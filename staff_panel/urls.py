@@ -6,6 +6,9 @@ app_name = "staff"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path("activities/", views.activity_list, name="activity_list"),
+    path("activities/new/", views.activity_create, name="activity_create"),
+    path("activities/<int:pk>/edit/", views.activity_edit, name="activity_edit"),
     path("posts/", views.post_list, name="post_list"),
     path("posts/new/", views.post_create, name="post_create"),
     path("posts/<int:pk>/edit/", views.post_edit, name="post_edit"),
@@ -33,6 +36,7 @@ urlpatterns = [
     path("vote-sessions/<int:pk>/export/", views.vote_session_export, name="vote_session_export"),
     path("qr/", views.qr_center, name="qr_center"),
     path("qr/<int:pk>/", views.qr_generate, name="qr_generate"),
+    path("qr/<int:pk>/<str:kind>.png", views.qr_image, name="qr_image"),
     path("export-center/", views.export_center, name="export_center"),
     path("export/material-checklist/<int:activity_id>/", views.excel_material_checklist, name="excel_material_checklist"),
     path("export/score-template/<int:round_id>/", views.excel_score_template, name="excel_score_template"),

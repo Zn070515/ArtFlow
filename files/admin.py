@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import MaterialCheck, StaffNote, SubmissionFile
+from .models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 
 
 @admin.register(SubmissionFile)
@@ -20,3 +20,9 @@ class StaffNoteAdmin(admin.ModelAdmin):
 @admin.register(MaterialCheck)
 class MaterialCheckAdmin(admin.ModelAdmin):
     list_display = ["item_name", "status", "singer_registration", "program"]
+
+
+@admin.register(MaterialRequirement)
+class MaterialRequirementAdmin(admin.ModelAdmin):
+    list_display = ["item_name", "activity", "applies_to", "file_purpose", "is_required", "sort_order"]
+    list_filter = ["activity", "applies_to", "is_required"]

@@ -1,10 +1,11 @@
 import io
 import zipfile
-from datetime import datetime
 
+from django.core.exceptions import PermissionDenied
 from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
@@ -15,10 +16,35 @@ from core.models import Activity
 from exports.models import ArticleTemplate, ExportTask, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, StaffNote, SubmissionFile
+from files.services import sync_program_material_checks, sync_singer_material_checks
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from singer_contest.models import Award, ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
 from voting.models import VoteOption, VoteRecord, VoteSession
+
+
+def _choices(enum_class):
+    return enum_class.choices
+
+
+def _require_admin(user):
+    if not user.is_admin:
+        raise PermissionDenied("Only admins can manage this resource.")
+
+
+def _get_activity_form_data(request):
+    data = {
+        "title": request.POST.get("title", "").strip(),
+        "subtitle": request.POST.get("subtitle", "").strip(),
+        "activity_type": request.POST.get("activity_type", Activity.Type.GENERAL),
+        "phase": request.POST.get("phase", Activity.Phase.DRAFT),
+        "description": request.POST.get("description", "").strip(),
+        "is_test_mode": request.POST.get("is_test_mode") == "on",
+    }
+    errors = []
+    if not data["title"]:
+        errors.append("活动标题不能为空")
+    return data, errors
 
 
 def _get_post_form_data(request):
@@ -53,6 +79,72 @@ def dashboard(request):
 
 
 @staff_member_required
+def activity_list(request):
+    activities = Activity.objects.all()
+    return render(request, "staff_panel/activity_list.html", {"activities": activities})
+
+
+@staff_member_required
+def activity_create(request):
+    _require_admin(request.user)
+    if request.method == "POST":
+        data, errors = _get_activity_form_data(request)
+        if errors:
+            return render(request, "staff_panel/activity_form.html", {
+                "error": errors[0],
+                "activity_types": _choices(Activity.Type),
+                "phases": _choices(Activity.Phase),
+                "data": data,
+            })
+        activity = Activity.objects.create(**data)
+        if request.FILES.get("cover_image"):
+            activity.cover_image = request.FILES["cover_image"]
+            activity.save(update_fields=["cover_image"])
+        AuditLog.objects.create(
+            operator=request.user,
+            action_type=AuditLog.ActionType.OTHER,
+            target=f"创建活动: {activity.title}",
+        )
+        return redirect("staff:activity_list")
+    return render(request, "staff_panel/activity_form.html", {
+        "activity_types": _choices(Activity.Type),
+        "phases": _choices(Activity.Phase),
+    })
+
+
+@staff_member_required
+def activity_edit(request, pk):
+    _require_admin(request.user)
+    activity = get_object_or_404(Activity, pk=pk)
+    if request.method == "POST":
+        data, errors = _get_activity_form_data(request)
+        if errors:
+            return render(request, "staff_panel/activity_form.html", {
+                "error": errors[0],
+                "activity": activity,
+                "activity_types": _choices(Activity.Type),
+                "phases": _choices(Activity.Phase),
+                "data": data,
+            })
+        for key, value in data.items():
+            setattr(activity, key, value)
+        if request.FILES.get("cover_image"):
+            activity.cover_image = request.FILES["cover_image"]
+        activity.save()
+        AuditLog.objects.create(
+            operator=request.user,
+            action_type=AuditLog.ActionType.OTHER,
+            target=f"更新活动: {activity.title}",
+        )
+        return redirect("staff:activity_list")
+    return render(request, "staff_panel/activity_form.html", {
+        "activity": activity,
+        "activity_types": _choices(Activity.Type),
+        "phases": _choices(Activity.Phase),
+    })
+
+
+@staff_member_required
 def post_list(request):
     posts = PublicPost.objects.all()
     return render(request, "staff_panel/post_list.html", {"posts": posts})
@@ -65,8 +157,9 @@ def post_create(request):
         if errors:
             return render(request, "staff_panel/post_form.html", {
                 "error": errors[0],
-                "post_types": PublicPost.PostType,
-                "statuses": PublicPost.Status,
+                "post_types": _choices(PublicPost.PostType),
+                "statuses": _choices(PublicPost.Status),
+                "activities": Activity.objects.all(),
             })
         post = PublicPost(
             title=data["title"],
@@ -87,8 +180,8 @@ def post_create(request):
         post.save()
         return redirect("staff:post_list")
     return render(request, "staff_panel/post_form.html", {
-        "post_types": PublicPost.PostType,
-        "statuses": PublicPost.Status,
+        "post_types": _choices(PublicPost.PostType),
+        "statuses": _choices(PublicPost.Status),
         "activities": Activity.objects.all(),
     })
 
@@ -102,8 +195,9 @@ def post_edit(request, pk):
             return render(request, "staff_panel/post_form.html", {
                 "error": errors[0],
                 "post": post,
-                "post_types": PublicPost.PostType,
-                "statuses": PublicPost.Status,
+                "post_types": _choices(PublicPost.PostType),
+                "statuses": _choices(PublicPost.Status),
+                "activities": Activity.objects.all(),
             })
         post.title = data["title"]
         post.subtitle = data["subtitle"]
@@ -126,8 +220,8 @@ def post_edit(request, pk):
 
     return render(request, "staff_panel/post_form.html", {
         "post": post,
-        "post_types": PublicPost.PostType,
-        "statuses": PublicPost.Status,
+        "post_types": _choices(PublicPost.PostType),
+        "statuses": _choices(PublicPost.Status),
         "activities": Activity.objects.all(),
     })
 
@@ -158,6 +252,7 @@ def singer_registration_detail(request, pk):
                     file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                     uploaded_by=request.user,
                 )
+                sync_singer_material_checks(reg)
         else:
             if "pre_status" in request.POST:
                 reg.pre_status = request.POST["pre_status"]
@@ -178,13 +273,13 @@ def singer_registration_detail(request, pk):
     checks = reg.material_checks.all()
     return render(request, "staff_panel/singer_registration_detail.html", {
         "reg": reg,
-        "pre_statuses": SingerRegistration.PreStatus,
-        "live_statuses": SingerRegistration.LiveStatus,
+        "pre_statuses": _choices(SingerRegistration.PreStatus),
+        "live_statuses": _choices(SingerRegistration.LiveStatus),
         "notes": notes,
         "files": files,
         "checks": checks,
-        "check_statuses": MaterialCheck.Status,
-        "file_purposes": SubmissionFile.Purpose,
+        "check_statuses": _choices(MaterialCheck.Status),
+        "file_purposes": _choices(SubmissionFile.Purpose),
     })
 
 
@@ -212,6 +307,7 @@ def program_detail(request, pk):
                     file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                     uploaded_by=request.user,
                 )
+                sync_program_material_checks(prog)
         else:
             if "status" in request.POST:
                 prog.status = request.POST["status"]
@@ -235,13 +331,13 @@ def program_detail(request, pk):
     checks = prog.material_checks.all()
     return render(request, "staff_panel/program_detail.html", {
         "prog": prog,
-        "statuses": Program.Status,
-        "program_types": Program.ProgramType,
+        "statuses": _choices(Program.Status),
+        "program_types": _choices(Program.ProgramType),
         "notes": notes,
         "files": files,
         "checks": checks,
-        "check_statuses": MaterialCheck.Status,
-        "file_purposes": SubmissionFile.Purpose,
+        "check_statuses": _choices(MaterialCheck.Status),
+        "file_purposes": _choices(SubmissionFile.Purpose),
     })
 
 
@@ -313,8 +409,8 @@ def round_create(request):
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     return render(request, "staff_panel/round_form.html", {
         "activities": activities,
-        "round_types": ContestRound.RoundType,
-        "scoring_modes": ContestRound.ScoringMode,
+        "round_types": _choices(ContestRound.RoundType),
+        "scoring_modes": _choices(ContestRound.ScoringMode),
     })
 
 
@@ -502,7 +598,7 @@ def vote_session_create(request):
     return render(request, "staff_panel/vote_session_form.html", {
         "activities": activities,
         "singers": singers,
-        "selection_types": VoteSession.SelectionType,
+        "selection_types": _choices(VoteSession.SelectionType),
     })
 
 
@@ -568,6 +664,31 @@ def qr_center(request):
 def qr_generate(request, pk):
     activity = get_object_or_404(Activity, pk=pk)
     return render(request, "staff_panel/qr_detail.html", {"activity": activity})
+
+
+@staff_member_required
+def qr_image(request, pk, kind):
+    activity = get_object_or_404(Activity, pk=pk)
+    if kind == "registration":
+        path = f"{reverse('singer_contest:apply')}?activity={activity.pk}"
+    elif kind == "vote":
+        vote_session = activity.vote_sessions.order_by("-created_at").first()
+        if not vote_session:
+            return HttpResponse("No vote session", status=404)
+        path = reverse("voting:vote_entry", args=[vote_session.pk])
+    elif kind == "results":
+        path = reverse("public_portal:result_list")
+    else:
+        return HttpResponse("Unknown QR code kind", status=404)
+
+    import qrcode
+
+    image = qrcode.make(request.build_absolute_uri(path))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    response = HttpResponse(buffer.getvalue(), content_type="image/png")
+    response["Content-Disposition"] = f'inline; filename="{kind}_{activity.pk}.png"'
+    return response
 
 
 # --- Export center ---
@@ -851,7 +972,7 @@ def incident_create(request):
     return render(request, "staff_panel/incident_form.html", {
         "activities": activities,
         "singers": singers,
-        "event_types": IncidentRecord.EventType,
+        "event_types": _choices(IncidentRecord.EventType),
     })
 
 

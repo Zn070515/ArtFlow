@@ -2,6 +2,8 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 
 from core.models import Activity
+from files.models import SubmissionFile
+from files.services import sync_singer_material_checks
 from .models import SingerRegistration
 
 
@@ -12,8 +14,9 @@ def apply_view(request):
         phase=Activity.Phase.REGISTRATION_OPEN,
     )
     if request.method == "POST":
+        activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         reg = SingerRegistration(
-            activity_id=request.POST["activity_id"],
+            activity=activity,
             user=request.user,
             name=request.POST["name"],
             student_id=request.POST["student_id"],
@@ -28,6 +31,27 @@ def apply_view(request):
             pre_status=SingerRegistration.PreStatus.SUBMITTED,
         )
         reg.save()
+        accompaniment = request.FILES.get("accompaniment")
+        if accompaniment:
+            SubmissionFile.objects.create(
+                singer_registration=reg,
+                file=accompaniment,
+                original_name=accompaniment.name,
+                file_size=accompaniment.size,
+                file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=request.user,
+            )
+        performance_video = request.FILES.get("performance_video")
+        if performance_video:
+            SubmissionFile.objects.create(
+                singer_registration=reg,
+                file=performance_video,
+                original_name=performance_video.name,
+                file_size=performance_video.size,
+                file_purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+                uploaded_by=request.user,
+            )
+        sync_singer_material_checks(reg)
         return redirect("singer_contest:my_submission")
     return render(request, "singer_contest/apply.html", {"activities": activities})
 
@@ -35,4 +59,24 @@ def apply_view(request):
 @login_required
 def my_submission_view(request):
     reg = SingerRegistration.objects.filter(user=request.user).last()
-    return render(request, "singer_contest/my_submission.html", {"reg": reg})
+    if reg and request.method == "POST":
+        f = request.FILES.get("file")
+        if f:
+            SubmissionFile.objects.create(
+                singer_registration=reg,
+                file=f,
+                original_name=f.name,
+                file_size=f.size,
+                file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
+                uploaded_by=request.user,
+            )
+            sync_singer_material_checks(reg)
+        return redirect("singer_contest:my_submission")
+    if reg:
+        sync_singer_material_checks(reg)
+    return render(request, "singer_contest/my_submission.html", {
+        "reg": reg,
+        "files": reg.files.all() if reg else [],
+        "checks": reg.material_checks.all() if reg else [],
+        "file_purposes": SubmissionFile.Purpose.choices,
+    })

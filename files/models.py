@@ -37,6 +37,26 @@ class SubmissionFile(models.Model):
         return self.original_name
 
 
+class MaterialRequirement(models.Model):
+    class AppliesTo(models.TextChoices):
+        SINGER = "singer", "歌手比赛报名"
+        PROGRAM = "program", "毕晚节目"
+
+    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="material_requirements")
+    applies_to = models.CharField(max_length=12, choices=AppliesTo.choices)
+    item_name = models.CharField(max_length=100)
+    file_purpose = models.CharField(max_length=24, choices=SubmissionFile.Purpose.choices, blank=True)
+    is_required = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "pk"]
+        unique_together = [("activity", "applies_to", "item_name")]
+
+    def __str__(self):
+        return self.item_name
+
+
 class StaffNote(models.Model):
     singer_registration = models.ForeignKey(
         "singer_contest.SingerRegistration", on_delete=models.CASCADE,

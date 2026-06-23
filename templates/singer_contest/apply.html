@@ -11,7 +11,7 @@
         <p>当前没有开放报名的歌手比赛</p>
     </div>
     {% else %}
-    <form method="post" class="space-y-4">
+    <form method="post" enctype="multipart/form-data" class="space-y-4">
         {% csrf_token %}
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">选择活动</label>
@@ -67,6 +67,17 @@
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
             <textarea name="remark" rows="2" class="w-full border border-gray-300 rounded px-3 py-2 text-sm"></textarea>
+        </div>
+        <div class="border-t border-gray-200 pt-4 space-y-3">
+            <h2 class="text-sm font-medium text-gray-900">报名材料</h2>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">伴奏文件</label>
+                <input type="file" name="accompaniment" class="text-sm">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">演唱视频（可选）</label>
+                <input type="file" name="performance_video" class="text-sm">
+            </div>
         </div>
         <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light transition-colors">提交报名</button>
     </form>

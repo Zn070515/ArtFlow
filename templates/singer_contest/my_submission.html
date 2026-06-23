@@ -33,6 +33,49 @@
             <span class="text-gray-900">{{ reg.created_at|date:"Y-m-d H:i" }}</span>
         </div>
     </div>
+    <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
+        <h2 class="font-medium text-gray-900 mb-3">材料状态</h2>
+        {% if checks %}
+        <div class="space-y-2">
+            {% for check in checks %}
+            <div class="flex items-center justify-between">
+                <span class="text-gray-700">{{ check.item_name }}</span>
+                {% if check.status == "reviewed" %}
+                <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs">已完成</span>
+                {% elif check.status == "uploaded" %}
+                <span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">已上传</span>
+                {% else %}
+                <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-xs">缺失</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-gray-400">暂无材料检查项</p>
+        {% endif %}
+    </div>
+    <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
+        <h2 class="font-medium text-gray-900 mb-3">补交材料</h2>
+        {% if files %}
+        <ul class="mb-4 space-y-1">
+            {% for file in files %}
+            <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }}</span><span>{{ file.get_file_purpose_display }}</span></li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <form method="post" enctype="multipart/form-data" class="flex flex-col gap-2">
+            {% csrf_token %}
+            <div class="flex gap-2">
+                <input type="file" name="file" required class="flex-1 text-xs border border-gray-300 rounded px-2 py-1">
+                <select name="file_purpose" class="text-xs border border-gray-300 rounded px-2 py-1">
+                    {% for value, label in file_purposes %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="bg-gray-100 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-200">上传</button>
+            </div>
+        </form>
+    </div>
     {% else %}
     <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
         <p>你还没有提交过报名</p>

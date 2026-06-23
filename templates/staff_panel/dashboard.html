@@ -8,6 +8,10 @@
     <p class="text-sm text-gray-500 mb-8">欢迎，{{ user.username }}</p>
 
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <a href="{% url 'staff:activity_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">活动管理</h3>
+            <p class="mt-1 text-sm text-gray-500">创建活动、调整阶段、切换测试模式</p>
+        </a>
         <a href="{% url 'staff:post_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
             <h3 class="font-medium text-gray-900">公开内容管理</h3>
             <p class="mt-1 text-sm text-gray-500">管理首页展示、往届风采、通知公告、结果公示</p>
