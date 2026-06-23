@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}报名管理 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">歌手比赛报名</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 报名管理</p>
+        </div>
+    </div>
+
+    {% if registrations %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-left px-4 py-2 font-medium">姓名</th>
+                    <th class="text-left px-4 py-2 font-medium">曲目</th>
+                    <th class="text-left px-4 py-2 font-medium">活动</th>
+                    <th class="text-left px-4 py-2 font-medium">赛前状态</th>
+                    <th class="text-left px-4 py-2 font-medium">赛中状态</th>
+                    <th class="text-left px-4 py-2 font-medium">提交时间</th>
+                    <th class="text-left px-4 py-2 font-medium">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for reg in registrations %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5">{{ reg.name }}</td>
+                    <td class="px-4 py-2.5">{{ reg.song_name }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ reg.activity.title }}</td>
+                    <td class="px-4 py-2.5">
+                        {% if reg.pre_status == "approved" %}<span class="text-xs text-green-700 bg-green-50 px-1.5 py-0.5 rounded">通过</span>
+                        {% elif reg.pre_status == "rejected" %}<span class="text-xs text-red-700 bg-red-50 px-1.5 py-0.5 rounded">未通过</span>
+                        {% elif reg.pre_status == "submitted" %}<span class="text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">待审核</span>
+                        {% else %}<span class="text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{{ reg.get_pre_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2.5">
+                        {% if reg.live_status != "not_checked_in" %}
+                        <span class="text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{{ reg.get_live_status_display }}</span>
+                        {% else %}
+                        <span class="text-xs text-gray-400">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ reg.created_at|date:"m-d H:i" }}</td>
+                    <td class="px-4 py-2.5"><a href="{% url 'staff:singer_registration_detail' reg.pk %}" class="text-brand hover:underline text-xs">查看</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无报名</p>
+    {% endif %}
+</div>
+{% endblock %}

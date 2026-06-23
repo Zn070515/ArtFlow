@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}我的节目 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">我的节目</h1>
+    {% if prog %}
+    <div class="bg-white border border-gray-200 rounded-lg p-6 space-y-3 text-sm">
+        <div class="flex justify-between"><span class="text-gray-500">活动</span><span class="text-gray-900">{{ prog.activity.title }}</span></div>
+        <div class="flex justify-between"><span class="text-gray-500">节目名称</span><span class="text-gray-900">{{ prog.name }}</span></div>
+        <div class="flex justify-between"><span class="text-gray-500">节目类型</span><span class="text-gray-900">{{ prog.get_program_type_display }}</span></div>
+        <div class="flex justify-between"><span class="text-gray-500">负责人</span><span class="text-gray-900">{{ prog.contact_name }}</span></div>
+        <div class="flex justify-between"><span class="text-gray-500">联系方式</span><span class="text-gray-900">{{ prog.contact_phone }}</span></div>
+        <div class="flex justify-between"><span class="text-gray-500">所属</span><span class="text-gray-900">{{ prog.class_name }}</span></div>
+        <div class="flex justify-between">
+            <span class="text-gray-500">状态</span>
+            {% if prog.status == "approved" %}
+            <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs font-medium">已通过</span>
+            {% elif prog.status == "rejected" %}
+            <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-xs font-medium">未通过</span>
+            {% elif prog.status == "submitted" %}
+            <span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs font-medium">已提交</span>
+            {% else %}
+            <span class="text-gray-600 bg-gray-100 px-2 py-0.5 rounded text-xs font-medium">{{ prog.get_status_display }}</span>
+            {% endif %}
+        </div>
+        <div class="flex justify-between"><span class="text-gray-500">提交时间</span><span class="text-gray-900">{{ prog.created_at|date:"Y-m-d H:i" }}</span></div>
+    </div>
+    {% else %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>你还没有提交过节目</p>
+        <a href="{% url 'farewell_show:apply' %}" class="mt-2 inline-block text-brand hover:underline text-sm">去提交 &rarr;</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

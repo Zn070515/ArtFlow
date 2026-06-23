@@ -7,6 +7,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("public_portal.urls")),
     path("", include("accounts.urls")),
+    path("contest/", include("singer_contest.urls")),
+    path("farewell/", include("farewell_show.urls")),
     path("staff/", include("staff_panel.urls")),
 ]
 

@@ -391,7 +391,7 @@ git push
 如果当前开发环境支持 Claude Code 的 `/code-review` 命令，则每次 push 后执行：
 
 ```text
-/code-review
+/code-review high
 ```
 
 代码审查重点：
@@ -439,7 +439,7 @@ git push
 然后再次执行：
 
 ```text
-/code-review
+/code-review high
 ```
 
 直到没有 P0/P1 问题。

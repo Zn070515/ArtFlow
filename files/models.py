@@ -1,3 +1,60 @@
+from django.conf import settings
 from django.db import models
 
-# Create your models here.
+
+class SubmissionFile(models.Model):
+    class Purpose(models.TextChoices):
+        ACCOMPANIMENT = "accompaniment", "伴奏"
+        BACKGROUND_VIDEO = "background_video", "背景视频"
+        PERFORMANCE_VIDEO = "performance_video", "演唱视频"
+        PROGRAM_IMAGE = "program_image", "节目图片"
+        LYRICS_SCRIPT = "lyrics_script", "歌词/台词"
+        HOST_MATERIAL = "host_material", "主持稿素材"
+        PUBLIC_IMAGE = "public_image", "公开首页图片"
+        SHOWCASE_IMAGE = "showcase_image", "往届风采图片"
+        OTHER = "other", "其他附件"
+
+    singer_registration = models.ForeignKey(
+        "singer_contest.SingerRegistration", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="files"
+    )
+    program = models.ForeignKey(
+        "farewell_show.Program", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="files"
+    )
+    file = models.FileField(upload_to="submissions/%Y/%m/")
+    original_name = models.CharField(max_length=255)
+    file_size = models.IntegerField()
+    file_purpose = models.CharField(max_length=24, choices=Purpose, default=Purpose.OTHER)
+    is_public = models.BooleanField(default=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="uploaded_files"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.original_name
+
+
+class StaffNote(models.Model):
+    singer_registration = models.ForeignKey(
+        "singer_contest.SingerRegistration", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="staff_notes"
+    )
+    program = models.ForeignKey(
+        "farewell_show.Program", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="staff_notes"
+    )
+    content = models.TextField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, related_name="staff_notes"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.created_by}: {self.content[:50]}"

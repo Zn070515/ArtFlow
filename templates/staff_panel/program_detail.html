@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}{{ prog.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:program_list' %}" class="hover:underline">节目管理</a> / {{ prog.name }}</p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">{{ prog.name }}</h1>
+
+    <div class="grid md:grid-cols-2 gap-6">
+        <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-2">
+            <h3 class="font-medium text-gray-900 mb-3">基本信息</h3>
+            <div class="flex justify-between"><span class="text-gray-500">活动</span><span>{{ prog.activity.title }}</span></div>
+            <div class="flex justify-between"><span class="text-gray-500">节目类型</span><span>{{ prog.get_program_type_display }}</span></div>
+            <div class="flex justify-between"><span class="text-gray-500">负责人</span><span>{{ prog.contact_name }}</span></div>
+            <div class="flex justify-between"><span class="text-gray-500">联系方式</span><span>{{ prog.contact_phone }}</span></div>
+            <div class="flex justify-between"><span class="text-gray-500">所属</span><span>{{ prog.class_name }}</span></div>
+            {% if prog.performers %}<p class="text-gray-500 mt-1">演员：{{ prog.performers }}</p>{% endif %}
+            <div class="flex justify-between"><span class="text-gray-500">时长</span><span>{{ prog.estimated_duration|default:"未填写" }}</span></div>
+            {% if prog.description %}<p class="text-gray-500 mt-1">{{ prog.description }}</p>{% endif %}
+            {% if prog.mic_requirements %}<p class="text-gray-500">麦克风：{{ prog.mic_requirements }}</p>{% endif %}
+            {% if prog.prop_requirements %}<p class="text-gray-500">道具：{{ prog.prop_requirements }}</p>{% endif %}
+            {% if prog.special_notes %}<p class="text-gray-500">备注：{{ prog.special_notes }}</p>{% endif %}
+        </div>
+
+        <div class="space-y-4">
+            <form method="post" class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-3">
+                {% csrf_token %}
+                <h3 class="font-medium text-gray-900">状态与排序</h3>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">审核状态</label>
+                    <select name="status" class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm">
+                        {% for value, label in statuses %}
+                        <option value="{{ value }}" {% if prog.status == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">节目顺序</label>
+                    <input type="number" name="sort_order" value="{{ prog.sort_order }}" class="w-24 border border-gray-300 rounded px-3 py-1.5 text-sm">
+                </div>
+                <button type="submit" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light transition-colors">更新</button>
+            </form>
+
+            <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm">
+                <h3 class="font-medium text-gray-900 mb-3">附件 ({{ files|length }})</h3>
+                {% if files %}
+                <ul class="space-y-1">
+                    {% for f in files %}
+                    <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({{ f.get_file_purpose_display }})</span></span><span>{{ f.file_size|filesizeformat }}</span></li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-gray-400 text-xs">暂无附件</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6">
+        <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm">
+            <h3 class="font-medium text-gray-900 mb-3">工作人员备注</h3>
+            {% if notes %}
+            <div class="space-y-2 mb-4">
+                {% for n in notes %}
+                <div class="bg-gray-50 rounded p-2 text-xs">
+                    <p class="text-gray-800">{{ n.content }}</p>
+                    <p class="text-gray-400 mt-1">{{ n.created_by.username }} · {{ n.created_at|date:"m-d H:i" }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-400 text-xs mb-3">暂无备注</p>
+            {% endif %}
+            <form method="post" class="flex gap-2">
+                {% csrf_token %}
+                <input type="text" name="staff_note" placeholder="添加备注（仅工作人员可见）" class="flex-1 border border-gray-300 rounded px-3 py-1.5 text-xs">
+                <button type="submit" class="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-xs hover:bg-gray-200 transition-colors">添加</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

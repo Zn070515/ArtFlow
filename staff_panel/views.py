@@ -2,7 +2,10 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
+from files.models import StaffNote
+from farewell_show.models import Program
 from public_portal.models import PublicPost
+from singer_contest.models import SingerRegistration
 
 
 def _get_post_form_data(request):
@@ -104,4 +107,85 @@ def post_edit(request, pk):
         "post": post,
         "post_types": PublicPost.PostType,
         "statuses": PublicPost.Status,
+    })
+
+
+# --- Singer registration management ---
+
+
+@staff_member_required
+def singer_registration_list(request):
+    registrations = SingerRegistration.objects.select_related("activity", "user")
+    return render(request, "staff_panel/singer_registration_list.html", {
+        "registrations": registrations,
+    })
+
+
+@staff_member_required
+def singer_registration_detail(request, pk):
+    reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
+    if request.method == "POST":
+        if "pre_status" in request.POST:
+            reg.pre_status = request.POST["pre_status"]
+        if "live_status" in request.POST:
+            reg.live_status = request.POST["live_status"]
+        if "staff_note" in request.POST:
+            note = request.POST["staff_note"].strip()
+            if note:
+                StaffNote.objects.create(
+                    singer_registration=reg,
+                    content=note,
+                    created_by=request.user,
+                )
+        reg.save()
+        return redirect("staff:singer_registration_detail", pk=reg.pk)
+    notes = reg.staff_notes.select_related("created_by")
+    files = reg.files.all()
+    return render(request, "staff_panel/singer_registration_detail.html", {
+        "reg": reg,
+        "pre_statuses": SingerRegistration.PreStatus,
+        "live_statuses": SingerRegistration.LiveStatus,
+        "notes": notes,
+        "files": files,
+    })
+
+
+# --- Program management ---
+
+
+@staff_member_required
+def program_list(request):
+    programs = Program.objects.select_related("activity", "user")
+    return render(request, "staff_panel/program_list.html", {"programs": programs})
+
+
+@staff_member_required
+def program_detail(request, pk):
+    prog = get_object_or_404(Program.objects.select_related("activity", "user"), pk=pk)
+    if request.method == "POST":
+        if "status" in request.POST:
+            prog.status = request.POST["status"]
+        if "sort_order" in request.POST:
+            try:
+                prog.sort_order = int(request.POST["sort_order"])
+            except ValueError:
+                pass
+        if "staff_note" in request.POST:
+            note = request.POST["staff_note"].strip()
+            if note:
+                StaffNote.objects.create(
+                    program=prog,
+                    content=note,
+                    created_by=request.user,
+                )
+        prog.save()
+        return redirect("staff:program_detail", pk=prog.pk)
+    notes = prog.staff_notes.select_related("created_by")
+    files = prog.files.all()
+    return render(request, "staff_panel/program_detail.html", {
+        "prog": prog,
+        "statuses": Program.Status,
+        "program_types": Program.ProgramType,
+        "notes": notes,
+        "files": files,
     })

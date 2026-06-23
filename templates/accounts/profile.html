@@ -19,6 +19,18 @@
             <span class="text-gray-900">{{ user.date_joined|date:"Y-m-d" }}</span>
         </div>
     </div>
+
+    <div class="mt-6 space-y-3">
+        <a href="{% url 'singer_contest:apply' %}" class="block border border-gray-200 bg-white rounded-lg p-4 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900 text-sm">歌手比赛报名</h3>
+            <p class="mt-0.5 text-xs text-gray-500">提交和管理歌手比赛报名信息</p>
+        </a>
+        <a href="{% url 'farewell_show:apply' %}" class="block border border-gray-200 bg-white rounded-lg p-4 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900 text-sm">毕晚节目征集</h3>
+            <p class="mt-0.5 text-xs text-gray-500">提交和管理毕晚节目</p>
+        </a>
+    </div>
+
     {% if user.is_staff_or_admin %}
     <div class="mt-6">
         <a href="{% url 'staff:dashboard' %}" class="inline-block bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light transition-colors">进入工作人员后台</a>
