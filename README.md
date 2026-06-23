@@ -36,6 +36,7 @@ python manage.py runserver
 关键变量：
 
 - `SECRET_KEY`
+- `ADMIN_LOGIN_KEY`
 - `DEBUG`
 - `ALLOWED_HOSTS`
 - `DATABASE_ENGINE`
@@ -44,6 +45,25 @@ python manage.py runserver
 - `POSTGRES_PASSWORD`
 - `POSTGRES_HOST`
 - `POSTGRES_PORT`
+
+管理员账号必须从“管理员登录”入口登录，并额外输入 `ADMIN_LOGIN_KEY`。普通登录入口会拒绝管理员账号。
+
+## 本地管理员调试账号
+
+设置本地环境变量后创建或重置调试管理员：
+
+```bash
+$env:ADMIN_LOGIN_KEY="local-admin-key"
+$env:DEV_ADMIN_PASSWORD="local-admin-password"
+python manage.py seed_dev_admin --username admin
+python manage.py runserver
+```
+
+然后访问 `/admin-login/`，使用：
+
+- 用户名：`admin`
+- 密码：`local-admin-password`
+- 管理员密钥：`local-admin-key`
 
 ## 常用命令
 
