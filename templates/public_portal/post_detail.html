@@ -16,6 +16,21 @@
     {% if post.content %}
     <div class="mt-6 text-gray-800 leading-relaxed whitespace-pre-line">{{ post.content }}</div>
     {% endif %}
+    {% if media_items %}
+    <section class="mt-10">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">活动相册</h2>
+        <div class="grid sm:grid-cols-2 gap-4">
+            {% for media in media_items %}
+            <figure class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <img src="{{ media.image.url }}" alt="{{ media.caption|default:post.title }}" class="w-full aspect-[4/3] object-cover">
+                {% if media.caption %}
+                <figcaption class="px-3 py-2 text-xs text-gray-500">{{ media.caption }}</figcaption>
+                {% endif %}
+            </figure>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
     <div class="mt-10">
         <a href="{% url 'public_portal:home' %}" class="text-sm text-gray-500 hover:text-gray-700">&larr; 返回首页</a>
     </div>

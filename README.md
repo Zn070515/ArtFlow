@@ -55,6 +55,16 @@ python manage.py test
 python manage.py runserver
 ```
 
+## 导入公开照片
+
+按活动分好子目录后，可以批量导入往届风采照片：
+
+```bash
+python manage.py import_public_photos "d:\ProgramData\xwechat_files\wxid_sjovff3wb33o12_aa25\msg\file\2026-06\photos" --publish
+```
+
+导入会把照片复制到 `media/public/gallery/`，创建对应的往届风采文章和相册。默认跳过 `会议照片` 这类内部目录；如确实要导入，追加 `--include-internal`。
+
 ## 工作流
 
 1. 管理员在工作人员后台创建活动，并设置为报名中。

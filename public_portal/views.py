@@ -1,6 +1,6 @@
 from django.shortcuts import get_object_or_404, render
 
-from .models import PublicPost
+from .models import PublicMedia, PublicPost
 
 
 def home(request):
@@ -10,6 +10,10 @@ def home(request):
     results = posts.filter(post_type=PublicPost.PostType.RESULT_PUBLICATION)[:5]
     registration_entries = posts.filter(post_type=PublicPost.PostType.REGISTRATION_ENTRY)[:3]
     voting_entries = posts.filter(post_type=PublicPost.PostType.VOTING_ENTRY)[:3]
+    activity_photos = PublicMedia.objects.filter(
+        is_published=True,
+        post__status=PublicPost.Status.PUBLISHED,
+    ).select_related("post")[:12]
 
     return render(request, "public_portal/home.html", {
         "announcements": announcements,
@@ -17,12 +21,17 @@ def home(request):
         "results": results,
         "registration_entries": registration_entries,
         "voting_entries": voting_entries,
+        "activity_photos": activity_photos,
     })
 
 
 def post_detail(request, pk):
     post = get_object_or_404(PublicPost, pk=pk, status=PublicPost.Status.PUBLISHED)
-    return render(request, "public_portal/post_detail.html", {"post": post})
+    media_items = post.media_items.filter(is_published=True)
+    return render(request, "public_portal/post_detail.html", {
+        "post": post,
+        "media_items": media_items,
+    })
 
 
 def showcase_list(request):

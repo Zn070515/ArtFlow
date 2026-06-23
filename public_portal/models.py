@@ -46,3 +46,24 @@ class PublicPost(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class PublicMedia(models.Model):
+    post = models.ForeignKey(PublicPost, on_delete=models.CASCADE, related_name="media_items")
+    related_activity = models.ForeignKey(
+        "core.Activity", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="public_media"
+    )
+    image = models.ImageField(upload_to="public/gallery/%Y/%m/")
+    caption = models.CharField(max_length=200, blank=True)
+    original_name = models.CharField(max_length=255, blank=True)
+    source_path = models.TextField(blank=True)
+    is_published = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sort_order", "pk"]
+
+    def __str__(self):
+        return self.caption or self.original_name or f"Media {self.pk}"
