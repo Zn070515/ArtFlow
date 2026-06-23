@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}公开内容管理 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">公开内容管理</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 公开内容</p>
+        </div>
+        <a href="{% url 'staff:post_create' %}" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light transition-colors">新增内容</a>
+    </div>
+
+    {% if posts %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-left px-4 py-2 font-medium">标题</th>
+                    <th class="text-left px-4 py-2 font-medium">类型</th>
+                    <th class="text-left px-4 py-2 font-medium">状态</th>
+                    <th class="text-left px-4 py-2 font-medium">更新时间</th>
+                    <th class="text-left px-4 py-2 font-medium">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for post in posts %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5 text-gray-900">{{ post.title }}</td>
+                    <td class="px-4 py-2.5 text-gray-600">{{ post.get_post_type_display }}</td>
+                    <td class="px-4 py-2.5">
+                        {% if post.status == "published" %}
+                        <span class="text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded">已发布</span>
+                        {% elif post.status == "draft" %}
+                        <span class="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">草稿</span>
+                        {% else %}
+                        <span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded">已隐藏</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ post.updated_at|date:"Y-m-d H:i" }}</td>
+                    <td class="px-4 py-2.5">
+                        <a href="{% url 'staff:post_edit' post.pk %}" class="text-brand hover:underline text-xs">编辑</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无内容，点击右上角新增</p>
+    {% endif %}
+</div>
+{% endblock %}

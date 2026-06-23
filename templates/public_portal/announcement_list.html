@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}通知公告 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-12">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">通知公告</h1>
+    {% if posts %}
+    <div class="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {% for post in posts %}
+        <a href="{% url 'public_portal:post_detail' post.pk %}" class="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+            <span class="text-sm text-gray-900">{{ post.title }}</span>
+            <span class="text-xs text-gray-400">{{ post.published_at|date:"Y-m-d" }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无内容</p>
+    {% endif %}
+</div>
+{% endblock %}

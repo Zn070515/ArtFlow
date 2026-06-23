@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}往届风采 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-12">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">往届风采</h1>
+    {% if posts %}
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {% for post in posts %}
+        <a href="{% url 'public_portal:post_detail' post.pk %}" class="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors">
+            {% if post.cover_image %}
+            <img src="{{ post.cover_image.url }}" alt="{{ post.title }}" class="w-full h-44 object-cover">
+            {% else %}
+            <div class="w-full h-44 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">暂无封面</div>
+            {% endif %}
+            <div class="p-4">
+                <h3 class="font-medium text-gray-900">{{ post.title }}</h3>
+                {% if post.subtitle %}<p class="mt-1 text-sm text-gray-500">{{ post.subtitle }}</p>{% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无内容</p>
+    {% endif %}
+</div>
+{% endblock %}

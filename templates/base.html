@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ArtFlow{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { DEFAULT: '#1e3a5f', light: '#2d5a8e', dark: '#152a47' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer base {
+            body { @apply bg-gray-50 text-gray-900 antialiased; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <nav class="bg-white border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-4 flex items-center justify-between h-14">
+            <div class="flex items-center gap-8">
+                <a href="{% url 'public_portal:home' %}" class="text-lg font-bold text-brand tracking-tight">ArtFlow</a>
+                <div class="hidden md:flex gap-6 text-sm">
+                    <a href="{% url 'public_portal:home' %}" class="text-gray-600 hover:text-gray-900 transition-colors">首页</a>
+                    <a href="{% url 'public_portal:showcase_list' %}" class="text-gray-600 hover:text-gray-900 transition-colors">往届风采</a>
+                    <a href="{% url 'public_portal:announcement_list' %}" class="text-gray-600 hover:text-gray-900 transition-colors">通知公告</a>
+                    <a href="{% url 'public_portal:result_list' %}" class="text-gray-600 hover:text-gray-900 transition-colors">结果公示</a>
+                </div>
+            </div>
+            <div class="flex items-center gap-3 text-sm">
+                {% if user.is_authenticated %}
+                    {% if user.is_staff_or_admin %}
+                        <a href="{% url 'staff:dashboard' %}" class="text-gray-600 hover:text-gray-900">工作人员后台</a>
+                    {% endif %}
+                    <a href="{% url 'accounts:profile' %}" class="text-gray-600 hover:text-gray-900">个人中心</a>
+                    <form method="post" action="{% url 'accounts:logout' %}" class="inline">
+                        {% csrf_token %}
+                        <button type="submit" class="text-gray-500 hover:text-gray-700">退出登录</button>
+                    </form>
+                {% else %}
+                    <a href="{% url 'accounts:login' %}" class="text-gray-600 hover:text-gray-900">登录</a>
+                    <a href="{% url 'accounts:register' %}" class="bg-brand text-white px-3 py-1.5 rounded hover:bg-brand-light transition-colors">注册</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-1">
+        {% if messages %}
+        <div class="max-w-6xl mx-auto px-4 pt-4">
+            {% for message in messages %}
+            <div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-2 rounded mb-2">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="bg-white border-t border-gray-200 mt-12 py-8 text-center text-sm text-gray-500">
+        <p>浙江工业大学 信息工程学院 文艺部</p>
+    </footer>
+</body>
+</html>

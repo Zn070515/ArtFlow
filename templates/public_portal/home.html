@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}ArtFlow — 文艺部活动平台{% endblock %}
+
+{% block content %}
+<section class="bg-white border-b border-gray-200">
+    <div class="max-w-6xl mx-auto px-4 py-16 md:py-24">
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-900 tracking-tight">信息工程学院 文艺部</h1>
+        <p class="mt-3 text-lg text-gray-500 max-w-xl">活动报名、现场评分、观众投票、结果公示 — 文艺部活动一站式平台</p>
+    </div>
+</section>
+
+<div class="max-w-6xl mx-auto px-4 py-12 space-y-16">
+
+    {% if registration_entries or voting_entries %}
+    <section>
+        <div class="grid md:grid-cols-2 gap-6">
+            {% for entry in registration_entries %}
+            <a href="{% url 'public_portal:post_detail' entry.pk %}" class="block border border-gray-200 rounded-lg p-6 hover:border-gray-300 transition-colors bg-white">
+                <span class="text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded">报名入口</span>
+                <h3 class="mt-2 text-lg font-semibold text-gray-900">{{ entry.title }}</h3>
+                <p class="mt-1 text-sm text-gray-500">{{ entry.subtitle }}</p>
+            </a>
+            {% endfor %}
+            {% for entry in voting_entries %}
+            <a href="{% url 'public_portal:post_detail' entry.pk %}" class="block border border-gray-200 rounded-lg p-6 hover:border-gray-300 transition-colors bg-white">
+                <span class="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded">投票入口</span>
+                <h3 class="mt-2 text-lg font-semibold text-gray-900">{{ entry.title }}</h3>
+                <p class="mt-1 text-sm text-gray-500">{{ entry.subtitle }}</p>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if announcements %}
+    <section>
+        <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold text-gray-900">通知公告</h2>
+            <a href="{% url 'public_portal:announcement_list' %}" class="text-sm text-gray-500 hover:text-gray-700">查看全部 &rarr;</a>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for post in announcements %}
+            <a href="{% url 'public_portal:post_detail' post.pk %}" class="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+                <span class="text-sm text-gray-900">{{ post.title }}</span>
+                <span class="text-xs text-gray-400">{{ post.published_at|date:"Y-m-d" }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if showcases %}
+    <section>
+        <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold text-gray-900">往届风采</h2>
+            <a href="{% url 'public_portal:showcase_list' %}" class="text-sm text-gray-500 hover:text-gray-700">查看全部 &rarr;</a>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {% for post in showcases %}
+            <a href="{% url 'public_portal:post_detail' post.pk %}" class="bg-white border border-gray-200 rounded-lg overflow-hidden hover:border-gray-300 transition-colors">
+                {% if post.cover_image %}
+                <img src="{{ post.cover_image.url }}" alt="{{ post.title }}" class="w-full h-44 object-cover">
+                {% else %}
+                <div class="w-full h-44 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">暂无封面</div>
+                {% endif %}
+                <div class="p-4">
+                    <h3 class="font-medium text-gray-900">{{ post.title }}</h3>
+                    {% if post.subtitle %}
+                    <p class="mt-1 text-sm text-gray-500">{{ post.subtitle }}</p>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if results %}
+    <section>
+        <div class="flex items-center justify-between mb-5">
+            <h2 class="text-xl font-semibold text-gray-900">结果公示</h2>
+            <a href="{% url 'public_portal:result_list' %}" class="text-sm text-gray-500 hover:text-gray-700">查看全部 &rarr;</a>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
+            {% for post in results %}
+            <a href="{% url 'public_portal:post_detail' post.pk %}" class="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
+                <span class="text-sm text-gray-900">{{ post.title }}</span>
+                <span class="text-xs text-gray-400">{{ post.published_at|date:"Y-m-d" }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if not announcements and not showcases and not results and not registration_entries and not voting_entries %}
+    <section class="text-center py-20 text-gray-400">
+        <p class="text-lg">暂无内容</p>
+        <p class="text-sm mt-1">工作人员登录后可发布内容</p>
+    </section>
+    {% endif %}
+
+</div>
+{% endblock %}

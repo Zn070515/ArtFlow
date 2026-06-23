@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}个人中心 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto mt-12 px-4">
+    <h2 class="text-xl font-bold text-gray-900 mb-6">个人中心</h2>
+    <div class="bg-white border border-gray-200 rounded-lg p-6 space-y-3 text-sm">
+        <div class="flex justify-between">
+            <span class="text-gray-500">用户名</span>
+            <span class="text-gray-900">{{ user.username }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-500">角色</span>
+            <span class="text-gray-900">{{ user.get_role_display }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-500">注册时间</span>
+            <span class="text-gray-900">{{ user.date_joined|date:"Y-m-d" }}</span>
+        </div>
+    </div>
+    {% if user.is_staff_or_admin %}
+    <div class="mt-6">
+        <a href="{% url 'staff:dashboard' %}" class="inline-block bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light transition-colors">进入工作人员后台</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
