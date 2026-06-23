@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}{{ round.name }} 排名 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 排名</p>
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round.get_round_type_display }} — 排名</h1>
+            <p class="text-sm text-gray-500 mt-1">{{ round.get_scoring_mode_display }}{% if round.advance_count %} · 前 {{ round.advance_count }} 名晋级{% endif %}</p>
+        </div>
+        <div class="flex gap-2">
+            {% if round.is_locked %}
+            <span class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded font-medium">已锁定</span>
+            {% if user.is_admin %}
+            <a href="{% url 'staff:round_unlock' round.pk %}" class="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded hover:bg-red-100">解锁</a>
+            {% endif %}
+            {% else %}
+            <a href="{% url 'staff:round_lock' round.pk %}" class="text-xs text-orange-600 border border-orange-300 px-2 py-0.5 rounded hover:bg-orange-50">锁定结果</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if has_missing %}
+    <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-2 rounded mb-4">部分分数缺失，排名可能不完整</div>
+    {% endif %}
+
+    {% if summaries %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-center px-4 py-2 font-medium w-12">排名</th>
+                    <th class="text-left px-4 py-2 font-medium">选手</th>
+                    <th class="text-left px-4 py-2 font-medium">曲目</th>
+                    <th class="text-center px-4 py-2 font-medium">平均分</th>
+                    <th class="text-center px-4 py-2 font-medium">晋级</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for s in summaries %}
+                <tr class="hover:bg-gray-50 {% if s.is_advanced %}bg-green-50{% endif %}">
+                    <td class="px-4 py-2 text-center font-mono text-xs {% if s.rank <= 3 %}font-bold text-brand{% endif %}">{{ s.rank }}</td>
+                    <td class="px-4 py-2">{{ s.singer.name }}</td>
+                    <td class="px-4 py-2 text-gray-500 text-xs">{{ s.singer.song_name }}</td>
+                    <td class="px-4 py-2 text-center font-mono text-xs">{{ s.average_score|floatformat:3 }}</td>
+                    <td class="px-4 py-2 text-center">
+                        {% if s.is_advanced %}<span class="text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">晋级</span>
+                        {% else %}<span class="text-xs text-gray-400">—</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>暂无排名数据，请先录入分数</p>
+        <a href="{% url 'staff:round_score_entry' round.pk %}" class="mt-2 inline-block text-brand hover:underline text-sm">去录分 &rarr;</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

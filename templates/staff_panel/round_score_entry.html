@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}{{ round.name }} 录分 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 录分</p>
+    <div class="flex items-center justify-between mb-4">
+        <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round.get_round_type_display }}</h1>
+        <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">{{ round.get_scoring_mode_display }}</span>
+            {% if round.is_locked %}
+            <span class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded font-medium">已锁定</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not score_grid %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>该活动没有已审核通过的选手</p>
+    </div>
+    {% elif not judges %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>该活动还没有评委，请先在<a href="{% url 'staff:judge_list' %}" class="text-brand hover:underline">评委管理</a>中添加</p>
+    </div>
+    {% else %}
+    <form method="post">
+        {% csrf_token %}
+        <div class="bg-white border border-gray-200 rounded-lg overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="bg-gray-50 text-gray-600">
+                        <th class="text-left px-3 py-2 font-medium w-10">#</th>
+                        <th class="text-left px-3 py-2 font-medium">选手</th>
+                        <th class="text-left px-3 py-2 font-medium">曲目</th>
+                        {% for judge in judges %}
+                        <th class="text-center px-2 py-2 font-medium w-20">{{ judge.name }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for singer, row in score_grid %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-2 text-gray-400 text-xs">{{ forloop.counter }}</td>
+                        <td class="px-3 py-2">{{ singer.name }}</td>
+                        <td class="px-3 py-2 text-gray-500 text-xs">{{ singer.song_name }}</td>
+                        {% for judge_pk, score_val in row %}
+                        <td class="px-1 py-2 text-center">
+                            {% if round.is_locked %}
+                            <span class="text-xs font-mono">{{ score_val|default:"—" }}</span>
+                            {% else %}
+                            <input type="text" name="score_{{ singer.pk }}_{{ judge_pk }}"
+                                   value="{{ score_val }}"
+                                   class="w-16 text-center border border-gray-300 rounded px-1 py-0.5 text-xs font-mono" placeholder="0.00">
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if not round.is_locked %}
+        <div class="mt-4 flex gap-3">
+            <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">保存分数</button>
+            <a href="{% url 'staff:round_ranking' round.pk %}" class="border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-50">查看排名</a>
+        </div>
+        {% endif %}
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}奖项管理 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">奖项管理</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 奖项管理</p>
+        </div>
+        <a href="{% url 'staff:award_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">颁发奖项</a>
+    </div>
+
+    {% if awards %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-gray-600">
+                <th class="text-left px-4 py-2 font-medium">奖项</th>
+                <th class="text-left px-4 py-2 font-medium">选手</th>
+                <th class="text-left px-4 py-2 font-medium">活动</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for a in awards %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5 font-medium">{{ a.name }}</td>
+                    <td class="px-4 py-2.5">{{ a.singer.name }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ a.activity.title }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无奖项</p>
+    {% endif %}
+</div>
+{% endblock %}

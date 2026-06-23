@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from files.models import MaterialCheck, StaffNote, SubmissionFile
 from farewell_show.models import Program
 from public_portal.models import PublicPost
-from singer_contest.models import SingerRegistration
+from singer_contest.models import Award, ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
 
 
 def _get_post_form_data(request):
@@ -267,3 +267,181 @@ def export_programs(request):
     response["Content-Disposition"] = "attachment; filename=program_list.xlsx"
     wb.save(response)
     return response
+
+
+# --- Singer contest scoring ---
+
+
+@staff_member_required
+def round_list(request):
+    rounds = ContestRound.objects.select_related("activity")
+    return render(request, "staff_panel/round_list.html", {"rounds": rounds})
+
+
+@staff_member_required
+def round_create(request):
+    if request.method == "POST":
+        ContestRound.objects.create(
+            activity_id=request.POST["activity_id"],
+            round_type=request.POST["round_type"],
+            scoring_mode=request.POST.get("scoring_mode", ContestRound.ScoringMode.AVERAGE),
+            name=request.POST.get("name", ""),
+            advance_count=int(request.POST.get("advance_count", 0) or 0),
+        )
+        return redirect("staff:round_list")
+    from core.models import Activity
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    return render(request, "staff_panel/round_form.html", {
+        "activities": activities,
+        "round_types": ContestRound.RoundType,
+        "scoring_modes": ContestRound.ScoringMode,
+    })
+
+
+@staff_member_required
+def round_score_entry(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    singers = SingerRegistration.objects.filter(
+        activity=contest_round.activity,
+        pre_status=SingerRegistration.PreStatus.APPROVED,
+    )
+    judges = Judge.objects.filter(activity=contest_round.activity, is_active=True)
+    scores = {
+        (s.singer_id, s.judge_id): s.score
+        for s in ScoreRecord.objects.filter(round=contest_round)
+    }
+
+    if request.method == "POST" and not contest_round.is_locked:
+        for singer in singers:
+            for judge in judges:
+                key = f"score_{singer.pk}_{judge.pk}"
+                if key in request.POST:
+                    val = request.POST[key].strip()
+                    if val:
+                        ScoreRecord.objects.update_or_create(
+                            round=contest_round, singer=singer, judge=judge,
+                            defaults={"score": val},
+                        )
+        _recalc_round(contest_round)
+        return redirect("staff:round_score_entry", pk=pk)
+
+    # Pre-compute score grid: list of (singer, [(judge_pk, score), ...])
+    score_grid = []
+    for singer in singers:
+        row = [(judge.pk, scores.get((singer.pk, judge.pk), "")) for judge in judges]
+        score_grid.append((singer, row))
+
+    return render(request, "staff_panel/round_score_entry.html", {
+        "round": contest_round,
+        "judges": judges,
+        "score_grid": score_grid,
+    })
+
+
+@staff_member_required
+def round_ranking(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    summaries = ScoreSummary.objects.filter(round=contest_round).select_related("singer")
+    missing = ScoreRecord.objects.filter(round=contest_round, score__isnull=True).exists()
+    return render(request, "staff_panel/round_ranking.html", {
+        "round": contest_round,
+        "summaries": summaries,
+        "has_missing": missing,
+    })
+
+
+@staff_member_required
+def round_lock(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    contest_round.is_locked = True
+    contest_round.save()
+    return redirect("staff:round_ranking", pk=pk)
+
+
+@staff_member_required
+def round_unlock(request, pk):
+    if request.user.is_admin:
+        contest_round = get_object_or_404(ContestRound, pk=pk)
+        contest_round.is_locked = False
+        contest_round.save()
+    return redirect("staff:round_ranking", pk=pk)
+
+
+@staff_member_required
+def judge_list(request):
+    judges = Judge.objects.select_related("activity")
+    return render(request, "staff_panel/judge_list.html", {"judges": judges})
+
+
+@staff_member_required
+def judge_create(request):
+    if request.method == "POST":
+        Judge.objects.create(
+            activity_id=request.POST["activity_id"],
+            name=request.POST["name"],
+        )
+        return redirect("staff:judge_list")
+    from core.models import Activity
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    return render(request, "staff_panel/judge_form.html", {"activities": activities})
+
+
+@staff_member_required
+def award_list(request):
+    awards = Award.objects.select_related("singer", "activity")
+    return render(request, "staff_panel/award_list.html", {"awards": awards})
+
+
+@staff_member_required
+def award_create(request):
+    if request.method == "POST":
+        singer_id = request.POST.get("singer_id")
+        if singer_id:
+            Award.objects.create(
+                activity_id=request.POST["activity_id"],
+                singer_id=singer_id,
+                name=request.POST["name"],
+            )
+        return redirect("staff:award_list")
+    from core.models import Activity
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
+    return render(request, "staff_panel/award_form.html", {
+        "activities": activities,
+        "singers": singers,
+    })
+
+
+def _recalc_round(contest_round):
+    """Recalculate ScoreSummary for all singers in a round."""
+    singers = SingerRegistration.objects.filter(activity=contest_round.activity)
+    for singer in singers:
+        singer_scores = list(
+            ScoreRecord.objects.filter(round=contest_round, singer=singer, score__isnull=False)
+            .values_list("score", flat=True)
+        )
+        if not singer_scores:
+            continue
+        if contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW and len(singer_scores) >= 3:
+            singer_scores.remove(max(singer_scores))
+            singer_scores.remove(min(singer_scores))
+        avg = sum(singer_scores) / len(singer_scores)
+        ScoreSummary.objects.update_or_create(
+            round=contest_round, singer=singer,
+            defaults={"average_score": avg},
+        )
+    # Re-rank
+    summaries = ScoreSummary.objects.filter(round=contest_round).order_by("-average_score")
+    for i, s in enumerate(summaries, 1):
+        s.rank = i
+        s.is_advanced = i <= contest_round.advance_count if contest_round.advance_count else False
+        s.save()
+    # Update singer live_status for advanced/not_advanced
+    if contest_round.round_type == ContestRound.RoundType.PRELIMINARY and contest_round.advance_count:
+        for s in summaries:
+            singer = s.singer
+            if s.is_advanced:
+                singer.live_status = SingerRegistration.LiveStatus.ADVANCED
+            else:
+                singer.live_status = SingerRegistration.LiveStatus.NOT_ADVANCED
+            singer.save()

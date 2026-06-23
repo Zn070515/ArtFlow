@@ -20,12 +20,20 @@
             <h3 class="font-medium text-gray-900">毕晚节目管理</h3>
             <p class="mt-1 text-sm text-gray-500">查看和管理节目征集、审核、排序</p>
         </a>
+        <a href="{% url 'staff:round_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">比赛轮次</h3>
+            <p class="mt-1 text-sm text-gray-500">管理比赛轮次、录分、排名</p>
+        </a>
+        <a href="{% url 'staff:judge_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">评委管理</h3>
+            <p class="mt-1 text-sm text-gray-500">添加和管理比赛评委</p>
+        </a>
+        <a href="{% url 'staff:award_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">奖项管理</h3>
+            <p class="mt-1 text-sm text-gray-500">为选手颁发奖项</p>
+        </a>
         <div class="border border-gray-100 bg-gray-50 rounded-lg p-5 text-gray-400">
             <h3 class="font-medium">活动管理</h3>
-            <p class="mt-1 text-sm">后续开放</p>
-        </div>
-        <div class="border border-gray-100 bg-gray-50 rounded-lg p-5 text-gray-400">
-            <h3 class="font-medium">歌手比赛评分</h3>
             <p class="mt-1 text-sm">后续开放</p>
         </div>
         <div class="border border-gray-100 bg-gray-50 rounded-lg p-5 text-gray-400">

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}评委管理 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">评委管理</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 评委管理</p>
+        </div>
+        <a href="{% url 'staff:judge_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">添加评委</a>
+    </div>
+
+    {% if judges %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-gray-600">
+                <th class="text-left px-4 py-2 font-medium">姓名</th>
+                <th class="text-left px-4 py-2 font-medium">活动</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for j in judges %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5">{{ j.name }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ j.activity.title }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无评委</p>
+    {% endif %}
+</div>
+{% endblock %}

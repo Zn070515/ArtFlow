@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}添加评委 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">添加评委</h1>
+    <form method="post" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">活动</label>
+            <select name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">评委姓名</label>
+            <input type="text" name="name" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+        </div>
+        <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">添加</button>
+    </form>
+</div>
+{% endblock %}

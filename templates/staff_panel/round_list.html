@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}比赛轮次 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">比赛轮次</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 比赛轮次</p>
+        </div>
+        <a href="{% url 'staff:round_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">新增轮次</a>
+    </div>
+
+    {% if rounds %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-left px-4 py-2 font-medium">名称</th>
+                    <th class="text-left px-4 py-2 font-medium">活动</th>
+                    <th class="text-left px-4 py-2 font-medium">类型</th>
+                    <th class="text-left px-4 py-2 font-medium">计分方式</th>
+                    <th class="text-left px-4 py-2 font-medium">晋级人数</th>
+                    <th class="text-left px-4 py-2 font-medium">锁定</th>
+                    <th class="text-left px-4 py-2 font-medium">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for r in rounds %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5">{{ r.name|default:r.get_round_type_display }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ r.activity.title }}</td>
+                    <td class="px-4 py-2.5">{{ r.get_round_type_display }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ r.get_scoring_mode_display }}</td>
+                    <td class="px-4 py-2.5">{{ r.advance_count|default:"—" }}</td>
+                    <td class="px-4 py-2.5">{% if r.is_locked %}<span class="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">已锁定</span>{% else %}<span class="text-xs text-gray-400">未锁定</span>{% endif %}</td>
+                    <td class="px-4 py-2.5 space-x-2">
+                        <a href="{% url 'staff:round_score_entry' r.pk %}" class="text-brand hover:underline text-xs">录分</a>
+                        <a href="{% url 'staff:round_ranking' r.pk %}" class="text-brand hover:underline text-xs">排名</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无轮次，请先创建比赛轮次</p>
+    {% endif %}
+</div>
+{% endblock %}
