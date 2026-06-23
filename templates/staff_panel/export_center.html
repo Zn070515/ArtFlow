@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}导出中心 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">导出中心</h1>
+    <p class="text-sm text-gray-500 mb-8"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 导出中心</p>
+
+    <div class="grid sm:grid-cols-2 gap-6">
+        {% for a in activities %}
+        <div class="border border-gray-200 bg-white rounded-lg p-5">
+            <h3 class="font-medium text-gray-900">{{ a.title }}</h3>
+            <p class="text-xs text-gray-500 mb-3">{{ a.get_activity_type_display }} · {{ a.get_phase_display }}
+                {% if a.is_test_mode %}<span class="text-yellow-600">· 测试模式</span>{% endif %}
+                {% if a.is_locked %}<span class="text-red-500">· 已锁定</span>{% endif %}
+            </p>
+
+            <div class="flex flex-wrap gap-1.5 mb-3">
+                <a href="{% url 'staff:execution_package' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">执行包</a>
+                <a href="{% url 'staff:archive_package_create' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">归档包</a>
+                <a href="{% url 'staff:excel_material_checklist' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">材料清单</a>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5 mb-3">
+                <a href="{% url 'staff:export_registrations' %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">报名名单</a>
+                <a href="{% url 'staff:incident_export' %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">异常记录</a>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5">
+                {% if not a.is_locked %}
+                <form method="post" action="{% url 'staff:activity_test_toggle' a.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-yellow-300 {% if a.is_test_mode %}bg-yellow-100 text-yellow-700{% else %}text-yellow-600{% endif %} px-2 py-1 rounded hover:bg-yellow-100">{% if a.is_test_mode %}退出测试{% else %}测试模式{% endif %}</button>
+                </form>
+                <a href="{% url 'staff:activity_clear_test_data' a.pk %}" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50" onclick="return confirm('确认清空所有测试数据？此操作不可恢复。')">清空测试</a>
+                {% endif %}
+                {% if not a.is_locked %}
+                <form method="post" action="{% url 'staff:activity_lock' a.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">锁定活动</button>
+                </form>
+                {% else %}
+                {% if user.is_admin %}
+                <form method="post" action="{% url 'staff:activity_unlock' a.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">解锁活动</button>
+                </form>
+                {% endif %}
+                {% endif %}
+                <form method="post" action="{% url 'staff:activity_clone' a.pk %}">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">克隆活动</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if templates %}
+    <h2 class="text-xl font-semibold text-gray-900 mt-10 mb-4">Word 推文生成</h2>
+    <div class="grid sm:grid-cols-2 gap-4">
+        {% for t in templates %}
+        <div class="border border-gray-200 bg-white rounded-lg p-4 flex items-center justify-between">
+            <div>
+                <h3 class="text-sm font-medium text-gray-900">{{ t.name }}</h3>
+                <p class="text-xs text-gray-500">{{ t.get_template_type_display }}</p>
+            </div>
+            <form method="get" action="{% url 'staff:word_generate' t.pk 0 %}"
+                  x-data="{ activityId: '' }"
+                  class="flex items-center gap-2">
+                <select name="activity_id" x-model="activityId" class="text-xs border border-gray-300 rounded px-2 py-1" required>
+                    <option value="">选择活动</option>
+                    {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
+                </select>
+                <button type="button" onclick="if(this.form.activity_id.value){window.location.href='{% url 'staff:word_generate' t.pk 0 %}'.replace('/0/', '/'+this.form.activity_id.value+'/')}" class="text-xs bg-brand text-white px-2 py-1 rounded hover:bg-brand-light">生成</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

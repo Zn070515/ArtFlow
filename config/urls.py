@@ -10,6 +10,7 @@ urlpatterns = [
     path("contest/", include("singer_contest.urls")),
     path("farewell/", include("farewell_show.urls")),
     path("staff/", include("staff_panel.urls")),
+    path("vote/", include("voting.urls")),
 ]
 
 if settings.DEBUG:

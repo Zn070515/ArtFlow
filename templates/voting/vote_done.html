@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}投票成功 — {{ vote_session.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-md mx-auto px-4 py-16 text-center">
+    <div class="bg-white border border-gray-200 rounded-lg p-8">
+        <div class="text-green-600 text-4xl mb-4">&#10003;</div>
+        <h1 class="text-xl font-bold text-gray-900 mb-2">投票成功</h1>
+        <p class="text-sm text-gray-500">感谢参与 {{ vote_session.name }}！</p>
+    </div>
+    <p class="text-xs text-gray-400 mt-4">每人仅限投票一次</p>
+</div>
+{% endblock %}

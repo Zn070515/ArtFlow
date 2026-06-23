@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}操作日志 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">操作日志</h1>
+    <p class="text-sm text-gray-500 mb-6"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 操作日志</p>
+
+    {% if logs %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-gray-600">
+                <th class="text-left px-4 py-2 font-medium">时间</th>
+                <th class="text-left px-4 py-2 font-medium">操作人</th>
+                <th class="text-left px-4 py-2 font-medium">操作</th>
+                <th class="text-left px-4 py-2 font-medium">对象</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for log in logs %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5 text-gray-500 whitespace-nowrap">{{ log.created_at|date:"Y-m-d H:i:s" }}</td>
+                    <td class="px-4 py-2.5">{{ log.operator.username|default:"系统" }}</td>
+                    <td class="px-4 py-2.5">{{ log.get_action_type_display }}</td>
+                    <td class="px-4 py-2.5 text-gray-500 text-xs">{{ log.target }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无操作日志</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -32,18 +32,26 @@
             <h3 class="font-medium text-gray-900">奖项管理</h3>
             <p class="mt-1 text-sm text-gray-500">为选手颁发奖项</p>
         </a>
-        <div class="border border-gray-100 bg-gray-50 rounded-lg p-5 text-gray-400">
-            <h3 class="font-medium">活动管理</h3>
-            <p class="mt-1 text-sm">后续开放</p>
-        </div>
-        <div class="border border-gray-100 bg-gray-50 rounded-lg p-5 text-gray-400">
-            <h3 class="font-medium">观众投票</h3>
-            <p class="mt-1 text-sm">后续开放</p>
-        </div>
-        <div class="border border-gray-100 bg-gray-50 rounded-lg p-5 text-gray-400">
-            <h3 class="font-medium">导出中心</h3>
-            <p class="mt-1 text-sm">后续开放</p>
-        </div>
+        <a href="{% url 'staff:export_center' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">导出中心</h3>
+            <p class="mt-1 text-sm text-gray-500">执行包、归档包、Word推文、测试模式、Excel导入</p>
+        </a>
+        <a href="{% url 'staff:vote_session_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">观众投票</h3>
+            <p class="mt-1 text-sm text-gray-500">创建投票场次、管理口令、查看实时票数</p>
+        </a>
+        <a href="{% url 'staff:incident_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">异常记录</h3>
+            <p class="mt-1 text-sm text-gray-500">记录活动异常事件、处理结果</p>
+        </a>
+        <a href="{% url 'staff:qr_center' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">二维码中心</h3>
+            <p class="mt-1 text-sm text-gray-500">生成报名、投票、结果公示二维码</p>
+        </a>
+        <a href="{% url 'staff:audit_log_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">操作日志</h3>
+            <p class="mt-1 text-sm text-gray-500">查看工作人员操作记录</p>
+        </a>
     </div>
 </div>
 {% endblock %}

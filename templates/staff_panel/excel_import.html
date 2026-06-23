@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}导入评分 — {{ round.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">导入评分</h1>
+    <p class="text-sm text-gray-500 mb-6">{{ round.activity.title }} · {{ round.get_round_type_display }}</p>
+
+    {% if errors %}
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
+        <ul class="list-disc list-inside space-y-1">
+            {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">上传 Excel 评分表</label>
+            <p class="text-xs text-gray-400 mb-2">第一列为选手姓名，第一行为评委姓名，单元格为分数。仅导入非空单元格。</p>
+            <input type="file" name="file" required accept=".xlsx" class="text-sm">
+        </div>
+        <div class="flex gap-3">
+            <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">导入</button>
+            <a href="{% url 'staff:round_score_entry' round.pk %}" class="border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-50">返回录分</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}异常记录 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">异常记录</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 异常记录</p>
+        </div>
+        <div class="flex gap-2">
+            <a href="{% url 'staff:incident_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">添加记录</a>
+            <a href="{% url 'staff:incident_export' %}" class="border border-gray-300 text-gray-600 px-3 py-1.5 rounded text-xs hover:bg-gray-50">导出 Excel</a>
+        </div>
+    </div>
+
+    {% if incidents %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-gray-600">
+                <th class="text-left px-4 py-2 font-medium">活动</th>
+                <th class="text-left px-4 py-2 font-medium">时间</th>
+                <th class="text-left px-4 py-2 font-medium">类型</th>
+                <th class="text-left px-4 py-2 font-medium">选手</th>
+                <th class="text-left px-4 py-2 font-medium">处理结果</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for inc in incidents %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5 text-gray-500">{{ inc.activity.title }}</td>
+                    <td class="px-4 py-2.5">{{ inc.occurred_at|date:"Y-m-d H:i" }}</td>
+                    <td class="px-4 py-2.5">{{ inc.get_event_type_display }}</td>
+                    <td class="px-4 py-2.5">{{ inc.singer.name|default:"-" }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ inc.resolution|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无异常记录</p>
+    {% endif %}
+</div>
+{% endblock %}

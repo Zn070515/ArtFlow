@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}投票 — {{ vote_session.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto px-4 py-10">
+    <h1 class="text-xl font-bold text-gray-900 mb-1">{{ vote_session.name }}</h1>
+    <p class="text-sm text-gray-500 mb-6">
+        {% if is_multi %}请选择最多 {{ max_selections }} 位选手{% else %}请选择一位选手{% endif %}
+    </p>
+
+    {% if error %}
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded mb-4">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" class="space-y-3">
+        {% csrf_token %}
+        {% for opt in options %}
+        <label class="flex items-center gap-3 border border-gray-200 rounded-lg px-4 py-3 hover:border-gray-300 cursor-pointer transition-colors">
+            {% if is_multi %}
+            <input type="checkbox" name="selected_option" value="{{ opt.pk }}" class="h-4 w-4 text-brand border-gray-300">
+            {% else %}
+            <input type="radio" name="selected_option" value="{{ opt.pk }}" class="h-4 w-4 text-brand border-gray-300">
+            {% endif %}
+            <span class="text-sm font-medium">{{ opt.singer.name }}</span>
+            <span class="text-xs text-gray-400">{{ opt.singer.song_name }}</span>
+        </label>
+        {% empty %}
+        <p class="text-gray-400 text-sm text-center py-8">暂无可选选手</p>
+        {% endfor %}
+
+        {% if options %}
+        <button type="submit" class="w-full bg-brand text-white py-2.5 rounded text-sm hover:bg-brand-light transition-colors">提交投票</button>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}二维码中心 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">二维码中心</h1>
+    <p class="text-sm text-gray-500 mb-6"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 二维码中心</p>
+
+    {% if activities %}
+    <div class="grid sm:grid-cols-2 gap-4">
+        {% for a in activities %}
+        <div class="border border-gray-200 bg-white rounded-lg p-5">
+            <h3 class="font-medium text-gray-900">{{ a.title }}</h3>
+            <p class="text-xs text-gray-500 mt-1">{{ a.get_activity_type_display }} · {{ a.get_phase_display }}</p>
+            <a href="{% url 'staff:qr_generate' a.pk %}" class="inline-block mt-3 text-xs text-brand hover:underline">查看二维码 &rarr;</a>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无活动</p>
+    {% endif %}
+</div>
+{% endblock %}

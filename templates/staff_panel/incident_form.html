@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}添加异常记录 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">添加异常记录</h1>
+    <form method="post" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">活动</label>
+            <select name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">发生时间</label>
+            <input type="datetime-local" name="occurred_at" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">事件类型</label>
+            <select name="event_type" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for val, label in event_types %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">涉及选手</label>
+            <select name="singer_id" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <option value="">—— 无 ——</option>
+                {% for s in singers %}<option value="{{ s.pk }}">{{ s.name }} — {{ s.song_name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">处理结果</label>
+            <input type="text" name="resolution" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+            <textarea name="remark" rows="2" class="w-full border border-gray-300 rounded px-3 py-2 text-sm"></textarea>
+        </div>
+        <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">添加</button>
+    </form>
+</div>
+{% endblock %}

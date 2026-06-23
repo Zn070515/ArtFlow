@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}{{ vote_session.name }} — 投票详情 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ vote_session.name }}</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                <a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> /
+                <a href="{% url 'staff:vote_session_list' %}" class="hover:underline">投票管理</a> / {{ vote_session.name }}
+            </p>
+        </div>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+        <div class="grid sm:grid-cols-3 gap-4 text-sm">
+            <div>
+                <span class="text-gray-500">活动：</span>
+                <span class="font-medium">{{ vote_session.activity.title }}</span>
+            </div>
+            <div>
+                <span class="text-gray-500">口令：</span>
+                <span class="font-mono font-medium">{{ vote_session.passcode }}</span>
+            </div>
+            <div>
+                <span class="text-gray-500">状态：</span>
+                {% if vote_session.is_locked %}
+                <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">已锁定</span>
+                {% elif vote_session.is_open %}
+                <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">投票中</span>
+                {% else %}
+                <span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">未开放</span>
+                {% endif %}
+            </div>
+            <div>
+                <span class="text-gray-500">时间：</span>
+                <span>{{ vote_session.start_time|date:"Y-m-d H:i" }} — {{ vote_session.end_time|date:"Y-m-d H:i" }}</span>
+            </div>
+            <div>
+                <span class="text-gray-500">方式：</span>
+                <span>{{ vote_session.get_selection_type_display }}{% if vote_session.selection_type == "multi" %}（最多 {{ vote_session.max_selections }} 项）{% endif %}</span>
+            </div>
+            <div>
+                <span class="text-gray-500">总投票数：</span>
+                <span class="font-bold">{{ total_votes }}</span>
+            </div>
+        </div>
+        <div class="flex gap-2 mt-4">
+            {% if not vote_session.is_locked %}
+            <form method="post" action="{% url 'staff:vote_session_toggle' vote_session.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="text-xs px-3 py-1.5 rounded {% if vote_session.is_open %}bg-yellow-100 text-yellow-700 hover:bg-yellow-200{% else %}bg-green-100 text-green-700 hover:bg-green-200{% endif %} transition-colors">
+                    {% if vote_session.is_open %}关闭投票{% else %}开启投票{% endif %}
+                </button>
+            </form>
+            <form method="post" action="{% url 'staff:vote_session_lock' vote_session.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors">锁定结果</button>
+            </form>
+            {% endif %}
+            <a href="{% url 'staff:vote_session_export' vote_session.pk %}" class="text-xs bg-brand text-white px-3 py-1.5 rounded hover:bg-brand-light transition-colors">导出结果</a>
+            <a href="{% url 'voting:vote_entry' vote_session.pk %}" class="text-xs border border-gray-300 text-gray-600 px-3 py-1.5 rounded hover:border-gray-400 transition-colors">打开投票链接</a>
+        </div>
+    </div>
+
+    {% if options %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-gray-600">
+                <th class="text-left px-4 py-2 font-medium">选手</th>
+                <th class="text-left px-4 py-2 font-medium">曲目</th>
+                <th class="text-right px-4 py-2 font-medium">票数</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for opt in options %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5 font-medium">{{ opt.singer.name }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ opt.singer.song_name }}</td>
+                    <td class="px-4 py-2.5 text-right font-mono font-bold">{{ opt.vote_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无候选选项</p>
+    {% endif %}
+</div>
+{% endblock %}

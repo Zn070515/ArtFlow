@@ -38,6 +38,8 @@
                     <td class="px-4 py-2.5 space-x-2">
                         <a href="{% url 'staff:round_score_entry' r.pk %}" class="text-brand hover:underline text-xs">录分</a>
                         <a href="{% url 'staff:round_ranking' r.pk %}" class="text-brand hover:underline text-xs">排名</a>
+                        <a href="{% url 'staff:excel_score_template' r.pk %}" class="text-gray-500 hover:underline text-xs">模板</a>
+                        <a href="{% url 'staff:excel_import_scores' r.pk %}" class="text-gray-500 hover:underline text-xs">导入</a>
                     </td>
                 </tr>
                 {% endfor %}

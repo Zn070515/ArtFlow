@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}投票管理 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">投票管理</h1>
+            <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 投票管理</p>
+        </div>
+        <a href="{% url 'staff:vote_session_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">创建投票场次</a>
+    </div>
+
+    {% if sessions %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 text-gray-600">
+                <th class="text-left px-4 py-2 font-medium">名称</th>
+                <th class="text-left px-4 py-2 font-medium">活动</th>
+                <th class="text-center px-4 py-2 font-medium">状态</th>
+                <th class="text-left px-4 py-2 font-medium">时间</th>
+            </tr></thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for s in sessions %}
+                <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5"><a href="{% url 'staff:vote_session_detail' s.pk %}" class="font-medium text-brand hover:underline">{{ s.name }}</a></td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ s.activity.title }}</td>
+                    <td class="px-4 py-2.5 text-center">
+                        {% if s.is_locked %}
+                        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">已锁定</span>
+                        {% elif s.is_open %}
+                        <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">投票中</span>
+                        {% else %}
+                        <span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">未开放</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ s.start_time|date:"m/d H:i" }} — {{ s.end_time|date:"m/d H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-sm">暂无投票场次</p>
+    {% endif %}
+</div>
+{% endblock %}
