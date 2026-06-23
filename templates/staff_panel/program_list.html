@@ -9,6 +9,9 @@
             <h1 class="text-2xl font-bold text-gray-900">毕晚节目管理</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 节目管理</p>
         </div>
+        {% if programs %}
+        <a href="{% url 'staff:export_programs' %}" class="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700 transition-colors">导出 Excel</a>
+        {% endif %}
     </div>
 
     {% if programs %}

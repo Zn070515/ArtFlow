@@ -58,3 +58,28 @@ class StaffNote(models.Model):
 
     def __str__(self):
         return f"{self.created_by}: {self.content[:50]}"
+
+
+class MaterialCheck(models.Model):
+    class Status(models.TextChoices):
+        MISSING = "missing", "未上传"
+        UPLOADED = "uploaded", "已上传"
+        REVIEWED = "reviewed", "已审核"
+
+    singer_registration = models.ForeignKey(
+        "singer_contest.SingerRegistration", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="material_checks"
+    )
+    program = models.ForeignKey(
+        "farewell_show.Program", on_delete=models.CASCADE,
+        null=True, blank=True, related_name="material_checks"
+    )
+    item_name = models.CharField(max_length=100)
+    status = models.CharField(max_length=12, choices=Status, default=Status.MISSING)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order"]
+
+    def __str__(self):
+        return f"{self.item_name} — {self.get_status_display()}"

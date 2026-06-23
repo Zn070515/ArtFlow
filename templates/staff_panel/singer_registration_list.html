@@ -9,6 +9,9 @@
             <h1 class="text-2xl font-bold text-gray-900">歌手比赛报名</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 报名管理</p>
         </div>
+        {% if registrations %}
+        <a href="{% url 'staff:export_registrations' %}" class="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700 transition-colors">导出 Excel</a>
+        {% endif %}
     </div>
 
     {% if registrations %}

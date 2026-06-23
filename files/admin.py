@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import StaffNote, SubmissionFile
+from .models import MaterialCheck, StaffNote, SubmissionFile
 
 
 @admin.register(SubmissionFile)
@@ -15,3 +15,8 @@ class StaffNoteAdmin(admin.ModelAdmin):
 
     def content_preview(self, obj):
         return obj.content[:60]
+
+
+@admin.register(MaterialCheck)
+class MaterialCheckAdmin(admin.ModelAdmin):
+    list_display = ["item_name", "status", "singer_registration", "program"]

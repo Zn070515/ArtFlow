@@ -45,15 +45,55 @@
             <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm">
                 <h3 class="font-medium text-gray-900 mb-3">附件 ({{ files|length }})</h3>
                 {% if files %}
-                <ul class="space-y-1">
+                <ul class="space-y-1 mb-4">
                     {% for f in files %}
                     <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({{ f.get_file_purpose_display }})</span></span><span>{{ f.file_size|filesizeformat }}</span></li>
                     {% endfor %}
                 </ul>
                 {% else %}
-                <p class="text-gray-400 text-xs">暂无附件</p>
+                <p class="text-gray-400 text-xs mb-3">暂无附件</p>
                 {% endif %}
+                <form method="post" enctype="multipart/form-data" class="flex flex-col gap-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="upload_file" value="1">
+                    <div class="flex gap-2">
+                        <input type="file" name="file" required class="flex-1 text-xs border border-gray-300 rounded px-2 py-1">
+                        <select name="file_purpose" class="text-xs border border-gray-300 rounded px-2 py-1">
+                            <option value="accompaniment">伴奏</option>
+                            <option value="background_video">背景视频</option>
+                            <option value="program_image">节目图片</option>
+                            <option value="lyrics_script">歌词/台词</option>
+                            <option value="host_material">主持稿素材</option>
+                            <option value="other">其他</option>
+                        </select>
+                        <button type="submit" class="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs hover:bg-gray-200">上传</button>
+                    </div>
+                </form>
             </div>
+        </div>
+    </div>
+
+    <div class="mt-6">
+        <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm">
+            <h3 class="font-medium text-gray-900 mb-3">材料完整性</h3>
+            {% if checks %}
+            <div class="space-y-1.5">
+                {% for c in checks %}
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-gray-700">{{ c.item_name }}</span>
+                    {% if c.status == "reviewed" %}
+                    <span class="text-green-700 bg-green-50 px-1.5 py-0.5 rounded">已审核</span>
+                    {% elif c.status == "uploaded" %}
+                    <span class="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">已上传</span>
+                    {% else %}
+                    <span class="text-red-600 bg-red-50 px-1.5 py-0.5 rounded">未上传</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-400 text-xs">暂无材料检查项，可在 Django Admin 中添加</p>
+            {% endif %}
         </div>
     </div>
 
