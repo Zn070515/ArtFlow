@@ -33,6 +33,7 @@ urlpatterns = [
     path("vote-sessions/<int:pk>/", views.vote_session_detail, name="vote_session_detail"),
     path("vote-sessions/<int:pk>/toggle/", views.vote_session_toggle, name="vote_session_toggle"),
     path("vote-sessions/<int:pk>/lock/", views.vote_session_lock, name="vote_session_lock"),
+    path("vote-sessions/<int:pk>/unlock/", views.vote_session_unlock, name="vote_session_unlock"),
     path("vote-sessions/<int:pk>/export/", views.vote_session_export, name="vote_session_export"),
     path("qr/", views.qr_center, name="qr_center"),
     path("qr/<int:pk>/", views.qr_generate, name="qr_generate"),

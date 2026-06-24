@@ -13,6 +13,7 @@ class VoteSession(models.Model):
     end_time = models.DateTimeField()
     is_open = models.BooleanField(default=False)
     is_locked = models.BooleanField(default=False)
+    is_test_data = models.BooleanField(default=False)
     selection_type = models.CharField(max_length=8, choices=SelectionType, default=SelectionType.SINGLE)
     max_selections = models.IntegerField(default=1)
 

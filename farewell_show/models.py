@@ -35,6 +35,7 @@ class Program(models.Model):
 
     sort_order = models.IntegerField(default=0)
     status = models.CharField(max_length=20, choices=Status, default=Status.DRAFT)
+    is_test_data = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -27,6 +27,7 @@ class SubmissionFile(models.Model):
     file_size = models.IntegerField()
     file_purpose = models.CharField(max_length=24, choices=Purpose, default=Purpose.OTHER)
     is_public = models.BooleanField(default=False)
+    is_test_data = models.BooleanField(default=False)
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
         null=True, blank=True, related_name="uploaded_files"

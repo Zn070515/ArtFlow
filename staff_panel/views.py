@@ -7,10 +7,13 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 
 from archive.models import ArchivePackage
+from common.audit import log_action
+from common.business_rules import ensure_activity_unlocked, ensure_round_unlocked, ensure_vote_session_unlocked
 from common.models import AuditLog
 from core.models import Activity
 from exports.models import ArticleTemplate, ExportTask, GeneratedDocument
@@ -161,6 +164,10 @@ def post_create(request):
                 "statuses": _choices(PublicPost.Status),
                 "activities": Activity.objects.all(),
             })
+        related_activity = None
+        if data["related_activity_id"]:
+            related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
+            ensure_activity_unlocked(related_activity)
         post = PublicPost(
             title=data["title"],
             subtitle=data["subtitle"],
@@ -178,6 +185,12 @@ def post_create(request):
         if data["status"] == PublicPost.Status.PUBLISHED:
             post.published_at = timezone.now()
         post.save()
+        log_action(
+            request,
+            AuditLog.ActionType.PUBLISH_POST,
+            f"PublicPost:{post.pk}",
+            new_value=f"status={post.status}",
+        )
         return redirect("staff:post_list")
     return render(request, "staff_panel/post_form.html", {
         "post_types": _choices(PublicPost.PostType),
@@ -199,6 +212,11 @@ def post_edit(request, pk):
                 "statuses": _choices(PublicPost.Status),
                 "activities": Activity.objects.all(),
             })
+        old_value = f"status={post.status}; title={post.title}"
+        related_activity = None
+        if data["related_activity_id"]:
+            related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
+        ensure_activity_unlocked(related_activity or post.related_activity)
         post.title = data["title"]
         post.subtitle = data["subtitle"]
         post.content = data["content"]
@@ -216,6 +234,13 @@ def post_edit(request, pk):
         elif data["status"] != PublicPost.Status.PUBLISHED and old_status == PublicPost.Status.PUBLISHED:
             post.published_at = None
         post.save()
+        log_action(
+            request,
+            AuditLog.ActionType.PUBLISH_POST,
+            f"PublicPost:{post.pk}",
+            old_value=old_value,
+            new_value=f"status={post.status}; title={post.title}",
+        )
         return redirect("staff:post_list")
 
     return render(request, "staff_panel/post_form.html", {
@@ -241,19 +266,28 @@ def singer_registration_list(request):
 def singer_registration_detail(request, pk):
     reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
     if request.method == "POST":
+        ensure_activity_unlocked(reg.activity)
         if "upload_file" in request.POST:
             f = request.FILES.get("file")
             if f:
-                SubmissionFile.objects.create(
+                submission_file = SubmissionFile.objects.create(
                     singer_registration=reg,
                     file=f,
                     original_name=f.name,
                     file_size=f.size,
                     file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                     uploaded_by=request.user,
+                    is_test_data=reg.is_test_data or reg.activity.is_test_mode,
                 )
                 sync_singer_material_checks(reg)
+                log_action(
+                    request,
+                    AuditLog.ActionType.UPLOAD_FILE,
+                    f"SubmissionFile:{submission_file.pk}",
+                    new_value=submission_file.original_name,
+                )
         else:
+            old_value = f"pre={reg.pre_status}; live={reg.live_status}"
             if "pre_status" in request.POST:
                 reg.pre_status = request.POST["pre_status"]
             if "live_status" in request.POST:
@@ -267,6 +301,13 @@ def singer_registration_detail(request, pk):
                         created_by=request.user,
                     )
             reg.save()
+            log_action(
+                request,
+                AuditLog.ActionType.UPDATE_STATUS,
+                f"SingerRegistration:{reg.pk}",
+                old_value=old_value,
+                new_value=f"pre={reg.pre_status}; live={reg.live_status}",
+            )
         return redirect("staff:singer_registration_detail", pk=reg.pk)
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
@@ -296,19 +337,28 @@ def program_list(request):
 def program_detail(request, pk):
     prog = get_object_or_404(Program.objects.select_related("activity", "user"), pk=pk)
     if request.method == "POST":
+        ensure_activity_unlocked(prog.activity)
         if "upload_file" in request.POST:
             f = request.FILES.get("file")
             if f:
-                SubmissionFile.objects.create(
+                submission_file = SubmissionFile.objects.create(
                     program=prog,
                     file=f,
                     original_name=f.name,
                     file_size=f.size,
                     file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                     uploaded_by=request.user,
+                    is_test_data=prog.is_test_data or prog.activity.is_test_mode,
                 )
                 sync_program_material_checks(prog)
+                log_action(
+                    request,
+                    AuditLog.ActionType.UPLOAD_FILE,
+                    f"SubmissionFile:{submission_file.pk}",
+                    new_value=submission_file.original_name,
+                )
         else:
+            old_value = f"status={prog.status}; sort_order={prog.sort_order}"
             if "status" in request.POST:
                 prog.status = request.POST["status"]
             if "sort_order" in request.POST:
@@ -325,6 +375,13 @@ def program_detail(request, pk):
                         created_by=request.user,
                     )
             prog.save()
+            log_action(
+                request,
+                AuditLog.ActionType.REVIEW_MATERIAL,
+                f"Program:{prog.pk}",
+                old_value=old_value,
+                new_value=f"status={prog.status}; sort_order={prog.sort_order}",
+            )
         return redirect("staff:program_detail", pk=prog.pk)
     notes = prog.staff_notes.select_related("created_by")
     files = prog.files.all()
@@ -397,13 +454,16 @@ def round_list(request):
 @staff_member_required
 def round_create(request):
     if request.method == "POST":
-        ContestRound.objects.create(
-            activity_id=request.POST["activity_id"],
+        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        ensure_activity_unlocked(activity)
+        contest_round = ContestRound.objects.create(
+            activity=activity,
             round_type=request.POST["round_type"],
             scoring_mode=request.POST.get("scoring_mode", ContestRound.ScoringMode.AVERAGE),
             name=request.POST.get("name", ""),
             advance_count=int(request.POST.get("advance_count", 0) or 0),
         )
+        log_action(request, AuditLog.ActionType.OTHER, f"ContestRound:{contest_round.pk}", new_value=contest_round.name)
         return redirect("staff:round_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
@@ -427,7 +487,8 @@ def round_score_entry(request, pk):
         for s in ScoreRecord.objects.filter(round=contest_round)
     }
 
-    if request.method == "POST" and not contest_round.is_locked:
+    if request.method == "POST":
+        ensure_round_unlocked(contest_round)
         for singer in singers:
             for judge in judges:
                 key = f"score_{singer.pk}_{judge.pk}"
@@ -436,9 +497,10 @@ def round_score_entry(request, pk):
                     if val:
                         ScoreRecord.objects.update_or_create(
                             round=contest_round, singer=singer, judge=judge,
-                            defaults={"score": val},
+                            defaults={"score": val, "is_test_data": contest_round.activity.is_test_mode},
                         )
         _recalc_round(contest_round)
+        log_action(request, AuditLog.ActionType.ENTER_SCORE, f"ContestRound:{contest_round.pk}")
         return redirect("staff:round_score_entry", pk=pk)
 
     # Pre-compute score grid: list of (singer, [(judge_pk, score), ...])
@@ -471,15 +533,22 @@ def round_lock(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     contest_round.is_locked = True
     contest_round.save()
+    log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"ContestRound:{contest_round.pk}")
     return redirect("staff:round_ranking", pk=pk)
 
 
 @staff_member_required
 def round_unlock(request, pk):
-    if request.user.is_admin:
-        contest_round = get_object_or_404(ContestRound, pk=pk)
-        contest_round.is_locked = False
-        contest_round.save()
+    _require_admin(request.user)
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    contest_round.is_locked = False
+    contest_round.save()
+    log_action(
+        request,
+        AuditLog.ActionType.UNLOCK_RESULT,
+        f"ContestRound:{contest_round.pk}",
+        note=request.POST.get("note", "").strip(),
+    )
     return redirect("staff:round_ranking", pk=pk)
 
 
@@ -492,10 +561,13 @@ def judge_list(request):
 @staff_member_required
 def judge_create(request):
     if request.method == "POST":
-        Judge.objects.create(
-            activity_id=request.POST["activity_id"],
+        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        ensure_activity_unlocked(activity)
+        judge = Judge.objects.create(
+            activity=activity,
             name=request.POST["name"],
         )
+        log_action(request, AuditLog.ActionType.OTHER, f"Judge:{judge.pk}", new_value=judge.name)
         return redirect("staff:judge_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
@@ -511,13 +583,17 @@ def award_list(request):
 @staff_member_required
 def award_create(request):
     if request.method == "POST":
+        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        ensure_activity_unlocked(activity)
         singer_id = request.POST.get("singer_id")
         if singer_id:
-            Award.objects.create(
-                activity_id=request.POST["activity_id"],
+            award = Award.objects.create(
+                activity=activity,
                 singer_id=singer_id,
                 name=request.POST["name"],
+                is_test_data=activity.is_test_mode,
             )
+            log_action(request, AuditLog.ActionType.OTHER, f"Award:{award.pk}", new_value=award.name)
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
@@ -544,7 +620,7 @@ def _recalc_round(contest_round):
         avg = sum(singer_scores) / len(singer_scores)
         ScoreSummary.objects.update_or_create(
             round=contest_round, singer=singer,
-            defaults={"average_score": avg},
+            defaults={"average_score": avg, "is_test_data": contest_round.activity.is_test_mode},
         )
     # Re-rank
     summaries = ScoreSummary.objects.filter(round=contest_round).order_by("-average_score")
@@ -575,14 +651,17 @@ def vote_session_list(request):
 @staff_member_required
 def vote_session_create(request):
     if request.method == "POST":
+        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        ensure_activity_unlocked(activity)
         vote_session = VoteSession.objects.create(
-            activity_id=request.POST["activity_id"],
+            activity=activity,
             name=request.POST["name"],
             passcode=request.POST["passcode"],
             start_time=request.POST["start_time"],
             end_time=request.POST["end_time"],
             selection_type=request.POST.get("selection_type", VoteSession.SelectionType.SINGLE),
             max_selections=int(request.POST.get("max_selections", 1) or 1),
+            is_test_data=activity.is_test_mode,
         )
         singer_ids = request.POST.getlist("singers")
         for i, sid in enumerate(singer_ids):
@@ -591,6 +670,7 @@ def vote_session_create(request):
                 singer_id=sid,
                 sort_order=i,
             )
+        log_action(request, AuditLog.ActionType.VOTE_MANAGE, f"VoteSession:{vote_session.pk}", new_value=vote_session.name)
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
@@ -620,8 +700,17 @@ def vote_session_detail(request, pk):
 @staff_member_required
 def vote_session_toggle(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
+    ensure_vote_session_unlocked(vote_session)
+    old_value = f"is_open={vote_session.is_open}"
     vote_session.is_open = not vote_session.is_open
     vote_session.save()
+    log_action(
+        request,
+        AuditLog.ActionType.VOTE_MANAGE,
+        f"VoteSession:{vote_session.pk}",
+        old_value=old_value,
+        new_value=f"is_open={vote_session.is_open}",
+    )
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -631,6 +720,22 @@ def vote_session_lock(request, pk):
     vote_session.is_locked = True
     vote_session.is_open = False
     vote_session.save()
+    log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"VoteSession:{vote_session.pk}")
+    return redirect("staff:vote_session_detail", pk=pk)
+
+
+@staff_member_required
+def vote_session_unlock(request, pk):
+    _require_admin(request.user)
+    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session.is_locked = False
+    vote_session.save()
+    log_action(
+        request,
+        AuditLog.ActionType.UNLOCK_RESULT,
+        f"VoteSession:{vote_session.pk}",
+        note=request.POST.get("note", "").strip(),
+    )
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -749,6 +854,7 @@ def excel_import_scores(request, round_id):
     contest_round = get_object_or_404(ContestRound, pk=round_id)
     errors = []
     if request.method == "POST" and request.FILES.get("file"):
+        ensure_round_unlocked(contest_round)
         from openpyxl import load_workbook
         try:
             wb = load_workbook(request.FILES["file"], data_only=True)
@@ -782,10 +888,11 @@ def excel_import_scores(request, round_id):
                         continue
                     ScoreRecord.objects.update_or_create(
                         round=contest_round, singer=singer, judge=judge,
-                        defaults={"score": score},
+                        defaults={"score": score, "is_test_data": contest_round.activity.is_test_mode},
                     )
             if not errors:
                 _recalc_round(contest_round)
+                log_action(request, AuditLog.ActionType.ENTER_SCORE, f"ContestRound:{contest_round.pk}", note="excel import")
                 return redirect("staff:round_score_entry", pk=round_id)
         except Exception as e:
             errors.append(f"文件解析失败: {e}")
@@ -956,8 +1063,9 @@ def incident_list(request):
 @staff_member_required
 def incident_create(request):
     if request.method == "POST":
-        IncidentRecord.objects.create(
-            activity_id=request.POST["activity_id"],
+        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        incident = IncidentRecord.objects.create(
+            activity=activity,
             occurred_at=request.POST["occurred_at"],
             event_type=request.POST.get("event_type", IncidentRecord.EventType.OTHER),
             singer_id=request.POST.get("singer_id") or None,
@@ -965,7 +1073,9 @@ def incident_create(request):
             handled_by_id=request.user.pk,
             resolution=request.POST.get("resolution", ""),
             remark=request.POST.get("remark", ""),
+            is_test=activity.is_test_mode,
         )
+        log_action(request, AuditLog.ActionType.OTHER, f"IncidentRecord:{incident.pk}", new_value=incident.event_type)
         return redirect("staff:incident_list")
     activities = Activity.objects.all()
     singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
@@ -1001,22 +1111,45 @@ def incident_export(request):
 
 @staff_member_required
 def activity_test_toggle(request, pk):
+    _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
+    old_value = f"is_test_mode={activity.is_test_mode}"
     activity.is_test_mode = not activity.is_test_mode
     activity.save()
+    log_action(
+        request,
+        AuditLog.ActionType.OTHER,
+        f"Activity:{activity.pk}",
+        old_value=old_value,
+        new_value=f"is_test_mode={activity.is_test_mode}",
+    )
     return redirect("staff:export_center")
 
 
 @staff_member_required
+@require_POST
 def activity_clear_test_data(request, pk):
+    _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
-    SingerRegistration.objects.filter(activity=activity).delete()
-    ScoreRecord.objects.filter(round__activity=activity).delete()
-    ScoreSummary.objects.filter(round__activity=activity).delete()
-    VoteRecord.objects.filter(vote_session__activity=activity).delete()
-    VoteOption.objects.filter(vote_session__activity=activity).delete()
-    VoteSession.objects.filter(activity=activity).delete()
+    if not activity.is_test_mode:
+        raise PermissionDenied("Test data can only be cleared while the activity is in test mode.")
+    deleted = {
+        "singer_registrations": SingerRegistration.objects.filter(activity=activity, is_test_data=True).count(),
+        "programs": Program.objects.filter(activity=activity, is_test_data=True).count(),
+        "vote_sessions": VoteSession.objects.filter(activity=activity, is_test_data=True).count(),
+    }
+    SubmissionFile.objects.filter(singer_registration__activity=activity, is_test_data=True).delete()
+    SubmissionFile.objects.filter(program__activity=activity, is_test_data=True).delete()
+    Award.objects.filter(activity=activity, is_test_data=True).delete()
+    ScoreRecord.objects.filter(round__activity=activity, is_test_data=True).delete()
+    ScoreSummary.objects.filter(round__activity=activity, is_test_data=True).delete()
+    VoteRecord.objects.filter(vote_session__activity=activity, vote_session__is_test_data=True).delete()
+    VoteOption.objects.filter(vote_session__activity=activity, vote_session__is_test_data=True).delete()
+    VoteSession.objects.filter(activity=activity, is_test_data=True).delete()
+    Program.objects.filter(activity=activity, is_test_data=True).delete()
+    SingerRegistration.objects.filter(activity=activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=activity, is_test=True).delete()
+    log_action(request, AuditLog.ActionType.OTHER, f"Activity:{activity.pk}", note=f"clear_test_data={deleted}")
     return redirect("staff:export_center")
 
 
@@ -1025,24 +1158,37 @@ def activity_clear_test_data(request, pk):
 
 @staff_member_required
 def activity_lock(request, pk):
+    _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     activity.is_locked = True
     activity.locked_at = timezone.now()
     activity.locked_by = request.user
     activity.save()
-    AuditLog.objects.create(operator=request.user, action_type=AuditLog.ActionType.RELOCK_RESULT, target=f"锁定: {activity.title}")
+    ContestRound.objects.filter(activity=activity).update(is_locked=True)
+    VoteSession.objects.filter(activity=activity).update(is_locked=True, is_open=False)
+    log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"Activity:{activity.pk}", new_value="locked")
     return redirect("staff:export_center")
 
 
 @staff_member_required
 def activity_unlock(request, pk):
+    _require_admin(request.user)
     if request.user.is_admin:
         activity = get_object_or_404(Activity, pk=pk)
         activity.is_locked = False
         activity.locked_at = None
         activity.locked_by = None
         activity.save()
-        AuditLog.objects.create(operator=request.user, action_type=AuditLog.ActionType.UNLOCK_RESULT, target=f"解锁: {activity.title}")
+        ContestRound.objects.filter(activity=activity).update(is_locked=False)
+        VoteSession.objects.filter(activity=activity).update(is_locked=False)
+        log_action(
+            request,
+            AuditLog.ActionType.UNLOCK_RESULT,
+            f"Activity:{activity.pk}",
+            old_value="locked",
+            new_value="unlocked",
+            note=request.POST.get("note", "").strip(),
+        )
     return redirect("staff:export_center")
 
 

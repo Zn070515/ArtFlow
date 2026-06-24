@@ -40,6 +40,7 @@ class SingerRegistration(models.Model):
 
     pre_status = models.CharField(max_length=20, choices=PreStatus, default=PreStatus.DRAFT)
     live_status = models.CharField(max_length=20, choices=LiveStatus, default=LiveStatus.NOT_CHECKED_IN)
+    is_test_data = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -92,6 +93,7 @@ class ScoreRecord(models.Model):
     judge = models.ForeignKey(Judge, on_delete=models.CASCADE, related_name="scores")
     score = models.DecimalField(max_digits=5, decimal_places=2)
     notes = models.CharField(max_length=200, blank=True)
+    is_test_data = models.BooleanField(default=False)
 
     class Meta:
         unique_together = [("round", "singer", "judge")]
@@ -106,6 +108,7 @@ class ScoreSummary(models.Model):
     average_score = models.DecimalField(max_digits=6, decimal_places=3, default=0)
     rank = models.IntegerField(default=0)
     is_advanced = models.BooleanField(default=False)
+    is_test_data = models.BooleanField(default=False)
 
     class Meta:
         unique_together = [("round", "singer")]
@@ -119,6 +122,7 @@ class Award(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="awards")
     singer = models.ForeignKey(SingerRegistration, on_delete=models.CASCADE, related_name="awards")
     name = models.CharField(max_length=100)
+    is_test_data = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["pk"]

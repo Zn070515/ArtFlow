@@ -59,6 +59,12 @@
                 {% csrf_token %}
                 <button type="submit" class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors">锁定结果</button>
             </form>
+            {% elif request.user.is_admin %}
+            <form method="post" action="{% url 'staff:vote_session_unlock' vote_session.pk %}" class="flex gap-2">
+                {% csrf_token %}
+                <input type="text" name="note" placeholder="解锁备注（选填）" class="text-xs border border-gray-300 rounded px-2 py-1">
+                <button type="submit" class="text-xs border border-red-300 text-red-700 px-3 py-1.5 rounded hover:bg-red-50 transition-colors">解锁结果</button>
+            </form>
             {% endif %}
             <a href="{% url 'staff:vote_session_export' vote_session.pk %}" class="text-xs bg-brand text-white px-3 py-1.5 rounded hover:bg-brand-light transition-colors">导出结果</a>
             <a href="{% url 'voting:vote_entry' vote_session.pk %}" class="text-xs border border-gray-300 text-gray-600 px-3 py-1.5 rounded hover:border-gray-400 transition-colors">打开投票链接</a>

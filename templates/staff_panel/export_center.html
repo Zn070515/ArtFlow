@@ -33,7 +33,10 @@
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-yellow-300 {% if a.is_test_mode %}bg-yellow-100 text-yellow-700{% else %}text-yellow-600{% endif %} px-2 py-1 rounded hover:bg-yellow-100">{% if a.is_test_mode %}退出测试{% else %}测试模式{% endif %}</button>
                 </form>
-                <a href="{% url 'staff:activity_clear_test_data' a.pk %}" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50" onclick="return confirm('确认清空所有测试数据？此操作不可恢复。')">清空测试</a>
+                <form method="post" action="{% url 'staff:activity_clear_test_data' a.pk %}" onsubmit="return confirm('确认清空测试数据？此操作不可恢复。')">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">清空测试</button>
+                </form>
                 {% endif %}
                 {% if not a.is_locked %}
                 <form method="post" action="{% url 'staff:activity_lock' a.pk %}">

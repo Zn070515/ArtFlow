@@ -1,6 +1,9 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 
+from common.audit import log_action
+from common.business_rules import ensure_activity_unlocked
+from common.models import AuditLog
 from core.models import Activity
 from files.models import SubmissionFile
 from files.services import sync_singer_material_checks
@@ -15,6 +18,7 @@ def apply_view(request):
     )
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
+        ensure_activity_unlocked(activity)
         reg = SingerRegistration(
             activity=activity,
             user=request.user,
@@ -29,6 +33,7 @@ def apply_view(request):
             description=request.POST.get("description", ""),
             remark=request.POST.get("remark", ""),
             pre_status=SingerRegistration.PreStatus.SUBMITTED,
+            is_test_data=activity.is_test_mode,
         )
         reg.save()
         accompaniment = request.FILES.get("accompaniment")
@@ -40,6 +45,7 @@ def apply_view(request):
                 file_size=accompaniment.size,
                 file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                 uploaded_by=request.user,
+                is_test_data=reg.is_test_data,
             )
         performance_video = request.FILES.get("performance_video")
         if performance_video:
@@ -50,8 +56,10 @@ def apply_view(request):
                 file_size=performance_video.size,
                 file_purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
                 uploaded_by=request.user,
+                is_test_data=reg.is_test_data,
             )
         sync_singer_material_checks(reg)
+        log_action(request, AuditLog.ActionType.UPDATE_REGISTRATION, f"SingerRegistration:{reg.pk}", new_value="submitted")
         return redirect("singer_contest:my_submission")
     return render(request, "singer_contest/apply.html", {"activities": activities})
 
@@ -60,17 +68,20 @@ def apply_view(request):
 def my_submission_view(request):
     reg = SingerRegistration.objects.filter(user=request.user).last()
     if reg and request.method == "POST":
+        ensure_activity_unlocked(reg.activity)
         f = request.FILES.get("file")
         if f:
-            SubmissionFile.objects.create(
+            submission_file = SubmissionFile.objects.create(
                 singer_registration=reg,
                 file=f,
                 original_name=f.name,
                 file_size=f.size,
                 file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                 uploaded_by=request.user,
+                is_test_data=reg.is_test_data or reg.activity.is_test_mode,
             )
             sync_singer_material_checks(reg)
+            log_action(request, AuditLog.ActionType.UPLOAD_FILE, f"SubmissionFile:{submission_file.pk}", new_value=submission_file.original_name)
         return redirect("singer_contest:my_submission")
     if reg:
         sync_singer_material_checks(reg)
