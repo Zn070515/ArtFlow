@@ -8,12 +8,15 @@ ArtFlow is a Django-based activity management platform for a university student 
 
 Read `GOAL.md` for the full specification. Every change should be checked against it.
 
+**MVP Phases 1–5 complete** (2026-07-06): 20 models, 56 views, 77 routes, 43 templates, 13 Django apps.
+
 ## Tech Stack
 
-- **Backend**: Django (monolith, no microservices)
-- **Database**: PostgreSQL
-- **Frontend**: Django Templates + Tailwind CSS + Alpine.js / HTMX
-- **Export**: openpyxl (Excel), python-docx/docxtpl (Word), qrcode (QR codes)
+- **Backend**: Django 6.0 (monolith, no microservices)
+- **Database**: SQLite (dev), PostgreSQL (prod)
+- **Frontend**: Django Templates + Tailwind CSS CDN + Alpine.js / HTMX
+- **Export**: openpyxl (Excel), python-docx (Word), qrcode (QR codes, .png generation)
+- **Auth**: custom User model (`accounts.User`) extending AbstractUser with `role` field (admin/staff/participant)
 - **Deployment**: Docker Compose, Nginx or Caddy
 
 ## Python 版本与依赖管理
@@ -80,40 +83,66 @@ pip freeze > requirements.txt
 ## Core Design Principles
 
 1. **Final architecture first** — Design complete models/permissions/routes up front; implement in phases. Never write throwaway pages.
-2. **Monolith, not microservices** — One Django project, modular apps.
+2. **Monolith, not microservices** — One Django project, 13 modular apps.
 3. **No hardcoded data in templates** — All public content is DB-driven via `PublicPost` model.
 4. **Permissions must be enforced** — Guest / Participant / Staff / Admin. Never skip permission checks for speed.
-5. **Files never stored in DB** — Use Django's FileField with proper access control.
-6. **Audit logging** — All staff/admin mutations must be logged.
+5. **Files never stored in DB** — Use Django's FileField with controlled access (`common/views.py:controlled_media`).
+6. **Audit logging** — All staff/admin mutations logged via `common/audit.py:log_action()` → `AuditLog` model.
+7. **Test data isolation** — Core models have `is_test_data` flag; `activity_clear_test_data` view wipes test data while preserving config.
 
-## App Structure (planned)
+## App Structure
 
 ```
-accounts/        — Users, login, roles
-core/            — Activities, phases, base config
-public_portal/   — Homepage, showcases, announcements, results
-files/           — Uploads, material requirements, completeness checks
-singer_contest/  — Singer competition: rounds, scoring, ranking
-farewell_show/   — Graduation gala: program submissions, program list
-voting/          — Audience voting (QR code + on-site passcode)
-exports/         — Excel, Word, zip export and import
-archive/         — Event archive packages, archive index
-incidents/       — Incident/anomaly records
-staff_panel/     — Staff backend dashboard
-common/          — Shared utilities
+accounts/        — User model (custom AbstractUser), login/register/profile views, admin keyed login
+core/            — Activity model (type, phase, test mode, lock), base config
+common/          — AuditLog model, controlled_media view, business_rules guards, audit helper
+public_portal/   — Homepage, post_detail, showcases, announcements, results, PublicMedia gallery
+files/           — SubmissionFile, MaterialRequirement, MaterialCheck, StaffNote, sync services
+singer_contest/  — SingerRegistration, ContestRound, Judge, ScoreRecord, ScoreSummary, Award
+farewell_show/   — Program submission, review, sorting
+voting/          — VoteSession, VoteOption, VoteRecord; public passcode-gated voting
+exports/         — ExportTask, ArticleTemplate, GeneratedDocument
+archive/         — ArchivePackage
+incidents/       — IncidentRecord (6 event types)
+staff_panel/     — 49 staff routes, 38 views, dashboard, all management UIs
 ```
 
-## Key Models (to be designed before any views)
+## Key Models (20 total)
 
-User, Activity, ActivityPhase, PublicPost, Registration, Program, SubmissionFile, MaterialRequirement, MaterialCheck, StaffNote, ContestRound, Judge, ScoreRecord, ScoreSummary, Award, VoteSession, VoteOption, VoteRecord, QRCodeLink, ExportTask, ArticleTemplate, GeneratedDocument, IncidentRecord, AuditLog, ArchivePackage
+| Model | App | Notes |
+|-------|-----|-------|
+| `User` | accounts | Extends AbstractUser, `role` field (admin/staff/participant), `is_admin`/`is_staff_or_admin` properties |
+| `Activity` | core | Type (3), Phase (10), `is_test_mode`, `is_locked`, `locked_by` FK |
+| `PublicPost` | public_portal | 7 post types, 3 statuses, `is_pinned`, `related_activity`, `published_at` |
+| `PublicMedia` | public_portal | Photo gallery linked to posts/activities, `source_path` for import tracking |
+| `SingerRegistration` | singer_contest | 20 fields, 6 pre-statuses, 11 live-statuses, `is_test_data` |
+| `ContestRound` | singer_contest | unique(activity, round_type), scoring_mode (average/drop_high_low), `advance_count` |
+| `Judge` | singer_contest | name, `is_active` per activity |
+| `ScoreRecord` | singer_contest | unique(round, singer, judge), Decimal(5,2), `is_test_data` |
+| `ScoreSummary` | singer_contest | unique(round, singer), `average_score` Decimal(6,3), `rank`, `is_advanced`, `is_test_data` |
+| `Award` | singer_contest | name, activity+singer FK, `is_test_data` |
+| `Program` | farewell_show | 6 types, 5 statuses, `sort_order`, `is_test_data` |
+| `SubmissionFile` | files | Nullable FKs to singer_registration/program, 9 purposes, `is_public`, `is_test_data` |
+| `MaterialRequirement` | files | unique(activity, applies_to, item_name), `file_purpose`, `is_required` |
+| `MaterialCheck` | files | Nullable FKs to singer_registration/program, status (missing/uploaded/reviewed) |
+| `StaffNote` | files | Nullable FKs to singer_registration/program, content, `created_by` |
+| `VoteSession` | voting | passcode, time window, selection_type (single/multi), `max_selections`, `is_test_data` |
+| `VoteOption` | voting | unique(vote_session, singer), `sort_order` |
+| `VoteRecord` | voting | unique(vote_session, browser_session_key, vote_option), `ip_address` |
+| `AuditLog` | common | 16 action types, operator, target, old/new values, IP |
+| `IncidentRecord` | incidents | 6 event types, nullable singer/program FK, `is_test` |
+| `ExportTask` | exports | 12 export types, format (xlsx/docx), `file` |
+| `ArticleTemplate` | exports | unique `template_type` (9 types), `body` with placeholders |
+| `GeneratedDocument` | exports | template+activity FK, `file` |
+| `ArchivePackage` | archive | activity FK, `file`, `includes`, `note` |
 
-## MVP Phases
+## MVP Phases (all complete)
 
-1. **Phase 1**: Django init, user auth, roles, Activity/PublicPost models, public homepage, staff panel layout
-2. **Phase 2**: Registration (singer + farewell), file uploads, material checks, staff review, Excel export
-3. **Phase 3**: Singer contest scoring — rounds, score entry, ranking, awards, result locking
-4. **Phase 4**: Audience voting — sessions, QR codes, passcodes, live results
-5. **Phase 5**: QR center, execution packages, archive packages, Word generation, activity cloning, test mode
+1. **Phase 1** ✓ Django init, user auth, roles, Activity/PublicPost models, public homepage, staff panel layout, activity CRUD
+2. **Phase 2** ✓ Registration (singer + farewell), file uploads, material checks, staff review, Excel export, admin keyed login
+3. **Phase 3** ✓ Singer contest scoring — rounds, score entry grid, ranking, awards, result locking/unlocking, `_recalc_round()`
+4. **Phase 4** ✓ Audience voting — VoteSession/VoteOption/VoteRecord, passcode-gated public flow, browser session dedup, Excel export, vote unlock
+5. **Phase 5** ✓ QR center (.png generation), execution/archive packages (.zip), Word docx generation, Excel import (scores with validation), incidents, test mode, activity cloning, audit log viewer
 
 ## Development Commands
 
@@ -121,12 +150,21 @@ User, Activity, ActivityPhase, PublicPost, Registration, Program, SubmissionFile
 # Start dev server
 python manage.py runserver
 
+# Seed test data (creates admin/admin123 + 2 activities + 5 singers + judges + rounds + votes + templates)
+python manage.py seed_data
+
 # Database migrations
 python manage.py makemigrations
 python manage.py migrate
 
 # Create superuser
 python manage.py createsuperuser
+
+# Reset admin password
+python manage.py changepassword admin
+
+# Import public photos from directory
+python manage.py import_public_photos <path> --publish
 
 # Run tests (all)
 python manage.py test
@@ -151,6 +189,20 @@ docker-compose up -d
 docker-compose down
 docker-compose logs -f
 ```
+
+## Key Architecture Notes
+
+- **`AUTH_USER_MODEL = "accounts.User"`** — always use `get_user_model()` or `settings.AUTH_USER_MODEL`, never `auth.User`
+- **Role/auth sync** — `User.save()` sets `is_staff = True` when role is staff/admin, so `@staff_member_required` works with the custom role system
+- **Open redirect prevention** — `login_view` validates `next` param with `url_has_allowed_host_and_scheme()`
+- **CSRF logout** — `logout_view` is `@require_POST`
+- **Controlled media** — `common/views.py:controlled_media` checks file owner + is_public + staff status before serving
+- **Business rule guards** — `common/business_rules.py` has `ensure_activity_unlocked()`, `ensure_round_unlocked()`, `ensure_vote_session_unlocked()`
+- **Audit logging** — use `common/audit.py:log_action()` which auto-captures operator and IP
+- **Material sync** — `files/services.py` has `sync_singer_material_checks()` and `sync_program_material_checks()` for auto-creating check items
+- **Admin-gated** — `_require_admin(user)` raises PermissionDenied for non-admin; used in activity create/edit, round unlock, vote unlock, activity lock/unlock
+- **Test data** — models have `is_test_data` flag; `activity_clear_test_data` wipes SingerRegistration, ScoreRecord, ScoreSummary, VoteSession, VoteRecord, VoteOption, IncidentRecord while keeping Activity config
+- **URL namespaces** — `public_portal:`, `accounts:`, `singer_contest:`, `farewell_show:`, `voting:`, `staff:`
 
 ## Visual Standards
 
