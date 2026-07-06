@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -58,15 +60,24 @@ def vote_cast(request, pk):
     if request.method == "POST" and not error:
         selected = request.POST.getlist("selected_option")
         ip = request.META.get("REMOTE_ADDR", "0.0.0.0")
-        for opt_pk in selected[:max_sel]:
-            if VoteOption.objects.filter(pk=opt_pk, vote_session=vote_session).exists():
-                VoteRecord.objects.create(
-                    vote_session=vote_session,
-                    vote_option_id=opt_pk,
-                    browser_session_key=session_key,
-                    ip_address=ip,
-                )
-        return redirect("voting:vote_done", pk=pk)
+        if VoteRecord.objects.filter(
+            vote_session=vote_session,
+            ip_address=ip,
+            created_at__gte=now - timedelta(seconds=10),
+        ).exists():
+            error = "投票过于频繁，请稍后再试"
+        if not selected:
+            error = "请选择至少一个候选项"
+        if not error:
+            for opt_pk in selected[:max_sel]:
+                if VoteOption.objects.filter(pk=opt_pk, vote_session=vote_session).exists():
+                    VoteRecord.objects.create(
+                        vote_session=vote_session,
+                        vote_option_id=opt_pk,
+                        browser_session_key=session_key,
+                        ip_address=ip,
+                    )
+            return redirect("voting:vote_done", pk=pk)
 
     return render(request, "voting/vote_cast.html", {
         "vote_session": vote_session,

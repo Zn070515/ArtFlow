@@ -4,6 +4,9 @@ from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
+from common.audit import log_action
+from common.models import AuditLog
+
 from .forms import AdminLoginForm, ParticipantLoginForm, RegisterForm
 
 
@@ -31,6 +34,7 @@ def login_view(request):
         if form.is_valid():
             user = form.get_user()
             login(request, user)
+            log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}")
             if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
                 return redirect(next_url)
             return redirect("staff:dashboard" if user.is_staff_or_admin else "public_portal:home")
@@ -49,6 +53,7 @@ def admin_login_view(request):
         if form.is_valid():
             user = form.get_user()
             login(request, user)
+            log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}", note="admin_login")
             if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
                 return redirect(next_url)
             return redirect("staff:dashboard")

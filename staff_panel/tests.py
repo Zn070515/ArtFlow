@@ -1,6 +1,8 @@
 import shutil
 import tempfile
+import zipfile
 from datetime import timedelta
+from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
@@ -11,6 +13,7 @@ from accounts.models import User
 from core.models import Activity
 from farewell_show.models import Program
 from files.models import MaterialCheck, SubmissionFile
+from files.models import MaterialRequirement
 from public_portal.models import PublicPost
 from common.models import AuditLog
 from singer_contest.models import Award, ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
@@ -357,3 +360,174 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         staff_response = self.client.get(uploaded.file.url)
         self.assertEqual(staff_response.status_code, 200)
+
+    def test_packages_include_contest_and_farewell_operational_indexes(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Li Hua",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=1,
+        )
+        ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
+        ScoreSummary.objects.create(round=round_, singer=registration, average_score=91, rank=1, is_advanced=True)
+        Award.objects.create(activity=self.singer_activity, singer=registration, name="Top Singer")
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+        )
+        VoteOption.objects.create(vote_session=vote_session, singer=registration)
+        SubmissionFile.objects.create(
+            singer_registration=registration,
+            file=SimpleUploadedFile("song.mp3", b"audio"),
+            original_name="song.mp3",
+            file_size=5,
+            uploaded_by=self.participant,
+        )
+        PublicPost.objects.create(
+            title="Result",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.singer_activity,
+            published_at=timezone.now(),
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:archive_package_create", args=[self.singer_activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as zf:
+            names = set(zf.namelist())
+        self.assertIn("score_results.xlsx", names)
+        self.assertIn("vote_results.xlsx", names)
+        self.assertIn("award_list.xlsx", names)
+        self.assertIn("attachment_index.xlsx", names)
+        self.assertIn("public_content_index.xlsx", names)
+
+        Program.objects.create(
+            activity=self.farewell_activity,
+            user=self.participant,
+            name="Dance",
+            program_type=Program.ProgramType.DANCE,
+            contact_name="Li Hua",
+            contact_phone="13800000000",
+            class_name="CS1",
+            sort_order=1,
+        )
+        response = self.client.get(reverse("staff:execution_package", args=[self.farewell_activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as zf:
+            names = set(zf.namelist())
+        self.assertIn("program_list.xlsx", names)
+        self.assertIn("contact_list.xlsx", names)
+        self.assertIn("material_checklist.xlsx", names)
+
+    def test_locking_vote_session_generates_popularity_award(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Li Hua",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
+        VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=option,
+            browser_session_key="visitor-1",
+            ip_address="127.0.0.1",
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Award.objects.filter(activity=self.singer_activity, singer=registration, name="最佳人气奖").exists())
+
+    def test_vote_cast_rate_limits_same_ip_briefly(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Li Hua",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
+        first = self.client_class()
+        second = self.client_class()
+        first.post(reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}, REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(
+            first.post(reverse("voting:vote_cast", args=[vote_session.pk]), {"selected_option": [str(option.pk)]}, REMOTE_ADDR="127.0.0.1").status_code,
+            302,
+        )
+        second.post(reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}, REMOTE_ADDR="127.0.0.1")
+        response = second.post(reverse("voting:vote_cast", args=[vote_session.pk]), {"selected_option": [str(option.pk)]}, REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(VoteRecord.objects.filter(vote_session=vote_session).count(), 1)
+
+    def test_activity_clone_preserves_configuration_not_runtime_data(self):
+        MaterialRequirement.objects.create(
+            activity=self.singer_activity,
+            applies_to=MaterialRequirement.AppliesTo.SINGER,
+            item_name="Lyrics",
+            file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            scoring_mode=ContestRound.ScoringMode.DROP_HIGH_LOW,
+            advance_count=2,
+            name="Preliminary",
+        )
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Runtime Data",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+        )
+        self.client.force_login(self.admin)
+        response = self.client.post(reverse("staff:activity_clone", args=[self.singer_activity.pk]))
+        self.assertEqual(response.status_code, 302)
+        clone = Activity.objects.exclude(pk=self.singer_activity.pk).get(activity_type=Activity.Type.SINGER_CONTEST)
+        self.assertTrue(MaterialRequirement.objects.filter(activity=clone, item_name="Lyrics").exists())
+        self.assertTrue(Judge.objects.filter(activity=clone, name="Judge A").exists())
+        self.assertTrue(ContestRound.objects.filter(activity=clone, round_type=ContestRound.RoundType.PRELIMINARY).exists())
+        self.assertFalse(SingerRegistration.objects.filter(activity=clone).exists())
