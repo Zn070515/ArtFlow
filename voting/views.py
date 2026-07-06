@@ -4,6 +4,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from common.audit import client_ip
+
 from .models import VoteOption, VoteRecord, VoteSession
 
 
@@ -36,7 +38,10 @@ def vote_entry(request, pk):
 def vote_cast(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
     now = timezone.now()
-    session_key = request.session.session_key or request.session.create()
+    session_key = request.session.session_key
+    if not session_key:
+        request.session.create()
+        session_key = request.session.session_key
 
     if request.session.get("vote_passcode_ok") != str(pk):
         return redirect("voting:vote_entry", pk=pk)
@@ -59,7 +64,7 @@ def vote_cast(request, pk):
 
     if request.method == "POST" and not error:
         selected = request.POST.getlist("selected_option")
-        ip = request.META.get("REMOTE_ADDR", "0.0.0.0")
+        ip = client_ip(request) or "0.0.0.0"
         if VoteRecord.objects.filter(
             vote_session=vote_session,
             ip_address=ip,
