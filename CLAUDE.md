@@ -8,7 +8,7 @@ ArtFlow is a Django-based activity management platform for a university student 
 
 Read `GOAL.md` for the full specification. Every change should be checked against it.
 
-**MVP Phases 1–5 complete** (2026-07-06): 20 models, 56 views, 77 routes, 43 templates, 13 Django apps.
+**MVP Phases 1–5 complete** (2026-07-06): 24 models, 67 views, 67 routes, 44 templates, 13 Django apps.
 
 ## Tech Stack
 
@@ -107,7 +107,7 @@ incidents/       — IncidentRecord (6 event types)
 staff_panel/     — 49 staff routes, 38 views, dashboard, all management UIs
 ```
 
-## Key Models (20 total)
+## Key Models (24 total)
 
 | Model | App | Notes |
 |-------|-----|-------|
