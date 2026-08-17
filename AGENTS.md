@@ -38,6 +38,34 @@ Use Django `TestCase`. Add regression tests for permission, lock-state, audit, f
 ## Commit & Pull Request Guidelines
 Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `style:`, `docs:`, `test:`, `chore:`. Keep commits scoped and push after each commit.
 
+## Branch & Worktree Workflow
+
+Do not use `.worktree/`, `worktrees/`, or any other linked worktree for ArtFlow development. Work directly in the repository checkout on a short-lived branch created from a clean, up-to-date `main`:
+
+```bash
+git status --short --branch
+git switch main
+git pull --ff-only origin main
+git switch -c build/<short-name>
+```
+
+Use `feat/`, `fix/`, `docs/`, `test/`, or `build/` prefixes as appropriate. Do not start work if `main` has uncommitted changes; preserve existing user changes and ask before proceeding.
+
+After verification, commit the scoped changes on the feature branch, merge the branch into `main` with a non-fast-forward merge, and push `main`:
+
+```bash
+git status --short
+git diff --check
+git add <scoped-files>
+git commit -m "<type>: <short description>"
+git switch main
+git pull --ff-only origin main
+git merge --no-ff <branch-name>
+git push origin main
+```
+
+Keep the feature branch until the merge and push have been confirmed. Delete it only after the final Git status and remote state are verified.
+
 Before opening a PR, run:
 
 ```bash
