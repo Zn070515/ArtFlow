@@ -1,5 +1,7 @@
 import importlib
 import os
+import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -16,13 +18,13 @@ def production_environment(**overrides):
         "DEBUG": "False",
         "SECRET_KEY": "production-secret-key",
         "ADMIN_LOGIN_KEY": "production-admin-key",
-        "ALLOWED_HOSTS": "artflow.example.com",
-        "CSRF_TRUSTED_ORIGINS": "https://artflow.example.com",
+        "ALLOWED_HOSTS": "artflow.internal",
+        "CSRF_TRUSTED_ORIGINS": "https://artflow.internal",
         "DATABASE_ENGINE": "postgresql",
         "POSTGRES_DB": "artflow",
         "POSTGRES_USER": "artflow",
         "POSTGRES_PASSWORD": "production-database-password",
-        "POSTGRES_HOST": "db.example.com",
+        "POSTGRES_HOST": "db.internal",
         "POSTGRES_PORT": "5432",
     }
     environment.update(overrides)
@@ -81,6 +83,40 @@ class RuntimeTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             validate_production_environment(production_environment(DATABASE_ENGINE="sqlite"))
 
+    def test_production_rejects_template_placeholders_without_leaking_values(self):
+        from config.runtime import validate_production_environment
+
+        placeholders = {
+            "SECRET_KEY": "set-a-long-random-production-secret",
+            "ADMIN_LOGIN_KEY": "set-a-long-random-admin-login-key",
+            "ALLOWED_HOSTS": "artflow.example.com",
+            "CSRF_TRUSTED_ORIGINS": "https://artflow.example.com",
+            "POSTGRES_PASSWORD": "set-a-strong-database-password",
+            "POSTGRES_HOST": "db.example.com",
+        }
+        for name, placeholder in placeholders.items():
+            with self.subTest(name=name):
+                with self.assertRaises(ImproperlyConfigured) as error:
+                    validate_production_environment(production_environment(**{name: placeholder}))
+
+                self.assertNotIn(placeholder, str(error.exception))
+
+    def test_production_accepts_generic_non_placeholder_values(self):
+        from config.runtime import validate_production_environment
+
+        validate_production_environment(production_environment())
+
+    def test_production_accepts_hosts_that_only_end_with_example_domain_characters(self):
+        from config.runtime import validate_production_environment
+
+        validate_production_environment(
+            production_environment(
+                ALLOWED_HOSTS="notexample.com",
+                CSRF_TRUSTED_ORIGINS="https://notexample.com",
+                POSTGRES_HOST="db.notexample.com",
+            )
+        )
+
 
 class SettingsTests(SimpleTestCase):
     def reload_settings(self, environment):
@@ -93,6 +129,13 @@ class SettingsTests(SimpleTestCase):
 
     def test_development_defaults_to_sqlite(self):
         settings_module = self.reload_settings({"APP_ENV": "development"})
+
+        self.assertEqual(
+            settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
+        )
+
+    def test_test_environment_defaults_to_sqlite(self):
+        settings_module = self.reload_settings({"APP_ENV": "test"})
 
         self.assertEqual(
             settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
@@ -127,3 +170,22 @@ class SettingsTests(SimpleTestCase):
         self.assertEqual([error.id for error in errors], ["config.E001"])
         self.assertNotIn(environment["SECRET_KEY"], errors[0].msg)
         self.assertNotIn(environment["SECRET_KEY"], errors[0].hint)
+
+    def test_manage_check_reports_invalid_production_configuration_as_config_error(self):
+        environment = os.environ.copy()
+        environment.update(production_environment(DATABASE_ENGINE="sqlite"))
+
+        result = subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("config.E001", output)
+        self.assertNotIn(environment["SECRET_KEY"], output)
+        self.assertNotIn(environment["POSTGRES_PASSWORD"], output)

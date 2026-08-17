@@ -9,15 +9,12 @@ from config.runtime import (
     get_bool,
     get_csv,
     load_environment,
-    validate_production_environment,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_environment(BASE_DIR)
 APP_ENV = get_app_env()
-if APP_ENV == "production":
-    validate_production_environment(os.environ)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
 ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
@@ -90,7 +87,7 @@ if DATABASE_ENGINE == "postgresql":
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         }
     }
-elif DATABASE_ENGINE == "sqlite":
+elif DATABASE_ENGINE == "sqlite" or APP_ENV == "production":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
