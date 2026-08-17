@@ -1,9 +1,12 @@
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.conf import settings
 from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.db import DatabaseError
 from django.test import TestCase, override_settings
 
 
@@ -27,3 +30,63 @@ class DoctorCommandTests(TestCase):
         self.assertIn("MEDIA_ROOT:", diagnostics)
         self.assertNotIn(settings.SECRET_KEY, diagnostics)
         self.assertNotIn(str(settings.DATABASES["default"].get("NAME", "")), diagnostics)
+
+    def test_doctor_reports_database_failure_with_explicit_exit_code_and_safe_output(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = StringIO()
+            (root / "staticfiles").mkdir()
+            (root / "media").mkdir()
+
+            with (
+                override_settings(STATIC_ROOT=root / "staticfiles", MEDIA_ROOT=root / "media"),
+                patch(
+                    "common.management.commands.doctor.connection.ensure_connection",
+                    side_effect=DatabaseError("database-password"),
+                ),
+                patch(
+                    "common.management.commands.doctor.Command._migrations_are_current",
+                    return_value=True,
+                ),
+                self.assertRaises(CommandError) as error,
+            ):
+                call_command("doctor", stdout=output)
+
+        self.assertEqual(error.exception.returncode, 3)
+        self.assertIn("Database connection: failed", output.getvalue())
+        self.assertNotIn("database-password", output.getvalue())
+
+    def test_doctor_reports_unapplied_migrations_with_explicit_exit_code(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = StringIO()
+            (root / "staticfiles").mkdir()
+            (root / "media").mkdir()
+
+            with (
+                override_settings(STATIC_ROOT=root / "staticfiles", MEDIA_ROOT=root / "media"),
+                patch(
+                    "common.management.commands.doctor.MigrationExecutor.migration_plan",
+                    return_value=[object()],
+                ),
+                self.assertRaises(CommandError) as error,
+            ):
+                call_command("doctor", stdout=output)
+
+        self.assertEqual(error.exception.returncode, 4)
+        self.assertIn("Migration state: failed or unapplied", output.getvalue())
+
+    def test_doctor_reports_missing_runtime_directories_with_explicit_exit_code(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = StringIO()
+
+            with (
+                override_settings(STATIC_ROOT=root / "staticfiles", MEDIA_ROOT=root / "media"),
+                self.assertRaises(CommandError) as error,
+            ):
+                call_command("doctor", stdout=output)
+
+        self.assertEqual(error.exception.returncode, 5)
+        self.assertIn("STATIC_ROOT: missing", output.getvalue())
+        self.assertIn("MEDIA_ROOT: missing", output.getvalue())

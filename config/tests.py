@@ -6,7 +6,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from django.core.checks import Error
 from django.core.exceptions import ImproperlyConfigured
+from django.db import DatabaseError, connections
 from django.test import SimpleTestCase, TestCase
 
 DEVELOPMENT_SECRET_KEY = "django-insecure-dev-only-change-me"
@@ -129,6 +131,31 @@ class HealthEndpointTests(TestCase):
         response = self.client.post("/healthz/")
 
         self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertEqual(response["Allow"], "GET")
+
+    def test_healthz_returns_generic_unavailable_response_for_configuration_errors(self):
+        with patch(
+            "config.health.run_checks",
+            return_value=[Error("Configuration rejected: configuration-secret", id="config.E001")],
+        ):
+            response = self.client.get("/healthz/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertNotIn("configuration-secret", response.content.decode())
+
+    def test_healthz_returns_generic_unavailable_response_for_database_errors(self):
+        with patch.object(
+            connections["default"],
+            "ensure_connection",
+            side_effect=DatabaseError("database-secret"),
+        ):
+            response = self.client.get("/healthz/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertNotIn("database-secret", response.content.decode())
 
 
 class SettingsTests(SimpleTestCase):
@@ -237,6 +264,7 @@ class SettingsTests(SimpleTestCase):
         self.assertNotIn(environment["SECRET_KEY"], output)
         self.assertNotIn(environment["ADMIN_LOGIN_KEY"], output)
         self.assertNotIn(environment["POSTGRES_PASSWORD"], output)
+        self.assertNotIn(environment["POSTGRES_HOST"], output)
 
     def run_production_doctor(self, **overrides):
         environment = os.environ.copy()
