@@ -141,6 +141,14 @@ class SettingsTests(SimpleTestCase):
             settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
         )
 
+    def test_development_rejects_malformed_debug_value(self):
+        with self.assertRaises(ImproperlyConfigured):
+            self.reload_settings({"APP_ENV": "development", "DEBUG": "not-a-boolean"})
+
+    def test_test_environment_rejects_unknown_database_engine(self):
+        with self.assertRaises(ImproperlyConfigured):
+            self.reload_settings({"APP_ENV": "test", "DATABASE_ENGINE": "not-a-database"})
+
     def test_static_directory_exists_for_staticfiles_validation(self):
         from django.conf import settings
 
@@ -171,11 +179,11 @@ class SettingsTests(SimpleTestCase):
         self.assertNotIn(environment["SECRET_KEY"], errors[0].msg)
         self.assertNotIn(environment["SECRET_KEY"], errors[0].hint)
 
-    def test_manage_check_reports_invalid_production_configuration_as_config_error(self):
+    def run_production_check(self, **overrides):
         environment = os.environ.copy()
-        environment.update(production_environment(DATABASE_ENGINE="sqlite"))
+        environment.update(production_environment(**overrides))
 
-        result = subprocess.run(
+        return environment, subprocess.run(
             [sys.executable, "manage.py", "check"],
             cwd=Path(__file__).resolve().parent.parent,
             env=environment,
@@ -184,8 +192,24 @@ class SettingsTests(SimpleTestCase):
             text=True,
         )
 
+    def assert_production_check_reports_config_error(self, environment, result):
         output = result.stdout + result.stderr
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("config.E001", output)
         self.assertNotIn(environment["SECRET_KEY"], output)
         self.assertNotIn(environment["POSTGRES_PASSWORD"], output)
+
+    def test_manage_check_reports_invalid_production_configuration_as_config_error(self):
+        environment, result = self.run_production_check(DATABASE_ENGINE="sqlite")
+
+        self.assert_production_check_reports_config_error(environment, result)
+
+    def test_manage_check_reports_malformed_production_debug_as_config_error(self):
+        environment, result = self.run_production_check(DEBUG="not-a-boolean")
+
+        self.assert_production_check_reports_config_error(environment, result)
+
+    def test_manage_check_reports_unknown_production_database_engine_as_config_error(self):
+        environment, result = self.run_production_check(DATABASE_ENGINE="not-a-database")
+
+        self.assert_production_check_reports_config_error(environment, result)

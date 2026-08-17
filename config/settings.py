@@ -19,7 +19,13 @@ APP_ENV = get_app_env()
 SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
 ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
 
-DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
+try:
+    DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
+except ImproperlyConfigured:
+    if APP_ENV != "production":
+        raise
+    # Complete settings import so the registered production check can report config.E001.
+    DEBUG = False
 
 ALLOWED_HOSTS = get_csv(os.environ, "ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
 CSRF_TRUSTED_ORIGINS = get_csv(os.environ, "CSRF_TRUSTED_ORIGINS")
@@ -76,6 +82,10 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASE_ENGINE = os.environ.get("DATABASE_ENGINE", "sqlite").strip().lower()
+if DATABASE_ENGINE not in {"sqlite", "postgresql"} and APP_ENV == "production":
+    # Complete settings import so the registered production check can report config.E001.
+    DATABASE_ENGINE = "sqlite"
+
 if DATABASE_ENGINE == "postgresql":
     DATABASES = {
         "default": {
@@ -87,7 +97,7 @@ if DATABASE_ENGINE == "postgresql":
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
         }
     }
-elif DATABASE_ENGINE == "sqlite" or APP_ENV == "production":
+elif DATABASE_ENGINE == "sqlite":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
