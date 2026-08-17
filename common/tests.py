@@ -9,6 +9,10 @@ from django.core.management.base import CommandError
 from django.db import DatabaseError
 from django.test import TestCase, override_settings
 
+DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
+DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
+DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
+
 
 class DoctorCommandTests(TestCase):
     def test_doctor_reports_safe_current_environment_diagnostics(self):
@@ -64,7 +68,16 @@ class DoctorCommandTests(TestCase):
             (root / "media").mkdir()
 
             with (
-                override_settings(STATIC_ROOT=root / "staticfiles", MEDIA_ROOT=root / "media"),
+                override_settings(
+                    STATIC_ROOT=root / "staticfiles",
+                    MEDIA_ROOT=root / "media",
+                    SECRET_KEY=DOCTOR_SECRET_KEY_SENTINEL,
+                    ADMIN_LOGIN_KEY=DOCTOR_ADMIN_LOGIN_KEY_SENTINEL,
+                ),
+                patch.dict(
+                    "common.management.commands.doctor.connection.settings_dict",
+                    {"PASSWORD": DOCTOR_DATABASE_PASSWORD_SENTINEL},
+                ),
                 patch(
                     "common.management.commands.doctor.MigrationExecutor.migration_plan",
                     return_value=[object()],
@@ -74,7 +87,11 @@ class DoctorCommandTests(TestCase):
                 call_command("doctor", stdout=output)
 
         self.assertEqual(error.exception.returncode, 4)
-        self.assertIn("Migration state: failed or unapplied", output.getvalue())
+        diagnostics = output.getvalue()
+        self.assertIn("Migration state: failed or unapplied", diagnostics)
+        self.assertNotIn(DOCTOR_SECRET_KEY_SENTINEL, diagnostics)
+        self.assertNotIn(DOCTOR_ADMIN_LOGIN_KEY_SENTINEL, diagnostics)
+        self.assertNotIn(DOCTOR_DATABASE_PASSWORD_SENTINEL, diagnostics)
 
     def test_doctor_reports_missing_runtime_directories_with_explicit_exit_code(self):
         with TemporaryDirectory() as directory:
@@ -82,11 +99,24 @@ class DoctorCommandTests(TestCase):
             output = StringIO()
 
             with (
-                override_settings(STATIC_ROOT=root / "staticfiles", MEDIA_ROOT=root / "media"),
+                override_settings(
+                    STATIC_ROOT=root / "staticfiles",
+                    MEDIA_ROOT=root / "media",
+                    SECRET_KEY=DOCTOR_SECRET_KEY_SENTINEL,
+                    ADMIN_LOGIN_KEY=DOCTOR_ADMIN_LOGIN_KEY_SENTINEL,
+                ),
+                patch.dict(
+                    "common.management.commands.doctor.connection.settings_dict",
+                    {"PASSWORD": DOCTOR_DATABASE_PASSWORD_SENTINEL},
+                ),
                 self.assertRaises(CommandError) as error,
             ):
                 call_command("doctor", stdout=output)
 
         self.assertEqual(error.exception.returncode, 5)
-        self.assertIn("STATIC_ROOT: missing", output.getvalue())
-        self.assertIn("MEDIA_ROOT: missing", output.getvalue())
+        diagnostics = output.getvalue()
+        self.assertIn("STATIC_ROOT: missing", diagnostics)
+        self.assertIn("MEDIA_ROOT: missing", diagnostics)
+        self.assertNotIn(DOCTOR_SECRET_KEY_SENTINEL, diagnostics)
+        self.assertNotIn(DOCTOR_ADMIN_LOGIN_KEY_SENTINEL, diagnostics)
+        self.assertNotIn(DOCTOR_DATABASE_PASSWORD_SENTINEL, diagnostics)

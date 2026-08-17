@@ -258,7 +258,7 @@ class SettingsTests(SimpleTestCase):
         environment, result = self.run_production_doctor(DATABASE_ENGINE="sqlite")
 
         output = result.stdout + result.stderr
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 2)
         self.assertIn("Environment: production", output)
         self.assertIn("Configuration: failed", output)
         self.assertNotIn(environment["SECRET_KEY"], output)
