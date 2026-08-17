@@ -43,6 +43,8 @@
 
   Create a non-package Django project definition with `requires-python = ">=3.12,<3.14"`. Move the current pinned runtime dependencies into `[project.dependencies]`; add `python-dotenv` for `.env` loading. Put `pytest`, `pytest-django`, `pytest-cov`, `ruff`, `mypy`, and `django-stubs` in the `dev` extra. Put `gunicorn` in a `production` extra guarded for non-Windows container use.
 
+  Set `[tool.uv] package = false`; ArtFlow is an executable Django repository, not an installable Python package, so `uv sync` must not try to build a missing project distribution.
+
 - [ ] **Step 2: Add tool configuration**
 
   Configure Ruff for Python 3.12, line length 100, source/test roots, and explicit migration/cache/media exclusions. Configure pytest with:
@@ -54,7 +56,7 @@
   filterwarnings = ["error"]
   ```
 
-  Configure coverage to measure the ArtFlow apps while omitting migrations and generated media. Configure mypy with `django-stubs`, `strict = true` for `config`, `common`, `accounts/management`, and `public_portal/management`, and `check_untyped_defs = true` for existing business views without using global `ignore_errors`.
+  Configure coverage to measure the ArtFlow apps while omitting migrations and generated media. Configure mypy with `django-stubs`, `files = ["accounts", "archive", "common", "config", "core", "exports", "farewell_show", "files", "incidents", "public_portal", "singer_contest", "staff_panel", "voting"]`, global `check_untyped_defs = true`, and strict overrides for `config`, `common`, `accounts/management`, and `public_portal/management`. Existing untyped business views must not be forced into `disallow_untyped_defs` yet, and the configuration must not use global `ignore_errors`.
 
 - [ ] **Step 3: Generate and verify the lock/export files**
 
@@ -98,7 +100,7 @@
 - `config.runtime.load_environment(base_dir: Path) -> None` loads `.env` without overriding process environment variables.
 - `config.runtime.get_app_env() -> Literal["development", "test", "production"]` rejects unknown values.
 - `config.runtime.validate_production_environment(env: Mapping[str, str]) -> None` raises `ImproperlyConfigured` for missing or development-default production values.
-- `config.checks.register_checks()` exposes configuration checks for `manage.py check`.
+- `config.checks.production_config_check(app_configs=None, **kwargs) -> list[Error]` is registered under Django's security checks and exposes production configuration failures to `manage.py check` without printing secret values.
 
 - [ ] **Step 1: Write failing runtime tests**
 
@@ -110,7 +112,7 @@
 
 - [ ] **Step 3: Implement runtime loading and settings validation**
 
-  Load dotenv with `override=False`, parse booleans/CSV values centrally, validate `APP_ENV`, and keep `config.settings` as the only Django settings entry. Use development SQLite defaults, test SQLite defaults, and require PostgreSQL plus all production security variables when `APP_ENV=production`. Never log or include secret values in exceptions.
+  Load dotenv with `override=False`, parse booleans/CSV values centrally, validate `APP_ENV`, and keep `config.settings` as the only Django settings entry. Import the check registration module only after runtime values are loaded, without making it import settings back at module import time. Use development SQLite defaults, test SQLite defaults, and require PostgreSQL plus all production security variables when `APP_ENV=production`. Never log or include secret values in exceptions.
 
 - [ ] **Step 4: Run focused tests and Django checks**
 
@@ -192,7 +194,7 @@
 
 - [ ] **Step 3: Add the SeedRecord model and migration**
 
-  Add a unique key, `ContentType` foreign key, positive object ID, and creation timestamp. Add a uniqueness constraint for `(content_type, object_id)` and register no public route. Generate the migration with `uv run python manage.py makemigrations common` and inspect it before applying.
+  Add a unique key, `ContentType` foreign key, `PositiveBigIntegerField` object ID, and creation timestamp. Add a uniqueness constraint for `(content_type, object_id)` and register no public route. Generate the migration with `uv run python manage.py makemigrations common` and inspect it before applying.
 
 - [ ] **Step 4: Implement deterministic demo fixtures**
 
@@ -200,7 +202,7 @@
 
 - [ ] **Step 5: Implement safe reset and admin initialization**
 
-  Restrict reset to the exact registered demo activity scope and model fields carrying test flags. Do not accept arbitrary model names, object IDs, or deletion keys from command-line input. Use `getpass` for interactive password entry and environment variables for automation.
+  Restrict reset to the exact registered demo activity scope and model fields carrying test flags. Retain unmarked seed configuration, `SeedRecord` rows, formal data, and audit logs. Do not accept arbitrary model names, object IDs, or deletion keys from command-line input. Use `getpass` for interactive password entry and environment variables for automation.
 
 - [ ] **Step 6: Run focused and full tests**
 
@@ -245,11 +247,11 @@
 
 - [ ] **Step 3: Implement the image and compose stack**
 
-  Use a slim Python 3.12 image, install production dependencies plus `postgresql-client`, create a non-root user, copy only application files, and run gunicorn after migrations and `collectstatic --noinput`. Configure PostgreSQL with a healthcheck and internal network; bind any host port to `127.0.0.1` only.
+  Use a slim Python 3.12 image, install production dependencies plus `postgresql-client`, create a non-root user, copy only application files, and run gunicorn after migrations and `collectstatic --noinput`. Configure PostgreSQL with a healthcheck and internal network; bind any host port to `127.0.0.1` only. Set Compose web environment explicitly to `DATABASE_ENGINE=postgresql`, `POSTGRES_HOST=db`, and the database name/user/password variables so a host `.env` cannot switch the container back to SQLite or a host-local database.
 
 - [ ] **Step 4: Implement bootstrap, verify, wait, and export scripts**
 
-  Make scripts fail on the first failing command, avoid printing secrets, and return the failing subprocess exit code. `bootstrap.ps1` creates/updates `.env` only from `.env.example`, uses `uv sync --locked`, and calls `doctor`; `verify.ps1` runs all local gates; the wait script uses `pg_isready` with bounded retries.
+  Make scripts fail on the first failing command, avoid printing secrets, and return the failing subprocess exit code. `bootstrap.ps1` creates/updates `.env` only from `.env.example`, uses `uv sync --locked`, and calls `doctor`; `verify.ps1` runs all local gates and saves/restores temporary `APP_ENV` and production-check variables in a `try/finally` block; the wait script uses `pg_isready` with bounded retries.
 
 - [ ] **Step 5: Run Docker smoke**
 
@@ -304,7 +306,7 @@
 
 - [ ] **Step 4: Implement security and dependency workflows**
 
-  Export production dependencies from the frozen lock to a temporary file, run pip-audit, scan Python with CodeQL, scan full history with gitleaks, and configure Dependabot for pip/uv, GitHub Actions, and Docker. Do not put credentials in workflow YAML.
+  Export production dependencies from the frozen lock to a temporary file, run pip-audit against that export, compare the export with the tracked `requirements.txt`, scan Python with CodeQL, scan full history with gitleaks, and configure Dependabot for pip/uv, GitHub Actions, and Docker. Do not put credentials in workflow YAML.
 
 - [ ] **Step 5: Validate workflows remotely**
 
@@ -336,7 +338,7 @@
 
 - [ ] **Step 1: Write documentation consistency checks**
 
-  Implement `scripts/check_docs.ps1` to fail if `seed_data`, `docker-compose up -d` as the only documented startup, hardcoded `admin/admin123`, or stale model/view/route counts remain in user-facing docs. The script must also resolve every relative Markdown link under `README.md`, `CLAUDE.md`, `AGENTS.md`, and `docs/` against the repository root.
+  Implement `scripts/check_docs.ps1` to fail if `seed_data`, `docker-compose up -d` as the only documented startup, hardcoded `admin/admin123`, or stale model/view/route counts remain in user-facing docs. The checker must skip `docs/superpowers/` design/plan artifacts so its own contract examples do not trigger false positives, and must resolve every relative Markdown link under `README.md`, `CLAUDE.md`, `AGENTS.md`, and user-facing `docs/` files against the repository root.
 
 - [ ] **Step 2: Update documentation**
 
@@ -366,7 +368,7 @@
 
 - [ ] **Step 1: Run the full local gate**
 
-  Run `scripts\verify.ps1` from PowerShell. It must execute uv lock verification, Ruff check/format, mypy, `manage.py check`, production `check --deploy --fail-level WARNING` with `APP_ENV=production`, migration check, pytest with coverage, and documentation/workflow checks.
+  Run `scripts\verify.ps1` from PowerShell. It must execute uv lock verification, Ruff check/format, mypy, `manage.py check`, production `check --deploy --fail-level WARNING` after setting `$env:APP_ENV = "production"`, migration check, pytest with coverage, and documentation/workflow checks; it must restore the caller's environment before exit.
 
 - [ ] **Step 2: Run the full PostgreSQL gate**
 

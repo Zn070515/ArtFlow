@@ -23,6 +23,7 @@
 ## 参考 offipy 后采用的原则
 
 - 使用 `uv` 管理虚拟环境和锁定依赖，所有 Python 命令优先使用 `uv run`。
+- ArtFlow 是可执行的 Django 仓库而不是待安装的 Python 包；`pyproject.toml` 必须显式设置 `[tool.uv] package = false`，避免 `uv sync` 尝试构建不存在的项目包。
 - `pyproject.toml` 统一承载项目元数据、依赖组、pytest、Ruff、mypy 和 coverage 配置。
 - CI 使用固定版本的 GitHub Actions，并增加 workflow lint，防止 YAML 错误造成无日志失败。
 - 质量门禁拆成纯模块、数据库集成、安全和文档四类，避免把所有检查塞进一个不可诊断的 job。
@@ -93,7 +94,7 @@ ArtFlow/
 - 支持 `is_test_data`/`is_test` 的运行数据全部显式标记为测试数据，覆盖公开门户、歌手比赛、毕晚、评分、投票、导出模板和审计场景。
 - 没有测试标记字段的活动配置、公开文章和模板使用 `common.SeedRecord` 持久化固定 seed key、模型类型和对象 ID 做幂等更新；它们不由 `--reset` 删除，只能由显式人工删除流程处理。
 - 默认不删除任何数据。
-- `--reset` 只能删除由该命令创建且带有 `is_test_data=True` 或 `is_test=True` 的运行数据；没有测试标记的 seed 配置只更新不删除，正式数据必须保持不变。
+- `--reset` 只能删除由该命令创建且带有 `is_test_data=True` 或 `is_test=True` 的运行数据；没有测试标记的 seed 配置及其 `SeedRecord` 只更新不删除，正式数据必须保持不变。
 - 管理员密码只能从 `DEV_ADMIN_PASSWORD` 或隐藏式交互输入读取，不接受命令行明文密码，不提供仓库内默认密码。
 - 现有 `seed_dev_admin` 保留为最小管理员初始化命令，文档不再引用不存在的 `seed_data`。
 
@@ -119,7 +120,7 @@ uv run pytest -q
 
 `scripts/verify.ps1` 另外以 `APP_ENV=production` 语义执行 `manage.py check --deploy --fail-level WARNING`，使用临时的非真实密钥和主机配置，不把生产默认值写入仓库。pytest 通过 `pytest-django` 收集现有 `tests.py`，显式设置 `DJANGO_SETTINGS_MODULE=config.settings` 和 `python_files = ["tests.py", "test_*.py", "*_tests.py"]`，启用严格 marker 和 warnings-as-errors；初始覆盖率门槛以基线实测值为准，并设为只能上调的门槛。Ruff 先覆盖项目源代码、配置、脚本和测试，排除生成迁移文件中的机械格式噪音；排除项必须写入配置并说明原因。
 
-mypy 采用渐进式强类型门禁：`pyproject.toml` 的 `files` 只包含基础设施模块（`config`、`common`、`accounts/management`、`public_portal/management`）并使用 strict；既有未类型化业务视图先启用 `check_untyped_defs`，不得借机大规模改写业务。每个被修改的模块都必须逐步移入 strict 范围，配置不能通过全局 `ignore_errors` 逃避检查。
+mypy 采用渐进式强类型门禁：`pyproject.toml` 的 `files` 显式覆盖 `accounts`、`archive`、`common`、`config`、`core`、`exports`、`farewell_show`、`files`、`incidents`、`public_portal`、`singer_contest`、`staff_panel` 和 `voting`，默认启用 `check_untyped_defs`；`config`、`common`、`accounts/management`、`public_portal/management` 使用 strict。既有未类型化业务视图暂不强制 `disallow_untyped_defs`，不得借机大规模改写业务。每个被修改的模块都必须逐步移入 strict 范围，配置不能通过全局 `ignore_errors` 逃避检查。
 
 ## Docker 与集成验证
 
@@ -127,6 +128,7 @@ mypy 采用渐进式强类型门禁：`pyproject.toml` 的 `files` 只包含基�
 
 - `db`：PostgreSQL，带健康检查和命名数据卷。
 - `web`：ArtFlow 镜像，等待数据库就绪后执行迁移和 `collectstatic --noinput`，再以非 root 用户启动 gunicorn；Dockerfile 安装 `postgresql-client`，供 `pg_isready` 等待脚本使用。
+- Compose 的 `web` 必须显式覆盖 `DATABASE_ENGINE=postgresql`、`POSTGRES_HOST=db` 及数据库名/用户/密码等连接变量，不能让宿主机 `.env` 的 SQLite 或本机主机名改变容器数据库契约。
 - `media`、`static`：独立命名卷；宿主机不把真实上传文件写入 Git 工作区。
 - 健康检查调用 `/healthz/`，容器异常时返回非零状态。
 - PostgreSQL 默认只加入 Compose 内部网络；如需宿主机连接，端口只能绑定到 `127.0.0.1`，不得默认暴露到所有网卡。
