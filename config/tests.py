@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.core.exceptions import ImproperlyConfigured
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 DEVELOPMENT_SECRET_KEY = "django-insecure-dev-only-change-me"
 
@@ -118,6 +118,19 @@ class RuntimeTests(SimpleTestCase):
         )
 
 
+class HealthEndpointTests(TestCase):
+    def test_healthz_returns_only_a_generic_success_response_to_anonymous_get(self):
+        response = self.client.get("/healthz/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_healthz_rejects_non_get_requests(self):
+        response = self.client.post("/healthz/")
+
+        self.assertEqual(response.status_code, 405)
+
+
 class SettingsTests(SimpleTestCase):
     def reload_settings(self, environment):
         with (
@@ -213,3 +226,27 @@ class SettingsTests(SimpleTestCase):
         environment, result = self.run_production_check(DATABASE_ENGINE="not-a-database")
 
         self.assert_production_check_reports_config_error(environment, result)
+
+    def test_doctor_reports_invalid_production_configuration_without_secret_values(self):
+        environment, result = self.run_production_doctor(DATABASE_ENGINE="sqlite")
+
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Environment: production", output)
+        self.assertIn("Configuration: failed", output)
+        self.assertNotIn(environment["SECRET_KEY"], output)
+        self.assertNotIn(environment["ADMIN_LOGIN_KEY"], output)
+        self.assertNotIn(environment["POSTGRES_PASSWORD"], output)
+
+    def run_production_doctor(self, **overrides):
+        environment = os.environ.copy()
+        environment.update(production_environment(**overrides))
+
+        return environment, subprocess.run(
+            [sys.executable, "manage.py", "doctor"],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
