@@ -82,7 +82,7 @@ ArtFlow/
 
 增加 `/healthz/`：检查 Django 配置和数据库连接，成功返回 200，失败返回非 200；不暴露业务数据、不要求登录。
 
-增加 `APP_ENV` 语义校验：`development`、`test`、`production` 是唯一允许值。生产环境缺少必需配置或仍使用开发默认值时，`django.setup()`/`doctor --environment production` 必须失败；`check --deploy --fail-level WARNING` 由验证脚本在临时生产变量下执行。
+增加 `APP_ENV` 语义校验：`development`、`test`、`production` 是唯一允许值。生产环境缺少必需配置或仍使用开发默认值时，`django.setup()`/`doctor` 必须失败；验证脚本通过进程环境变量 `APP_ENV=production` 选择生产语义，再执行 `check --deploy --fail-level WARNING`。`doctor` 只读取并报告已加载的环境，不通过命令参数切换 Django settings。
 
 ## 数据初始化
 
