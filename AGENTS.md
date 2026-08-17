@@ -16,7 +16,7 @@ ArtFlow is a Django monolith for student arts department activity operations. Co
 Templates are under `templates/`. Tests are app-level `tests.py` files. Local media under `media/` must not be committed.
 
 ## Build, Test, and Development Commands
-Prefix shell commands with `rtk` in agent workflows.
+Prefix shell commands with `rtk` in agent workflows when `rtk` is installed. If the command is unavailable on the current machine, run the command directly and report that fallback; do not block repository work on an optional wrapper.
 
 ```bash
 python manage.py migrate
@@ -36,7 +36,7 @@ Use Python 4-space indentation and Django conventions: models as `PascalCase`, f
 Use Django `TestCase`. Add regression tests for permission, lock-state, audit, file-access, export, and destructive-data paths. Prefer tests in the app that owns the behavior; cross-flow staff/admin tests can live in `staff_panel/tests.py`. Name tests by behavior, for example `test_locked_activity_blocks_staff_score_entry`.
 
 ## Commit & Pull Request Guidelines
-Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `style:`, `docs:`, `test:`, `chore:`. Keep commits scoped and push after each commit.
+Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `style:`, `docs:`, `test:`, `chore:`. Keep commits scoped and push feature-branch commits after verification; push `main` only after the verified non-fast-forward merge.
 
 ## Branch & Worktree Workflow
 
