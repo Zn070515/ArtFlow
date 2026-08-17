@@ -52,7 +52,8 @@ ArtFlow/
 │   ├── verify.ps1              # 本地完整门禁
 │   ├── docker-entrypoint.sh    # Linux 容器迁移与启动
 │   ├── wait-for-postgres.sh    # 容器数据库就绪等待
-│   └── export-requirements.ps1 # 从 uv lock 生成兼容 requirements.txt
+│   ├── export-requirements.ps1 # 从 uv lock 生成兼容 requirements.txt
+│   └── check_docs.ps1          # 文档命令、链接和过时统计检查
 ├── docs/
 │   ├── development-baseline.md # 开发、验证、数据库和故障排查手册
 │   └── superpowers/specs/      # 设计规格
