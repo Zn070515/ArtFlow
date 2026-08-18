@@ -45,7 +45,8 @@ def valid_workflow() -> str:
                 run: |
                   docker compose ps --status running --services
                   web_container="$(docker compose ps -q web)"
-                  health="$(docker inspect "$web_container" --format '{{{{.State.Health.Status}}}}')"
+                  health_format='{{{{.State.Health.Status}}}}'
+                  health="$(docker inspect "$web_container" --format "$health_format")"
                   test "$health" = healthy
               - name: Apply migrations in web
                 run: docker compose exec -T web python manage.py migrate --noinput
@@ -54,7 +55,9 @@ def valid_workflow() -> str:
               - name: Check health endpoint in web
                 run: >-
                   docker compose exec -T web python -c
-                  "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3);
+                  "from urllib.request import urlopen;
+                  url = 'http://127.0.0.1:8000/healthz/';
+                  response = urlopen(url, timeout=3);
                   raise SystemExit(0 if response.status == 200 else response.status)"
               - name: Seed demo data twice in web
                 run: |
