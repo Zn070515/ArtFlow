@@ -130,7 +130,9 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
         "docker compose ps --status running" not in compose_commands
         or "State.Health.Status" not in compose_commands
     ):
-        issues.append(f"{workflow_path.name}: Compose smoke must verify the running container health")
+        issues.append(
+            f"{workflow_path.name}: Compose smoke must verify the running container health"
+        )
     if (
         "docker compose exec -T web python manage.py migrate --noinput" not in compose_commands
         or "docker compose exec -T web python manage.py doctor" not in compose_commands
@@ -139,20 +141,23 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
         or compose_commands.count("docker compose exec -T web python manage.py seed_demo_data") < 2
     ):
         issues.append(
-            f"{workflow_path.name}: Compose smoke must run migrate, doctor, health, and seed twice in web"
+            f"{workflow_path.name}: Compose smoke must run migrate, doctor, health, and "
+            "seed twice in web"
         )
 
     cleanup_steps = [
         step
         for step in compose_steps
-        if "always()" in str(step.get("if", "")) and "docker compose down" in str(step.get("run", ""))
+        if "always()" in str(step.get("if", ""))
+        and "docker compose down" in str(step.get("run", ""))
     ]
     if not cleanup_steps or any(
         "--volumes" in str(step.get("run", "")) or " -v" in str(step.get("run", ""))
         for step in cleanup_steps
     ):
         issues.append(
-            f"{workflow_path.name}: Compose smoke must clean up with docker compose down in an always step"
+            f"{workflow_path.name}: Compose smoke must clean up with docker compose down "
+            "in an always step"
         )
     return issues
 
