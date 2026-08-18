@@ -24,13 +24,24 @@ class PublicPhotoImportTests(TestCase):
 
     def tearDown(self):
         self.override.disable()
-        for link_path in self.created_links:
-            try:
-                link_path.rmdir()
-            except FileNotFoundError:
-                continue
+        self.remove_created_links()
         shutil.rmtree(self.media_root, ignore_errors=True)
         shutil.rmtree(self.outside_source_root, ignore_errors=True)
+
+    def remove_created_links(self):
+        for link_path, link_type in self.created_links:
+            if link_type == "symlink":
+                try:
+                    link_path.unlink()
+                except FileNotFoundError:
+                    continue
+            elif link_type == "junction" and os.name == "nt" and link_path.exists():
+                subprocess.run(
+                    ["cmd", "/d", "/c", "rmdir", str(link_path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
 
     def write_jpeg(self, image_path):
         image_path.write_bytes(
@@ -80,12 +91,13 @@ class PublicPhotoImportTests(TestCase):
             os.symlink(external_album, linked_album, target_is_directory=True)
         except OSError as error:
             self.skipTest(f"Directory symlinks are unavailable: {error}")
-        self.created_links.append(linked_album)
+        self.created_links.append((linked_album, "symlink"))
 
         call_command("import_public_photos", str(self.source_root))
 
         self.assertFalse(PublicPost.objects.filter(title="linked-album").exists())
         self.assertFalse(PublicMedia.objects.exists())
+        self.remove_created_links()
         self.assertTrue((external_album / "external.jpg").exists())
 
     def test_import_public_photos_skips_windows_junction_outside_source_batch(self):
@@ -104,10 +116,11 @@ class PublicPhotoImportTests(TestCase):
         )
         if junction.returncode != 0:
             self.skipTest(f"Unable to create Windows junction: {junction.stderr}")
-        self.created_links.append(linked_album)
+        self.created_links.append((linked_album, "junction"))
 
         call_command("import_public_photos", str(self.source_root))
 
         self.assertFalse(PublicPost.objects.filter(title="linked-album").exists())
         self.assertFalse(PublicMedia.objects.exists())
+        self.remove_created_links()
         self.assertTrue((external_album / "external.jpg").exists())
