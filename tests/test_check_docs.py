@@ -38,6 +38,22 @@ def run_checker(repository_root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def remove_link_without_following(path: Path) -> None:
+    if path.is_symlink():
+        path.unlink()
+        return
+
+    if path.is_junction():
+        result = subprocess.run(
+            ["cmd", "/c", "rmdir", str(path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise OSError(f"could not remove junction {path}: {result.stderr}")
+
+
 def test_checker_resolves_links_from_the_source_document_directory(tmp_path: Path):
     repository_root = create_documentation_repository(tmp_path)
     docs = repository_root / "docs"
@@ -117,6 +133,23 @@ def test_checker_does_not_mistake_a_windows_drive_path_for_a_uri(tmp_path: Path)
     assert "escapes the repository root" in result.stderr
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive paths require Windows")
+def test_checker_accepts_a_windows_drive_path_inside_the_repository(tmp_path: Path):
+    repository_root = create_documentation_repository(tmp_path)
+    inside_document = repository_root / "docs" / "inside.md"
+    inside_document.parent.mkdir()
+    inside_document.write_text("inside\n", encoding="utf-8")
+    windows_path = str(inside_document).replace("/", "\\")
+    (repository_root / "README.md").write_text(
+        f"[Inside]({windows_path})\n",
+        encoding="utf-8",
+    )
+
+    result = run_checker(repository_root)
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_checker_rejects_a_repository_symlink_to_an_external_target(tmp_path: Path):
     repository_root = create_documentation_repository(tmp_path)
     docs = repository_root / "docs"
@@ -157,6 +190,7 @@ def test_checker_rejects_a_repository_symlink_to_an_external_target(tmp_path: Pa
         assert "escapes the repository root" in result.stderr
     finally:
         if symlink.exists() or symlink.is_symlink():
-            symlink.rmdir()
+            remove_link_without_following(symlink)
+        assert outside_target.is_dir()
         (outside_target / "target.md").unlink(missing_ok=True)
         outside_target.rmdir()

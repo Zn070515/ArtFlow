@@ -96,6 +96,15 @@ function Test-IsExternalUri {
     return $Target -match '^[A-Za-z][A-Za-z0-9+.-]*:'
 }
 
+function Test-IsWindowsDrivePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    return $Target -match '^[A-Za-z]:[\\/]'
+}
+
 $documents = Get-UserFacingDocuments
 $missingLinks = @()
 $escapingLinks = @()
@@ -115,8 +124,19 @@ foreach ($document in $documents) {
         }
 
         $targetPath = (($target -split '#', 2)[0] -split '\?', 2)[0]
-        $documentDirectory = Split-Path -Parent $document.FullName
-        $resolvedPath = [IO.Path]::GetFullPath((Join-Path $documentDirectory $targetPath))
+        $isWindowsDrivePath = Test-IsWindowsDrivePath -Target $targetPath
+        if ($isWindowsDrivePath -and -not $IsWindows) {
+            $escapingLinks += "$($document.FullName): $target"
+            continue
+        }
+
+        if ($isWindowsDrivePath) {
+            $resolvedPath = [IO.Path]::GetFullPath($targetPath)
+        }
+        else {
+            $documentDirectory = Split-Path -Parent $document.FullName
+            $resolvedPath = [IO.Path]::GetFullPath((Join-Path $documentDirectory $targetPath))
+        }
         $canonicalResolvedPath = Resolve-CanonicalFilesystemPath -Path $resolvedPath
         if (-not (Test-IsWithinRepositoryRoot -Path $canonicalResolvedPath)) {
             $escapingLinks += "$($document.FullName): $target"

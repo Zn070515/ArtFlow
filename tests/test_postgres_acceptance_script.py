@@ -78,7 +78,9 @@ def create_fake_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         docker_path.write_text(
             "#!/bin/sh\n"
             'printf \'%s|%s\\n\' "$PWD" "$*" >> "$FAKE_DOCKER_LOG"\n'
-            'case "$*" in *"$FAKE_DOCKER_FAIL_TEXT"*) exit 23;; esac\n'
+            'if [ -n "$FAKE_DOCKER_FAIL_TEXT" ]; then\n'
+            '  case "$*" in *"$FAKE_DOCKER_FAIL_TEXT"*) exit 23;; esac\n'
+            "fi\n"
             "exit 0\n",
             encoding="utf-8",
         )
