@@ -1,7 +1,6 @@
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import AuthenticationForm
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.utils.crypto import constant_time_compare
 
 from .models import User

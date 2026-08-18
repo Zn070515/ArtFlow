@@ -12,35 +12,47 @@ def home(request):
     registration_entries = posts.filter(post_type=PublicPost.PostType.REGISTRATION_ENTRY)[:3]
     voting_entries = posts.filter(post_type=PublicPost.PostType.VOTING_ENTRY)[:3]
     published_media = PublicMedia.objects.filter(is_published=True).order_by("sort_order", "pk")
-    photo_posts = posts.filter(
-        post_type=PublicPost.PostType.SHOWCASE,
-        media_items__is_published=True,
-    ).prefetch_related(
-        Prefetch("media_items", queryset=published_media, to_attr="published_media")
-    ).distinct()[:6]
+    photo_posts = (
+        posts.filter(
+            post_type=PublicPost.PostType.SHOWCASE,
+            media_items__is_published=True,
+        )
+        .prefetch_related(
+            Prefetch("media_items", queryset=published_media, to_attr="published_media")
+        )
+        .distinct()[:6]
+    )
     activity_photos = PublicMedia.objects.filter(
         is_published=True,
         post__status=PublicPost.Status.PUBLISHED,
     ).select_related("post")[:12]
 
-    return render(request, "public_portal/home.html", {
-        "announcements": announcements,
-        "showcases": showcases,
-        "results": results,
-        "registration_entries": registration_entries,
-        "voting_entries": voting_entries,
-        "activity_photos": activity_photos,
-        "photo_posts": photo_posts,
-    })
+    return render(
+        request,
+        "public_portal/home.html",
+        {
+            "announcements": announcements,
+            "showcases": showcases,
+            "results": results,
+            "registration_entries": registration_entries,
+            "voting_entries": voting_entries,
+            "activity_photos": activity_photos,
+            "photo_posts": photo_posts,
+        },
+    )
 
 
 def post_detail(request, pk):
     post = get_object_or_404(PublicPost, pk=pk, status=PublicPost.Status.PUBLISHED)
     media_items = post.media_items.filter(is_published=True)
-    return render(request, "public_portal/post_detail.html", {
-        "post": post,
-        "media_items": media_items,
-    })
+    return render(
+        request,
+        "public_portal/post_detail.html",
+        {
+            "post": post,
+            "media_items": media_items,
+        },
+    )
 
 
 def showcase_list(request):

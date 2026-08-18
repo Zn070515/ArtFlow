@@ -1,12 +1,12 @@
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import get_object_or_404, redirect, render
-
 from common.audit import log_action
 from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from core.models import Activity
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
 from files.services import sync_program_material_checks
+
 from .models import Program
 
 
@@ -55,7 +55,12 @@ def apply_view(request):
                     is_test_data=prog.is_test_data,
                 )
         sync_program_material_checks(prog)
-        log_action(request, AuditLog.ActionType.UPDATE_REGISTRATION, f"Program:{prog.pk}", new_value="submitted")
+        log_action(
+            request,
+            AuditLog.ActionType.UPDATE_REGISTRATION,
+            f"Program:{prog.pk}",
+            new_value="submitted",
+        )
         return redirect("farewell_show:my_program")
     return render(request, "farewell_show/apply.html", {"activities": activities})
 
@@ -77,13 +82,22 @@ def my_program_view(request):
                 is_test_data=prog.is_test_data or prog.activity.is_test_mode,
             )
             sync_program_material_checks(prog)
-            log_action(request, AuditLog.ActionType.UPLOAD_FILE, f"SubmissionFile:{submission_file.pk}", new_value=submission_file.original_name)
+            log_action(
+                request,
+                AuditLog.ActionType.UPLOAD_FILE,
+                f"SubmissionFile:{submission_file.pk}",
+                new_value=submission_file.original_name,
+            )
         return redirect("farewell_show:my_program")
     if prog:
         sync_program_material_checks(prog)
-    return render(request, "farewell_show/my_program.html", {
-        "prog": prog,
-        "files": prog.files.all() if prog else [],
-        "checks": prog.material_checks.all() if prog else [],
-        "file_purposes": SubmissionFile.Purpose.choices,
-    })
+    return render(
+        request,
+        "farewell_show/my_program.html",
+        {
+            "prog": prog,
+            "files": prog.files.all() if prog else [],
+            "checks": prog.material_checks.all() if prog else [],
+            "file_purposes": SubmissionFile.Purpose.choices,
+        },
+    )

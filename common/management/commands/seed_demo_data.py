@@ -5,7 +5,7 @@ from accounts.models import User
 from core.models import Activity
 from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand, CommandError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models.deletion import Collector, ProtectedError, RestrictedError
 from django.utils import timezone
 from exports.models import ArticleTemplate
@@ -493,7 +493,7 @@ class Command(BaseCommand):
         return True
 
     def _reset_candidates(self, activity_ids):
-        candidates = []
+        candidates: list[models.Model] = []
         for model, activity_lookup in RESET_RUNTIME_ROOTS:
             flag_field = TEST_DATA_FLAG_FIELDS[model]
             filters = {
@@ -566,14 +566,11 @@ class Command(BaseCommand):
 
         content_type = ContentType.objects.get_for_model(model)
         object_ids = {object_.pk for object_ in objects}
-        return (
-            SeedRecord.objects.filter(
-                key__in=DEMO_SEED_KEYS,
-                content_type=content_type,
-                object_id__in=object_ids,
-            ).count()
-            == len(object_ids)
-        )
+        return SeedRecord.objects.filter(
+            key__in=DEMO_SEED_KEYS,
+            content_type=content_type,
+            object_id__in=object_ids,
+        ).count() == len(object_ids)
 
     def _demo_activity_ids(self):
         activity_type = ContentType.objects.get_for_model(Activity)

@@ -1,29 +1,40 @@
 import io
 import zipfile
 
+from archive.models import ArchivePackage
+from common.audit import log_action
+from common.business_rules import (
+    ensure_activity_unlocked,
+    ensure_round_unlocked,
+    ensure_vote_session_unlocked,
+)
+from common.models import AuditLog
+from core.models import Activity
+from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied
 from django.core.files.base import ContentFile
-from django.contrib.admin.views.decorators import staff_member_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment
-
-from archive.models import ArchivePackage
-from common.audit import log_action
-from common.business_rules import ensure_activity_unlocked, ensure_round_unlocked, ensure_vote_session_unlocked
-from common.models import AuditLog
-from core.models import Activity
-from exports.models import ArticleTemplate, ExportTask, GeneratedDocument
+from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 from files.services import sync_program_material_checks, sync_singer_material_checks
 from incidents.models import IncidentRecord
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
-from singer_contest.models import Award, ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
+from singer_contest.models import (
+    Award,
+    ContestRound,
+    Judge,
+    ScoreRecord,
+    ScoreSummary,
+    SingerRegistration,
+)
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 
@@ -34,6 +45,13 @@ def _choices(enum_class):
 def _require_admin(user):
     if not user.is_admin:
         raise PermissionDenied("Only admins can manage this resource.")
+
+
+def _active_worksheet(workbook):
+    worksheet = workbook.active
+    if not isinstance(worksheet, Worksheet):
+        raise ValueError("The active workbook sheet must be a worksheet.")
+    return worksheet
 
 
 def _get_activity_form_data(request):
@@ -94,12 +112,16 @@ def activity_create(request):
     if request.method == "POST":
         data, errors = _get_activity_form_data(request)
         if errors:
-            return render(request, "staff_panel/activity_form.html", {
-                "error": errors[0],
-                "activity_types": _choices(Activity.Type),
-                "phases": _choices(Activity.Phase),
-                "data": data,
-            })
+            return render(
+                request,
+                "staff_panel/activity_form.html",
+                {
+                    "error": errors[0],
+                    "activity_types": _choices(Activity.Type),
+                    "phases": _choices(Activity.Phase),
+                    "data": data,
+                },
+            )
         activity = Activity.objects.create(**data)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
@@ -110,10 +132,14 @@ def activity_create(request):
             target=f"创建活动: {activity.title}",
         )
         return redirect("staff:activity_list")
-    return render(request, "staff_panel/activity_form.html", {
-        "activity_types": _choices(Activity.Type),
-        "phases": _choices(Activity.Phase),
-    })
+    return render(
+        request,
+        "staff_panel/activity_form.html",
+        {
+            "activity_types": _choices(Activity.Type),
+            "phases": _choices(Activity.Phase),
+        },
+    )
 
 
 @staff_member_required
@@ -123,13 +149,17 @@ def activity_edit(request, pk):
     if request.method == "POST":
         data, errors = _get_activity_form_data(request)
         if errors:
-            return render(request, "staff_panel/activity_form.html", {
-                "error": errors[0],
-                "activity": activity,
-                "activity_types": _choices(Activity.Type),
-                "phases": _choices(Activity.Phase),
-                "data": data,
-            })
+            return render(
+                request,
+                "staff_panel/activity_form.html",
+                {
+                    "error": errors[0],
+                    "activity": activity,
+                    "activity_types": _choices(Activity.Type),
+                    "phases": _choices(Activity.Phase),
+                    "data": data,
+                },
+            )
         for key, value in data.items():
             setattr(activity, key, value)
         if request.FILES.get("cover_image"):
@@ -141,11 +171,15 @@ def activity_edit(request, pk):
             target=f"更新活动: {activity.title}",
         )
         return redirect("staff:activity_list")
-    return render(request, "staff_panel/activity_form.html", {
-        "activity": activity,
-        "activity_types": _choices(Activity.Type),
-        "phases": _choices(Activity.Phase),
-    })
+    return render(
+        request,
+        "staff_panel/activity_form.html",
+        {
+            "activity": activity,
+            "activity_types": _choices(Activity.Type),
+            "phases": _choices(Activity.Phase),
+        },
+    )
 
 
 @staff_member_required
@@ -159,12 +193,16 @@ def post_create(request):
     if request.method == "POST":
         data, errors = _get_post_form_data(request)
         if errors:
-            return render(request, "staff_panel/post_form.html", {
-                "error": errors[0],
-                "post_types": _choices(PublicPost.PostType),
-                "statuses": _choices(PublicPost.Status),
-                "activities": Activity.objects.all(),
-            })
+            return render(
+                request,
+                "staff_panel/post_form.html",
+                {
+                    "error": errors[0],
+                    "post_types": _choices(PublicPost.PostType),
+                    "statuses": _choices(PublicPost.Status),
+                    "activities": Activity.objects.all(),
+                },
+            )
         related_activity = None
         if data["related_activity_id"]:
             related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
@@ -193,11 +231,15 @@ def post_create(request):
             new_value=f"status={post.status}",
         )
         return redirect("staff:post_list")
-    return render(request, "staff_panel/post_form.html", {
-        "post_types": _choices(PublicPost.PostType),
-        "statuses": _choices(PublicPost.Status),
-        "activities": Activity.objects.all(),
-    })
+    return render(
+        request,
+        "staff_panel/post_form.html",
+        {
+            "post_types": _choices(PublicPost.PostType),
+            "statuses": _choices(PublicPost.Status),
+            "activities": Activity.objects.all(),
+        },
+    )
 
 
 @staff_member_required
@@ -206,13 +248,17 @@ def post_edit(request, pk):
     if request.method == "POST":
         data, errors = _get_post_form_data(request)
         if errors:
-            return render(request, "staff_panel/post_form.html", {
-                "error": errors[0],
-                "post": post,
-                "post_types": _choices(PublicPost.PostType),
-                "statuses": _choices(PublicPost.Status),
-                "activities": Activity.objects.all(),
-            })
+            return render(
+                request,
+                "staff_panel/post_form.html",
+                {
+                    "error": errors[0],
+                    "post": post,
+                    "post_types": _choices(PublicPost.PostType),
+                    "statuses": _choices(PublicPost.Status),
+                    "activities": Activity.objects.all(),
+                },
+            )
         old_value = f"status={post.status}; title={post.title}"
         related_activity = None
         if data["related_activity_id"]:
@@ -232,7 +278,10 @@ def post_edit(request, pk):
             post.cover_image = request.FILES["cover_image"]
         if data["status"] == PublicPost.Status.PUBLISHED and not post.published_at:
             post.published_at = timezone.now()
-        elif data["status"] != PublicPost.Status.PUBLISHED and old_status == PublicPost.Status.PUBLISHED:
+        elif (
+            data["status"] != PublicPost.Status.PUBLISHED
+            and old_status == PublicPost.Status.PUBLISHED
+        ):
             post.published_at = None
         post.save()
         log_action(
@@ -244,12 +293,16 @@ def post_edit(request, pk):
         )
         return redirect("staff:post_list")
 
-    return render(request, "staff_panel/post_form.html", {
-        "post": post,
-        "post_types": _choices(PublicPost.PostType),
-        "statuses": _choices(PublicPost.Status),
-        "activities": Activity.objects.all(),
-    })
+    return render(
+        request,
+        "staff_panel/post_form.html",
+        {
+            "post": post,
+            "post_types": _choices(PublicPost.PostType),
+            "statuses": _choices(PublicPost.Status),
+            "activities": Activity.objects.all(),
+        },
+    )
 
 
 # --- Singer registration management ---
@@ -258,9 +311,13 @@ def post_edit(request, pk):
 @staff_member_required
 def singer_registration_list(request):
     registrations = SingerRegistration.objects.select_related("activity", "user")
-    return render(request, "staff_panel/singer_registration_list.html", {
-        "registrations": registrations,
-    })
+    return render(
+        request,
+        "staff_panel/singer_registration_list.html",
+        {
+            "registrations": registrations,
+        },
+    )
 
 
 @staff_member_required
@@ -313,16 +370,20 @@ def singer_registration_detail(request, pk):
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
     checks = reg.material_checks.all()
-    return render(request, "staff_panel/singer_registration_detail.html", {
-        "reg": reg,
-        "pre_statuses": _choices(SingerRegistration.PreStatus),
-        "live_statuses": _choices(SingerRegistration.LiveStatus),
-        "notes": notes,
-        "files": files,
-        "checks": checks,
-        "check_statuses": _choices(MaterialCheck.Status),
-        "file_purposes": _choices(SubmissionFile.Purpose),
-    })
+    return render(
+        request,
+        "staff_panel/singer_registration_detail.html",
+        {
+            "reg": reg,
+            "pre_statuses": _choices(SingerRegistration.PreStatus),
+            "live_statuses": _choices(SingerRegistration.LiveStatus),
+            "notes": notes,
+            "files": files,
+            "checks": checks,
+            "check_statuses": _choices(MaterialCheck.Status),
+            "file_purposes": _choices(SubmissionFile.Purpose),
+        },
+    )
 
 
 # --- Program management ---
@@ -387,16 +448,20 @@ def program_detail(request, pk):
     notes = prog.staff_notes.select_related("created_by")
     files = prog.files.all()
     checks = prog.material_checks.all()
-    return render(request, "staff_panel/program_detail.html", {
-        "prog": prog,
-        "statuses": _choices(Program.Status),
-        "program_types": _choices(Program.ProgramType),
-        "notes": notes,
-        "files": files,
-        "checks": checks,
-        "check_statuses": _choices(MaterialCheck.Status),
-        "file_purposes": _choices(SubmissionFile.Purpose),
-    })
+    return render(
+        request,
+        "staff_panel/program_detail.html",
+        {
+            "prog": prog,
+            "statuses": _choices(Program.Status),
+            "program_types": _choices(Program.ProgramType),
+            "notes": notes,
+            "files": files,
+            "checks": checks,
+            "check_statuses": _choices(MaterialCheck.Status),
+            "file_purposes": _choices(SubmissionFile.Purpose),
+        },
+    )
 
 
 # --- Excel export ---
@@ -405,18 +470,44 @@ def program_detail(request, pk):
 @staff_member_required
 def export_registrations(request):
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "报名名单"
-    ws.append(["姓名", "学号", "学院", "班级", "手机", "微信", "曲目", "原创", "赛前状态", "赛中状态", "活动", "提交时间"])
+    ws.append(
+        [
+            "姓名",
+            "学号",
+            "学院",
+            "班级",
+            "手机",
+            "微信",
+            "曲目",
+            "原创",
+            "赛前状态",
+            "赛中状态",
+            "活动",
+            "提交时间",
+        ]
+    )
     for r in SingerRegistration.objects.select_related("activity"):
-        ws.append([
-            r.name, r.student_id, r.college, r.class_name,
-            r.phone, r.wechat, r.song_name,
-            "是" if r.is_original else "否",
-            r.get_pre_status_display(), r.get_live_status_display(),
-            r.activity.title, r.created_at.strftime("%Y-%m-%d %H:%M"),
-        ])
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ws.append(
+            [
+                r.name,
+                r.student_id,
+                r.college,
+                r.class_name,
+                r.phone,
+                r.wechat,
+                r.song_name,
+                "是" if r.is_original else "否",
+                r.get_pre_status_display(),
+                r.get_live_status_display(),
+                r.activity.title,
+                r.created_at.strftime("%Y-%m-%d %H:%M"),
+            ]
+        )
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = "attachment; filename=registration_list.xlsx"
     wb.save(response)
     return response
@@ -425,19 +516,46 @@ def export_registrations(request):
 @staff_member_required
 def export_programs(request):
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "节目单"
-    ws.append(["顺序", "节目名称", "类型", "负责人", "联系方式", "所属", "演员", "时长", "麦克风需求", "道具需求", "状态", "活动", "提交时间"])
+    ws.append(
+        [
+            "顺序",
+            "节目名称",
+            "类型",
+            "负责人",
+            "联系方式",
+            "所属",
+            "演员",
+            "时长",
+            "麦克风需求",
+            "道具需求",
+            "状态",
+            "活动",
+            "提交时间",
+        ]
+    )
     for p in Program.objects.select_related("activity"):
-        ws.append([
-            p.sort_order, p.name, p.get_program_type_display(),
-            p.contact_name, p.contact_phone, p.class_name,
-            p.performers, p.estimated_duration,
-            p.mic_requirements, p.prop_requirements,
-            p.get_status_display(), p.activity.title,
-            p.created_at.strftime("%Y-%m-%d %H:%M"),
-        ])
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ws.append(
+            [
+                p.sort_order,
+                p.name,
+                p.get_program_type_display(),
+                p.contact_name,
+                p.contact_phone,
+                p.class_name,
+                p.performers,
+                p.estimated_duration,
+                p.mic_requirements,
+                p.prop_requirements,
+                p.get_status_display(),
+                p.activity.title,
+                p.created_at.strftime("%Y-%m-%d %H:%M"),
+            ]
+        )
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = "attachment; filename=program_list.xlsx"
     wb.save(response)
     return response
@@ -464,15 +582,24 @@ def round_create(request):
             name=request.POST.get("name", ""),
             advance_count=int(request.POST.get("advance_count", 0) or 0),
         )
-        log_action(request, AuditLog.ActionType.OTHER, f"ContestRound:{contest_round.pk}", new_value=contest_round.name)
+        log_action(
+            request,
+            AuditLog.ActionType.OTHER,
+            f"ContestRound:{contest_round.pk}",
+            new_value=contest_round.name,
+        )
         return redirect("staff:round_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    return render(request, "staff_panel/round_form.html", {
-        "activities": activities,
-        "round_types": _choices(ContestRound.RoundType),
-        "scoring_modes": _choices(ContestRound.ScoringMode),
-    })
+    return render(
+        request,
+        "staff_panel/round_form.html",
+        {
+            "activities": activities,
+            "round_types": _choices(ContestRound.RoundType),
+            "scoring_modes": _choices(ContestRound.ScoringMode),
+        },
+    )
 
 
 @staff_member_required
@@ -484,8 +611,7 @@ def round_score_entry(request, pk):
     )
     judges = Judge.objects.filter(activity=contest_round.activity, is_active=True)
     scores = {
-        (s.singer_id, s.judge_id): s.score
-        for s in ScoreRecord.objects.filter(round=contest_round)
+        (s.singer_id, s.judge_id): s.score for s in ScoreRecord.objects.filter(round=contest_round)
     }
 
     if request.method == "POST":
@@ -497,8 +623,13 @@ def round_score_entry(request, pk):
                     val = request.POST[key].strip()
                     if val:
                         ScoreRecord.objects.update_or_create(
-                            round=contest_round, singer=singer, judge=judge,
-                            defaults={"score": val, "is_test_data": contest_round.activity.is_test_mode},
+                            round=contest_round,
+                            singer=singer,
+                            judge=judge,
+                            defaults={
+                                "score": val,
+                                "is_test_data": contest_round.activity.is_test_mode,
+                            },
                         )
         _recalc_round(contest_round)
         log_action(request, AuditLog.ActionType.ENTER_SCORE, f"ContestRound:{contest_round.pk}")
@@ -510,11 +641,15 @@ def round_score_entry(request, pk):
         row = [(judge.pk, scores.get((singer.pk, judge.pk), "")) for judge in judges]
         score_grid.append((singer, row))
 
-    return render(request, "staff_panel/round_score_entry.html", {
-        "round": contest_round,
-        "judges": judges,
-        "score_grid": score_grid,
-    })
+    return render(
+        request,
+        "staff_panel/round_score_entry.html",
+        {
+            "round": contest_round,
+            "judges": judges,
+            "score_grid": score_grid,
+        },
+    )
 
 
 @staff_member_required
@@ -522,11 +657,15 @@ def round_ranking(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     summaries = ScoreSummary.objects.filter(round=contest_round).select_related("singer")
     missing = ScoreRecord.objects.filter(round=contest_round, score__isnull=True).exists()
-    return render(request, "staff_panel/round_ranking.html", {
-        "round": contest_round,
-        "summaries": summaries,
-        "has_missing": missing,
-    })
+    return render(
+        request,
+        "staff_panel/round_ranking.html",
+        {
+            "round": contest_round,
+            "summaries": summaries,
+            "has_missing": missing,
+        },
+    )
 
 
 @staff_member_required
@@ -594,15 +733,21 @@ def award_create(request):
                 name=request.POST["name"],
                 is_test_data=activity.is_test_mode,
             )
-            log_action(request, AuditLog.ActionType.OTHER, f"Award:{award.pk}", new_value=award.name)
+            log_action(
+                request, AuditLog.ActionType.OTHER, f"Award:{award.pk}", new_value=award.name
+            )
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
-    return render(request, "staff_panel/award_form.html", {
-        "activities": activities,
-        "singers": singers,
-    })
+    return render(
+        request,
+        "staff_panel/award_form.html",
+        {
+            "activities": activities,
+            "singers": singers,
+        },
+    )
 
 
 def _recalc_round(contest_round):
@@ -610,17 +755,22 @@ def _recalc_round(contest_round):
     singers = SingerRegistration.objects.filter(activity=contest_round.activity)
     for singer in singers:
         singer_scores = list(
-            ScoreRecord.objects.filter(round=contest_round, singer=singer, score__isnull=False)
-            .values_list("score", flat=True)
+            ScoreRecord.objects.filter(
+                round=contest_round, singer=singer, score__isnull=False
+            ).values_list("score", flat=True)
         )
         if not singer_scores:
             continue
-        if contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW and len(singer_scores) >= 3:
+        if (
+            contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
+            and len(singer_scores) >= 3
+        ):
             singer_scores.remove(max(singer_scores))
             singer_scores.remove(min(singer_scores))
         avg = sum(singer_scores) / len(singer_scores)
         ScoreSummary.objects.update_or_create(
-            round=contest_round, singer=singer,
+            round=contest_round,
+            singer=singer,
             defaults={"average_score": avg, "is_test_data": contest_round.activity.is_test_mode},
         )
     # Re-rank
@@ -630,7 +780,10 @@ def _recalc_round(contest_round):
         s.is_advanced = i <= contest_round.advance_count if contest_round.advance_count else False
         s.save()
     # Update singer live_status for advanced/not_advanced
-    if contest_round.round_type == ContestRound.RoundType.PRELIMINARY and contest_round.advance_count:
+    if (
+        contest_round.round_type == ContestRound.RoundType.PRELIMINARY
+        and contest_round.advance_count
+    ):
         for s in summaries:
             singer = s.singer
             if s.is_advanced:
@@ -671,16 +824,25 @@ def vote_session_create(request):
                 singer_id=sid,
                 sort_order=i,
             )
-        log_action(request, AuditLog.ActionType.VOTE_MANAGE, f"VoteSession:{vote_session.pk}", new_value=vote_session.name)
+        log_action(
+            request,
+            AuditLog.ActionType.VOTE_MANAGE,
+            f"VoteSession:{vote_session.pk}",
+            new_value=vote_session.name,
+        )
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
-    return render(request, "staff_panel/vote_session_form.html", {
-        "activities": activities,
-        "singers": singers,
-        "selection_types": _choices(VoteSession.SelectionType),
-    })
+    return render(
+        request,
+        "staff_panel/vote_session_form.html",
+        {
+            "activities": activities,
+            "singers": singers,
+            "selection_types": _choices(VoteSession.SelectionType),
+        },
+    )
 
 
 @staff_member_required
@@ -689,13 +851,18 @@ def vote_session_detail(request, pk):
     options = vote_session.options.select_related("singer")
     # Annotate with vote count
     from django.db.models import Count
+
     options = options.annotate(vote_count=Count("records"))
     total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
-    return render(request, "staff_panel/vote_session_detail.html", {
-        "vote_session": vote_session,
-        "options": options,
-        "total_votes": total_votes,
-    })
+    return render(
+        request,
+        "staff_panel/vote_session_detail.html",
+        {
+            "vote_session": vote_session,
+            "options": options,
+            "total_votes": total_votes,
+        },
+    )
 
 
 @staff_member_required
@@ -745,14 +912,17 @@ def vote_session_unlock(request, pk):
 def vote_session_export(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "投票结果"
     ws.append(["选手", "票数"])
     from django.db.models import Count
+
     options = vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
     for opt in options:
         ws.append([opt.singer.name, opt.vote_count])
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = f"attachment; filename=vote_result_{vote_session.pk}.xlsx"
     wb.save(response)
     return response
@@ -813,7 +983,7 @@ def qr_image(request, pk, kind):
 
     image = qrcode.make(request.build_absolute_uri(path))
     buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
+    image.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type="image/png")
     response["Content-Disposition"] = f'inline; filename="{kind}_{activity.pk}.png"'
     return response
@@ -826,23 +996,35 @@ def qr_image(request, pk, kind):
 def export_center(request):
     activities = Activity.objects.all()
     templates = ArticleTemplate.objects.all()
-    return render(request, "staff_panel/export_center.html", {
-        "activities": activities,
-        "templates": templates,
-    })
+    return render(
+        request,
+        "staff_panel/export_center.html",
+        {
+            "activities": activities,
+            "templates": templates,
+        },
+    )
 
 
 @staff_member_required
 def _legacy_excel_material_checklist(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "材料清单"
     ws.append(["姓名", "项目", "状态"])
     checks = MaterialCheck.objects.filter(singer_registration__activity=activity)
     for c in checks.select_related("singer_registration"):
-        ws.append([c.singer_registration.name, c.item_name, c.get_status_display()])
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ws.append(
+            [
+                c.singer_registration.name if c.singer_registration else "",
+                c.item_name,
+                c.get_status_display(),
+            ]
+        )
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = "attachment; filename=material_checklist.xlsx"
     wb.save(response)
     return response
@@ -852,14 +1034,32 @@ def _legacy_excel_material_checklist(request, activity_id):
 def excel_material_checklist(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "Material Checklist"
     ws.append(["Owner Type", "Owner", "Item", "Status"])
-    for c in MaterialCheck.objects.filter(singer_registration__activity=activity).select_related("singer_registration"):
-        ws.append(["singer", c.singer_registration.name, c.item_name, c.get_status_display()])
+    for c in MaterialCheck.objects.filter(singer_registration__activity=activity).select_related(
+        "singer_registration"
+    ):
+        ws.append(
+            [
+                "singer",
+                c.singer_registration.name if c.singer_registration else "",
+                c.item_name,
+                c.get_status_display(),
+            ]
+        )
     for c in MaterialCheck.objects.filter(program__activity=activity).select_related("program"):
-        ws.append(["program", c.program.name, c.item_name, c.get_status_display()])
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ws.append(
+            [
+                "program",
+                c.program.name if c.program else "",
+                c.item_name,
+                c.get_status_display(),
+            ]
+        )
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = "attachment; filename=material_checklist.xlsx"
     wb.save(response)
     return response
@@ -874,7 +1074,7 @@ def excel_score_template(request, round_id):
     )
     judges = Judge.objects.filter(activity=contest_round.activity, is_active=True)
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "评分表模板"
     header = ["选手\\评委"] + [j.name for j in judges]
     ws.append(header)
@@ -883,7 +1083,9 @@ def excel_score_template(request, round_id):
     for col_idx, judge in enumerate(judges, 2):
         ws.cell(row=1, column=col_idx).font = Font(bold=True)
         ws.cell(row=1, column=col_idx).alignment = Alignment(horizontal="center")
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = "attachment; filename=score_template.xlsx"
     wb.save(response)
     return response
@@ -896,15 +1098,21 @@ def excel_import_scores(request, round_id):
     if request.method == "POST" and request.FILES.get("file"):
         ensure_round_unlocked(contest_round)
         from openpyxl import load_workbook
+
         try:
             wb = load_workbook(request.FILES["file"], data_only=True)
-            ws = wb.active
-            header = [cell.value for cell in ws[1]]
-            judges_by_name = {j.name: j for j in Judge.objects.filter(activity=contest_round.activity)}
-            singer_by_name = {s.name: s for s in SingerRegistration.objects.filter(activity=contest_round.activity)}
+            ws = _active_worksheet(wb)
+            header = [str(cell.value).strip() if cell.value is not None else "" for cell in ws[1]]
+            judges_by_name = {
+                j.name: j for j in Judge.objects.filter(activity=contest_round.activity)
+            }
+            singer_by_name = {
+                s.name: s
+                for s in SingerRegistration.objects.filter(activity=contest_round.activity)
+            }
             for row in ws.iter_rows(min_row=2, values_only=True):
                 singer_name = row[0]
-                if not singer_name:
+                if not isinstance(singer_name, str) or not singer_name.strip():
                     continue
                 singer = singer_by_name.get(singer_name.strip())
                 if not singer:
@@ -927,19 +1135,33 @@ def excel_import_scores(request, round_id):
                         errors.append(f"分数超出范围 0-100: {singer_name} {judge_name} = {score}")
                         continue
                     ScoreRecord.objects.update_or_create(
-                        round=contest_round, singer=singer, judge=judge,
-                        defaults={"score": score, "is_test_data": contest_round.activity.is_test_mode},
+                        round=contest_round,
+                        singer=singer,
+                        judge=judge,
+                        defaults={
+                            "score": score,
+                            "is_test_data": contest_round.activity.is_test_mode,
+                        },
                     )
             if not errors:
                 _recalc_round(contest_round)
-                log_action(request, AuditLog.ActionType.ENTER_SCORE, f"ContestRound:{contest_round.pk}", note="excel import")
+                log_action(
+                    request,
+                    AuditLog.ActionType.ENTER_SCORE,
+                    f"ContestRound:{contest_round.pk}",
+                    note="excel import",
+                )
                 return redirect("staff:round_score_entry", pk=round_id)
         except Exception as e:
             errors.append(f"文件解析失败: {e}")
-    return render(request, "staff_panel/excel_import.html", {
-        "round": contest_round,
-        "errors": errors,
-    })
+    return render(
+        request,
+        "staff_panel/excel_import.html",
+        {
+            "round": contest_round,
+            "errors": errors,
+        },
+    )
 
 
 # --- Word generation ---
@@ -950,10 +1172,13 @@ def word_generate(request, template_id, activity_id):
     template = get_object_or_404(ArticleTemplate, pk=template_id)
     activity = get_object_or_404(Activity, pk=activity_id)
     from docx import Document
+
     doc = Document()
     doc.add_heading(activity.title, 0)
     body = template.body
-    singers = SingerRegistration.objects.filter(activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED)
+    singers = SingerRegistration.objects.filter(
+        activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
+    )
     singer_lines = "\n".join(f"{s.name} — {s.song_name}" for s in singers)
     programs = Program.objects.filter(activity=activity)
     program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)
@@ -977,14 +1202,19 @@ def word_generate(request, template_id, activity_id):
         title=template.name,
         created_by=request.user,
     )
-    doc_obj.file.save(f"{template.template_type}_{activity_id}.docx", buf)
+    doc_obj.file.save(f"{template.template_type}_{activity_id}.docx", ContentFile(buf.getvalue()))
     AuditLog.objects.create(
         operator=request.user,
         action_type=AuditLog.ActionType.EXPORT,
         target=f"生成Word: {template.name}",
     )
-    response = HttpResponse(buf.read(), content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    response["Content-Disposition"] = f"attachment; filename={template.template_type}_{activity_id}.docx"
+    response = HttpResponse(
+        buf.read(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    response["Content-Disposition"] = (
+        f"attachment; filename={template.template_type}_{activity_id}.docx"
+    )
     return response
 
 
@@ -1041,51 +1271,88 @@ def archive_package_create(request, activity_id):
 
 def _activity_excel_generators(activity):
     """Yield (label, callable returning Workbook) for common exports."""
+
     def _registration_list():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "报名名单"
         ws.append(["姓名", "学号", "学院", "班级", "手机", "微信", "曲目", "原创", "赛前状态"])
         for r in SingerRegistration.objects.filter(activity=activity):
-            ws.append([r.name, r.student_id, r.college, r.class_name, r.phone, r.wechat, r.song_name, "是" if r.is_original else "否", r.get_pre_status_display()])
+            ws.append(
+                [
+                    r.name,
+                    r.student_id,
+                    r.college,
+                    r.class_name,
+                    r.phone,
+                    r.wechat,
+                    r.song_name,
+                    "是" if r.is_original else "否",
+                    r.get_pre_status_display(),
+                ]
+            )
         return wb
 
     def _material_checklist():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "材料清单"
         ws.append(["姓名", "项目", "状态"])
         for c in MaterialCheck.objects.filter(singer_registration__activity=activity):
-            ws.append([c.singer_registration.name, c.item_name, c.get_status_display()])
+            ws.append(
+                [
+                    c.singer_registration.name if c.singer_registration else "",
+                    c.item_name,
+                    c.get_status_display(),
+                ]
+            )
         return wb
 
     def _incidents():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "异常记录"
         ws.append(["时间", "类型", "选手", "处理人", "处理结果", "备注"])
         for inc in IncidentRecord.objects.filter(activity=activity):
-            ws.append([inc.occurred_at.strftime("%m/%d %H:%M"), inc.get_event_type_display(),
-                       inc.singer.name if inc.singer else "", inc.handled_by.username if inc.handled_by else "",
-                       inc.resolution, inc.remark])
+            ws.append(
+                [
+                    inc.occurred_at.strftime("%m/%d %H:%M"),
+                    inc.get_event_type_display(),
+                    inc.singer.name if inc.singer else "",
+                    inc.handled_by.username if inc.handled_by else "",
+                    inc.resolution,
+                    inc.remark,
+                ]
+            )
         return wb
 
     def _staff_notes():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "工作人员备注"
         ws.append(["关联", "内容", "创建人", "时间"])
-        for n in StaffNote.objects.filter(singer_registration__activity=activity).select_related("created_by"):
-            ws.append([f"选手: {n.singer_registration.name}", n.content, n.created_by.username, n.created_at.strftime("%m/%d %H:%M")])
+        for n in StaffNote.objects.filter(singer_registration__activity=activity).select_related(
+            "created_by"
+        ):
+            ws.append(
+                [
+                    f"选手: {n.singer_registration.name}" if n.singer_registration else "",
+                    n.content,
+                    n.created_by.username if n.created_by else "",
+                    n.created_at.strftime("%m/%d %H:%M"),
+                ]
+            )
         return wb
 
     def _contacts():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "联系方式表"
         ws.append(["姓名", "学号", "手机", "微信", "学院", "班级", "曲目"])
         for r in SingerRegistration.objects.filter(activity=activity):
-            ws.append([r.name, r.student_id, r.phone, r.wechat, r.college, r.class_name, r.song_name])
+            ws.append(
+                [r.name, r.student_id, r.phone, r.wechat, r.college, r.class_name, r.song_name]
+            )
         return wb
 
     return [
@@ -1106,45 +1373,128 @@ def _autosize_sheet(ws):
 
 def _complete_activity_excel_generators(activity):
     """Yield stable workbook exports for execution and archive packages."""
+
     def _registration_list():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Registration List"
-        ws.append(["Name", "Student ID", "College", "Class", "Phone", "Wechat", "Song", "Original", "Pre Status", "Live Status"])
+        ws.append(
+            [
+                "Name",
+                "Student ID",
+                "College",
+                "Class",
+                "Phone",
+                "Wechat",
+                "Song",
+                "Original",
+                "Pre Status",
+                "Live Status",
+            ]
+        )
         for r in SingerRegistration.objects.filter(activity=activity):
-            ws.append([r.name, r.student_id, r.college, r.class_name, r.phone, r.wechat, r.song_name, "yes" if r.is_original else "no", r.get_pre_status_display(), r.get_live_status_display()])
+            ws.append(
+                [
+                    r.name,
+                    r.student_id,
+                    r.college,
+                    r.class_name,
+                    r.phone,
+                    r.wechat,
+                    r.song_name,
+                    "yes" if r.is_original else "no",
+                    r.get_pre_status_display(),
+                    r.get_live_status_display(),
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _program_list():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Program List"
-        ws.append(["Order", "Name", "Type", "Contact", "Phone", "Class/Dept", "Performers", "Duration", "Status", "Mic", "Props", "Notes"])
+        ws.append(
+            [
+                "Order",
+                "Name",
+                "Type",
+                "Contact",
+                "Phone",
+                "Class/Dept",
+                "Performers",
+                "Duration",
+                "Status",
+                "Mic",
+                "Props",
+                "Notes",
+            ]
+        )
         for p in Program.objects.filter(activity=activity):
-            ws.append([p.sort_order, p.name, p.get_program_type_display(), p.contact_name, p.contact_phone, p.class_name, p.performers, p.estimated_duration, p.get_status_display(), p.mic_requirements, p.prop_requirements, p.special_notes])
+            ws.append(
+                [
+                    p.sort_order,
+                    p.name,
+                    p.get_program_type_display(),
+                    p.contact_name,
+                    p.contact_phone,
+                    p.class_name,
+                    p.performers,
+                    p.estimated_duration,
+                    p.get_status_display(),
+                    p.mic_requirements,
+                    p.prop_requirements,
+                    p.special_notes,
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _material_checklist():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Material Checklist"
         ws.append(["Owner Type", "Owner", "Item", "Status"])
-        for c in MaterialCheck.objects.filter(singer_registration__activity=activity).select_related("singer_registration"):
-            ws.append(["singer", c.singer_registration.name, c.item_name, c.get_status_display()])
+        for c in MaterialCheck.objects.filter(
+            singer_registration__activity=activity
+        ).select_related("singer_registration"):
+            ws.append(
+                [
+                    "singer",
+                    c.singer_registration.name if c.singer_registration else "",
+                    c.item_name,
+                    c.get_status_display(),
+                ]
+            )
         for c in MaterialCheck.objects.filter(program__activity=activity).select_related("program"):
-            ws.append(["program", c.program.name, c.item_name, c.get_status_display()])
+            ws.append(
+                [
+                    "program",
+                    c.program.name if c.program else "",
+                    c.item_name,
+                    c.get_status_display(),
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _contact_list():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Contacts"
         ws.append(["Owner Type", "Name", "Student ID", "Phone", "Wechat", "College/Class", "Item"])
         for r in SingerRegistration.objects.filter(activity=activity):
-            ws.append(["singer", r.name, r.student_id, r.phone, r.wechat, f"{r.college} {r.class_name}", r.song_name])
+            ws.append(
+                [
+                    "singer",
+                    r.name,
+                    r.student_id,
+                    r.phone,
+                    r.wechat,
+                    f"{r.college} {r.class_name}",
+                    r.song_name,
+                ]
+            )
         for p in Program.objects.filter(activity=activity):
             ws.append(["program", p.contact_name, "", p.contact_phone, "", p.class_name, p.name])
         _autosize_sheet(ws)
@@ -1152,12 +1502,24 @@ def _complete_activity_excel_generators(activity):
 
     def _score_results():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Score Results"
         ws.append(["Round", "Singer", "Average Score", "Rank", "Advanced"])
-        summaries = ScoreSummary.objects.filter(round__activity=activity).select_related("round", "singer").order_by("round_id", "rank")
+        summaries = (
+            ScoreSummary.objects.filter(round__activity=activity)
+            .select_related("round", "singer")
+            .order_by("round_id", "rank")
+        )
         for s in summaries:
-            ws.append([s.round.name or s.round.get_round_type_display(), s.singer.name, s.average_score, s.rank, "yes" if s.is_advanced else "no"])
+            ws.append(
+                [
+                    s.round.name or s.round.get_round_type_display(),
+                    s.singer.name,
+                    s.average_score,
+                    s.rank,
+                    "yes" if s.is_advanced else "no",
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
@@ -1165,18 +1527,24 @@ def _complete_activity_excel_generators(activity):
         from django.db.models import Count
 
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Vote Results"
         ws.append(["Session", "Singer", "Song", "Votes"])
-        options = VoteOption.objects.filter(vote_session__activity=activity).select_related("vote_session", "singer").annotate(vote_count=Count("records"))
+        options = (
+            VoteOption.objects.filter(vote_session__activity=activity)
+            .select_related("vote_session", "singer")
+            .annotate(vote_count=Count("records"))
+        )
         for opt in options:
-            ws.append([opt.vote_session.name, opt.singer.name, opt.singer.song_name, opt.vote_count])
+            ws.append(
+                [opt.vote_session.name, opt.singer.name, opt.singer.song_name, opt.vote_count]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _award_list():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Awards"
         ws.append(["Singer", "Song", "Award"])
         for award in Award.objects.filter(activity=activity).select_related("singer"):
@@ -1186,49 +1554,129 @@ def _complete_activity_excel_generators(activity):
 
     def _attachment_index():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Attachment Index"
-        ws.append(["Owner Type", "Owner", "Purpose", "Original Name", "Size", "Uploaded By", "Uploaded At", "Public"])
-        singer_files = SubmissionFile.objects.filter(singer_registration__activity=activity).select_related("singer_registration", "uploaded_by")
+        ws.append(
+            [
+                "Owner Type",
+                "Owner",
+                "Purpose",
+                "Original Name",
+                "Size",
+                "Uploaded By",
+                "Uploaded At",
+                "Public",
+            ]
+        )
+        singer_files = SubmissionFile.objects.filter(
+            singer_registration__activity=activity
+        ).select_related("singer_registration", "uploaded_by")
         for f in singer_files:
-            ws.append(["singer", f.singer_registration.name, f.get_file_purpose_display(), f.original_name, f.file_size, f.uploaded_by.username if f.uploaded_by else "", f.uploaded_at.strftime("%Y-%m-%d %H:%M"), "yes" if f.is_public else "no"])
-        program_files = SubmissionFile.objects.filter(program__activity=activity).select_related("program", "uploaded_by")
+            ws.append(
+                [
+                    "singer",
+                    f.singer_registration.name if f.singer_registration else "",
+                    f.get_file_purpose_display(),
+                    f.original_name,
+                    f.file_size,
+                    f.uploaded_by.username if f.uploaded_by else "",
+                    f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "yes" if f.is_public else "no",
+                ]
+            )
+        program_files = SubmissionFile.objects.filter(program__activity=activity).select_related(
+            "program", "uploaded_by"
+        )
         for f in program_files:
-            ws.append(["program", f.program.name, f.get_file_purpose_display(), f.original_name, f.file_size, f.uploaded_by.username if f.uploaded_by else "", f.uploaded_at.strftime("%Y-%m-%d %H:%M"), "yes" if f.is_public else "no"])
+            ws.append(
+                [
+                    "program",
+                    f.program.name if f.program else "",
+                    f.get_file_purpose_display(),
+                    f.original_name,
+                    f.file_size,
+                    f.uploaded_by.username if f.uploaded_by else "",
+                    f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "yes" if f.is_public else "no",
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _public_content_index():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Public Content"
         ws.append(["Title", "Type", "Status", "Pinned", "Published At", "Updated By"])
-        for post in PublicPost.objects.filter(related_activity=activity).select_related("updated_by"):
-            ws.append([post.title, post.get_post_type_display(), post.get_status_display(), "yes" if post.is_pinned else "no", post.published_at.strftime("%Y-%m-%d %H:%M") if post.published_at else "", post.updated_by.username if post.updated_by else ""])
+        for post in PublicPost.objects.filter(related_activity=activity).select_related(
+            "updated_by"
+        ):
+            ws.append(
+                [
+                    post.title,
+                    post.get_post_type_display(),
+                    post.get_status_display(),
+                    "yes" if post.is_pinned else "no",
+                    post.published_at.strftime("%Y-%m-%d %H:%M") if post.published_at else "",
+                    post.updated_by.username if post.updated_by else "",
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _incident_list():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Incidents"
         ws.append(["Time", "Type", "Singer", "Program", "Handler", "Resolution", "Remark"])
-        for inc in IncidentRecord.objects.filter(activity=activity).select_related("singer", "program", "handled_by"):
-            ws.append([inc.occurred_at.strftime("%Y-%m-%d %H:%M"), inc.get_event_type_display(), inc.singer.name if inc.singer else "", inc.program.name if inc.program else "", inc.handled_by.username if inc.handled_by else "", inc.resolution, inc.remark])
+        for inc in IncidentRecord.objects.filter(activity=activity).select_related(
+            "singer", "program", "handled_by"
+        ):
+            ws.append(
+                [
+                    inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
+                    inc.get_event_type_display(),
+                    inc.singer.name if inc.singer else "",
+                    inc.program.name if inc.program else "",
+                    inc.handled_by.username if inc.handled_by else "",
+                    inc.resolution,
+                    inc.remark,
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
     def _staff_notes():
         wb = Workbook()
-        ws = wb.active
+        ws = _active_worksheet(wb)
         ws.title = "Staff Notes"
         ws.append(["Owner Type", "Owner", "Content", "Created By", "Time"])
-        singer_notes = StaffNote.objects.filter(singer_registration__activity=activity).select_related("singer_registration", "created_by")
+        singer_notes = StaffNote.objects.filter(
+            singer_registration__activity=activity
+        ).select_related("singer_registration", "created_by")
         for n in singer_notes:
-            ws.append(["singer", n.singer_registration.name, n.content, n.created_by.username if n.created_by else "", n.created_at.strftime("%Y-%m-%d %H:%M")])
-        program_notes = StaffNote.objects.filter(program__activity=activity).select_related("program", "created_by")
+            ws.append(
+                [
+                    "singer",
+                    n.singer_registration.name if n.singer_registration else "",
+                    n.content,
+                    n.created_by.username if n.created_by else "",
+                    n.created_at.strftime("%Y-%m-%d %H:%M"),
+                ]
+            )
+        program_notes = StaffNote.objects.filter(program__activity=activity).select_related(
+            "program", "created_by"
+        )
         for n in program_notes:
-            ws.append(["program", n.program.name, n.content, n.created_by.username if n.created_by else "", n.created_at.strftime("%Y-%m-%d %H:%M")])
+            ws.append(
+                [
+                    "program",
+                    n.program.name if n.program else "",
+                    n.content,
+                    n.created_by.username if n.created_by else "",
+                    n.created_at.strftime("%Y-%m-%d %H:%M"),
+                ]
+            )
         _autosize_sheet(ws)
         return wb
 
@@ -1271,32 +1719,47 @@ def incident_create(request):
             remark=request.POST.get("remark", ""),
             is_test=activity.is_test_mode,
         )
-        log_action(request, AuditLog.ActionType.OTHER, f"IncidentRecord:{incident.pk}", new_value=incident.event_type)
+        log_action(
+            request,
+            AuditLog.ActionType.OTHER,
+            f"IncidentRecord:{incident.pk}",
+            new_value=incident.event_type,
+        )
         return redirect("staff:incident_list")
     activities = Activity.objects.all()
     singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
-    return render(request, "staff_panel/incident_form.html", {
-        "activities": activities,
-        "singers": singers,
-        "event_types": _choices(IncidentRecord.EventType),
-    })
+    return render(
+        request,
+        "staff_panel/incident_form.html",
+        {
+            "activities": activities,
+            "singers": singers,
+            "event_types": _choices(IncidentRecord.EventType),
+        },
+    )
 
 
 @staff_member_required
 def incident_export(request):
     wb = Workbook()
-    ws = wb.active
+    ws = _active_worksheet(wb)
     ws.title = "异常记录"
     ws.append(["活动", "时间", "类型", "选手", "处理人", "处理结果", "备注"])
     for inc in IncidentRecord.objects.select_related("activity", "singer", "handled_by"):
-        ws.append([
-            inc.activity.title, inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
-            inc.get_event_type_display(),
-            inc.singer.name if inc.singer else "",
-            inc.handled_by.username if inc.handled_by else "",
-            inc.resolution, inc.remark,
-        ])
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        ws.append(
+            [
+                inc.activity.title,
+                inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
+                inc.get_event_type_display(),
+                inc.singer.name if inc.singer else "",
+                inc.handled_by.username if inc.handled_by else "",
+                inc.resolution,
+                inc.remark,
+            ]
+        )
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
     response["Content-Disposition"] = "attachment; filename=incident_list.xlsx"
     wb.save(response)
     return response
@@ -1330,22 +1793,35 @@ def activity_clear_test_data(request, pk):
     if not activity.is_test_mode:
         raise PermissionDenied("Test data can only be cleared while the activity is in test mode.")
     deleted = {
-        "singer_registrations": SingerRegistration.objects.filter(activity=activity, is_test_data=True).count(),
+        "singer_registrations": SingerRegistration.objects.filter(
+            activity=activity, is_test_data=True
+        ).count(),
         "programs": Program.objects.filter(activity=activity, is_test_data=True).count(),
         "vote_sessions": VoteSession.objects.filter(activity=activity, is_test_data=True).count(),
     }
-    SubmissionFile.objects.filter(singer_registration__activity=activity, is_test_data=True).delete()
+    SubmissionFile.objects.filter(
+        singer_registration__activity=activity, is_test_data=True
+    ).delete()
     SubmissionFile.objects.filter(program__activity=activity, is_test_data=True).delete()
     Award.objects.filter(activity=activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=activity, is_test_data=True).delete()
-    VoteRecord.objects.filter(vote_session__activity=activity, vote_session__is_test_data=True).delete()
-    VoteOption.objects.filter(vote_session__activity=activity, vote_session__is_test_data=True).delete()
+    VoteRecord.objects.filter(
+        vote_session__activity=activity, vote_session__is_test_data=True
+    ).delete()
+    VoteOption.objects.filter(
+        vote_session__activity=activity, vote_session__is_test_data=True
+    ).delete()
     VoteSession.objects.filter(activity=activity, is_test_data=True).delete()
     Program.objects.filter(activity=activity, is_test_data=True).delete()
     SingerRegistration.objects.filter(activity=activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=activity, is_test=True).delete()
-    log_action(request, AuditLog.ActionType.OTHER, f"Activity:{activity.pk}", note=f"clear_test_data={deleted}")
+    log_action(
+        request,
+        AuditLog.ActionType.OTHER,
+        f"Activity:{activity.pk}",
+        note=f"clear_test_data={deleted}",
+    )
     return redirect("staff:export_center")
 
 
@@ -1362,7 +1838,9 @@ def activity_lock(request, pk):
     activity.save()
     ContestRound.objects.filter(activity=activity).update(is_locked=True)
     VoteSession.objects.filter(activity=activity).update(is_locked=True, is_open=False)
-    log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"Activity:{activity.pk}", new_value="locked")
+    log_action(
+        request, AuditLog.ActionType.RELOCK_RESULT, f"Activity:{activity.pk}", new_value="locked"
+    )
     return redirect("staff:export_center")
 
 

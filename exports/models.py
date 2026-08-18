@@ -1,6 +1,10 @@
 from django.conf import settings
 from django.db import models
 
+ARTICLE_TEMPLATE_BODY_HELP_TEXT = (
+    "正文，用 {title}, {subtitle}, {date}, {time}, {venue}, {content}, {sign_off} " + "等占位符"
+)
+
 
 class ExportTask(models.Model):
     class ExportType(models.TextChoices):
@@ -21,11 +25,15 @@ class ExportTask(models.Model):
         XLSX = "xlsx", "Excel"
         DOCX = "docx", "Word"
 
-    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="export_tasks")
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="export_tasks"
+    )
     export_type = models.CharField(max_length=22, choices=ExportType)
     format = models.CharField(max_length=4, choices=Format, default=Format.XLSX)
     file = models.FileField(upload_to="exports/", blank=True)
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="export_tasks")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="export_tasks"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -49,7 +57,7 @@ class ArticleTemplate(models.Model):
 
     name = models.CharField(max_length=200)
     template_type = models.CharField(max_length=22, choices=TemplateType, unique=True)
-    body = models.TextField(help_text="正文，用 {title}, {subtitle}, {date}, {time}, {venue}, {content}, {sign_off} 等占位符")
+    body = models.TextField(help_text=ARTICLE_TEMPLATE_BODY_HELP_TEXT)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -58,11 +66,20 @@ class ArticleTemplate(models.Model):
 
 
 class GeneratedDocument(models.Model):
-    template = models.ForeignKey(ArticleTemplate, on_delete=models.SET_NULL, null=True, related_name="documents")
-    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="generated_docs")
+    template = models.ForeignKey(
+        ArticleTemplate, on_delete=models.SET_NULL, null=True, related_name="documents"
+    )
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="generated_docs"
+    )
     title = models.CharField(max_length=200, blank=True)
     file = models.FileField(upload_to="generated/")
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="generated_docs")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="generated_docs",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

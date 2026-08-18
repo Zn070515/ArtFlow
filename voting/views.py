@@ -1,10 +1,8 @@
 from datetime import timedelta
 
+from common.audit import client_ip
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_POST
-
-from common.audit import client_ip
 
 from .models import VoteOption, VoteRecord, VoteSession
 
@@ -28,11 +26,15 @@ def vote_entry(request, pk):
             request.session["vote_passcode_ok"] = str(pk)
             return redirect("voting:vote_cast", pk=pk)
 
-    return render(request, "voting/vote_entry.html", {
-        "vote_session": vote_session,
-        "error": error,
-        "now": now,
-    })
+    return render(
+        request,
+        "voting/vote_entry.html",
+        {
+            "vote_session": vote_session,
+            "error": error,
+            "now": now,
+        },
+    )
 
 
 def vote_cast(request, pk):
@@ -60,7 +62,11 @@ def vote_cast(request, pk):
         return redirect("voting:vote_done", pk=pk)
 
     options = vote_session.options.select_related("singer")
-    max_sel = vote_session.max_selections if vote_session.selection_type == VoteSession.SelectionType.MULTI else 1
+    max_sel = (
+        vote_session.max_selections
+        if vote_session.selection_type == VoteSession.SelectionType.MULTI
+        else 1
+    )
 
     if request.method == "POST" and not error:
         selected = request.POST.getlist("selected_option")
@@ -84,13 +90,17 @@ def vote_cast(request, pk):
                     )
             return redirect("voting:vote_done", pk=pk)
 
-    return render(request, "voting/vote_cast.html", {
-        "vote_session": vote_session,
-        "options": options,
-        "max_selections": max_sel,
-        "is_multi": vote_session.selection_type == VoteSession.SelectionType.MULTI,
-        "error": error,
-    })
+    return render(
+        request,
+        "voting/vote_cast.html",
+        {
+            "vote_session": vote_session,
+            "options": options,
+            "max_selections": max_sel,
+            "is_multi": vote_session.selection_type == VoteSession.SelectionType.MULTI,
+            "error": error,
+        },
+    )
 
 
 def vote_done(request, pk):

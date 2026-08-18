@@ -6,7 +6,9 @@ class VoteSession(models.Model):
         SINGLE = "single", "单选"
         MULTI = "multi", "多选"
 
-    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="vote_sessions")
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="vote_sessions"
+    )
     name = models.CharField(max_length=100)
     passcode = models.CharField(max_length=20)
     start_time = models.DateTimeField()
@@ -14,7 +16,9 @@ class VoteSession(models.Model):
     is_open = models.BooleanField(default=False)
     is_locked = models.BooleanField(default=False)
     is_test_data = models.BooleanField(default=False)
-    selection_type = models.CharField(max_length=8, choices=SelectionType, default=SelectionType.SINGLE)
+    selection_type = models.CharField(
+        max_length=8, choices=SelectionType, default=SelectionType.SINGLE
+    )
     max_selections = models.IntegerField(default=1)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -28,7 +32,9 @@ class VoteSession(models.Model):
 
 class VoteOption(models.Model):
     vote_session = models.ForeignKey(VoteSession, on_delete=models.CASCADE, related_name="options")
-    singer = models.ForeignKey("singer_contest.SingerRegistration", on_delete=models.CASCADE, related_name="vote_options")
+    singer = models.ForeignKey(
+        "singer_contest.SingerRegistration", on_delete=models.CASCADE, related_name="vote_options"
+    )
     sort_order = models.IntegerField(default=0)
     is_test_data = models.BooleanField(default=False)
 

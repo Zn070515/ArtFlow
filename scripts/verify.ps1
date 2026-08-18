@@ -123,83 +123,18 @@ function Assert-ContainerContracts {
 
 function Assert-WorkflowContracts {
     $workflowDirectory = Join-Path $repositoryRoot '.github/workflows'
-    $expectedWorkflowNames = @('ci.yml', 'integration.yml', 'security.yml', 'workflow-lint.yml')
+    $workflowVerifierPath = Join-Path $repositoryRoot 'scripts/verify_workflows.py'
+    $requiredWorkflowNames = @('ci.yml', 'integration.yml', 'security.yml', 'workflow-lint.yml')
 
-    if (-not (Test-Path -LiteralPath $workflowDirectory -PathType Container)) {
-        throw 'Workflow contract violation: missing .github/workflows directory.'
+    if (-not (Test-Path -LiteralPath $workflowVerifierPath -PathType Leaf)) {
+        throw "Workflow contract violation: missing $workflowVerifierPath."
     }
 
-    foreach ($workflowName in $expectedWorkflowNames) {
-        $workflowPath = Join-Path $workflowDirectory $workflowName
-        if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
-            throw "Workflow contract violation: missing $workflowName."
-        }
+    $arguments = @('run', 'python', $workflowVerifierPath, $workflowDirectory)
+    foreach ($workflowName in $requiredWorkflowNames) {
+        $arguments += @('--require', $workflowName)
     }
-
-    $workflowPaths = @(
-        Get-ChildItem -LiteralPath $workflowDirectory -File |
-            Where-Object { $_.Extension -in @('.yml', '.yaml') }
-    )
-    if ($workflowPaths.Count -eq 0) {
-        throw 'Workflow contract violation: no workflow files found.'
-    }
-
-    foreach ($workflowPath in $workflowPaths) {
-        $workflow = Get-Content -LiteralPath $workflowPath.FullName -Raw
-
-        Assert-ContentMatch $workflow '(?m)^permissions:\s*(?:\r?$|\S)' "$($workflowPath.Name) workflow permissions"
-        Assert-ContentMatch $workflow '(?m)^jobs:\s*$' "$($workflowPath.Name) jobs section"
-
-        $jobsSection = [regex]::Match($workflow, '(?ms)^jobs:\s*$\r?\n(?<jobs>.*)$').Groups['jobs'].Value
-        $jobBlocks = [regex]::Matches(
-            $jobsSection,
-            '(?ms)^  (?<name>[A-Za-z0-9_-]+):\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)'
-        )
-        if ($jobBlocks.Count -eq 0) {
-            throw "Workflow contract violation: $($workflowPath.Name) has no jobs."
-        }
-        foreach ($jobBlock in $jobBlocks) {
-            if ($jobBlock.Value -notmatch '(?m)^    timeout-minutes:\s*\d+\s*$') {
-                throw "Workflow contract violation: $($workflowPath.Name) job $($jobBlock.Groups['name'].Value) needs timeout-minutes."
-            }
-        }
-
-        $usesLines = [regex]::Matches($workflow, '(?m)^\s*uses:\s*(?<reference>\S+)(?:\s+#.*)?\s*$')
-        foreach ($usesLine in $usesLines) {
-            $reference = $usesLine.Groups['reference'].Value
-            if ($reference -notmatch '@[0-9a-f]{40}$') {
-                throw "Workflow contract violation: $($workflowPath.Name) must pin $reference to an exact commit SHA."
-            }
-        }
-
-        if ($workflow -match 'POSTGRES_') {
-            Assert-ContentMatch $workflow '(?m)^\s*POSTGRES_HOST:\s*127\.0\.0\.1\s*$' "$($workflowPath.Name) PostgreSQL localhost host"
-            $postgresService = [regex]::Match(
-                $workflow,
-                '(?ms)^      postgres:\s*$.*?(?=^    (?:env|steps):\s*$|\z)'
-            ).Value
-            $postgresPorts = [regex]::Match(
-                $postgresService,
-                '(?ms)^        ports:\s*$\r?\n(?<ports>.*?)(?=^    (?:env|steps):\s*$|\z)'
-            )
-            $postgresPortBindings = [regex]::Matches(
-                $postgresPorts.Groups['ports'].Value,
-                '(?m)^          -\s*["'']?(?<binding>[^"''\r\n]+)'
-            )
-            if ($postgresPortBindings.Count -eq 0) {
-                throw "Workflow contract violation: $($workflowPath.Name) must map PostgreSQL to localhost."
-            }
-            foreach ($postgresPortBinding in $postgresPortBindings) {
-                $binding = $postgresPortBinding.Groups['binding'].Value.Trim()
-                if ($binding -notmatch '^127\.0\.0\.1:\d+:\d+(?:/(?:tcp|udp))?$') {
-                    throw "Workflow contract violation: $($workflowPath.Name) PostgreSQL port $binding must bind to 127.0.0.1."
-                }
-            }
-        }
-    }
-
-    $workflowLint = Get-Content -LiteralPath (Join-Path $workflowDirectory 'workflow-lint.yml') -Raw
-    Assert-ContentMatch $workflowLint 'actionlint' 'an actionlint workflow gate'
+    Invoke-Uv @arguments
 }
 
 $temporaryProductionEnvironment = [ordered]@{

@@ -11,20 +11,31 @@ class IncidentRecord(models.Model):
         INFO_ERROR = "info_error", "信息填写错误"
         OTHER = "other", "其他"
 
-    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="incidents")
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="incidents"
+    )
     occurred_at = models.DateTimeField()
     event_type = models.CharField(max_length=20, choices=EventType, default=EventType.OTHER)
     singer = models.ForeignKey(
-        "singer_contest.SingerRegistration", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="incidents"
+        "singer_contest.SingerRegistration",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidents",
     )
     program = models.ForeignKey(
-        "farewell_show.Program", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="incidents"
+        "farewell_show.Program",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="incidents",
     )
     handled_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="handled_incidents"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="handled_incidents",
     )
     resolution = models.TextField(blank=True)
     remark = models.TextField(blank=True)

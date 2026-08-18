@@ -4,19 +4,24 @@ import zipfile
 from datetime import timedelta
 from io import BytesIO
 
+from accounts.models import User
+from common.models import AuditLog
+from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-
-from accounts.models import User
-from core.models import Activity
 from farewell_show.models import Program
-from files.models import MaterialCheck, SubmissionFile
-from files.models import MaterialRequirement
+from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from public_portal.models import PublicPost
-from common.models import AuditLog
-from singer_contest.models import Award, ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
+from singer_contest.models import (
+    Award,
+    ContestRound,
+    Judge,
+    ScoreRecord,
+    ScoreSummary,
+    SingerRegistration,
+)
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 
@@ -91,12 +96,15 @@ class StaffPanelSmokeTests(TestCase):
 
     def test_admin_can_create_activity_from_staff_panel(self):
         self.client.force_login(self.admin)
-        response = self.client.post(reverse("staff:activity_create"), {
-            "title": "New Contest",
-            "activity_type": Activity.Type.SINGER_CONTEST,
-            "phase": Activity.Phase.REGISTRATION_OPEN,
-            "is_test_mode": "on",
-        })
+        response = self.client.post(
+            reverse("staff:activity_create"),
+            {
+                "title": "New Contest",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+                "is_test_mode": "on",
+            },
+        )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Activity.objects.filter(title="New Contest").exists())
 
@@ -117,19 +125,24 @@ class StaffPanelSmokeTests(TestCase):
 
     def test_singer_registration_uploads_material_and_checks_completeness(self):
         self.client.force_login(self.participant)
-        response = self.client.post(reverse("singer_contest:apply"), {
-            "activity_id": self.singer_activity.pk,
-            "name": "Li Hua",
-            "student_id": "20260001",
-            "college": "Info",
-            "class_name": "CS1",
-            "phone": "13800000000",
-            "song_name": "Song",
-            "accompaniment": SimpleUploadedFile("song.mp3", b"audio"),
-        })
+        response = self.client.post(
+            reverse("singer_contest:apply"),
+            {
+                "activity_id": self.singer_activity.pk,
+                "name": "Li Hua",
+                "student_id": "20260001",
+                "college": "Info",
+                "class_name": "CS1",
+                "phone": "13800000000",
+                "song_name": "Song",
+                "accompaniment": SimpleUploadedFile("song.mp3", b"audio"),
+            },
+        )
         self.assertEqual(response.status_code, 302)
         registration = SingerRegistration.objects.get(user=self.participant)
-        self.assertTrue(registration.files.filter(file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT).exists())
+        self.assertTrue(
+            registration.files.filter(file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT).exists()
+        )
         self.assertTrue(
             MaterialCheck.objects.filter(
                 singer_registration=registration,
@@ -140,18 +153,23 @@ class StaffPanelSmokeTests(TestCase):
 
     def test_farewell_program_uploads_material_and_checks_completeness(self):
         self.client.force_login(self.participant)
-        response = self.client.post(reverse("farewell_show:apply"), {
-            "activity_id": self.farewell_activity.pk,
-            "name": "Dance",
-            "program_type": Program.ProgramType.DANCE,
-            "contact_name": "Li Hua",
-            "contact_phone": "13800000000",
-            "class_name": "CS1",
-            "accompaniment": SimpleUploadedFile("dance.mp3", b"audio"),
-        })
+        response = self.client.post(
+            reverse("farewell_show:apply"),
+            {
+                "activity_id": self.farewell_activity.pk,
+                "name": "Dance",
+                "program_type": Program.ProgramType.DANCE,
+                "contact_name": "Li Hua",
+                "contact_phone": "13800000000",
+                "class_name": "CS1",
+                "accompaniment": SimpleUploadedFile("dance.mp3", b"audio"),
+            },
+        )
         self.assertEqual(response.status_code, 302)
         program = Program.objects.get(user=self.participant)
-        self.assertTrue(program.files.filter(file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT).exists())
+        self.assertTrue(
+            program.files.filter(file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT).exists()
+        )
         self.assertTrue(
             MaterialCheck.objects.filter(
                 program=program,
@@ -180,9 +198,12 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=1,
         )
         self.client.force_login(self.staff)
-        response = self.client.post(reverse("staff:round_score_entry", args=[round_.pk]), {
-            f"score_{registration.pk}_{judge.pk}": "91",
-        })
+        response = self.client.post(
+            reverse("staff:round_score_entry", args=[round_.pk]),
+            {
+                f"score_{registration.pk}_{judge.pk}": "91",
+            },
+        )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(ScoreSummary.objects.get(round=round_, singer=registration).rank, 1)
 
@@ -196,13 +217,26 @@ class StaffPanelSmokeTests(TestCase):
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
         visitor = self.client_class()
-        self.assertEqual(visitor.post(reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}).status_code, 302)
-        self.assertEqual(visitor.post(reverse("voting:vote_cast", args=[vote_session.pk]), {"selected_option": [str(option.pk)]}).status_code, 302)
+        self.assertEqual(
+            visitor.post(
+                reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}
+            ).status_code,
+            302,
+        )
+        self.assertEqual(
+            visitor.post(
+                reverse("voting:vote_cast", args=[vote_session.pk]),
+                {"selected_option": [str(option.pk)]},
+            ).status_code,
+            302,
+        )
         self.assertEqual(VoteRecord.objects.filter(vote_session=vote_session).count(), 1)
 
         qr_page = self.client.get(reverse("staff:qr_generate", args=[self.singer_activity.pk]))
         self.assertEqual(qr_page.status_code, 200)
-        qr_image = self.client.get(reverse("staff:qr_image", args=[self.singer_activity.pk, "registration"]))
+        qr_image = self.client.get(
+            reverse("staff:qr_image", args=[self.singer_activity.pk, "registration"])
+        )
         self.assertEqual(qr_image.status_code, 200)
         self.assertEqual(qr_image["Content-Type"], "image/png")
 
@@ -226,9 +260,12 @@ class StaffPanelSmokeTests(TestCase):
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
         self.client.force_login(self.staff)
-        response = self.client.post(reverse("staff:round_score_entry", args=[round_.pk]), {
-            f"score_{registration.pk}_{judge.pk}": "91",
-        })
+        response = self.client.post(
+            reverse("staff:round_score_entry", args=[round_.pk]),
+            {
+                f"score_{registration.pk}_{judge.pk}": "91",
+            },
+        )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ScoreRecord.objects.exists())
 
@@ -247,11 +284,14 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         self.client.force_login(self.staff)
-        response = self.client.post(reverse("staff:award_create"), {
-            "activity_id": self.singer_activity.pk,
-            "singer_id": registration.pk,
-            "name": "Top Singer",
-        })
+        response = self.client.post(
+            reverse("staff:award_create"),
+            {
+                "activity_id": self.singer_activity.pk,
+                "singer_id": registration.pk,
+                "name": "Top Singer",
+            },
+        )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Award.objects.exists())
 
@@ -265,10 +305,17 @@ class StaffPanelSmokeTests(TestCase):
             is_locked=True,
         )
         self.client.force_login(self.staff)
-        self.assertEqual(self.client.post(reverse("staff:vote_session_unlock", args=[vote_session.pk])).status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                reverse("staff:vote_session_unlock", args=[vote_session.pk])
+            ).status_code,
+            403,
+        )
 
         self.client.force_login(self.admin)
-        response = self.client.post(reverse("staff:vote_session_unlock", args=[vote_session.pk]), {"note": "fix typo"})
+        response = self.client.post(
+            reverse("staff:vote_session_unlock", args=[vote_session.pk]), {"note": "fix typo"}
+        )
         self.assertEqual(response.status_code, 302)
         vote_session.refresh_from_db()
         self.assertFalse(vote_session.is_locked)
@@ -320,7 +367,9 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=True,
         )
         self.client.force_login(self.admin)
-        response = self.client.post(reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk]))
+        response = self.client.post(
+            reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
+        )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(SingerRegistration.objects.filter(pk=formal_registration.pk).exists())
         self.assertFalse(SingerRegistration.objects.filter(pk=test_registration.pk).exists())
@@ -355,11 +404,17 @@ class StaffPanelSmokeTests(TestCase):
 
         self.client.force_login(self.participant)
         owner_response = self.client.get(uploaded.file.url)
-        self.assertEqual(owner_response.status_code, 200)
+        try:
+            self.assertEqual(owner_response.status_code, 200)
+        finally:
+            owner_response.close()
 
         self.client.force_login(self.staff)
         staff_response = self.client.get(uploaded.file.url)
-        self.assertEqual(staff_response.status_code, 200)
+        try:
+            self.assertEqual(staff_response.status_code, 200)
+        finally:
+            staff_response.close()
 
     def test_packages_include_contest_and_farewell_operational_indexes(self):
         registration = SingerRegistration.objects.create(
@@ -380,7 +435,9 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=1,
         )
         ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
-        ScoreSummary.objects.create(round=round_, singer=registration, average_score=91, rank=1, is_advanced=True)
+        ScoreSummary.objects.create(
+            round=round_, singer=registration, average_score=91, rank=1, is_advanced=True
+        )
         Award.objects.create(activity=self.singer_activity, singer=registration, name="Top Singer")
         vote_session = VoteSession.objects.create(
             activity=self.singer_activity,
@@ -405,7 +462,9 @@ class StaffPanelSmokeTests(TestCase):
             published_at=timezone.now(),
         )
         self.client.force_login(self.staff)
-        response = self.client.get(reverse("staff:archive_package_create", args=[self.singer_activity.pk]))
+        response = self.client.get(
+            reverse("staff:archive_package_create", args=[self.singer_activity.pk])
+        )
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as zf:
             names = set(zf.namelist())
@@ -425,7 +484,9 @@ class StaffPanelSmokeTests(TestCase):
             class_name="CS1",
             sort_order=1,
         )
-        response = self.client.get(reverse("staff:execution_package", args=[self.farewell_activity.pk]))
+        response = self.client.get(
+            reverse("staff:execution_package", args=[self.farewell_activity.pk])
+        )
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as zf:
             names = set(zf.namelist())
@@ -463,7 +524,11 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         response = self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(Award.objects.filter(activity=self.singer_activity, singer=registration, name="最佳人气奖").exists())
+        self.assertTrue(
+            Award.objects.filter(
+                activity=self.singer_activity, singer=registration, name="最佳人气奖"
+            ).exists()
+        )
 
     def test_vote_cast_rate_limits_same_ip_briefly(self):
         registration = SingerRegistration.objects.create(
@@ -488,13 +553,29 @@ class StaffPanelSmokeTests(TestCase):
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
         first = self.client_class()
         second = self.client_class()
-        first.post(reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}, REMOTE_ADDR="127.0.0.1")
+        first.post(
+            reverse("voting:vote_entry", args=[vote_session.pk]),
+            {"passcode": "1234"},
+            REMOTE_ADDR="127.0.0.1",
+        )
         self.assertEqual(
-            first.post(reverse("voting:vote_cast", args=[vote_session.pk]), {"selected_option": [str(option.pk)]}, REMOTE_ADDR="127.0.0.1").status_code,
+            first.post(
+                reverse("voting:vote_cast", args=[vote_session.pk]),
+                {"selected_option": [str(option.pk)]},
+                REMOTE_ADDR="127.0.0.1",
+            ).status_code,
             302,
         )
-        second.post(reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}, REMOTE_ADDR="127.0.0.1")
-        response = second.post(reverse("voting:vote_cast", args=[vote_session.pk]), {"selected_option": [str(option.pk)]}, REMOTE_ADDR="127.0.0.1")
+        second.post(
+            reverse("voting:vote_entry", args=[vote_session.pk]),
+            {"passcode": "1234"},
+            REMOTE_ADDR="127.0.0.1",
+        )
+        response = second.post(
+            reverse("voting:vote_cast", args=[vote_session.pk]),
+            {"selected_option": [str(option.pk)]},
+            REMOTE_ADDR="127.0.0.1",
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(VoteRecord.objects.filter(vote_session=vote_session).count(), 1)
 
@@ -526,8 +607,16 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.admin)
         response = self.client.post(reverse("staff:activity_clone", args=[self.singer_activity.pk]))
         self.assertEqual(response.status_code, 302)
-        clone = Activity.objects.exclude(pk=self.singer_activity.pk).get(activity_type=Activity.Type.SINGER_CONTEST)
-        self.assertTrue(MaterialRequirement.objects.filter(activity=clone, item_name="Lyrics").exists())
+        clone = Activity.objects.exclude(pk=self.singer_activity.pk).get(
+            activity_type=Activity.Type.SINGER_CONTEST
+        )
+        self.assertTrue(
+            MaterialRequirement.objects.filter(activity=clone, item_name="Lyrics").exists()
+        )
         self.assertTrue(Judge.objects.filter(activity=clone, name="Judge A").exists())
-        self.assertTrue(ContestRound.objects.filter(activity=clone, round_type=ContestRound.RoundType.PRELIMINARY).exists())
+        self.assertTrue(
+            ContestRound.objects.filter(
+                activity=clone, round_type=ContestRound.RoundType.PRELIMINARY
+            ).exists()
+        )
         self.assertFalse(SingerRegistration.objects.filter(activity=clone).exists())

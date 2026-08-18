@@ -1,12 +1,12 @@
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import get_object_or_404, redirect, render
-
 from common.audit import log_action
 from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from core.models import Activity
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
 from files.services import sync_singer_material_checks
+
 from .models import SingerRegistration
 
 
@@ -59,7 +59,12 @@ def apply_view(request):
                 is_test_data=reg.is_test_data,
             )
         sync_singer_material_checks(reg)
-        log_action(request, AuditLog.ActionType.UPDATE_REGISTRATION, f"SingerRegistration:{reg.pk}", new_value="submitted")
+        log_action(
+            request,
+            AuditLog.ActionType.UPDATE_REGISTRATION,
+            f"SingerRegistration:{reg.pk}",
+            new_value="submitted",
+        )
         return redirect("singer_contest:my_submission")
     return render(request, "singer_contest/apply.html", {"activities": activities})
 
@@ -81,13 +86,22 @@ def my_submission_view(request):
                 is_test_data=reg.is_test_data or reg.activity.is_test_mode,
             )
             sync_singer_material_checks(reg)
-            log_action(request, AuditLog.ActionType.UPLOAD_FILE, f"SubmissionFile:{submission_file.pk}", new_value=submission_file.original_name)
+            log_action(
+                request,
+                AuditLog.ActionType.UPLOAD_FILE,
+                f"SubmissionFile:{submission_file.pk}",
+                new_value=submission_file.original_name,
+            )
         return redirect("singer_contest:my_submission")
     if reg:
         sync_singer_material_checks(reg)
-    return render(request, "singer_contest/my_submission.html", {
-        "reg": reg,
-        "files": reg.files.all() if reg else [],
-        "checks": reg.material_checks.all() if reg else [],
-        "file_purposes": SubmissionFile.Purpose.choices,
-    })
+    return render(
+        request,
+        "singer_contest/my_submission.html",
+        {
+            "reg": reg,
+            "files": reg.files.all() if reg else [],
+            "checks": reg.material_checks.all() if reg else [],
+            "file_purposes": SubmissionFile.Purpose.choices,
+        },
+    )

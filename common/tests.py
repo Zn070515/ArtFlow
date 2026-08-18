@@ -30,7 +30,7 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from . import models as common_models
-from .models import AuditLog
+from .models import AuditLog, SeedRecord
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
 DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
@@ -148,15 +148,15 @@ class DoctorCommandTests(TestCase):
 class SeedRecordTests(TestCase):
     def test_seed_record_keeps_one_key_and_one_owned_object(self):
         seed_record_model = getattr(common_models, "SeedRecord", None)
-        self.assertIsNotNone(seed_record_model)
+        self.assertIs(seed_record_model, SeedRecord)
         self.assertIsInstance(
-            seed_record_model._meta.get_field("object_id"),
+            SeedRecord._meta.get_field("object_id"),
             django_models.PositiveBigIntegerField,
         )
 
         user = User.objects.create_user(username="seed-record-owner", password="safe-password")
         content_type = ContentType.objects.get_for_model(User)
-        first_record = seed_record_model.objects.create(
+        first_record = SeedRecord.objects.create(
             key="demo.user.owner",
             content_type=content_type,
             object_id=user.pk,
@@ -164,13 +164,13 @@ class SeedRecordTests(TestCase):
 
         self.assertIsNotNone(first_record.created_at)
         with self.assertRaises(IntegrityError), transaction.atomic():
-            seed_record_model.objects.create(
+            SeedRecord.objects.create(
                 key="demo.user.other",
                 content_type=content_type,
                 object_id=user.pk,
             )
         with self.assertRaises(IntegrityError), transaction.atomic():
-            seed_record_model.objects.create(
+            SeedRecord.objects.create(
                 key="demo.user.owner",
                 content_type=content_type,
                 object_id=user.pk + 1,
@@ -447,7 +447,9 @@ class DemoSeedCommandTests(TestCase):
         self.assertTrue(ArticleTemplate.objects.filter(pk=formal_template.pk).exists())
         self.assertTrue(AuditLog.objects.filter(pk=audit_log.pk).exists())
         self.assertTrue(Activity.objects.filter(pk=unrelated_test_activity.pk).exists())
-        self.assertTrue(SingerRegistration.objects.filter(pk=unrelated_test_registration.pk).exists())
+        self.assertTrue(
+            SingerRegistration.objects.filter(pk=unrelated_test_registration.pk).exists()
+        )
         self.assertTrue(VoteSession.objects.filter(pk=unrelated_test_vote.pk).exists())
         self.assertEqual(output.getvalue(), "Demo test runtime data reset.\n")
 

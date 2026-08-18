@@ -8,4 +8,4 @@ from .models import User
 class CustomUserAdmin(UserAdmin):
     list_display = ["username", "email", "role", "is_active", "date_joined"]
     list_filter = ["role", "is_active"]
-    fieldsets = UserAdmin.fieldsets + (("Role", {"fields": ("role",)}),)
+    fieldsets = tuple(UserAdmin.fieldsets or ()) + (("Role", {"fields": ("role",)}),)

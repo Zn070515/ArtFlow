@@ -24,18 +24,27 @@ class PublicPost(models.Model):
     post_type = models.CharField(max_length=22, choices=PostType, default=PostType.NORMAL_ARTICLE)
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
     related_activity = models.ForeignKey(
-        "core.Activity", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="public_posts"
+        "core.Activity",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="public_posts",
     )
     is_pinned = models.BooleanField(default=False)
     sort_order = models.IntegerField(default=0)
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name="created_posts"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_posts",
     )
     updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name="updated_posts"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_posts",
     )
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -51,8 +60,11 @@ class PublicPost(models.Model):
 class PublicMedia(models.Model):
     post = models.ForeignKey(PublicPost, on_delete=models.CASCADE, related_name="media_items")
     related_activity = models.ForeignKey(
-        "core.Activity", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="public_media"
+        "core.Activity",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="public_media",
     )
     image = models.ImageField(upload_to="public/gallery/%Y/%m/")
     caption = models.CharField(max_length=200, blank=True)
