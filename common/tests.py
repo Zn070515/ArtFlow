@@ -1,3 +1,5 @@
+import os
+import subprocess
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -14,6 +16,7 @@ from django.db import DatabaseError, IntegrityError, transaction
 from django.db import models as django_models
 from django.http import Http404
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate
 from farewell_show.models import Program
@@ -51,6 +54,101 @@ class ControlledMediaPathTests(TestCase):
             with override_settings(MEDIA_ROOT=media_root):
                 with self.assertRaises(Http404):
                     _media_file_response("../private.txt")
+
+    def test_controlled_media_rejects_posix_symlink_to_external_file(self):
+        if os.name != "posix":
+            self.skipTest("POSIX symlinks are only available on POSIX platforms.")
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            media_root = root / "media"
+            media_root.mkdir()
+            external_file = root / "private.txt"
+            external_contents = "private media content"
+            external_file.write_text(external_contents, encoding="utf-8")
+            link_path = media_root / "public" / "linked-private.txt"
+            link_path.parent.mkdir()
+
+            try:
+                os.symlink(external_file, link_path)
+            except OSError as error:
+                self.skipTest(f"POSIX symlink creation is unavailable: {error}")
+
+            try:
+                relative_path = "public/linked-private.txt"
+                PublicPost.objects.create(
+                    title="Linked private media",
+                    cover_image=relative_path,
+                    status=PublicPost.Status.PUBLISHED,
+                )
+
+                with override_settings(MEDIA_ROOT=media_root):
+                    response = self.client.get(
+                        reverse("controlled_media", kwargs={"path": relative_path})
+                    )
+
+                self.assertEqual(response.status_code, 404)
+                self.assertNotContains(response, external_contents, status_code=404)
+            finally:
+                if link_path.is_symlink():
+                    link_path.unlink()
+
+            self.assertTrue(external_file.is_file())
+            self.assertEqual(external_file.read_text(encoding="utf-8"), external_contents)
+
+    def test_controlled_media_rejects_windows_junction_to_external_directory(self):
+        if os.name != "nt":
+            self.skipTest("Windows junctions are only available on Windows.")
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            media_root = root / "media"
+            media_root.mkdir()
+            external_directory = root / "private"
+            external_directory.mkdir()
+            external_file = external_directory / "private.txt"
+            external_contents = "private media content"
+            external_file.write_text(external_contents, encoding="utf-8")
+            link_path = media_root / "public" / "linked-private"
+            link_path.parent.mkdir()
+
+            junction = subprocess.run(
+                ["cmd", "/d", "/c", "mklink", "/J", str(link_path), str(external_directory)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if junction.returncode != 0:
+                self.skipTest(f"Windows junction creation is unavailable: {junction.stderr}")
+
+            try:
+                relative_path = "public/linked-private/private.txt"
+                PublicPost.objects.create(
+                    title="Linked private media",
+                    cover_image=relative_path,
+                    status=PublicPost.Status.PUBLISHED,
+                )
+
+                with override_settings(MEDIA_ROOT=media_root):
+                    response = self.client.get(
+                        reverse("controlled_media", kwargs={"path": relative_path})
+                    )
+
+                self.assertEqual(response.status_code, 404)
+                self.assertNotContains(response, external_contents, status_code=404)
+            finally:
+                if link_path.is_junction():
+                    removal = subprocess.run(
+                        ["cmd", "/d", "/c", "rmdir", str(link_path)],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if removal.returncode != 0:
+                        self.fail(f"Unable to remove Windows junction: {removal.stderr}")
+
+            self.assertTrue(external_file.is_file())
+            self.assertEqual(external_file.read_text(encoding="utf-8"), external_contents)
 
 
 class DoctorCommandTests(TestCase):
