@@ -11,6 +11,41 @@ $superpowersDocsPath = Join-Path $docsPath 'superpowers'
 # documents. Other root Markdown is not scanned unless it is added here.
 $rootDocumentNames = @('README.md', 'CLAUDE.md', 'AGENTS.md', 'CHANGELOG.md', 'GOAL.md')
 
+function Resolve-CanonicalFilesystemPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $pathRoot = [IO.Path]::GetPathRoot($fullPath)
+    $currentPath = $pathRoot
+    $relativeSegments = $fullPath.Substring($pathRoot.Length) -split '[\\/]'
+
+    foreach ($segment in $relativeSegments) {
+        if ([string]::IsNullOrWhiteSpace($segment)) {
+            continue
+        }
+
+        $currentPath = Join-Path $currentPath $segment
+        if (-not (Test-Path -LiteralPath $currentPath)) {
+            continue
+        }
+
+        $item = Get-Item -LiteralPath $currentPath -Force
+        if ($item.LinkType) {
+            $linkTarget = $item.ResolveLinkTarget($true)
+            if ($null -ne $linkTarget) {
+                $currentPath = [IO.Path]::GetFullPath($linkTarget.FullName)
+            }
+        }
+    }
+
+    return $currentPath
+}
+
+$canonicalRepositoryRoot = Resolve-CanonicalFilesystemPath -Path $repositoryRoot
+
 function Get-UserFacingDocuments {
     $documents = @()
     foreach ($name in $rootDocumentNames) {
@@ -40,12 +75,25 @@ function Test-IsWithinRepositoryRoot {
         [string]$Path
     )
 
-    $relativePath = [IO.Path]::GetRelativePath($repositoryRoot, $Path)
+    $relativePath = [IO.Path]::GetRelativePath($canonicalRepositoryRoot, $Path)
     return (
         $relativePath -ne '..' -and
         -not $relativePath.StartsWith("..$([IO.Path]::DirectorySeparatorChar)") -and
         -not [IO.Path]::IsPathRooted($relativePath)
     )
+}
+
+function Test-IsExternalUri {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    if ($Target -match '^[A-Za-z]:[\\/]') {
+        return $false
+    }
+
+    return $Target -match '^[A-Za-z][A-Za-z0-9+.-]*:'
 }
 
 $documents = Get-UserFacingDocuments
@@ -61,7 +109,7 @@ foreach ($document in $documents) {
             [string]::IsNullOrWhiteSpace($target) -or
             $target.StartsWith('#') -or
             $target.StartsWith('//') -or
-            $target -match '^(https?|mailto|tel):'
+            (Test-IsExternalUri -Target $target)
         ) {
             continue
         }
@@ -69,7 +117,8 @@ foreach ($document in $documents) {
         $targetPath = (($target -split '#', 2)[0] -split '\?', 2)[0]
         $documentDirectory = Split-Path -Parent $document.FullName
         $resolvedPath = [IO.Path]::GetFullPath((Join-Path $documentDirectory $targetPath))
-        if (-not (Test-IsWithinRepositoryRoot -Path $resolvedPath)) {
+        $canonicalResolvedPath = Resolve-CanonicalFilesystemPath -Path $resolvedPath
+        if (-not (Test-IsWithinRepositoryRoot -Path $canonicalResolvedPath)) {
             $escapingLinks += "$($document.FullName): $target"
             continue
         }
