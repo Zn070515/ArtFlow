@@ -14,6 +14,7 @@ import yaml
 
 SHA_PATTERN = re.compile(r"[0-9a-f]{40}")
 VERSION_COMMENT_PATTERN = re.compile(r"v\d+(?:\.\d+){0,3}(?:[-+][\w.-]+)?")
+SETUP_UV_VERSION = "0.11.29"
 CREDENTIAL_KEY_PARTS = ("password", "secret", "token", "api_key", "apikey")
 CREDENTIAL_EXPRESSION_PATTERN = re.compile(
     r"\$\{\{\s*(?:github\.token|secrets\.[A-Za-z_][A-Za-z0-9_]*)\s*}}"
@@ -111,6 +112,133 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
     for port in ports:
         if port != "127.0.0.1:5432:5432":
             issues.append(f"{workflow_path.name}: PostgreSQL port {port!s} must bind to 127.0.0.1")
+
+    compose_smoke_job = as_mapping(jobs.get("compose-smoke")) if jobs is not None else None
+    if compose_smoke_job is None:
+        issues.append(f"{workflow_path.name}: missing compose-smoke job")
+        return issues
+
+    compose_steps = steps_for_job(compose_smoke_job)
+    compose_commands = "\n".join(
+        str(step.get("run", "")) for step in compose_steps if isinstance(step.get("run"), str)
+    )
+    if "docker compose up --build --wait" not in compose_commands:
+        issues.append(
+            f"{workflow_path.name}: Compose smoke must run docker compose up --build --wait"
+        )
+    if (
+        "docker compose ps --status running" not in compose_commands
+        or "State.Health.Status" not in compose_commands
+    ):
+        issues.append(f"{workflow_path.name}: Compose smoke must verify the running container health")
+    if (
+        "docker compose exec -T web python manage.py migrate --noinput" not in compose_commands
+        or "docker compose exec -T web python manage.py doctor" not in compose_commands
+        or "docker compose exec -T web python" not in compose_commands
+        or "/healthz/" not in compose_commands
+        or compose_commands.count("docker compose exec -T web python manage.py seed_demo_data") < 2
+    ):
+        issues.append(
+            f"{workflow_path.name}: Compose smoke must run migrate, doctor, health, and seed twice in web"
+        )
+
+    cleanup_steps = [
+        step
+        for step in compose_steps
+        if "always()" in str(step.get("if", "")) and "docker compose down" in str(step.get("run", ""))
+    ]
+    if not cleanup_steps or any(
+        "--volumes" in str(step.get("run", "")) or " -v" in str(step.get("run", ""))
+        for step in cleanup_steps
+    ):
+        issues.append(
+            f"{workflow_path.name}: Compose smoke must clean up with docker compose down in an always step"
+        )
+    return issues
+
+
+def steps_for_job(job: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    if job is None:
+        return []
+    steps = job.get("steps")
+    if not isinstance(steps, Sequence) or isinstance(steps, str):
+        return []
+    return [step for value in steps if (step := as_mapping(value)) is not None]
+
+
+def uses_action(step: Mapping[str, Any], action: str) -> bool:
+    uses = step.get("uses")
+    return isinstance(uses, str) and uses.startswith(f"{action}@")
+
+
+def setup_uv_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[str]:
+    jobs = as_mapping(workflow.get("jobs"))
+    if jobs is None:
+        return []
+
+    issues: list[str] = []
+    for job_name, job in jobs.items():
+        for step in steps_for_job(as_mapping(job)):
+            if not uses_action(step, "astral-sh/setup-uv"):
+                continue
+            setup_inputs = as_mapping(step.get("with"))
+            if setup_inputs is None or setup_inputs.get("version") != SETUP_UV_VERSION:
+                issues.append(
+                    f"{workflow_path.name}: job {job_name} setup-uv must set version to "
+                    f"{SETUP_UV_VERSION}"
+                )
+    return issues
+
+
+def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[str]:
+    if workflow_path.name != "security.yml":
+        return []
+
+    issues: list[str] = []
+    jobs = as_mapping(workflow.get("jobs"))
+    codeql_job = as_mapping(jobs.get("codeql")) if jobs is not None else None
+    if codeql_job is None:
+        issues.append(f"{workflow_path.name}: missing codeql job")
+    else:
+        permissions = as_mapping(codeql_job.get("permissions"))
+        if permissions is None or permissions.get("security-events") != "write":
+            issues.append(f"{workflow_path.name}: CodeQL must grant security-events: write")
+        codeql_steps = steps_for_job(codeql_job)
+        analyze_step = next(
+            (step for step in codeql_steps if uses_action(step, "github/codeql-action/analyze")),
+            None,
+        )
+        if analyze_step is None:
+            issues.append(f"{workflow_path.name}: missing CodeQL analyze step")
+        else:
+            analyze_inputs = as_mapping(analyze_step.get("with"))
+            if analyze_inputs is not None and analyze_inputs.get("upload") != "always":
+                issues.append(f"{workflow_path.name}: CodeQL must upload SARIF results")
+
+    gitleaks_job = as_mapping(jobs.get("gitleaks")) if jobs is not None else None
+    if gitleaks_job is None:
+        issues.append(f"{workflow_path.name}: missing gitleaks job")
+        return issues
+
+    gitleaks_steps = steps_for_job(gitleaks_job)
+    checkout_step = next(
+        (step for step in gitleaks_steps if uses_action(step, "actions/checkout")),
+        None,
+    )
+    checkout_inputs = as_mapping(checkout_step.get("with")) if checkout_step is not None else None
+    if checkout_inputs is None or str(checkout_inputs.get("fetch-depth")) != "0":
+        issues.append(f"{workflow_path.name}: Gitleaks checkout must use fetch-depth: 0")
+
+    gitleaks_step = next(
+        (step for step in gitleaks_steps if uses_action(step, "gitleaks/gitleaks-action")),
+        None,
+    )
+    if gitleaks_step is None:
+        issues.append(f"{workflow_path.name}: missing Gitleaks action step")
+    else:
+        gitleaks_inputs = as_mapping(gitleaks_step.get("with"))
+        if gitleaks_inputs is not None and "args" in gitleaks_inputs:
+            issues.append(f"{workflow_path.name}: Gitleaks action v2 does not support with.args")
     return issues
 
 
@@ -151,6 +279,8 @@ def workflow_issues(workflow_path: Path) -> list[str]:
     issues.extend(action_reference_issues(workflow_path, raw_content))
     issues.extend(literal_credential_issues(workflow_path, workflow))
     issues.extend(integration_issues(workflow_path, workflow))
+    issues.extend(security_issues(workflow_path, workflow))
+    issues.extend(setup_uv_issues(workflow_path, workflow))
     return issues
 
 
