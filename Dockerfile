@@ -14,7 +14,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-RUN python -m pip install --no-cache-dir "uv>=0.6"
+RUN python -m pip install --no-cache-dir "uv==0.11.29"
 
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --extra production

@@ -20,6 +20,8 @@ uv run python manage.py runserver
 
 没有 `uv` 时，先安装它；不要绕过锁文件改用未锁定的依赖安装。`scripts\bootstrap.ps1` 可自动执行依赖同步、迁移和运行诊断，并可通过 `-SeedDemoData` 额外写入演示数据；如需本地管理员，仍运行 `seed_dev_admin`。
 
+本仓库的本地工具基线为 Python 3.12（见 `.python-version`）和 uv 0.11.29；Docker 镜像使用相同的固定 uv 版本。Python 3.13 仍受项目元数据支持并在 CI 中验证。
+
 ## Docker PostgreSQL 启动
 
 Docker Compose 使用 PostgreSQL，并将 Web 服务发布到 `127.0.0.1:8000`：

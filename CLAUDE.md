@@ -6,7 +6,7 @@ ArtFlow is a Django monolith for university arts-department activity operations.
 
 ## Development environment
 
-Use Python 3.12 or 3.13 and the lockfile-backed development environment:
+Use the repository's Python 3.12 baseline from `.python-version` and uv 0.11.29 with the lockfile-backed development environment. Python 3.13 remains supported by project metadata and CI:
 
 ```powershell
 uv sync --locked --extra dev

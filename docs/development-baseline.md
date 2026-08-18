@@ -4,7 +4,7 @@ This guide describes the repository's verified development and runtime paths. It
 
 ## Environments and dependencies
 
-Use Python 3.12 or 3.13. The lockfile is authoritative:
+Use Python 3.12, as selected by `.python-version`, with uv 0.11.29. The Docker image installs that same exact uv version, while the project metadata and CI also support Python 3.13. The lockfile is authoritative:
 
 ```powershell
 uv sync --locked --extra dev
