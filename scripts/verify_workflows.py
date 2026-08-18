@@ -206,6 +206,8 @@ def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[st
         issues.append(f"{workflow_path.name}: missing codeql job")
     else:
         permissions = as_mapping(codeql_job.get("permissions"))
+        if permissions is None or permissions.get("actions") != "read":
+            issues.append(f"{workflow_path.name}: CodeQL must grant actions: read")
         if permissions is None or permissions.get("security-events") != "write":
             issues.append(f"{workflow_path.name}: CodeQL must grant security-events: write")
         codeql_steps = steps_for_job(codeql_job)

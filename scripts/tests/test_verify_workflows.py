@@ -200,6 +200,7 @@ def test_verifier_rejects_unenforceable_codeql_and_partial_gitleaks_contracts():
     result = run_verifier(insecure_security_workflow(), "security.yml")
 
     assert result.returncode == 1
+    assert "CodeQL must grant actions: read" in result.stderr
     assert "CodeQL must grant security-events: write" in result.stderr
     assert "CodeQL must upload SARIF results" in result.stderr
     assert "Gitleaks checkout must use fetch-depth: 0" in result.stderr
