@@ -50,17 +50,23 @@ class Command(BaseCommand):
         imported_media = 0
         skipped_media = 0
 
-        for folder in sorted([p for p in source_dir.iterdir() if p.is_dir()], key=lambda p: p.name):
-            is_internal = folder.name in INTERNAL_FOLDERS
+        folders = []
+        for candidate_folder in source_dir.iterdir():
+            folder = self.resolve_descendant(
+                candidate_folder,
+                import_root=import_root,
+                source_dir=source_dir,
+            )
+            if folder is not None and folder.is_dir():
+                folders.append((candidate_folder.name, folder))
+
+        for folder_name, folder in sorted(folders, key=lambda item: item[0]):
+            is_internal = folder_name in INTERNAL_FOLDERS
             if is_internal and not options["include_internal"]:
-                self.stdout.write(f"Skipping internal folder: {folder.name}")
+                self.stdout.write(f"Skipping internal folder: {folder_name}")
                 continue
 
-            image_paths = [
-                p
-                for p in sorted(folder.rglob("*"), key=lambda p: p.name)
-                if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
-            ]
+            image_paths = self.find_image_paths(folder, import_root, source_dir)
             if not image_paths:
                 continue
 
@@ -70,11 +76,11 @@ class Command(BaseCommand):
                 else PublicPost.Status.DRAFT
             )
             post, created = PublicPost.objects.get_or_create(
-                title=folder.name,
+                title=folder_name,
                 post_type=PublicPost.PostType.SHOWCASE,
                 defaults={
-                    "subtitle": f"{folder.name} 活动照片",
-                    "content": f"{folder.name} 活动照片集。",
+                    "subtitle": f"{folder_name} 活动照片",
+                    "content": f"{folder_name} 活动照片集。",
                     "status": status,
                     "published_at": timezone.now()
                     if status == PublicPost.Status.PUBLISHED
@@ -100,7 +106,7 @@ class Command(BaseCommand):
 
                 media = PublicMedia(
                     post=post,
-                    caption=folder.name,
+                    caption=folder_name,
                     original_name=image_path.name,
                     source_path=source_path,
                     is_published=True,
@@ -119,3 +125,51 @@ class Command(BaseCommand):
             + f"skipped {skipped_media} existing item(s)."
         )
         self.stdout.write(self.style.SUCCESS(summary))
+
+    def find_image_paths(self, folder: Path, import_root: Path, source_dir: Path) -> list[Path]:
+        image_paths = []
+        pending_folders = [folder]
+        visited_folders = set()
+
+        while pending_folders:
+            current_folder = pending_folders.pop()
+            if current_folder in visited_folders:
+                continue
+            visited_folders.add(current_folder)
+
+            try:
+                candidates = current_folder.iterdir()
+                for candidate in candidates:
+                    path = self.resolve_descendant(
+                        candidate,
+                        import_root=import_root,
+                        source_dir=source_dir,
+                    )
+                    if path is None:
+                        continue
+                    if path.is_dir():
+                        pending_folders.append(path)
+                    elif path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                        image_paths.append(path)
+            except OSError as error:
+                self.stdout.write(f"Skipping unreadable folder: {current_folder} ({error})")
+
+        return sorted(image_paths, key=lambda path: path.name)
+
+    def resolve_descendant(
+        self, candidate: Path, *, import_root: Path, source_dir: Path
+    ) -> Path | None:
+        try:
+            resolved_candidate = candidate.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            self.stdout.write(f"Skipping unresolved path: {candidate} ({error})")
+            return None
+
+        if not (
+            resolved_candidate.is_relative_to(import_root)
+            and resolved_candidate.is_relative_to(source_dir)
+        ):
+            self.stdout.write(f"Skipping path outside import source: {candidate}")
+            return None
+
+        return resolved_candidate
