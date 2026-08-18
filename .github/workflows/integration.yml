@@ -129,6 +129,12 @@ jobs:
           "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3);
           raise SystemExit(0 if response.status == 200 else response.status)"
 
+      - name: Check published web health endpoint from runner
+        run: >-
+          python -c
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3);
+          raise SystemExit(0 if response.status == 200 else response.status)"
+
       - name: Seed demo data twice in web container
         run: |
           docker compose exec -T web python manage.py seed_demo_data

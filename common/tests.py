@@ -31,6 +31,7 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from . import models as common_models
+from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
 from .views import _media_file_response
 
@@ -194,6 +195,41 @@ class SeedRecordTests(TestCase):
 
 class DemoSeedCommandTests(TestCase):
     seed_time = timezone.make_aware(datetime(2026, 9, 1, 9, 0))
+
+    def test_reset_lock_preflight_materializes_every_selected_dependent_row(self):
+        class LockedRows:
+            def __init__(self):
+                self.locked_ids = set()
+                self.was_materialized = False
+
+            def filter(self, *, pk__in):
+                self.locked_ids = set(pk__in)
+                return self
+
+            def __iter__(self):
+                self.was_materialized = True
+                return iter(())
+
+        locked_rows = LockedRows()
+
+        class LockedManager:
+            def select_for_update(self):
+                return locked_rows
+
+        class LockedModel:
+            objects = LockedManager()
+
+        class DependentRow:
+            def __init__(self, pk):
+                self.pk = pk
+
+        SeedDemoDataCommand()._lock_objects(
+            LockedModel,
+            [DependentRow(101), DependentRow(202)],
+        )
+
+        self.assertEqual(locked_rows.locked_ids, {101, 202})
+        self.assertTrue(locked_rows.was_materialized)
 
     def _seed_record_model(self):
         seed_record_model = getattr(common_models, "SeedRecord", None)

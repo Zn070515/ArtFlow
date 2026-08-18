@@ -535,7 +535,7 @@ class Command(BaseCommand):
     def _lock_objects(self, model: Any, objects: Any) -> None:
         object_ids = {object_.pk for object_ in objects}
         if object_ids:
-            model.objects.select_for_update().filter(pk__in=object_ids).exists()
+            list(model.objects.select_for_update().filter(pk__in=object_ids))
 
     def _collector_contains_only_owned_test_data(self, collector: Any) -> bool:
         for model, objects in collector.data.items():
