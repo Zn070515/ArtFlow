@@ -6,9 +6,11 @@ from core.models import Activity
 from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import Collector, ProtectedError, RestrictedError
 from django.utils import timezone
 from exports.models import ArticleTemplate
 from farewell_show.models import Program
+from files.models import SubmissionFile
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from singer_contest.models import (
@@ -62,6 +64,29 @@ DEMO_SEED_KEYS = frozenset(
 
 SEED_TIME = timezone.make_aware(datetime(2026, 9, 1, 9, 0))
 
+TEST_DATA_FLAG_FIELDS = {
+    Award: "is_test_data",
+    IncidentRecord: "is_test",
+    Program: "is_test_data",
+    ScoreRecord: "is_test_data",
+    ScoreSummary: "is_test_data",
+    SingerRegistration: "is_test_data",
+    SubmissionFile: "is_test_data",
+    VoteOption: "is_test_data",
+    VoteRecord: "is_test_data",
+    VoteSession: "is_test_data",
+}
+
+RESET_RUNTIME_ROOTS = (
+    (Award, "activity_id__in"),
+    (ScoreSummary, "round__activity_id__in"),
+    (ScoreRecord, "round__activity_id__in"),
+    (VoteSession, "activity_id__in"),
+    (IncidentRecord, "activity_id__in"),
+    (Program, "activity_id__in"),
+    (SingerRegistration, "activity_id__in"),
+)
+
 
 class Command(BaseCommand):
     help = "Create deterministic demo data or remove its flagged runtime rows."
@@ -76,8 +101,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         with transaction.atomic():
             if options["reset"]:
-                self._reset_demo_runtime_data()
-                message = "Demo test runtime data reset."
+                if self._reset_demo_runtime_data():
+                    message = "Demo test runtime data reset."
+                else:
+                    message = "Demo reset retained unsafe runtime data."
             else:
                 self._seed_demo_data()
                 message = "Demo data seeded."
@@ -402,6 +429,7 @@ class Command(BaseCommand):
                 "vote_session": vote_session,
                 "singer": singer_one,
                 "sort_order": 1,
+                "is_test_data": True,
             },
         )
         option_two = self._upsert(
@@ -411,6 +439,7 @@ class Command(BaseCommand):
                 "vote_session": vote_session,
                 "singer": singer_two,
                 "sort_order": 2,
+                "is_test_data": True,
             },
         )
         self._upsert(
@@ -421,6 +450,7 @@ class Command(BaseCommand):
                 "vote_option": option_one,
                 "browser_session_key": "demo-browser-session-one",
                 "ip_address": "127.0.0.1",
+                "is_test_data": True,
             },
         )
         self._upsert(
@@ -431,6 +461,7 @@ class Command(BaseCommand):
                 "vote_option": option_two,
                 "browser_session_key": "demo-browser-session-two",
                 "ip_address": "127.0.0.2",
+                "is_test_data": True,
             },
         )
         self._upsert(
@@ -451,43 +482,98 @@ class Command(BaseCommand):
     def _reset_demo_runtime_data(self):
         activity_ids = self._demo_activity_ids()
         if not activity_ids:
-            return
+            return True
 
-        Award.objects.filter(
-            pk__in=self._owned_ids(Award),
-            activity_id__in=activity_ids,
-            is_test_data=True,
-        ).delete()
-        ScoreSummary.objects.filter(
-            pk__in=self._owned_ids(ScoreSummary),
-            round__activity_id__in=activity_ids,
-            is_test_data=True,
-        ).delete()
-        ScoreRecord.objects.filter(
-            pk__in=self._owned_ids(ScoreRecord),
-            round__activity_id__in=activity_ids,
-            is_test_data=True,
-        ).delete()
-        VoteSession.objects.filter(
-            pk__in=self._owned_ids(VoteSession),
-            activity_id__in=activity_ids,
-            is_test_data=True,
-        ).delete()
-        IncidentRecord.objects.filter(
-            pk__in=self._owned_ids(IncidentRecord),
-            activity_id__in=activity_ids,
-            is_test=True,
-        ).delete()
-        Program.objects.filter(
-            pk__in=self._owned_ids(Program),
-            activity_id__in=activity_ids,
-            is_test_data=True,
-        ).delete()
-        SingerRegistration.objects.filter(
-            pk__in=self._owned_ids(SingerRegistration),
-            activity_id__in=activity_ids,
-            is_test_data=True,
-        ).delete()
+        candidates = self._reset_candidates(activity_ids)
+        if not all(self._can_delete_safely(candidate) for candidate in candidates):
+            return False
+
+        for candidate in candidates:
+            candidate.delete()
+        return True
+
+    def _reset_candidates(self, activity_ids):
+        candidates = []
+        for model, activity_lookup in RESET_RUNTIME_ROOTS:
+            flag_field = TEST_DATA_FLAG_FIELDS[model]
+            filters = {
+                activity_lookup: activity_ids,
+                flag_field: True,
+            }
+            candidates.extend(
+                model.objects.select_for_update().filter(
+                    pk__in=self._owned_ids(model),
+                    **filters,
+                )
+            )
+        return candidates
+
+    def _can_delete_safely(self, candidate):
+        try:
+            collector = self._collector_for(candidate)
+            self._lock_collected_objects(collector)
+            collector = self._collector_for(candidate)
+        except (ProtectedError, RestrictedError):
+            return False
+        return self._collector_contains_only_owned_test_data(collector)
+
+    def _collector_for(self, candidate):
+        collector = Collector(using=candidate._state.db)
+        collector.collect([candidate])
+        return collector
+
+    def _lock_collected_objects(self, collector):
+        for model, objects in collector.data.items():
+            self._lock_objects(model, objects)
+        for queryset in collector.fast_deletes:
+            self._lock_objects(queryset.model, queryset)
+        for (field, _value), instances_list in collector.field_updates.items():
+            for objects in instances_list:
+                self._lock_objects(field.model, objects)
+
+    def _lock_objects(self, model, objects):
+        object_ids = {object_.pk for object_ in objects}
+        if object_ids:
+            model.objects.select_for_update().filter(pk__in=object_ids).exists()
+
+    def _collector_contains_only_owned_test_data(self, collector):
+        for model, objects in collector.data.items():
+            if not self._objects_are_owned_test_data(model, objects):
+                return False
+        for queryset in collector.fast_deletes:
+            if not self._objects_are_owned_test_data(queryset.model, queryset):
+                return False
+        for (field, _value), instances_list in collector.field_updates.items():
+            for objects in instances_list:
+                if not self._objects_are_owned_test_data(field.model, objects):
+                    return False
+        return not any(
+            objects
+            for fields in collector.restricted_objects.values()
+            for objects in fields.values()
+        )
+
+    def _objects_are_owned_test_data(self, model, objects):
+        objects = list(objects)
+        if not objects:
+            return True
+
+        flag_field = TEST_DATA_FLAG_FIELDS.get(model)
+        if flag_field is None:
+            return False
+        if not all(getattr(object_, flag_field) for object_ in objects):
+            return False
+
+        content_type = ContentType.objects.get_for_model(model)
+        object_ids = {object_.pk for object_ in objects}
+        return (
+            SeedRecord.objects.filter(
+                key__in=DEMO_SEED_KEYS,
+                content_type=content_type,
+                object_id__in=object_ids,
+            ).count()
+            == len(object_ids)
+        )
 
     def _demo_activity_ids(self):
         activity_type = ContentType.objects.get_for_model(Activity)

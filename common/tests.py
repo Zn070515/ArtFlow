@@ -16,6 +16,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from exports.models import ArticleTemplate
 from farewell_show.models import Program
+from files.models import MaterialCheck, StaffNote, SubmissionFile
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from singer_contest.models import (
@@ -274,6 +275,12 @@ class DemoSeedCommandTests(TestCase):
             },
         )
         self.assertFalse(User.objects.get(username="demo-admin").has_usable_password())
+        self.assertTrue(
+            all(getattr(option, "is_test_data", False) for option in VoteOption.objects.all())
+        )
+        self.assertTrue(
+            all(getattr(record, "is_test_data", False) for record in VoteRecord.objects.all())
+        )
         self.assertEqual(output.getvalue(), "Demo data seeded.\n")
 
         second_output = StringIO()
@@ -443,3 +450,89 @@ class DemoSeedCommandTests(TestCase):
         self.assertTrue(SingerRegistration.objects.filter(pk=unrelated_test_registration.pk).exists())
         self.assertTrue(VoteSession.objects.filter(pk=unrelated_test_vote.pk).exists())
         self.assertEqual(output.getvalue(), "Demo test runtime data reset.\n")
+
+    def test_reset_retains_vote_session_with_an_unowned_vote_record(self):
+        call_command("seed_demo_data")
+        vote_session = VoteSession.objects.get(name="Demo Audience Choice")
+        vote_option = VoteOption.objects.get(vote_session=vote_session, sort_order=1)
+        seeded_award = Award.objects.get(name="Demo First Place")
+        unowned_record = VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=vote_option,
+            browser_session_key="unowned-browser-session",
+            ip_address="127.0.0.9",
+        )
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        self.assertTrue(VoteSession.objects.filter(pk=vote_session.pk).exists())
+        self.assertTrue(VoteRecord.objects.filter(pk=unowned_record.pk).exists())
+        self.assertTrue(Award.objects.filter(pk=seeded_award.pk).exists())
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
+    def test_reset_retains_singer_with_an_unowned_award(self):
+        call_command("seed_demo_data")
+        singer = SingerRegistration.objects.get(name="Demo Singer One")
+        unowned_award = Award.objects.create(
+            activity=singer.activity,
+            singer=singer,
+            name="Unowned award",
+            is_test_data=True,
+        )
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        self.assertTrue(SingerRegistration.objects.filter(pk=singer.pk).exists())
+        self.assertTrue(Award.objects.filter(pk=unowned_award.pk).exists())
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
+    def test_reset_retains_singer_with_an_unowned_staff_note(self):
+        call_command("seed_demo_data")
+        singer = SingerRegistration.objects.get(name="Demo Singer One")
+        unowned_note = StaffNote.objects.create(
+            singer_registration=singer,
+            content="Unowned staff note",
+            created_by=User.objects.get(username="demo-participant"),
+        )
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        self.assertTrue(SingerRegistration.objects.filter(pk=singer.pk).exists())
+        self.assertTrue(StaffNote.objects.filter(pk=unowned_note.pk).exists())
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
+    def test_reset_retains_program_with_an_unowned_submission_file(self):
+        call_command("seed_demo_data")
+        program = Program.objects.get(name="Demo Opening Song")
+        unowned_file = SubmissionFile.objects.create(
+            program=program,
+            file="submissions/unowned-program-material.txt",
+            original_name="unowned-program-material.txt",
+            file_size=1,
+            uploaded_by=User.objects.get(username="demo-participant"),
+        )
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        self.assertTrue(Program.objects.filter(pk=program.pk).exists())
+        self.assertTrue(SubmissionFile.objects.filter(pk=unowned_file.pk).exists())
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
+    def test_reset_retains_program_with_an_unowned_material_check(self):
+        call_command("seed_demo_data")
+        program = Program.objects.get(name="Demo Opening Song")
+        unowned_check = MaterialCheck.objects.create(
+            program=program,
+            item_name="Unowned material check",
+        )
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        self.assertTrue(Program.objects.filter(pk=program.pk).exists())
+        self.assertTrue(MaterialCheck.objects.filter(pk=unowned_check.pk).exists())
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")

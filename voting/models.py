@@ -30,6 +30,7 @@ class VoteOption(models.Model):
     vote_session = models.ForeignKey(VoteSession, on_delete=models.CASCADE, related_name="options")
     singer = models.ForeignKey("singer_contest.SingerRegistration", on_delete=models.CASCADE, related_name="vote_options")
     sort_order = models.IntegerField(default=0)
+    is_test_data = models.BooleanField(default=False)
 
     class Meta:
         unique_together = [("vote_session", "singer")]
@@ -44,6 +45,7 @@ class VoteRecord(models.Model):
     vote_option = models.ForeignKey(VoteOption, on_delete=models.CASCADE, related_name="records")
     browser_session_key = models.CharField(max_length=64)
     ip_address = models.GenericIPAddressField()
+    is_test_data = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
