@@ -2,6 +2,7 @@ import importlib
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -238,8 +239,27 @@ class SettingsTests(SimpleTestCase):
         ):
             environment.pop(name, None)
         environment["APP_ENV"] = "production"
+        environment["PYTHON_DOTENV_DISABLED"] = "1"
         environment.update(overrides)
         return environment
+
+    @contextmanager
+    def temporary_repository_dotenv(self):
+        dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+        dotenv_contents = (
+            "\n".join(f"{name}={value}" for name, value in production_environment().items()) + "\n"
+        )
+
+        if dotenv_path.exists():
+            yield dotenv_path
+            return
+
+        dotenv_path.write_text(dotenv_contents, encoding="utf-8")
+        try:
+            yield dotenv_path
+        finally:
+            if dotenv_path.exists() and dotenv_path.read_text(encoding="utf-8") == dotenv_contents:
+                dotenv_path.unlink()
 
     def run_production_startup(self, command, **overrides):
         environment = self.isolated_production_environment(**overrides)
@@ -254,6 +274,7 @@ class SettingsTests(SimpleTestCase):
 
     def assert_incomplete_production_startup_is_rejected(self, environment, result):
         output = result.stdout + result.stderr
+        self.assertEqual(environment["PYTHON_DOTENV_DISABLED"], "1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Production configuration requires SECRET_KEY.", output)
         self.assertNotIn(DEVELOPMENT_SECRET_KEY, output)
@@ -276,11 +297,13 @@ class SettingsTests(SimpleTestCase):
             "doctor": [sys.executable, "manage.py", "doctor"],
         }
 
-        for startup_path, command in commands.items():
-            with self.subTest(startup_path=startup_path):
-                environment, result = self.run_production_startup(command)
+        with self.temporary_repository_dotenv() as dotenv_path:
+            self.assertTrue(dotenv_path.is_file())
+            for startup_path, command in commands.items():
+                with self.subTest(startup_path=startup_path):
+                    environment, result = self.run_production_startup(command)
 
-                self.assert_incomplete_production_startup_is_rejected(environment, result)
+                    self.assert_incomplete_production_startup_is_rejected(environment, result)
 
     def test_valid_production_environment_allows_django_setup_with_postgresql(self):
         environment, result = self.run_production_startup(
