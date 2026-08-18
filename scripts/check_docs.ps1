@@ -4,10 +4,12 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repositoryRoot = Split-Path -Parent $PSScriptRoot
+$repositoryRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $docsPath = Join-Path $repositoryRoot 'docs'
 $superpowersDocsPath = Join-Path $docsPath 'superpowers'
-$rootDocumentNames = @('README.md', 'CLAUDE.md', 'AGENTS.md')
+# Root Markdown is opt-in: this list contains the repository's user-facing root
+# documents. Other root Markdown is not scanned unless it is added here.
+$rootDocumentNames = @('README.md', 'CLAUDE.md', 'AGENTS.md', 'CHANGELOG.md', 'GOAL.md')
 
 function Get-UserFacingDocuments {
     $documents = @()
@@ -32,8 +34,23 @@ function Get-UserFacingDocuments {
     return $documents
 }
 
+function Test-IsWithinRepositoryRoot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $relativePath = [IO.Path]::GetRelativePath($repositoryRoot, $Path)
+    return (
+        $relativePath -ne '..' -and
+        -not $relativePath.StartsWith("..$([IO.Path]::DirectorySeparatorChar)") -and
+        -not [IO.Path]::IsPathRooted($relativePath)
+    )
+}
+
 $documents = Get-UserFacingDocuments
 $missingLinks = @()
+$escapingLinks = @()
 $linkPattern = '\[[^\]]*\]\((?<target><[^>]+>|[^)\s]+)(?:\s+["''][^"'']*["''])?\)'
 
 foreach ($document in $documents) {
@@ -50,11 +67,21 @@ foreach ($document in $documents) {
         }
 
         $targetPath = (($target -split '#', 2)[0] -split '\?', 2)[0]
-        $resolvedPath = Join-Path $repositoryRoot $targetPath.TrimStart([char[]]@('/', '\'))
+        $documentDirectory = Split-Path -Parent $document.FullName
+        $resolvedPath = [IO.Path]::GetFullPath((Join-Path $documentDirectory $targetPath))
+        if (-not (Test-IsWithinRepositoryRoot -Path $resolvedPath)) {
+            $escapingLinks += "$($document.FullName): $target"
+            continue
+        }
+
         if (-not (Test-Path -LiteralPath $resolvedPath)) {
             $missingLinks += "$($document.FullName): $target"
         }
     }
+}
+
+if ($escapingLinks.Count -gt 0) {
+    throw ("A documentation link escapes the repository root:`n" + ($escapingLinks -join "`n"))
 }
 
 if ($missingLinks.Count -gt 0) {

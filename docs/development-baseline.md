@@ -56,6 +56,16 @@ Invoke-WebRequest http://127.0.0.1:8000/healthz/
 
 The database remains on the internal Docker network. The web port is bound to loopback. Compose uses named volumes for PostgreSQL data (`postgres_data`), collected static files (`static_data`), and media (`media_data`). `docker compose down` stops the stack while retaining those volumes. `docker compose down --volumes` permanently removes all three local volumes, so use it only when intentional data loss is acceptable.
 
+### PostgreSQL acceptance gate
+
+Run the Task 8 PostgreSQL acceptance contract against the Compose services with:
+
+```powershell
+pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -VerifyResetSafety
+```
+
+`-StartCompose` explicitly performs `docker compose up --build --wait`; without it, the script requires an already running Compose `web` service. The contract runs migrations, `doctor`, a health request, idempotent demo seeding, the opt-in demo reset check, and Django's full `manage.py test` suite inside the `web` container. The image intentionally installs only the production extra, so this gate uses Django's built-in test runner rather than host `pytest`. It never stops services or removes volumes. Use `docker compose down --volumes` separately—and only when intentionally discarding local PostgreSQL, static, and media data.
+
 ## CI and local gates
 
 The repository CI covers Linux SQLite quality checks, Windows application checks, PostgreSQL integration, workflow linting, dependency audit, CodeQL, and a Git-history secret scan. The PostgreSQL integration verifies migrations, `doctor`, `/healthz/`, repeated demo seeding, and the full test suite.
@@ -84,4 +94,4 @@ git diff --check
 
 Never commit `.env`, production credentials, database files, uploads, exports, archives, or generated media. Examples use placeholders only; replace them locally or through deployment secret management. Keep internal submission files behind controlled access views, and do not put sensitive configuration in `doctor`, health, CI, or container logs.
 
-Create a short-lived branch from a clean, updated `main`; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into `main` after verification. See [repository instructions](AGENTS.md) for the repository-wide workflow rules.
+Create a short-lived branch from a clean, updated `main`; verify and commit the scoped change on that branch. The integration owner performs the non-fast-forward merge into `main` after verification. See [repository instructions](../AGENTS.md) for the repository-wide workflow rules.
