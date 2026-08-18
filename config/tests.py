@@ -217,6 +217,7 @@ class SettingsTests(SimpleTestCase):
 
         self.assertEqual([error.id for error in errors], ["config.E001"])
         self.assertNotIn(environment["SECRET_KEY"], errors[0].msg)
+        assert errors[0].hint is not None
         self.assertNotIn(environment["SECRET_KEY"], errors[0].hint)
 
     def isolated_production_environment(self, **overrides):

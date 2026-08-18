@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from django.core.checks import Error, Tags, register
 from django.core.exceptions import ImproperlyConfigured
@@ -7,7 +8,7 @@ from config.runtime import get_app_env, validate_production_environment
 
 
 @register(Tags.security)
-def production_config_check(app_configs=None, **kwargs):
+def production_config_check(app_configs: Any = None, **kwargs: Any) -> list[Error]:
     if get_app_env() != "production":
         return []
 

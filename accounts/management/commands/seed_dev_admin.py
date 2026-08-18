@@ -1,5 +1,6 @@
 import getpass
 import os
+from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -9,10 +10,10 @@ from accounts.models import User
 class Command(BaseCommand):
     help = "Create or reset a local development administrator account."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument("--username", default=os.environ.get("DEV_ADMIN_USERNAME", "admin"))
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         password = os.environ.get("DEV_ADMIN_PASSWORD")
         if not password:
             try:
@@ -28,7 +29,7 @@ class Command(BaseCommand):
         user.is_staff = True
         user.is_superuser = True
         user.set_password(password)
-        user.save()
+        user.save()  # type: ignore[no-untyped-call]
 
         action = "Created" if created else "Updated"
         self.stdout.write(self.style.SUCCESS(f"{action} development admin: {username}"))

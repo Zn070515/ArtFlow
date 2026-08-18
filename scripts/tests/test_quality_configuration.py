@@ -31,12 +31,21 @@ STRICT_MODULES = {
 STRICT_CHECKS = {
     "disallow_any_generics": True,
     "disallow_subclassing_any": True,
+    "disallow_incomplete_defs": True,
+    "disallow_untyped_calls": True,
+    "disallow_untyped_defs": True,
     "disallow_untyped_decorators": True,
     "warn_unused_ignores": True,
     "warn_return_any": True,
     "no_implicit_reexport": True,
     "strict_equality": True,
     "extra_checks": True,
+}
+GRADUAL_MODULES = {"common.views", "common.tests", "config.tests"}
+GRADUAL_CHECKS = {
+    "disallow_incomplete_defs": False,
+    "disallow_untyped_calls": False,
+    "disallow_untyped_defs": False,
 }
 
 
@@ -61,6 +70,12 @@ def test_quality_configuration_enforces_the_engineering_baseline():
     )
     for setting, expected_value in STRICT_CHECKS.items():
         assert strict_override[setting] is expected_value
+
+    gradual_override = next(
+        override for override in mypy["overrides"] if set(override["module"]) == GRADUAL_MODULES
+    )
+    for setting, expected_value in GRADUAL_CHECKS.items():
+        assert gradual_override[setting] is expected_value
 
 
 def test_toolchain_baseline_is_pinned_and_documented():

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.core.files import File
@@ -21,7 +22,7 @@ PUBLISH_HELP = (
 class Command(BaseCommand):
     help = "Import folders of public activity photos into PublicPost/PublicMedia."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             "source_dir", help="Directory containing one subfolder per activity/gallery."
         )
@@ -37,7 +38,7 @@ class Command(BaseCommand):
         )
 
     @transaction.atomic
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         import_root = Path(os.path.realpath(Path(settings.MEDIA_ROOT) / PHOTO_IMPORT_ROOT_NAME))
         source_dir = Path(os.path.realpath(Path(options["source_dir"]).expanduser()))
         if source_dir == import_root or not source_dir.is_relative_to(import_root):

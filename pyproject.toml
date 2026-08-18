@@ -151,12 +151,27 @@ module = [
 # the modules that are ready for them while annotation enforcement is gradual.
 disallow_any_generics = true
 disallow_subclassing_any = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
 disallow_untyped_decorators = true
 warn_unused_ignores = true
 warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 extra_checks = true
+
+[[tool.mypy.overrides]]
+# Preserve gradual typing for existing business views and legacy test modules.
+# Production config/common helpers and the approved management namespaces remain strict.
+module = [
+    "common.views",
+    "common.tests",
+    "config.tests",
+]
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_untyped_defs = false
 
 [tool.django-stubs]
 django_settings_module = "config.settings"

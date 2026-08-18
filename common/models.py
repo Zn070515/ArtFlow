@@ -35,7 +35,7 @@ class AuditLog(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (
             f"{self.operator} {self.get_action_type_display()} {self.target} "
             f"({self.created_at:%Y-%m-%d %H:%M})"
@@ -60,5 +60,5 @@ class SeedRecord(models.Model):
             )
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.key

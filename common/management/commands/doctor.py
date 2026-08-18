@@ -1,5 +1,6 @@
 from enum import IntEnum
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.core.checks import ERROR, run_checks
@@ -21,7 +22,7 @@ class Command(BaseCommand):
     requires_system_checks = []
     requires_migrations_checks = False
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         failures: list[DoctorExitCode] = []
 
         self.stdout.write(f"Environment: {settings.APP_ENV}")

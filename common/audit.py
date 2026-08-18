@@ -1,14 +1,25 @@
+from django.http import HttpRequest
+
 from .models import AuditLog
 
 
-def client_ip(request):
+def client_ip(request: HttpRequest) -> str | None:
     forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if forwarded_for:
+    if isinstance(forwarded_for, str) and forwarded_for:
         return forwarded_for.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR") or None
+    remote_addr = request.META.get("REMOTE_ADDR")
+    return remote_addr if isinstance(remote_addr, str) else None
 
 
-def log_action(request, action_type, target, *, old_value="", new_value="", note=""):
+def log_action(
+    request: HttpRequest,
+    action_type: str,
+    target: str,
+    *,
+    old_value: str = "",
+    new_value: str = "",
+    note: str = "",
+) -> AuditLog:
     return AuditLog.objects.create(
         operator=request.user if request.user.is_authenticated else None,
         action_type=action_type,

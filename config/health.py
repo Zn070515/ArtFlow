@@ -1,9 +1,9 @@
 from django.core.checks import ERROR, run_checks
 from django.db import connections
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
 
 
-def healthz(request):
+def healthz(request: HttpRequest) -> JsonResponse:
     if request.method != "GET":
         response = _unavailable_response(status=405)
         response["Allow"] = "GET"
@@ -19,5 +19,5 @@ def healthz(request):
     return JsonResponse({"status": "ok"})
 
 
-def _unavailable_response(status=503):
+def _unavailable_response(status: int = 503) -> JsonResponse:
     return JsonResponse({"status": "unavailable"}, status=status)

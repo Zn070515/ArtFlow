@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from accounts.models import User
 from core.models import Activity
 from django.contrib.contenttypes.models import ContentType
 from django.core.management.base import BaseCommand, CommandError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, transaction
 from django.db.models.deletion import Collector, ProtectedError, RestrictedError
 from django.utils import timezone
 from exports.models import ArticleTemplate
@@ -91,14 +92,14 @@ RESET_RUNTIME_ROOTS = (
 class Command(BaseCommand):
     help = "Create deterministic demo data or remove its flagged runtime rows."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             "--reset",
             action="store_true",
             help="Remove command-owned flagged demo runtime rows without touching configuration.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         with transaction.atomic():
             if options["reset"]:
                 if self._reset_demo_runtime_data():
@@ -111,7 +112,7 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(message))
 
-    def _seed_demo_data(self):
+    def _seed_demo_data(self) -> None:
         admin = self._upsert(
             "demo.user.admin",
             User,
@@ -479,7 +480,7 @@ class Command(BaseCommand):
             },
         )
 
-    def _reset_demo_runtime_data(self):
+    def _reset_demo_runtime_data(self) -> bool:
         activity_ids = self._demo_activity_ids()
         if not activity_ids:
             return True
@@ -492,8 +493,8 @@ class Command(BaseCommand):
             candidate.delete()
         return True
 
-    def _reset_candidates(self, activity_ids):
-        candidates: list[models.Model] = []
+    def _reset_candidates(self, activity_ids: Any) -> list[Any]:
+        candidates: list[Any] = []
         for model, activity_lookup in RESET_RUNTIME_ROOTS:
             flag_field = TEST_DATA_FLAG_FIELDS[model]
             filters = {
@@ -508,7 +509,7 @@ class Command(BaseCommand):
             )
         return candidates
 
-    def _can_delete_safely(self, candidate):
+    def _can_delete_safely(self, candidate: Any) -> bool:
         try:
             collector = self._collector_for(candidate)
             self._lock_collected_objects(collector)
@@ -517,12 +518,12 @@ class Command(BaseCommand):
             return False
         return self._collector_contains_only_owned_test_data(collector)
 
-    def _collector_for(self, candidate):
+    def _collector_for(self, candidate: Any) -> Any:
         collector = Collector(using=candidate._state.db)
         collector.collect([candidate])
         return collector
 
-    def _lock_collected_objects(self, collector):
+    def _lock_collected_objects(self, collector: Any) -> None:
         for model, objects in collector.data.items():
             self._lock_objects(model, objects)
         for queryset in collector.fast_deletes:
@@ -531,12 +532,12 @@ class Command(BaseCommand):
             for objects in instances_list:
                 self._lock_objects(field.model, objects)
 
-    def _lock_objects(self, model, objects):
+    def _lock_objects(self, model: Any, objects: Any) -> None:
         object_ids = {object_.pk for object_ in objects}
         if object_ids:
             model.objects.select_for_update().filter(pk__in=object_ids).exists()
 
-    def _collector_contains_only_owned_test_data(self, collector):
+    def _collector_contains_only_owned_test_data(self, collector: Any) -> bool:
         for model, objects in collector.data.items():
             if not self._objects_are_owned_test_data(model, objects):
                 return False
@@ -553,7 +554,7 @@ class Command(BaseCommand):
             for objects in fields.values()
         )
 
-    def _objects_are_owned_test_data(self, model, objects):
+    def _objects_are_owned_test_data(self, model: Any, objects: Any) -> bool:
         objects = list(objects)
         if not objects:
             return True
@@ -572,7 +573,7 @@ class Command(BaseCommand):
             object_id__in=object_ids,
         ).count() == len(object_ids)
 
-    def _demo_activity_ids(self):
+    def _demo_activity_ids(self) -> list[int]:
         activity_type = ContentType.objects.get_for_model(Activity)
         return list(
             SeedRecord.objects.filter(
@@ -581,14 +582,20 @@ class Command(BaseCommand):
             ).values_list("object_id", flat=True)
         )
 
-    def _owned_ids(self, model):
+    def _owned_ids(self, model: Any) -> Any:
         content_type = ContentType.objects.get_for_model(model)
         return SeedRecord.objects.filter(
             key__in=DEMO_SEED_KEYS,
             content_type=content_type,
         ).values_list("object_id", flat=True)
 
-    def _upsert(self, key, model, defaults, prepare_create=None):
+    def _upsert(
+        self,
+        key: str,
+        model: Any,
+        defaults: dict[str, Any],
+        prepare_create: Any = None,
+    ) -> Any:
         content_type = ContentType.objects.get_for_model(model)
         seed_record = SeedRecord.objects.select_for_update().filter(key=key).first()
         target = None
