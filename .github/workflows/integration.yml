@@ -28,13 +28,15 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
+        ports:
+          - "127.0.0.1:5432:5432"
     env:
       APP_ENV: development
       DEBUG: "False"
       DATABASE_ENGINE: postgresql
       POSTGRES_DB: artflow_ci
       POSTGRES_USER: artflow_ci
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: "5432"
     steps:
       - name: Check out source

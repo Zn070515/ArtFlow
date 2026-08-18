@@ -172,8 +172,29 @@ function Assert-WorkflowContracts {
             }
         }
 
-        if ($workflow -match 'POSTGRES_' -and $workflow -match '(?m)^\s+ports:\s*$') {
-            throw "Workflow contract violation: $($workflowPath.Name) must not expose PostgreSQL service ports."
+        if ($workflow -match 'POSTGRES_') {
+            Assert-ContentMatch $workflow '(?m)^\s*POSTGRES_HOST:\s*127\.0\.0\.1\s*$' "$($workflowPath.Name) PostgreSQL localhost host"
+            $postgresService = [regex]::Match(
+                $workflow,
+                '(?ms)^      postgres:\s*$.*?(?=^    (?:env|steps):\s*$|\z)'
+            ).Value
+            $postgresPorts = [regex]::Match(
+                $postgresService,
+                '(?ms)^        ports:\s*$\r?\n(?<ports>.*?)(?=^    (?:env|steps):\s*$|\z)'
+            )
+            $postgresPortBindings = [regex]::Matches(
+                $postgresPorts.Groups['ports'].Value,
+                '(?m)^          -\s*["'']?(?<binding>[^"''\r\n]+)'
+            )
+            if ($postgresPortBindings.Count -eq 0) {
+                throw "Workflow contract violation: $($workflowPath.Name) must map PostgreSQL to localhost."
+            }
+            foreach ($postgresPortBinding in $postgresPortBindings) {
+                $binding = $postgresPortBinding.Groups['binding'].Value.Trim()
+                if ($binding -notmatch '^127\.0\.0\.1:\d+:\d+(?:/(?:tcp|udp))?$') {
+                    throw "Workflow contract violation: $($workflowPath.Name) PostgreSQL port $binding must bind to 127.0.0.1."
+                }
+            }
         }
     }
 
