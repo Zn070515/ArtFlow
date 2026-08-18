@@ -219,27 +219,51 @@ def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[st
             issues.append(f"{workflow_path.name}: missing CodeQL analyze step")
         else:
             analyze_inputs = as_mapping(analyze_step.get("with"))
-            if analyze_inputs is not None and analyze_inputs.get("upload") != "always":
-                issues.append(f"{workflow_path.name}: CodeQL must upload SARIF results")
+            if (
+                analyze_step.get("continue-on-error") is True
+                or analyze_inputs is None
+                or analyze_inputs.get("upload") != "never"
+                or analyze_inputs.get("output") != "codeql-results"
+            ):
+                issues.append(
+                    f"{workflow_path.name}: CodeQL must generate SARIF locally without "
+                    "continue-on-error"
+                )
             evaluator_commands = "\n".join(
                 str(step.get("run", ""))
                 for step in codeql_steps
                 if isinstance(step.get("run"), str)
             )
-            codeql_step_configuration = "\n".join(str(step) for step in codeql_steps)
             has_sarif_evaluator = (
-                analyze_step.get("continue-on-error") is True
-                and analyze_inputs is not None
-                and analyze_inputs.get("output") == "codeql-results"
-                and "CODEQL_ANALYSIS_OUTCOME" in codeql_step_configuration
-                and "codeql-results" in codeql_step_configuration
-                and "sarif" in evaluator_commands.lower()
+                "CODEQL_SARIF_DIRECTORY" in evaluator_commands
+                and 'sarif.get("version") != "2.1.0"' in evaluator_commands
+                and "executionSuccessful" in evaluator_commands
+                and 'suppression.get("status") == "accepted"' in evaluator_commands
                 and "raise SystemExit(1)" in evaluator_commands
             )
             if not has_sarif_evaluator:
                 issues.append(
-                    f"{workflow_path.name}: CodeQL must evaluate SARIF findings when "
-                    "upload cannot complete"
+                    f"{workflow_path.name}: CodeQL must validate SARIF structure, analysis "
+                    "success, and explicit suppressions"
+                )
+            upload_step = next(
+                (
+                    step
+                    for step in codeql_steps
+                    if uses_action(step, "github/codeql-action/upload-sarif")
+                ),
+                None,
+            )
+            upload_inputs = as_mapping(upload_step.get("with")) if upload_step is not None else None
+            if (
+                upload_step is None
+                or upload_step.get("continue-on-error") is not True
+                or upload_inputs is None
+                or upload_inputs.get("sarif_file") != "codeql-results"
+                or "success()" not in str(upload_step.get("if", ""))
+            ):
+                issues.append(
+                    f"{workflow_path.name}: CodeQL must upload evaluated SARIF separately"
                 )
 
     gitleaks_job = as_mapping(jobs.get("gitleaks")) if jobs is not None else None
@@ -256,16 +280,20 @@ def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[st
     if checkout_inputs is None or str(checkout_inputs.get("fetch-depth")) != "0":
         issues.append(f"{workflow_path.name}: Gitleaks checkout must use fetch-depth: 0")
 
-    gitleaks_step = next(
-        (step for step in gitleaks_steps if uses_action(step, "gitleaks/gitleaks-action")),
-        None,
+    gitleaks_commands = "\n".join(
+        str(step.get("run", "")) for step in gitleaks_steps if isinstance(step.get("run"), str)
     )
-    if gitleaks_step is None:
-        issues.append(f"{workflow_path.name}: missing Gitleaks action step")
-    else:
-        gitleaks_inputs = as_mapping(gitleaks_step.get("with"))
-        if gitleaks_inputs is not None and "args" in gitleaks_inputs:
-            issues.append(f"{workflow_path.name}: Gitleaks action v2 does not support with.args")
+    if (
+        any(uses_action(step, "gitleaks/gitleaks-action") for step in gitleaks_steps)
+        or "GITLEAKS_LINUX_X64_SHA256" not in gitleaks_commands
+        or "sha256sum --check --strict" not in gitleaks_commands
+        or "gitleaks git" not in gitleaks_commands
+        or '--log-opts="--all"' not in gitleaks_commands
+        or "git rev-list --all --count" not in gitleaks_commands
+    ):
+        issues.append(
+            f"{workflow_path.name}: Gitleaks must scan all reachable commits with the pinned CLI"
+        )
     return issues
 
 

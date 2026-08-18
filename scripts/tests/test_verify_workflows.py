@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -5,6 +7,7 @@ from pathlib import Path
 from textwrap import dedent
 
 VERIFIER_PATH = Path(__file__).resolve().parents[1] / "verify_workflows.py"
+SECURITY_WORKFLOW_PATH = Path(__file__).resolve().parents[2] / ".github/workflows/security.yml"
 CHECKOUT_SHA = "11bd71901bbe5b1630ceea73d27597364c9af683"
 CODEQL_SHA = "bb16b9baa2ec4010b29f5c606d57d01190139edd"
 GITLEAKS_SHA = "ff98106e4c7b2bc287b24eaf42907196329070c7"
@@ -82,6 +85,42 @@ def run_verifier(
             capture_output=True,
             text=True,
         )
+
+
+def run_sarif_evaluator(sarif_contents: str) -> subprocess.CompletedProcess[str]:
+    workflow = SECURITY_WORKFLOW_PATH.read_text(encoding="utf-8")
+    script = workflow.split("          python - <<'PY'\n", maxsplit=1)[1].split(
+        "\n          PY", maxsplit=1
+    )[0]
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        temporary_path = Path(temporary_directory)
+        (temporary_path / "results.sarif").write_text(sarif_contents, encoding="utf-8")
+        evaluator_path = temporary_path / "evaluate_sarif.py"
+        evaluator_path.write_text(dedent(script), encoding="utf-8")
+        environment = os.environ | {"CODEQL_SARIF_DIRECTORY": str(temporary_path)}
+        return subprocess.run(
+            [sys.executable, str(evaluator_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+
+def codeql_sarif(results: list[dict[str, object]], execution_successful: bool = True) -> str:
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "CodeQL command-line toolchain"}},
+                    "invocations": [{"executionSuccessful": execution_successful}],
+                    "results": results,
+                }
+            ],
+        }
+    )
 
 
 def insecure_security_workflow() -> str:
@@ -202,10 +241,62 @@ def test_verifier_rejects_unenforceable_codeql_and_partial_gitleaks_contracts():
     assert result.returncode == 1
     assert "CodeQL must grant actions: read" in result.stderr
     assert "CodeQL must grant security-events: write" in result.stderr
-    assert "CodeQL must upload SARIF results" in result.stderr
-    assert "CodeQL must evaluate SARIF findings when upload cannot complete" in result.stderr
+    assert "CodeQL must generate SARIF locally without continue-on-error" in result.stderr
+    assert "CodeQL must upload evaluated SARIF separately" in result.stderr
     assert "Gitleaks checkout must use fetch-depth: 0" in result.stderr
-    assert "Gitleaks action v2 does not support with.args" in result.stderr
+    assert "Gitleaks must scan all reachable commits with the pinned CLI" in result.stderr
+
+
+def test_codeql_sarif_evaluator_fails_on_an_unsuppressed_finding():
+    result = run_sarif_evaluator(codeql_sarif([{"ruleId": "py/path-injection"}]))
+
+    assert result.returncode == 1
+    assert "CodeQL findings: py/path-injection" in result.stdout
+
+
+def test_codeql_sarif_evaluator_rejects_malformed_sarif():
+    result = run_sarif_evaluator("not JSON")
+
+    assert result.returncode == 1
+    assert "invalid SARIF" in result.stderr
+
+
+def test_codeql_sarif_evaluator_rejects_unsuccessful_analysis():
+    result = run_sarif_evaluator(codeql_sarif([], execution_successful=False))
+
+    assert result.returncode == 1
+    assert "CodeQL analysis was not successful" in result.stderr
+
+
+def test_codeql_sarif_evaluator_allows_only_explicitly_accepted_suppression():
+    result = run_sarif_evaluator(
+        codeql_sarif(
+            [
+                {
+                    "ruleId": "py/path-injection",
+                    "suppressions": [{"kind": "inSource", "status": "accepted"}],
+                }
+            ]
+        )
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_codeql_sarif_evaluator_rejects_a_suppression_under_review():
+    result = run_sarif_evaluator(
+        codeql_sarif(
+            [
+                {
+                    "ruleId": "py/path-injection",
+                    "suppressions": [{"kind": "inSource", "status": "underReview"}],
+                }
+            ]
+        )
+    )
+
+    assert result.returncode == 1
+    assert "unaccepted SARIF suppression" in result.stderr
 
 
 def test_verifier_requires_an_exact_setup_uv_tool_version():
