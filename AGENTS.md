@@ -19,15 +19,18 @@ Templates are under `templates/`. Tests are app-level `tests.py` files. Local me
 Prefix shell commands with `rtk` in agent workflows when `rtk` is installed. If the command is unavailable on the current machine, run the command directly and report that fallback; do not block repository work on an optional wrapper.
 
 ```bash
+uv sync --locked --extra dev
 python manage.py migrate
 python manage.py runserver
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test
 python manage.py test staff_panel
+python manage.py doctor
+pwsh -NoProfile -File scripts/check_docs.ps1
 ```
 
-Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, and `test` before committing. Install dependencies with `uv pip install -r requirements.txt` or an activated virtualenv plus `pip install -r requirements.txt`.
+Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, `doctor` for read-only runtime diagnostics, and `test` before committing. Install the locked development environment with `uv sync --locked --extra dev`; use `check_docs.ps1` after user-facing documentation changes.
 
 ## Coding Style & Naming Conventions
 Use Python 4-space indentation and Django conventions: models as `PascalCase`, functions/views as `snake_case`, URL names as concise action names such as `vote_session_unlock`. Keep cross-flow rules in shared helpers, e.g. `common/business_rules.py`. Do not enforce permissions only in templates; validate before mutation.
