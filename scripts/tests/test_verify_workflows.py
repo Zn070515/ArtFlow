@@ -203,6 +203,7 @@ def test_verifier_rejects_unenforceable_codeql_and_partial_gitleaks_contracts():
     assert "CodeQL must grant actions: read" in result.stderr
     assert "CodeQL must grant security-events: write" in result.stderr
     assert "CodeQL must upload SARIF results" in result.stderr
+    assert "CodeQL must evaluate SARIF findings when upload cannot complete" in result.stderr
     assert "Gitleaks checkout must use fetch-depth: 0" in result.stderr
     assert "Gitleaks action v2 does not support with.args" in result.stderr
 

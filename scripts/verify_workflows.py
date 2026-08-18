@@ -221,6 +221,26 @@ def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[st
             analyze_inputs = as_mapping(analyze_step.get("with"))
             if analyze_inputs is not None and analyze_inputs.get("upload") != "always":
                 issues.append(f"{workflow_path.name}: CodeQL must upload SARIF results")
+            evaluator_commands = "\n".join(
+                str(step.get("run", ""))
+                for step in codeql_steps
+                if isinstance(step.get("run"), str)
+            )
+            codeql_step_configuration = "\n".join(str(step) for step in codeql_steps)
+            has_sarif_evaluator = (
+                analyze_step.get("continue-on-error") is True
+                and analyze_inputs is not None
+                and analyze_inputs.get("output") == "codeql-results"
+                and "CODEQL_ANALYSIS_OUTCOME" in codeql_step_configuration
+                and "codeql-results" in codeql_step_configuration
+                and "sarif" in evaluator_commands.lower()
+                and "raise SystemExit(1)" in evaluator_commands
+            )
+            if not has_sarif_evaluator:
+                issues.append(
+                    f"{workflow_path.name}: CodeQL must evaluate SARIF findings when "
+                    "upload cannot complete"
+                )
 
     gitleaks_job = as_mapping(jobs.get("gitleaks")) if jobs is not None else None
     if gitleaks_job is None:

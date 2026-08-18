@@ -69,9 +69,50 @@ jobs:
         uses: github/codeql-action/autobuild@bb16b9baa2ec4010b29f5c606d57d01190139edd # v4.37.1
 
       - name: Analyze with CodeQL
+        id: codeql-analysis
+        # Keep publishing enabled; the next step evaluates local SARIF only when
+        # repository settings prevent Code Scanning from accepting the upload.
+        continue-on-error: true
         uses: github/codeql-action/analyze@bb16b9baa2ec4010b29f5c606d57d01190139edd # v4.37.1
         with:
           upload: always
+          output: codeql-results
+
+      - name: Evaluate CodeQL SARIF fallback
+        if: ${{ always() }}
+        env:
+          CODEQL_ANALYSIS_OUTCOME: ${{ steps.codeql-analysis.outcome }}
+          CODEQL_SARIF_DIRECTORY: codeql-results
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          sarif_directory = Path(os.environ["CODEQL_SARIF_DIRECTORY"])
+          sarif_files = sorted(sarif_directory.rglob("*.sarif"))
+          if not sarif_files:
+              raise SystemExit("CodeQL did not produce SARIF results for local evaluation")
+
+          findings = []
+          for sarif_file in sarif_files:
+              sarif = json.loads(sarif_file.read_text(encoding="utf-8"))
+              for run in sarif.get("runs", []):
+                  for result in run.get("results", []):
+                      if result.get("suppressions"):
+                          continue
+                      findings.append(result.get("ruleId", "unknown CodeQL rule"))
+
+          if findings:
+              print("CodeQL findings: " + ", ".join(sorted(set(findings))))
+              raise SystemExit(1)
+          if os.environ["CODEQL_ANALYSIS_OUTCOME"] != "success":
+              print(
+                  "CodeQL SARIF upload did not complete; local evaluation passed with no findings. "
+                  "Enable Code Scanning in repository settings to publish alerts."
+              )
+          PY
 
   gitleaks:
     name: Full-history secret scan
