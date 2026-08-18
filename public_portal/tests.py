@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -12,14 +13,16 @@ from .models import PublicMedia, PublicPost
 class PublicPhotoImportTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
-        self.source_root = Path(tempfile.mkdtemp())
+        self.source_root = Path(self.media_root) / "public_photo_imports" / "batch"
+        self.source_root.mkdir(parents=True)
+        self.outside_source_root = Path(tempfile.mkdtemp())
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
 
     def tearDown(self):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
-        shutil.rmtree(self.source_root, ignore_errors=True)
+        shutil.rmtree(self.outside_source_root, ignore_errors=True)
 
     def test_import_public_photos_creates_showcase_posts_and_home_gallery(self):
         event_dir = self.source_root / "院十佳"
@@ -50,3 +53,10 @@ class PublicPhotoImportTests(TestCase):
         detail = self.client.get(reverse("public_portal:post_detail", args=[post.pk]))
         self.assertContains(detail, "活动相册")
         self.assertContains(detail, "院十佳")
+
+    def test_import_public_photos_rejects_a_source_directory_outside_media_staging(self):
+        outside_album = self.outside_source_root / "outside"
+        outside_album.mkdir()
+
+        with self.assertRaises(CommandError):
+            call_command("import_public_photos", str(self.outside_source_root))

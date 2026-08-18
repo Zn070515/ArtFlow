@@ -1,5 +1,8 @@
+import os
+
 from pathlib import Path
 
+from django.conf import settings
 from django.core.files import File
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -9,6 +12,7 @@ from public_portal.models import PublicMedia, PublicPost
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 INTERNAL_FOLDERS = {"会议照片"}
+PHOTO_IMPORT_ROOT_NAME = "public_photo_imports"
 PUBLISH_HELP = (
     "Publish imported public posts immediately. Internal folders stay draft unless "
     + "--include-internal is set."
@@ -35,7 +39,11 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        source_dir = Path(options["source_dir"]).expanduser().resolve()
+        import_root = os.path.realpath(Path(settings.MEDIA_ROOT) / PHOTO_IMPORT_ROOT_NAME)
+        source_dir = os.path.realpath(Path(options["source_dir"]).expanduser())
+        if not source_dir.startswith(f"{import_root}{os.sep}"):
+            raise CommandError(f"Source directory must be inside {import_root}.")
+        source_dir = Path(source_dir)
         if not source_dir.exists() or not source_dir.is_dir():
             raise CommandError(f"Source directory does not exist: {source_dir}")
 
