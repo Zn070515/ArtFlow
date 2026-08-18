@@ -33,7 +33,7 @@ function Get-NormalizedExportContent {
         [string]$Path
     )
 
-    return (Get-Content -LiteralPath $Path -Raw) -replace '(?m)^#    uv export .+$', '#    uv export --frozen --no-dev --no-emit-project -o requirements.txt'
+    return (Get-Content -LiteralPath $Path -Raw) -replace '(?m)^#    uv export .+$', '#    uv export --frozen --no-dev --extra production --no-emit-project -o requirements.txt'
 }
 
 $temporaryDirectory = [System.IO.Path]::GetTempPath()
@@ -44,8 +44,8 @@ $requirementsPath = Join-Path $repositoryRoot 'requirements.txt'
 Push-Location $repositoryRoot
 try {
     Remove-Item -LiteralPath $firstExport, $secondExport -Force -ErrorAction SilentlyContinue
-    Invoke-Uv -Quiet export --frozen --no-dev --no-emit-project --output-file $firstExport
-    Invoke-Uv -Quiet export --frozen --no-dev --no-emit-project --output-file $secondExport
+    Invoke-Uv -Quiet export --frozen --no-dev --extra production --no-emit-project --output-file $firstExport
+    Invoke-Uv -Quiet export --frozen --no-dev --extra production --no-emit-project --output-file $secondExport
 
     $firstContent = Get-NormalizedExportContent -Path $firstExport
     $secondContent = Get-NormalizedExportContent -Path $secondExport
@@ -57,6 +57,8 @@ try {
         'export',
         '--frozen',
         '--no-dev',
+        '--extra',
+        'production',
         '--no-emit-project',
         '-o',
         'requirements.txt'
