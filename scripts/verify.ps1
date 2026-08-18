@@ -121,6 +121,66 @@ function Assert-ContainerContracts {
     Assert-ContentMatch $waitScript 'if \(\( \$# != 0 \)\); then' 'wait-script argument validation'
 }
 
+function Assert-WorkflowContracts {
+    $workflowDirectory = Join-Path $repositoryRoot '.github/workflows'
+    $expectedWorkflowNames = @('ci.yml', 'integration.yml', 'security.yml', 'workflow-lint.yml')
+
+    if (-not (Test-Path -LiteralPath $workflowDirectory -PathType Container)) {
+        throw 'Workflow contract violation: missing .github/workflows directory.'
+    }
+
+    foreach ($workflowName in $expectedWorkflowNames) {
+        $workflowPath = Join-Path $workflowDirectory $workflowName
+        if (-not (Test-Path -LiteralPath $workflowPath -PathType Leaf)) {
+            throw "Workflow contract violation: missing $workflowName."
+        }
+    }
+
+    $workflowPaths = @(
+        Get-ChildItem -LiteralPath $workflowDirectory -File |
+            Where-Object { $_.Extension -in @('.yml', '.yaml') }
+    )
+    if ($workflowPaths.Count -eq 0) {
+        throw 'Workflow contract violation: no workflow files found.'
+    }
+
+    foreach ($workflowPath in $workflowPaths) {
+        $workflow = Get-Content -LiteralPath $workflowPath.FullName -Raw
+
+        Assert-ContentMatch $workflow '(?m)^permissions:\s*(?:\r?$|\S)' "$($workflowPath.Name) workflow permissions"
+        Assert-ContentMatch $workflow '(?m)^jobs:\s*$' "$($workflowPath.Name) jobs section"
+
+        $jobsSection = [regex]::Match($workflow, '(?ms)^jobs:\s*$\r?\n(?<jobs>.*)$').Groups['jobs'].Value
+        $jobBlocks = [regex]::Matches(
+            $jobsSection,
+            '(?ms)^  (?<name>[A-Za-z0-9_-]+):\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)'
+        )
+        if ($jobBlocks.Count -eq 0) {
+            throw "Workflow contract violation: $($workflowPath.Name) has no jobs."
+        }
+        foreach ($jobBlock in $jobBlocks) {
+            if ($jobBlock.Value -notmatch '(?m)^    timeout-minutes:\s*\d+\s*$') {
+                throw "Workflow contract violation: $($workflowPath.Name) job $($jobBlock.Groups['name'].Value) needs timeout-minutes."
+            }
+        }
+
+        $usesLines = [regex]::Matches($workflow, '(?m)^\s*uses:\s*(?<reference>\S+)(?:\s+#.*)?\s*$')
+        foreach ($usesLine in $usesLines) {
+            $reference = $usesLine.Groups['reference'].Value
+            if ($reference -notmatch '@[0-9a-f]{40}$') {
+                throw "Workflow contract violation: $($workflowPath.Name) must pin $reference to an exact commit SHA."
+            }
+        }
+
+        if ($workflow -match 'POSTGRES_' -and $workflow -match '(?m)^\s+ports:\s*$') {
+            throw "Workflow contract violation: $($workflowPath.Name) must not expose PostgreSQL service ports."
+        }
+    }
+
+    $workflowLint = Get-Content -LiteralPath (Join-Path $workflowDirectory 'workflow-lint.yml') -Raw
+    Assert-ContentMatch $workflowLint 'actionlint' 'an actionlint workflow gate'
+}
+
 $temporaryProductionEnvironment = [ordered]@{
     APP_ENV = 'production'
     DEBUG = 'False'
@@ -144,6 +204,7 @@ Push-Location $repositoryRoot
 $failureMessage = $null
 try {
     Assert-ContainerContracts
+    Assert-WorkflowContracts
     Invoke-CheckedCommand docker compose config --quiet
     Invoke-Uv lock --check
     Invoke-Uv run ruff check .
