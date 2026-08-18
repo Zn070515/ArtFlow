@@ -3,11 +3,14 @@ import tempfile
 import zipfile
 from datetime import timedelta
 from io import BytesIO
+from typing import Any
+from unittest.mock import patch
 
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -23,6 +26,14 @@ from singer_contest.models import (
     SingerRegistration,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
+
+
+def _close_file_response_resources(response: Any):
+    filelike = response.file_to_stream
+    if filelike is not None and hasattr(filelike, "close"):
+        filelike.close()
+    response.file_to_stream = None
+    response._resource_closers.clear()
 
 
 class StaffPanelSmokeTests(TestCase):
@@ -376,6 +387,21 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(VoteSession.objects.filter(name="Formal Vote").exists())
         self.assertFalse(VoteSession.objects.filter(name="Test Vote").exists())
 
+    def test_file_response_cleanup_closes_file_without_closing_response(self):
+        response = FileResponse(BytesIO(b"audio"))
+        filelike = response.file_to_stream
+        assert filelike is not None
+
+        with patch("django.core.signals.request_finished.send") as request_finished:
+            _close_file_response_resources(response)
+
+        self.assertTrue(filelike.closed)
+        self.assertIsNone(response.file_to_stream)
+        self.assertEqual(getattr(response, "_resource_closers"), [])
+        self.assertFalse(response.closed)
+        request_finished.assert_not_called()
+        self.assertEqual(Activity.objects.count(), 2)
+
     def test_submission_file_media_url_is_owner_or_staff_only(self):
         other_participant = User.objects.create_user(
             username="other",
@@ -407,14 +433,14 @@ class StaffPanelSmokeTests(TestCase):
         try:
             self.assertEqual(owner_response.status_code, 200)
         finally:
-            owner_response.close()
+            _close_file_response_resources(owner_response)
 
         self.client.force_login(self.staff)
         staff_response = self.client.get(uploaded.file.url)
         try:
             self.assertEqual(staff_response.status_code, 200)
         finally:
-            staff_response.close()
+            _close_file_response_resources(staff_response)
 
     def test_packages_include_contest_and_farewell_operational_indexes(self):
         registration = SingerRegistration.objects.create(
