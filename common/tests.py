@@ -12,6 +12,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import DatabaseError, IntegrityError, transaction
 from django.db import models as django_models
+from django.http import Http404
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from exports.models import ArticleTemplate
@@ -31,10 +32,24 @@ from voting.models import VoteOption, VoteRecord, VoteSession
 
 from . import models as common_models
 from .models import AuditLog, SeedRecord
+from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
 DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
 DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
+
+
+class ControlledMediaPathTests(TestCase):
+    def test_media_file_response_rejects_a_path_outside_media_root(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            media_root = root / "media"
+            media_root.mkdir()
+            (root / "private.txt").write_text("private", encoding="utf-8")
+
+            with override_settings(MEDIA_ROOT=media_root):
+                with self.assertRaises(Http404):
+                    _media_file_response("../private.txt")
 
 
 class DoctorCommandTests(TestCase):

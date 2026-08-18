@@ -1,3 +1,5 @@
+import os
+
 from pathlib import Path
 
 from archive.models import ArchivePackage
@@ -11,11 +13,11 @@ from public_portal.models import PublicMedia, PublicPost
 
 
 def _media_file_response(relative_path, download_name=None):
-    media_root = Path(settings.MEDIA_ROOT).resolve()
-    full_path = (media_root / relative_path).resolve()
-    if media_root not in full_path.parents and full_path != media_root:
+    media_root = os.path.realpath(settings.MEDIA_ROOT)
+    full_path = os.path.realpath(os.path.join(media_root, relative_path))
+    if not full_path.startswith(f"{media_root}{os.sep}"):
         raise Http404("Invalid media path.")
-    if not full_path.is_file():
+    if not os.path.isfile(full_path):
         raise Http404("Media file not found.")
     return FileResponse(open(full_path, "rb"), as_attachment=False, filename=download_name)
 
