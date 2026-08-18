@@ -38,11 +38,10 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
-        import_root = os.path.realpath(Path(settings.MEDIA_ROOT) / PHOTO_IMPORT_ROOT_NAME)
-        source_dir = os.path.realpath(Path(options["source_dir"]).expanduser())
-        if not source_dir.startswith(f"{import_root}{os.sep}"):
+        import_root = Path(os.path.realpath(Path(settings.MEDIA_ROOT) / PHOTO_IMPORT_ROOT_NAME))
+        source_dir = Path(os.path.realpath(Path(options["source_dir"]).expanduser()))
+        if source_dir == import_root or not source_dir.is_relative_to(import_root):
             raise CommandError(f"Source directory must be inside {import_root}.")
-        source_dir = Path(source_dir)
         if not source_dir.exists() or not source_dir.is_dir():
             raise CommandError(f"Source directory does not exist: {source_dir}")
 
