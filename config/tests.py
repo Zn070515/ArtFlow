@@ -219,12 +219,31 @@ class SettingsTests(SimpleTestCase):
         self.assertNotIn(environment["SECRET_KEY"], errors[0].msg)
         self.assertNotIn(environment["SECRET_KEY"], errors[0].hint)
 
-    def run_production_check(self, **overrides):
+    def isolated_production_environment(self, **overrides):
         environment = os.environ.copy()
-        environment.update(production_environment(**overrides))
+        for name in (
+            "APP_ENV",
+            "DEBUG",
+            "SECRET_KEY",
+            "ADMIN_LOGIN_KEY",
+            "ALLOWED_HOSTS",
+            "CSRF_TRUSTED_ORIGINS",
+            "DATABASE_ENGINE",
+            "POSTGRES_DB",
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+            "POSTGRES_HOST",
+            "POSTGRES_PORT",
+        ):
+            environment.pop(name, None)
+        environment["APP_ENV"] = "production"
+        environment.update(overrides)
+        return environment
 
+    def run_production_startup(self, command, **overrides):
+        environment = self.isolated_production_environment(**overrides)
         return environment, subprocess.run(
-            [sys.executable, "manage.py", "check"],
+            command,
             cwd=Path(__file__).resolve().parent.parent,
             env=environment,
             capture_output=True,
@@ -232,49 +251,52 @@ class SettingsTests(SimpleTestCase):
             text=True,
         )
 
-    def assert_production_check_reports_config_error(self, environment, result):
+    def assert_incomplete_production_startup_is_rejected(self, environment, result):
         output = result.stdout + result.stderr
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("config.E001", output)
-        self.assertNotIn(environment["SECRET_KEY"], output)
-        self.assertNotIn(environment["POSTGRES_PASSWORD"], output)
+        self.assertIn("Production configuration requires SECRET_KEY.", output)
+        self.assertNotIn(DEVELOPMENT_SECRET_KEY, output)
+        self.assertNotIn("django.db.backends.sqlite3", output)
 
-    def test_manage_check_reports_invalid_production_configuration_as_config_error(self):
-        environment, result = self.run_production_check(DATABASE_ENGINE="sqlite")
+    def test_incomplete_production_environment_blocks_all_startup_entry_points(self):
+        commands = {
+            "django_setup": [
+                sys.executable,
+                "-c",
+                (
+                    "import os; "
+                    "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); "
+                    "import django; django.setup()"
+                ),
+            ],
+            "wsgi": [sys.executable, "-c", "import config.wsgi"],
+            "asgi": [sys.executable, "-c", "import config.asgi"],
+            "check": [sys.executable, "manage.py", "check"],
+            "doctor": [sys.executable, "manage.py", "doctor"],
+        }
 
-        self.assert_production_check_reports_config_error(environment, result)
+        for startup_path, command in commands.items():
+            with self.subTest(startup_path=startup_path):
+                environment, result = self.run_production_startup(command)
 
-    def test_manage_check_reports_malformed_production_debug_as_config_error(self):
-        environment, result = self.run_production_check(DEBUG="not-a-boolean")
+                self.assert_incomplete_production_startup_is_rejected(environment, result)
 
-        self.assert_production_check_reports_config_error(environment, result)
-
-    def test_manage_check_reports_unknown_production_database_engine_as_config_error(self):
-        environment, result = self.run_production_check(DATABASE_ENGINE="not-a-database")
-
-        self.assert_production_check_reports_config_error(environment, result)
-
-    def test_doctor_reports_invalid_production_configuration_without_secret_values(self):
-        environment, result = self.run_production_doctor(DATABASE_ENGINE="sqlite")
+    def test_valid_production_environment_allows_django_setup_with_postgresql(self):
+        environment, result = self.run_production_startup(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os; "
+                    "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); "
+                    "import django; django.setup(); "
+                    "from django.conf import settings; "
+                    "print(settings.DATABASES['default']['ENGINE'])"
+                ),
+            ],
+            **production_environment(),
+        )
 
         output = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("Environment: production", output)
-        self.assertIn("Configuration: failed", output)
-        self.assertNotIn(environment["SECRET_KEY"], output)
-        self.assertNotIn(environment["ADMIN_LOGIN_KEY"], output)
-        self.assertNotIn(environment["POSTGRES_PASSWORD"], output)
-        self.assertNotIn(environment["POSTGRES_HOST"], output)
-
-    def run_production_doctor(self, **overrides):
-        environment = os.environ.copy()
-        environment.update(production_environment(**overrides))
-
-        return environment, subprocess.run(
-            [sys.executable, "manage.py", "doctor"],
-            cwd=Path(__file__).resolve().parent.parent,
-            env=environment,
-            capture_output=True,
-            check=False,
-            text=True,
-        )
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("django.db.backends.postgresql", output)
