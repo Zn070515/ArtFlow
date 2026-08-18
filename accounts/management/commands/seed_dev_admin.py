@@ -1,3 +1,4 @@
+import getpass
 import os
 
 from django.core.management.base import BaseCommand, CommandError
@@ -14,7 +15,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         password = os.environ.get("DEV_ADMIN_PASSWORD")
         if not password:
-            raise CommandError("Set DEV_ADMIN_PASSWORD before running this command.")
+            try:
+                password = getpass.getpass("Development admin password: ")
+            except (EOFError, KeyboardInterrupt) as error:
+                raise CommandError("A development admin password is required.") from error
+        if not password:
+            raise CommandError("A development admin password is required.")
 
         username = options["username"]
         user, created = User.objects.get_or_create(username=username)

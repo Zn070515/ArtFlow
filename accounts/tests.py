@@ -1,3 +1,9 @@
+import os
+from io import StringIO
+from unittest.mock import patch
+
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -69,3 +75,31 @@ class LoginModeTests(TestCase):
         response = self.client.get(reverse("accounts:login"))
         self.assertContains(response, reverse("accounts:admin_login"))
         self.assertContains(response, "管理员登录")
+
+
+class SeedDevAdminCommandTests(TestCase):
+    @patch("getpass.getpass", return_value="")
+    @patch.dict(os.environ, {"DEV_ADMIN_PASSWORD": ""})
+    def test_seed_dev_admin_requires_a_nonempty_password(self, _getpass):
+        with self.assertRaisesMessage(CommandError, "A development admin password is required."):
+            call_command("seed_dev_admin")
+
+    @patch("getpass.getpass", return_value="hidden-input-password")
+    @patch.dict(os.environ, {"DEV_ADMIN_PASSWORD": ""})
+    def test_seed_dev_admin_updates_existing_admin_from_hidden_input(self, _getpass):
+        user = User.objects.create_user(
+            username="existing-admin",
+            password="old-password",
+            role=User.Role.PARTICIPANT,
+        )
+        output = StringIO()
+
+        call_command("seed_dev_admin", "--username", user.username, stdout=output)
+
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.ADMIN)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.check_password("hidden-input-password"))
+        self.assertEqual(output.getvalue(), "Updated development admin: existing-admin\n")
+        self.assertNotIn("hidden-input-password", output.getvalue())
