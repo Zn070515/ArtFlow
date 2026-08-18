@@ -29,11 +29,24 @@ from voting.models import VoteOption, VoteRecord, VoteSession
 
 
 def _close_file_response_resources(response: Any):
+    closers = response._resource_closers
+    filelikes = []
     filelike = response.file_to_stream
-    if filelike is not None and hasattr(filelike, "close"):
+    if filelike is not None and hasattr(filelike, "read") and hasattr(filelike, "close"):
+        filelikes.append(filelike)
+    for closer in closers:
+        resource = getattr(closer, "__self__", None)
+        if (
+            resource is not None
+            and hasattr(resource, "read")
+            and hasattr(resource, "close")
+            and all(resource is not existing for existing in filelikes)
+        ):
+            filelikes.append(resource)
+    for filelike in filelikes:
         filelike.close()
     response.file_to_stream = None
-    response._resource_closers.clear()
+    closers.clear()
 
 
 class StaffPanelSmokeTests(TestCase):
