@@ -15,6 +15,7 @@ from core.models import Activity
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -43,6 +44,7 @@ from singer_contest.models import (
 )
 from singer_contest.services import (
     apply_scores,
+    expected_score_cells,
     missing_score_cells,
     parse_score_workbook,
 )
@@ -507,7 +509,7 @@ def export_registrations(request):
             "提交时间",
         ]
     )
-    for r in SingerRegistration.objects.select_related("activity"):
+    for r in SingerRegistration.objects.filter(is_test_data=False).select_related("activity"):
         ws.append(
             [
                 r.name,
@@ -554,7 +556,7 @@ def export_programs(request):
             "提交时间",
         ]
     )
-    for p in Program.objects.select_related("activity"):
+    for p in Program.objects.filter(is_test_data=False).select_related("activity"):
         ws.append(
             [
                 p.sort_order,
@@ -689,6 +691,8 @@ def round_ranking(request, pk):
 @require_POST
 def round_lock(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
+    if not expected_score_cells(contest_round):
+        raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
     missing_cells = missing_score_cells(contest_round)
     if missing_cells:
         raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
@@ -766,7 +770,10 @@ def award_create(request):
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
+    singers = SingerRegistration.objects.filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED,
+        is_test_data=False,
+    )
     return render(
         request,
         "staff_panel/award_form.html",
@@ -787,6 +794,7 @@ def vote_session_list(request):
 
 
 @staff_member_required
+@transaction.atomic
 def vote_session_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
@@ -794,15 +802,15 @@ def vote_session_create(request):
         singer_ids = request.POST.getlist("singers")
         if len(singer_ids) != len(set(singer_ids)):
             raise PermissionDenied("Vote options cannot contain duplicate singers.")
-        singers = list(
+        selected_singers = list(
             SingerRegistration.objects.filter(
                 pk__in=singer_ids,
                 pre_status=SingerRegistration.PreStatus.APPROVED,
             )
         )
-        if len(singers) != len(singer_ids):
+        if len(selected_singers) != len(singer_ids):
             raise PermissionDenied("Every vote option must be an approved singer.")
-        for singer in singers:
+        for singer in selected_singers:
             ensure_same_activity(activity, singer, label="Vote option singer")
         vote_session = VoteSession.objects.create(
             activity=activity,
@@ -829,7 +837,10 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
+    singers = SingerRegistration.objects.filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED,
+        is_test_data=False,
+    )
     return render(
         request,
         "staff_panel/vote_session_form.html",
@@ -881,6 +892,7 @@ def vote_session_toggle(request, pk):
 
 @staff_member_required
 @require_POST
+@transaction.atomic
 def vote_session_lock(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
     vote_session.is_locked = True
@@ -1033,7 +1045,10 @@ def _legacy_excel_material_checklist(request, activity_id):
     ws = _active_worksheet(wb)
     ws.title = "材料清单"
     ws.append(["姓名", "项目", "状态"])
-    checks = MaterialCheck.objects.filter(singer_registration__activity=activity)
+    checks = MaterialCheck.objects.filter(
+        singer_registration__activity=activity,
+        singer_registration__is_test_data=False,
+    )
     for c in checks.select_related("singer_registration"):
         ws.append(
             [
@@ -1057,9 +1072,10 @@ def excel_material_checklist(request, activity_id):
     ws = _active_worksheet(wb)
     ws.title = "Material Checklist"
     ws.append(["Owner Type", "Owner", "Item", "Status"])
-    for c in MaterialCheck.objects.filter(singer_registration__activity=activity).select_related(
-        "singer_registration"
-    ):
+    for c in MaterialCheck.objects.filter(
+        singer_registration__activity=activity,
+        singer_registration__is_test_data=False,
+    ).select_related("singer_registration"):
         ws.append(
             [
                 "singer",
@@ -1068,7 +1084,10 @@ def excel_material_checklist(request, activity_id):
                 c.get_status_display(),
             ]
         )
-    for c in MaterialCheck.objects.filter(program__activity=activity).select_related("program"):
+    for c in MaterialCheck.objects.filter(
+        program__activity=activity,
+        program__is_test_data=False,
+    ).select_related("program"):
         ws.append(
             [
                 "program",
@@ -1091,6 +1110,7 @@ def excel_score_template(request, round_id):
     singers = SingerRegistration.objects.filter(
         activity=contest_round.activity,
         pre_status=SingerRegistration.PreStatus.APPROVED,
+        is_test_data=False,
     )
     judges = Judge.objects.filter(activity=contest_round.activity, is_active=True)
     wb = Workbook()
@@ -1152,10 +1172,12 @@ def word_generate(request, template_id, activity_id):
     doc.add_heading(activity.title, 0)
     body = template.body
     singers = SingerRegistration.objects.filter(
-        activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
+        activity=activity,
+        pre_status=SingerRegistration.PreStatus.APPROVED,
+        is_test_data=False,
     )
     singer_lines = "\n".join(f"{s.name} — {s.song_name}" for s in singers)
-    programs = Program.objects.filter(activity=activity)
+    programs = Program.objects.filter(activity=activity, is_test_data=False)
     program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)
     body = body.replace("{title}", activity.title)
     body = body.replace("{subtitle}", activity.subtitle or "")
@@ -1274,7 +1296,10 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "材料清单"
         ws.append(["姓名", "项目", "状态"])
-        for c in MaterialCheck.objects.filter(singer_registration__activity=activity):
+        for c in MaterialCheck.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+        ):
             ws.append(
                 [
                     c.singer_registration.name if c.singer_registration else "",
@@ -1289,7 +1314,7 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "异常记录"
         ws.append(["时间", "类型", "选手", "处理人", "处理结果", "备注"])
-        for inc in IncidentRecord.objects.filter(activity=activity):
+        for inc in IncidentRecord.objects.filter(activity=activity, is_test=False):
             ws.append(
                 [
                     inc.occurred_at.strftime("%m/%d %H:%M"),
@@ -1307,9 +1332,10 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "工作人员备注"
         ws.append(["关联", "内容", "创建人", "时间"])
-        for n in StaffNote.objects.filter(singer_registration__activity=activity).select_related(
-            "created_by"
-        ):
+        for n in StaffNote.objects.filter(
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+        ).select_related("created_by"):
             ws.append(
                 [
                     f"选手: {n.singer_registration.name}" if n.singer_registration else "",
@@ -1741,7 +1767,9 @@ def incident_export(request):
     ws = _active_worksheet(wb)
     ws.title = "异常记录"
     ws.append(["活动", "时间", "类型", "选手", "处理人", "处理结果", "备注"])
-    for inc in IncidentRecord.objects.select_related("activity", "singer", "handled_by"):
+    for inc in IncidentRecord.objects.filter(is_test=False).select_related(
+        "activity", "singer", "handled_by"
+    ):
         ws.append(
             [
                 inc.activity.title,
@@ -1805,6 +1833,7 @@ def activity_clear_test_data(request, pk):
 
 @staff_member_required
 @require_POST
+@transaction.atomic
 def activity_lock(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
@@ -1822,6 +1851,7 @@ def activity_lock(request, pk):
 
 @staff_member_required
 @require_POST
+@transaction.atomic
 def activity_unlock(request, pk):
     _require_admin(request.user)
     note = request.POST.get("note", "").strip()
@@ -1847,6 +1877,7 @@ def activity_unlock(request, pk):
 
 @staff_member_required
 @require_POST
+@transaction.atomic
 def activity_clone(request, pk):
     _require_admin(request.user)
     original = get_object_or_404(Activity, pk=pk)

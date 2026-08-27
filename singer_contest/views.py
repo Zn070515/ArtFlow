@@ -56,31 +56,31 @@ def apply_view(request):
                 is_test_data=activity.is_test_mode,
             )
             reg.save()
-        accompaniment = request.FILES.get("accompaniment")
-        if accompaniment:
-            store_submission_file(
-                owner=reg,
-                uploaded_file=accompaniment,
-                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
-                uploaded_by=request.user,
-                is_test_data=reg.is_test_data,
+            accompaniment = request.FILES.get("accompaniment")
+            if accompaniment:
+                store_submission_file(
+                    owner=reg,
+                    uploaded_file=accompaniment,
+                    purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                    uploaded_by=request.user,
+                    is_test_data=reg.is_test_data,
+                )
+            performance_video = request.FILES.get("performance_video")
+            if performance_video:
+                store_submission_file(
+                    owner=reg,
+                    uploaded_file=performance_video,
+                    purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+                    uploaded_by=request.user,
+                    is_test_data=reg.is_test_data,
+                )
+            sync_singer_material_checks(reg)
+            log_action(
+                request,
+                AuditLog.ActionType.UPDATE_REGISTRATION,
+                f"SingerRegistration:{reg.pk}",
+                new_value="submitted",
             )
-        performance_video = request.FILES.get("performance_video")
-        if performance_video:
-            store_submission_file(
-                owner=reg,
-                uploaded_file=performance_video,
-                purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
-                uploaded_by=request.user,
-                is_test_data=reg.is_test_data,
-            )
-        sync_singer_material_checks(reg)
-        log_action(
-            request,
-            AuditLog.ActionType.UPDATE_REGISTRATION,
-            f"SingerRegistration:{reg.pk}",
-            new_value="submitted",
-        )
         return redirect("singer_contest:my_submission")
     return render(request, "singer_contest/apply.html", {"activities": activities})
 

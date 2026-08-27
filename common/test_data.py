@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
@@ -9,7 +10,7 @@ from django.db.models import Q
 from .models import AuditLog
 
 
-def test_data_counts(activity) -> dict[str, int]:
+def get_test_data_counts(activity: Any) -> dict[str, int]:
     from farewell_show.models import Program
     from files.models import SubmissionFile
     from incidents.models import IncidentRecord
@@ -31,23 +32,25 @@ def test_data_counts(activity) -> dict[str, int]:
         "vote_ballots": VoteBallot.objects.filter(
             vote_session__activity=activity, vote_session__is_test_data=True
         ).count(),
-        "scores": ScoreRecord.objects.filter(
-            round__activity=activity, is_test_data=True
-        ).count(),
+        "scores": ScoreRecord.objects.filter(round__activity=activity, is_test_data=True).count(),
         "score_summaries": ScoreSummary.objects.filter(
             round__activity=activity, is_test_data=True
         ).count(),
         "awards": Award.objects.filter(activity=activity, is_test_data=True).count(),
         "incidents": IncidentRecord.objects.filter(activity=activity, is_test=True).count(),
         "files": SubmissionFile.objects.filter(
-            Q(is_test_data=True)
+            (
+                Q(is_test_data=True)
+                | Q(singer_registration__is_test_data=True)
+                | Q(program__is_test_data=True)
+            )
             & (Q(singer_registration__activity=activity) | Q(program__activity=activity))
         ).count(),
     }
 
 
 @transaction.atomic
-def clear_activity_test_data(activity, *, operator) -> dict[str, int]:
+def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from farewell_show.models import Program
     from files.models import SubmissionFile
     from files.services import delete_submission_file
@@ -55,9 +58,13 @@ def clear_activity_test_data(activity, *, operator) -> dict[str, int]:
     from singer_contest.models import Award, ScoreRecord, ScoreSummary, SingerRegistration
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
-    counts = test_data_counts(activity)
+    counts = get_test_data_counts(activity)
     files = SubmissionFile.objects.filter(
-        Q(is_test_data=True)
+        (
+            Q(is_test_data=True)
+            | Q(singer_registration__is_test_data=True)
+            | Q(program__is_test_data=True)
+        )
         & (Q(singer_registration__activity=activity) | Q(program__activity=activity))
     )
     for submission_file in files:
@@ -88,13 +95,15 @@ def clear_activity_test_data(activity, *, operator) -> dict[str, int]:
 
 
 @transaction.atomic
-def leave_test_mode(activity, *, operator, clear=False, reason="") -> dict[str, int]:
+def leave_test_mode(
+    activity: Any, *, operator: Any, clear: bool = False, reason: str = ""
+) -> dict[str, int]:
     from core.models import Activity
 
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
     if not locked_activity.is_test_mode:
         return {}
-    counts = test_data_counts(locked_activity)
+    counts = get_test_data_counts(locked_activity)
     if any(counts.values()) and not clear:
         raise PermissionDenied("退出测试模式前必须清理所有测试数据。")
     if clear:

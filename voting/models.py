@@ -97,5 +97,17 @@ class VoteRecord(models.Model):
             )
         ]
 
+    def clean(self):
+        ballot = self.ballot if self.ballot_id else None
+        option = self.vote_option if self.vote_option_id else None
+        if ballot and ballot.vote_session_id != self.vote_session_id:
+            raise ValidationError("Vote record ballot must belong to the vote session.")
+        if option and option.vote_session_id != self.vote_session_id:
+            raise ValidationError("Vote record option must belong to the vote session.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.browser_session_key} → {self.vote_option.singer.name}"

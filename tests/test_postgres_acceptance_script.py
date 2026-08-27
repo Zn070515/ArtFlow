@@ -7,6 +7,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "verify_postgres_acceptance.ps1"
+BACKUP_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "verify_postgres_backup_restore.ps1"
 PWSH = shutil.which("pwsh")
 
 
@@ -30,6 +31,44 @@ def test_postgres_acceptance_script_defines_the_required_non_destructive_gate():
     assert "python manage.py test" in script
     assert "down --volumes" not in script
     assert "Remove-Item" not in script
+
+
+def test_postgres_backup_restore_script_has_isolated_target_and_safety_contract():
+    script = BACKUP_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "[string]$BackupPath" in script
+    assert "[string]$OutputDirectory" in script
+    assert "Test-IsWithinDirectory" in script
+    assert "pg_dump --format=custom" in script
+    assert "pg_restore', '--list'" in script
+    assert "pg_restore', '--exit-on-error'" in script
+    assert "--network', $composeNetwork" in script
+    assert "--no-deps" in script
+    assert "docker compose down --volumes" not in script
+    assert "dropdb" not in script
+    assert "down -v" not in script
+
+
+@pytest.mark.skipif(PWSH is None, reason="pwsh is required for PowerShell syntax checks")
+def test_postgres_backup_restore_script_has_valid_powershell_syntax():
+    escaped_script_path = str(BACKUP_SCRIPT_PATH).replace("'", "''")
+    parser_command = (
+        "$parseErrors = $null; "
+        "[System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{escaped_script_path}', [ref]$null, [ref]$parseErrors) | Out-Null; "
+        "if ($parseErrors.Count -gt 0) { exit 1 }"
+    )
+
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-Command", parser_command],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh is required for PowerShell syntax checks")

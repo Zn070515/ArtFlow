@@ -47,9 +47,11 @@ class IncidentRecord(models.Model):
         ordering = ["-occurred_at"]
 
     def clean(self):
-        if self.singer_id and self.singer.activity_id != self.activity_id:
+        singer = self.singer if self.singer_id else None
+        program = self.program if self.program_id else None
+        if singer and singer.activity_id != self.activity_id:
             raise ValidationError("Incident singer must belong to the incident activity.")
-        if self.program_id and self.program.activity_id != self.activity_id:
+        if program and program.activity_id != self.activity_id:
             raise ValidationError("Incident program must belong to the incident activity.")
 
     def save(self, *args, **kwargs):

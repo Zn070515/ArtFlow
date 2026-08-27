@@ -29,6 +29,40 @@ ALLOWED_EXTENSIONS = {
     SubmissionFile.Purpose.OTHER: {".txt", ".doc", ".docx", ".pdf", ".zip"},
 }
 
+ALLOWED_CONTENT_TYPES = {
+    SubmissionFile.Purpose.PROGRAM_IMAGE: {"image/jpeg", "image/png", "image/webp"},
+    SubmissionFile.Purpose.PUBLIC_IMAGE: {"image/jpeg", "image/png", "image/webp"},
+    SubmissionFile.Purpose.SHOWCASE_IMAGE: {"image/jpeg", "image/png", "image/webp"},
+    SubmissionFile.Purpose.ACCOMPANIMENT: {
+        "audio/flac",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/wav",
+        "audio/x-wav",
+    },
+    SubmissionFile.Purpose.BACKGROUND_VIDEO: {"video/mp4", "video/quicktime", "video/webm"},
+    SubmissionFile.Purpose.PERFORMANCE_VIDEO: {"video/mp4", "video/quicktime", "video/webm"},
+    SubmissionFile.Purpose.LYRICS_SCRIPT: {
+        "application/msword",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+    },
+    SubmissionFile.Purpose.HOST_MATERIAL: {
+        "application/msword",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+    },
+    SubmissionFile.Purpose.OTHER: {
+        "application/msword",
+        "application/pdf",
+        "application/zip",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+    },
+}
+
 
 def validate_upload(uploaded_file, purpose):
     if purpose not in MAX_UPLOAD_BYTES:
@@ -40,6 +74,12 @@ def validate_upload(uploaded_file, purpose):
     extension = PurePath(str(uploaded_file.name)).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS[purpose]:
         raise ValidationError("文件类型不符合该用途的允许列表。")
+    content_type = str(getattr(uploaded_file, "content_type", "") or "").lower()
+    if (
+        content_type not in {"", "application/octet-stream"}
+        and content_type not in ALLOWED_CONTENT_TYPES[purpose]
+    ):
+        raise ValidationError("文件媒体类型不符合该用途的允许列表。")
 
 
 def _owner_filter(owner):
@@ -79,10 +119,8 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by, is_test
 
 
 @transaction.atomic
-def delete_submission_file(submission_file):
-    owner_filter = _owner_filter(
-        submission_file.singer_registration or submission_file.program
-    )
+def delete_submission_file(submission_file: SubmissionFile) -> None:
+    owner_filter = _owner_filter(submission_file.singer_registration or submission_file.program)
     storage = submission_file.file.storage
     stored_name = submission_file.file.name
     was_current = submission_file.is_current
@@ -100,6 +138,7 @@ def delete_submission_file(submission_file):
             replacement.save(update_fields=["is_current"])
     if stored_name:
         storage.delete(stored_name)
+
 
 DEFAULT_SINGER_REQUIREMENTS = [
     ("基本信息", ""),
@@ -149,7 +188,7 @@ def _sync_checks(registration=None, program=None, requirements=None):
         if file_purpose:
             status = (
                 MaterialCheck.Status.UPLOADED
-                if file_queryset.filter(file_purpose=file_purpose).exists()
+                if file_queryset.filter(file_purpose=file_purpose, is_current=True).exists()
                 else MaterialCheck.Status.MISSING
             )
         else:

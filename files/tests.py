@@ -51,17 +51,23 @@ class SubmissionFileLifecycleTests(TestCase):
         with self.assertRaises(ValidationError):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
 
+    def test_upload_policy_rejects_mismatched_content_type(self):
+        upload = SimpleUploadedFile("song.mp3", b"audio", content_type="text/html")
+
+        with self.assertRaises(ValidationError):
+            validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
+
     def test_replacing_upload_demotes_previous_file(self):
         first = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("first.mp3", b"first"),
+            uploaded_file=SimpleUploadedFile("first.mp3", b"first", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
             is_test_data=True,
         )
         second = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("second.mp3", b"second"),
+            uploaded_file=SimpleUploadedFile("second.mp3", b"second", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
             is_test_data=True,
@@ -75,7 +81,7 @@ class SubmissionFileLifecycleTests(TestCase):
     def test_deleting_submission_file_removes_database_row_and_storage_object(self):
         submission = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio"),
+            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
             is_test_data=True,
@@ -91,14 +97,14 @@ class SubmissionFileLifecycleTests(TestCase):
     def test_deleting_current_file_promotes_latest_historical_version(self):
         first = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("first.mp3", b"first"),
+            uploaded_file=SimpleUploadedFile("first.mp3", b"first", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
             is_test_data=True,
         )
         second = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("second.mp3", b"second"),
+            uploaded_file=SimpleUploadedFile("second.mp3", b"second", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
             is_test_data=True,

@@ -55,9 +55,12 @@ uv run python manage.py makemigrations --check --dry-run
 uv run python manage.py test
 uv run python manage.py doctor
 pwsh -NoProfile -File scripts/check_docs.ps1
+pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1 -ComposeProjectName artflow -BackupPath backups/artflow-rehearsal.dump
 ```
 
 `doctor` 只读检查配置、数据库、迁移和运行目录。匿名 `GET /healthz/` 只返回运行状态，不返回配置或业务数据。演示数据可用 `uv run python manage.py seed_demo_data --reset` 清理，但它只会删除该命令拥有且带测试标记的运行数据；仍应先在非重要数据库中验证。
+
+数据库恢复不能用活动资料归档替代。Docker Compose 环境可用上面的备份恢复命令，把源库恢复到隔离临时容器并运行 Django 检查；该演练不会重置源数据库或卷。完整事件日矩阵见 [生产准备演练](docs/production-readiness.md)，备份约束见 [PostgreSQL 备份与恢复演练](docs/postgres-backup-restore.md)。
 
 ## 开发与合并流程
 

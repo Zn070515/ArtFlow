@@ -91,10 +91,12 @@ class ScoringServiceTests(TestCase):
             ScoreRecord.objects.get(round=self.round, singer=self.singer, judge=self.judge).score,
             Decimal("92.50"),
         )
-        audit = AuditLog.objects.filter(
-            action_type=AuditLog.ActionType.ENTER_SCORE
-        ).order_by("-pk").first()
-        self.assertIsNotNone(audit)
+        audit = (
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ENTER_SCORE)
+            .order_by("-pk")
+            .first()
+        )
+        assert audit is not None
         self.assertIn('"old": "91.00"', audit.new_value)
         self.assertIn('"new": "92.50"', audit.new_value)
 
@@ -112,6 +114,7 @@ class ScoringServiceTests(TestCase):
         )
         workbook = Workbook()
         worksheet = workbook.active
+        assert worksheet is not None
         worksheet.append(["选手\\评委", self.judge.name])
         worksheet.append([self.singer.name, 90])
         worksheet.append([second_singer.name, "bad"])

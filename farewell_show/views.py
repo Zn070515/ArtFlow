@@ -4,6 +4,7 @@ from common.models import AuditLog
 from core.models import Activity
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
 from files.services import store_submission_file, sync_program_material_checks, validate_upload
@@ -20,24 +21,6 @@ def apply_view(request):
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         ensure_activity_unlocked(activity)
-        prog = Program(
-            activity=activity,
-            user=request.user,
-            name=request.POST["name"],
-            program_type=request.POST["program_type"],
-            contact_name=request.POST["contact_name"],
-            contact_phone=request.POST["contact_phone"],
-            class_name=request.POST["class_name"],
-            performers=request.POST.get("performers", ""),
-            estimated_duration=request.POST.get("estimated_duration", ""),
-            description=request.POST.get("description", ""),
-            mic_requirements=request.POST.get("mic_requirements", ""),
-            prop_requirements=request.POST.get("prop_requirements", ""),
-            special_notes=request.POST.get("special_notes", ""),
-            status=Program.Status.SUBMITTED,
-            is_test_data=activity.is_test_mode,
-        )
-        prog.save()
         upload_map = {
             "accompaniment": SubmissionFile.Purpose.ACCOMPANIMENT,
             "background_video": SubmissionFile.Purpose.BACKGROUND_VIDEO,
@@ -57,23 +40,42 @@ def apply_view(request):
                 "farewell_show/apply.html",
                 {"activities": activities, "errors": errors},
             )
-        for field_name, purpose in upload_map.items():
-            f = request.FILES.get(field_name)
-            if f:
-                store_submission_file(
-                    owner=prog,
-                    uploaded_file=f,
-                    purpose=purpose,
-                    uploaded_by=request.user,
-                    is_test_data=prog.is_test_data,
-                )
-        sync_program_material_checks(prog)
-        log_action(
-            request,
-            AuditLog.ActionType.UPDATE_REGISTRATION,
-            f"Program:{prog.pk}",
-            new_value="submitted",
-        )
+        with transaction.atomic():
+            prog = Program(
+                activity=activity,
+                user=request.user,
+                name=request.POST["name"],
+                program_type=request.POST["program_type"],
+                contact_name=request.POST["contact_name"],
+                contact_phone=request.POST["contact_phone"],
+                class_name=request.POST["class_name"],
+                performers=request.POST.get("performers", ""),
+                estimated_duration=request.POST.get("estimated_duration", ""),
+                description=request.POST.get("description", ""),
+                mic_requirements=request.POST.get("mic_requirements", ""),
+                prop_requirements=request.POST.get("prop_requirements", ""),
+                special_notes=request.POST.get("special_notes", ""),
+                status=Program.Status.SUBMITTED,
+                is_test_data=activity.is_test_mode,
+            )
+            prog.save()
+            for field_name, purpose in upload_map.items():
+                f = request.FILES.get(field_name)
+                if f:
+                    store_submission_file(
+                        owner=prog,
+                        uploaded_file=f,
+                        purpose=purpose,
+                        uploaded_by=request.user,
+                        is_test_data=prog.is_test_data,
+                    )
+            sync_program_material_checks(prog)
+            log_action(
+                request,
+                AuditLog.ActionType.UPDATE_REGISTRATION,
+                f"Program:{prog.pk}",
+                new_value="submitted",
+            )
         return redirect("farewell_show:my_program")
     return render(request, "farewell_show/apply.html", {"activities": activities})
 

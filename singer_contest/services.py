@@ -32,7 +32,7 @@ def validate_score(value: object) -> Decimal:
         raise ValidationError("分数必须是 0 到 100 之间的数字。") from None
     if not score.is_finite() or score < 0 or score > 100:
         raise ValidationError("分数必须是 0 到 100 之间的数字。")
-    if max(0, -score.as_tuple().exponent) > 2:
+    if max(0, -int(score.as_tuple().exponent)) > 2:
         raise ValidationError("分数最多保留两位小数。")
     return score
 
@@ -101,9 +101,7 @@ def recalculate_round(contest_round: ContestRound) -> None:
             },
         )
 
-    ScoreSummary.objects.filter(round=contest_round).exclude(
-        singer__in=singers
-    ).delete()
+    ScoreSummary.objects.filter(round=contest_round).exclude(singer__in=singers).delete()
     summaries = ScoreSummary.objects.filter(round=contest_round).order_by(
         "-average_score", "singer_id"
     )
@@ -123,8 +121,8 @@ def apply_scores(
     *,
     note: str = "",
 ) -> list[dict[str, int | str | None]]:
-    locked_round = ContestRound.objects.select_for_update().select_related("activity").get(
-        pk=contest_round.pk
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
     if locked_round.is_locked or locked_round.activity.is_locked:
         raise ValidationError("该比赛轮次或活动已锁定。")
@@ -189,9 +187,7 @@ def parse_score_workbook(uploaded_file, contest_round: ContestRound):
     if not headers or not headers[0]:
         return {}, ["评分表第一列必须是选手姓名。"]
     judge_names = headers[1:]
-    duplicate_judge_names = {
-        name for name in judge_names if name and judge_names.count(name) > 1
-    }
+    duplicate_judge_names = {name for name in judge_names if name and judge_names.count(name) > 1}
     errors = [f"评委姓名重复: {name}" for name in sorted(duplicate_judge_names)]
     judges_by_name = {
         judge.name: judge

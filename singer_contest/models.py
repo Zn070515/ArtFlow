@@ -106,9 +106,12 @@ class ScoreRecord(models.Model):
         unique_together = [("round", "singer", "judge")]
 
     def clean(self):
-        if self.round_id and self.singer_id and self.singer.activity_id != self.round.activity_id:
+        singer = self.singer if self.singer_id else None
+        contest_round = self.round if self.round_id else None
+        judge = self.judge if self.judge_id else None
+        if singer and contest_round and singer.activity_id != contest_round.activity_id:
             raise ValidationError("Score singer must belong to the round activity.")
-        if self.round_id and self.judge_id and self.judge.activity_id != self.round.activity_id:
+        if judge and contest_round and judge.activity_id != contest_round.activity_id:
             raise ValidationError("Score judge must belong to the round activity.")
 
     def save(self, *args, **kwargs):
@@ -154,13 +157,11 @@ class Award(models.Model):
         ordering = ["pk"]
 
     def clean(self):
-        if self.activity_id and self.singer_id and self.singer.activity_id != self.activity_id:
+        singer = self.singer if self.singer_id else None
+        vote_session = self.source_vote_session if self.source_vote_session_id else None
+        if self.activity_id and singer and singer.activity_id != self.activity_id:
             raise ValidationError("Award singer must belong to the award activity.")
-        if (
-            self.source_vote_session_id
-            and self.activity_id
-            and self.source_vote_session.activity_id != self.activity_id
-        ):
+        if vote_session and self.activity_id and vote_session.activity_id != self.activity_id:
             raise ValidationError("Generated award must belong to the vote activity.")
 
     def save(self, *args, **kwargs):

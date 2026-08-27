@@ -2,12 +2,13 @@
 
 from django.conf import settings
 from django.db import migrations, models
+from typing import Any
 
 
 def normalize_submission_versions(apps, schema_editor):
     SubmissionFile = apps.get_model("files", "SubmissionFile")
     for owner_field in ("singer_registration_id", "program_id"):
-        grouped = {}
+        grouped: dict[tuple[int, str], list[int]] = {}
         rows = SubmissionFile.objects.order_by("pk").values_list(
             "pk", owner_field, "file_purpose"
         )

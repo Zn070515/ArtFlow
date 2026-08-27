@@ -29,6 +29,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+
       - name: Set up uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
@@ -41,6 +47,9 @@ jobs:
 
       - name: Verify lockfile
         run: uv lock --check
+
+      - name: Verify compiled static CSS
+        run: npm ci && npm run check:css
 
       - name: Run Ruff lint
         run: uv run ruff check .

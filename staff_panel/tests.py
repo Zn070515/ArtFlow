@@ -162,7 +162,9 @@ class StaffPanelSmokeTests(TestCase):
                 "class_name": "CS1",
                 "phone": "13800000000",
                 "song_name": "Song",
-                "accompaniment": SimpleUploadedFile("song.mp3", b"audio"),
+                "accompaniment": SimpleUploadedFile(
+                    "song.mp3", b"audio", content_type="audio/mpeg"
+                ),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -189,7 +191,9 @@ class StaffPanelSmokeTests(TestCase):
                 "contact_name": "Li Hua",
                 "contact_phone": "13800000000",
                 "class_name": "CS1",
-                "accompaniment": SimpleUploadedFile("dance.mp3", b"audio"),
+                "accompaniment": SimpleUploadedFile(
+                    "dance.mp3", b"audio", content_type="audio/mpeg"
+                ),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -440,7 +444,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         submission = store_submission_file(
             owner=test_registration,
-            uploaded_file=SimpleUploadedFile("test.mp3", b"audio"),
+            uploaded_file=SimpleUploadedFile("test.mp3", b"audio", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.participant,
             is_test_data=True,
@@ -619,7 +623,9 @@ class StaffPanelSmokeTests(TestCase):
 
         with zipfile.ZipFile(BytesIO(response.content)) as archive:
             workbook = load_workbook(BytesIO(archive.read("registration_list.xlsx")))
-        values = [cell.value for row in workbook.active.iter_rows() for cell in row]
+        worksheet = workbook.active
+        assert worksheet is not None
+        values = [cell.value for row in worksheet.iter_rows() for cell in row]
         self.assertIn(formal.name, values)
         self.assertNotIn("Test Singer", values)
 
