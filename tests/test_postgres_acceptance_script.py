@@ -45,7 +45,7 @@ def test_postgres_backup_restore_script_has_isolated_target_and_safety_contract(
     assert "pg_restore', '--list'" in script
     assert "pg_restore', '--username', 'postgres'" in script
     assert "psql', '--username', 'postgres'" in script
-    assert "pg_restore', '--exit-on-error'" in script
+    assert "pg_restore', '--username', 'postgres', '--exit-on-error'" in script
     assert "--network', $composeNetwork" in script
     assert "--no-deps" in script
     assert "docker compose down --volumes" not in script
