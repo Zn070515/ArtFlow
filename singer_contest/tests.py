@@ -14,12 +14,21 @@ from django.urls import reverse
 from openpyxl import Workbook
 
 from .admin import RoundEntryAdmin, RoundJudgeAdmin
-from .models import ContestRound, Judge, RoundEntry, RoundJudge, ScoreRecord, SingerRegistration
+from .models import (
+    ContestRound,
+    Judge,
+    RoundEntry,
+    RoundJudge,
+    ScoreRecord,
+    ScoreSummary,
+    SingerRegistration,
+)
 from .services import (
     apply_scores,
     expected_score_cells,
     missing_score_cells,
     parse_score_workbook,
+    prepare_round,
     validate_score,
 )
 
@@ -48,10 +57,10 @@ class ScoringServiceTests(TestCase):
         )
         self.judge = Judge.objects.create(activity=self.activity, name="Judge")
 
-    def make_singer(self, *, activity, student_id, name=None, user=None):
+    def make_singer(self, *, student_id, activity=None, name=None, user=None):
         user = user or User.objects.create_user(username=f"singer-{student_id}", password="pass")
         return SingerRegistration.objects.create(
-            activity=activity,
+            activity=activity or self.activity,
             user=user,
             name=name or f"Singer {student_id}",
             student_id=student_id,
@@ -262,10 +271,73 @@ class ScoringServiceTests(TestCase):
 
         self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
 
+    def test_prepare_preliminary_round_snapshots_approved_non_test_singers(self):
+        test_singer = self.make_singer(student_id="prepared-test")
+        test_singer.is_test_data = True
+        test_singer.save(update_fields=["is_test_data"])
+        unapproved_singer = self.make_singer(student_id="prepared-unapproved")
+        unapproved_singer.pre_status = SingerRegistration.PreStatus.SUBMITTED
+        unapproved_singer.save(update_fields=["pre_status"])
+
+        prepared_round = prepare_round(self.round, self.user)
+
+        self.assertEqual(
+            list(RoundEntry.objects.filter(round=self.round).values_list("singer_id", flat=True)),
+            [self.singer.pk],
+        )
+        self.assertEqual(prepared_round.status, ContestRound.Status.PREPARED)
+        self.assertFalse(prepared_round.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.user,
+                action_type=AuditLog.ActionType.UPDATE_STATUS,
+                target=f"ContestRound:{self.round.pk}",
+            ).exists()
+        )
+
+    def test_prepare_semifinal_round_uses_only_previous_advancers(self):
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        for index in range(20):
+            singer = self.make_singer(student_id=f"2026{index:04d}")
+            ScoreSummary.objects.create(
+                round=self.round,
+                singer=singer,
+                average_score=90 - index,
+                rank=index + 1,
+                is_advanced=index < 10,
+            )
+
+        prepare_round(semifinal, self.user)
+
+        self.assertEqual(RoundEntry.objects.filter(round=semifinal).count(), 10)
+
+    def test_prepare_round_snapshots_active_judges(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        Judge.objects.create(activity=self.activity, name="Inactive Judge", is_active=False)
+
+        prepare_round(self.round, self.user)
+
+        self.assertEqual(
+            list(RoundJudge.objects.filter(round=self.round).values_list("judge_id", flat=True)),
+            [self.judge.pk, second_judge.pk],
+        )
+
+    def test_prepare_round_is_rejected_after_preparation(self):
+        prepare_round(self.round, self.user)
+
+        with self.assertRaises(ValidationError):
+            prepare_round(self.round, self.user)
+
     def test_expected_cells_include_approved_singer_and_active_judge(self):
+        prepare_round(self.round, self.user)
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
 
     def test_missing_cells_report_absent_score_record(self):
+        prepare_round(self.round, self.user)
+
         self.assertEqual(
             missing_score_cells(self.round),
             [
@@ -291,6 +363,8 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(validate_score("99.50"), Decimal("99.50"))
 
     def test_apply_scores_is_atomic_when_one_cell_is_invalid(self):
+        prepare_round(self.round, self.user)
+
         with self.assertRaises(ValidationError):
             apply_scores(
                 self.round,
@@ -299,9 +373,13 @@ class ScoringServiceTests(TestCase):
             )
 
         self.assertFalse(ScoreRecord.objects.exists())
-        self.assertFalse(AuditLog.objects.exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ENTER_SCORE).exists()
+        )
 
     def test_apply_scores_records_edit_details_and_recalculates(self):
+        prepare_round(self.round, self.user)
+
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "91"}, self.user)
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "92.50"}, self.user)
 
@@ -330,6 +408,7 @@ class ScoringServiceTests(TestCase):
             song_name="Song 2",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
+        prepare_round(self.round, self.user)
         workbook = Workbook()
         worksheet = workbook.active
         assert worksheet is not None
