@@ -879,6 +879,96 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(unlock_response.status_code, 302)
         self.assertFalse(round_.is_locked)
 
+    def test_round_lock_rejects_stale_round_already_locked_by_status(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Locked Singer",
+            student_id="20260011",
+            college="Info",
+            class_name="CS1",
+            phone="13800000010",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        ScoreRecord.objects.create(round=round_, singer=singer, judge=judge, score=91)
+        round_.status = ContestRound.Status.LOCKED
+        round_.is_locked = False
+        round_.save(update_fields=["status", "is_locked"])
+        self.client.force_login(self.staff)
+
+        response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+
+        self.assertEqual(response.status_code, 403)
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.LOCKED)
+        self.assertFalse(round_.is_locked)
+
+    def test_round_ranking_excludes_singers_outside_prepared_snapshot(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Prepared Singer",
+            student_id="20260012",
+            college="Info",
+            class_name="CS1",
+            phone="13800000011",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        late_singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Late Singer",
+            student_id="20260013",
+            college="Info",
+            class_name="CS1",
+            phone="13800000012",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        other_activity = Activity.objects.create(
+            title="Other Contest", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        foreign_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=self.participant,
+            name="Foreign Singer",
+            student_id="20260014",
+            college="Info",
+            class_name="CS1",
+            phone="13800000013",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        ScoreSummary.objects.create(round=round_, singer=singer, average_score=90, rank=1)
+        ScoreSummary.objects.create(round=round_, singer=late_singer, average_score=99, rank=1)
+        ScoreSummary.objects.create(round=round_, singer=foreign_singer, average_score=100, rank=1)
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:round_ranking", args=[round_.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(response.context["summaries"].values_list("singer_id", flat=True)),
+            [singer.pk],
+        )
+        self.assertContains(response, singer.name)
+        self.assertNotContains(response, late_singer.name)
+        self.assertNotContains(response, foreign_singer.name)
+
     def test_round_lock_get_is_rejected_without_mutating_state(self):
         round_ = ContestRound.objects.create(
             activity=self.singer_activity,

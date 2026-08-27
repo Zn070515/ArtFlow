@@ -679,7 +679,9 @@ def round_score_entry(request, pk):
 @staff_member_required
 def round_ranking(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    summaries = ScoreSummary.objects.filter(round=contest_round).select_related("singer")
+    summaries = ScoreSummary.objects.filter(
+        round=contest_round, singer__round_entries__round=contest_round
+    ).select_related("singer")
     missing_cells = missing_score_cells(contest_round)
     return render(
         request,
@@ -695,8 +697,13 @@ def round_ranking(request, pk):
 
 @staff_member_required
 @require_POST
+@transaction.atomic
 def round_lock(request, pk):
-    contest_round = get_object_or_404(ContestRound, pk=pk)
+    contest_round = get_object_or_404(
+        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
+    )
+    if contest_round.status == ContestRound.Status.LOCKED or contest_round.is_locked:
+        raise PermissionDenied("该比赛轮次已锁定。")
     if not expected_score_cells(contest_round):
         raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
     missing_cells = missing_score_cells(contest_round)
@@ -711,9 +718,12 @@ def round_lock(request, pk):
 
 @staff_member_required
 @require_POST
+@transaction.atomic
 def round_unlock(request, pk):
     _require_admin(request.user)
-    contest_round = get_object_or_404(ContestRound, pk=pk)
+    contest_round = get_object_or_404(
+        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
+    )
     note = request.POST.get("note", "").strip()
     if not note:
         raise PermissionDenied("解锁结果必须填写原因。")

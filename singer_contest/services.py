@@ -226,7 +226,7 @@ def apply_scores(
         )
 
     recalculate_round(locked_round)
-    if locked_round.status == ContestRound.Status.PREPARED:
+    if changes and locked_round.status == ContestRound.Status.PREPARED:
         locked_round.status = ContestRound.Status.SCORING
         locked_round.save(update_fields=["status"])
     if changes:

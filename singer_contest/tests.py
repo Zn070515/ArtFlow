@@ -427,6 +427,23 @@ class ScoringServiceTests(TestCase):
         self.round.refresh_from_db()
         self.assertEqual(self.round.status, ContestRound.Status.SCORING)
 
+    def test_apply_scores_keeps_prepared_round_prepared_when_submission_is_empty(self):
+        prepare_round(self.round, self.user)
+
+        apply_scores(self.round, {}, self.user)
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
+    def test_apply_scores_keeps_prepared_round_prepared_when_scores_are_unchanged(self):
+        prepare_round(self.round, self.user)
+        ScoreRecord.objects.create(round=self.round, singer=self.singer, judge=self.judge, score=90)
+
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.user)
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
     def test_apply_scores_rejects_locked_round_status(self):
         prepare_round(self.round, self.user)
         self.round.status = ContestRound.Status.LOCKED
