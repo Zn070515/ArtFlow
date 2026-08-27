@@ -29,6 +29,7 @@ from .services import (
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
+    recalculate_round,
     validate_score,
 )
 
@@ -352,6 +353,91 @@ class ScoringServiceTests(TestCase):
 
         ScoreRecord.objects.create(round=self.round, singer=self.singer, judge=self.judge, score=90)
         self.assertEqual(missing_score_cells(self.round), [])
+
+    def test_new_global_judge_does_not_change_prepared_matrix(self):
+        prepare_round(self.round, self.user)
+        new_judge = Judge.objects.create(activity=self.activity, name="Late Judge")
+
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        self.assertEqual(
+            missing_score_cells(self.round),
+            [
+                {
+                    "singer_id": self.singer.pk,
+                    "singer_name": self.singer.name,
+                    "judge_id": self.judge.pk,
+                    "judge_name": self.judge.name,
+                }
+            ],
+        )
+        self.assertNotIn((self.singer.pk, new_judge.pk), expected_score_cells(self.round))
+
+    def test_registration_status_change_does_not_change_prepared_roster(self):
+        prepare_round(self.round, self.user)
+        self.singer.pre_status = SingerRegistration.PreStatus.SUBMITTED
+        self.singer.save(update_fields=["pre_status"])
+
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        self.assertEqual(
+            missing_score_cells(self.round),
+            [
+                {
+                    "singer_id": self.singer.pk,
+                    "singer_name": self.singer.name,
+                    "judge_id": self.judge.pk,
+                    "judge_name": self.judge.name,
+                }
+            ],
+        )
+
+    def test_recalculate_ignores_score_from_judge_outside_snapshot(self):
+        prepare_round(self.round, self.user)
+        inactive_judge = Judge.objects.create(
+            activity=self.activity, name="Inactive Judge", is_active=False
+        )
+        ScoreRecord.objects.create(round=self.round, singer=self.singer, judge=self.judge, score=90)
+        ScoreRecord.objects.create(
+            round=self.round, singer=self.singer, judge=inactive_judge, score=0
+        )
+
+        recalculate_round(self.round)
+
+        self.assertEqual(
+            ScoreSummary.objects.get(round=self.round, singer=self.singer).average_score,
+            Decimal("90"),
+        )
+
+    def test_apply_scores_rejects_draft_round(self):
+        with self.assertRaisesMessage(ValidationError, "请先准备比赛轮次"):
+            apply_scores(
+                self.round,
+                {(self.singer.pk, self.judge.pk): "90"},
+                self.user,
+            )
+
+    def test_apply_scores_transitions_prepared_round_to_scoring(self):
+        prepare_round(self.round, self.user)
+
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+        )
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.SCORING)
+
+    def test_apply_scores_rejects_locked_round_status(self):
+        prepare_round(self.round, self.user)
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(ValidationError, "该比赛轮次已锁定"):
+            apply_scores(
+                self.round,
+                {(self.singer.pk, self.judge.pk): "90"},
+                self.user,
+            )
 
     def test_validate_score_rejects_invalid_values(self):
         for value in ("", "abc", "-0.01", "100.01", "NaN", "Infinity", "1.234"):

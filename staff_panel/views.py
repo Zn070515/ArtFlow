@@ -43,6 +43,8 @@ from singer_contest.models import (
     SingerRegistration,
 )
 from singer_contest.services import (
+    _active_judges,
+    _eligible_singers,
     apply_scores,
     expected_score_cells,
     missing_score_cells,
@@ -626,11 +628,15 @@ def round_create(request):
 @staff_member_required
 def round_score_entry(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    singers = SingerRegistration.objects.filter(
-        activity=contest_round.activity,
-        pre_status=SingerRegistration.PreStatus.APPROVED,
-    )
-    judges = Judge.objects.filter(activity=contest_round.activity, is_active=True)
+    if contest_round.status == ContestRound.Status.DRAFT:
+        return render(
+            request,
+            "staff_panel/round_score_entry.html",
+            {"round": contest_round, "preparation_required": True},
+        )
+
+    singers = _eligible_singers(contest_round)
+    judges = _active_judges(contest_round)
     scores = {
         (s.singer_id, s.judge_id): s.score for s in ScoreRecord.objects.filter(round=contest_round)
     }
@@ -697,7 +703,8 @@ def round_lock(request, pk):
     if missing_cells:
         raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
     contest_round.is_locked = True
-    contest_round.save()
+    contest_round.status = ContestRound.Status.LOCKED
+    contest_round.save(update_fields=["is_locked", "status"])
     log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"ContestRound:{contest_round.pk}")
     return redirect("staff:round_ranking", pk=pk)
 
@@ -711,7 +718,11 @@ def round_unlock(request, pk):
     if not note:
         raise PermissionDenied("解锁结果必须填写原因。")
     contest_round.is_locked = False
-    contest_round.save()
+    update_fields = ["is_locked"]
+    if contest_round.status == ContestRound.Status.LOCKED:
+        contest_round.status = ContestRound.Status.SCORING
+        update_fields.append("status")
+    contest_round.save(update_fields=update_fields)
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
@@ -1107,12 +1118,8 @@ def excel_material_checklist(request, activity_id):
 @staff_member_required
 def excel_score_template(request, round_id):
     contest_round = get_object_or_404(ContestRound, pk=round_id)
-    singers = SingerRegistration.objects.filter(
-        activity=contest_round.activity,
-        pre_status=SingerRegistration.PreStatus.APPROVED,
-        is_test_data=False,
-    )
-    judges = Judge.objects.filter(activity=contest_round.activity, is_active=True)
+    singers = _eligible_singers(contest_round)
+    judges = _active_judges(contest_round)
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "评分表模板"

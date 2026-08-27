@@ -28,6 +28,7 @@ from singer_contest.models import (
     ScoreSummary,
     SingerRegistration,
 )
+from singer_contest.services import prepare_round
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 
@@ -228,6 +229,7 @@ class StaffPanelSmokeTests(TestCase):
             scoring_mode=ContestRound.ScoringMode.AVERAGE,
             advance_count=1,
         )
+        prepare_round(round_, self.staff)
         self.client.force_login(self.staff)
         response = self.client.post(
             reverse("staff:round_score_entry", args=[round_.pk]),
@@ -271,9 +273,87 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(qr_image.status_code, 200)
         self.assertEqual(qr_image["Content-Type"], "image/png")
 
+    def test_round_score_entry_requires_prepared_round(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Li Hua",
+            student_id="20260007",
+            college="Info",
+            class_name="CS1",
+            phone="13800000006",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+
+        entry_response = self.client.get(reverse("staff:round_score_entry", args=[round_.pk]))
+
+        response = self.client.post(
+            reverse("staff:round_score_entry", args=[round_.pk]),
+            {f"score_{registration.pk}_{judge.pk}": "91"},
+        )
+
+        self.assertContains(entry_response, "请先准备比赛轮次")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "请先准备比赛轮次")
+        self.assertFalse(ScoreRecord.objects.filter(round=round_).exists())
+
+    def test_score_entry_and_template_use_prepared_round_snapshots(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Prepared Singer",
+            student_id="20260008",
+            college="Info",
+            class_name="CS1",
+            phone="13800000007",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Prepared Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Late Singer",
+            student_id="20260009",
+            college="Info",
+            class_name="CS1",
+            phone="13800000008",
+            song_name="Late Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Late Judge")
+        self.client.force_login(self.staff)
+
+        entry_response = self.client.get(reverse("staff:round_score_entry", args=[round_.pk]))
+        template_response = self.client.get(
+            reverse("staff:excel_score_template", args=[round_.pk])
+        )
+
+        self.assertContains(entry_response, registration.name)
+        self.assertContains(entry_response, judge.name)
+        self.assertNotContains(entry_response, "Late Singer")
+        self.assertNotContains(entry_response, "Late Judge")
+        workbook = load_workbook(BytesIO(template_response.content))
+        worksheet = workbook.active
+        assert worksheet is not None
+        self.assertEqual(
+            list(worksheet.values),
+            [("选手\\评委", judge.name), (registration.name, None)],
+        )
+
     def test_locked_activity_blocks_staff_score_entry(self):
-        self.singer_activity.is_locked = True
-        self.singer_activity.save()
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -290,6 +370,9 @@ class StaffPanelSmokeTests(TestCase):
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
+        prepare_round(round_, self.staff)
+        self.singer_activity.is_locked = True
+        self.singer_activity.save(update_fields=["is_locked"])
         self.client.force_login(self.staff)
         response = self.client.post(
             reverse("staff:round_score_entry", args=[round_.pk]),
@@ -762,6 +845,40 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(round_.is_locked)
         self.assertFalse(ScoreRecord.objects.filter(singer=singer, judge=judge).exists())
 
+    def test_round_lock_and_unlock_update_round_status(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Scored Singer",
+            student_id="20260010",
+            college="Info",
+            class_name="CS1",
+            phone="13800000009",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        ScoreRecord.objects.create(round=round_, singer=singer, judge=judge, score=91)
+        self.client.force_login(self.admin)
+
+        lock_response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+        round_.refresh_from_db()
+        self.assertEqual(lock_response.status_code, 302)
+        self.assertEqual(round_.status, ContestRound.Status.LOCKED)
+        unlock_response = self.client.post(
+            reverse("staff:round_unlock", args=[round_.pk]), {"note": "correction"}
+        )
+        round_.refresh_from_db()
+
+        self.assertEqual(round_.status, ContestRound.Status.SCORING)
+        self.assertEqual(unlock_response.status_code, 302)
+        self.assertFalse(round_.is_locked)
+
     def test_round_lock_get_is_rejected_without_mutating_state(self):
         round_ = ContestRound.objects.create(
             activity=self.singer_activity,
@@ -893,6 +1010,7 @@ class StaffPanelSmokeTests(TestCase):
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
+        prepare_round(round_, self.staff)
         self.client.force_login(self.staff)
 
         response = self.client.post(

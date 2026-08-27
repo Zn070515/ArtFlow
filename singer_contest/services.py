@@ -143,11 +143,12 @@ def recalculate_round(contest_round: ContestRound) -> None:
         return
 
     singers = _eligible_singers(contest_round)
+    judge_ids = _active_judges(contest_round).values_list("pk", flat=True)
     for singer in singers:
         singer_scores = list(
-            ScoreRecord.objects.filter(round=contest_round, singer=singer).values_list(
-                "score", flat=True
-            )
+            ScoreRecord.objects.filter(
+                round=contest_round, singer=singer, judge_id__in=judge_ids
+            ).values_list("score", flat=True)
         )
         if (
             contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
@@ -188,6 +189,10 @@ def apply_scores(
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
+    if locked_round.status == ContestRound.Status.DRAFT:
+        raise ValidationError("请先准备比赛轮次后再评分。")
+    if locked_round.status == ContestRound.Status.LOCKED:
+        raise ValidationError("该比赛轮次已锁定。")
     if locked_round.is_locked or locked_round.activity.is_locked:
         raise ValidationError("该比赛轮次或活动已锁定。")
 
@@ -221,6 +226,9 @@ def apply_scores(
         )
 
     recalculate_round(locked_round)
+    if locked_round.status == ContestRound.Status.PREPARED:
+        locked_round.status = ContestRound.Status.SCORING
+        locked_round.save(update_fields=["status"])
     if changes:
         AuditLog.objects.create(
             operator=operator,
