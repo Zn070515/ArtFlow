@@ -1,6 +1,5 @@
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 
-
 DEFAULT_SINGER_REQUIREMENTS = [
     ("基本信息", ""),
     ("联系方式", ""),
@@ -34,8 +33,9 @@ def sync_program_material_checks(program):
 
 def _requirements_for(activity, applies_to, fallback):
     configured = list(
-        MaterialRequirement.objects.filter(activity=activity, applies_to=applies_to)
-        .values_list("item_name", "file_purpose")
+        MaterialRequirement.objects.filter(activity=activity, applies_to=applies_to).values_list(
+            "item_name", "file_purpose"
+        )
     )
     return configured or fallback
 

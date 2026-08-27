@@ -1,0 +1,161 @@
+name: PostgreSQL integration
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgresql:
+    name: PostgreSQL integration gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: artflow_ci
+          POSTGRES_USER: artflow_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready -U artflow_ci -d artflow_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+        ports:
+          - "127.0.0.1:5432:5432"
+    env:
+      APP_ENV: development
+      DEBUG: "False"
+      DATABASE_ENGINE: postgresql
+      POSTGRES_DB: artflow_ci
+      POSTGRES_USER: artflow_ci
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.29"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Prepare runtime directories
+        run: mkdir -p staticfiles media
+
+      - name: Apply migrations
+        run: uv run python manage.py migrate --noinput
+
+      - name: Run runtime diagnostics
+        run: uv run python manage.py doctor
+
+      - name: Check health endpoint
+        run: >-
+          uv run python manage.py shell -c
+          "from django.test import Client; response = Client().get('/healthz/');
+          raise SystemExit(0 if response.status_code == 200 else response.status_code)"
+
+      - name: Seed demo data twice
+        run: |
+          uv run python manage.py seed_demo_data
+          uv run python manage.py seed_demo_data
+
+      - name: Run full test suite
+        run: uv run pytest -q
+
+  compose-smoke:
+    name: Docker Compose PostgreSQL acceptance gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Validate Compose database isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker compose config --format json > "$RUNNER_TEMP/compose.json"
+          python - "$RUNNER_TEMP/compose.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as compose_file:
+              compose = json.load(compose_file)
+          if compose["services"]["db"].get("ports"):
+              raise SystemExit("Compose database must not publish a host port")
+          PY
+
+      - name: Build and start Compose stack
+        run: docker compose up --build --wait
+
+      - name: Verify running container health
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker compose ps --status running --services
+          for service in db web; do
+            container_id="$(docker compose ps -q "$service")"
+            test -n "$container_id"
+            test "$(docker inspect "$container_id" --format '{{.State.Health.Status}}')" = "healthy"
+          done
+
+      - name: Apply migrations in web container
+        run: docker compose exec -T web python manage.py migrate --noinput
+
+      - name: Run diagnostics in web container
+        run: docker compose exec -T web python manage.py doctor
+
+      - name: Check web health endpoint in container
+        run: >-
+          docker compose exec -T web python -c
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3);
+          raise SystemExit(0 if response.status == 200 else response.status)"
+
+      - name: Check published web health endpoint from runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in {1..12}; do
+            printf 'Health check attempt %s/12\n' "$attempt" >&2
+            health_check="from urllib.request import urlopen; "
+            health_check+="response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3); "
+            health_check+="raise SystemExit(0 if response.status == 200 else response.status)"
+            if python -c "$health_check"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Seed demo data twice in web container
+        run: |
+          docker compose exec -T web python manage.py seed_demo_data
+          docker compose exec -T web python manage.py seed_demo_data
+
+      - name: Prepare production startup test fixture
+        run: docker compose exec -T --user root web sh -lc 'touch /app/.env'
+
+      - name: Run Django test suite in web container
+        run: docker compose exec -T web python manage.py test
+
+      - name: Stop Compose services and retain volumes
+        if: ${{ always() }}
+        run: docker compose down

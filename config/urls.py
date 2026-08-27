@@ -1,10 +1,12 @@
+from common.views import controlled_media
 from django.contrib import admin
 from django.urls import include, path
 
-from common.views import controlled_media
+from config.health import healthz
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("healthz/", healthz, name="healthz"),
     path("", include("public_portal.urls")),
     path("", include("accounts.urls")),
     path("contest/", include("singer_contest.urls")),

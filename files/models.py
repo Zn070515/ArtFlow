@@ -15,12 +15,18 @@ class SubmissionFile(models.Model):
         OTHER = "other", "其他附件"
 
     singer_registration = models.ForeignKey(
-        "singer_contest.SingerRegistration", on_delete=models.CASCADE,
-        null=True, blank=True, related_name="files"
+        "singer_contest.SingerRegistration",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="files",
     )
     program = models.ForeignKey(
-        "farewell_show.Program", on_delete=models.CASCADE,
-        null=True, blank=True, related_name="files"
+        "farewell_show.Program",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="files",
     )
     file = models.FileField(upload_to="submissions/%Y/%m/")
     original_name = models.CharField(max_length=255)
@@ -29,8 +35,11 @@ class SubmissionFile(models.Model):
     is_public = models.BooleanField(default=False)
     is_test_data = models.BooleanField(default=False)
     uploaded_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, blank=True, related_name="uploaded_files"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="uploaded_files",
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
@@ -43,10 +52,14 @@ class MaterialRequirement(models.Model):
         SINGER = "singer", "歌手比赛报名"
         PROGRAM = "program", "毕晚节目"
 
-    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="material_requirements")
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="material_requirements"
+    )
     applies_to = models.CharField(max_length=12, choices=AppliesTo.choices)
     item_name = models.CharField(max_length=100)
-    file_purpose = models.CharField(max_length=24, choices=SubmissionFile.Purpose.choices, blank=True)
+    file_purpose = models.CharField(
+        max_length=24, choices=SubmissionFile.Purpose.choices, blank=True
+    )
     is_required = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 
@@ -60,17 +73,22 @@ class MaterialRequirement(models.Model):
 
 class StaffNote(models.Model):
     singer_registration = models.ForeignKey(
-        "singer_contest.SingerRegistration", on_delete=models.CASCADE,
-        null=True, blank=True, related_name="staff_notes"
+        "singer_contest.SingerRegistration",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="staff_notes",
     )
     program = models.ForeignKey(
-        "farewell_show.Program", on_delete=models.CASCADE,
-        null=True, blank=True, related_name="staff_notes"
+        "farewell_show.Program",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="staff_notes",
     )
     content = models.TextField()
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
-        null=True, related_name="staff_notes"
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="staff_notes"
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -88,12 +106,18 @@ class MaterialCheck(models.Model):
         REVIEWED = "reviewed", "已审核"
 
     singer_registration = models.ForeignKey(
-        "singer_contest.SingerRegistration", on_delete=models.CASCADE,
-        null=True, blank=True, related_name="material_checks"
+        "singer_contest.SingerRegistration",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_checks",
     )
     program = models.ForeignKey(
-        "farewell_show.Program", on_delete=models.CASCADE,
-        null=True, blank=True, related_name="material_checks"
+        "farewell_show.Program",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_checks",
     )
     item_name = models.CharField(max_length=100)
     status = models.CharField(max_length=12, choices=Status, default=Status.MISSING)

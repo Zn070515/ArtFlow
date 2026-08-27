@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: artflow
+      POSTGRES_USER: artflow
+      POSTGRES_PASSWORD: artflow-local-container-password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - artflow_internal
+
+  web:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_ENGINE: postgresql
+      POSTGRES_DB: artflow
+      POSTGRES_USER: artflow
+      POSTGRES_PASSWORD: artflow-local-container-password
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - artflow_frontend
+      - artflow_internal
+
+volumes:
+  postgres_data:
+  static_data:
+  media_data:
+
+networks:
+  artflow_frontend:
+    driver: bridge
+  artflow_internal:
+    internal: true

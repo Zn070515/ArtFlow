@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
 from django.db import models
 
 
@@ -34,5 +35,30 @@ class AuditLog(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self):
-        return f"{self.operator} {self.get_action_type_display()} {self.target} ({self.created_at:%Y-%m-%d %H:%M})"
+    def __str__(self) -> str:
+        return (
+            f"{self.operator} {self.get_action_type_display()} {self.target} "
+            f"({self.created_at:%Y-%m-%d %H:%M})"
+        )
+
+
+class SeedRecord(models.Model):
+    key = models.CharField(max_length=100, unique=True)
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.PROTECT,
+        related_name="seed_records",
+    )
+    object_id = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["content_type", "object_id"],
+                name="common_seedrecord_unique_owned_object",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.key

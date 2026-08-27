@@ -19,7 +19,9 @@ class Program(models.Model):
         WITHDRAWN = "withdrawn", "已撤回"
 
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="programs")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="programs")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="programs"
+    )
 
     name = models.CharField(max_length=200)
     program_type = models.CharField(max_length=20, choices=ProgramType)

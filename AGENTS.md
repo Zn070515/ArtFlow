@@ -16,18 +16,22 @@ ArtFlow is a Django monolith for student arts department activity operations. Co
 Templates are under `templates/`. Tests are app-level `tests.py` files. Local media under `media/` must not be committed.
 
 ## Build, Test, and Development Commands
-Prefix shell commands with `rtk` in agent workflows.
+Prefix shell commands with `rtk` in agent workflows when `rtk` is installed. If the command is unavailable on the current machine, run the command directly and report that fallback; do not block repository work on an optional wrapper.
 
 ```bash
+uv sync --locked --extra dev
 python manage.py migrate
 python manage.py runserver
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test
 python manage.py test staff_panel
+python manage.py doctor
+pwsh -NoProfile -File scripts/check_docs.ps1
+pwsh -NoProfile -File scripts/verify_postgres_acceptance.ps1 -StartCompose -VerifyResetSafety
 ```
 
-Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, and `test` before committing. Install dependencies with `uv pip install -r requirements.txt` or an activated virtualenv plus `pip install -r requirements.txt`.
+Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, `doctor` for read-only runtime diagnostics, and `test` before committing. Install the locked development environment with `uv sync --locked --extra dev`; use `check_docs.ps1` after user-facing documentation changes. The PostgreSQL acceptance command requires Docker Compose and leaves its services and volumes intact; `-VerifyResetSafety` makes the demo-data reset check explicit.
 
 ## Coding Style & Naming Conventions
 Use Python 4-space indentation and Django conventions: models as `PascalCase`, functions/views as `snake_case`, URL names as concise action names such as `vote_session_unlock`. Keep cross-flow rules in shared helpers, e.g. `common/business_rules.py`. Do not enforce permissions only in templates; validate before mutation.
@@ -36,7 +40,35 @@ Use Python 4-space indentation and Django conventions: models as `PascalCase`, f
 Use Django `TestCase`. Add regression tests for permission, lock-state, audit, file-access, export, and destructive-data paths. Prefer tests in the app that owns the behavior; cross-flow staff/admin tests can live in `staff_panel/tests.py`. Name tests by behavior, for example `test_locked_activity_blocks_staff_score_entry`.
 
 ## Commit & Pull Request Guidelines
-Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `style:`, `docs:`, `test:`, `chore:`. Keep commits scoped and push after each commit.
+Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `style:`, `docs:`, `test:`, `chore:`. Keep commits scoped and push feature-branch commits after verification; push `main` only after the verified non-fast-forward merge.
+
+## Branch & Worktree Workflow
+
+Do not use `.worktree/`, `worktrees/`, or any other linked worktree for ArtFlow development. Work directly in the repository checkout on a short-lived branch created from a clean, up-to-date `main`:
+
+```bash
+git status --short --branch
+git switch main
+git pull --ff-only origin main
+git switch -c build/<short-name>
+```
+
+Use `feat/`, `fix/`, `docs/`, `test/`, or `build/` prefixes as appropriate. Do not start work if `main` has uncommitted changes; preserve existing user changes and ask before proceeding.
+
+After verification, commit the scoped changes on the feature branch, merge the branch into `main` with a non-fast-forward merge, and push `main`:
+
+```bash
+git status --short
+git diff --check
+git add <scoped-files>
+git commit -m "<type>: <short description>"
+git switch main
+git pull --ff-only origin main
+git merge --no-ff <branch-name>
+git push origin main
+```
+
+Keep the feature branch until the merge and push have been confirmed. Delete it only after the final Git status and remote state are verified.
 
 Before opening a PR, run:
 

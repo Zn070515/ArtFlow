@@ -1,3 +1,9 @@
+import os
+from io import StringIO
+from unittest.mock import patch
+
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -18,50 +24,65 @@ class LoginModeTests(TestCase):
         )
 
     def test_normal_login_allows_non_admin_user(self):
-        response = self.client.post(reverse("accounts:login"), {
-            "login_mode": "normal",
-            "username": "participant",
-            "password": "pass12345",
-        })
+        response = self.client.post(
+            reverse("accounts:login"),
+            {
+                "login_mode": "normal",
+                "username": "participant",
+                "password": "pass12345",
+            },
+        )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("public_portal:home"))
+        self.assertEqual(response["Location"], reverse("public_portal:home"))
 
     def test_normal_login_rejects_admin_user(self):
-        response = self.client.post(reverse("accounts:login"), {
-            "login_mode": "normal",
-            "username": "admin",
-            "password": "pass12345",
-        })
+        response = self.client.post(
+            reverse("accounts:login"),
+            {
+                "login_mode": "normal",
+                "username": "admin",
+                "password": "pass12345",
+            },
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "管理员账号请使用管理员登录入口。")
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key")
     def test_admin_login_requires_correct_key(self):
-        response = self.client.post(reverse("accounts:admin_login"), {
-            "username": "admin",
-            "password": "pass12345",
-            "admin_key": "wrong-key",
-        })
+        response = self.client.post(
+            reverse("accounts:admin_login"),
+            {
+                "username": "admin",
+                "password": "pass12345",
+                "admin_key": "wrong-key",
+            },
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "管理员密钥错误。")
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key")
     def test_admin_login_redirects_admin_to_staff_dashboard(self):
-        response = self.client.post(reverse("accounts:admin_login"), {
-            "username": "admin",
-            "password": "pass12345",
-            "admin_key": "secret-key",
-        })
+        response = self.client.post(
+            reverse("accounts:admin_login"),
+            {
+                "username": "admin",
+                "password": "pass12345",
+                "admin_key": "secret-key",
+            },
+        )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, reverse("staff:dashboard"))
+        self.assertEqual(response["Location"], reverse("staff:dashboard"))
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key")
     def test_admin_login_rejects_non_admin_user(self):
-        response = self.client.post(reverse("accounts:admin_login"), {
-            "username": "participant",
-            "password": "pass12345",
-            "admin_key": "secret-key",
-        })
+        response = self.client.post(
+            reverse("accounts:admin_login"),
+            {
+                "username": "participant",
+                "password": "pass12345",
+                "admin_key": "secret-key",
+            },
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "该账号不是管理员账号。")
 
@@ -69,3 +90,31 @@ class LoginModeTests(TestCase):
         response = self.client.get(reverse("accounts:login"))
         self.assertContains(response, reverse("accounts:admin_login"))
         self.assertContains(response, "管理员登录")
+
+
+class SeedDevAdminCommandTests(TestCase):
+    @patch("getpass.getpass", return_value="")
+    @patch.dict(os.environ, {"DEV_ADMIN_PASSWORD": ""})
+    def test_seed_dev_admin_requires_a_nonempty_password(self, _getpass):
+        with self.assertRaisesMessage(CommandError, "A development admin password is required."):
+            call_command("seed_dev_admin")
+
+    @patch("getpass.getpass", return_value="hidden-input-password")
+    @patch.dict(os.environ, {"DEV_ADMIN_PASSWORD": ""})
+    def test_seed_dev_admin_updates_existing_admin_from_hidden_input(self, _getpass):
+        user = User.objects.create_user(
+            username="existing-admin",
+            password="old-password",
+            role=User.Role.PARTICIPANT,
+        )
+        output = StringIO()
+
+        call_command("seed_dev_admin", "--username", user.username, stdout=output)
+
+        user.refresh_from_db()
+        self.assertEqual(user.role, User.Role.ADMIN)
+        self.assertTrue(user.is_staff)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.check_password("hidden-input-password"))
+        self.assertEqual(output.getvalue(), "Updated development admin: existing-admin\n")
+        self.assertNotIn("hidden-input-password", output.getvalue())

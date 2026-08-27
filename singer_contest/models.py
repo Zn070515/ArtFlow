@@ -24,8 +24,12 @@ class SingerRegistration(models.Model):
         ABANDONED = "abandoned", "弃赛"
         DELAYED = "delayed", "延后出场"
 
-    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="singer_registrations")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="singer_registrations")
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="singer_registrations"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="singer_registrations"
+    )
 
     name = models.CharField(max_length=100)
     student_id = models.CharField(max_length=20)
@@ -39,7 +43,9 @@ class SingerRegistration(models.Model):
     remark = models.TextField(blank=True)
 
     pre_status = models.CharField(max_length=20, choices=PreStatus, default=PreStatus.DRAFT)
-    live_status = models.CharField(max_length=20, choices=LiveStatus, default=LiveStatus.NOT_CHECKED_IN)
+    live_status = models.CharField(
+        max_length=20, choices=LiveStatus, default=LiveStatus.NOT_CHECKED_IN
+    )
     is_test_data = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -104,7 +110,9 @@ class ScoreRecord(models.Model):
 
 class ScoreSummary(models.Model):
     round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="summaries")
-    singer = models.ForeignKey(SingerRegistration, on_delete=models.CASCADE, related_name="summaries")
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="summaries"
+    )
     average_score = models.DecimalField(max_digits=6, decimal_places=3, default=0)
     rank = models.IntegerField(default=0)
     is_advanced = models.BooleanField(default=False)

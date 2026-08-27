@@ -24,5 +24,12 @@ class MaterialCheckAdmin(admin.ModelAdmin):
 
 @admin.register(MaterialRequirement)
 class MaterialRequirementAdmin(admin.ModelAdmin):
-    list_display = ["item_name", "activity", "applies_to", "file_purpose", "is_required", "sort_order"]
+    list_display = [
+        "item_name",
+        "activity",
+        "applies_to",
+        "file_purpose",
+        "is_required",
+        "sort_order",
+    ]
     list_filter = ["activity", "applies_to", "is_required"]
