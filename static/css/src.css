@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#f5f7fa] text-gray-900 antialiased;
+  }
+
+  a {
+    @apply transition-colors;
+  }
+}

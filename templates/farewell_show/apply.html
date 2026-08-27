@@ -5,6 +5,11 @@
 {% block content %}
 <div class="max-w-xl mx-auto px-4 py-10">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">毕晚节目征集</h1>
+    {% if errors %}
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
+        {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+    {% endif %}
 
     {% if not activities %}
     <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">

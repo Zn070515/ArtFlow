@@ -16,6 +16,9 @@ from django.urls import reverse
 from django.utils import timezone
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
+from files.services import store_submission_file
+from incidents.models import IncidentRecord
+from openpyxl import load_workbook
 from public_portal.models import PublicPost
 from singer_contest.models import (
     Award,
@@ -159,7 +162,9 @@ class StaffPanelSmokeTests(TestCase):
                 "class_name": "CS1",
                 "phone": "13800000000",
                 "song_name": "Song",
-                "accompaniment": SimpleUploadedFile("song.mp3", b"audio"),
+                "accompaniment": SimpleUploadedFile(
+                    "song.mp3", b"audio", content_type="audio/mpeg"
+                ),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -186,7 +191,9 @@ class StaffPanelSmokeTests(TestCase):
                 "contact_name": "Li Hua",
                 "contact_phone": "13800000000",
                 "class_name": "CS1",
-                "accompaniment": SimpleUploadedFile("dance.mp3", b"audio"),
+                "accompaniment": SimpleUploadedFile(
+                    "dance.mp3", b"audio", content_type="audio/mpeg"
+                ),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -400,6 +407,58 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(VoteSession.objects.filter(name="Formal Vote").exists())
         self.assertFalse(VoteSession.objects.filter(name="Test Vote").exists())
 
+    def test_leaving_test_mode_rejects_residual_test_data(self):
+        test_registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Residual Test",
+            student_id="20260007",
+            college="Info",
+            class_name="CS1",
+            phone="13800000006",
+            song_name="Test Song",
+            is_test_data=True,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("staff:activity_test_toggle", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.singer_activity.refresh_from_db()
+        self.assertTrue(self.singer_activity.is_test_mode)
+        self.assertTrue(SingerRegistration.objects.filter(pk=test_registration.pk).exists())
+
+    def test_clear_test_data_removes_test_file_object(self):
+        test_registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="File Test",
+            student_id="20260012",
+            college="Info",
+            class_name="CS1",
+            phone="13800000011",
+            song_name="Test Song",
+            is_test_data=True,
+        )
+        submission = store_submission_file(
+            owner=test_registration,
+            uploaded_file=SimpleUploadedFile("test.mp3", b"audio", content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.participant,
+            is_test_data=True,
+        )
+        stored_name = submission.file.name
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(submission.file.storage.exists(stored_name))
+
     def test_file_response_cleanup_closes_file_without_closing_response(self):
         response = FileResponse(BytesIO(b"audio"))
         filelike = response.file_to_stream
@@ -501,7 +560,7 @@ class StaffPanelSmokeTests(TestCase):
             published_at=timezone.now(),
         )
         self.client.force_login(self.staff)
-        response = self.client.get(
+        response = self.client.post(
             reverse("staff:archive_package_create", args=[self.singer_activity.pk])
         )
         self.assertEqual(response.status_code, 200)
@@ -532,6 +591,43 @@ class StaffPanelSmokeTests(TestCase):
         self.assertIn("program_list.xlsx", names)
         self.assertIn("contact_list.xlsx", names)
         self.assertIn("material_checklist.xlsx", names)
+
+    def test_archive_package_excludes_test_data_from_formal_indexes(self):
+        formal = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Formal Singer",
+            student_id="20260008",
+            college="Info",
+            class_name="CS1",
+            phone="13800000007",
+            song_name="Formal Song",
+            is_test_data=False,
+        )
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Test Singer",
+            student_id="20260009",
+            college="Info",
+            class_name="CS1",
+            phone="13800000008",
+            song_name="Test Song",
+            is_test_data=True,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:archive_package_create", args=[self.singer_activity.pk])
+        )
+
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            workbook = load_workbook(BytesIO(archive.read("registration_list.xlsx")))
+        worksheet = workbook.active
+        assert worksheet is not None
+        values = [cell.value for row in worksheet.iter_rows() for cell in row]
+        self.assertIn(formal.name, values)
+        self.assertNotIn("Test Singer", values)
 
     def test_locking_vote_session_generates_popularity_award(self):
         registration = SingerRegistration.objects.create(
@@ -569,7 +665,249 @@ class StaffPanelSmokeTests(TestCase):
             ).exists()
         )
 
-    def test_vote_cast_rate_limits_same_ip_briefly(self):
+    def test_relocking_vote_session_reconciles_changed_popularity_winner(self):
+        first = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="First Winner",
+            student_id="20260010",
+            college="Info",
+            class_name="CS1",
+            phone="13800000009",
+            song_name="Song 1",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        second = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Second Winner",
+            student_id="20260011",
+            college="Info",
+            class_name="CS1",
+            phone="13800000010",
+            song_name="Song 2",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Popularity Recount",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        first_option = VoteOption.objects.create(vote_session=vote_session, singer=first)
+        second_option = VoteOption.objects.create(vote_session=vote_session, singer=second)
+        VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=first_option,
+            browser_session_key="winner-1",
+            ip_address="127.0.0.1",
+        )
+        self.client.force_login(self.admin)
+        self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
+        self.client.post(
+            reverse("staff:vote_session_unlock", args=[vote_session.pk]),
+            {"note": "recount"},
+        )
+        VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=second_option,
+            browser_session_key="winner-2",
+            ip_address="127.0.0.2",
+        )
+        VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=second_option,
+            browser_session_key="winner-3",
+            ip_address="127.0.0.3",
+        )
+        self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
+
+        self.assertFalse(
+            Award.objects.filter(
+                activity=self.singer_activity, singer=first, name="最佳人气奖"
+            ).exists()
+        )
+        self.assertEqual(
+            Award.objects.filter(
+                activity=self.singer_activity, singer=second, name="最佳人气奖"
+            ).count(),
+            1,
+        )
+
+    def test_round_lock_rejects_incomplete_scores(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Incomplete Singer",
+            student_id="20260002",
+            college="Info",
+            class_name="CS1",
+            phone="13800000001",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+
+        self.assertEqual(response.status_code, 403)
+        round_.refresh_from_db()
+        self.assertFalse(round_.is_locked)
+        self.assertFalse(ScoreRecord.objects.filter(singer=singer, judge=judge).exists())
+
+    def test_round_lock_get_is_rejected_without_mutating_state(self):
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:round_lock", args=[round_.pk]))
+
+        self.assertEqual(response.status_code, 405)
+        round_.refresh_from_db()
+        self.assertFalse(round_.is_locked)
+
+    def test_award_creation_rejects_singer_from_another_activity(self):
+        foreign_singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Foreign Singer",
+            student_id="20260005",
+            college="Info",
+            class_name="CS1",
+            phone="13800000004",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        other_activity = Activity.objects.create(
+            title="Other Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("staff:award_create"),
+            {
+                "activity_id": other_activity.pk,
+                "singer_id": foreign_singer.pk,
+                "name": "Invalid Award",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Award.objects.filter(name="Invalid Award").exists())
+
+    def test_vote_session_creation_rejects_singer_from_another_activity(self):
+        foreign_singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Foreign Vote Singer",
+            student_id="20260006",
+            college="Info",
+            class_name="CS1",
+            phone="13800000005",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        other_activity = Activity.objects.create(
+            title="Other Vote Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("staff:vote_session_create"),
+            {
+                "activity_id": other_activity.pk,
+                "name": "Invalid Vote",
+                "passcode": "1234",
+                "start_time": "2026-08-27T10:00",
+                "end_time": "2026-08-27T11:00",
+                "singers": [str(foreign_singer.pk)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(VoteSession.objects.filter(name="Invalid Vote").exists())
+
+    def test_incident_creation_rejects_singer_from_another_activity(self):
+        foreign_singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Foreign Incident Singer",
+            student_id="20260013",
+            college="Info",
+            class_name="CS1",
+            phone="13800000012",
+            song_name="Song",
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:incident_create"),
+            {
+                "activity_id": self.farewell_activity.pk,
+                "occurred_at": timezone.now().isoformat(),
+                "event_type": IncidentRecord.EventType.OTHER,
+                "singer_id": foreign_singer.pk,
+                "resolution": "invalid",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(IncidentRecord.objects.filter(resolution="invalid").exists())
+
+    def test_manual_score_submission_rolls_back_when_one_score_is_invalid(self):
+        first = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="First Singer",
+            student_id="20260003",
+            college="Info",
+            class_name="CS1",
+            phone="13800000002",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        second = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Second Singer",
+            student_id="20260004",
+            college="Info",
+            class_name="CS1",
+            phone="13800000003",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge B")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:round_score_entry", args=[round_.pk]),
+            {
+                f"score_{first.pk}_{judge.pk}": "90",
+                f"score_{second.pk}_{judge.pk}": "not-a-score",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "分数")
+        self.assertFalse(ScoreRecord.objects.filter(round=round_).exists())
+
+    def test_vote_cast_allows_distinct_browsers_sharing_an_ip(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -615,8 +953,8 @@ class StaffPanelSmokeTests(TestCase):
             {"selected_option": [str(option.pk)]},
             REMOTE_ADDR="127.0.0.1",
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(VoteRecord.objects.filter(vote_session=vote_session).count(), 1)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(VoteRecord.objects.filter(vote_session=vote_session).count(), 2)
 
     def test_activity_clone_preserves_configuration_not_runtime_data(self):
         MaterialRequirement.objects.create(

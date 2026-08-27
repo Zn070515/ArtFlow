@@ -34,6 +34,8 @@ class SubmissionFile(models.Model):
     file_purpose = models.CharField(max_length=24, choices=Purpose, default=Purpose.OTHER)
     is_public = models.BooleanField(default=False)
     is_test_data = models.BooleanField(default=False)
+    is_current = models.BooleanField(default=True)
+    version = models.PositiveIntegerField(default=1)
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -42,6 +44,20 @@ class SubmissionFile(models.Model):
         related_name="uploaded_files",
     )
     uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["singer_registration", "file_purpose"],
+                condition=models.Q(is_current=True, singer_registration__isnull=False),
+                name="files_one_current_singer_purpose",
+            ),
+            models.UniqueConstraint(
+                fields=["program", "file_purpose"],
+                condition=models.Q(is_current=True, program__isnull=False),
+                name="files_one_current_program_purpose",
+            ),
+        ]
 
     def __str__(self):
         return self.original_name

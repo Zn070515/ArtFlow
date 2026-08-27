@@ -62,7 +62,7 @@
             {% elif request.user.is_admin %}
             <form method="post" action="{% url 'staff:vote_session_unlock' vote_session.pk %}" class="flex gap-2">
                 {% csrf_token %}
-                <input type="text" name="note" placeholder="解锁备注（选填）" class="text-xs border border-gray-300 rounded px-2 py-1">
+                <input type="text" name="note" required placeholder="解锁原因" class="text-xs border border-gray-300 rounded px-2 py-1">
                 <button type="submit" class="text-xs border border-red-300 text-red-700 px-3 py-1.5 rounded hover:bg-red-50 transition-colors">解锁结果</button>
             </form>
             {% endif %}

@@ -10,6 +10,7 @@ from accounts.models import User
 from core.models import Activity
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import DatabaseError, IntegrityError, transaction
@@ -34,6 +35,7 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from . import models as common_models
+from .business_rules import ensure_same_activity
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
 from .views import _media_file_response
@@ -41,6 +43,64 @@ from .views import _media_file_response
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
 DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
 DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
+
+
+class ActivityOwnershipTests(TestCase):
+    def test_same_activity_guard_rejects_related_object_from_another_activity(self):
+        first = Activity.objects.create(
+            title="First",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        second = Activity.objects.create(
+            title="Second",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            ensure_same_activity(first, second, label="related activity")
+
+    def test_cross_activity_award_and_vote_option_are_rejected_by_model_save(self):
+        user = User.objects.create_user(username="owner", password="pass")
+        first = Activity.objects.create(
+            title="First",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        second = Activity.objects.create(
+            title="Second",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        singer = SingerRegistration.objects.create(
+            activity=second,
+            user=user,
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+        with self.assertRaises(ValidationError):
+            Award(activity=first, singer=singer, name="Invalid").save()
+
+        vote_session = VoteSession.objects.create(
+            activity=first,
+            name="Votes",
+            passcode="1234",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(minutes=5),
+        )
+        with self.assertRaises(ValidationError):
+            VoteOption(vote_session=vote_session, singer=singer).save()
+
+
+class StaticAssetContractTests(TestCase):
+    def test_base_template_uses_local_compiled_css(self):
+        base_template = (settings.BASE_DIR / "templates" / "base.html").read_text(encoding="utf-8")
+
+        self.assertIn("{% load static %}", base_template)
+        self.assertIn("static 'css/app.css'", base_template)
+        self.assertNotIn("cdn.tailwindcss.com", base_template)
+        self.assertNotIn("text/tailwind", base_template)
 
 
 class ControlledMediaPathTests(TestCase):

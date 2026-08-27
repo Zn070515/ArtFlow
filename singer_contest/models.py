@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -104,6 +105,19 @@ class ScoreRecord(models.Model):
     class Meta:
         unique_together = [("round", "singer", "judge")]
 
+    def clean(self):
+        singer = self.singer if self.singer_id else None
+        contest_round = self.round if self.round_id else None
+        judge = self.judge if self.judge_id else None
+        if singer and contest_round and singer.activity_id != contest_round.activity_id:
+            raise ValidationError("Score singer must belong to the round activity.")
+        if judge and contest_round and judge.activity_id != contest_round.activity_id:
+            raise ValidationError("Score judge must belong to the round activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
 
@@ -131,9 +145,28 @@ class Award(models.Model):
     singer = models.ForeignKey(SingerRegistration, on_delete=models.CASCADE, related_name="awards")
     name = models.CharField(max_length=100)
     is_test_data = models.BooleanField(default=False)
+    source_vote_session = models.OneToOneField(
+        "voting.VoteSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_popularity_award",
+    )
 
     class Meta:
         ordering = ["pk"]
+
+    def clean(self):
+        singer = self.singer if self.singer_id else None
+        vote_session = self.source_vote_session if self.source_vote_session_id else None
+        if self.activity_id and singer and singer.activity_id != self.activity_id:
+            raise ValidationError("Award singer must belong to the award activity.")
+        if vote_session and self.activity_id and vote_session.activity_id != self.activity_id:
+            raise ValidationError("Generated award must belong to the vote activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name}: {self.name}"

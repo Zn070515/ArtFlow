@@ -18,7 +18,10 @@
 
             <div class="flex flex-wrap gap-1.5 mb-3">
                 <a href="{% url 'staff:execution_package' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">执行包</a>
-                <a href="{% url 'staff:archive_package_create' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">归档包</a>
+                <form method="post" action="{% url 'staff:archive_package_create' a.pk %}" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">归档包</button>
+                </form>
                 <a href="{% url 'staff:excel_material_checklist' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">材料清单</a>
             </div>
 
@@ -47,6 +50,7 @@
                 {% if user.is_admin %}
                 <form method="post" action="{% url 'staff:activity_unlock' a.pk %}">
                     {% csrf_token %}
+                    <input type="text" name="note" required placeholder="解锁原因" class="text-xs border border-red-200 rounded px-2 py-1">
                     <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">解锁活动</button>
                 </form>
                 {% endif %}
@@ -69,14 +73,15 @@
                 <h3 class="text-sm font-medium text-gray-900">{{ t.name }}</h3>
                 <p class="text-xs text-gray-500">{{ t.get_template_type_display }}</p>
             </div>
-            <form method="get" action="{% url 'staff:word_generate' t.pk 0 %}"
+            <form method="post" action="{% url 'staff:word_generate' t.pk 0 %}"
                   x-data="{ activityId: '' }"
                   class="flex items-center gap-2">
+                {% csrf_token %}
                 <select name="activity_id" x-model="activityId" class="text-xs border border-gray-300 rounded px-2 py-1" required>
                     <option value="">选择活动</option>
                     {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
                 </select>
-                <button type="button" onclick="if(this.form.activity_id.value){window.location.href='{% url 'staff:word_generate' t.pk 0 %}'.replace('/0/', '/'+this.form.activity_id.value+'/')}" class="text-xs bg-brand text-white px-2 py-1 rounded hover:bg-brand-light">生成</button>
+                <button type="button" onclick="if(this.form.activity_id.value){this.form.action='{% url 'staff:word_generate' t.pk 0 %}'.replace('/0/', '/'+this.form.activity_id.value+'/'); this.form.submit();}" class="text-xs bg-brand text-white px-2 py-1 rounded hover:bg-brand-light">生成</button>
             </form>
         </div>
         {% endfor %}

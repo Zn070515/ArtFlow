@@ -156,6 +156,13 @@ jobs:
       - name: Run Django test suite in web container
         run: docker compose exec -T web python manage.py test
 
+      - name: Verify PostgreSQL backup restore without touching source volumes
+        run: >-
+          pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1
+          -ComposeProjectName artflow
+          -OutputDirectory "$RUNNER_TEMP"
+          -BackupPath "$RUNNER_TEMP/artflow-rehearsal.dump"
+
       - name: Stop Compose services and retain volumes
         if: ${{ always() }}
         run: docker compose down

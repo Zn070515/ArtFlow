@@ -38,3 +38,4 @@ Thumbs.db
 # Node / Tailwind
 node_modules/
 dist/
+backups/

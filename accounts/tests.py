@@ -92,6 +92,33 @@ class LoginModeTests(TestCase):
         self.assertContains(response, "管理员登录")
 
 
+class UserPermissionSynchronizationTests(TestCase):
+    def test_demoting_staff_user_clears_django_staff_flag(self):
+        user = User.objects.create_user(
+            username="demoted-staff",
+            password="pass12345",
+            role=User.Role.STAFF,
+        )
+        self.assertTrue(user.is_staff)
+
+        user.role = User.Role.PARTICIPANT
+        user.save()
+
+        user.refresh_from_db()
+        self.assertFalse(user.is_staff)
+
+    def test_superuser_remains_staff_when_role_is_participant(self):
+        user = User.objects.create_superuser(
+            username="superuser",
+            password="pass12345",
+            email="superuser@example.com",
+            role=User.Role.PARTICIPANT,
+        )
+
+        user.refresh_from_db()
+        self.assertTrue(user.is_staff)
+
+
 class SeedDevAdminCommandTests(TestCase):
     @patch("getpass.getpass", return_value="")
     @patch.dict(os.environ, {"DEV_ADMIN_PASSWORD": ""})

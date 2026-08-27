@@ -29,9 +29,12 @@ python manage.py test staff_panel
 python manage.py doctor
 pwsh -NoProfile -File scripts/check_docs.ps1
 pwsh -NoProfile -File scripts/verify_postgres_acceptance.ps1 -StartCompose -VerifyResetSafety
+npm ci
+npm run check:css
+pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1 -ComposeProjectName artflow -BackupPath backups/artflow-rehearsal.dump
 ```
 
-Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, `doctor` for read-only runtime diagnostics, and `test` before committing. Install the locked development environment with `uv sync --locked --extra dev`; use `check_docs.ps1` after user-facing documentation changes. The PostgreSQL acceptance command requires Docker Compose and leaves its services and volumes intact; `-VerifyResetSafety` makes the demo-data reset check explicit.
+Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, `doctor` for read-only runtime diagnostics, and `test` before committing. Install the locked development environment with `uv sync --locked --extra dev`; use `check_docs.ps1` after user-facing documentation changes. The PostgreSQL acceptance command requires Docker Compose and leaves its services and volumes intact; `-VerifyResetSafety` makes the demo-data reset check explicit. The CSS gate rebuilds the pinned Tailwind asset and fails if the tracked output is stale. The backup/restore rehearsal creates a custom-format dump from the running Compose database, restores it into a separate temporary database container, runs Django checks, and cleans up only that temporary target. It must never use `docker compose down --volumes`, reset, or drop the source database/volumes.
 
 ## Coding Style & Naming Conventions
 Use Python 4-space indentation and Django conventions: models as `PascalCase`, functions/views as `snake_case`, URL names as concise action names such as `vote_session_unlock`. Keep cross-flow rules in shared helpers, e.g. `common/business_rules.py`. Do not enforce permissions only in templates; validate before mutation.

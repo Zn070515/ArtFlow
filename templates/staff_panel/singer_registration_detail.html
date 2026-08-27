@@ -6,6 +6,11 @@
 <div class="max-w-4xl mx-auto px-4 py-10">
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:singer_registration_list' %}" class="hover:underline">报名管理</a> / {{ reg.name }}</p>
     <h1 class="text-2xl font-bold text-gray-900 mb-6">{{ reg.name }} — {{ reg.song_name }}</h1>
+    {% if errors %}
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
+        {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+    {% endif %}
 
     <div class="grid md:grid-cols-2 gap-6">
         <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-2">
@@ -48,7 +53,7 @@
                 {% if files %}
                 <ul class="space-y-1 mb-4">
                     {% for f in files %}
-                    <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({{ f.get_file_purpose_display }})</span></span><span>{{ f.file_size|filesizeformat }}</span></li>
+            <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({{ f.get_file_purpose_display }} · v{{ f.version }})</span>{% if f.is_current %}<span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ f.file_size|filesizeformat }}</span></li>
                     {% endfor %}
                 </ul>
                 {% else %}

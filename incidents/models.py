@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -44,6 +45,18 @@ class IncidentRecord(models.Model):
 
     class Meta:
         ordering = ["-occurred_at"]
+
+    def clean(self):
+        singer = self.singer if self.singer_id else None
+        program = self.program if self.program_id else None
+        if singer and singer.activity_id != self.activity_id:
+            raise ValidationError("Incident singer must belong to the incident activity.")
+        if program and program.activity_id != self.activity_id:
+            raise ValidationError("Incident program must belong to the incident activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_event_type_display()} — {self.occurred_at:%Y-%m-%d %H:%M}"
