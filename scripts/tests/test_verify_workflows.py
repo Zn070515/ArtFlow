@@ -67,6 +67,7 @@ def valid_workflow() -> str:
                 run: |
                   set -Eeuo pipefail
                   for attempt in {{1..12}}; do
+                    printf 'Health check attempt %s/12\\n' "$attempt" >&2
                     health_check="from urllib.request import urlopen; "
                     health_check+="response = urlopen("
                     health_check+="'http://127.0.0.1:8000/healthz/', timeout=3); "
