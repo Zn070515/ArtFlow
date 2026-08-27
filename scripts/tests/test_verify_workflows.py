@@ -82,6 +82,8 @@ def valid_workflow() -> str:
                 run: |
                   docker compose exec -T web python manage.py seed_demo_data
                   docker compose exec -T web python manage.py seed_demo_data
+              - name: Prepare production startup test fixture
+                run: docker compose exec -T --user root web sh -lc 'touch /app/.env'
               - name: Preserve Compose volumes
                 if: ${{{{ always() }}}}
                 run: docker compose down

@@ -29,6 +29,15 @@ function Invoke-WebCommand {
     Invoke-DockerCompose -Arguments @('exec', '-T', 'web', 'sh', '-lc', $Command)
 }
 
+function Invoke-RootWebCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Command
+    )
+
+    Invoke-DockerCompose -Arguments @('exec', '-T', '--user', 'root', 'web', 'sh', '-lc', $Command)
+}
+
 Push-Location $repositoryRoot
 try {
     $dockerCommand = Get-Command docker -CommandType Application -ErrorAction Stop |
@@ -51,6 +60,7 @@ try {
         Invoke-WebCommand 'python manage.py seed_demo_data'
     }
 
+    Invoke-RootWebCommand 'touch /app/.env'
     Invoke-WebCommand 'python manage.py test'
     Write-Host 'PostgreSQL acceptance contract completed. Services and volumes were left intact.'
 }

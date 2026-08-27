@@ -144,6 +144,14 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
             f"{workflow_path.name}: Compose smoke must run migrate, doctor, health, and "
             "seed twice in web"
         )
+    if (
+        "docker compose exec -T --user root web sh -lc" not in compose_commands
+        or "touch /app/.env" not in compose_commands
+    ):
+        issues.append(
+            f"{workflow_path.name}: Compose smoke must prepare the immutable-image "
+            "production startup test fixture"
+        )
     published_health_commands = "\n".join(
         str(step.get("run", ""))
         for step in compose_steps
