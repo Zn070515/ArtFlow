@@ -66,7 +66,7 @@ try {
     }
 
     Write-Host "Creating custom-format dump at $backupFile"
-    Invoke-Compose -Arguments @('exec', '-T', 'db', 'sh', '-lc', "pg_dump --format=custom --file=$remoteDumpPath")
+    Invoke-Compose -Arguments @('exec', '-T', 'db', 'sh', '-lc', 'pg_dump --format=custom --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --file=/tmp/artflow-backup.dump')
     Invoke-Docker -Arguments @('cp', "${sourceContainer}:$remoteDumpPath", $backupFile)
     Invoke-Compose -Arguments @('exec', '-T', 'db', 'rm', '-f', $remoteDumpPath)
 
