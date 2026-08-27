@@ -5,6 +5,11 @@
 {% block content %}
 <div class="max-w-xl mx-auto px-4 py-10">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">我的报名</h1>
+    {% if errors %}
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
+        {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+    {% endif %}
     {% if reg %}
     <div class="bg-white border border-gray-200 rounded-lg p-6 space-y-3 text-sm">
         <div class="flex justify-between"><span class="text-gray-500">活动</span><span class="text-gray-900">{{ reg.activity.title }}</span></div>
@@ -59,7 +64,7 @@
         {% if files %}
         <ul class="mb-4 space-y-1">
             {% for file in files %}
-            <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }}</span><span>{{ file.get_file_purpose_display }}</span></li>
+            <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }}{% if file.is_current %} <span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ file.get_file_purpose_display }} · v{{ file.version }}</span></li>
             {% endfor %}
         </ul>
         {% endif %}

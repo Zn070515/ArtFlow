@@ -1,27 +1,11 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}ArtFlow{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        brand: { DEFAULT: '#1e3a5f', light: '#2d5a8e', dark: '#152a47' }
-                    }
-                }
-            }
-        }
-    </script>
-    <style type="text/tailwindcss">
-        @layer base {
-            body { @apply bg-[#f5f7fa] text-gray-900 antialiased; }
-            a { @apply transition-colors; }
-        }
-    </style>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
 </head>
 <body class="min-h-screen flex flex-col">
     <header class="bg-white border-b border-gray-200">

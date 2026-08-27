@@ -1,10 +1,10 @@
-from datetime import timedelta
-
 from common.audit import client_ip
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from .models import VoteOption, VoteRecord, VoteSession
+from .models import VoteBallot, VoteSession
+from .services import submit_ballot
 
 
 def vote_entry(request, pk):
@@ -55,7 +55,7 @@ def vote_cast(request, pk):
         error = "投票尚未开始"
     elif now > vote_session.end_time:
         error = "投票已结束"
-    elif VoteRecord.objects.filter(
+    elif VoteBallot.objects.filter(
         vote_session=vote_session,
         browser_session_key=session_key,
     ).exists():
@@ -71,23 +71,16 @@ def vote_cast(request, pk):
     if request.method == "POST" and not error:
         selected = request.POST.getlist("selected_option")
         ip = client_ip(request) or "0.0.0.0"
-        if VoteRecord.objects.filter(
-            vote_session=vote_session,
-            ip_address=ip,
-            created_at__gte=now - timedelta(seconds=10),
-        ).exists():
-            error = "投票过于频繁，请稍后再试"
-        if not selected:
-            error = "请选择至少一个候选项"
-        if not error:
-            for opt_pk in selected[:max_sel]:
-                if VoteOption.objects.filter(pk=opt_pk, vote_session=vote_session).exists():
-                    VoteRecord.objects.create(
-                        vote_session=vote_session,
-                        vote_option_id=opt_pk,
-                        browser_session_key=session_key,
-                        ip_address=ip,
-                    )
+        try:
+            submit_ballot(
+                vote_session,
+                browser_session_key=session_key,
+                option_ids=selected,
+                ip_address=ip,
+            )
+        except ValidationError as validation_error:
+            error = "；".join(validation_error.messages)
+        else:
             return redirect("voting:vote_done", pk=pk)
 
     return render(

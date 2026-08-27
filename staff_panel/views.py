@@ -6,12 +6,14 @@ from common.audit import log_action
 from common.business_rules import (
     ensure_activity_unlocked,
     ensure_round_unlocked,
+    ensure_same_activity,
     ensure_vote_session_unlocked,
 )
 from common.models import AuditLog
+from common.test_data import clear_activity_test_data, leave_test_mode
 from core.models import Activity
 from django.contrib.admin.views.decorators import staff_member_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -21,7 +23,11 @@ from django.views.decorators.http import require_POST
 from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
-from files.services import sync_program_material_checks, sync_singer_material_checks
+from files.services import (
+    store_submission_file,
+    sync_program_material_checks,
+    sync_singer_material_checks,
+)
 from incidents.models import IncidentRecord
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
@@ -34,6 +40,11 @@ from singer_contest.models import (
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
+)
+from singer_contest.services import (
+    apply_scores,
+    missing_score_cells,
+    parse_score_workbook,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
 
@@ -323,27 +334,30 @@ def singer_registration_list(request):
 @staff_member_required
 def singer_registration_detail(request, pk):
     reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
+    errors = []
     if request.method == "POST":
         ensure_activity_unlocked(reg.activity)
         if "upload_file" in request.POST:
             f = request.FILES.get("file")
             if f:
-                submission_file = SubmissionFile.objects.create(
-                    singer_registration=reg,
-                    file=f,
-                    original_name=f.name,
-                    file_size=f.size,
-                    file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                    uploaded_by=request.user,
-                    is_test_data=reg.is_test_data or reg.activity.is_test_mode,
-                )
-                sync_singer_material_checks(reg)
-                log_action(
-                    request,
-                    AuditLog.ActionType.UPLOAD_FILE,
-                    f"SubmissionFile:{submission_file.pk}",
-                    new_value=submission_file.original_name,
-                )
+                try:
+                    submission_file = store_submission_file(
+                        owner=reg,
+                        uploaded_file=f,
+                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
+                        uploaded_by=request.user,
+                        is_test_data=reg.is_test_data or reg.activity.is_test_mode,
+                    )
+                except ValidationError as error:
+                    errors.extend(error.messages)
+                else:
+                    sync_singer_material_checks(reg)
+                    log_action(
+                        request,
+                        AuditLog.ActionType.UPLOAD_FILE,
+                        f"SubmissionFile:{submission_file.pk}",
+                        new_value=submission_file.original_name,
+                    )
         else:
             old_value = f"pre={reg.pre_status}; live={reg.live_status}"
             if "pre_status" in request.POST:
@@ -382,6 +396,7 @@ def singer_registration_detail(request, pk):
             "checks": checks,
             "check_statuses": _choices(MaterialCheck.Status),
             "file_purposes": _choices(SubmissionFile.Purpose),
+            "errors": errors,
         },
     )
 
@@ -398,27 +413,30 @@ def program_list(request):
 @staff_member_required
 def program_detail(request, pk):
     prog = get_object_or_404(Program.objects.select_related("activity", "user"), pk=pk)
+    errors = []
     if request.method == "POST":
         ensure_activity_unlocked(prog.activity)
         if "upload_file" in request.POST:
             f = request.FILES.get("file")
             if f:
-                submission_file = SubmissionFile.objects.create(
-                    program=prog,
-                    file=f,
-                    original_name=f.name,
-                    file_size=f.size,
-                    file_purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                    uploaded_by=request.user,
-                    is_test_data=prog.is_test_data or prog.activity.is_test_mode,
-                )
-                sync_program_material_checks(prog)
-                log_action(
-                    request,
-                    AuditLog.ActionType.UPLOAD_FILE,
-                    f"SubmissionFile:{submission_file.pk}",
-                    new_value=submission_file.original_name,
-                )
+                try:
+                    submission_file = store_submission_file(
+                        owner=prog,
+                        uploaded_file=f,
+                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
+                        uploaded_by=request.user,
+                        is_test_data=prog.is_test_data or prog.activity.is_test_mode,
+                    )
+                except ValidationError as error:
+                    errors.extend(error.messages)
+                else:
+                    sync_program_material_checks(prog)
+                    log_action(
+                        request,
+                        AuditLog.ActionType.UPLOAD_FILE,
+                        f"SubmissionFile:{submission_file.pk}",
+                        new_value=submission_file.original_name,
+                    )
         else:
             old_value = f"status={prog.status}; sort_order={prog.sort_order}"
             if "status" in request.POST:
@@ -460,6 +478,7 @@ def program_detail(request, pk):
             "checks": checks,
             "check_statuses": _choices(MaterialCheck.Status),
             "file_purposes": _choices(SubmissionFile.Purpose),
+            "errors": errors,
         },
     )
 
@@ -614,26 +633,22 @@ def round_score_entry(request, pk):
         (s.singer_id, s.judge_id): s.score for s in ScoreRecord.objects.filter(round=contest_round)
     }
 
+    errors = []
     if request.method == "POST":
         ensure_round_unlocked(contest_round)
+        score_values = {}
         for singer in singers:
             for judge in judges:
                 key = f"score_{singer.pk}_{judge.pk}"
-                if key in request.POST:
-                    val = request.POST[key].strip()
-                    if val:
-                        ScoreRecord.objects.update_or_create(
-                            round=contest_round,
-                            singer=singer,
-                            judge=judge,
-                            defaults={
-                                "score": val,
-                                "is_test_data": contest_round.activity.is_test_mode,
-                            },
-                        )
-        _recalc_round(contest_round)
-        log_action(request, AuditLog.ActionType.ENTER_SCORE, f"ContestRound:{contest_round.pk}")
-        return redirect("staff:round_score_entry", pk=pk)
+                value = request.POST.get(key, "").strip()
+                if value:
+                    score_values[(singer.pk, judge.pk)] = value
+        try:
+            apply_scores(contest_round, score_values, request.user)
+        except ValidationError as error:
+            errors.extend(error.messages)
+        else:
+            return redirect("staff:round_score_entry", pk=pk)
 
     # Pre-compute score grid: list of (singer, [(judge_pk, score), ...])
     score_grid = []
@@ -648,6 +663,7 @@ def round_score_entry(request, pk):
             "round": contest_round,
             "judges": judges,
             "score_grid": score_grid,
+            "errors": errors,
         },
     )
 
@@ -656,21 +672,26 @@ def round_score_entry(request, pk):
 def round_ranking(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     summaries = ScoreSummary.objects.filter(round=contest_round).select_related("singer")
-    missing = ScoreRecord.objects.filter(round=contest_round, score__isnull=True).exists()
+    missing_cells = missing_score_cells(contest_round)
     return render(
         request,
         "staff_panel/round_ranking.html",
         {
             "round": contest_round,
             "summaries": summaries,
-            "has_missing": missing,
+            "has_missing": bool(missing_cells),
+            "missing_cells": missing_cells,
         },
     )
 
 
 @staff_member_required
+@require_POST
 def round_lock(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
+    missing_cells = missing_score_cells(contest_round)
+    if missing_cells:
+        raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
     contest_round.is_locked = True
     contest_round.save()
     log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"ContestRound:{contest_round.pk}")
@@ -678,16 +699,20 @@ def round_lock(request, pk):
 
 
 @staff_member_required
+@require_POST
 def round_unlock(request, pk):
     _require_admin(request.user)
     contest_round = get_object_or_404(ContestRound, pk=pk)
+    note = request.POST.get("note", "").strip()
+    if not note:
+        raise PermissionDenied("解锁结果必须填写原因。")
     contest_round.is_locked = False
     contest_round.save()
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
         f"ContestRound:{contest_round.pk}",
-        note=request.POST.get("note", "").strip(),
+        note=note,
     )
     return redirect("staff:round_ranking", pk=pk)
 
@@ -727,9 +752,11 @@ def award_create(request):
         ensure_activity_unlocked(activity)
         singer_id = request.POST.get("singer_id")
         if singer_id:
+            singer = get_object_or_404(SingerRegistration, pk=singer_id)
+            ensure_same_activity(activity, singer, label="Award singer")
             award = Award.objects.create(
                 activity=activity,
-                singer_id=singer_id,
+                singer=singer,
                 name=request.POST["name"],
                 is_test_data=activity.is_test_mode,
             )
@@ -750,49 +777,6 @@ def award_create(request):
     )
 
 
-def _recalc_round(contest_round):
-    """Recalculate ScoreSummary for all singers in a round."""
-    singers = SingerRegistration.objects.filter(activity=contest_round.activity)
-    for singer in singers:
-        singer_scores = list(
-            ScoreRecord.objects.filter(
-                round=contest_round, singer=singer, score__isnull=False
-            ).values_list("score", flat=True)
-        )
-        if not singer_scores:
-            continue
-        if (
-            contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
-            and len(singer_scores) >= 3
-        ):
-            singer_scores.remove(max(singer_scores))
-            singer_scores.remove(min(singer_scores))
-        avg = sum(singer_scores) / len(singer_scores)
-        ScoreSummary.objects.update_or_create(
-            round=contest_round,
-            singer=singer,
-            defaults={"average_score": avg, "is_test_data": contest_round.activity.is_test_mode},
-        )
-    # Re-rank
-    summaries = ScoreSummary.objects.filter(round=contest_round).order_by("-average_score")
-    for i, s in enumerate(summaries, 1):
-        s.rank = i
-        s.is_advanced = i <= contest_round.advance_count if contest_round.advance_count else False
-        s.save()
-    # Update singer live_status for advanced/not_advanced
-    if (
-        contest_round.round_type == ContestRound.RoundType.PRELIMINARY
-        and contest_round.advance_count
-    ):
-        for s in summaries:
-            singer = s.singer
-            if s.is_advanced:
-                singer.live_status = SingerRegistration.LiveStatus.ADVANCED
-            else:
-                singer.live_status = SingerRegistration.LiveStatus.NOT_ADVANCED
-            singer.save()
-
-
 # --- Vote session management ---
 
 
@@ -807,6 +791,19 @@ def vote_session_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
         ensure_activity_unlocked(activity)
+        singer_ids = request.POST.getlist("singers")
+        if len(singer_ids) != len(set(singer_ids)):
+            raise PermissionDenied("Vote options cannot contain duplicate singers.")
+        singers = list(
+            SingerRegistration.objects.filter(
+                pk__in=singer_ids,
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+            )
+        )
+        if len(singers) != len(singer_ids):
+            raise PermissionDenied("Every vote option must be an approved singer.")
+        for singer in singers:
+            ensure_same_activity(activity, singer, label="Vote option singer")
         vote_session = VoteSession.objects.create(
             activity=activity,
             name=request.POST["name"],
@@ -817,7 +814,6 @@ def vote_session_create(request):
             max_selections=int(request.POST.get("max_selections", 1) or 1),
             is_test_data=activity.is_test_mode,
         )
-        singer_ids = request.POST.getlist("singers")
         for i, sid in enumerate(singer_ids):
             VoteOption.objects.create(
                 vote_session=vote_session,
@@ -866,6 +862,7 @@ def vote_session_detail(request, pk):
 
 
 @staff_member_required
+@require_POST
 def vote_session_toggle(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
     ensure_vote_session_unlocked(vote_session)
@@ -883,6 +880,7 @@ def vote_session_toggle(request, pk):
 
 
 @staff_member_required
+@require_POST
 def vote_session_lock(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
     vote_session.is_locked = True
@@ -894,16 +892,20 @@ def vote_session_lock(request, pk):
 
 
 @staff_member_required
+@require_POST
 def vote_session_unlock(request, pk):
     _require_admin(request.user)
     vote_session = get_object_or_404(VoteSession, pk=pk)
+    note = request.POST.get("note", "").strip()
+    if not note:
+        raise PermissionDenied("解锁投票必须填写原因。")
     vote_session.is_locked = False
     vote_session.save()
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
         f"VoteSession:{vote_session.pk}",
-        note=request.POST.get("note", "").strip(),
+        note=note,
     )
     return redirect("staff:vote_session_detail", pk=pk)
 
@@ -929,6 +931,7 @@ def vote_session_export(request, pk):
 
 
 def _generate_popularity_award(vote_session):
+    from django.db import transaction
     from django.db.models import Count
 
     winner = (
@@ -940,12 +943,29 @@ def _generate_popularity_award(vote_session):
     )
     if not winner:
         return None
-    award, _ = Award.objects.get_or_create(
-        activity=vote_session.activity,
-        singer=winner.singer,
-        name="最佳人气奖",
-        defaults={"is_test_data": vote_session.is_test_data},
-    )
+    with transaction.atomic():
+        legacy_awards = Award.objects.filter(
+            activity=vote_session.activity,
+            name="最佳人气奖",
+            source_vote_session__isnull=True,
+        ).order_by("pk")
+        award = legacy_awards.first()
+        if award:
+            legacy_awards.exclude(pk=award.pk).delete()
+            award.source_vote_session = vote_session
+            award.singer = winner.singer
+            award.is_test_data = vote_session.is_test_data
+            award.save(update_fields=["source_vote_session", "singer", "is_test_data"])
+        else:
+            award, _ = Award.objects.update_or_create(
+                source_vote_session=vote_session,
+                defaults={
+                    "activity": vote_session.activity,
+                    "singer": winner.singer,
+                    "name": "最佳人气奖",
+                    "is_test_data": vote_session.is_test_data,
+                },
+            )
     return award
 
 
@@ -1097,63 +1117,17 @@ def excel_import_scores(request, round_id):
     errors = []
     if request.method == "POST" and request.FILES.get("file"):
         ensure_round_unlocked(contest_round)
-        from openpyxl import load_workbook
-
         try:
-            wb = load_workbook(request.FILES["file"], data_only=True)
-            ws = _active_worksheet(wb)
-            header = [str(cell.value).strip() if cell.value is not None else "" for cell in ws[1]]
-            judges_by_name = {
-                j.name: j for j in Judge.objects.filter(activity=contest_round.activity)
-            }
-            singer_by_name = {
-                s.name: s
-                for s in SingerRegistration.objects.filter(activity=contest_round.activity)
-            }
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                singer_name = row[0]
-                if not isinstance(singer_name, str) or not singer_name.strip():
-                    continue
-                singer = singer_by_name.get(singer_name.strip())
-                if not singer:
-                    errors.append(f"选手不存在: {singer_name}")
-                    continue
-                for col_idx, score_val in enumerate(row[1:], 1):
-                    if score_val is None or str(score_val).strip() == "":
-                        continue
-                    judge_name = header[col_idx]
-                    judge = judges_by_name.get(judge_name)
-                    if not judge:
-                        errors.append(f"评委不存在: {judge_name}")
-                        continue
-                    try:
-                        score = float(score_val)
-                    except ValueError:
-                        errors.append(f"分数格式错误: {singer_name} {judge_name} = {score_val}")
-                        continue
-                    if score < 0 or score > 100:
-                        errors.append(f"分数超出范围 0-100: {singer_name} {judge_name} = {score}")
-                        continue
-                    ScoreRecord.objects.update_or_create(
-                        round=contest_round,
-                        singer=singer,
-                        judge=judge,
-                        defaults={
-                            "score": score,
-                            "is_test_data": contest_round.activity.is_test_mode,
-                        },
-                    )
+            scores, errors = parse_score_workbook(request.FILES["file"], contest_round)
             if not errors:
-                _recalc_round(contest_round)
-                log_action(
-                    request,
-                    AuditLog.ActionType.ENTER_SCORE,
-                    f"ContestRound:{contest_round.pk}",
-                    note="excel import",
-                )
+                apply_scores(contest_round, scores, request.user, note="excel import")
                 return redirect("staff:round_score_entry", pk=round_id)
-        except Exception as e:
-            errors.append(f"文件解析失败: {e}")
+        except ValidationError as error:
+            errors.extend(error.messages)
+        except Exception:
+            errors.append("文件解析失败，请上传有效的 xlsx 评分表。")
+    elif request.method == "POST":
+        errors.append("请选择要导入的 xlsx 评分表。")
     return render(
         request,
         "staff_panel/excel_import.html",
@@ -1168,6 +1142,7 @@ def excel_import_scores(request, round_id):
 
 
 @staff_member_required
+@require_POST
 def word_generate(request, template_id, activity_id):
     template = get_object_or_404(ArticleTemplate, pk=template_id)
     activity = get_object_or_404(Activity, pk=activity_id)
@@ -1238,6 +1213,7 @@ def execution_package(request, activity_id):
 
 
 @staff_member_required
+@require_POST
 def archive_package_create(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     buf = io.BytesIO()
@@ -1277,7 +1253,7 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "报名名单"
         ws.append(["姓名", "学号", "学院", "班级", "手机", "微信", "曲目", "原创", "赛前状态"])
-        for r in SingerRegistration.objects.filter(activity=activity):
+        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
             ws.append(
                 [
                     r.name,
@@ -1349,7 +1325,7 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "联系方式表"
         ws.append(["姓名", "学号", "手机", "微信", "学院", "班级", "曲目"])
-        for r in SingerRegistration.objects.filter(activity=activity):
+        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
             ws.append(
                 [r.name, r.student_id, r.phone, r.wechat, r.college, r.class_name, r.song_name]
             )
@@ -1392,7 +1368,7 @@ def _complete_activity_excel_generators(activity):
                 "Live Status",
             ]
         )
-        for r in SingerRegistration.objects.filter(activity=activity):
+        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
             ws.append(
                 [
                     r.name,
@@ -1430,7 +1406,7 @@ def _complete_activity_excel_generators(activity):
                 "Notes",
             ]
         )
-        for p in Program.objects.filter(activity=activity):
+        for p in Program.objects.filter(activity=activity, is_test_data=False):
             ws.append(
                 [
                     p.sort_order,
@@ -1456,7 +1432,7 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Material Checklist"
         ws.append(["Owner Type", "Owner", "Item", "Status"])
         for c in MaterialCheck.objects.filter(
-            singer_registration__activity=activity
+            singer_registration__activity=activity, singer_registration__is_test_data=False
         ).select_related("singer_registration"):
             ws.append(
                 [
@@ -1466,7 +1442,9 @@ def _complete_activity_excel_generators(activity):
                     c.get_status_display(),
                 ]
             )
-        for c in MaterialCheck.objects.filter(program__activity=activity).select_related("program"):
+        for c in MaterialCheck.objects.filter(
+            program__activity=activity, program__is_test_data=False
+        ).select_related("program"):
             ws.append(
                 [
                     "program",
@@ -1483,7 +1461,7 @@ def _complete_activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "Contacts"
         ws.append(["Owner Type", "Name", "Student ID", "Phone", "Wechat", "College/Class", "Item"])
-        for r in SingerRegistration.objects.filter(activity=activity):
+        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
             ws.append(
                 [
                     "singer",
@@ -1495,7 +1473,7 @@ def _complete_activity_excel_generators(activity):
                     r.song_name,
                 ]
             )
-        for p in Program.objects.filter(activity=activity):
+        for p in Program.objects.filter(activity=activity, is_test_data=False):
             ws.append(["program", p.contact_name, "", p.contact_phone, "", p.class_name, p.name])
         _autosize_sheet(ws)
         return wb
@@ -1506,7 +1484,7 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Score Results"
         ws.append(["Round", "Singer", "Average Score", "Rank", "Advanced"])
         summaries = (
-            ScoreSummary.objects.filter(round__activity=activity)
+            ScoreSummary.objects.filter(round__activity=activity, is_test_data=False)
             .select_related("round", "singer")
             .order_by("round_id", "rank")
         )
@@ -1531,7 +1509,9 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Vote Results"
         ws.append(["Session", "Singer", "Song", "Votes"])
         options = (
-            VoteOption.objects.filter(vote_session__activity=activity)
+            VoteOption.objects.filter(
+                vote_session__activity=activity, vote_session__is_test_data=False
+            )
             .select_related("vote_session", "singer")
             .annotate(vote_count=Count("records"))
         )
@@ -1547,7 +1527,9 @@ def _complete_activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "Awards"
         ws.append(["Singer", "Song", "Award"])
-        for award in Award.objects.filter(activity=activity).select_related("singer"):
+        for award in Award.objects.filter(activity=activity, is_test_data=False).select_related(
+            "singer"
+        ):
             ws.append([award.singer.name, award.singer.song_name, award.name])
         _autosize_sheet(ws)
         return wb
@@ -1565,11 +1547,14 @@ def _complete_activity_excel_generators(activity):
                 "Size",
                 "Uploaded By",
                 "Uploaded At",
+                "Current",
                 "Public",
             ]
         )
         singer_files = SubmissionFile.objects.filter(
-            singer_registration__activity=activity
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=False,
+            is_test_data=False,
         ).select_related("singer_registration", "uploaded_by")
         for f in singer_files:
             ws.append(
@@ -1581,12 +1566,13 @@ def _complete_activity_excel_generators(activity):
                     f.file_size,
                     f.uploaded_by.username if f.uploaded_by else "",
                     f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "yes" if f.is_current else "no",
                     "yes" if f.is_public else "no",
                 ]
             )
-        program_files = SubmissionFile.objects.filter(program__activity=activity).select_related(
-            "program", "uploaded_by"
-        )
+        program_files = SubmissionFile.objects.filter(
+            program__activity=activity, program__is_test_data=False, is_test_data=False
+        ).select_related("program", "uploaded_by")
         for f in program_files:
             ws.append(
                 [
@@ -1597,6 +1583,7 @@ def _complete_activity_excel_generators(activity):
                     f.file_size,
                     f.uploaded_by.username if f.uploaded_by else "",
                     f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                    "yes" if f.is_current else "no",
                     "yes" if f.is_public else "no",
                 ]
             )
@@ -1629,7 +1616,7 @@ def _complete_activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "Incidents"
         ws.append(["Time", "Type", "Singer", "Program", "Handler", "Resolution", "Remark"])
-        for inc in IncidentRecord.objects.filter(activity=activity).select_related(
+        for inc in IncidentRecord.objects.filter(activity=activity, is_test=False).select_related(
             "singer", "program", "handled_by"
         ):
             ws.append(
@@ -1652,7 +1639,7 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Staff Notes"
         ws.append(["Owner Type", "Owner", "Content", "Created By", "Time"])
         singer_notes = StaffNote.objects.filter(
-            singer_registration__activity=activity
+            singer_registration__activity=activity, singer_registration__is_test_data=False
         ).select_related("singer_registration", "created_by")
         for n in singer_notes:
             ws.append(
@@ -1664,9 +1651,9 @@ def _complete_activity_excel_generators(activity):
                     n.created_at.strftime("%Y-%m-%d %H:%M"),
                 ]
             )
-        program_notes = StaffNote.objects.filter(program__activity=activity).select_related(
-            "program", "created_by"
-        )
+        program_notes = StaffNote.objects.filter(
+            program__activity=activity, program__is_test_data=False
+        ).select_related("program", "created_by")
         for n in program_notes:
             ws.append(
                 [
@@ -1708,12 +1695,21 @@ def incident_list(request):
 def incident_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        ensure_activity_unlocked(activity)
+        singer = None
+        if request.POST.get("singer_id"):
+            singer = get_object_or_404(SingerRegistration, pk=request.POST["singer_id"])
+            ensure_same_activity(activity, singer, label="Incident singer")
+        program = None
+        if request.POST.get("program_id"):
+            program = get_object_or_404(Program, pk=request.POST["program_id"])
+            ensure_same_activity(activity, program, label="Incident program")
         incident = IncidentRecord.objects.create(
             activity=activity,
             occurred_at=request.POST["occurred_at"],
             event_type=request.POST.get("event_type", IncidentRecord.EventType.OTHER),
-            singer_id=request.POST.get("singer_id") or None,
-            program_id=request.POST.get("program_id") or None,
+            singer=singer,
+            program=program,
             handled_by_id=request.user.pk,
             resolution=request.POST.get("resolution", ""),
             remark=request.POST.get("remark", ""),
@@ -1769,19 +1765,27 @@ def incident_export(request):
 
 
 @staff_member_required
+@require_POST
 def activity_test_toggle(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
-    old_value = f"is_test_mode={activity.is_test_mode}"
-    activity.is_test_mode = not activity.is_test_mode
-    activity.save()
-    log_action(
-        request,
-        AuditLog.ActionType.OTHER,
-        f"Activity:{activity.pk}",
-        old_value=old_value,
-        new_value=f"is_test_mode={activity.is_test_mode}",
-    )
+    if activity.is_test_mode:
+        leave_test_mode(
+            activity,
+            operator=request.user,
+            clear=request.POST.get("clear") == "on",
+            reason=request.POST.get("reason", ""),
+        )
+    else:
+        activity.is_test_mode = True
+        activity.save(update_fields=["is_test_mode", "updated_at"])
+        log_action(
+            request,
+            AuditLog.ActionType.OTHER,
+            f"Activity:{activity.pk}",
+            old_value="is_test_mode=False",
+            new_value="is_test_mode=True",
+        )
     return redirect("staff:export_center")
 
 
@@ -1792,36 +1796,7 @@ def activity_clear_test_data(request, pk):
     activity = get_object_or_404(Activity, pk=pk)
     if not activity.is_test_mode:
         raise PermissionDenied("Test data can only be cleared while the activity is in test mode.")
-    deleted = {
-        "singer_registrations": SingerRegistration.objects.filter(
-            activity=activity, is_test_data=True
-        ).count(),
-        "programs": Program.objects.filter(activity=activity, is_test_data=True).count(),
-        "vote_sessions": VoteSession.objects.filter(activity=activity, is_test_data=True).count(),
-    }
-    SubmissionFile.objects.filter(
-        singer_registration__activity=activity, is_test_data=True
-    ).delete()
-    SubmissionFile.objects.filter(program__activity=activity, is_test_data=True).delete()
-    Award.objects.filter(activity=activity, is_test_data=True).delete()
-    ScoreRecord.objects.filter(round__activity=activity, is_test_data=True).delete()
-    ScoreSummary.objects.filter(round__activity=activity, is_test_data=True).delete()
-    VoteRecord.objects.filter(
-        vote_session__activity=activity, vote_session__is_test_data=True
-    ).delete()
-    VoteOption.objects.filter(
-        vote_session__activity=activity, vote_session__is_test_data=True
-    ).delete()
-    VoteSession.objects.filter(activity=activity, is_test_data=True).delete()
-    Program.objects.filter(activity=activity, is_test_data=True).delete()
-    SingerRegistration.objects.filter(activity=activity, is_test_data=True).delete()
-    IncidentRecord.objects.filter(activity=activity, is_test=True).delete()
-    log_action(
-        request,
-        AuditLog.ActionType.OTHER,
-        f"Activity:{activity.pk}",
-        note=f"clear_test_data={deleted}",
-    )
+    clear_activity_test_data(activity, operator=request.user)
     return redirect("staff:export_center")
 
 
@@ -1829,6 +1804,7 @@ def activity_clear_test_data(request, pk):
 
 
 @staff_member_required
+@require_POST
 def activity_lock(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
@@ -1845,28 +1821,32 @@ def activity_lock(request, pk):
 
 
 @staff_member_required
+@require_POST
 def activity_unlock(request, pk):
     _require_admin(request.user)
-    if request.user.is_admin:
-        activity = get_object_or_404(Activity, pk=pk)
-        activity.is_locked = False
-        activity.locked_at = None
-        activity.locked_by = None
-        activity.save()
-        ContestRound.objects.filter(activity=activity).update(is_locked=False)
-        VoteSession.objects.filter(activity=activity).update(is_locked=False)
-        log_action(
-            request,
-            AuditLog.ActionType.UNLOCK_RESULT,
-            f"Activity:{activity.pk}",
-            old_value="locked",
-            new_value="unlocked",
-            note=request.POST.get("note", "").strip(),
-        )
+    note = request.POST.get("note", "").strip()
+    if not note:
+        raise PermissionDenied("解锁活动必须填写原因。")
+    activity = get_object_or_404(Activity, pk=pk)
+    activity.is_locked = False
+    activity.locked_at = None
+    activity.locked_by = None
+    activity.save()
+    ContestRound.objects.filter(activity=activity).update(is_locked=False)
+    VoteSession.objects.filter(activity=activity).update(is_locked=False)
+    log_action(
+        request,
+        AuditLog.ActionType.UNLOCK_RESULT,
+        f"Activity:{activity.pk}",
+        old_value="locked",
+        new_value="unlocked",
+        note=note,
+    )
     return redirect("staff:export_center")
 
 
 @staff_member_required
+@require_POST
 def activity_clone(request, pk):
     _require_admin(request.user)
     original = get_object_or_404(Activity, pk=pk)
