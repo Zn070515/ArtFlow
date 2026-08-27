@@ -43,6 +43,8 @@ def test_postgres_backup_restore_script_has_isolated_target_and_safety_contract(
     assert '--username="$POSTGRES_USER"' in script
     assert '--dbname="$POSTGRES_DB"' in script
     assert "pg_restore', '--list'" in script
+    assert "pg_restore', '--username', 'postgres'" in script
+    assert "psql', '--username', 'postgres'" in script
     assert "pg_restore', '--exit-on-error'" in script
     assert "--network', $composeNetwork" in script
     assert "--no-deps" in script

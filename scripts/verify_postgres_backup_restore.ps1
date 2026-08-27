@@ -84,8 +84,8 @@ try {
         if (-not $ready) { throw 'The isolated restore database did not become ready.' }
         Invoke-Docker -Arguments @('cp', $backupFile, "${restoreContainer}:/tmp/artflow-backup.dump")
         Invoke-Docker -Arguments @('exec', $restoreContainer, 'pg_restore', '--list', '/tmp/artflow-backup.dump')
-        Invoke-Docker -Arguments @('exec', $restoreContainer, 'pg_restore', '--exit-on-error', '--no-owner', '--dbname', $RestoreDatabase, '/tmp/artflow-backup.dump')
-        Invoke-Docker -Arguments @('exec', $restoreContainer, 'psql', '--dbname', $RestoreDatabase, '--tuples-only', '--no-align', '--command', 'SELECT 1 FROM django_migrations LIMIT 1;')
+        Invoke-Docker -Arguments @('exec', $restoreContainer, 'pg_restore', '--username', 'postgres', '--exit-on-error', '--no-owner', '--dbname', $RestoreDatabase, '/tmp/artflow-backup.dump')
+        Invoke-Docker -Arguments @('exec', $restoreContainer, 'psql', '--username', 'postgres', '--dbname', $RestoreDatabase, '--tuples-only', '--no-align', '--command', 'SELECT 1 FROM django_migrations LIMIT 1;')
 
         Write-Host 'Running Django checks against the isolated restored database.'
         Invoke-Compose -Arguments @('run', '--rm', '--no-deps', '-T', '-e', 'APP_ENV=development', '-e', 'DEBUG=False', '-e', 'DATABASE_ENGINE=postgresql', '-e', "POSTGRES_DB=$RestoreDatabase", '-e', 'POSTGRES_USER=postgres', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_HOST=$restoreContainer", '-e', 'POSTGRES_PORT=5432', 'web', 'python', 'manage.py', 'check')
