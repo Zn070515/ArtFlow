@@ -87,6 +87,7 @@ function Assert-ContainerContracts {
     Assert-ContentMatch $compose 'DATABASE_ENGINE:\s*postgresql' 'an explicit PostgreSQL database engine'
     Assert-ContentMatch $compose 'POSTGRES_HOST:\s*db' 'an explicit db hostname'
     Assert-ContentMatch $compose 'POSTGRES_(DB|USER|PASSWORD):\s*artflow' 'explicit PostgreSQL credentials'
+    Assert-ContentMatch $compose '(?m)^  artflow_frontend:\s*$' 'a host-connected web network'
     Assert-ContentMatch $compose '(?m)^  artflow_internal:\s*$' 'an internal network'
     Assert-ContentMatch $compose 'internal:\s*true' 'an internal-only network'
 
