@@ -22,6 +22,8 @@
                     <th class="text-left px-4 py-2 font-medium">类型</th>
                     <th class="text-left px-4 py-2 font-medium">计分方式</th>
                     <th class="text-left px-4 py-2 font-medium">晋级人数</th>
+                    <th class="text-left px-4 py-2 font-medium">状态</th>
+                    <th class="text-left px-4 py-2 font-medium">快照</th>
                     <th class="text-left px-4 py-2 font-medium">锁定</th>
                     <th class="text-left px-4 py-2 font-medium">操作</th>
                 </tr>
@@ -34,12 +36,21 @@
                     <td class="px-4 py-2.5">{{ r.get_round_type_display }}</td>
                     <td class="px-4 py-2.5 text-gray-500">{{ r.get_scoring_mode_display }}</td>
                     <td class="px-4 py-2.5">{{ r.advance_count|default:"—" }}</td>
+                    <td class="px-4 py-2.5"><span class="text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{{ r.get_status_display }}</span></td>
+                    <td class="px-4 py-2.5 text-xs text-gray-500">选手 {{ r.entry_count }} · 评委 {{ r.judge_count }}</td>
                     <td class="px-4 py-2.5">{% if r.is_locked %}<span class="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">已锁定</span>{% else %}<span class="text-xs text-gray-400">未锁定</span>{% endif %}</td>
                     <td class="px-4 py-2.5 space-x-2">
+                        {% if r.status == "draft" %}
+                        <form method="post" action="{% url 'staff:round_prepare' r.pk %}" class="inline">
+                            {% csrf_token %}
+                            <button type="submit" class="text-brand hover:underline text-xs">准备轮次</button>
+                        </form>
+                        {% else %}
                         <a href="{% url 'staff:round_score_entry' r.pk %}" class="text-brand hover:underline text-xs">录分</a>
                         <a href="{% url 'staff:round_ranking' r.pk %}" class="text-brand hover:underline text-xs">排名</a>
                         <a href="{% url 'staff:excel_score_template' r.pk %}" class="text-gray-500 hover:underline text-xs">模板</a>
                         <a href="{% url 'staff:excel_import_scores' r.pk %}" class="text-gray-500 hover:underline text-xs">导入</a>
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

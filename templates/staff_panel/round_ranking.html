@@ -8,10 +8,15 @@
     <div class="flex items-center justify-between mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round.get_round_type_display }} — 排名</h1>
-            <p class="text-sm text-gray-500 mt-1">{{ round.get_scoring_mode_display }}{% if round.advance_count %} · 前 {{ round.advance_count }} 名晋级{% endif %}</p>
+            <p class="text-sm text-gray-500 mt-1">{{ round.get_scoring_mode_display }} · {{ round.get_status_display }}{% if round.advance_count %} · 前 {{ round.advance_count }} 名晋级{% endif %}</p>
         </div>
         <div class="flex gap-2">
-            {% if round.is_locked %}
+            {% if preparation_required %}
+            <form method="post" action="{% url 'staff:round_prepare' round.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="text-xs text-brand border border-brand px-2 py-0.5 rounded hover:bg-brand-light hover:text-white">准备轮次</button>
+            </form>
+            {% elif round.is_locked %}
             <span class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded font-medium">已锁定</span>
             {% if user.is_admin %}
             <form method="post" action="{% url 'staff:round_unlock' round.pk %}" class="flex gap-1">
@@ -38,7 +43,11 @@
     </ul>
     {% endif %}
 
-    {% if summaries %}
+    {% if preparation_required %}
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-8 text-center text-yellow-800">
+        <p>请先准备比赛轮次后再查看排名。</p>
+    </div>
+    {% elif summaries %}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <table class="w-full text-sm">
             <thead>

@@ -16,6 +16,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Count
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -49,6 +50,7 @@ from singer_contest.services import (
     expected_score_cells,
     missing_score_cells,
     parse_score_workbook,
+    prepare_round,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
 
@@ -589,7 +591,10 @@ def export_programs(request):
 
 @staff_member_required
 def round_list(request):
-    rounds = ContestRound.objects.select_related("activity")
+    rounds = ContestRound.objects.select_related("activity").annotate(
+        entry_count=Count("entries", distinct=True),
+        judge_count=Count("round_judges", distinct=True),
+    )
     return render(request, "staff_panel/round_list.html", {"rounds": rounds})
 
 
@@ -623,6 +628,15 @@ def round_create(request):
             "scoring_modes": _choices(ContestRound.ScoringMode),
         },
     )
+
+
+@staff_member_required
+@require_POST
+def round_prepare(request, pk):
+    contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
+    ensure_activity_unlocked(contest_round.activity)
+    prepare_round(contest_round, request.user)
+    return redirect("staff:round_list")
 
 
 @staff_member_required
@@ -689,6 +703,7 @@ def round_ranking(request, pk):
         {
             "round": contest_round,
             "summaries": summaries,
+            "preparation_required": contest_round.status == ContestRound.Status.DRAFT,
             "has_missing": bool(missing_cells),
             "missing_cells": missing_cells,
         },
@@ -702,7 +717,10 @@ def round_lock(request, pk):
     contest_round = get_object_or_404(
         ContestRound.objects.select_for_update().select_related("activity"), pk=pk
     )
-    if contest_round.status == ContestRound.Status.LOCKED or contest_round.is_locked:
+    if contest_round.status not in {
+        ContestRound.Status.PREPARED,
+        ContestRound.Status.SCORING,
+    } or contest_round.is_locked:
         raise PermissionDenied("该比赛轮次已锁定。")
     if not expected_score_cells(contest_round):
         raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
@@ -727,12 +745,11 @@ def round_unlock(request, pk):
     note = request.POST.get("note", "").strip()
     if not note:
         raise PermissionDenied("解锁结果必须填写原因。")
+    if contest_round.status != ContestRound.Status.LOCKED or not contest_round.is_locked:
+        raise PermissionDenied("该比赛轮次未锁定。")
     contest_round.is_locked = False
-    update_fields = ["is_locked"]
-    if contest_round.status == ContestRound.Status.LOCKED:
-        contest_round.status = ContestRound.Status.SCORING
-        update_fields.append("status")
-    contest_round.save(update_fields=update_fields)
+    contest_round.status = ContestRound.Status.SCORING
+    contest_round.save(update_fields=["is_locked", "status"])
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
@@ -878,7 +895,6 @@ def vote_session_detail(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
     options = vote_session.options.select_related("singer")
     # Annotate with vote count
-    from django.db.models import Count
 
     options = options.annotate(vote_count=Count("records"))
     total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()

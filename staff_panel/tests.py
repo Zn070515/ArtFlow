@@ -304,6 +304,147 @@ class StaffPanelSmokeTests(TestCase):
         self.assertContains(response, "请先准备比赛轮次")
         self.assertFalse(ScoreRecord.objects.filter(round=round_).exists())
 
+    def test_staff_can_prepare_round(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Ready Singer",
+            student_id="20260015",
+            college="Info",
+            class_name="CS1",
+            phone="13800000014",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Ready Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+
+        get_response = self.client.get(reverse("staff:round_prepare", args=[round_.pk]))
+        response = self.client.post(reverse("staff:round_prepare", args=[round_.pk]))
+
+        self.assertEqual(get_response.status_code, 405)
+        self.assertRedirects(response, reverse("staff:round_list"))
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.PREPARED)
+        self.assertFalse(round_.is_locked)
+        self.assertEqual(list(round_.entries.values_list("singer_id", flat=True)), [registration.pk])
+        self.assertEqual(list(round_.round_judges.values_list("judge_id", flat=True)), [judge.pk])
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.staff,
+                action_type=AuditLog.ActionType.UPDATE_STATUS,
+                target=f"ContestRound:{round_.pk}",
+            ).exists()
+        )
+
+    def test_unprepared_round_cannot_accept_scores(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Draft Singer",
+            student_id="20260016",
+            college="Info",
+            class_name="CS1",
+            phone="13800000015",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Draft Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:round_score_entry", args=[round_.pk]),
+            {f"score_{registration.pk}_{judge.pk}": "91"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "请先准备比赛轮次")
+        self.assertFalse(ScoreRecord.objects.filter(round=round_).exists())
+
+    def test_round_lock_sets_locked_status(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Lockable Singer",
+            student_id="20260017",
+            college="Info",
+            class_name="CS1",
+            phone="13800000016",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Lockable Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
+        self.client.force_login(self.staff)
+
+        response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+
+        self.assertRedirects(response, reverse("staff:round_ranking", args=[round_.pk]))
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.LOCKED)
+        self.assertTrue(round_.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.staff,
+                action_type=AuditLog.ActionType.RELOCK_RESULT,
+                target=f"ContestRound:{round_.pk}",
+            ).exists()
+        )
+
+    def test_round_unlock_preserves_snapshots(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Unlockable Singer",
+            student_id="20260018",
+            college="Info",
+            class_name="CS1",
+            phone="13800000017",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Unlockable Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
+        self.client.force_login(self.admin)
+        self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+        snapshot_counts = (round_.entries.count(), round_.round_judges.count())
+
+        response = self.client.post(
+            reverse("staff:round_unlock", args=[round_.pk]), {"note": "Correction needed"}
+        )
+
+        self.assertRedirects(response, reverse("staff:round_ranking", args=[round_.pk]))
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.SCORING)
+        self.assertFalse(round_.is_locked)
+        self.assertEqual((round_.entries.count(), round_.round_judges.count()), snapshot_counts)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.admin,
+                action_type=AuditLog.ActionType.UNLOCK_RESULT,
+                target=f"ContestRound:{round_.pk}",
+                note="Correction needed",
+            ).exists()
+        )
+
     def test_score_entry_and_template_use_prepared_round_snapshots(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
