@@ -86,6 +86,44 @@ class ScoringServiceTests(TestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             RoundJudge.objects.create(round=self.round, judge=self.judge)
 
+    def test_prepared_round_rejects_snapshot_creates(self):
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-create")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Create Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.create(round=self.round, singer=singer)
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.create(round=self.round, judge=judge)
+
+    def test_prepared_round_rejects_snapshot_updates(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        entry.singer = self.make_singer(activity=self.activity, student_id="prepared-update")
+        round_judge.judge = Judge.objects.create(activity=self.activity, name="Prepared Update Judge")
+
+        with self.assertRaises(ValidationError):
+            entry.save()
+        with self.assertRaises(ValidationError):
+            round_judge.save()
+
+    def test_prepared_round_rejects_snapshot_deletes(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+
+        with self.assertRaises(ValidationError):
+            entry.delete()
+        with self.assertRaises(ValidationError):
+            round_judge.delete()
+
+        self.assertTrue(RoundEntry.objects.filter(pk=entry.pk).exists())
+        self.assertTrue(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
     def test_expected_cells_include_approved_singer_and_active_judge(self):
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
 

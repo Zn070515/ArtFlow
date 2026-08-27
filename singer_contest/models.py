@@ -101,7 +101,23 @@ class Judge(models.Model):
         return self.name
 
 
-class RoundEntry(models.Model):
+class RoundSnapshotMixin:
+    def _ensure_round_is_draft(self, round_id):
+        if not round_id:
+            return
+        status = ContestRound.objects.values_list("status", flat=True).get(pk=round_id)
+        if status != ContestRound.Status.DRAFT:
+            raise ValidationError("Round snapshots cannot be changed after preparation.")
+
+    def _stored_round_id(self):
+        return type(self).objects.filter(pk=self.pk).values_list("round_id", flat=True).first()
+
+    def delete(self, *args, **kwargs):
+        self._ensure_round_is_draft(self._stored_round_id())
+        return super().delete(*args, **kwargs)
+
+
+class RoundEntry(RoundSnapshotMixin, models.Model):
     round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="entries")
     singer = models.ForeignKey(
         SingerRegistration, on_delete=models.CASCADE, related_name="round_entries"
@@ -111,6 +127,8 @@ class RoundEntry(models.Model):
         unique_together = [("round", "singer")]
 
     def clean(self):
+        self._ensure_round_is_draft(self._stored_round_id())
+        self._ensure_round_is_draft(self.round_id)
         singer = self.singer if self.singer_id else None
         contest_round = self.round if self.round_id else None
         if singer and contest_round and singer.activity_id != contest_round.activity_id:
@@ -121,7 +139,7 @@ class RoundEntry(models.Model):
         return super().save(*args, **kwargs)
 
 
-class RoundJudge(models.Model):
+class RoundJudge(RoundSnapshotMixin, models.Model):
     round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="round_judges")
     judge = models.ForeignKey(Judge, on_delete=models.CASCADE, related_name="round_assignments")
 
@@ -129,6 +147,8 @@ class RoundJudge(models.Model):
         unique_together = [("round", "judge")]
 
     def clean(self):
+        self._ensure_round_is_draft(self._stored_round_id())
+        self._ensure_round_is_draft(self.round_id)
         judge = self.judge if self.judge_id else None
         contest_round = self.round if self.round_id else None
         if judge and contest_round and judge.activity_id != contest_round.activity_id:
