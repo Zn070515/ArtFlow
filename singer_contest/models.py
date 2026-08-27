@@ -68,11 +68,18 @@ class ContestRound(models.Model):
         AVERAGE = "average", "平均分"
         DROP_HIGH_LOW = "drop_high_low", "去最高最低后平均"
 
+    class Status(models.TextChoices):
+        DRAFT = "draft", "草稿"
+        PREPARED = "prepared", "已准备"
+        SCORING = "scoring", "评分中"
+        LOCKED = "locked", "已锁定"
+
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rounds")
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
     name = models.CharField(max_length=100, blank=True)
     advance_count = models.IntegerField(default=0)
+    status = models.CharField(max_length=10, choices=Status, default=Status.DRAFT)
     is_locked = models.BooleanField(default=False)
 
     class Meta:
@@ -92,6 +99,44 @@ class Judge(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class RoundEntry(models.Model):
+    round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="entries")
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="round_entries"
+    )
+
+    class Meta:
+        unique_together = [("round", "singer")]
+
+    def clean(self):
+        singer = self.singer if self.singer_id else None
+        contest_round = self.round if self.round_id else None
+        if singer and contest_round and singer.activity_id != contest_round.activity_id:
+            raise ValidationError("Round entry singer must belong to the round activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+
+class RoundJudge(models.Model):
+    round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="round_judges")
+    judge = models.ForeignKey(Judge, on_delete=models.CASCADE, related_name="round_assignments")
+
+    class Meta:
+        unique_together = [("round", "judge")]
+
+    def clean(self):
+        judge = self.judge if self.judge_id else None
+        contest_round = self.round if self.round_id else None
+        if judge and contest_round and judge.activity_id != contest_round.activity_id:
+            raise ValidationError("Round judge must belong to the round activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
 
 class ScoreRecord(models.Model):

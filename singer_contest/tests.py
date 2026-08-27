@@ -6,11 +6,12 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from openpyxl import Workbook
 
-from .models import ContestRound, Judge, ScoreRecord, SingerRegistration
+from .models import ContestRound, Judge, RoundEntry, RoundJudge, ScoreRecord, SingerRegistration
 from .services import (
     apply_scores,
     expected_score_cells,
@@ -43,6 +44,47 @@ class ScoringServiceTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         self.judge = Judge.objects.create(activity=self.activity, name="Judge")
+
+    def make_singer(self, *, activity, student_id, name=None, user=None):
+        user = user or User.objects.create_user(username=f"singer-{student_id}", password="pass")
+        return SingerRegistration.objects.create(
+            activity=activity,
+            user=user,
+            name=name or f"Singer {student_id}",
+            student_id=student_id,
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+    def test_round_entry_rejects_singer_from_another_activity(self):
+        other_activity = Activity.objects.create(
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        foreign = self.make_singer(activity=other_activity, student_id="foreign")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.create(round=self.round, singer=foreign)
+
+    def test_round_judge_rejects_judge_from_another_activity(self):
+        other_activity = Activity.objects.create(
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        foreign = Judge.objects.create(activity=other_activity, name="Foreign Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.create(round=self.round, judge=foreign)
+
+    def test_round_snapshot_pairs_are_unique(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RoundEntry.objects.create(round=self.round, singer=self.singer)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RoundJudge.objects.create(round=self.round, judge=self.judge)
 
     def test_expected_cells_include_approved_singer_and_active_judge(self):
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])

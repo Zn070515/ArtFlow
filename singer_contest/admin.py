@@ -1,6 +1,15 @@
 from django.contrib import admin
 
-from .models import Award, ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
+from .models import (
+    Award,
+    ContestRound,
+    Judge,
+    RoundEntry,
+    RoundJudge,
+    ScoreRecord,
+    ScoreSummary,
+    SingerRegistration,
+)
 
 
 @admin.register(SingerRegistration)
@@ -12,12 +21,22 @@ class SingerRegistrationAdmin(admin.ModelAdmin):
 
 @admin.register(ContestRound)
 class ContestRoundAdmin(admin.ModelAdmin):
-    list_display = ["name", "activity", "round_type", "scoring_mode", "is_locked"]
+    list_display = ["name", "activity", "round_type", "scoring_mode", "status", "is_locked"]
 
 
 @admin.register(Judge)
 class JudgeAdmin(admin.ModelAdmin):
     list_display = ["name", "activity", "is_active"]
+
+
+@admin.register(RoundEntry)
+class RoundEntryAdmin(admin.ModelAdmin):
+    list_display = ["round", "singer"]
+
+
+@admin.register(RoundJudge)
+class RoundJudgeAdmin(admin.ModelAdmin):
+    list_display = ["round", "judge"]
 
 
 @admin.register(ScoreRecord)
