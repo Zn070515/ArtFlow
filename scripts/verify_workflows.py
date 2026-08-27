@@ -144,6 +144,19 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
             f"{workflow_path.name}: Compose smoke must run migrate, doctor, health, and "
             "seed twice in web"
         )
+    published_health_commands = "\n".join(
+        str(step.get("run", ""))
+        for step in compose_steps
+        if step.get("name") == "Check published web health endpoint from runner"
+    )
+    if (
+        "for attempt in" not in published_health_commands
+        or "sleep 1" not in published_health_commands
+    ):
+        issues.append(
+            f"{workflow_path.name}: published web health check must retry "
+            "transient startup failures"
+        )
 
     cleanup_steps = [
         step

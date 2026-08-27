@@ -62,6 +62,22 @@ def valid_workflow() -> str:
                   url = 'http://127.0.0.1:8000/healthz/';
                   response = urlopen(url, timeout=3);
                   raise SystemExit(0 if response.status == 200 else response.status)"
+              - name: Check published web health endpoint from runner
+                shell: bash
+                run: |
+                  set -Eeuo pipefail
+                  for attempt in {{1..12}}; do
+                    health_check="from urllib.request import urlopen; "
+                    health_check+="response = urlopen("
+                    health_check+="'http://127.0.0.1:8000/healthz/', timeout=3); "
+                    health_check+="raise SystemExit(0 if response.status == 200 else "
+                    health_check+="response.status)"
+                    if python -c "$health_check"; then
+                      exit 0
+                    fi
+                    sleep 1
+                  done
+                  exit 1
               - name: Seed demo data twice in web
                 run: |
                   docker compose exec -T web python manage.py seed_demo_data
@@ -193,6 +209,17 @@ def test_verifier_accepts_loopback_only_postgresql_workflow():
     result = run_verifier(valid_workflow())
 
     assert result.returncode == 0, result.stderr
+
+
+def test_verifier_requires_retry_for_published_compose_health_check():
+    workflow = valid_workflow()
+    workflow = workflow.replace("for attempt in {{1..12}}; do\n", "")
+    workflow = workflow.replace("sleep 1\n", "")
+
+    result = run_verifier(workflow)
+
+    assert result.returncode == 1
+    assert "retry" in result.stderr
 
 
 def test_verifier_rejects_workflow_contract_violations():

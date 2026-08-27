@@ -130,10 +130,19 @@ jobs:
           raise SystemExit(0 if response.status == 200 else response.status)"
 
       - name: Check published web health endpoint from runner
-        run: >-
-          python -c
-          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3);
-          raise SystemExit(0 if response.status == 200 else response.status)"
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in {1..12}; do
+            health_check="from urllib.request import urlopen; "
+            health_check+="response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3); "
+            health_check+="raise SystemExit(0 if response.status == 200 else response.status)"
+            if python -c "$health_check"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
 
       - name: Seed demo data twice in web container
         run: |
