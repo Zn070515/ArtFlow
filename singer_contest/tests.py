@@ -8,6 +8,7 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from openpyxl import Workbook
@@ -144,6 +145,71 @@ class ScoringServiceTests(TestCase):
 
         self.assertTrue(RoundEntry.objects.filter(pk=entry.pk).exists())
         self.assertTrue(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+    def test_prepared_round_rejects_snapshot_queryset_deletes(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.filter(pk=entry.pk).delete()
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.filter(pk=round_judge.pk).delete()
+
+    def test_prepared_round_rejects_snapshot_queryset_updates(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-queryset-update")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Queryset Update Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.filter(pk=entry.pk).update(singer_id=singer.pk)
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.filter(pk=round_judge.pk).update(judge_id=judge.pk)
+
+    def test_prepared_round_rejects_snapshot_bulk_creates(self):
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-bulk-create")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Bulk Create Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=singer)])
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.bulk_create([RoundJudge(round=self.round, judge=judge)])
+
+    def test_prepared_snapshots_protect_parents_from_deletion(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+
+        with self.assertRaises(ProtectedError):
+            self.round.delete()
+        with self.assertRaises(ProtectedError):
+            self.singer.delete()
+        with self.assertRaises(ProtectedError):
+            self.judge.delete()
+
+    def test_draft_round_allows_snapshot_bulk_operations(self):
+        entry = RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=self.singer)])[0]
+        round_judge = RoundJudge.objects.bulk_create([RoundJudge(round=self.round, judge=self.judge)])[0]
+        singer = self.make_singer(activity=self.activity, student_id="draft-queryset-update")
+        judge = Judge.objects.create(activity=self.activity, name="Draft Queryset Update Judge")
+
+        self.assertEqual(
+            RoundEntry.objects.filter(pk=entry.pk).update(singer_id=singer.pk),
+            1,
+        )
+        self.assertEqual(
+            RoundJudge.objects.filter(pk=round_judge.pk).update(judge_id=judge.pk),
+            1,
+        )
+        self.assertEqual(RoundEntry.objects.filter(pk=entry.pk).delete()[0], 1)
+        self.assertEqual(RoundJudge.objects.filter(pk=round_judge.pk).delete()[0], 1)
 
     def test_expected_cells_include_approved_singer_and_active_judge(self):
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])

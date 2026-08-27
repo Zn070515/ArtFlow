@@ -117,11 +117,83 @@ class RoundSnapshotMixin:
         return super().delete(*args, **kwargs)
 
 
+class RoundSnapshotQuerySet(models.QuerySet):
+    related_field = ""
+    related_model = None
+
+    def _ensure_draft_rounds(self):
+        if self.exclude(round__status=ContestRound.Status.DRAFT).exists():
+            raise ValidationError("Round snapshots cannot be changed after preparation.")
+
+    def _updated_object(self, values, field, model):
+        value = values.get(field, values.get(f"{field}_id"))
+        if value is None:
+            return None
+        if isinstance(value, model):
+            return value
+        if isinstance(value, int):
+            return model.objects.get(pk=value)
+        raise ValidationError("Snapshot relations must be updated with a model instance or primary key.")
+
+    def _validate_update_relations(self, values):
+        if not self.exists():
+            return
+        self._ensure_draft_rounds()
+        contest_round = self._updated_object(values, "round", ContestRound)
+        related_object = self._updated_object(values, self.related_field, self.related_model)
+        if contest_round and contest_round.status != ContestRound.Status.DRAFT:
+            raise ValidationError("Round snapshots cannot be changed after preparation.")
+        if contest_round and related_object:
+            if contest_round.activity_id != related_object.activity_id:
+                raise ValidationError("Snapshot relation must belong to the round activity.")
+        elif contest_round:
+            if self.exclude(**{f"{self.related_field}__activity_id": contest_round.activity_id}).exists():
+                raise ValidationError("Snapshot relation must belong to the round activity.")
+        elif related_object:
+            if self.exclude(round__activity_id=related_object.activity_id).exists():
+                raise ValidationError("Snapshot relation must belong to the round activity.")
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def update(self, **kwargs):
+        self._validate_update_relations(kwargs)
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_draft_rounds()
+        return super().delete()
+
+
+class RoundEntryQuerySet(RoundSnapshotQuerySet):
+    related_field = "singer"
+    related_model = SingerRegistration
+
+
+class RoundJudgeQuerySet(RoundSnapshotQuerySet):
+    related_field = "judge"
+    related_model = Judge
+
+
+RoundEntryManager = models.Manager.from_queryset(RoundEntryQuerySet)
+RoundJudgeManager = models.Manager.from_queryset(RoundJudgeQuerySet)
+
+
 class RoundEntry(RoundSnapshotMixin, models.Model):
-    round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="entries")
+    round = models.ForeignKey(ContestRound, on_delete=models.PROTECT, related_name="entries")
     singer = models.ForeignKey(
-        SingerRegistration, on_delete=models.CASCADE, related_name="round_entries"
+        SingerRegistration, on_delete=models.PROTECT, related_name="round_entries"
     )
+    objects = RoundEntryManager()
 
     class Meta:
         unique_together = [("round", "singer")]
@@ -140,8 +212,9 @@ class RoundEntry(RoundSnapshotMixin, models.Model):
 
 
 class RoundJudge(RoundSnapshotMixin, models.Model):
-    round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="round_judges")
-    judge = models.ForeignKey(Judge, on_delete=models.CASCADE, related_name="round_assignments")
+    round = models.ForeignKey(ContestRound, on_delete=models.PROTECT, related_name="round_judges")
+    judge = models.ForeignKey(Judge, on_delete=models.PROTECT, related_name="round_assignments")
+    objects = RoundJudgeManager()
 
     class Meta:
         unique_together = [("round", "judge")]
