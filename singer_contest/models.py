@@ -2,6 +2,8 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from .deletion import cascade_draft_snapshots_or_protect_prepared
+
 
 class SingerRegistration(models.Model):
     class PreStatus(models.TextChoices):
@@ -189,13 +191,20 @@ RoundJudgeManager = models.Manager.from_queryset(RoundJudgeQuerySet)
 
 
 class RoundEntry(RoundSnapshotMixin, models.Model):
-    round = models.ForeignKey(ContestRound, on_delete=models.PROTECT, related_name="entries")
+    round = models.ForeignKey(
+        ContestRound,
+        on_delete=cascade_draft_snapshots_or_protect_prepared,
+        related_name="entries",
+    )
     singer = models.ForeignKey(
-        SingerRegistration, on_delete=models.PROTECT, related_name="round_entries"
+        SingerRegistration,
+        on_delete=cascade_draft_snapshots_or_protect_prepared,
+        related_name="round_entries",
     )
     objects = RoundEntryManager()
 
     class Meta:
+        base_manager_name = "objects"
         unique_together = [("round", "singer")]
 
     def clean(self):
@@ -212,11 +221,20 @@ class RoundEntry(RoundSnapshotMixin, models.Model):
 
 
 class RoundJudge(RoundSnapshotMixin, models.Model):
-    round = models.ForeignKey(ContestRound, on_delete=models.PROTECT, related_name="round_judges")
-    judge = models.ForeignKey(Judge, on_delete=models.PROTECT, related_name="round_assignments")
+    round = models.ForeignKey(
+        ContestRound,
+        on_delete=cascade_draft_snapshots_or_protect_prepared,
+        related_name="round_judges",
+    )
+    judge = models.ForeignKey(
+        Judge,
+        on_delete=cascade_draft_snapshots_or_protect_prepared,
+        related_name="round_assignments",
+    )
     objects = RoundJudgeManager()
 
     class Meta:
+        base_manager_name = "objects"
         unique_together = [("round", "judge")]
 
     def clean(self):

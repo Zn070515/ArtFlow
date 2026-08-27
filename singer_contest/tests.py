@@ -211,6 +211,57 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(RoundEntry.objects.filter(pk=entry.pk).delete()[0], 1)
         self.assertEqual(RoundJudge.objects.filter(pk=round_judge.pk).delete()[0], 1)
 
+    def test_base_manager_rejects_prepared_snapshot_bulk_mutations(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-base-manager")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Base Manager Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry._base_manager.filter(pk=entry.pk).update(singer_id=singer.pk)
+        with self.assertRaises(ValidationError):
+            RoundJudge._base_manager.filter(pk=round_judge.pk).delete()
+        with self.assertRaises(ValidationError):
+            RoundEntry._base_manager.bulk_create([RoundEntry(round=self.round, singer=singer)])
+        with self.assertRaises(ValidationError):
+            RoundJudge._base_manager.bulk_create([RoundJudge(round=self.round, judge=judge)])
+
+    def test_draft_snapshots_allow_parent_deletion(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+
+        self.round.delete()
+
+        self.assertFalse(RoundEntry.objects.filter(pk=entry.pk).exists())
+        self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+        singer_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        singer = self.make_singer(activity=self.activity, student_id="draft-parent-singer")
+        singer_entry = RoundEntry.objects.create(round=singer_round, singer=singer)
+
+        singer.delete()
+
+        self.assertFalse(RoundEntry.objects.filter(pk=singer_entry.pk).exists())
+
+        other_activity = Activity.objects.create(
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        judge_round = ContestRound.objects.create(
+            activity=other_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        judge = Judge.objects.create(activity=other_activity, name="Draft Parent Judge")
+        round_judge = RoundJudge.objects.create(round=judge_round, judge=judge)
+
+        judge.delete()
+
+        self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
     def test_expected_cells_include_approved_singer_and_active_judge(self):
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
 
