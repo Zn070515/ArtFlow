@@ -13,7 +13,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from openpyxl import Workbook
 
-from .admin import RoundEntryAdmin, RoundJudgeAdmin
+from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .models import (
     ContestRound,
     Judge,
@@ -98,6 +98,31 @@ class ScoringServiceTests(TestCase):
             RoundEntry.objects.create(round=self.round, singer=self.singer)
         with self.assertRaises(IntegrityError), transaction.atomic():
             RoundJudge.objects.create(round=self.round, judge=self.judge)
+
+    def test_round_admin_lists_status_lock_and_snapshot_counts(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+
+        round_admin = ContestRoundAdmin(ContestRound, admin.site)
+
+        self.assertEqual(
+            round_admin.list_display,
+            [
+                "name",
+                "activity",
+                "round_type",
+                "scoring_mode",
+                "status",
+                "is_locked",
+                "entry_count",
+                "judge_count",
+            ],
+        )
+        self.assertEqual(round_admin.entry_count(self.round), 1)
+        self.assertEqual(round_admin.judge_count(self.round), 1)
 
     def test_prepared_round_rejects_snapshot_creates(self):
         self.round.status = ContestRound.Status.PREPARED

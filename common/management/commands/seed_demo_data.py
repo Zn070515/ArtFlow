@@ -18,10 +18,13 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    RoundEntry,
+    RoundJudge,
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
 )
+from singer_contest.services import prepare_round
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.models import SeedRecord
@@ -326,6 +329,14 @@ class Command(BaseCommand):
                 "advance_count": 1,
             },
         )
+        if contest_round.status == ContestRound.Status.DRAFT:
+            SingerRegistration.objects.filter(pk__in=[singer_one.pk, singer_two.pk]).update(
+                is_test_data=False
+            )
+            prepare_round(contest_round, admin)
+            SingerRegistration.objects.filter(pk__in=[singer_one.pk, singer_two.pk]).update(
+                is_test_data=True
+            )
         self._upsert(
             "demo.score.one.judge_one",
             ScoreRecord,
@@ -485,13 +496,37 @@ class Command(BaseCommand):
         if not activity_ids:
             return True
 
-        candidates = self._reset_candidates(activity_ids)
-        if not all(self._can_delete_safely(candidate) for candidate in candidates):
-            return False
+        with transaction.atomic():
+            demo_rounds = ContestRound.objects.select_for_update().filter(
+                pk__in=self._owned_ids(ContestRound), activity_id__in=activity_ids
+            )
+            if not self._round_snapshots_are_owned(demo_rounds):
+                transaction.set_rollback(True)
+                return False
 
-        for candidate in candidates:
-            candidate.delete()
+            demo_rounds.update(status=ContestRound.Status.DRAFT, is_locked=False)
+            RoundEntry.objects.filter(round__in=demo_rounds).delete()
+            RoundJudge.objects.filter(round__in=demo_rounds).delete()
+
+            candidates = self._reset_candidates(activity_ids)
+            if not all(self._can_delete_safely(candidate) for candidate in candidates):
+                transaction.set_rollback(True)
+                return False
+
+            for candidate in candidates:
+                candidate.delete()
         return True
+
+    def _round_snapshots_are_owned(self, demo_rounds: Any) -> bool:
+        round_ids = demo_rounds.values_list("pk", flat=True)
+        return not (
+            RoundEntry.objects.filter(round_id__in=round_ids)
+            .exclude(singer_id__in=self._owned_ids(SingerRegistration))
+            .exists()
+            or RoundJudge.objects.filter(round_id__in=round_ids)
+            .exclude(judge_id__in=self._owned_ids(Judge))
+            .exists()
+        )
 
     def _reset_candidates(self, activity_ids: Any) -> list[Any]:
         candidates: list[Any] = []

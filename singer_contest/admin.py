@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.db import transaction
+from django.db.models import Count
 
 from .models import (
     Award,
@@ -22,7 +23,30 @@ class SingerRegistrationAdmin(admin.ModelAdmin):
 
 @admin.register(ContestRound)
 class ContestRoundAdmin(admin.ModelAdmin):
-    list_display = ["name", "activity", "round_type", "scoring_mode", "status", "is_locked"]
+    list_display = [
+        "name",
+        "activity",
+        "round_type",
+        "scoring_mode",
+        "status",
+        "is_locked",
+        "entry_count",
+        "judge_count",
+    ]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            entry_count_value=Count("entries", distinct=True),
+            judge_count_value=Count("round_judges", distinct=True),
+        )
+
+    @admin.display(description="选手快照数", ordering="entry_count_value")
+    def entry_count(self, contest_round):
+        return getattr(contest_round, "entry_count_value", contest_round.entries.count())
+
+    @admin.display(description="评委快照数", ordering="judge_count_value")
+    def judge_count(self, contest_round):
+        return getattr(contest_round, "judge_count_value", contest_round.round_judges.count())
 
 
 @admin.register(Judge)

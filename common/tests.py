@@ -28,6 +28,8 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    RoundEntry,
+    RoundJudge,
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
@@ -490,6 +492,27 @@ class DemoSeedCommandTests(TestCase):
         self.assertTrue(
             all(getattr(record, "is_test_data", False) for record in VoteRecord.objects.all())
         )
+        seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        self.assertEqual(seeded_round.status, ContestRound.Status.PREPARED)
+        self.assertFalse(seeded_round.is_locked)
+        self.assertEqual(RoundEntry.objects.filter(round=seeded_round).count(), 2)
+        self.assertEqual(RoundJudge.objects.filter(round=seeded_round).count(), 2)
+        self.assertEqual(
+            set(
+                ScoreRecord.objects.filter(round=seeded_round).values_list(
+                    "singer_id", "judge_id"
+                )
+            ),
+            set(
+                (entry.singer_id, round_judge.judge_id)
+                for entry in RoundEntry.objects.filter(round=seeded_round)
+                for round_judge in RoundJudge.objects.filter(round=seeded_round)
+            ),
+        )
+        self.assertSetEqual(
+            set(ScoreSummary.objects.filter(round=seeded_round).values_list("singer_id", flat=True)),
+            set(RoundEntry.objects.filter(round=seeded_round).values_list("singer_id", flat=True)),
+        )
         self.assertEqual(output.getvalue(), "Demo data seeded.\n")
 
         second_output = StringIO()
@@ -633,6 +656,11 @@ class DemoSeedCommandTests(TestCase):
                 is_test=True,
             ).exists()
         )
+        seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        self.assertEqual(seeded_round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(seeded_round.is_locked)
+        self.assertFalse(RoundEntry.objects.filter(round=seeded_round).exists())
+        self.assertFalse(RoundJudge.objects.filter(round=seeded_round).exists())
         self.assertEqual(
             PublicPost.objects.filter(related_activity_id__in=demo_activity_ids).count(),
             2,
