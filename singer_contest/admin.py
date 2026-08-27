@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db import transaction
 
 from .models import (
     Award,
@@ -29,13 +30,20 @@ class JudgeAdmin(admin.ModelAdmin):
     list_display = ["name", "activity", "is_active"]
 
 
+class RoundSnapshotAdmin(admin.ModelAdmin):
+    def delete_queryset(self, request, queryset):
+        with transaction.atomic():
+            for snapshot in queryset:
+                snapshot.delete()
+
+
 @admin.register(RoundEntry)
-class RoundEntryAdmin(admin.ModelAdmin):
+class RoundEntryAdmin(RoundSnapshotAdmin):
     list_display = ["round", "singer"]
 
 
 @admin.register(RoundJudge)
-class RoundJudgeAdmin(admin.ModelAdmin):
+class RoundJudgeAdmin(RoundSnapshotAdmin):
     list_display = ["round", "judge"]
 
 

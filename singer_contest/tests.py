@@ -4,13 +4,15 @@ from io import BytesIO
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
+from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from openpyxl import Workbook
 
+from .admin import RoundEntryAdmin, RoundJudgeAdmin
 from .models import ContestRound, Judge, RoundEntry, RoundJudge, ScoreRecord, SingerRegistration
 from .services import (
     apply_scores,
@@ -120,6 +122,25 @@ class ScoringServiceTests(TestCase):
             entry.delete()
         with self.assertRaises(ValidationError):
             round_judge.delete()
+
+        self.assertTrue(RoundEntry.objects.filter(pk=entry.pk).exists())
+        self.assertTrue(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+    def test_admin_bulk_delete_rejects_prepared_snapshots(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        request = RequestFactory().post("/admin/")
+
+        with self.assertRaises(ValidationError):
+            RoundEntryAdmin(RoundEntry, admin.site).delete_queryset(
+                request, RoundEntry.objects.filter(pk=entry.pk)
+            )
+        with self.assertRaises(ValidationError):
+            RoundJudgeAdmin(RoundJudge, admin.site).delete_queryset(
+                request, RoundJudge.objects.filter(pk=round_judge.pk)
+            )
 
         self.assertTrue(RoundEntry.objects.filter(pk=entry.pk).exists())
         self.assertTrue(RoundJudge.objects.filter(pk=round_judge.pk).exists())
