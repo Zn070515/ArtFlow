@@ -19,6 +19,5 @@ class User(AbstractUser):
         return self.role in (self.Role.STAFF, self.Role.ADMIN) or self.is_superuser
 
     def save(self, *args, **kwargs):
-        if self.role in (self.Role.STAFF, self.Role.ADMIN):
-            self.is_staff = True
+        self.is_staff = self.is_superuser or self.role in (self.Role.STAFF, self.Role.ADMIN)
         super().save(*args, **kwargs)
