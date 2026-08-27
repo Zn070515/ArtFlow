@@ -51,7 +51,8 @@ function Assert-ContentMatch {
         [string]$Description
     )
 
-    if ($Content -notmatch $Pattern) {
+    $normalizedContent = $Content -replace "`r`n", "`n"
+    if ($normalizedContent -notmatch $Pattern) {
         throw "Container contract violation: $Description."
     }
 }
