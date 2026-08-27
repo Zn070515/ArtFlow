@@ -35,7 +35,7 @@ Extend `ContestRound` with a lifecycle status:
 DRAFT -> PREPARED -> SCORING -> LOCKED
 ```
 
-Existing `is_locked` remains as a compatibility/readability field during migration; `LOCKED` is the authoritative terminal scoring state and both fields are written consistently. Existing rounds are migrated to a safe state: locked rounds become `LOCKED`; other rounds remain `DRAFT` and must be prepared before scoring.
+Existing `is_locked` remains as a compatibility/readability field during migration; `LOCKED` is the authoritative normal terminal scoring state and both fields are written consistently. An explicit admin unlock with a non-empty reason is the only exception and returns a round to `SCORING` without changing its snapshots. Existing rounds are migrated to a safe state: locked rounds become `LOCKED`; other rounds remain `DRAFT` and must be prepared before scoring.
 
 `prepare_round(round, operator)` runs in one transaction and locks the round. It creates the immutable snapshot:
 
@@ -45,7 +45,7 @@ Existing `is_locked` remains as a compatibility/readability field during migrati
 
 Preparation is idempotent only while the round is `DRAFT`. Once prepared, the snapshot cannot be silently changed. An administrative correction, if needed, requires an explicit service operation, an operator, a non-empty reason, and an audit entry; ordinary judge activation/deactivation and registration status changes never rewrite the snapshot.
 
-Scoring, Excel parsing, missing-cell checks, summary recalculation, ranking, and the staff score grid all consume `RoundEntry` and `RoundJudge`. Recalculation only reads score records whose judge is in the round's snapshot. Score writes must target a snapshot pair and must reject prepared/scoring/locked mismatches. Locking requires a complete snapshot matrix, transitions the round to `LOCKED`, and prevents further score writes.
+Scoring, Excel parsing, missing-cell checks, summary recalculation, ranking, and the staff score grid all consume `RoundEntry` and `RoundJudge`. Recalculation only reads score records whose judge is in the round's snapshot. Score writes must target a snapshot pair, reject `DRAFT` and `LOCKED`, and transition `PREPARED` to `SCORING` on the first successful write. Locking requires a complete snapshot matrix, transitions the round to `LOCKED`, and prevents further score writes.
 
 The next round is prepared only from the previous round's persisted `ScoreSummary.is_advanced` values. No tie-breaking rule beyond the current deterministic score-descending/registration-ID ordering is introduced in this change; policy-specific tie rules remain a later, explicitly specified change.
 
