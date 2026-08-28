@@ -170,7 +170,9 @@ class ScoringServiceTests(TestCase):
         self.round.status = ContestRound.Status.PREPARED
         self.round.save()
         entry.singer = self.make_singer(activity=self.activity, student_id="prepared-update")
-        round_judge.judge = Judge.objects.create(activity=self.activity, name="Prepared Update Judge")
+        round_judge.judge = Judge.objects.create(
+            activity=self.activity, name="Prepared Update Judge"
+        )
 
         with self.assertRaises(ValidationError):
             entry.save()
@@ -259,8 +261,12 @@ class ScoringServiceTests(TestCase):
             self.judge.delete()
 
     def test_draft_round_allows_snapshot_bulk_operations(self):
-        entry = RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=self.singer)])[0]
-        round_judge = RoundJudge.objects.bulk_create([RoundJudge(round=self.round, judge=self.judge)])[0]
+        entry = RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=self.singer)])[
+            0
+        ]
+        round_judge = RoundJudge.objects.bulk_create(
+            [RoundJudge(round=self.round, judge=self.judge)]
+        )[0]
         singer = self.make_singer(activity=self.activity, student_id="draft-qset-update")
         judge = Judge.objects.create(activity=self.activity, name="Draft Queryset Update Judge")
 

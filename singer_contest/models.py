@@ -145,7 +145,9 @@ class RoundSnapshotQuerySet(models.QuerySet):
             return value
         if isinstance(value, int):
             return model.objects.get(pk=value)
-        raise ValidationError("Snapshot relations must be updated with a model instance or primary key.")
+        raise ValidationError(
+            "Snapshot relations must be updated with a model instance or primary key."
+        )
 
     def _validate_update_relations(self, values):
         if not self.exists():
@@ -159,7 +161,9 @@ class RoundSnapshotQuerySet(models.QuerySet):
             if contest_round.activity_id != related_object.activity_id:
                 raise ValidationError("Snapshot relation must belong to the round activity.")
         elif contest_round:
-            if self.exclude(**{f"{self.related_field}__activity_id": contest_round.activity_id}).exists():
+            if self.exclude(
+                **{f"{self.related_field}__activity_id": contest_round.activity_id}
+            ).exists():
                 raise ValidationError("Snapshot relation must belong to the round activity.")
         elif related_object:
             if self.exclude(round__activity_id=related_object.activity_id).exists():

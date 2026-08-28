@@ -66,8 +66,12 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if not singers or not judges:
         raise ValidationError("准备比赛轮次需要至少一名选手和一名活跃评委。")
 
-    RoundEntry.objects.bulk_create([RoundEntry(round=locked_round, singer=singer) for singer in singers])
-    RoundJudge.objects.bulk_create([RoundJudge(round=locked_round, judge=judge) for judge in judges])
+    RoundEntry.objects.bulk_create(
+        [RoundEntry(round=locked_round, singer=singer) for singer in singers]
+    )
+    RoundJudge.objects.bulk_create(
+        [RoundJudge(round=locked_round, judge=judge) for judge in judges]
+    )
     locked_round.status = ContestRound.Status.PREPARED
     locked_round.is_locked = False
     locked_round.save(update_fields=["status", "is_locked"])

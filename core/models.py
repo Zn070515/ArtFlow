@@ -111,10 +111,7 @@ class Activity(models.Model):
                     .first()
                 )
                 if persisted_lifecycle == self.DataLifecycle.FORMAL:
-                    if (
-                        self.is_test_mode
-                        or self.data_lifecycle == self.DataLifecycle.TEST
-                    ):
+                    if self.is_test_mode or self.data_lifecycle == self.DataLifecycle.TEST:
                         raise ValidationError("Formal activities cannot re-enter test mode.")
                     self.is_test_mode = False
                     self.data_lifecycle = self.DataLifecycle.FORMAL

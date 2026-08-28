@@ -557,7 +557,9 @@ class Command(BaseCommand):
             )
             .exclude(pk__in=singer_ids)
             .exists()
-            or Judge.objects.filter(activity=activity, is_active=True).exclude(pk__in=judge_ids).exists()
+            or Judge.objects.filter(activity=activity, is_active=True)
+            .exclude(pk__in=judge_ids)
+            .exists()
         )
 
     def _reset_candidates(self, activity_ids: Any) -> list[Any]:

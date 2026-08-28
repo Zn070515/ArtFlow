@@ -9,8 +9,8 @@ from unittest.mock import patch
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import Storage
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -394,7 +394,9 @@ class StaffPanelSmokeTests(TestCase):
         round_.refresh_from_db()
         self.assertEqual(round_.status, ContestRound.Status.PREPARED)
         self.assertFalse(round_.is_locked)
-        self.assertEqual(list(round_.entries.values_list("singer_id", flat=True)), [registration.pk])
+        self.assertEqual(
+            list(round_.entries.values_list("singer_id", flat=True)), [registration.pk]
+        )
         self.assertEqual(list(round_.round_judges.values_list("judge_id", flat=True)), [judge.pk])
         self.assertTrue(
             AuditLog.objects.filter(
@@ -441,9 +443,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(
             ScoreRecord.objects.get(round=round_, singer=registration, judge=judge).is_test_data
         )
-        self.assertFalse(
-            ScoreSummary.objects.get(round=round_, singer=registration).is_test_data
-        )
+        self.assertFalse(ScoreSummary.objects.get(round=round_, singer=registration).is_test_data)
 
     def test_unprepared_round_cannot_accept_scores(self):
         registration = SingerRegistration.objects.create(
@@ -583,9 +583,7 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
 
         entry_response = self.client.get(reverse("staff:round_score_entry", args=[round_.pk]))
-        template_response = self.client.get(
-            reverse("staff:excel_score_template", args=[round_.pk])
-        )
+        template_response = self.client.get(reverse("staff:excel_score_template", args=[round_.pk]))
 
         self.assertContains(entry_response, registration.name)
         self.assertContains(entry_response, judge.name)
@@ -676,7 +674,9 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(contest_round.is_locked)
         self.client.force_login(self.staff)
         self.assertEqual(
-            self.client.post(reverse("staff:round_score_entry", args=[contest_round.pk])).status_code,
+            self.client.post(
+                reverse("staff:round_score_entry", args=[contest_round.pk])
+            ).status_code,
             403,
         )
 
@@ -1515,7 +1515,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        _judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
         round_ = ContestRound.objects.create(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -1853,7 +1853,9 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(clone.data_lifecycle, Activity.DataLifecycle.TEST)
         self.assertEqual(clone.phase, Activity.Phase.DRAFT)
         self.assertFalse(SingerRegistration.objects.filter(activity=clone).exists())
-        self.assertFalse(SubmissionFile.objects.filter(singer_registration__activity=clone).exists())
+        self.assertFalse(
+            SubmissionFile.objects.filter(singer_registration__activity=clone).exists()
+        )
         self.assertFalse(RoundEntry.objects.filter(round__activity=clone).exists())
         self.assertFalse(RoundJudge.objects.filter(round__activity=clone).exists())
         self.assertFalse(ScoreRecord.objects.filter(round__activity=clone).exists())
