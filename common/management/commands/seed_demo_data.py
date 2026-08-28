@@ -5,6 +5,7 @@ from typing import Any
 from accounts.models import User
 from core.models import Activity
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import Collector, ProtectedError, RestrictedError

@@ -777,6 +777,51 @@ class DemoSeedCommandTests(TestCase):
         )
         self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
 
+    def test_reset_retains_round_with_an_unowned_non_test_snapshot_parent(self):
+        call_command("seed_demo_data")
+        contest_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        participant = User.objects.get(username="demo-participant")
+        contest_round.status = ContestRound.Status.DRAFT
+        contest_round.save(update_fields=["status"])
+        unowned_singer = SingerRegistration.objects.create(
+            activity=contest_round.activity,
+            user=participant,
+            name="Unowned Snapshot Singer",
+            student_id="UNOWNED2026002",
+            college="Arts College",
+            class_name="Demo Class C",
+            phone="13800000004",
+            song_name="Unowned Snapshot Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        snapshot = RoundEntry.objects.create(round=contest_round, singer=unowned_singer)
+        contest_round.status = ContestRound.Status.PREPARED
+        contest_round.save(update_fields=["status"])
+        runtime_counts = {
+            "scores": ScoreRecord.objects.count(),
+            "summaries": ScoreSummary.objects.count(),
+            "awards": Award.objects.count(),
+            "vote_sessions": VoteSession.objects.count(),
+        }
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.status, ContestRound.Status.PREPARED)
+        self.assertTrue(RoundEntry.objects.filter(pk=snapshot.pk, singer=unowned_singer).exists())
+        self.assertEqual(
+            {
+                "scores": ScoreRecord.objects.count(),
+                "summaries": ScoreSummary.objects.count(),
+                "awards": Award.objects.count(),
+                "vote_sessions": VoteSession.objects.count(),
+            },
+            runtime_counts,
+        )
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
     def test_reset_retains_singer_with_an_unowned_staff_note(self):
         call_command("seed_demo_data")
         singer = SingerRegistration.objects.get(name="Demo Singer One")
