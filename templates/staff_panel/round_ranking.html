@@ -74,6 +74,28 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% if round.advancement_status == "needs_review" %}
+        <div class="border-t border-yellow-200 bg-yellow-50 p-6">
+            <h2 class="font-semibold text-yellow-900 mb-1">人工核定晋级名单</h2>
+            <p class="text-sm text-yellow-800 mb-4">晋级线存在同分，无法自动生成后续轮次。请勾选最终晋级的选手后提交。</p>
+            <form method="post" action="{% url 'staff:round_finalize_advancement' round.pk %}">
+                {% csrf_token %}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                    {% for s in summaries %}
+                    <label class="flex items-center gap-2 text-sm bg-white border border-yellow-200 rounded px-3 py-2 cursor-pointer">
+                        <input type="checkbox" name="selected_singer_ids" value="{{ s.singer.pk }}" {% if s.is_advanced %}checked{% endif %}>
+                        <span class="font-mono text-xs text-gray-500">{{ s.rank }}.</span>
+                        <span class="font-medium">{{ s.singer.name }}</span>
+                        <span class="text-gray-400 text-xs">{{ s.average_score|floatformat:3 }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="text-sm bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">核定晋级名单</button>
+            </form>
+        </div>
+        {% elif round.advancement_status == "finalized" %}
+        <div class="border-t border-green-200 bg-green-50 text-green-800 text-sm px-4 py-3 rounded-b-lg">晋级名单已人工核定。</div>
+        {% endif %}
     </div>
     {% else %}
     <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">

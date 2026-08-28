@@ -265,6 +265,8 @@ def ensure_round_final_for_advancement(contest_round: ContestRound) -> None:
         raise ValidationError("上游轮次晋级名单不完整。")
     if ScoreSummary.objects.filter(round=contest_round, rank__lte=0).exists():
         raise ValidationError("上游轮次存在无效排名。")
+    if contest_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
+        raise ValidationError("上游轮次晋级名单存在同分，请先人工核定晋级人选。")
 
 
 def validate_score(value: object) -> Decimal:
@@ -320,6 +322,9 @@ def recalculate_round(contest_round: ContestRound) -> None:
     missing = missing_score_cells(contest_round)
     if missing:
         ScoreSummary.objects.filter(round=contest_round).delete()
+        if contest_round.advancement_status != ContestRound.AdvancementStatus.AUTO:
+            contest_round.advancement_status = ContestRound.AdvancementStatus.AUTO
+            contest_round.save(update_fields=["advancement_status"])
         return
 
     singers = _eligible_singers(contest_round)
@@ -347,15 +352,83 @@ def recalculate_round(contest_round: ContestRound) -> None:
         )
 
     ScoreSummary.objects.filter(round=contest_round).exclude(singer__in=singers).delete()
-    summaries = ScoreSummary.objects.filter(round=contest_round).order_by(
-        "-average_score", "singer_id"
+    summaries = list(
+        ScoreSummary.objects.filter(round=contest_round).order_by("-average_score", "singer_id")
     )
+    advance_count = contest_round.advance_count
+    tie_at_boundary = False
+    if advance_count and advance_count < len(summaries):
+        boundary_score = summaries[advance_count - 1].average_score
+        following_score = summaries[advance_count].average_score
+        tie_at_boundary = boundary_score == following_score
     for rank, summary in enumerate(summaries, start=1):
         summary.rank = rank
-        summary.is_advanced = bool(
-            contest_round.advance_count and rank <= contest_round.advance_count
-        )
+        summary.is_advanced = bool(advance_count and rank <= advance_count)
         summary.save(update_fields=["rank", "is_advanced"])
+
+    new_status = (
+        ContestRound.AdvancementStatus.NEEDS_REVIEW
+        if tie_at_boundary
+        else ContestRound.AdvancementStatus.AUTO
+    )
+    if contest_round.advancement_status != new_status:
+        contest_round.advancement_status = new_status
+        contest_round.save(update_fields=["advancement_status"])
+
+
+@transaction.atomic
+def finalize_advancement(
+    contest_round: ContestRound,
+    selected_singer_ids: Iterable[int],
+    actor,
+    *,
+    note: str = "",
+) -> ContestRound:
+    """Record a staff-confirmed advancement selection after a boundary tie.
+
+    The score matrix computes a rank-based proposal, but when two singers tie at
+    the advancement boundary the system must not silently break the tie by
+    database order. Staff explicitly choose who advances; that choice is frozen
+    for downstream round consumption and audited.
+    """
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if locked_round.status == ContestRound.Status.DRAFT:
+        raise ValidationError("请先准备并完成比赛轮次后再核定晋级名单。")
+    if missing_score_cells(locked_round):
+        raise ValidationError("评分尚未完成，无法核定晋级名单。")
+    entrants = set(_eligible_singers(locked_round).values_list("pk", flat=True))
+    selected = {int(singer_id) for singer_id in selected_singer_ids}
+    if not selected:
+        raise ValidationError("请选择至少一名晋级选手。")
+    if not selected <= entrants:
+        raise ValidationError("晋级选手必须属于当前轮次。")
+
+    old_advanced = set(
+        ScoreSummary.objects.filter(round=locked_round, is_advanced=True).values_list(
+            "singer_id", flat=True
+        )
+    )
+    if (
+        selected == old_advanced
+        and locked_round.advancement_status == ContestRound.AdvancementStatus.FINALIZED
+    ):
+        return locked_round
+
+    ScoreSummary.objects.filter(round=locked_round).update(is_advanced=False)
+    ScoreSummary.objects.filter(round=locked_round, singer_id__in=selected).update(is_advanced=True)
+    locked_round.advancement_status = ContestRound.AdvancementStatus.FINALIZED
+    locked_round.save(update_fields=["advancement_status"])
+    AuditLog.objects.create(
+        operator=actor,
+        action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value=json.dumps({"advanced": sorted(old_advanced)}, ensure_ascii=False),
+        new_value=json.dumps({"advanced": sorted(selected)}, ensure_ascii=False),
+        note=note,
+    )
+    return locked_round
 
 
 @transaction.atomic

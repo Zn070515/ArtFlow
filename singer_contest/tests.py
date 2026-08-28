@@ -28,6 +28,7 @@ from .services import (
     downstream_rounds,
     ensure_round_final_for_advancement,
     expected_score_cells,
+    finalize_advancement,
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
@@ -384,6 +385,71 @@ class ScoringServiceTests(TestCase):
         round.status = ContestRound.Status.LOCKED
         round.is_locked = True
         round.save(update_fields=["status", "is_locked"])
+
+    def _prepare_boundary_tie_round(self, advance_count=2):
+        """Score a round where the last passing score ties the first failing one."""
+        self.round.advance_count = advance_count
+        self.round.save(update_fields=["advance_count"])
+        extras = [self.make_singer(student_id=f"tie{idx}", name=f"Tie {idx}") for idx in range(3)]
+        prepare_round(self.round, self.user)
+        judge_id = list(
+            RoundJudge.objects.filter(round=self.round).values_list("judge_id", flat=True)
+        )[0]
+        apply_scores(
+            self.round,
+            {
+                (self.singer.pk, judge_id): 95,
+                (extras[0].pk, judge_id): 90,
+                (extras[1].pk, judge_id): 90,
+                (extras[2].pk, judge_id): 80,
+            },
+            self.user,
+        )
+        return self.singer, extras[0], extras[1], extras[2]
+
+    def test_advancement_boundary_tie_marks_round_needs_review_and_blocks_downstream(self):
+        self._prepare_boundary_tie_round()
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.advancement_status, ContestRound.AdvancementStatus.NEEDS_REVIEW)
+
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+        semifinal = ContestRound.objects.create(
+            activity=self.activity, round_type=ContestRound.RoundType.SEMI_FINAL
+        )
+        with self.assertRaisesMessage(ValidationError, "请先人工核定晋级人选"):
+            prepare_round(semifinal, self.user)
+
+    def test_finalize_advancement_records_manual_selection_and_audits(self):
+        singer, extra0, extra1, extra2 = self._prepare_boundary_tie_round()
+        chosen = [singer.pk, extra0.pk]
+        result = finalize_advancement(self.round, chosen, self.user)
+        self.assertEqual(result.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
+        advanced = set(
+            ScoreSummary.objects.filter(round=self.round, is_advanced=True).values_list(
+                "singer_id", flat=True
+            )
+        )
+        self.assertEqual(advanced, set(chosen))
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
+                operator=self.user,
+                target=f"ContestRound:{self.round.pk}",
+            ).exists()
+        )
+
+    def test_finalize_advancement_rejects_singer_outside_round(self):
+        self._prepare_boundary_tie_round()
+        outsider = self.make_singer(student_id="outsider")
+        with self.assertRaisesMessage(ValidationError, "晋级选手必须属于当前轮次"):
+            finalize_advancement(self.round, [outsider.pk], self.user)
+
+    def test_advancement_without_boundary_tie_stays_auto(self):
+        self._lock_scored_round(self.round, singer_count=4, advance_count=2)
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.advancement_status, ContestRound.AdvancementStatus.AUTO)
 
     def test_prepare_semifinal_round_uses_only_previous_advancers(self):
         self._lock_scored_round(self.round, singer_count=20, advance_count=10)

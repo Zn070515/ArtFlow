@@ -27,6 +27,11 @@ urlpatterns = [
     path("rounds/<int:pk>/prepare/", views.round_prepare, name="round_prepare"),
     path("rounds/<int:pk>/scores/", views.round_score_entry, name="round_score_entry"),
     path("rounds/<int:pk>/ranking/", views.round_ranking, name="round_ranking"),
+    path(
+        "rounds/<int:pk>/advancement/",
+        views.round_finalize_advancement,
+        name="round_finalize_advancement",
+    ),
     path("rounds/<int:pk>/lock/", views.round_lock, name="round_lock"),
     path("rounds/<int:pk>/unlock/", views.round_unlock, name="round_unlock"),
     path("rounds/<int:pk>/reset/", views.round_reset, name="round_reset"),

@@ -89,6 +89,11 @@ class ContestRound(models.Model):
         SCORING = "scoring", "评分中"
         LOCKED = "locked", "已锁定"
 
+    class AdvancementStatus(models.TextChoices):
+        AUTO = "auto", "自动晋级"
+        NEEDS_REVIEW = "needs_review", "待人工核定"
+        FINALIZED = "finalized", "已核定晋级"
+
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rounds")
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
@@ -96,6 +101,9 @@ class ContestRound(models.Model):
     advance_count = models.IntegerField(default=0)
     status = models.CharField(max_length=10, choices=Status, default=Status.DRAFT)
     is_locked = models.BooleanField(default=False)
+    advancement_status = models.CharField(
+        max_length=16, choices=AdvancementStatus, default=AdvancementStatus.AUTO
+    )
 
     class Meta:
         unique_together = [("activity", "round_type")]

@@ -1632,6 +1632,70 @@ class StaffPanelSmokeTests(TestCase):
             1,
         )
 
+    def _make_popularity_tie_session(self):
+        second_user = User.objects.create_user(username="participant-second", password="pass")
+        reg1 = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Tie One",
+            student_id="20260101",
+            college="Info",
+            class_name="CS1",
+            phone="13800000001",
+            song_name="Song 1",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        reg2 = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=second_user,
+            name="Tie Two",
+            student_id="20260102",
+            college="Info",
+            class_name="CS1",
+            phone="13800000002",
+            song_name="Song 2",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Tie Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        option1 = VoteOption.objects.create(vote_session=vote_session, singer=reg1)
+        option2 = VoteOption.objects.create(vote_session=vote_session, singer=reg2)
+        VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=option1,
+            browser_session_key="tie-1",
+            ip_address="127.0.0.1",
+        )
+        VoteRecord.objects.create(
+            vote_session=vote_session,
+            vote_option=option2,
+            browser_session_key="tie-2",
+            ip_address="127.0.0.2",
+        )
+        return vote_session
+
+    def test_lock_vote_session_with_popularity_tie_does_not_award(self):
+        vote_session = self._make_popularity_tie_session()
+        self.client.force_login(self.staff)
+        response = self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(
+            Award.objects.filter(activity=self.singer_activity, name="最佳人气奖").exists()
+        )
+
+    def test_vote_session_detail_shows_popularity_tie_warning(self):
+        vote_session = self._make_popularity_tie_session()
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:vote_session_detail", args=[vote_session.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["popularity_tie"])
+
     def test_round_lock_rejects_incomplete_scores(self):
         singer = SingerRegistration.objects.create(
             activity=self.singer_activity,

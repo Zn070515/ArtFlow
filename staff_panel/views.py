@@ -19,6 +19,7 @@ from common.test_data import (
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import transition_activity_phase
+from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -55,6 +56,7 @@ from singer_contest.services import (
     apply_scores,
     downstream_rounds,
     expected_score_cells,
+    finalize_advancement,
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
@@ -727,6 +729,25 @@ def round_ranking(request, pk):
 @staff_required
 @require_POST
 @transaction.atomic
+def round_finalize_advancement(request, pk):
+    contest_round = get_object_or_404(
+        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
+    )
+    ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
+    try:
+        finalize_advancement(
+            contest_round, request.POST.getlist("selected_singer_ids"), request.user
+        )
+    except ValidationError as error:
+        messages.error(request, "；".join(error.messages))
+    else:
+        messages.success(request, "已核定晋级名单。")
+    return redirect("staff:round_ranking", pk=pk)
+
+
+@staff_required
+@require_POST
+@transaction.atomic
 def round_lock(request, pk):
     contest_round = get_object_or_404(
         ContestRound.objects.select_for_update().select_related("activity"), pk=pk
@@ -750,6 +771,8 @@ def round_lock(request, pk):
     contest_round.status = ContestRound.Status.LOCKED
     contest_round.save(update_fields=["is_locked", "status"])
     log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"ContestRound:{contest_round.pk}")
+    if contest_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
+        messages.warning(request, "晋级线存在同分，请人工核定晋级名单。")
     return redirect("staff:round_ranking", pk=pk)
 
 
@@ -953,6 +976,7 @@ def vote_session_detail(request, pk):
 
     options = options.annotate(vote_count=Count("records"))
     total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
+    _, top = _popularity_top_tie(vote_session)
     return render(
         request,
         "staff_panel/vote_session_detail.html",
@@ -960,6 +984,7 @@ def vote_session_detail(request, pk):
             "vote_session": vote_session,
             "options": options,
             "total_votes": total_votes,
+            "popularity_tie": len(top) > 1,
         },
     )
 
@@ -989,7 +1014,11 @@ def vote_session_lock(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
     ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
     lock_vote_session(vote_session, request.user)
-    _generate_popularity_award(vote_session)
+    outcome = _generate_popularity_award(vote_session)
+    if outcome["status"] == "tie":
+        messages.warning(request, "最佳人气奖存在同分，请人工核定获奖名单。")
+    elif outcome["status"] == "created":
+        messages.success(request, "已生成最佳人气奖。")
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -1023,19 +1052,33 @@ def vote_session_export(request, pk):
     return response
 
 
-def _generate_popularity_award(vote_session):
-    from django.db import transaction
-    from django.db.models import Count
+def _popularity_top_tie(vote_session):
+    """Return (top_vote_count, tied_top_options).
 
-    winner = (
+    An empty tuple result means there are no winning ballots. The tie list is
+    deliberately order-independent so a database sort can never decide who wins.
+    """
+    leaderboard = list(
         vote_session.options.select_related("singer")
         .annotate(vote_count=Count("records"))
         .filter(vote_count__gt=0)
         .order_by("-vote_count", "sort_order", "pk")
-        .first()
     )
-    if not winner:
-        return None
+    if not leaderboard:
+        return None, []
+    top_count = leaderboard[0].vote_count
+    return top_count, [option for option in leaderboard if option.vote_count == top_count]
+
+
+def _generate_popularity_award(vote_session):
+    from django.db import transaction
+
+    top_count, top = _popularity_top_tie(vote_session)
+    if top_count is None:
+        return {"status": "no_votes", "count": 0, "top": []}
+    if len(top) > 1:
+        return {"status": "tie", "count": top_count, "top": top}
+    winner = top[0]
     with transaction.atomic():
         legacy_awards = Award.objects.filter(
             activity=vote_session.activity,
@@ -1059,7 +1102,7 @@ def _generate_popularity_award(vote_session):
                     "is_test_data": vote_session.is_test_data,
                 },
             )
-    return award
+    return {"status": "created", "count": top_count, "top": top, "award": award}
 
 
 # --- QR code center ---
