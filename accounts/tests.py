@@ -1,14 +1,21 @@
 import os
+import threading
 from io import StringIO
+from unittest import skipUnless
 from unittest.mock import patch
 
+from common.models import AuditLog
 from django.core.cache import cache
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase, override_settings
+from django.db import close_old_connections, connection
+from django.db.models import Q
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
 from .models import User
+from .services import change_user_role, set_user_active
 
 
 class LoginModeTests(TestCase):
@@ -206,3 +213,167 @@ class SeedDevAdminCommandTests(TestCase):
         self.assertTrue(user.check_password("hidden-input-password"))
         self.assertEqual(output.getvalue(), "Updated development admin: existing-admin\n")
         self.assertNotIn("hidden-input-password", output.getvalue())
+
+
+class EffectiveAdminAuthorityTests(TestCase):
+    """The ``is_admin`` authority and the last-admin guard must agree.
+
+    An effective admin is ``active AND (role == ADMIN OR is_superuser)``. The
+    guard must count superusers too, and the mutation must re-read the actor's
+    authority from the database instead of trusting a stale Python object.
+    """
+
+    def setUp(self):
+        self.super_admin = User.objects.create_superuser(
+            username="super-admin",
+            email="super@example.com",
+            password="pass12345",
+            role=User.Role.PARTICIPANT,
+        )
+        self.participant = User.objects.create_user(
+            username="participant-x", password="pass12345", role=User.Role.PARTICIPANT
+        )
+
+    def test_superuser_counts_as_effective_admin_for_last_admin_guard(self):
+        # The superuser is an effective admin even with a participant role, so a
+        # real role-based admin may be demoted without leaving zero admins. The
+        # old guard only counted role == ADMIN and rejected this correctly.
+        real_admin = User.objects.create_user(
+            username="real-admin", password="pass12345", role=User.Role.ADMIN
+        )
+        change_user_role(target=real_admin, new_role=User.Role.PARTICIPANT, actor=self.super_admin)
+        real_admin.refresh_from_db()
+        self.assertEqual(real_admin.role, User.Role.PARTICIPANT)
+        self.assertTrue(self.super_admin.is_admin)
+        log = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.UPDATE_PERMISSION,
+            operator=self.super_admin,
+            target=f"User:{real_admin.pk}",
+        ).get()
+        self.assertEqual(log.old_value, User.Role.ADMIN)
+        self.assertEqual(log.new_value, User.Role.PARTICIPANT)
+
+    def test_revoked_actor_cannot_use_stale_admin_authority(self):
+        # Demote the actor to participant (revoker remains admin). The actor
+        # object in memory still says ADMIN; the service must reject using that
+        # stale authority to mutate a third user.
+        revoker = User.objects.create_user(
+            username="revoker", password="pass12345", role=User.Role.ADMIN
+        )
+        actor = User.objects.create_user(
+            username="actor", password="pass12345", role=User.Role.ADMIN
+        )
+        change_user_role(target=actor, new_role=User.Role.PARTICIPANT, actor=revoker)
+        stale_actor = actor
+        with self.assertRaises(PermissionDenied):
+            change_user_role(target=self.participant, new_role=User.Role.STAFF, actor=stale_actor)
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.role, User.Role.PARTICIPANT)
+
+    def test_last_effective_admin_cannot_be_demoted(self):
+        # Only ``alone`` is an effective admin here (the superuser is neutralized).
+        self.super_admin.is_superuser = False
+        self.super_admin.save(update_fields=["is_superuser"])
+        alone = User.objects.create_user(
+            username="only-admin", password="pass12345", role=User.Role.ADMIN
+        )
+        with self.assertRaises(ValidationError):
+            change_user_role(target=alone, new_role=User.Role.PARTICIPANT, actor=alone)
+        alone.refresh_from_db()
+        self.assertEqual(alone.role, User.Role.ADMIN)
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class AdminAuthorityConcurrencyTests(TransactionTestCase):
+    """Concurrent admin mutations must never leave zero effective admins."""
+
+    def _effective_admin_count(self) -> int:
+        return (
+            User.objects.filter(is_active=True)
+            .filter(Q(role=User.Role.ADMIN) | Q(is_superuser=True))
+            .count()
+        )
+
+    def test_concurrent_mutual_demotion_keeps_at_least_one_admin(self):
+        admin_a = User.objects.create_user(
+            username="admin-a", password="pass12345", role=User.Role.ADMIN
+        )
+        admin_b = User.objects.create_user(
+            username="admin-b", password="pass12345", role=User.Role.ADMIN
+        )
+        results: dict[str, str] = {}
+
+        def demote_b():
+            close_old_connections()
+            try:
+                change_user_role(target=admin_b, new_role=User.Role.PARTICIPANT, actor=admin_a)
+                results["b"] = "ok"
+            except (ValidationError, PermissionDenied):
+                results["b"] = "rejected"
+            except Exception:
+                results["b"] = "error"
+            finally:
+                close_old_connections()
+
+        def demote_a():
+            close_old_connections()
+            try:
+                change_user_role(target=admin_a, new_role=User.Role.PARTICIPANT, actor=admin_b)
+                results["a"] = "ok"
+            except (ValidationError, PermissionDenied):
+                results["a"] = "rejected"
+            except Exception:
+                results["a"] = "error"
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=demote_b), threading.Thread(target=demote_a)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertGreaterEqual(self._effective_admin_count(), 1)
+        self.assertLessEqual(list(results.values()).count("ok"), 1)
+
+    def test_concurrent_mutual_deactivation_keeps_at_least_one_admin(self):
+        admin_a = User.objects.create_user(
+            username="deact-a", password="pass12345", role=User.Role.ADMIN
+        )
+        admin_b = User.objects.create_user(
+            username="deact-b", password="pass12345", role=User.Role.ADMIN
+        )
+        results: dict[str, str] = {}
+
+        def deactivate_b():
+            close_old_connections()
+            try:
+                set_user_active(target=admin_b, is_active=False, actor=admin_a)
+                results["b"] = "ok"
+            except (ValidationError, PermissionDenied):
+                results["b"] = "rejected"
+            except Exception:
+                results["b"] = "error"
+            finally:
+                close_old_connections()
+
+        def deactivate_a():
+            close_old_connections()
+            try:
+                set_user_active(target=admin_a, is_active=False, actor=admin_b)
+                results["a"] = "ok"
+            except (ValidationError, PermissionDenied):
+                results["a"] = "rejected"
+            except Exception:
+                results["a"] = "error"
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=deactivate_b), threading.Thread(target=deactivate_a)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertGreaterEqual(self._effective_admin_count(), 1)
+        self.assertLessEqual(list(results.values()).count("ok"), 1)
