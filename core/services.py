@@ -23,6 +23,18 @@ _PHASE_ORDER: list[str] = [
     Activity.Phase.ARCHIVED,
 ]
 
+# Explicit generic-transition edge set. A phase may move to any later lifecycle
+# phase, but ARCHIVED is deliberately absent from every successor set: the
+# generic service (and the create/edit forms that feed it) can never manufacture
+# an archived activity. Only enter_archived_phase(), used by the formal archive
+# flow, may move an activity into ARCHIVED.
+_PHASE_EDGES: dict[str, frozenset[str]] = {
+    phase: frozenset(
+        later for later in _PHASE_ORDER[phase_index + 1 :] if later != Activity.Phase.ARCHIVED
+    )
+    for phase_index, phase in enumerate(_PHASE_ORDER)
+}
+
 
 @transaction.atomic
 def transition_activity_phase(
@@ -34,7 +46,8 @@ def transition_activity_phase(
 ) -> Activity:
     """Advance an activity to a later phase, auditing the change.
 
-    Rejects regression (e.g. ARCHIVED -> LIVE) and arbitrary phase strings.
+    Any generic path may move the activity forward in its lifecycle, but never
+    backwards and never into ARCHIVED (that requires the formal archive flow).
     """
     if target_phase not in Activity.Phase.values:
         raise ValidationError(f"Unknown phase: {target_phase}")
@@ -43,11 +56,9 @@ def transition_activity_phase(
     if locked_activity.phase == target_phase:
         return locked_activity
 
-    current_index = _PHASE_ORDER.index(locked_activity.phase)
-    target_index = _PHASE_ORDER.index(target_phase)
-    if target_index < current_index:
+    if target_phase not in _PHASE_EDGES.get(locked_activity.phase, frozenset()):
         raise PermissionDenied(
-            f"Cannot move activity backwards from '{locked_activity.phase}' to '{target_phase}'."
+            f"Cannot move activity from '{locked_activity.phase}' to '{target_phase}'."
         )
 
     old_phase = locked_activity.phase
@@ -59,6 +70,31 @@ def transition_activity_phase(
         target=f"Activity:{locked_activity.pk}",
         old_value=old_phase,
         new_value=target_phase,
+        note=note,
+    )
+    return locked_activity
+
+
+@transaction.atomic
+def enter_archived_phase(activity: Activity, *, actor: Any = None, note: str = "") -> Activity:
+    """Move an activity into the terminal ARCHIVED phase.
+
+    This is the single archive-authority path: generic phase transitions must
+    never target ARCHIVED, so only the formal archive flow (archive_activity)
+    may reach this state. Audits the transition like any other phase change.
+    """
+    locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
+    if locked_activity.phase == Activity.Phase.ARCHIVED:
+        return locked_activity
+    old_phase = locked_activity.phase
+    locked_activity.phase = Activity.Phase.ARCHIVED
+    locked_activity.save(update_fields=["phase"])
+    AuditLog.objects.create(
+        operator=actor,
+        action_type=AuditLog.ActionType.PHASE_TRANSITION,
+        target=f"Activity:{locked_activity.pk}",
+        old_value=old_phase,
+        new_value=Activity.Phase.ARCHIVED,
         note=note,
     )
     return locked_activity

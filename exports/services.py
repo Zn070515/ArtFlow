@@ -10,7 +10,7 @@ from common.models import AuditLog
 from common.test_data import get_test_data_counts, lock_activity_for_runtime_data
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
-from core.services import transition_activity_phase
+from core.services import enter_archived_phase
 from django.core.exceptions import PermissionDenied
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -603,10 +603,7 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
 
         old_phase = locked_activity.phase
         if old_phase != Activity.Phase.ARCHIVED:
-            transition_activity_phase(
-                locked_activity, Activity.Phase.ARCHIVED, actor=actor, note=note
-            )
-            locked_activity = lock_activity_for_runtime_data(locked_activity)
+            locked_activity = enter_archived_phase(locked_activity, actor=actor, note=note)
         locked_activity.is_locked = True
         locked_activity.locked_at = timezone.now()
         locked_activity.locked_by = actor

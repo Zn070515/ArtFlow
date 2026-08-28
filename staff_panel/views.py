@@ -139,6 +139,8 @@ def activity_create(request):
                     "data": request.POST,
                 },
             )
+        if form.cleaned_data["phase"] == Activity.Phase.ARCHIVED:
+            raise PermissionDenied("不能直接创建已归档活动。")
         activity = Activity.objects.create(**form.cleaned_data)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]

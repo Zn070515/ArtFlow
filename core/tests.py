@@ -5,7 +5,7 @@ from django.test import TestCase
 
 from .models import Activity, ActivityPhase, QRCodeLink
 from .policies import ActivityAction, allowed_actions, ensure_activity_action_allowed
-from .services import transition_activity_phase
+from .services import enter_archived_phase, transition_activity_phase
 
 User = get_user_model()
 
@@ -163,3 +163,32 @@ class ActivityPhaseTransitionTests(TestCase):
     def test_unknown_phase_is_rejected(self):
         with self.assertRaises(ValidationError):
             transition_activity_phase(self.activity, "not_a_phase", actor=self.user)
+
+    def test_generic_transition_rejects_archived(self):
+        with self.assertRaises(PermissionDenied):
+            transition_activity_phase(self.activity, Activity.Phase.ARCHIVED, actor=self.user)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.DRAFT)
+        self.assertFalse(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.PHASE_TRANSITION).exists()
+        )
+
+    def test_archived_phase_only_entered_via_archive_authority(self):
+        result = enter_archived_phase(self.activity, actor=self.user)
+        self.assertEqual(result.phase, Activity.Phase.ARCHIVED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.PHASE_TRANSITION,
+                operator=self.user,
+                old_value=Activity.Phase.DRAFT,
+                new_value=Activity.Phase.ARCHIVED,
+            ).exists()
+        )
+        # No generic successor set may reach ARCHIVED; only the archive service does.
+        expecting_archived = Activity.objects.create(
+            title="Second",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+        )
+        with self.assertRaises(PermissionDenied):
+            transition_activity_phase(expecting_archived, Activity.Phase.ARCHIVED, actor=self.user)

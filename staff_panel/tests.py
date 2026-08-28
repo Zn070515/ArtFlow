@@ -2775,6 +2775,47 @@ class ActivityPhaseEditTests(TestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.phase, Activity.Phase.LIVE)
 
+    def test_admin_edit_cannot_directly_archive(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Contest",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.ARCHIVED,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.RESULTS_PUBLISHED)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.PHASE_TRANSITION,
+                new_value=Activity.Phase.ARCHIVED,
+            ).exists()
+        )
+
+    def test_admin_create_cannot_create_archived(self):
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:activity_create"),
+            {
+                "title": "Fake Archived",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.ARCHIVED,
+                "is_test_mode": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Activity.objects.filter(title="Fake Archived").exists())
+
 
 class ActivityPhaseViewEnforcementTests(TestCase):
     def setUp(self):
