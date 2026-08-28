@@ -13,6 +13,7 @@ from core.models import Activity
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import (
@@ -28,7 +29,7 @@ from django.http import Http404
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-from exports.models import ArticleTemplate
+from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, StaffNote, SubmissionFile
 from incidents.models import IncidentRecord
@@ -49,6 +50,7 @@ from . import models as common_models
 from .business_rules import ensure_same_activity
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
+from .test_data import clear_activity_test_data
 from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
@@ -103,6 +105,38 @@ class ActivityLifecycleTests(TestCase):
 
         with self.assertRaises(ValidationError):
             activity.save()
+
+
+class GeneratedDocumentTestDataCleanupTests(TestCase):
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_directory.name)
+        self.media_override.enable()
+        self.operator = User.objects.create_user(username="cleanup-operator", password="pass")
+        self.activity = Activity.objects.create(
+            title="Test activity", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+
+    def test_generated_test_document_is_removed_with_file(self):
+        document = GeneratedDocument.objects.create(
+            activity=self.activity,
+            title="Test document",
+            file=SimpleUploadedFile("test-document.docx", b"test document"),
+            created_by=self.operator,
+            is_test_data=True,
+        )
+        stored_name = document.file.name
+        storage = document.file.storage
+
+        counts = clear_activity_test_data(self.activity, operator=self.operator)
+
+        self.assertEqual(counts["generated_documents"], 1)
+        self.assertFalse(GeneratedDocument.objects.filter(pk=document.pk).exists())
+        self.assertFalse(storage.exists(stored_name))
 
 
 class ActivityLifecycleBulkWriteTests(TestCase):

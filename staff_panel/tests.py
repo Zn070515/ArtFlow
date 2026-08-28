@@ -14,6 +14,7 @@ from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from files.services import store_submission_file
@@ -1093,6 +1094,81 @@ class StaffPanelSmokeTests(TestCase):
         values = [cell.value for row in worksheet.iter_rows() for cell in row]
         self.assertIn(formal.name, values)
         self.assertNotIn("Test Singer", values)
+
+    def test_formal_archive_excludes_test_generated_document(self):
+        formal_activity = Activity.objects.create(
+            title="Formal Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        formal_document = GeneratedDocument.objects.create(
+            activity=formal_activity,
+            title="Formal announcement",
+            file=SimpleUploadedFile("formal.docx", b"formal document"),
+            created_by=self.staff,
+            is_test_data=False,
+        )
+        test_document = GeneratedDocument.objects.create(
+            activity=formal_activity,
+            title="Test announcement",
+            file=SimpleUploadedFile("test.docx", b"test document"),
+            created_by=self.staff,
+            is_test_data=True,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:archive_package_create", args=[formal_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(GeneratedDocument.objects.filter(pk=formal_document.pk).exists())
+        self.assertTrue(GeneratedDocument.objects.filter(pk=test_document.pk).exists())
+        self.assertTrue(formal_document.file.storage.exists(formal_document.file.name))
+        self.assertTrue(test_document.file.storage.exists(test_document.file.name))
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            names = set(archive.namelist())
+        self.assertIn(f"推文_{formal_document.pk}.docx", names)
+        self.assertNotIn(f"推文_{test_document.pk}.docx", names)
+
+    def test_formal_word_generation_creates_formal_document(self):
+        formal_activity = Activity.objects.create(
+            title="Formal Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        template = ArticleTemplate.objects.create(
+            name="Formal notice",
+            template_type=ArticleTemplate.TemplateType.PRELIMINARY_NOTICE,
+            body="{title}",
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:word_generate", args=[template.pk, formal_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        document = GeneratedDocument.objects.get(template=template, activity=formal_activity)
+        self.assertFalse(document.is_test_data)
+        self.assertTrue(document.file.storage.exists(document.file.name))
+
+    def test_test_word_generation_creates_test_document(self):
+        template = ArticleTemplate.objects.create(
+            name="Test notice",
+            template_type=ArticleTemplate.TemplateType.VOTE_GUIDE,
+            body="{title}",
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:word_generate", args=[template.pk, self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        document = GeneratedDocument.objects.get(template=template, activity=self.singer_activity)
+        self.assertTrue(document.is_test_data)
+        self.assertTrue(document.file.storage.exists(document.file.name))
 
     def test_locking_vote_session_generates_popularity_award(self):
         registration = SingerRegistration.objects.create(

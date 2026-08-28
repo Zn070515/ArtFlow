@@ -1232,13 +1232,18 @@ def word_generate(request, template_id, activity_id):
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-    doc_obj = GeneratedDocument.objects.create(
-        template=template,
-        activity=activity,
-        title=template.name,
-        created_by=request.user,
-    )
-    doc_obj.file.save(f"{template.template_type}_{activity_id}.docx", ContentFile(buf.getvalue()))
+    with transaction.atomic():
+        activity = lock_activity_for_runtime_data(activity)
+        doc_obj = GeneratedDocument.objects.create(
+            template=template,
+            activity=activity,
+            title=template.name,
+            created_by=request.user,
+            is_test_data=activity.is_test_mode,
+        )
+        doc_obj.file.save(
+            f"{template.template_type}_{activity_id}.docx", ContentFile(buf.getvalue())
+        )
     AuditLog.objects.create(
         operator=request.user,
         action_type=AuditLog.ActionType.EXPORT,
@@ -1285,7 +1290,7 @@ def archive_package_create(request, activity_id):
             wb.save(stream)
             zf.writestr(f"{label}.xlsx", stream.getvalue())
         # Include generated docs
-        for doc in GeneratedDocument.objects.filter(activity=activity):
+        for doc in GeneratedDocument.objects.filter(activity=activity, is_test_data=False):
             if doc.file:
                 zf.write(doc.file.path, f"推文_{doc.pk}.docx")
     buf.seek(0)

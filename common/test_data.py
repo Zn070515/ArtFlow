@@ -17,6 +17,7 @@ def lock_activity_for_runtime_data(activity: Any) -> Any:
 
 
 def get_test_data_counts(activity: Any) -> dict[str, int]:
+    from exports.models import GeneratedDocument
     from farewell_show.models import Program
     from files.models import SubmissionFile
     from incidents.models import IncidentRecord
@@ -52,6 +53,9 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         "incidents": IncidentRecord.objects.filter(activity=activity, is_test=True).count(),
         "files": SubmissionFile.objects.filter(is_test_data=True).filter(
             Q(singer_registration__activity=activity) | Q(program__activity=activity)
+        ).count(),
+        "generated_documents": GeneratedDocument.objects.filter(
+            activity=activity, is_test_data=True
         ).count(),
     }
 
@@ -96,6 +100,7 @@ def _reject_mixed_marker_dependencies(activity: Any) -> None:
 
 @transaction.atomic
 def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
+    from exports.models import GeneratedDocument
     from farewell_show.models import Program
     from files.models import SubmissionFile
     from files.services import delete_submission_file
@@ -114,6 +119,11 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     )
     for submission_file in files:
         delete_submission_file(submission_file)
+    for generated_document in GeneratedDocument.objects.filter(
+        activity=locked_activity, is_test_data=True
+    ):
+        generated_document.file.delete(save=False)
+        generated_document.delete()
     Award.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()

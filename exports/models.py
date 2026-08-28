@@ -74,6 +74,7 @@ class GeneratedDocument(models.Model):
     )
     title = models.CharField(max_length=200, blank=True)
     file = models.FileField(upload_to="generated/")
+    is_test_data = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
