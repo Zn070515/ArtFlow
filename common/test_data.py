@@ -74,6 +74,19 @@ def _reject_mixed_marker_dependencies(activity: Any) -> None:
     ):
         raise PermissionDenied("Test vote sessions with formal dependents cannot be cleared.")
 
+    test_singer_vote_options = VoteOption.objects.filter(
+        singer__activity=activity,
+        singer__is_test_data=True,
+    )
+    if (
+        test_singer_vote_options.filter(is_test_data=False).exists()
+        or VoteRecord.objects.filter(
+            vote_option__in=test_singer_vote_options,
+            is_test_data=False,
+        ).exists()
+    ):
+        raise PermissionDenied("Test singers with formal vote dependents cannot be cleared.")
+
     if SubmissionFile.objects.filter(is_test_data=False).filter(
         Q(singer_registration__activity=activity, singer_registration__is_test_data=True)
         | Q(program__activity=activity, program__is_test_data=True)

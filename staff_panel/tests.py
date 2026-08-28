@@ -761,6 +761,59 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteBallot.objects.get(pk=ballot.pk).is_test_data)
         self.assertFalse(VoteRecord.objects.get(pk=record.pk).is_test_data)
 
+    def test_cleanup_rejects_formal_vote_graph_referencing_test_singer(self):
+        test_registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Test Singer With Formal Vote",
+            student_id="20260023",
+            college="Info",
+            class_name="CS1",
+            phone="13800000022",
+            song_name="Test Singer Song",
+            is_test_data=True,
+        )
+        formal_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Formal Vote For Test Singer",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_test_data=False,
+        )
+        formal_option = VoteOption.objects.create(
+            vote_session=formal_session,
+            singer=test_registration,
+            is_test_data=False,
+        )
+        formal_ballot = VoteBallot.objects.create(
+            vote_session=formal_session,
+            browser_session_key="formal-singer-ballot",
+            ip_address="127.0.0.1",
+            is_test_data=False,
+        )
+        formal_record = VoteRecord.objects.create(
+            ballot=formal_ballot,
+            vote_session=formal_session,
+            vote_option=formal_option,
+            browser_session_key="formal-singer-ballot",
+            ip_address="127.0.0.1",
+            is_test_data=False,
+        )
+        self.client.force_login(self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(SingerRegistration.objects.filter(pk=test_registration.pk).exists())
+        self.assertFalse(VoteSession.objects.get(pk=formal_session.pk).is_test_data)
+        self.assertFalse(VoteOption.objects.get(pk=formal_option.pk).is_test_data)
+        self.assertFalse(VoteBallot.objects.get(pk=formal_ballot.pk).is_test_data)
+        self.assertFalse(VoteRecord.objects.get(pk=formal_record.pk).is_test_data)
+
     def test_cleanup_rejects_formal_file_under_test_owner(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
