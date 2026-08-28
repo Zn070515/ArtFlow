@@ -41,6 +41,11 @@ def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
 
     with transaction.atomic():
         locked_session = VoteSession.objects.select_for_update().get(pk=vote_session.pk)
+        now = timezone.now()
+        if not locked_session.is_open or locked_session.is_locked:
+            raise ValidationError("投票尚未开放或已锁定。")
+        if now < locked_session.start_time or now > locked_session.end_time:
+            raise ValidationError("当前不在投票时间内。")
         locked_activity = lock_activity_for_runtime_data(locked_session.activity)
         ballot = VoteBallot.objects.filter(
             vote_session=locked_session, browser_session_key=browser_session_key

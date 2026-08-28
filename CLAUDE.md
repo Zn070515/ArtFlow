@@ -38,6 +38,7 @@ Use `uv run python manage.py doctor` for read-only configuration, database, migr
 - Preserve activity and result locks, audit logging, and test-data safeguards when changing operational flows.
 - Do not commit `.env`, secrets, SQLite databases, uploads, exports, archives, or generated media.
 - Run `pwsh -NoProfile -File scripts/check_docs.ps1` after user-facing documentation changes.
+- Do not let claude get into Co-Authored commits; it is a code reviewer, not a code author. Use `git commit --author` to correct any misattribution.
 
 ## Git workflow
 

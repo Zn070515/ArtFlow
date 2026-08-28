@@ -356,7 +356,7 @@ class ScoringServiceTests(TestCase):
             round_type=ContestRound.RoundType.SEMI_FINAL,
         )
         for index in range(20):
-            singer = self.make_singer(student_id=f"2026{index:04d}")
+            singer = self.make_singer(student_id=f"2027{index:04d}")
             ScoreSummary.objects.create(
                 round=self.round,
                 singer=singer,
@@ -560,9 +560,10 @@ class ScoringServiceTests(TestCase):
         self.assertIn('"new": "92.50"', audit.new_value)
 
     def test_parse_score_workbook_reports_late_invalid_cell_without_writing(self):
+        second_user = User.objects.create_user(username="singer-two", password="pass")
         second_singer = SingerRegistration.objects.create(
             activity=self.activity,
-            user=self.user,
+            user=second_user,
             name="Second Singer",
             student_id="20260002",
             college="College",
@@ -618,3 +619,51 @@ class SingerUploadViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "文件类型")
         self.assertFalse(SingerRegistration.objects.exists())
+
+    def test_apply_rejects_duplicate_registration_for_same_user(self):
+        self.client.force_login(self.user)
+        payload = {
+            "activity_id": self.activity.pk,
+            "name": "Singer",
+            "student_id": "20260001",
+            "college": "College",
+            "class_name": "Class",
+            "phone": "13800000000",
+            "song_name": "Song",
+        }
+
+        first = self.client.post(reverse("singer_contest:apply"), payload)
+        self.assertEqual(first.status_code, 302)
+
+        second = self.client.post(reverse("singer_contest:apply"), payload)
+        self.assertEqual(second.status_code, 200)
+        self.assertContains(second, "请勿重复提交")
+        self.assertEqual(
+            SingerRegistration.objects.filter(activity=self.activity, user=self.user).count(), 1
+        )
+
+    def test_duplicate_registration_by_student_id_is_rejected_at_db_level(self):
+        SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="First Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+        other_user = User.objects.create_user(username="applicant-two", password="pass")
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SingerRegistration.objects.create(
+                    activity=self.activity,
+                    user=other_user,
+                    name="Second Singer",
+                    student_id="20260001",
+                    college="College",
+                    class_name="Class",
+                    phone="13800000001",
+                    song_name="Song 2",
+                )

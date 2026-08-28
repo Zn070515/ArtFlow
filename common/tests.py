@@ -666,7 +666,7 @@ class DemoSeedCommandTests(TestCase):
             first_counts,
             {
                 "activities": 2,
-                "users": 2,
+                "users": 3,
                 "posts": 2,
                 "templates": 2,
                 "singers": 2,
@@ -680,7 +680,7 @@ class DemoSeedCommandTests(TestCase):
                 "vote_options": 2,
                 "vote_records": 2,
                 "incidents": 1,
-                "seed_records": 28,
+                "seed_records": 29,
             },
         )
         self.assertEqual(
@@ -688,6 +688,7 @@ class DemoSeedCommandTests(TestCase):
             {
                 "demo.user.admin",
                 "demo.user.participant",
+                "demo.user.participant_two",
                 "demo.activity.singer_contest",
                 "demo.activity.farewell_show",
                 "demo.post.singer_contest",
@@ -781,9 +782,12 @@ class DemoSeedCommandTests(TestCase):
         call_command("seed_demo_data", "--reset")
         singer_activity = Activity.objects.get(title="Demo Singer Contest")
         participant = User.objects.get(username="demo-participant")
+        unowned_user = User.objects.create_user(
+            username="unowned-eligible", password="pass"
+        )
         unowned_singer = SingerRegistration.objects.create(
             activity=singer_activity,
-            user=participant,
+            user=unowned_user,
             name="Unowned Eligible Singer",
             student_id="UNOWNED2026001",
             college="Arts College",
@@ -1014,9 +1018,12 @@ class DemoSeedCommandTests(TestCase):
         participant = User.objects.get(username="demo-participant")
         contest_round.status = ContestRound.Status.DRAFT
         contest_round.save(update_fields=["status"])
+        unowned_user = User.objects.create_user(
+            username="unowned-snapshot", password="pass"
+        )
         unowned_singer = SingerRegistration.objects.create(
             activity=contest_round.activity,
-            user=participant,
+            user=unowned_user,
             name="Unowned Snapshot Singer",
             student_id="UNOWNED2026002",
             college="Arts College",

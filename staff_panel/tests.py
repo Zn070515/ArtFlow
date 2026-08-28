@@ -26,6 +26,8 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    RoundEntry,
+    RoundJudge,
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
@@ -565,9 +567,10 @@ class StaffPanelSmokeTests(TestCase):
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
         prepare_round(round_, self.staff)
+        late_user = User.objects.create_user(username="participant-late", password="pass")
         SingerRegistration.objects.create(
             activity=self.singer_activity,
-            user=self.participant,
+            user=late_user,
             name="Late Singer",
             student_id="20260009",
             college="Info",
@@ -652,6 +655,87 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Award.objects.exists())
 
+    def test_activity_unlock_does_not_unlock_locked_round(self):
+        contest_round = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            status=ContestRound.Status.LOCKED,
+            is_locked=True,
+        )
+        self.client.force_login(self.admin)
+
+        self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
+        response = self.client.post(
+            reverse("staff:activity_unlock", args=[self.singer_activity.pk]),
+            {"note": "Activity correction"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.status, ContestRound.Status.LOCKED)
+        self.assertTrue(contest_round.is_locked)
+        self.client.force_login(self.staff)
+        self.assertEqual(
+            self.client.post(reverse("staff:round_score_entry", args=[contest_round.pk])).status_code,
+            403,
+        )
+
+    def test_activity_unlock_does_not_unlock_locked_vote_session(self):
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Locked popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_locked=True,
+            is_open=False,
+        )
+        self.client.force_login(self.admin)
+
+        self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
+        response = self.client.post(
+            reverse("staff:activity_unlock", args=[self.singer_activity.pk]),
+            {"note": "Activity correction"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        vote_session.refresh_from_db()
+        self.assertTrue(vote_session.is_locked)
+        self.assertFalse(vote_session.is_open)
+        self.client.force_login(self.staff)
+        self.assertEqual(
+            self.client.post(
+                reverse("staff:vote_session_toggle", args=[vote_session.pk])
+            ).status_code,
+            403,
+        )
+
+    def test_activity_lock_does_not_destroy_child_open_state(self):
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Open popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+            is_locked=False,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        vote_session.refresh_from_db()
+        self.assertTrue(vote_session.is_open)
+        self.assertFalse(vote_session.is_locked)
+        self.client.force_login(self.staff)
+        self.assertEqual(
+            self.client.post(
+                reverse("staff:vote_session_toggle", args=[vote_session.pk])
+            ).status_code,
+            403,
+        )
+
     def test_admin_can_unlock_vote_session_and_audit_is_recorded(self):
         vote_session = VoteSession.objects.create(
             activity=self.singer_activity,
@@ -696,9 +780,10 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Formal Song",
             is_test_data=False,
         )
+        test_user = User.objects.create_user(username="participant-test", password="pass")
         test_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
-            user=self.participant,
+            user=test_user,
             name="Test",
             student_id="20260003",
             college="Info",
@@ -978,6 +1063,7 @@ class StaffPanelSmokeTests(TestCase):
             class_name="CS1",
             phone="13800000000",
             song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         uploaded = SubmissionFile.objects.create(
             singer_registration=registration,
@@ -1093,9 +1179,10 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Formal Song",
             is_test_data=False,
         )
+        test_user = User.objects.create_user(username="participant-test", password="pass")
         SingerRegistration.objects.create(
             activity=self.singer_activity,
-            user=self.participant,
+            user=test_user,
             name="Test Singer",
             student_id="20260009",
             college="Info",
@@ -1265,9 +1352,10 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song 1",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
+        second_user = User.objects.create_user(username="participant-two", password="pass")
         second = SingerRegistration.objects.create(
             activity=self.singer_activity,
-            user=self.participant,
+            user=second_user,
             name="Second Winner",
             student_id="20260011",
             college="Info",
@@ -1433,9 +1521,10 @@ class StaffPanelSmokeTests(TestCase):
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
         prepare_round(round_, self.staff)
+        late_user = User.objects.create_user(username="participant-late", password="pass")
         late_singer = SingerRegistration.objects.create(
             activity=self.singer_activity,
-            user=self.participant,
+            user=late_user,
             name="Late Singer",
             student_id="20260013",
             college="Info",
@@ -1589,9 +1678,10 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
+        second_user = User.objects.create_user(username="participant-two", password="pass")
         second = SingerRegistration.objects.create(
             activity=self.singer_activity,
-            user=self.participant,
+            user=second_user,
             name="Second Singer",
             student_id="20260004",
             college="Info",
@@ -1676,15 +1766,15 @@ class StaffPanelSmokeTests(TestCase):
             item_name="Lyrics",
             file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
         )
-        Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        ContestRound.objects.create(
+        judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        contest_round = ContestRound.objects.create(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             scoring_mode=ContestRound.ScoringMode.DROP_HIGH_LOW,
             advance_count=2,
             name="Preliminary",
         )
-        SingerRegistration.objects.create(
+        singer = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
             name="Runtime Data",
@@ -1693,6 +1783,55 @@ class StaffPanelSmokeTests(TestCase):
             class_name="CS1",
             phone="13800000000",
             song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        SubmissionFile.objects.create(
+            singer_registration=singer,
+            file=SimpleUploadedFile("runtime.txt", b"runtime data"),
+            original_name="runtime.txt",
+            file_size=12,
+            file_purpose=SubmissionFile.Purpose.OTHER,
+            uploaded_by=self.participant,
+        )
+        prepare_round(contest_round, self.staff)
+        ScoreRecord.objects.create(
+            round=contest_round,
+            singer=singer,
+            judge=judge,
+            score=91,
+        )
+        ScoreSummary.objects.create(
+            round=contest_round,
+            singer=singer,
+            average_score=91,
+            rank=1,
+        )
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        option = VoteOption.objects.create(vote_session=vote_session, singer=singer)
+        ballot = VoteBallot.objects.create(
+            vote_session=vote_session,
+            browser_session_key="runtime-browser",
+            ip_address="127.0.0.1",
+        )
+        VoteRecord.objects.create(
+            ballot=ballot,
+            vote_session=vote_session,
+            vote_option=option,
+            browser_session_key="runtime-browser",
+            ip_address="127.0.0.1",
+        )
+        GeneratedDocument.objects.create(
+            activity=self.singer_activity,
+            title="Runtime document",
+            file=SimpleUploadedFile("runtime.docx", b"runtime document"),
+            created_by=self.staff,
         )
         self.client.force_login(self.admin)
         response = self.client.post(reverse("staff:activity_clone", args=[self.singer_activity.pk]))
@@ -1709,4 +1848,17 @@ class StaffPanelSmokeTests(TestCase):
                 activity=clone, round_type=ContestRound.RoundType.PRELIMINARY
             ).exists()
         )
+        self.assertTrue(VoteSession.objects.filter(activity=clone, name="Popularity").exists())
+        self.assertTrue(clone.is_test_mode)
+        self.assertEqual(clone.data_lifecycle, Activity.DataLifecycle.TEST)
+        self.assertEqual(clone.phase, Activity.Phase.DRAFT)
         self.assertFalse(SingerRegistration.objects.filter(activity=clone).exists())
+        self.assertFalse(SubmissionFile.objects.filter(singer_registration__activity=clone).exists())
+        self.assertFalse(RoundEntry.objects.filter(round__activity=clone).exists())
+        self.assertFalse(RoundJudge.objects.filter(round__activity=clone).exists())
+        self.assertFalse(ScoreRecord.objects.filter(round__activity=clone).exists())
+        self.assertFalse(ScoreSummary.objects.filter(round__activity=clone).exists())
+        self.assertFalse(VoteOption.objects.filter(vote_session__activity=clone).exists())
+        self.assertFalse(VoteBallot.objects.filter(vote_session__activity=clone).exists())
+        self.assertFalse(VoteRecord.objects.filter(vote_session__activity=clone).exists())
+        self.assertFalse(GeneratedDocument.objects.filter(activity=clone).exists())

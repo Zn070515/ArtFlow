@@ -137,6 +137,17 @@ class Command(BaseCommand):
             },
             prepare_create=lambda user: user.set_unusable_password(),
         )
+        participant_two = self._upsert(
+            "demo.user.participant_two",
+            User,
+            {
+                "username": "demo-participant-two",
+                "role": User.Role.PARTICIPANT,
+                "is_staff": False,
+                "is_superuser": False,
+            },
+            prepare_create=lambda user: user.set_unusable_password(),
+        )
         singer_activity = self._upsert(
             "demo.activity.singer_contest",
             Activity,
@@ -239,7 +250,7 @@ class Command(BaseCommand):
             SingerRegistration,
             {
                 "activity": singer_activity,
-                "user": participant,
+                "user": participant_two,
                 "name": "Demo Singer Two",
                 "student_id": "DEMO2026002",
                 "college": "Arts College",

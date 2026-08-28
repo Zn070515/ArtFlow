@@ -56,6 +56,16 @@ class SingerRegistration(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "user"],
+                name="singer_one_registration_per_account_per_activity",
+            ),
+            models.UniqueConstraint(
+                fields=["activity", "student_id"],
+                name="singer_one_registration_per_student_per_activity",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} — {self.song_name}"

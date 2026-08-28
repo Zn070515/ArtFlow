@@ -1874,13 +1874,11 @@ def activity_clear_test_data(request, pk):
 @transaction.atomic
 def activity_lock(request, pk):
     _require_admin(request.user)
-    activity = get_object_or_404(Activity, pk=pk)
+    activity = get_object_or_404(Activity.objects.select_for_update(), pk=pk)
     activity.is_locked = True
     activity.locked_at = timezone.now()
     activity.locked_by = request.user
-    activity.save()
-    ContestRound.objects.filter(activity=activity).update(is_locked=True)
-    VoteSession.objects.filter(activity=activity).update(is_locked=True, is_open=False)
+    activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
     log_action(
         request, AuditLog.ActionType.RELOCK_RESULT, f"Activity:{activity.pk}", new_value="locked"
     )
@@ -1895,13 +1893,11 @@ def activity_unlock(request, pk):
     note = request.POST.get("note", "").strip()
     if not note:
         raise PermissionDenied("解锁活动必须填写原因。")
-    activity = get_object_or_404(Activity, pk=pk)
+    activity = get_object_or_404(Activity.objects.select_for_update(), pk=pk)
     activity.is_locked = False
     activity.locked_at = None
     activity.locked_by = None
-    activity.save()
-    ContestRound.objects.filter(activity=activity).update(is_locked=False)
-    VoteSession.objects.filter(activity=activity).update(is_locked=False)
+    activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
