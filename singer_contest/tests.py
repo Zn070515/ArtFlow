@@ -30,6 +30,8 @@ from .services import (
     parse_score_workbook,
     prepare_round,
     recalculate_round,
+    reset_round_snapshots,
+    reset_round_to_draft,
     reset_test_round_snapshots,
     validate_score,
 )
@@ -674,3 +676,110 @@ class SingerUploadViewTests(TestCase):
                     phone="13800000001",
                     song_name="Song 2",
                 )
+
+
+class RoundResetServiceTests(TestCase):
+    def setUp(self):
+        self.actor = User.objects.create_user(username="reset-actor", password="pass")
+        self.activity = Activity.objects.create(
+            title="Test contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="reset-singer", password="pass"),
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge")
+
+    def _prepare_round_with_scores(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        ScoreRecord.objects.create(
+            round=self.round,
+            singer=self.singer,
+            judge=self.judge,
+            score=Decimal("90.00"),
+            is_test_data=True,
+        )
+        ScoreSummary.objects.create(
+            round=self.round,
+            singer=self.singer,
+            average_score=Decimal("90.000"),
+            rank=1,
+            is_advanced=True,
+            is_test_data=True,
+        )
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status", "is_locked"])
+
+    def test_reset_round_snapshots_returns_test_round_to_draft(self):
+        self._prepare_round_with_scores()
+
+        reset_round_snapshots(self.round, self.actor, reason="reset test round")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(self.round.is_locked)
+        self.assertFalse(RoundEntry.objects.filter(round=self.round).exists())
+        self.assertFalse(RoundJudge.objects.filter(round=self.round).exists())
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round).exists())
+        self.assertFalse(ScoreSummary.objects.filter(round=self.round).exists())
+        self.assertTrue(AuditLog.objects.filter(target=f"ContestRound:{self.round.pk}").exists())
+
+    def test_reset_round_snapshots_rejects_formal_parents_in_test_activity(self):
+        self.singer.is_test_data = False
+        self.singer.save(update_fields=["is_test_data"])
+        self._prepare_round_with_scores()
+
+        with self.assertRaises(ValidationError):
+            reset_round_snapshots(self.round, self.actor, reason="reset formal parent")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
+    def test_reset_round_to_draft_requires_reason(self):
+        self._prepare_round_with_scores()
+        with self.assertRaises(ValidationError):
+            reset_round_to_draft(self.round, self.actor, reason="  ")
+
+    def test_reset_round_to_draft_rejects_downstream_active(self):
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            status=ContestRound.Status.PREPARED,
+        )
+        self._prepare_round_with_scores()
+
+        with self.assertRaises(ValidationError):
+            reset_round_to_draft(self.round, self.actor, reason="reset preliminary")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+        self.assertEqual(semifinal.status, ContestRound.Status.PREPARED)
+
+    def test_reset_round_to_draft_resets_prepared_round(self):
+        self._prepare_round_with_scores()
+
+        reset_round_to_draft(self.round, self.actor, reason="admin unwind")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(RoundEntry.objects.filter(round=self.round).exists())
+
+    def test_reset_round_to_draft_is_no_op_on_draft_round(self):
+        reset_round_to_draft(self.round, self.actor, reason="already draft")
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)

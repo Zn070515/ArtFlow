@@ -147,6 +147,38 @@ class GeneratedDocumentTestDataCleanupTests(TestCase):
         self.assertFalse(GeneratedDocument.objects.filter(pk=document.pk).exists())
         self.assertFalse(storage.exists(stored_name or ""))
 
+    def test_clear_activity_test_data_resets_prepared_round_snapshots(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="cleanup-singer", password="pass"),
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        judge = Judge.objects.create(activity=self.activity, name="Cleanup Judge")
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        RoundEntry.objects.create(round=contest_round, singer=singer)
+        RoundJudge.objects.create(round=contest_round, judge=judge)
+        contest_round.status = ContestRound.Status.PREPARED
+        contest_round.save(update_fields=["status"])
+
+        counts = clear_activity_test_data(self.activity, operator=self.operator)
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(RoundEntry.objects.filter(round=contest_round).exists())
+        self.assertFalse(RoundJudge.objects.filter(round=contest_round).exists())
+        self.assertFalse(SingerRegistration.objects.filter(pk=singer.pk).exists())
+        self.assertEqual(counts["singer_registrations"], 1)
+
 
 class ActivityLifecycleBulkWriteTests(TestCase):
     def test_queryset_update_rejects_lifecycle_changes(self):

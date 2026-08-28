@@ -154,6 +154,85 @@ def reset_test_round_snapshots(
     return locked_round
 
 
+@transaction.atomic
+def reset_round_snapshots(
+    contest_round: ContestRound, operator, *, reason: str = ""
+) -> ContestRound:
+    """Reset a round to DRAFT, discarding its score matrix and snapshots.
+
+    For a test-mode activity, every parent carried into the reset must itself be
+    test-marked; otherwise a test rehearsal snapshot is silently wiping formal
+    rows. A formal activity is intentionally allowed to unwind via this path.
+    """
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    activity = locked_round.activity
+    if activity.is_test_mode and (
+        RoundEntry.objects.filter(round=locked_round, singer__is_test_data=False).exists()
+        or ScoreRecord.objects.filter(round=locked_round, is_test_data=False).exists()
+        or ScoreSummary.objects.filter(round=locked_round, is_test_data=False).exists()
+    ):
+        raise ValidationError("Test round reset requires test-owned scores and singers.")
+
+    old_value = json.dumps(
+        {
+            "status": locked_round.status,
+            "is_locked": locked_round.is_locked,
+            "entries": locked_round.entries.count(),
+            "judges": locked_round.round_judges.count(),
+        },
+        ensure_ascii=False,
+    )
+    locked_round.status = ContestRound.Status.DRAFT
+    locked_round.is_locked = False
+    locked_round.save(update_fields=["status", "is_locked"])
+    ScoreRecord.objects.filter(round=locked_round).delete()
+    ScoreSummary.objects.filter(round=locked_round).delete()
+    RoundEntry.objects.filter(round=locked_round).delete()
+    RoundJudge.objects.filter(round=locked_round).delete()
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value=old_value,
+        new_value=json.dumps(
+            {"status": ContestRound.Status.DRAFT, "is_locked": False, "entries": 0, "judges": 0},
+            ensure_ascii=False,
+        ),
+        note=f"reset_round_snapshots={locked_round.pk} {reason}".strip(),
+    )
+    return locked_round
+
+
+@transaction.atomic
+def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = "") -> ContestRound:
+    """Admin-unwind a prepared/scoring/locked round back to DRAFT.
+
+    Rejects when a later round already consumes this round's advancement, since
+    resetting upstream would orphan the downstream snapshot. Requires a reason.
+    """
+    if not reason.strip():
+        raise ValidationError("重置轮次必须填写原因。")
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if locked_round.status == ContestRound.Status.DRAFT:
+        return locked_round
+    round_order = {
+        ContestRound.RoundType.PRELIMINARY: 0,
+        ContestRound.RoundType.SEMI_FINAL: 1,
+    }
+    for other in ContestRound.objects.filter(activity=locked_round.activity).exclude(
+        pk=locked_round.pk
+    ):
+        other_rank = round_order[ContestRound.RoundType(other.round_type)]
+        this_rank = round_order[ContestRound.RoundType(locked_round.round_type)]
+        if other.status != ContestRound.Status.DRAFT and other_rank > this_rank:
+            raise ValidationError("后续轮次仍在使用本轮结果，重置前必须先清空后续轮次。")
+    return reset_round_snapshots(locked_round, actor, reason=reason)
+
+
 def validate_score(value: object) -> Decimal:
     if isinstance(value, bool) or value is None:
         raise ValidationError("分数必须是 0 到 100 之间的数字。")

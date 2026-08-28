@@ -580,6 +580,54 @@ class StaffPanelSmokeTests(TestCase):
             ).exists()
         )
 
+    def test_round_reset_prepared_round_to_draft(self):
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Reset Singer",
+            student_id="20260019",
+            college="Info",
+            class_name="CS1",
+            phone="13800000017",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Reset Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        login_admin(self.client, self.admin)
+
+        response = self.client.post(
+            reverse("staff:round_reset", args=[round_.pk]), {"reason": "Admin unwind"}
+        )
+
+        self.assertRedirects(response, reverse("staff:round_list"))
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.DRAFT)
+        self.assertFalse(round_.entries.exists())
+        self.assertFalse(round_.round_judges.exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.admin,
+                target=f"ContestRound:{round_.pk}",
+                note__contains="Admin unwind",
+            ).exists()
+        )
+
+    def test_round_reset_requires_reason(self):
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        login_admin(self.client, self.admin)
+
+        response = self.client.post(reverse("staff:round_reset", args=[round_.pk]), {"reason": ""})
+
+        self.assertEqual(response.status_code, 403)
+
     def test_score_entry_and_template_use_prepared_round_snapshots(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,

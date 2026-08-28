@@ -50,6 +50,13 @@
                         <a href="{% url 'staff:round_ranking' r.pk %}" class="text-brand hover:underline text-xs">排名</a>
                         <a href="{% url 'staff:excel_score_template' r.pk %}" class="text-gray-500 hover:underline text-xs">模板</a>
                         <a href="{% url 'staff:excel_import_scores' r.pk %}" class="text-gray-500 hover:underline text-xs">导入</a>
+                        <form method="post" action="{% url 'staff:round_reset' r.pk %}" class="inline"
+                              onsubmit="return confirm('确认重置本轮为草稿？将清空快照与评分，且不可撤销。')">
+                            {% csrf_token %}
+                            <input type="text" name="reason" placeholder="重置原因" required
+                                   class="text-xs border border-gray-300 rounded px-1.5 py-0.5 w-24">
+                            <button type="submit" class="text-red-600 hover:underline text-xs">重置</button>
+                        </form>
                         {% endif %}
                     </td>
                 </tr>

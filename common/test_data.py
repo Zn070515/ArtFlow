@@ -107,7 +107,14 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from files.models import SubmissionFile
     from files.services import delete_submission_file
     from incidents.models import IncidentRecord
-    from singer_contest.models import Award, ScoreRecord, ScoreSummary, SingerRegistration
+    from singer_contest.models import (
+        Award,
+        ContestRound,
+        ScoreRecord,
+        ScoreSummary,
+        SingerRegistration,
+    )
+    from singer_contest.services import reset_round_snapshots
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
     locked_activity = lock_activity_for_runtime_data(activity)
@@ -115,6 +122,19 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         raise PermissionDenied("Test data can only be cleared while the activity is in test mode.")
     _reject_mixed_marker_dependencies(locked_activity)
     counts = get_test_data_counts(locked_activity)
+    for contest_round in (
+        ContestRound.objects.filter(
+            activity=locked_activity,
+            status__in=[
+                ContestRound.Status.PREPARED,
+                ContestRound.Status.SCORING,
+                ContestRound.Status.LOCKED,
+            ],
+        )
+        .order_by("pk")
+        .select_for_update()
+    ):
+        reset_round_snapshots(contest_round, operator, reason="activity_test_cleanup")
     files = SubmissionFile.objects.filter(is_test_data=True).filter(
         Q(singer_registration__activity=locked_activity) | Q(program__activity=locked_activity)
     )

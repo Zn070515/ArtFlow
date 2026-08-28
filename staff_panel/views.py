@@ -56,6 +56,7 @@ from singer_contest.services import (
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
+    reset_round_to_draft,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
 
@@ -765,6 +766,20 @@ def round_unlock(request, pk):
         note=note,
     )
     return redirect("staff:round_ranking", pk=pk)
+
+
+@admin_required
+@require_POST
+def round_reset(request, pk):
+    _require_admin(request.user)
+    contest_round = get_object_or_404(
+        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
+    )
+    reason = request.POST.get("reason", "")
+    if not reason.strip():
+        raise PermissionDenied("重置轮次必须填写原因。")
+    reset_round_to_draft(contest_round, request.user, reason=reason)
+    return redirect("staff:round_list")
 
 
 @staff_required
