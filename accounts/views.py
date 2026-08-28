@@ -1,5 +1,6 @@
-from common.audit import log_action
+from common.audit import client_ip, log_action
 from common.models import AuditLog
+from common.rate_limit import RateLimitExceeded, hit_rate_limit
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
@@ -66,6 +67,15 @@ def admin_login_view(request):
             ):
                 return redirect(next_url)
             return redirect("staff:dashboard")
+        else:
+            try:
+                hit_rate_limit(
+                    f"admin-login:{client_ip(request) or 'unknown'}",
+                    limit=10,
+                    window_seconds=300,
+                )
+            except RateLimitExceeded:
+                form.add_error(None, "尝试次数过多，请稍后再试。")
     else:
         form = AdminLoginForm()
     return render(request, "accounts/admin_login.html", {"form": form})

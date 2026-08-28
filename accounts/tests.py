@@ -2,6 +2,7 @@ import os
 from io import StringIO
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
@@ -105,6 +106,51 @@ class LoginModeTests(TestCase):
         response = self.client.get(reverse("accounts:login"))
         self.assertContains(response, reverse("accounts:admin_login"))
         self.assertContains(response, "管理员登录")
+
+
+class AdminLoginRateLimitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.admin = User.objects.create_user(
+            username="admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    def test_admin_login_throttles_after_many_failures(self):
+        url = reverse("accounts:admin_login")
+        for _ in range(10):
+            response = self.client.post(
+                url,
+                {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+            )
+            self.assertEqual(response.status_code, 200)
+
+        throttled = self.client.post(
+            url,
+            {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+        )
+        self.assertEqual(throttled.status_code, 200)
+        self.assertContains(throttled, "尝试次数过多")
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    def test_correct_credentials_still_log_in_when_under_limit(self):
+        url = reverse("accounts:admin_login")
+        for _ in range(3):
+            self.client.post(
+                url,
+                {"username": "admin", "password": "wrong", "admin_key": "wrong"},
+            )
+        response = self.client.post(
+            url,
+            {"username": "admin", "password": "pass12345", "admin_key": "secret-key"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("staff:dashboard"))
 
 
 class UserPermissionSynchronizationTests(TestCase):

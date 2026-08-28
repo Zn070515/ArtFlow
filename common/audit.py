@@ -1,12 +1,17 @@
+from django.conf import settings
 from django.http import HttpRequest
 
 from .models import AuditLog
 
 
 def client_ip(request: HttpRequest) -> str | None:
-    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-    if isinstance(forwarded_for, str) and forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+    # X-Forwarded-For is spoofable if clients can reach the app directly. Only
+    # trust it when a known reverse proxy that overwrites the client-supplied
+    # header is deployed (TRUST_X_FORWARDED_FOR=true); otherwise use REMOTE_ADDR.
+    if getattr(settings, "TRUST_X_FORWARDED_FOR", False):
+        forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+        if isinstance(forwarded_for, str) and forwarded_for:
+            return forwarded_for.split(",")[0].strip()
     remote_addr = request.META.get("REMOTE_ADDR")
     return remote_addr if isinstance(remote_addr, str) else None
 

@@ -6,9 +6,11 @@ from unittest import skipUnless
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
 from django.test import TestCase, TransactionTestCase
+from django.urls import reverse
 from django.utils import timezone
 from singer_contest.models import SingerRegistration
 
@@ -302,3 +304,55 @@ class VoteStateServiceTests(TestCase):
         session = VoteSession.objects.get(pk=self.session.pk)
         self.assertFalse(session.is_open)
         self.assertFalse(session.is_locked)
+
+
+class VoteEntryRateLimitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        self.session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_wrong_passcode_is_throttled_after_limit(self):
+        url = reverse("voting:vote_entry", args=[self.session.pk])
+        for _ in range(10):
+            response = self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="127.0.0.1")
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, "口令错误")
+
+        throttled = self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="127.0.0.1")
+        self.assertEqual(throttled.status_code, 200)
+        self.assertContains(throttled, "尝试次数过多")
+
+    def test_throttle_is_scoped_to_the_vote_session(self):
+        other = VoteSession.objects.create(
+            activity=self.activity,
+            name="Other",
+            passcode="5678",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        url = reverse("voting:vote_entry", args=[self.session.pk])
+        for _ in range(10):
+            self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="127.0.0.1")
+
+        other_response = self.client.post(
+            reverse("voting:vote_entry", args=[other.pk]),
+            {"passcode": "wrong"},
+            REMOTE_ADDR="127.0.0.1",
+        )
+        self.assertEqual(other_response.status_code, 200)
+        self.assertContains(other_response, "口令错误")

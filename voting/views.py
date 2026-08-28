@@ -1,10 +1,19 @@
 from common.audit import client_ip
+from common.rate_limit import RateLimitExceeded, hit_rate_limit
 from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .models import VoteBallot, VoteSession
 from .services import submit_ballot
+
+
+def _hit_vote_rate_limit(request, pk):
+    session_key = request.session.session_key
+    if not session_key:
+        request.session.create()
+        session_key = request.session.session_key
+    hit_rate_limit(f"vote-passcode:{pk}:{session_key}", limit=10, window_seconds=300)
 
 
 def vote_entry(request, pk):
@@ -16,6 +25,10 @@ def vote_entry(request, pk):
         passcode = request.POST.get("passcode", "").strip()
         if passcode != vote_session.passcode:
             error = "口令错误"
+            try:
+                _hit_vote_rate_limit(request, pk)
+            except RateLimitExceeded:
+                error = "尝试次数过多，请稍后再试。"
         elif not vote_session.is_open or vote_session.is_locked:
             error = "投票尚未开放或已锁定"
         elif now < vote_session.start_time:

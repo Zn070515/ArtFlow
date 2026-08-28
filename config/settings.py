@@ -26,6 +26,10 @@ DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
 
 ALLOWED_HOSTS = get_csv(os.environ, "ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
 CSRF_TRUSTED_ORIGINS = get_csv(os.environ, "CSRF_TRUSTED_ORIGINS")
+# Only trust X-Forwarded-For when a known reverse proxy overwrites and appends
+# to it. Default False so clients that share the app directly cannot spoof the
+# audit/source IP; they must present REMOTE_ADDR as seen by Gunicorn.
+TRUST_X_FORWARDED_FOR = get_bool(os.environ, "TRUST_X_FORWARDED_FOR", default=False)
 
 INSTALLED_APPS = [
     "django.contrib.admin",

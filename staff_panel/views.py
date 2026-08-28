@@ -1691,19 +1691,9 @@ def activity_clone(request, pk):
             advance_count=contest_round.advance_count,
             is_locked=False,
         )
-    for vote_session in VoteSession.objects.filter(activity=original):
-        VoteSession.objects.create(
-            activity=new_activity,
-            name=vote_session.name,
-            passcode=vote_session.passcode,
-            start_time=vote_session.start_time,
-            end_time=vote_session.end_time,
-            is_open=False,
-            is_locked=False,
-            selection_type=vote_session.selection_type,
-            max_selections=vote_session.max_selections,
-            is_test_data=True,
-        )
+    # Vote sessions are runtime state (passcode, start/end window, open/locked),
+    # not reusable template config. Cloning would copy a stale passcode and time
+    # window into the new activity, so staff create sessions fresh per activity.
     log_action(
         request,
         AuditLog.ActionType.OTHER,

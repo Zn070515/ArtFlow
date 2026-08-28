@@ -22,9 +22,11 @@ uv run python manage.py runserver
 
 本仓库的本地工具基线为 Python 3.12（见 `.python-version`）和 uv 0.11.29；Docker 镜像使用相同的固定 uv 版本。Python 3.13 仍受项目元数据支持并在 CI 中验证。
 
-## Docker PostgreSQL 启动
+## Docker PostgreSQL 启动（本地/联调）
 
-Docker Compose 使用 PostgreSQL，并将 Web 服务发布到 `127.0.0.1:8000`：
+`docker-compose.yml` 是**本地/联调 Compose**，不是生产部署文件：它固定 `APP_ENV: development`、`ALLOWED_HOSTS: localhost,127.0.0.1`、一个硬编码的本地数据库口令，并把端口绑定到 `127.0.0.1:8000`。不要把它当作生产 manifest；在它之上套 `.env.production` 也不能让它变成生产配置。生产部署见 [生产部署说明](docs/deployment-production.md)。
+
+本地启动：
 
 ```powershell
 docker compose up --build --wait
@@ -45,7 +47,7 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 从 `.env.example` 创建本地 `.env` 并替换其中的占位值。模板包含 `APP_ENV`、`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`DEV_ADMIN_USERNAME`、`DEV_ADMIN_PASSWORD`、`DEBUG` 和 `DATABASE_ENGINE`；`seed_dev_admin` 使用 `DEV_ADMIN_USERNAME` 和 `DEV_ADMIN_PASSWORD`。只有选择 PostgreSQL 时才需要 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_HOST` 和 `POSTGRES_PORT`。
 
-生产环境使用 `.env.production.example` 作为字段清单：`APP_ENV=production`、`DEBUG=False`、真实的主机名和 CSRF 来源，以及 PostgreSQL 连接配置都是必需的。示例值仅是占位符；不得提交 `.env`、密钥、密码、数据库、媒体文件或生成的导出文件。
+生产环境使用 `.env.production.example` 作为字段清单：`APP_ENV=production`、`DEBUG=False`、真实的主机名和 CSRF 来源、PostgreSQL 连接配置都是必需的；`TRUST_X_FORWARDED_FOR` 只在可信反向代理覆盖客户端 `X-Forwarded-For` 时才设为 `true`。示例值仅是占位符；不得提交 `.env`、密钥、密码、数据库、媒体文件或生成的导出文件。生产拓扑见 [生产部署说明](docs/deployment-production.md)。
 
 ## 常用维护命令
 

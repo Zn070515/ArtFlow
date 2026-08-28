@@ -27,7 +27,7 @@ from django.db import (
 )
 from django.db import models as django_models
 from django.db.models.signals import pre_save
-from django.http import Http404
+from django.http import Http404, HttpRequest
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -49,6 +49,7 @@ from singer_contest.models import (
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
 
+from common.audit import client_ip
 from common.management.commands.backup_artflow import (
     apply_migration_heads,
     collect_counts,
@@ -1327,3 +1328,26 @@ class AppBackupVerificationTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command("verify_app_backup", "--manifest", str(manifest_path))
+
+
+class ClientIpTests(TestCase):
+    @staticmethod
+    def _request(**meta):
+        request = HttpRequest()
+        request.META = {"REMOTE_ADDR": "203.0.113.7", **meta}
+        return request
+
+    @override_settings(TRUST_X_FORWARDED_FOR=False)
+    def test_ignores_x_forwarded_for_when_proxy_not_trusted(self):
+        request = self._request(HTTP_X_FORWARDED_FOR="198.51.100.9, 10.0.0.1")
+        self.assertEqual(client_ip(request), "203.0.113.7")
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True)
+    def test_uses_x_forwarded_for_first_entry_when_proxy_trusted(self):
+        request = self._request(HTTP_X_FORWARDED_FOR="198.51.100.9, 10.0.0.1")
+        self.assertEqual(client_ip(request), "198.51.100.9")
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True)
+    def test_falls_back_to_remote_addr_when_header_absent(self):
+        request = self._request()
+        self.assertEqual(client_ip(request), "203.0.113.7")

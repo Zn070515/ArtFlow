@@ -2330,7 +2330,7 @@ class StaffPanelSmokeTests(TestCase):
                 activity=clone, round_type=ContestRound.RoundType.PRELIMINARY
             ).exists()
         )
-        self.assertTrue(VoteSession.objects.filter(activity=clone, name="Popularity").exists())
+        self.assertFalse(VoteSession.objects.filter(activity=clone, name="Popularity").exists())
         self.assertTrue(clone.is_test_mode)
         self.assertEqual(clone.data_lifecycle, Activity.DataLifecycle.TEST)
         self.assertEqual(clone.phase, Activity.Phase.DRAFT)
