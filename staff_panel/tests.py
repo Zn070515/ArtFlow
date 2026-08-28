@@ -2348,6 +2348,182 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(GeneratedDocument.objects.filter(activity=clone).exists())
 
 
+class RuntimeLifecycleMatrixTests(TestCase):
+    """TEST/FORMAL runtime data must never mix when binding a child to an activity.
+
+    The candidate pools scope each singer row to its own activity lifecycle, and
+    POST validation rejects binding a singer whose test marker differs from the
+    target activity. This is the lifecycle matrix the reviewer asked for.
+    """
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="matrix-staff", password="pass", role=User.Role.STAFF
+        )
+        self.admin = User.objects.create_user(
+            username="matrix-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.test_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.formal_activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        # Each activity carries one correctly-marked and one wrongly-marked singer.
+        self.test_singer = self._singer(self.test_activity, "Test Match", True, "20260101")
+        self.test_mismatch = self._singer(self.test_activity, "Test Mismatch", False, "20260102")
+        self.formal_singer = self._singer(self.formal_activity, "Formal Match", False, "20260103")
+        self.formal_mismatch = self._singer(
+            self.formal_activity, "Formal Mismatch", True, "20260104"
+        )
+
+    def _singer(self, activity, name, is_test_data, student_id):
+        user = User.objects.create_user(username=f"matrix-{student_id}", password="pass")
+        return SingerRegistration.objects.create(
+            activity=activity,
+            user=user,
+            name=name,
+            student_id=student_id,
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=is_test_data,
+        )
+
+    def test_candidate_pool_binds_each_singer_to_its_own_activity(self):
+        self.client.force_login(self.staff)
+        for path in (
+            reverse("staff:award_create"),
+            reverse("staff:vote_session_create"),
+            reverse("staff:incident_create"),
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, self.test_singer.name)
+                self.assertContains(response, self.formal_singer.name)
+                self.assertNotContains(response, self.test_mismatch.name)
+                self.assertNotContains(response, self.formal_mismatch.name)
+
+    def test_award_create_rejects_wrong_lifecycle_singer(self):
+        activity = Activity.objects.create(
+            title="Award Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.DRAFT,
+            is_test_mode=True,
+        )
+        matching = self._singer(activity, "Award Match", True, "20260201")
+        mismatched = self._singer(activity, "Award Mismatch", False, "20260202")
+        login_admin(self.client, self.admin)
+
+        rejected = self.client.post(
+            reverse("staff:award_create"),
+            {"activity_id": activity.pk, "singer_id": mismatched.pk, "name": "Bad Award"},
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertFalse(Award.objects.filter(name="Bad Award").exists())
+
+        accepted = self.client.post(
+            reverse("staff:award_create"),
+            {"activity_id": activity.pk, "singer_id": matching.pk, "name": "Good Award"},
+        )
+        self.assertEqual(accepted.status_code, 302)
+        award = Award.objects.get(name="Good Award")
+        self.assertTrue(award.is_test_data)
+
+    def test_vote_session_create_rejects_wrong_lifecycle_singer(self):
+        activity = Activity.objects.create(
+            title="Vote Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        matching = self._singer(activity, "Vote Match", True, "20260301")
+        mismatched = self._singer(activity, "Vote Mismatch", False, "20260302")
+        login_admin(self.client, self.admin)
+        base = {
+            "activity_id": activity.pk,
+            "passcode": "1234",
+            "start_time": "2026-08-27T10:00",
+            "end_time": "2026-08-27T11:00",
+        }
+
+        rejected = self.client.post(
+            reverse("staff:vote_session_create"),
+            {**base, "name": "Bad Vote", "singers": [str(mismatched.pk)]},
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertFalse(VoteSession.objects.filter(name="Bad Vote").exists())
+
+        accepted = self.client.post(
+            reverse("staff:vote_session_create"),
+            {**base, "name": "Good Vote", "singers": [str(matching.pk)]},
+        )
+        self.assertEqual(accepted.status_code, 302)
+        session = VoteSession.objects.get(name="Good Vote")
+        self.assertTrue(session.is_test_data)
+        self.assertEqual(VoteOption.objects.filter(vote_session=session).count(), 1)
+
+    def test_incident_create_rejects_wrong_lifecycle_singer(self):
+        activity = Activity.objects.create(
+            title="Incident Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        matching = self._singer(activity, "Incident Match", True, "20260401")
+        mismatched = self._singer(activity, "Incident Mismatch", False, "20260402")
+        self.client.force_login(self.staff)
+        base = {
+            "activity_id": activity.pk,
+            "occurred_at": timezone.now().isoformat(),
+            "event_type": IncidentRecord.EventType.OTHER,
+        }
+
+        rejected = self.client.post(
+            reverse("staff:incident_create"),
+            {**base, "singer_id": mismatched.pk, "resolution": "bad"},
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertFalse(IncidentRecord.objects.filter(resolution="bad").exists())
+
+        accepted = self.client.post(
+            reverse("staff:incident_create"),
+            {**base, "singer_id": matching.pk, "resolution": "good"},
+        )
+        self.assertEqual(accepted.status_code, 302)
+        self.assertTrue(IncidentRecord.objects.get(resolution="good").is_test)
+
+    def test_prepare_round_uses_approved_singers_scoped_to_activity(self):
+        activity = Activity.objects.create(
+            title="Round Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        test_match = self._singer(activity, "Round Test Match", True, "20260501")
+        self._singer(activity, "Round Test Mismatch", False, "20260502")
+        Judge.objects.create(activity=activity, name="Judge", is_active=True)
+        round_ = ContestRound.objects.create(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=1,
+        )
+
+        prepare_round(round_, self.staff)
+
+        entries = set(RoundEntry.objects.filter(round=round_).values_list("singer_id", flat=True))
+        self.assertEqual(entries, {test_match.pk})
+
+
 class AdminAuthBoundaryTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_user(

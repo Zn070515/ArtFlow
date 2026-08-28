@@ -7,10 +7,11 @@ from archive.models import ArchivePackage
 from common.audit import log_action
 from common.business_rules import (
     ensure_activity_unlocked,
+    ensure_lifecycle_consistent,
     ensure_round_unlocked,
     ensure_same_activity,
 )
-from common.lifecycle import runtime_is_test, scope_runtime
+from common.lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from common.models import AuditLog
 from common.test_data import (
     clear_activity_test_data,
@@ -941,6 +942,7 @@ def award_create(request):
         if singer_id:
             singer = get_object_or_404(SingerRegistration, pk=singer_id)
             ensure_same_activity(activity, singer, label="Award singer")
+            ensure_lifecycle_consistent(activity, singer, label="Award 选手")
             award = Award.objects.create(
                 activity=activity,
                 singer=singer,
@@ -953,8 +955,10 @@ def award_create(request):
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = SingerRegistration.objects.filter(
-        pre_status=SingerRegistration.PreStatus.APPROVED, is_test_data=False
+    singers = scope_lifecycle(
+        SingerRegistration.objects.select_related("activity").filter(
+            pre_status=SingerRegistration.PreStatus.APPROVED
+        )
     )
     return render(
         request,
@@ -993,8 +997,10 @@ def vote_session_create(request):
                     "activities": Activity.objects.filter(
                         activity_type=Activity.Type.SINGER_CONTEST
                     ),
-                    "singers": SingerRegistration.objects.filter(
-                        pre_status=SingerRegistration.PreStatus.APPROVED, is_test_data=False
+                    "singers": scope_lifecycle(
+                        SingerRegistration.objects.select_related("activity").filter(
+                            pre_status=SingerRegistration.PreStatus.APPROVED
+                        )
                     ),
                     "selection_types": _choices(VoteSession.SelectionType),
                 },
@@ -1012,6 +1018,7 @@ def vote_session_create(request):
             raise PermissionDenied("Every vote option must be an approved singer.")
         for singer in selected_singers:
             ensure_same_activity(activity, singer, label="Vote option singer")
+            ensure_lifecycle_consistent(activity, singer, label="投票候选选手")
         vote_session = VoteSession.objects.create(
             activity=activity,
             name=form.cleaned_data["name"],
@@ -1038,8 +1045,10 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = SingerRegistration.objects.filter(
-        pre_status=SingerRegistration.PreStatus.APPROVED, is_test_data=False
+    singers = scope_lifecycle(
+        SingerRegistration.objects.select_related("activity").filter(
+            pre_status=SingerRegistration.PreStatus.APPROVED
+        )
     )
     return render(
         request,
@@ -1502,8 +1511,10 @@ def incident_create(request):
                 {
                     "error": _form_error(form),
                     "activities": Activity.objects.all(),
-                    "singers": SingerRegistration.objects.filter(
-                        pre_status=SingerRegistration.PreStatus.APPROVED
+                    "singers": scope_lifecycle(
+                        SingerRegistration.objects.select_related("activity").filter(
+                            pre_status=SingerRegistration.PreStatus.APPROVED
+                        )
                     ),
                     "event_types": _choices(IncidentRecord.EventType),
                 },
@@ -1512,10 +1523,12 @@ def incident_create(request):
         if request.POST.get("singer_id"):
             singer = get_object_or_404(SingerRegistration, pk=request.POST["singer_id"])
             ensure_same_activity(activity, singer, label="Incident singer")
+            ensure_lifecycle_consistent(activity, singer, label="涉事选手")
         program = None
         if request.POST.get("program_id"):
             program = get_object_or_404(Program, pk=request.POST["program_id"])
             ensure_same_activity(activity, program, label="Incident program")
+            ensure_lifecycle_consistent(activity, program, label="涉事节目")
         incident = IncidentRecord.objects.create(
             activity=activity,
             occurred_at=form.cleaned_data["occurred_at"],
@@ -1535,7 +1548,11 @@ def incident_create(request):
         )
         return redirect("staff:incident_list")
     activities = Activity.objects.all()
-    singers = SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
+    singers = scope_lifecycle(
+        SingerRegistration.objects.select_related("activity").filter(
+            pre_status=SingerRegistration.PreStatus.APPROVED
+        )
+    )
     return render(
         request,
         "staff_panel/incident_form.html",

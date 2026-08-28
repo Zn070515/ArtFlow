@@ -38,3 +38,22 @@ def scope_lifecycle(
         Q(**{f"{activity_relation}__data_lifecycle": TEST_VALUE, marker: True})
         | Q(**{f"{activity_relation}__data_lifecycle": FORMAL_VALUE, marker: False})
     )
+
+
+def runtime_approved_singers(activity: Activity) -> QuerySet:
+    """Approved singers whose test marker matches the activity's lifecycle.
+
+    This is the single selector for "who is participating in this activity right
+    now". Views that build a candidate list for a round, award, vote session or
+    incident must resolve candidates through here so a TEST activity only ever
+    sees test-marked singers and a FORMAL activity only ever sees formal ones.
+    """
+    from singer_contest.models import SingerRegistration
+
+    return scope_runtime(
+        SingerRegistration.objects.filter(
+            activity=activity,
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        ),
+        activity,
+    )

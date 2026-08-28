@@ -4,7 +4,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
-from common.lifecycle import runtime_is_test, scope_runtime
+from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
@@ -40,15 +40,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
 
     if locked_round.round_type == ContestRound.RoundType.PRELIMINARY:
-        singers = list(
-            scope_runtime(
-                SingerRegistration.objects.filter(
-                    activity=locked_round.activity,
-                    pre_status=SingerRegistration.PreStatus.APPROVED,
-                ),
-                locked_round.activity,
-            ).order_by("pk")
-        )
+        singers = list(runtime_approved_singers(locked_round.activity).order_by("pk"))
     else:
         previous_round = ContestRound.objects.filter(
             activity=locked_round.activity,

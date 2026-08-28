@@ -8,6 +8,22 @@ def ensure_activity_unlocked(activity: Any) -> None:
         raise PermissionDenied("Activity results are locked.")
 
 
+def ensure_lifecycle_consistent(activity: Any, related_object: Any, *, label: str) -> None:
+    """Reject binding a runtime child whose test marker differs from its activity.
+
+    A TEST activity only admits test-marked rows; a FORMAL activity only admits
+    formal-marked rows. Attaching the wrong marker produces mixed-test/formal data
+    that the cleanup/lifecycle guards treat as corruption.
+    """
+    marker = getattr(related_object, "is_test_data", None)
+    if marker is None:
+        marker = getattr(related_object, "is_test", None)
+    if marker is None:
+        return
+    if marker != activity.is_test_mode:
+        raise PermissionDenied(f"{label} 与当前活动的数据生命周期不匹配。")
+
+
 def ensure_round_unlocked(contest_round: Any) -> None:
     ensure_activity_unlocked(contest_round.activity)
     if contest_round.is_locked:
