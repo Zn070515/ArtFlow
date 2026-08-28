@@ -43,7 +43,10 @@ def apply_view(request):
             return render(
                 request,
                 "singer_contest/apply.html",
-                {"activities": activities, "errors": ["您已报名该活动，请勿重复提交。"],},
+                {
+                    "activities": activities,
+                    "errors": ["您已报名该活动，请勿重复提交。"],
+                },
             )
         if SingerRegistration.objects.filter(
             activity=activity, student_id=request.POST["student_id"]
@@ -51,7 +54,10 @@ def apply_view(request):
             return render(
                 request,
                 "singer_contest/apply.html",
-                {"activities": activities, "errors": ["该学号已报名本活动。"],},
+                {
+                    "activities": activities,
+                    "errors": ["该学号已报名本活动。"],
+                },
             )
         try:
             with transaction.atomic():
@@ -100,7 +106,10 @@ def apply_view(request):
             return render(
                 request,
                 "singer_contest/apply.html",
-                {"activities": activities, "errors": ["报名失败：该账号或学号已报名本活动。"],},
+                {
+                    "activities": activities,
+                    "errors": ["报名失败：该账号或学号已报名本活动。"],
+                },
             )
         return redirect("singer_contest:my_submission")
     return render(request, "singer_contest/apply.html", {"activities": activities})

@@ -1,9 +1,8 @@
 from pathlib import PurePath
 
+from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.db import transaction
-
-from common.test_data import lock_activity_for_runtime_data
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 

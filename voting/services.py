@@ -1,10 +1,9 @@
 from datetime import timedelta
 
+from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
-
-from common.test_data import lock_activity_for_runtime_data
 
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
 

@@ -731,9 +731,7 @@ class DemoSeedCommandTests(TestCase):
         self.assertEqual(RoundJudge.objects.filter(round=seeded_round).count(), 2)
         self.assertEqual(
             set(
-                ScoreRecord.objects.filter(round=seeded_round).values_list(
-                    "singer_id", "judge_id"
-                )
+                ScoreRecord.objects.filter(round=seeded_round).values_list("singer_id", "judge_id")
             ),
             set(
                 (entry.singer_id, round_judge.judge_id)
@@ -742,7 +740,9 @@ class DemoSeedCommandTests(TestCase):
             ),
         )
         self.assertSetEqual(
-            set(ScoreSummary.objects.filter(round=seeded_round).values_list("singer_id", flat=True)),
+            set(
+                ScoreSummary.objects.filter(round=seeded_round).values_list("singer_id", flat=True)
+            ),
             set(RoundEntry.objects.filter(round=seeded_round).values_list("singer_id", flat=True)),
         )
         self.assertEqual(output.getvalue(), "Demo data seeded.\n")
@@ -781,10 +781,8 @@ class DemoSeedCommandTests(TestCase):
         call_command("seed_demo_data")
         call_command("seed_demo_data", "--reset")
         singer_activity = Activity.objects.get(title="Demo Singer Contest")
-        participant = User.objects.get(username="demo-participant")
-        unowned_user = User.objects.create_user(
-            username="unowned-eligible", password="pass"
-        )
+        _participant = User.objects.get(username="demo-participant")
+        unowned_user = User.objects.create_user(username="unowned-eligible", password="pass")
         unowned_singer = SingerRegistration.objects.create(
             activity=singer_activity,
             user=unowned_user,
@@ -1015,12 +1013,10 @@ class DemoSeedCommandTests(TestCase):
     def test_reset_retains_round_with_an_unowned_non_test_snapshot_parent(self):
         call_command("seed_demo_data")
         contest_round = ContestRound.objects.get(name="Demo Preliminary Round")
-        participant = User.objects.get(username="demo-participant")
+        _participant = User.objects.get(username="demo-participant")
         contest_round.status = ContestRound.Status.DRAFT
         contest_round.save(update_fields=["status"])
-        unowned_user = User.objects.create_user(
-            username="unowned-snapshot", password="pass"
-        )
+        unowned_user = User.objects.create_user(username="unowned-snapshot", password="pass")
         unowned_singer = SingerRegistration.objects.create(
             activity=contest_round.activity,
             user=unowned_user,

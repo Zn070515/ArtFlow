@@ -36,9 +36,13 @@ class ContestRoundAdmin(admin.ModelAdmin):
     ]
 
     def get_queryset(self, request):
-        return super().get_queryset(request).annotate(
-            entry_count_value=Count("entries", distinct=True),
-            judge_count_value=Count("round_judges", distinct=True),
+        return (
+            super()
+            .get_queryset(request)
+            .annotate(
+                entry_count_value=Count("entries", distinct=True),
+                judge_count_value=Count("round_judges", distinct=True),
+            )
         )
 
     @admin.display(description="选手快照数", ordering="entry_count_value")

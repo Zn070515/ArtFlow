@@ -51,9 +51,9 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         ).count(),
         "awards": Award.objects.filter(activity=activity, is_test_data=True).count(),
         "incidents": IncidentRecord.objects.filter(activity=activity, is_test=True).count(),
-        "files": SubmissionFile.objects.filter(is_test_data=True).filter(
-            Q(singer_registration__activity=activity) | Q(program__activity=activity)
-        ).count(),
+        "files": SubmissionFile.objects.filter(is_test_data=True)
+        .filter(Q(singer_registration__activity=activity) | Q(program__activity=activity))
+        .count(),
         "generated_documents": GeneratedDocument.objects.filter(
             activity=activity, is_test_data=True
         ).count(),
@@ -66,9 +66,7 @@ def _reject_mixed_marker_dependencies(activity: Any) -> None:
 
     test_vote_sessions = VoteSession.objects.filter(activity=activity, is_test_data=True)
     if (
-        VoteOption.objects.filter(
-            vote_session__in=test_vote_sessions, is_test_data=False
-        ).exists()
+        VoteOption.objects.filter(vote_session__in=test_vote_sessions, is_test_data=False).exists()
         or VoteBallot.objects.filter(
             vote_session__in=test_vote_sessions, is_test_data=False
         ).exists()
@@ -91,10 +89,14 @@ def _reject_mixed_marker_dependencies(activity: Any) -> None:
     ):
         raise PermissionDenied("Test singers with formal vote dependents cannot be cleared.")
 
-    if SubmissionFile.objects.filter(is_test_data=False).filter(
-        Q(singer_registration__activity=activity, singer_registration__is_test_data=True)
-        | Q(program__activity=activity, program__is_test_data=True)
-    ).exists():
+    if (
+        SubmissionFile.objects.filter(is_test_data=False)
+        .filter(
+            Q(singer_registration__activity=activity, singer_registration__is_test_data=True)
+            | Q(program__activity=activity, program__is_test_data=True)
+        )
+        .exists()
+    ):
         raise PermissionDenied("Test owners with formal files cannot be cleared.")
 
 
@@ -114,8 +116,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     _reject_mixed_marker_dependencies(locked_activity)
     counts = get_test_data_counts(locked_activity)
     files = SubmissionFile.objects.filter(is_test_data=True).filter(
-        Q(singer_registration__activity=locked_activity)
-        | Q(program__activity=locked_activity)
+        Q(singer_registration__activity=locked_activity) | Q(program__activity=locked_activity)
     )
     for submission_file in files:
         delete_submission_file(submission_file)

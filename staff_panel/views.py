@@ -719,10 +719,14 @@ def round_lock(request, pk):
     contest_round = get_object_or_404(
         ContestRound.objects.select_for_update().select_related("activity"), pk=pk
     )
-    if contest_round.status not in {
-        ContestRound.Status.PREPARED,
-        ContestRound.Status.SCORING,
-    } or contest_round.is_locked:
+    if (
+        contest_round.status
+        not in {
+            ContestRound.Status.PREPARED,
+            ContestRound.Status.SCORING,
+        }
+        or contest_round.is_locked
+    ):
         raise PermissionDenied("该比赛轮次已锁定。")
     if not expected_score_cells(contest_round):
         raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
@@ -1845,7 +1849,9 @@ def activity_test_toggle(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     if not activity.is_test_mode:
-        raise PermissionDenied("Formal activities cannot re-enter test mode. Clone the activity instead.")
+        raise PermissionDenied(
+            "Formal activities cannot re-enter test mode. Clone the activity instead."
+        )
     leave_test_mode(
         activity,
         operator=request.user,
