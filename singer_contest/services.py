@@ -87,6 +87,61 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     return locked_round
 
 
+@transaction.atomic
+def reset_test_round_snapshots(
+    contest_round: ContestRound,
+    operator,
+    *,
+    test_only: bool = False,
+    owned_singer_ids: set[int],
+    owned_judge_ids: set[int],
+) -> ContestRound:
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if not test_only:
+        raise ValidationError("Test round reset requires explicit test-only opt-in.")
+    if not locked_round.activity.is_test_mode:
+        raise ValidationError("Only test-mode activities can reset prepared round snapshots.")
+    if (
+        RoundEntry.objects.filter(round=locked_round)
+        .exclude(singer_id__in=owned_singer_ids)
+        .exists()
+        or RoundEntry.objects.filter(round=locked_round, singer__is_test_data=False).exists()
+        or RoundJudge.objects.filter(round=locked_round)
+        .exclude(judge_id__in=owned_judge_ids)
+        .exists()
+    ):
+        raise ValidationError("Test reset requires test-owned snapshot parents.")
+
+    old_value = json.dumps(
+        {
+            "status": locked_round.status,
+            "is_locked": locked_round.is_locked,
+            "entries": locked_round.entries.count(),
+            "judges": locked_round.round_judges.count(),
+        },
+        ensure_ascii=False,
+    )
+    locked_round.status = ContestRound.Status.DRAFT
+    locked_round.is_locked = False
+    locked_round.save(update_fields=["status", "is_locked"])
+    RoundEntry.objects.filter(round=locked_round).delete()
+    RoundJudge.objects.filter(round=locked_round).delete()
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value=old_value,
+        new_value=json.dumps(
+            {"status": ContestRound.Status.DRAFT, "is_locked": False, "entries": 0, "judges": 0},
+            ensure_ascii=False,
+        ),
+        note="Demo test round reset",
+    )
+    return locked_round
+
+
 def validate_score(value: object) -> Decimal:
     if isinstance(value, bool) or value is None:
         raise ValidationError("分数必须是 0 到 100 之间的数字。")

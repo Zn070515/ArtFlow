@@ -18,13 +18,11 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
-    RoundEntry,
-    RoundJudge,
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
 )
-from singer_contest.services import prepare_round
+from singer_contest.services import prepare_round, reset_test_round_snapshots
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.models import SeedRecord
@@ -330,6 +328,14 @@ class Command(BaseCommand):
             },
         )
         if contest_round.status == ContestRound.Status.DRAFT:
+            if not self._demo_round_candidates_are_owned(
+                singer_activity,
+                {singer_one.pk, singer_two.pk},
+                {judge_one.pk, judge_two.pk},
+            ):
+                raise CommandError(
+                    "Cannot prepare demo round with unowned eligible singers or active judges."
+                )
             SingerRegistration.objects.filter(pk__in=[singer_one.pk, singer_two.pk]).update(
                 is_test_data=False
             )
@@ -500,13 +506,21 @@ class Command(BaseCommand):
             demo_rounds = ContestRound.objects.select_for_update().filter(
                 pk__in=self._owned_ids(ContestRound), activity_id__in=activity_ids
             )
-            if not self._round_snapshots_are_owned(demo_rounds):
+            admin = self._owned_object("demo.user.admin", User)
+            owned_singer_ids = set(self._owned_ids(SingerRegistration))
+            owned_judge_ids = set(self._owned_ids(Judge))
+            try:
+                for contest_round in demo_rounds:
+                    reset_test_round_snapshots(
+                        contest_round,
+                        admin,
+                        test_only=True,
+                        owned_singer_ids=owned_singer_ids,
+                        owned_judge_ids=owned_judge_ids,
+                    )
+            except ValidationError:
                 transaction.set_rollback(True)
                 return False
-
-            demo_rounds.update(status=ContestRound.Status.DRAFT, is_locked=False)
-            RoundEntry.objects.filter(round__in=demo_rounds).delete()
-            RoundJudge.objects.filter(round__in=demo_rounds).delete()
 
             candidates = self._reset_candidates(activity_ids)
             if not all(self._can_delete_safely(candidate) for candidate in candidates):
@@ -517,15 +531,21 @@ class Command(BaseCommand):
                 candidate.delete()
         return True
 
-    def _round_snapshots_are_owned(self, demo_rounds: Any) -> bool:
-        round_ids = demo_rounds.values_list("pk", flat=True)
+    def _demo_round_candidates_are_owned(
+        self,
+        activity: Activity,
+        singer_ids: set[int],
+        judge_ids: set[int],
+    ) -> bool:
         return not (
-            RoundEntry.objects.filter(round_id__in=round_ids)
-            .exclude(singer_id__in=self._owned_ids(SingerRegistration))
+            SingerRegistration.objects.filter(
+                activity=activity,
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=False,
+            )
+            .exclude(pk__in=singer_ids)
             .exists()
-            or RoundJudge.objects.filter(round_id__in=round_ids)
-            .exclude(judge_id__in=self._owned_ids(Judge))
-            .exists()
+            or Judge.objects.filter(activity=activity, is_active=True).exclude(pk__in=judge_ids).exists()
         )
 
     def _reset_candidates(self, activity_ids: Any) -> list[Any]:
@@ -623,6 +643,11 @@ class Command(BaseCommand):
             key__in=DEMO_SEED_KEYS,
             content_type=content_type,
         ).values_list("object_id", flat=True)
+
+    def _owned_object(self, key: str, model: Any) -> Any:
+        content_type = ContentType.objects.get_for_model(model)
+        seed_record = SeedRecord.objects.get(key=key, content_type=content_type)
+        return model.objects.get(pk=seed_record.object_id)
 
     def _upsert(
         self,

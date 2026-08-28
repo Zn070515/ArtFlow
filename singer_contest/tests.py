@@ -30,6 +30,7 @@ from .services import (
     parse_score_workbook,
     prepare_round,
     recalculate_round,
+    reset_test_round_snapshots,
     validate_score,
 )
 
@@ -123,6 +124,34 @@ class ScoringServiceTests(TestCase):
         )
         self.assertEqual(round_admin.entry_count(self.round), 1)
         self.assertEqual(round_admin.judge_count(self.round), 1)
+        request = RequestFactory().get("/admin/")
+        request.user = self.user
+        form = round_admin.get_form(request, self.round)
+        self.assertNotIn("status", form.base_fields)
+        self.assertNotIn("is_locked", form.base_fields)
+
+    def test_test_round_reset_requires_explicit_opt_in(self):
+        self.singer.is_test_data = True
+        self.singer.save(update_fields=["is_test_data"])
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(
+            ValidationError, "Test round reset requires explicit test-only opt-in."
+        ):
+            reset_test_round_snapshots(
+                self.round,
+                self.user,
+                owned_singer_ids={self.singer.pk},
+                owned_judge_ids={self.judge.pk},
+            )
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+        self.assertTrue(RoundEntry.objects.filter(round=self.round, singer=self.singer).exists())
+        self.assertTrue(RoundJudge.objects.filter(round=self.round, judge=self.judge).exists())
 
     def test_prepared_round_rejects_snapshot_creates(self):
         self.round.status = ContestRound.Status.PREPARED

@@ -545,6 +545,41 @@ class DemoSeedCommandTests(TestCase):
         )
         self.assertEqual(second_output.getvalue(), "Demo data seeded.\n")
 
+    def test_seed_refuses_to_prepare_demo_round_with_unowned_eligible_candidates(self):
+        call_command("seed_demo_data")
+        call_command("seed_demo_data", "--reset")
+        singer_activity = Activity.objects.get(title="Demo Singer Contest")
+        participant = User.objects.get(username="demo-participant")
+        unowned_singer = SingerRegistration.objects.create(
+            activity=singer_activity,
+            user=participant,
+            name="Unowned Eligible Singer",
+            student_id="UNOWNED2026001",
+            college="Arts College",
+            class_name="Demo Class C",
+            phone="13800000003",
+            song_name="Unowned Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        unowned_judge = Judge.objects.create(
+            activity=singer_activity,
+            name="Unowned Active Judge",
+        )
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "Cannot prepare demo round with unowned eligible singers or active judges.",
+        ):
+            call_command("seed_demo_data")
+
+        contest_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        self.assertEqual(contest_round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(RoundEntry.objects.filter(round=contest_round).exists())
+        self.assertFalse(RoundJudge.objects.filter(round=contest_round).exists())
+        self.assertFalse(RoundEntry.objects.filter(singer=unowned_singer).exists())
+        self.assertFalse(RoundJudge.objects.filter(judge=unowned_judge).exists())
+
     def test_reset_removes_only_registered_demo_runtime_data(self):
         formal_user = User.objects.create_user(
             username="formal-participant",
@@ -661,6 +696,14 @@ class DemoSeedCommandTests(TestCase):
         self.assertFalse(seeded_round.is_locked)
         self.assertFalse(RoundEntry.objects.filter(round=seeded_round).exists())
         self.assertFalse(RoundJudge.objects.filter(round=seeded_round).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=User.objects.get(username="demo-admin"),
+                action_type=AuditLog.ActionType.OTHER,
+                target=f"ContestRound:{seeded_round.pk}",
+                note="Demo test round reset",
+            ).exists()
+        )
         self.assertEqual(
             PublicPost.objects.filter(related_activity_id__in=demo_activity_ids).count(),
             2,
@@ -713,6 +756,8 @@ class DemoSeedCommandTests(TestCase):
     def test_reset_retains_singer_with_an_unowned_award(self):
         call_command("seed_demo_data")
         singer = SingerRegistration.objects.get(name="Demo Singer One")
+        seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        snapshot_counts = (seeded_round.entries.count(), seeded_round.round_judges.count())
         unowned_award = Award.objects.create(
             activity=singer.activity,
             singer=singer,
@@ -725,6 +770,11 @@ class DemoSeedCommandTests(TestCase):
 
         self.assertTrue(SingerRegistration.objects.filter(pk=singer.pk).exists())
         self.assertTrue(Award.objects.filter(pk=unowned_award.pk).exists())
+        seeded_round.refresh_from_db()
+        self.assertEqual(seeded_round.status, ContestRound.Status.PREPARED)
+        self.assertEqual(
+            (seeded_round.entries.count(), seeded_round.round_judges.count()), snapshot_counts
+        )
         self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
 
     def test_reset_retains_singer_with_an_unowned_staff_note(self):

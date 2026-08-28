@@ -23,6 +23,7 @@ class SingerRegistrationAdmin(admin.ModelAdmin):
 
 @admin.register(ContestRound)
 class ContestRoundAdmin(admin.ModelAdmin):
+    readonly_fields = ["status", "is_locked"]
     list_display = [
         "name",
         "activity",
