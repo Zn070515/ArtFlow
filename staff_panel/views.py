@@ -1830,23 +1830,14 @@ def incident_export(request):
 def activity_test_toggle(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
-    if activity.is_test_mode:
-        leave_test_mode(
-            activity,
-            operator=request.user,
-            clear=request.POST.get("clear") == "on",
-            reason=request.POST.get("reason", ""),
-        )
-    else:
-        activity.is_test_mode = True
-        activity.save(update_fields=["is_test_mode", "updated_at"])
-        log_action(
-            request,
-            AuditLog.ActionType.OTHER,
-            f"Activity:{activity.pk}",
-            old_value="is_test_mode=False",
-            new_value="is_test_mode=True",
-        )
+    if not activity.is_test_mode:
+        raise PermissionDenied("Formal activities cannot re-enter test mode.")
+    leave_test_mode(
+        activity,
+        operator=request.user,
+        clear=request.POST.get("clear") == "on",
+        reason=request.POST.get("reason", ""),
+    )
     return redirect("staff:export_center")
 
 

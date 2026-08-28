@@ -136,6 +136,43 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Activity.objects.filter(title="New Contest").exists())
 
+    def test_formal_activity_toggle_is_rejected_without_mutating_lifecycle(self):
+        formal_activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        self.client.force_login(self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:activity_test_toggle", args=[formal_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        formal_activity.refresh_from_db()
+        self.assertEqual(formal_activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(formal_activity.is_test_mode)
+
+    def test_export_center_hides_test_controls_for_formal_activity(self):
+        formal_activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("staff:export_center"))
+
+        self.assertNotContains(
+            response,
+            reverse("staff:activity_test_toggle", args=[formal_activity.pk]),
+        )
+        self.assertNotContains(
+            response,
+            reverse("staff:activity_clear_test_data", args=[formal_activity.pk]),
+        )
+
     def test_staff_cannot_create_activity(self):
         self.client.force_login(self.staff)
         response = self.client.get(reverse("staff:activity_create"))
