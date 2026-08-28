@@ -1193,11 +1193,12 @@ def vote_session_export(request, pk):
     ws.append(["选手", "票数"])
     from django.db.models import Count
 
-    options = vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
-    options = list(options)
-    for opt in options:
+    option_list = list(
+        vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
+    )
+    for opt in option_list:
         ws.append([opt.singer.name, opt.vote_count])
-    audit_export(request, vote_session.activity, "vote_result", row_count=len(options))
+    audit_export(request, vote_session.activity, "vote_result", row_count=len(option_list))
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )

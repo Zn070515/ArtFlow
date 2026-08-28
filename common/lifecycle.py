@@ -6,6 +6,7 @@ from django.db.models import Model, Q, QuerySet
 
 if TYPE_CHECKING:
     from core.models import Activity
+    from singer_contest.models import SingerRegistration
 
 TEST_VALUE = "test"
 FORMAL_VALUE = "formal"
@@ -40,7 +41,7 @@ def scope_lifecycle(
     )
 
 
-def runtime_approved_singers(activity: Activity) -> QuerySet:
+def runtime_approved_singers(activity: Activity) -> QuerySet[SingerRegistration]:
     """Approved singers whose test marker matches the activity's lifecycle.
 
     This is the single selector for "who is participating in this activity right

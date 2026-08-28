@@ -782,6 +782,7 @@ class ScoringServiceTests(TestCase):
         prepare_round(self.round, self.user)
         wb = build_score_template_workbook(self.round)
         ws = wb.active
+        assert ws is not None
         self.assertEqual(ws.cell(row=1, column=1).value, "选手ID")
         self.assertEqual(ws.cell(row=1, column=2).value, "姓名")
         self.assertEqual(ws.cell(row=1, column=3).value, f"J{self.judge.pk} {self.judge.name}")
@@ -797,6 +798,7 @@ class ScoringServiceTests(TestCase):
         prepare_round(self.round, self.user)
         wb = build_score_template_workbook(self.round)
         ws = wb.active
+        assert ws is not None
         ws.cell(row=2, column=3).value = 91
         scores, errors = self._parse_workbook(wb)
         self.assertEqual(errors, [])
@@ -827,6 +829,7 @@ class ScoringServiceTests(TestCase):
         prepare_round(self.round, self.user)
         wb = build_score_template_workbook(self.round)
         ws = wb.active
+        assert ws is not None
         ws.append([999999, "Ghost", ""])
         scores, errors = self._parse_workbook(wb)
         self.assertEqual(scores, {})

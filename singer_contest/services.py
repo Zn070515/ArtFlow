@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from common.business_rules import ensure_round_unlocked
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
@@ -440,7 +440,7 @@ def finalize_advancement(
 @transaction.atomic
 def apply_scores(
     contest_round: ContestRound,
-    score_values: dict[tuple[int, int], object],
+    score_values: Mapping[tuple[int, int], object],
     operator,
     *,
     note: str = "",
@@ -524,7 +524,9 @@ def _read_artflow_meta(workbook) -> dict[str, str]:
     return data
 
 
-def _resolve_judge_header(header: str, judge_by_id, judge_by_name):
+def _resolve_judge_header(
+    header: str, judge_by_id: dict[int, Judge], judge_by_name: dict[str, Judge]
+) -> Judge | None:
     header = header.strip()
     if not header:
         return None
@@ -551,7 +553,7 @@ def _parse_id_authority_workbook(rows, headers, meta, contest_round: ContestRoun
     judge_by_name = {judge.name: judge for judge in active_judges}
     singers = {singer.pk: singer for singer in _eligible_singers(contest_round)}
 
-    valid_judges: dict[int, object] = {}
+    valid_judges: dict[int, Judge] = {}
     for column in range(2, len(headers)):
         header = headers[column]
         if not header:

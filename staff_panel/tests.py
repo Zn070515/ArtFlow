@@ -3188,6 +3188,7 @@ class ExportPrivacyTests(TestCase):
     def _first_column_from(self, response):
         wb = load_workbook(BytesIO(response.content))
         ws = wb.active
+        assert ws is not None
         return [ws.cell(row=idx, column=1).value for idx in range(2, ws.max_row + 1)]
 
     def test_staff_export_registrations_requires_activity_scope(self):
@@ -3228,6 +3229,7 @@ class ExportPrivacyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         wb = load_workbook(BytesIO(response.content))
         ws = wb.active
+        assert ws is not None
         names = [ws.cell(row=idx, column=2).value for idx in range(2, ws.max_row + 1)]
         self.assertEqual(names, ["Other Program"])
 
