@@ -47,6 +47,55 @@ DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
 DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
 
 
+class ActivityLifecycleTests(TestCase):
+    def test_formal_activity_cannot_reenter_test_mode(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        activity.is_test_mode = True
+
+        with self.assertRaises(ValidationError):
+            activity.save()
+
+    def test_new_formal_activity_has_consistent_marker(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
+
+    def test_test_activity_becomes_formal_when_test_mode_is_disabled(self):
+        activity = Activity.objects.create(
+            title="Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+
+        activity.is_test_mode = False
+        activity.save(update_fields=["is_test_mode", "updated_at"])
+        activity.refresh_from_db()
+
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
+
+    def test_formal_activity_cannot_downgrade_lifecycle_marker(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        activity.data_lifecycle = Activity.DataLifecycle.TEST
+
+        with self.assertRaises(ValidationError):
+            activity.save()
+
+
 class ActivityOwnershipTests(TestCase):
     def test_same_activity_guard_rejects_related_object_from_another_activity(self):
         first = Activity.objects.create(

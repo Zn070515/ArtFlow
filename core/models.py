@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -20,6 +21,10 @@ class Activity(models.Model):
         RESULTS_PUBLISHED = "results_published", "结果公示中"
         ARCHIVED = "archived", "已归档"
 
+    class DataLifecycle(models.TextChoices):
+        TEST = "test", "测试数据"
+        FORMAL = "formal", "正式数据"
+
     title = models.CharField(max_length=200)
     subtitle = models.CharField(max_length=400, blank=True)
     activity_type = models.CharField(max_length=20, choices=Type)
@@ -27,6 +32,11 @@ class Activity(models.Model):
     description = models.TextField(blank=True)
     cover_image = models.ImageField(upload_to="activities/covers/", blank=True)
     is_test_mode = models.BooleanField(default=True)
+    data_lifecycle = models.CharField(
+        max_length=12,
+        choices=DataLifecycle,
+        default=DataLifecycle.TEST,
+    )
     is_locked = models.BooleanField(default=False)
     locked_at = models.DateTimeField(null=True, blank=True)
     locked_by = models.ForeignKey(
@@ -45,6 +55,39 @@ class Activity(models.Model):
 
     def __str__(self):
         return self.title
+
+    def save(self, *args, **kwargs):
+        if self._state.adding:
+            self.data_lifecycle = (
+                self.DataLifecycle.TEST if self.is_test_mode else self.DataLifecycle.FORMAL
+            )
+        else:
+            persisted_lifecycle = (
+                type(self)
+                ._default_manager.filter(pk=self.pk)
+                .values_list("data_lifecycle", flat=True)
+                .first()
+            )
+            if persisted_lifecycle == self.DataLifecycle.FORMAL:
+                if (
+                    self.is_test_mode
+                    or self.data_lifecycle == self.DataLifecycle.TEST
+                ):
+                    raise ValidationError("Formal activities cannot re-enter test mode.")
+                self.is_test_mode = False
+                self.data_lifecycle = self.DataLifecycle.FORMAL
+            elif self.is_test_mode:
+                self.data_lifecycle = self.DataLifecycle.TEST
+            else:
+                self.data_lifecycle = self.DataLifecycle.FORMAL
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = set(update_fields) | {
+                "data_lifecycle",
+                "is_test_mode",
+            }
+        return super().save(*args, **kwargs)
 
 
 class ActivityPhase(models.Model):
