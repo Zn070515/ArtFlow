@@ -4,6 +4,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
+from common.lifecycle import scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
@@ -39,10 +40,12 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
 
     if locked_round.round_type == ContestRound.RoundType.PRELIMINARY:
         singers = list(
-            SingerRegistration.objects.filter(
-                activity=locked_round.activity,
-                pre_status=SingerRegistration.PreStatus.APPROVED,
-                is_test_data=False,
+            scope_runtime(
+                SingerRegistration.objects.filter(
+                    activity=locked_round.activity,
+                    pre_status=SingerRegistration.PreStatus.APPROVED,
+                ),
+                locked_round.activity,
             ).order_by("pk")
         )
     else:
@@ -53,10 +56,13 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
         if previous_round is None:
             raise ValidationError("后续轮次必须先有上一轮比赛。")
         singers = list(
-            SingerRegistration.objects.filter(
-                activity=locked_round.activity,
-                summaries__round=previous_round,
-                summaries__is_advanced=True,
+            scope_runtime(
+                SingerRegistration.objects.filter(
+                    activity=locked_round.activity,
+                    summaries__round=previous_round,
+                    summaries__is_advanced=True,
+                ),
+                locked_round.activity,
             ).order_by("pk")
         )
 

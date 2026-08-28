@@ -111,6 +111,7 @@ class StaffPanelSmokeTests(TestCase):
             title="Singer Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
         )
         self.farewell_activity = Activity.objects.create(
             title="Farewell Show",
@@ -169,6 +170,28 @@ class StaffPanelSmokeTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Activity.objects.filter(title="New Contest").exists())
+
+    def test_activity_edit_cannot_change_lifecycle(self):
+        formal_activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[formal_activity.pk]),
+            {
+                "title": "Renamed Contest",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+                "is_test_mode": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        formal_activity.refresh_from_db()
+        self.assertEqual(formal_activity.title, "Renamed Contest")
+        self.assertEqual(formal_activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(formal_activity.is_test_mode)
 
     def test_formal_activity_cannot_be_reopened_in_test_mode(self):
         formal_activity = Activity.objects.create(
@@ -777,6 +800,10 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_test_cleanup_cannot_delete_formal_registration(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         formal_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -827,6 +854,10 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteSession.objects.filter(name="Test Vote").exists())
 
     def test_cleanup_rejects_formal_vote_dependents_under_test_session(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -879,6 +910,10 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteRecord.objects.get(pk=record.pk).is_test_data)
 
     def test_cleanup_rejects_formal_vote_graph_referencing_test_singer(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         test_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -932,6 +967,10 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteRecord.objects.get(pk=formal_record.pk).is_test_data)
 
     def test_cleanup_rejects_formal_file_under_test_owner(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -991,6 +1030,10 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(submission.is_test_data)
 
     def test_leaving_test_mode_rejects_residual_test_data(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         test_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -1014,6 +1057,10 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(SingerRegistration.objects.filter(pk=test_registration.pk).exists())
 
     def test_clear_test_data_removes_test_file_object(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         test_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -1296,6 +1343,10 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(document.file.storage.exists(document.file.name or ""))
 
     def test_test_word_generation_creates_test_document(self):
+        self.singer_activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         template = ArticleTemplate.objects.create(
             name="Test notice",
             template_type=ArticleTemplate.TemplateType.VOTE_GUIDE,

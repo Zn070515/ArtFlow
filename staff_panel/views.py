@@ -10,6 +10,7 @@ from common.business_rules import (
     ensure_same_activity,
     ensure_vote_session_unlocked,
 )
+from common.lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from common.models import AuditLog
 from common.test_data import (
     clear_activity_test_data,
@@ -75,15 +76,16 @@ def _active_worksheet(workbook):
     return worksheet
 
 
-def _get_activity_form_data(request):
+def _get_activity_form_data(request, *, include_lifecycle):
     data = {
         "title": request.POST.get("title", "").strip(),
         "subtitle": request.POST.get("subtitle", "").strip(),
         "activity_type": request.POST.get("activity_type", Activity.Type.GENERAL),
         "phase": request.POST.get("phase", Activity.Phase.DRAFT),
         "description": request.POST.get("description", "").strip(),
-        "is_test_mode": request.POST.get("is_test_mode") == "on",
     }
+    if include_lifecycle:
+        data["is_test_mode"] = request.POST.get("is_test_mode") == "on"
     errors = []
     if not data["title"]:
         errors.append("活动标题不能为空")
@@ -131,7 +133,7 @@ def activity_list(request):
 def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
-        data, errors = _get_activity_form_data(request)
+        data, errors = _get_activity_form_data(request, include_lifecycle=True)
         if errors:
             return render(
                 request,
@@ -168,7 +170,7 @@ def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     if request.method == "POST":
-        data, errors = _get_activity_form_data(request)
+        data, errors = _get_activity_form_data(request, include_lifecycle=False)
         if errors:
             return render(
                 request,
@@ -515,7 +517,7 @@ def export_registrations(request):
             "提交时间",
         ]
     )
-    for r in SingerRegistration.objects.filter(is_test_data=False).select_related("activity"):
+    for r in scope_lifecycle(SingerRegistration.objects.select_related("activity")):
         ws.append(
             [
                 r.name,
@@ -562,7 +564,7 @@ def export_programs(request):
             "提交时间",
         ]
     )
-    for p in Program.objects.filter(is_test_data=False).select_related("activity"):
+    for p in scope_lifecycle(Program.objects.select_related("activity")):
         ws.append(
             [
                 p.sort_order,
@@ -816,9 +818,8 @@ def award_create(request):
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = SingerRegistration.objects.filter(
-        pre_status=SingerRegistration.PreStatus.APPROVED,
-        is_test_data=False,
+    singers = scope_lifecycle(
+        SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
     )
     return render(
         request,
@@ -885,9 +886,8 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = SingerRegistration.objects.filter(
-        pre_status=SingerRegistration.PreStatus.APPROVED,
-        is_test_data=False,
+    singers = scope_lifecycle(
+        SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
     )
     return render(
         request,
@@ -1094,7 +1094,7 @@ def _legacy_excel_material_checklist(request, activity_id):
     ws.append(["姓名", "项目", "状态"])
     checks = MaterialCheck.objects.filter(
         singer_registration__activity=activity,
-        singer_registration__is_test_data=False,
+        singer_registration__is_test_data=runtime_is_test(activity),
     )
     for c in checks.select_related("singer_registration"):
         ws.append(
@@ -1121,7 +1121,7 @@ def excel_material_checklist(request, activity_id):
     ws.append(["Owner Type", "Owner", "Item", "Status"])
     for c in MaterialCheck.objects.filter(
         singer_registration__activity=activity,
-        singer_registration__is_test_data=False,
+        singer_registration__is_test_data=runtime_is_test(activity),
     ).select_related("singer_registration"):
         ws.append(
             [
@@ -1133,7 +1133,7 @@ def excel_material_checklist(request, activity_id):
         )
     for c in MaterialCheck.objects.filter(
         program__activity=activity,
-        program__is_test_data=False,
+        program__is_test_data=runtime_is_test(activity),
     ).select_related("program"):
         ws.append(
             [
@@ -1214,13 +1214,15 @@ def word_generate(request, template_id, activity_id):
     doc = Document()
     doc.add_heading(activity.title, 0)
     body = template.body
-    singers = SingerRegistration.objects.filter(
-        activity=activity,
-        pre_status=SingerRegistration.PreStatus.APPROVED,
-        is_test_data=False,
+    singers = scope_runtime(
+        SingerRegistration.objects.filter(
+            activity=activity,
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        ),
+        activity,
     )
     singer_lines = "\n".join(f"{s.name} — {s.song_name}" for s in singers)
-    programs = Program.objects.filter(activity=activity, is_test_data=False)
+    programs = scope_runtime(Program.objects.filter(activity=activity), activity)
     program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)
     body = body.replace("{title}", activity.title)
     body = body.replace("{subtitle}", activity.subtitle or "")
@@ -1294,7 +1296,7 @@ def archive_package_create(request, activity_id):
             wb.save(stream)
             zf.writestr(f"{label}.xlsx", stream.getvalue())
         # Include generated docs
-        for doc in GeneratedDocument.objects.filter(activity=activity, is_test_data=False):
+        for doc in scope_runtime(GeneratedDocument.objects.filter(activity=activity), activity):
             if doc.file:
                 with doc.file.open("rb") as document_file:
                     zf.writestr(f"推文_{doc.pk}.docx", document_file.read())
@@ -1324,7 +1326,7 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "报名名单"
         ws.append(["姓名", "学号", "学院", "班级", "手机", "微信", "曲目", "原创", "赛前状态"])
-        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
+        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
             ws.append(
                 [
                     r.name,
@@ -1347,7 +1349,7 @@ def _activity_excel_generators(activity):
         ws.append(["姓名", "项目", "状态"])
         for c in MaterialCheck.objects.filter(
             singer_registration__activity=activity,
-            singer_registration__is_test_data=False,
+            singer_registration__is_test_data=runtime_is_test(activity),
         ):
             ws.append(
                 [
@@ -1363,7 +1365,9 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "异常记录"
         ws.append(["时间", "类型", "选手", "处理人", "处理结果", "备注"])
-        for inc in IncidentRecord.objects.filter(activity=activity, is_test=False):
+        for inc in IncidentRecord.objects.filter(
+            activity=activity, is_test=runtime_is_test(activity)
+        ):
             ws.append(
                 [
                     inc.occurred_at.strftime("%m/%d %H:%M"),
@@ -1383,7 +1387,7 @@ def _activity_excel_generators(activity):
         ws.append(["关联", "内容", "创建人", "时间"])
         for n in StaffNote.objects.filter(
             singer_registration__activity=activity,
-            singer_registration__is_test_data=False,
+            singer_registration__is_test_data=runtime_is_test(activity),
         ).select_related("created_by"):
             ws.append(
                 [
@@ -1400,7 +1404,7 @@ def _activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "联系方式表"
         ws.append(["姓名", "学号", "手机", "微信", "学院", "班级", "曲目"])
-        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
+        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
             ws.append(
                 [r.name, r.student_id, r.phone, r.wechat, r.college, r.class_name, r.song_name]
             )
@@ -1443,7 +1447,7 @@ def _complete_activity_excel_generators(activity):
                 "Live Status",
             ]
         )
-        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
+        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
             ws.append(
                 [
                     r.name,
@@ -1481,7 +1485,7 @@ def _complete_activity_excel_generators(activity):
                 "Notes",
             ]
         )
-        for p in Program.objects.filter(activity=activity, is_test_data=False):
+        for p in scope_runtime(Program.objects.filter(activity=activity), activity):
             ws.append(
                 [
                     p.sort_order,
@@ -1507,7 +1511,8 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Material Checklist"
         ws.append(["Owner Type", "Owner", "Item", "Status"])
         for c in MaterialCheck.objects.filter(
-            singer_registration__activity=activity, singer_registration__is_test_data=False
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=runtime_is_test(activity),
         ).select_related("singer_registration"):
             ws.append(
                 [
@@ -1518,7 +1523,7 @@ def _complete_activity_excel_generators(activity):
                 ]
             )
         for c in MaterialCheck.objects.filter(
-            program__activity=activity, program__is_test_data=False
+            program__activity=activity, program__is_test_data=runtime_is_test(activity)
         ).select_related("program"):
             ws.append(
                 [
@@ -1536,7 +1541,7 @@ def _complete_activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "Contacts"
         ws.append(["Owner Type", "Name", "Student ID", "Phone", "Wechat", "College/Class", "Item"])
-        for r in SingerRegistration.objects.filter(activity=activity, is_test_data=False):
+        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
             ws.append(
                 [
                     "singer",
@@ -1548,7 +1553,7 @@ def _complete_activity_excel_generators(activity):
                     r.song_name,
                 ]
             )
-        for p in Program.objects.filter(activity=activity, is_test_data=False):
+        for p in scope_runtime(Program.objects.filter(activity=activity), activity):
             ws.append(["program", p.contact_name, "", p.contact_phone, "", p.class_name, p.name])
         _autosize_sheet(ws)
         return wb
@@ -1559,7 +1564,9 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Score Results"
         ws.append(["Round", "Singer", "Average Score", "Rank", "Advanced"])
         summaries = (
-            ScoreSummary.objects.filter(round__activity=activity, is_test_data=False)
+            ScoreSummary.objects.filter(
+                round__activity=activity, is_test_data=runtime_is_test(activity)
+            )
             .select_related("round", "singer")
             .order_by("round_id", "rank")
         )
@@ -1585,7 +1592,8 @@ def _complete_activity_excel_generators(activity):
         ws.append(["Session", "Singer", "Song", "Votes"])
         options = (
             VoteOption.objects.filter(
-                vote_session__activity=activity, vote_session__is_test_data=False
+                vote_session__activity=activity,
+                vote_session__is_test_data=runtime_is_test(activity),
             )
             .select_related("vote_session", "singer")
             .annotate(vote_count=Count("records"))
@@ -1602,9 +1610,10 @@ def _complete_activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "Awards"
         ws.append(["Singer", "Song", "Award"])
-        for award in Award.objects.filter(activity=activity, is_test_data=False).select_related(
+        awards = scope_runtime(Award.objects.filter(activity=activity), activity).select_related(
             "singer"
-        ):
+        )
+        for award in awards:
             ws.append([award.singer.name, award.singer.song_name, award.name])
         _autosize_sheet(ws)
         return wb
@@ -1628,8 +1637,8 @@ def _complete_activity_excel_generators(activity):
         )
         singer_files = SubmissionFile.objects.filter(
             singer_registration__activity=activity,
-            singer_registration__is_test_data=False,
-            is_test_data=False,
+            singer_registration__is_test_data=runtime_is_test(activity),
+            is_test_data=runtime_is_test(activity),
         ).select_related("singer_registration", "uploaded_by")
         for f in singer_files:
             ws.append(
@@ -1646,7 +1655,9 @@ def _complete_activity_excel_generators(activity):
                 ]
             )
         program_files = SubmissionFile.objects.filter(
-            program__activity=activity, program__is_test_data=False, is_test_data=False
+            program__activity=activity,
+            program__is_test_data=runtime_is_test(activity),
+            is_test_data=runtime_is_test(activity),
         ).select_related("program", "uploaded_by")
         for f in program_files:
             ws.append(
@@ -1691,9 +1702,9 @@ def _complete_activity_excel_generators(activity):
         ws = _active_worksheet(wb)
         ws.title = "Incidents"
         ws.append(["Time", "Type", "Singer", "Program", "Handler", "Resolution", "Remark"])
-        for inc in IncidentRecord.objects.filter(activity=activity, is_test=False).select_related(
-            "singer", "program", "handled_by"
-        ):
+        for inc in IncidentRecord.objects.filter(
+            activity=activity, is_test=runtime_is_test(activity)
+        ).select_related("singer", "program", "handled_by"):
             ws.append(
                 [
                     inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
@@ -1714,7 +1725,8 @@ def _complete_activity_excel_generators(activity):
         ws.title = "Staff Notes"
         ws.append(["Owner Type", "Owner", "Content", "Created By", "Time"])
         singer_notes = StaffNote.objects.filter(
-            singer_registration__activity=activity, singer_registration__is_test_data=False
+            singer_registration__activity=activity,
+            singer_registration__is_test_data=runtime_is_test(activity),
         ).select_related("singer_registration", "created_by")
         for n in singer_notes:
             ws.append(
@@ -1727,7 +1739,7 @@ def _complete_activity_excel_generators(activity):
                 ]
             )
         program_notes = StaffNote.objects.filter(
-            program__activity=activity, program__is_test_data=False
+            program__activity=activity, program__is_test_data=runtime_is_test(activity)
         ).select_related("program", "created_by")
         for n in program_notes:
             ws.append(
@@ -1818,9 +1830,11 @@ def incident_export(request):
     ws = _active_worksheet(wb)
     ws.title = "异常记录"
     ws.append(["活动", "时间", "类型", "选手", "处理人", "处理结果", "备注"])
-    for inc in IncidentRecord.objects.filter(is_test=False).select_related(
-        "activity", "singer", "handled_by"
-    ):
+    incidents = scope_lifecycle(
+        IncidentRecord.objects.select_related("activity", "singer", "handled_by"),
+        marker="is_test",
+    )
+    for inc in incidents:
         ws.append(
             [
                 inc.activity.title,

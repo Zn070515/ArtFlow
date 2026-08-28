@@ -26,6 +26,7 @@ from singer_contest.models import (
 from singer_contest.services import prepare_round, reset_test_round_snapshots
 from voting.models import VoteOption, VoteRecord, VoteSession
 
+from common.lifecycle import runtime_is_test
 from common.models import SeedRecord
 
 DEMO_ACTIVITY_KEYS = (
@@ -348,13 +349,7 @@ class Command(BaseCommand):
                 raise CommandError(
                     "Cannot prepare demo round with unowned eligible singers or active judges."
                 )
-            SingerRegistration.objects.filter(pk__in=[singer_one.pk, singer_two.pk]).update(
-                is_test_data=False
-            )
             prepare_round(contest_round, admin)
-            SingerRegistration.objects.filter(pk__in=[singer_one.pk, singer_two.pk]).update(
-                is_test_data=True
-            )
         self._upsert(
             "demo.score.one.judge_one",
             ScoreRecord,
@@ -553,7 +548,7 @@ class Command(BaseCommand):
             SingerRegistration.objects.filter(
                 activity=activity,
                 pre_status=SingerRegistration.PreStatus.APPROVED,
-                is_test_data=False,
+                is_test_data=runtime_is_test(activity),
             )
             .exclude(pk__in=singer_ids)
             .exists()

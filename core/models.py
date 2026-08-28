@@ -90,6 +90,7 @@ class Activity(models.Model):
         return self.title
 
     def save(self, *args, **kwargs):
+        allow_transition = kwargs.pop("_allow_lifecycle_transition", False)
         if self._state.adding:
             self.data_lifecycle = (
                 self.DataLifecycle.TEST if self.is_test_mode else self.DataLifecycle.FORMAL
@@ -118,6 +119,11 @@ class Activity(models.Model):
                 elif self.is_test_mode:
                     self.data_lifecycle = self.DataLifecycle.TEST
                 else:
+                    if not allow_transition:
+                        raise ValidationError(
+                            "Activity lifecycle must be changed through the lifecycle service."
+                        )
+                    self.is_test_mode = False
                     self.data_lifecycle = self.DataLifecycle.FORMAL
 
                 update_fields = kwargs.get("update_fields")

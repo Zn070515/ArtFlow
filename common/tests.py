@@ -48,6 +48,7 @@ from voting.models import VoteOption, VoteRecord, VoteSession
 
 from . import models as common_models
 from .business_rules import ensure_same_activity
+from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
 from .test_data import clear_activity_test_data
@@ -81,16 +82,24 @@ class ActivityLifecycleTests(TestCase):
         self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(activity.is_test_mode)
 
-    def test_test_activity_becomes_formal_when_test_mode_is_disabled(self):
+    def test_test_activity_requires_lifecycle_flag_to_promote_to_formal(self):
         activity = Activity.objects.create(
             title="Test",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
 
         activity.is_test_mode = False
-        activity.save(update_fields=["is_test_mode", "updated_at"])
+        with self.assertRaises(ValidationError):
+            activity.save(update_fields=["is_test_mode", "updated_at"])
         activity.refresh_from_db()
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.TEST)
 
+        activity.is_test_mode = False
+        activity.save(
+            update_fields=["is_test_mode", "updated_at"],
+            _allow_lifecycle_transition=True,
+        )
+        activity.refresh_from_db()
         self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(activity.is_test_mode)
 
@@ -276,6 +285,64 @@ class ActivityLifecycleConcurrencyTests(TransactionTestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(activity.is_test_mode)
+
+
+class RuntimeScopeTests(TestCase):
+    def setUp(self):
+        self.test_activity = Activity.objects.create(
+            title="Test scope", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        self.formal_activity = Activity.objects.create(
+            title="Formal scope",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        self.test_singer = self._make_singer(
+            "Test Singer", "SCOPE01", "test-owner-1", self.test_activity, True
+        )
+        self.formal_singer = self._make_singer(
+            "Formal Singer", "SCOPE02", "test-owner-2", self.formal_activity, False
+        )
+        # A test-marked row parked under a formal activity: the runtime scope must hide it.
+        self.stray_singer = self._make_singer(
+            "Stray Singer", "SCOPE03", "test-owner-3", self.formal_activity, True
+        )
+
+    def _make_singer(self, name, student_id, username, activity, is_test_data):
+        return SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username=username, password="pass"),
+            name=name,
+            student_id=student_id,
+            college="Arts College",
+            class_name="Demo Class",
+            phone="13800000000",
+            song_name="Demo Song",
+            is_test_data=is_test_data,
+        )
+
+    def test_runtime_is_test_reads_activity_lifecycle(self):
+        self.assertTrue(runtime_is_test(self.test_activity))
+        self.assertFalse(runtime_is_test(self.formal_activity))
+
+    def test_scope_runtime_binds_rows_to_activity_lifecycle(self):
+        test_scoped = scope_runtime(
+            SingerRegistration.objects.filter(activity=self.test_activity),
+            self.test_activity,
+        )
+        self.assertEqual(set(test_scoped.values_list("name", flat=True)), {"Test Singer"})
+
+        formal_scoped = scope_runtime(
+            SingerRegistration.objects.filter(activity=self.formal_activity),
+            self.formal_activity,
+        )
+        self.assertEqual(set(formal_scoped.values_list("name", flat=True)), {"Formal Singer"})
+
+    def test_scope_lifecycle_matches_each_row_own_activity_lifecycle(self):
+        scoped = scope_lifecycle(SingerRegistration.objects.select_related("activity"))
+        self.assertEqual(
+            set(scoped.values_list("name", flat=True)), {"Test Singer", "Formal Singer"}
+        )
 
 
 class ActivityOwnershipTests(TestCase):
@@ -793,7 +860,7 @@ class DemoSeedCommandTests(TestCase):
             phone="13800000003",
             song_name="Unowned Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
-            is_test_data=False,
+            is_test_data=True,
         )
         unowned_judge = Judge.objects.create(
             activity=singer_activity,

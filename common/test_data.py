@@ -176,7 +176,10 @@ def leave_test_mode(
         clear_activity_test_data(locked_activity, operator=operator)
     locked_activity.is_test_mode = False
     locked_activity.data_lifecycle = Activity.DataLifecycle.FORMAL
-    locked_activity.save(update_fields=["is_test_mode", "data_lifecycle", "updated_at"])
+    locked_activity.save(
+        update_fields=["is_test_mode", "data_lifecycle", "updated_at"],
+        _allow_lifecycle_transition=True,
+    )
     AuditLog.objects.create(
         operator=operator,
         action_type=AuditLog.ActionType.OTHER,

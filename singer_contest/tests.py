@@ -41,6 +41,7 @@ class ScoringServiceTests(TestCase):
         self.activity = Activity.objects.create(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
         )
         self.round = ContestRound.objects.create(
             activity=self.activity,
@@ -502,7 +503,7 @@ class ScoringServiceTests(TestCase):
             singer=self.singer,
             judge=self.judge,
             score=90,
-            is_test_data=True,
+            is_test_data=False,
         )
 
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.user)
