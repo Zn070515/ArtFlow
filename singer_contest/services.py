@@ -55,6 +55,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
         ).first()
         if previous_round is None:
             raise ValidationError("后续轮次必须先有上一轮比赛。")
+        ensure_round_final_for_advancement(previous_round)
         singers = list(
             scope_runtime(
                 SingerRegistration.objects.filter(
@@ -231,6 +232,39 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
         if other.status != ContestRound.Status.DRAFT and other_rank > this_rank:
             raise ValidationError("后续轮次仍在使用本轮结果，重置前必须先清空后续轮次。")
     return reset_round_snapshots(locked_round, actor, reason=reason)
+
+
+def downstream_rounds(contest_round: ContestRound) -> QuerySet[ContestRound]:
+    """Rounds that consume this round's advancement, if any.
+
+    Only a preliminary round currently feeds a later round.
+    """
+    if contest_round.round_type == ContestRound.RoundType.PRELIMINARY:
+        return ContestRound.objects.filter(
+            activity=contest_round.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+    return ContestRound.objects.none()
+
+
+def ensure_round_final_for_advancement(contest_round: ContestRound) -> None:
+    """Require a complete, locked upstream round before building downstream.
+
+    A later-round snapshot must never consume a provisional result, or the two
+    rounds would hold two different truths for the same advancement decision.
+    """
+    if contest_round.status != ContestRound.Status.LOCKED or not contest_round.is_locked:
+        raise ValidationError("上游轮次尚未锁定，无法生成后续轮次。")
+    if not expected_score_cells(contest_round):
+        raise ValidationError("上游轮次没有可用的评分矩阵。")
+    if missing_score_cells(contest_round):
+        raise ValidationError("上游轮次仍有未录完的分数。")
+    entry_count = RoundEntry.objects.filter(round=contest_round).count()
+    summary_count = ScoreSummary.objects.filter(round=contest_round).count()
+    if entry_count == 0 or summary_count != entry_count:
+        raise ValidationError("上游轮次晋级名单不完整。")
+    if ScoreSummary.objects.filter(round=contest_round, rank__lte=0).exists():
+        raise ValidationError("上游轮次存在无效排名。")
 
 
 def validate_score(value: object) -> Decimal:

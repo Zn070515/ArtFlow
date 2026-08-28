@@ -52,6 +52,7 @@ from singer_contest.services import (
     _active_judges,
     _eligible_singers,
     apply_scores,
+    downstream_rounds,
     expected_score_cells,
     missing_score_cells,
     parse_score_workbook,
@@ -756,6 +757,8 @@ def round_unlock(request, pk):
         raise PermissionDenied("解锁结果必须填写原因。")
     if contest_round.status != ContestRound.Status.LOCKED or not contest_round.is_locked:
         raise PermissionDenied("该比赛轮次未锁定。")
+    if downstream_rounds(contest_round).exclude(status=ContestRound.Status.DRAFT).exists():
+        raise PermissionDenied("后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。")
     contest_round.is_locked = False
     contest_round.status = ContestRound.Status.SCORING
     contest_round.save(update_fields=["is_locked", "status"])

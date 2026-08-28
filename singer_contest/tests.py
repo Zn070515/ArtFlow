@@ -25,6 +25,8 @@ from .models import (
 )
 from .services import (
     apply_scores,
+    downstream_rounds,
+    ensure_round_final_for_advancement,
     expected_score_cells,
     missing_score_cells,
     parse_score_workbook,
@@ -359,24 +361,78 @@ class ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def _lock_scored_round(self, round, singer_count, advance_count):
+        for index in range(singer_count):
+            self.make_singer(student_id=f"2027{index:04d}")
+        if advance_count:
+            round.advance_count = advance_count
+            round.save(update_fields=["advance_count"])
+        prepare_round(round, self.user)
+        judge_ids = list(RoundJudge.objects.filter(round=round).values_list("judge_id", flat=True))
+        singer_ids = list(
+            RoundEntry.objects.filter(round=round).values_list("singer_id", flat=True)
+        )
+        apply_scores(
+            round,
+            {
+                (singer_id, judge_id): 95 - index
+                for index, singer_id in enumerate(singer_ids)
+                for judge_id in judge_ids
+            },
+            self.user,
+        )
+        round.status = ContestRound.Status.LOCKED
+        round.is_locked = True
+        round.save(update_fields=["status", "is_locked"])
+
     def test_prepare_semifinal_round_uses_only_previous_advancers(self):
+        self._lock_scored_round(self.round, singer_count=20, advance_count=10)
+
         semifinal = ContestRound.objects.create(
             activity=self.activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
         )
-        for index in range(20):
-            singer = self.make_singer(student_id=f"2027{index:04d}")
-            ScoreSummary.objects.create(
-                round=self.round,
-                singer=singer,
-                average_score=90 - index,
-                rank=index + 1,
-                is_advanced=index < 10,
-            )
-
         prepare_round(semifinal, self.user)
 
         self.assertEqual(RoundEntry.objects.filter(round=semifinal).count(), 10)
+
+    def test_prepare_semifinal_rejects_when_upstream_not_locked(self):
+        self._lock_scored_round(self.round, singer_count=5, advance_count=0)
+        self.round.status = ContestRound.Status.SCORING
+        self.round.save(update_fields=["status"])
+
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        with self.assertRaisesMessage(ValidationError, "上游轮次尚未锁定，无法生成后续轮次。"):
+            prepare_round(semifinal, self.user)
+
+    def test_ensure_round_final_rejects_unlocked_upstream(self):
+        with self.assertRaisesMessage(ValidationError, "上游轮次尚未锁定，无法生成后续轮次。"):
+            ensure_round_final_for_advancement(self.round)
+
+    def test_ensure_round_final_rejects_empty_score_matrix(self):
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+
+        with self.assertRaisesMessage(ValidationError, "上游轮次没有可用的评分矩阵。"):
+            ensure_round_final_for_advancement(self.round)
+
+    def test_downstream_rounds_empty_for_semifinal(self):
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        self.assertEqual(downstream_rounds(semifinal).count(), 0)
+
+    def test_downstream_rounds_finds_semifinal_for_preliminary(self):
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        self.assertEqual(list(downstream_rounds(self.round)), [semifinal])
 
     def test_prepare_round_snapshots_active_judges(self):
         second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")

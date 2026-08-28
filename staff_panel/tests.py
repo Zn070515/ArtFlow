@@ -580,6 +580,43 @@ class StaffPanelSmokeTests(TestCase):
             ).exists()
         )
 
+    def test_round_unlock_rejects_downstream_active(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Downstream Singer",
+            student_id="20260020",
+            college="Info",
+            class_name="CS1",
+            phone="13800000019",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        judge = Judge.objects.create(activity=self.singer_activity, name="Downstream Judge")
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
+        login_admin(self.client, self.admin)
+        self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+
+        ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            status=ContestRound.Status.PREPARED,
+        )
+
+        response = self.client.post(
+            reverse("staff:round_unlock", args=[round_.pk]), {"note": "Correction needed"}
+        )
+
+        self.assertEqual(response.status_code, 403)
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.LOCKED)
+        self.assertTrue(round_.is_locked)
+
     def test_round_reset_prepared_round_to_draft(self):
         SingerRegistration.objects.create(
             activity=self.singer_activity,
