@@ -102,4 +102,7 @@ urlpatterns = [
     path("activity/<int:pk>/archive/", views.activity_archive, name="activity_archive"),
     path("activity/<int:pk>/clone/", views.activity_clone, name="activity_clone"),
     path("audit-logs/", views.audit_log_list, name="audit_log_list"),
+    path("users/", views.user_list, name="user_list"),
+    path("users/<int:pk>/role/", views.user_role_update, name="user_role_update"),
+    path("users/<int:pk>/active/", views.user_set_active, name="user_set_active"),
 ]

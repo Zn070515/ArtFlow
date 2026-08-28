@@ -2660,3 +2660,129 @@ class MaterialReviewAndRequirementTests(TestCase):
         response = self.client.post(delete_url)
         self.assertEqual(response.status_code, 302)
         self.assertFalse(MaterialRequirement.objects.filter(pk=requirement.pk).exists())
+
+
+class UserRoleAdministrationTests(TestCase):
+    def setUp(self):
+        self.actor = User.objects.create_user(
+            username="role-admin",
+            password="pass",
+            role=User.Role.ADMIN,
+        )
+        self.participant = User.objects.create_user(
+            username="role-target",
+            password="pass",
+            role=User.Role.PARTICIPANT,
+        )
+
+    def test_participant_gets_403_on_user_list(self):
+        self.client.force_login(self.participant)
+        self.assertEqual(self.client.get(reverse("staff:user_list")).status_code, 403)
+
+    def test_staff_gets_403_on_user_list(self):
+        staff = User.objects.create_user(
+            username="role-staff",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        self.client.force_login(staff)
+        self.assertEqual(self.client.get(reverse("staff:user_list")).status_code, 403)
+
+    def test_verified_admin_can_promote_participant_to_staff(self):
+        login_admin(self.client, self.actor)
+        response = self.client.post(
+            reverse("staff:user_role_update", args=[self.participant.pk]),
+            {"new_role": User.Role.STAFF},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.role, User.Role.STAFF)
+        self.assertTrue(self.participant.is_staff)
+
+    def test_demoted_staff_loses_staff_endpoint_on_next_request(self):
+        staff = User.objects.create_user(
+            username="role-lose",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        login_admin(self.client, self.actor)
+        response = self.client.post(
+            reverse("staff:user_role_update", args=[staff.pk]),
+            {"new_role": User.Role.PARTICIPANT},
+        )
+        self.assertEqual(response.status_code, 302)
+        staff.refresh_from_db()
+        self.assertFalse(staff.is_staff)
+        self.client.force_login(staff)
+        self.assertEqual(self.client.get(reverse("staff:dashboard")).status_code, 403)
+
+    def test_role_change_writes_full_audit_old_new(self):
+        login_admin(self.client, self.actor)
+        self.client.post(
+            reverse("staff:user_role_update", args=[self.participant.pk]),
+            {"new_role": User.Role.STAFF},
+        )
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.UPDATE_PERMISSION,
+            target=f"User:{self.participant.pk}",
+        )
+        self.assertEqual(audit.operator, self.actor)
+        self.assertEqual(audit.old_value, User.Role.PARTICIPANT)
+        self.assertEqual(audit.new_value, User.Role.STAFF)
+
+    def test_last_active_admin_cannot_be_demoted(self):
+        login_admin(self.client, self.actor)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:user_role_update", args=[self.actor.pk]),
+            {"new_role": User.Role.PARTICIPANT},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.actor.refresh_from_db()
+        self.assertEqual(self.actor.role, User.Role.ADMIN)
+        self.assertTrue(self.actor.is_active)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UPDATE_PERMISSION,
+                target=f"User:{self.actor.pk}",
+            ).exists()
+        )
+
+    def test_last_active_admin_cannot_be_deactivated(self):
+        login_admin(self.client, self.actor)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:user_set_active", args=[self.actor.pk]),
+            {"active": "0"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.actor.refresh_from_db()
+        self.assertTrue(self.actor.is_active)
+
+    def test_get_user_role_endpoint_does_not_change_role(self):
+        login_admin(self.client, self.actor)
+        self.assertEqual(
+            self.client.get(
+                reverse("staff:user_role_update", args=[self.participant.pk])
+            ).status_code,
+            405,
+        )
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.role, User.Role.PARTICIPANT)
+
+    def test_invalid_role_does_not_change_database(self):
+        login_admin(self.client, self.actor)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:user_role_update", args=[self.participant.pk]),
+            {"new_role": "superstar"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.participant.refresh_from_db()
+        self.assertEqual(self.participant.role, User.Role.PARTICIPANT)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UPDATE_PERMISSION,
+                target=f"User:{self.participant.pk}",
+            ).exists()
+        )

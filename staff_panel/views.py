@@ -1,6 +1,8 @@
 import io
 
 from accounts.decorators import admin_required, staff_required
+from accounts.models import User
+from accounts.services import change_user_role, set_user_active
 from archive.models import ArchivePackage
 from common.audit import log_action
 from common.business_rules import (
@@ -1710,3 +1712,48 @@ def activity_clone(request, pk):
 def audit_log_list(request):
     logs = AuditLog.objects.select_related("operator")[:200]
     return render(request, "staff_panel/audit_log_list.html", {"logs": logs})
+
+
+# --- User & role administration ---
+
+
+@admin_required
+def user_list(request):
+    _require_admin(request.user)
+    users = User.objects.order_by("-date_joined", "username")
+    return render(request, "staff_panel/user_list.html", {"users": users})
+
+
+@admin_required
+@require_POST
+def user_role_update(request, pk):
+    _require_admin(request.user)
+    target = get_object_or_404(User, pk=pk)
+    try:
+        updated = change_user_role(
+            target=target, new_role=request.POST.get("new_role", ""), actor=request.user
+        )
+    except (ValidationError, PermissionDenied) as error:
+        messages.error(request, str(error))
+    else:
+        messages.success(
+            request, f"已将 {updated.username} 的角色改为 {updated.get_role_display()}。"
+        )
+    return redirect("staff:user_list")
+
+
+@admin_required
+@require_POST
+def user_set_active(request, pk):
+    _require_admin(request.user)
+    target = get_object_or_404(User, pk=pk)
+    is_active = request.POST.get("active") == "1"
+    try:
+        updated = set_user_active(target=target, is_active=is_active, actor=request.user)
+    except (ValidationError, PermissionDenied) as error:
+        messages.error(request, str(error))
+    else:
+        messages.success(
+            request, f"已{'启用' if updated.is_active else '停用'}账号 {updated.username}。"
+        )
+    return redirect("staff:user_list")
