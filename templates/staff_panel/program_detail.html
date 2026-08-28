@@ -82,22 +82,32 @@
         <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm">
             <h3 class="font-medium text-gray-900 mb-3">材料完整性</h3>
             {% if checks %}
-            <div class="space-y-1.5">
+            <div class="space-y-2">
                 {% for c in checks %}
                 <div class="flex items-center justify-between text-xs">
                     <span class="text-gray-700">{{ c.item_name }}</span>
-                    {% if c.status == "reviewed" %}
-                    <span class="text-green-700 bg-green-50 px-1.5 py-0.5 rounded">已审核</span>
+                    {% if c.status == "approved" %}
+                    <span class="text-green-700 bg-green-50 px-1.5 py-0.5 rounded">已通过</span>
+                    {% elif c.status == "needs_supplement" %}
+                    <span class="text-orange-700 bg-orange-50 px-1.5 py-0.5 rounded">需补交</span>
                     {% elif c.status == "uploaded" %}
                     <span class="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">已上传</span>
                     {% else %}
                     <span class="text-red-600 bg-red-50 px-1.5 py-0.5 rounded">未上传</span>
                     {% endif %}
                 </div>
+                {% if c.review_note %}<p class="text-xs text-gray-500 -mt-2 ml-1">反馈：{{ c.review_note }}</p>{% endif %}
+                <form method="post" action="{% url 'staff:material_check_review' %}" class="flex items-center gap-2 text-xs">
+                    {% csrf_token %}
+                    <input type="hidden" name="check_id" value="{{ c.pk }}">
+                    <input type="text" name="note" placeholder="反馈说明（选填）" value="{{ c.review_note|default:'' }}" class="border border-gray-300 rounded px-2 py-1 flex-1">
+                    <button name="result" value="approve" class="border border-green-200 text-green-700 px-2 py-1 rounded hover:bg-green-50">通过</button>
+                    <button name="result" value="supplement" class="border border-orange-200 text-orange-700 px-2 py-1 rounded hover:bg-orange-50">要求补交</button>
+                </form>
                 {% endfor %}
             </div>
             {% else %}
-            <p class="text-gray-400 text-xs">暂无材料检查项，可在 Django Admin 中添加</p>
+            <p class="text-gray-400 text-xs">暂无材料检查项，<a href="{% url 'staff:activity_material_requirements' prog.activity.pk %}" class="text-brand hover:underline">前往配置检查项</a></p>
             {% endif %}
         </div>
     </div>

@@ -1,11 +1,11 @@
 from common.audit import log_action
-from common.business_rules import ensure_activity_unlocked
+from common.business_rules import ensure_activity_unlocked, ensure_participant_can_edit
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
@@ -83,43 +83,107 @@ def apply_view(request):
     return render(request, "farewell_show/apply.html", {"activities": activities})
 
 
+PROGRAM_EDITABLE_FIELDS = (
+    "program_type",
+    "contact_name",
+    "contact_phone",
+    "class_name",
+    "performers",
+    "estimated_duration",
+    "description",
+    "mic_requirements",
+    "prop_requirements",
+    "special_notes",
+)
+
+
+def _participant_can_edit(program):
+    if program.activity.is_locked:
+        return False
+    return program.activity.phase in (
+        Activity.Phase.REGISTRATION_OPEN,
+        Activity.Phase.REVIEWING,
+    )
+
+
+@login_required
+def my_programs_view(request):
+    programs = Program.objects.filter(user=request.user).select_related("activity")
+    return render(
+        request,
+        "farewell_show/my_programs.html",
+        {"programs": programs},
+    )
+
+
 @login_required
 def my_program_view(request):
-    prog = Program.objects.filter(user=request.user).last()
+    return redirect("farewell_show:my_programs")
+
+
+@login_required
+def my_program_detail(request, pk):
+    prog = get_object_or_404(Program.objects.select_related("activity"), pk=pk, user=request.user)
     errors = []
-    if prog and request.method == "POST":
-        ensure_activity_unlocked(prog.activity)
-        f = request.FILES.get("file")
-        if f:
-            try:
-                submission_file = store_submission_file(
-                    owner=prog,
-                    uploaded_file=f,
-                    purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                    uploaded_by=request.user,
-                )
-            except ValidationError as error:
-                errors.extend(error.messages)
+    if request.method == "POST":
+        try:
+            ensure_participant_can_edit(prog)
+        except PermissionDenied as error:
+            errors.append(str(error))
+        else:
+            if request.FILES.get("file"):
+                try:
+                    submission_file = store_submission_file(
+                        owner=prog,
+                        uploaded_file=request.FILES["file"],
+                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
+                        uploaded_by=request.user,
+                    )
+                except ValidationError as error:
+                    errors.extend(error.messages)
+                else:
+                    sync_program_material_checks(prog)
+                    log_action(
+                        request,
+                        AuditLog.ActionType.UPLOAD_FILE,
+                        f"SubmissionFile:{submission_file.pk}",
+                        new_value=submission_file.original_name,
+                    )
             else:
-                sync_program_material_checks(prog)
-                log_action(
-                    request,
-                    AuditLog.ActionType.UPLOAD_FILE,
-                    f"SubmissionFile:{submission_file.pk}",
-                    new_value=submission_file.original_name,
-                )
-        if not errors:
-            return redirect("farewell_show:my_program")
-    if prog:
-        sync_program_material_checks(prog)
+                errors.extend(_update_program(request, prog))
+            if not errors:
+                return redirect("farewell_show:my_program_detail", pk=prog.pk)
+    sync_program_material_checks(prog)
     return render(
         request,
         "farewell_show/my_program.html",
         {
             "prog": prog,
-            "files": prog.files.all() if prog else [],
-            "checks": prog.material_checks.all() if prog else [],
+            "can_edit": _participant_can_edit(prog),
+            "files": prog.files.all(),
+            "checks": prog.material_checks.all(),
             "file_purposes": SubmissionFile.Purpose.choices,
+            "program_types": Program.ProgramType.choices,
             "errors": errors,
         },
     )
+
+
+def _update_program(request, prog):
+    editable = [f for f in PROGRAM_EDITABLE_FIELDS if f in request.POST]
+    old = {field: getattr(prog, field) for field in editable}
+    for field in editable:
+        if field in request.POST:
+            setattr(prog, field, request.POST[field].strip())
+    if not old:
+        return []
+    prog.save(update_fields=list(old))
+    new = {field: getattr(prog, field) for field in old}
+    log_action(
+        request,
+        AuditLog.ActionType.UPDATE_REGISTRATION,
+        f"Program:{prog.pk}",
+        old_value=str(old),
+        new_value=str(new),
+    )
+    return []

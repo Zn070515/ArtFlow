@@ -38,6 +38,7 @@ from exports.services import (
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 from files.services import (
+    review_material_check,
     store_submission_file,
     sync_program_material_checks,
     sync_singer_material_checks,
@@ -492,6 +493,88 @@ def program_detail(request, pk):
             "errors": errors,
         },
     )
+
+
+@staff_required
+@require_POST
+def material_check_review(request):
+    check = get_object_or_404(MaterialCheck, pk=request.POST.get("check_id"))
+    owner = check.singer_registration or check.program
+    if owner is None:
+        messages.error(request, "材料检查项未关联有效报名，无法审核。")
+        return redirect("staff:export_center")
+    ensure_activity_unlocked(owner.activity)
+    ensure_activity_action_allowed(owner.activity, ActivityAction.REVIEW_REGISTRATION)
+    result = request.POST.get("result")
+    if result == "approve":
+        status = MaterialCheck.Status.APPROVED
+    elif result == "supplement":
+        status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+    else:
+        messages.error(request, "无效的审核操作。")
+        return _material_review_redirect(owner)
+    review_material_check(
+        check,
+        status=status,
+        note=request.POST.get("note", ""),
+        actor=request.user,
+    )
+    messages.success(request, f"「{check.item_name}」已审核。")
+    return _material_review_redirect(owner)
+
+
+def _material_review_redirect(owner):
+    target = (
+        "staff:singer_registration_detail"
+        if getattr(owner, "student_id", None)
+        else "staff:program_detail"
+    )
+    return redirect(target, pk=owner.pk)
+
+
+@staff_required
+def activity_material_requirements(request, activity_id):
+    activity = get_object_or_404(Activity, pk=activity_id)
+    if request.method == "POST":
+        applies_to = request.POST.get("applies_to")
+        item_name = request.POST.get("item_name", "").strip()
+        if not item_name:
+            messages.error(request, "检查项名称不能为空。")
+        elif applies_to not in MaterialRequirement.AppliesTo.values:
+            messages.error(request, "无效的适用范围。")
+        else:
+            MaterialRequirement.objects.update_or_create(
+                activity=activity,
+                applies_to=applies_to,
+                item_name=item_name,
+                defaults={
+                    "file_purpose": request.POST.get("file_purpose", "") or "",
+                    "is_required": True,
+                    "sort_order": request.POST.get("sort_order", 0),
+                },
+            )
+            messages.success(request, "材料检查项已保存。")
+        return redirect("staff:activity_material_requirements", activity_id=activity.pk)
+    requirements = MaterialRequirement.objects.filter(activity=activity)
+    return render(
+        request,
+        "staff_panel/material_requirements.html",
+        {
+            "activity": activity,
+            "requirements": requirements,
+            "applies_to_choices": _choices(MaterialRequirement.AppliesTo),
+            "file_purposes": _choices(SubmissionFile.Purpose),
+        },
+    )
+
+
+@staff_required
+@require_POST
+def activity_material_requirement_delete(request, activity_id, pk):
+    activity = get_object_or_404(Activity, pk=activity_id)
+    MaterialRequirement.objects.filter(pk=pk, activity=activity).delete()
+    messages.success(request, "材料检查项已删除。")
+    return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 
 
 # --- Excel export ---

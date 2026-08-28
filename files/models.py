@@ -135,8 +135,9 @@ class StaffNote(models.Model):
 class MaterialCheck(models.Model):
     class Status(models.TextChoices):
         MISSING = "missing", "未上传"
-        UPLOADED = "uploaded", "已上传"
-        REVIEWED = "reviewed", "已审核"
+        UPLOADED = "uploaded", "已上传，待审核"
+        APPROVED = "approved", "已审核通过"
+        NEEDS_SUPPLEMENT = "needs_supplement", "需补交"
 
     singer_registration = models.ForeignKey(
         "singer_contest.SingerRegistration",
@@ -153,7 +154,16 @@ class MaterialCheck(models.Model):
         related_name="material_checks",
     )
     item_name = models.CharField(max_length=100)
-    status = models.CharField(max_length=12, choices=Status, default=Status.MISSING)
+    status = models.CharField(max_length=20, choices=Status, default=Status.MISSING)
+    review_note = models.TextField(blank=True, default="")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_material_checks",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
     sort_order = models.IntegerField(default=0)
 
     class Meta:

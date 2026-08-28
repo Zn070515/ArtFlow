@@ -21,7 +21,7 @@ from exports.models import ArticleTemplate, GeneratedDocument
 from exports.services import archive_activity
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
-from files.services import store_submission_file
+from files.services import store_submission_file, sync_singer_material_checks
 from incidents.models import IncidentRecord
 from openpyxl import load_workbook
 from public_portal.models import PublicPost
@@ -2559,3 +2559,104 @@ class ActivityPhaseViewEnforcementTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 403)
+
+
+class MaterialReviewAndRequirementTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.staff = User.objects.create_user(
+            username="staff_user",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        self.participant = User.objects.create_user(
+            username="participant",
+            password="pass",
+            role=User.Role.PARTICIPANT,
+        )
+        self.activity = Activity.objects.create(
+            title="Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REVIEWING,
+            is_test_mode=False,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Li Hua",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+        )
+        sync_singer_material_checks(self.registration)
+        self.client.raise_request_exception = False
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def test_staff_approve_material_check(self):
+        self.client.force_login(self.staff)
+        check = self.registration.material_checks.get(item_name="伴奏文件")
+        response = self.client.post(
+            reverse("staff:material_check_review"),
+            {"check_id": check.pk, "result": "approve", "note": "清晰"},
+        )
+        self.assertEqual(response.status_code, 302)
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.APPROVED)
+        self.assertEqual(check.review_note, "清晰")
+        self.assertEqual(check.reviewed_by, self.staff)
+
+    def test_staff_request_supplement_material_check(self):
+        self.client.force_login(self.staff)
+        check = self.registration.material_checks.get(item_name="伴奏文件")
+        response = self.client.post(
+            reverse("staff:material_check_review"),
+            {"check_id": check.pk, "result": "supplement", "note": "请上传无现场人声版本"},
+        )
+        self.assertEqual(response.status_code, 302)
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.NEEDS_SUPPLEMENT)
+        self.assertEqual(check.review_note, "请上传无现场人声版本")
+
+    def test_staff_material_review_denied_when_activity_locked(self):
+        self.activity.is_locked = True
+        self.activity.save()
+        self.client.force_login(self.staff)
+        check = self.registration.material_checks.get(item_name="伴奏文件")
+        response = self.client.post(
+            reverse("staff:material_check_review"),
+            {"check_id": check.pk, "result": "approve"},
+        )
+        self.assertEqual(response.status_code, 403)
+        check.refresh_from_db()
+        self.assertNotEqual(check.status, MaterialCheck.Status.APPROVED)
+
+    def test_add_and_delete_material_requirement(self):
+        self.client.force_login(self.staff)
+        url = reverse("staff:activity_material_requirements", args=[self.activity.pk])
+        response = self.client.post(
+            url,
+            {
+                "applies_to": MaterialRequirement.AppliesTo.SINGER,
+                "item_name": "歌词/台词",
+                "file_purpose": SubmissionFile.Purpose.LYRICS_SCRIPT,
+                "sort_order": "5",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        requirement = MaterialRequirement.objects.get(activity=self.activity, item_name="歌词/台词")
+        self.assertEqual(requirement.file_purpose, SubmissionFile.Purpose.LYRICS_SCRIPT)
+
+        delete_url = reverse(
+            "staff:activity_material_requirement_delete",
+            args=[self.activity.pk, requirement.pk],
+        )
+        response = self.client.post(delete_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(MaterialRequirement.objects.filter(pk=requirement.pk).exists())

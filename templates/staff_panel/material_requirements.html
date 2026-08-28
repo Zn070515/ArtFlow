@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}材料检查项 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:activity_list' %}" class="hover:underline">活动管理</a> / {{ activity.title }} / 材料检查项</p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">材料检查项 — {{ activity.title }}</h1>
+
+    <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm mb-6">
+        <h3 class="font-medium text-gray-900 mb-3">添加检查项</h3>
+        <form method="post" class="flex flex-col gap-3">
+            {% csrf_token %}
+            <div class="flex flex-wrap gap-3">
+                <label class="block">
+                    <span class="block text-xs text-gray-500 mb-1">适用范围</span>
+                    <select name="applies_to" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                        {% for value, label in applies_to_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="flex-1">
+                    <span class="block text-xs text-gray-500 mb-1">检查项名称</span>
+                    <input type="text" name="item_name" required class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                </label>
+                <label class="block">
+                    <span class="block text-xs text-gray-500 mb-1">文件用途（选填）</span>
+                    <select name="file_purpose" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                        <option value="">非文件项</option>
+                        {% for value, label in file_purposes %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="block">
+                    <span class="block text-xs text-gray-500 mb-1">排序号</span>
+                    <input type="number" name="sort_order" value="0" class="w-20 border border-gray-300 rounded px-2 py-1 text-sm">
+                </label>
+            </div>
+            <button type="submit" class="self-start bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">保存</button>
+        </form>
+    </div>
+
+    <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm">
+        <h3 class="font-medium text-gray-900 mb-3">已配置（{{ requirements|length }}）</h3>
+        {% if requirements %}
+        <ul class="space-y-2">
+            {% for r in requirements %}
+            <li class="flex items-center justify-between text-xs">
+                <span class="text-gray-700">{{ r.item_name }}
+                    <span class="text-gray-400 ml-1">{{ r.get_applies_to_display }} · {{ r.get_file_purpose_display|default:"非文件项" }}{% if r.is_required %} · 必填{% endif %}</span>
+                </span>
+                <form method="post" action="{% url 'staff:activity_material_requirement_delete' activity.pk r.pk %}"
+                      onsubmit="return confirm('删除检查项「{{ r.item_name }}」？')">
+                    {% csrf_token %}
+                    <button type="submit" class="text-red-600 hover:underline">删除</button>
+                </form>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-gray-400 text-xs">尚未配置，将使用默认检查项。</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

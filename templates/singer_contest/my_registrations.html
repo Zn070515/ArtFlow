@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}我的报名 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">我的报名</h1>
+    {% if registrations %}
+    <div class="grid gap-4">
+        {% for reg in registrations %}
+        <a href="{% url 'singer_contest:my_registration_detail' reg.pk %}" class="bg-white border border-gray-200 rounded-lg p-5 text-sm hover:border-brand transition-colors block">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h3 class="font-medium text-gray-900">{{ reg.activity.title }}</h3>
+                    <p class="text-xs text-gray-500 mt-1">{{ reg.name }} · {{ reg.song_name }} · {{ reg.created_at|date:"Y-m-d H:i" }}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    {% if reg.pre_status == "approved" %}
+                    <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs font-medium">已通过</span>
+                    {% elif reg.pre_status == "rejected" %}
+                    <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-xs font-medium">未通过</span>
+                    {% elif reg.pre_status == "need_supplement" %}
+                    <span class="text-orange-700 bg-orange-50 px-2 py-0.5 rounded text-xs font-medium">资料待补充</span>
+                    {% elif reg.pre_status == "submitted" %}
+                    <span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs font-medium">已提交</span>
+                    {% else %}
+                    <span class="text-gray-600 bg-gray-100 px-2 py-0.5 rounded text-xs font-medium">{{ reg.get_pre_status_display }}</span>
+                    {% endif %}
+                    <span class="text-gray-400">&rarr;</span>
+                </div>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-10 text-center text-gray-500">
+        <p>你还没有提交过报名</p>
+        <a href="{% url 'singer_contest:apply' %}" class="mt-2 inline-block text-brand hover:underline text-sm">去报名 &rarr;</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

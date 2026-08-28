@@ -907,3 +907,103 @@ class RoundResetServiceTests(TestCase):
         reset_round_to_draft(self.round, self.actor, reason="already draft")
         self.round.refresh_from_db()
         self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+
+
+class ParticipantRegistrationFlowTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="participant", password="pass")
+        self.other = User.objects.create_user(username="other", password="pass")
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+
+    def make_registration(self, *, user=None, student_id="20260001"):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=user or self.user,
+            name=f"Singer {student_id}",
+            student_id=student_id,
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+
+    def test_my_registrations_lists_all_activities(self):
+        other_activity = Activity.objects.create(
+            title="Other Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+        )
+        self.make_registration(student_id="20260001")
+        SingerRegistration.objects.create(
+            activity=other_activity,
+            user=self.user,
+            name="Another",
+            student_id="20260002",
+            college="College",
+            class_name="Class",
+            phone="13800000001",
+            song_name="Song 2",
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("singer_contest:my_registrations"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.activity.title)
+        self.assertContains(response, other_activity.title)
+
+    def test_my_registration_detail_is_user_scoped(self):
+        registration = self.make_registration()
+        self.client.force_login(self.other)
+        response = self.client.get(
+            reverse("singer_contest:my_registration_detail", args=[registration.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_participant_can_edit_own_registration_during_registration_open(self):
+        registration = self.make_registration()
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("singer_contest:my_registration_detail", args=[registration.pk]),
+            {"phone": "13900000000", "song_name": "New Song"},
+        )
+        self.assertEqual(response.status_code, 302)
+        registration.refresh_from_db()
+        self.assertEqual(registration.phone, "13900000000")
+        self.assertEqual(registration.song_name, "New Song")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+                target=f"SingerRegistration:{registration.pk}",
+            ).exists()
+        )
+
+    def test_participant_cannot_edit_when_phase_is_live(self):
+        self.activity.phase = Activity.Phase.LIVE
+        self.activity.save()
+        registration = self.make_registration()
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("singer_contest:my_registration_detail", args=[registration.pk]),
+            {"phone": "13900000000"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "不允许修改报名")
+        registration.refresh_from_db()
+        self.assertEqual(registration.phone, "13800000000")
+
+    def test_participant_cannot_edit_a_locked_activity(self):
+        self.activity.is_locked = True
+        self.activity.save()
+        registration = self.make_registration()
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("singer_contest:my_registration_detail", args=[registration.pk]),
+            {"phone": "13900000000"},
+        )
+        self.assertEqual(response.status_code, 200)
+        registration.refresh_from_db()
+        self.assertEqual(registration.phone, "13800000000")

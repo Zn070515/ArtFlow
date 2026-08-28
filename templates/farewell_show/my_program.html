@@ -4,6 +4,7 @@
 
 {% block content %}
 <div class="max-w-xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-4"><a href="{% url 'farewell_show:my_programs' %}" class="hover:underline">我的节目</a> / {{ prog.activity.title }}</p>
     <h1 class="text-2xl font-bold text-gray-900 mb-6">我的节目</h1>
     {% if errors %}
     <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
@@ -32,6 +33,31 @@
         </div>
         <div class="flex justify-between"><span class="text-gray-500">提交时间</span><span class="text-gray-900">{{ prog.created_at|date:"Y-m-d H:i" }}</span></div>
     </div>
+
+    {% if can_edit %}
+    <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
+        <h2 class="font-medium text-gray-900 mb-3">编辑节目信息</h2>
+        <form method="post" class="space-y-3">
+            {% csrf_token %}
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">节目类型</span>
+                <select name="program_type" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    {% for value, label in program_types %}<option value="{{ value }}" {% if prog.program_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">负责人</span><input name="contact_name" value="{{ prog.contact_name }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">联系方式</span><input name="contact_phone" value="{{ prog.contact_phone }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">所属</span><input name="class_name" value="{{ prog.class_name }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">表演者</span><input name="performers" value="{{ prog.performers }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">预计时长</span><input name="estimated_duration" value="{{ prog.estimated_duration }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">描述</span><textarea name="description" rows="3" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">{{ prog.description }}</textarea></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">麦克风要求</span><textarea name="mic_requirements" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">{{ prog.mic_requirements }}</textarea></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">道具要求</span><textarea name="prop_requirements" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">{{ prog.prop_requirements }}</textarea></label>
+            <label class="block"><span class="block text-xs text-gray-500 mb-1">特别说明</span><textarea name="special_notes" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">{{ prog.special_notes }}</textarea></label>
+            <button type="submit" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">保存修改</button>
+        </form>
+    </div>
+    {% endif %}
+
     <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
         <h2 class="font-medium text-gray-900 mb-3">材料状态</h2>
         {% if checks %}
@@ -39,20 +65,25 @@
             {% for check in checks %}
             <div class="flex items-center justify-between">
                 <span class="text-gray-700">{{ check.item_name }}</span>
-                {% if check.status == "reviewed" %}
-                <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs">已完成</span>
+                {% if check.status == "approved" %}
+                <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs">已通过</span>
+                {% elif check.status == "needs_supplement" %}
+                <span class="text-orange-700 bg-orange-50 px-2 py-0.5 rounded text-xs">需补交</span>
                 {% elif check.status == "uploaded" %}
                 <span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">已上传</span>
                 {% else %}
                 <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-xs">缺失</span>
                 {% endif %}
             </div>
+            {% if check.review_note %}<p class="text-xs text-orange-700 -mt-1 ml-1">原因：{{ check.review_note }}</p>{% endif %}
             {% endfor %}
         </div>
         {% else %}
         <p class="text-gray-400">暂无材料检查项</p>
         {% endif %}
     </div>
+
+    {% if can_edit %}
     <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
         <h2 class="font-medium text-gray-900 mb-3">补交材料</h2>
         {% if files %}
@@ -75,10 +106,20 @@
             </div>
         </form>
     </div>
+    {% elif files %}
+    <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
+        <h2 class="font-medium text-gray-900 mb-3">材料</h2>
+        <ul class="space-y-1">
+            {% for file in files %}
+            <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }}{% if file.is_current %} <span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ file.get_file_purpose_display }} · v{{ file.version }}</span></li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
     {% else %}
     <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
-        <p>你还没有提交过节目</p>
-        <a href="{% url 'farewell_show:apply' %}" class="mt-2 inline-block text-brand hover:underline text-sm">去提交 &rarr;</a>
+        <p>节目记录不存在或无权访问</p>
+        <a href="{% url 'farewell_show:my_programs' %}" class="mt-2 inline-block text-brand hover:underline text-sm">返回我的节目 &rarr;</a>
     </div>
     {% endif %}
 </div>

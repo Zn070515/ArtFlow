@@ -5,6 +5,7 @@ from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
+from django.utils import timezone
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 
@@ -117,7 +118,7 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
         or 0
     )
     original_name = PurePath(str(uploaded_file.name)).name
-    return SubmissionFile.objects.create(
+    created = SubmissionFile.objects.create(
         **owner_filter,
         file=uploaded_file,
         original_name=original_name,
@@ -128,6 +129,8 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
         is_current=True,
         version=latest + 1,
     )
+    _reset_matching_check(locked_owner, purpose)
+    return created
 
 
 @transaction.atomic
@@ -192,22 +195,84 @@ def _requirements_for(activity, applies_to, fallback):
     return configured or fallback
 
 
+def _owner_applies_to(owner):
+    if hasattr(owner, "student_id"):
+        return MaterialRequirement.AppliesTo.SINGER
+    if hasattr(owner, "program_type"):
+        return MaterialRequirement.AppliesTo.PROGRAM
+    return None
+
+
+def _reset_matching_check(owner, purpose):
+    """A brand-new upload supersedes any prior staff review for that purpose."""
+    applies_to = _owner_applies_to(owner)
+    if applies_to is None or not purpose:
+        return
+    owner_filter = _owner_filter(owner)
+    fallback = (
+        DEFAULT_SINGER_REQUIREMENTS
+        if applies_to == MaterialRequirement.AppliesTo.SINGER
+        else DEFAULT_PROGRAM_REQUIREMENTS
+    )
+    requirements = _requirements_for(owner.activity, applies_to, fallback)
+    reset_names = [item_name for item_name, file_purpose in requirements if file_purpose == purpose]
+    if not reset_names:
+        return
+    MaterialCheck.objects.filter(**owner_filter, item_name__in=reset_names).update(
+        status=MaterialCheck.Status.UPLOADED,
+        review_note="",
+        reviewed_by=None,
+        reviewed_at=None,
+    )
+
+
+def review_material_check(check, *, status, note, actor):
+    """Record a staff review decision on a material check and audit it."""
+    if status not in (MaterialCheck.Status.APPROVED, MaterialCheck.Status.NEEDS_SUPPLEMENT):
+        raise ValidationError("无效的审核状态。")
+    from common.models import AuditLog
+
+    old_status = check.status
+    check.status = status
+    check.review_note = (note or "").strip()
+    check.reviewed_by = actor
+    check.reviewed_at = timezone.now()
+    check.save(update_fields=["status", "review_note", "reviewed_by", "reviewed_at"])
+    AuditLog.objects.create(
+        operator=actor,
+        action_type=AuditLog.ActionType.REVIEW_MATERIAL,
+        target=f"MaterialCheck:{check.pk}",
+        old_value=old_status,
+        new_value=f"{status}: {check.review_note}",
+        note=check.item_name,
+    )
+    return check
+
+
 def _sync_checks(registration=None, program=None, requirements=None):
     owner_filter = {"singer_registration": registration} if registration else {"program": program}
     file_queryset = SubmissionFile.objects.filter(**owner_filter)
+    current = {c.item_name: c for c in MaterialCheck.objects.filter(**owner_filter)}
     checks = []
     for index, (item_name, file_purpose) in enumerate(requirements or []):
+        existing = current.get(item_name)
         if file_purpose:
-            status = (
-                MaterialCheck.Status.UPLOADED
-                if file_queryset.filter(file_purpose=file_purpose, is_current=True).exists()
-                else MaterialCheck.Status.MISSING
-            )
+            has_file = file_queryset.filter(file_purpose=file_purpose, is_current=True).exists()
+            if not has_file:
+                desired: str = MaterialCheck.Status.MISSING
+            elif existing is None:
+                desired = MaterialCheck.Status.UPLOADED
+            elif existing.status == MaterialCheck.Status.MISSING:
+                desired = MaterialCheck.Status.UPLOADED
+            else:
+                # Preserve staff review state; a brand-new upload already resets
+                # to UPLOADED in store_submission_file.
+                desired = existing.status
         else:
-            status = MaterialCheck.Status.REVIEWED
+            desired = existing.status if existing else MaterialCheck.Status.UPLOADED
         check, _ = MaterialCheck.objects.update_or_create(
             item_name=item_name,
-            defaults={"status": status, "sort_order": index},
+            defaults={"status": desired, "sort_order": index},
             **owner_filter,
         )
         checks.append(check)
