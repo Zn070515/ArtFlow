@@ -9,7 +9,9 @@ from common.business_rules import ensure_round_unlocked
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
-from django.core.exceptions import ValidationError
+from core.policies import ActivityAction
+from core.services import lock_activity_for_action
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
 
@@ -38,6 +40,8 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
+    if locked_round.activity.is_locked:
+        raise PermissionDenied("活动结果已锁定，无法准备轮次。")
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
 
@@ -219,14 +223,19 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
+    if locked_round.activity.is_locked:
+        raise PermissionDenied("活动结果已锁定，无法重置轮次。")
     if locked_round.status == ContestRound.Status.DRAFT:
         return locked_round
     round_order = {
         ContestRound.RoundType.PRELIMINARY: 0,
         ContestRound.RoundType.SEMI_FINAL: 1,
     }
-    for other in ContestRound.objects.filter(activity=locked_round.activity).exclude(
-        pk=locked_round.pk
+    for other in (
+        ContestRound.objects.select_for_update()
+        .filter(activity=locked_round.activity)
+        .exclude(pk=locked_round.pk)
+        .order_by("pk")
     ):
         other_rank = round_order[ContestRound.RoundType(other.round_type)]
         this_rank = round_order[ContestRound.RoundType(locked_round.round_type)]
@@ -504,6 +513,67 @@ def apply_scores(
             note=note,
         )
     return changes
+
+
+@transaction.atomic
+def lock_round(contest_round: ContestRound, operator) -> ContestRound:
+    """Freeze a prepared/scoring round once its score matrix is complete."""
+    lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if (
+        locked_round.status not in {ContestRound.Status.PREPARED, ContestRound.Status.SCORING}
+        or locked_round.is_locked
+    ):
+        raise PermissionDenied("该比赛轮次已锁定。")
+    if not expected_score_cells(locked_round):
+        raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
+    if missing_score_cells(locked_round):
+        raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
+    if locked_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
+        raise PermissionDenied("晋级线存在同分，请先人工核定晋级名单。")
+    locked_round.is_locked = True
+    locked_round.status = ContestRound.Status.LOCKED
+    locked_round.save(update_fields=["is_locked", "status"])
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.RELOCK_RESULT,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value="unlocked",
+        new_value="locked",
+    )
+    return locked_round
+
+
+@transaction.atomic
+def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> ContestRound:
+    """Unlock an upstream locked round only if no downstream round consumes it."""
+    lock_activity_for_action(contest_round.activity)
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if locked_round.status != ContestRound.Status.LOCKED or not locked_round.is_locked:
+        raise PermissionDenied("该比赛轮次未锁定。")
+    for other in (
+        ContestRound.objects.select_for_update()
+        .filter(activity=locked_round.activity, pk__in=downstream_rounds(locked_round))
+        .order_by("pk")
+    ):
+        if other.status != ContestRound.Status.DRAFT:
+            raise PermissionDenied("后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。")
+    locked_round.is_locked = False
+    locked_round.status = ContestRound.Status.SCORING
+    locked_round.save(update_fields=["is_locked", "status"])
+    AuditLog.objects.create(
+        operator=actor,
+        action_type=AuditLog.ActionType.UNLOCK_RESULT,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value="locked",
+        new_value="unlocked",
+        note=note,
+    )
+    return locked_round
 
 
 _META_SHEET_NAME = "ArtFlowMeta"

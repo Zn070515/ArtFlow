@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+
+from core.policies import ActivityAction, ensure_activity_action_allowed
 
 from .models import Activity
 
@@ -34,6 +37,23 @@ _PHASE_EDGES: dict[str, frozenset[str]] = {
     )
     for phase_index, phase in enumerate(_PHASE_ORDER)
 }
+
+
+def lock_activity_for_action(activity: Activity, action: ActivityAction | None = None) -> Activity:
+    """Acquire the authoritative Activity row lock and re-validate a mutation.
+
+    Only call inside ``transaction.atomic``. Locks the Activity row, then
+    re-reads and re-checks the global lock; if ``action`` is given it also
+    re-checks the phase action policy. Any check outside this call (in a view,
+    before entering the transaction) is only a UX guard and carries no authority
+    — the state can change between that check and the transaction, so the
+    mutation must re-validate here.
+    """
+    locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
+    ensure_activity_unlocked(locked_activity)
+    if action is not None:
+        ensure_activity_action_allowed(locked_activity, action)
+    return locked_activity
 
 
 @transaction.atomic

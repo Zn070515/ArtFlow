@@ -62,13 +62,13 @@ from singer_contest.services import (
     _active_judges,
     _eligible_singers,
     apply_scores,
-    downstream_rounds,
-    expected_score_cells,
     finalize_advancement,
+    lock_round,
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
     reset_round_to_draft,
+    unlock_round,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
 from voting.services import (
@@ -894,58 +894,18 @@ def round_finalize_advancement(request, pk):
 
 @staff_required
 @require_POST
-@transaction.atomic
 def round_lock(request, pk):
-    contest_round = get_object_or_404(
-        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
-    )
-    ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
-    if (
-        contest_round.status
-        not in {
-            ContestRound.Status.PREPARED,
-            ContestRound.Status.SCORING,
-        }
-        or contest_round.is_locked
-    ):
-        raise PermissionDenied("该比赛轮次已锁定。")
-    if not expected_score_cells(contest_round):
-        raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
-    missing_cells = missing_score_cells(contest_round)
-    if missing_cells:
-        raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
-    if contest_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
-        raise PermissionDenied("晋级线存在同分，请先人工核定晋级名单。")
-    contest_round.is_locked = True
-    contest_round.status = ContestRound.Status.LOCKED
-    contest_round.save(update_fields=["is_locked", "status"])
-    log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"ContestRound:{contest_round.pk}")
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    lock_round(contest_round, request.user)
     return redirect("staff:round_ranking", pk=pk)
 
 
 @admin_required
 @require_POST
-@transaction.atomic
 def round_unlock(request, pk):
     _require_admin(request.user)
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    note = request.POST.get("note", "").strip()
-    if contest_round.status != ContestRound.Status.LOCKED or not contest_round.is_locked:
-        raise PermissionDenied("该比赛轮次未锁定。")
-    if downstream_rounds(contest_round).exclude(status=ContestRound.Status.DRAFT).exists():
-        raise PermissionDenied("后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。")
-    locked_activity = lock_activity_for_runtime_data(contest_round.activity)
-    ensure_activity_unlocked(locked_activity)
-    locked_round = ContestRound.objects.select_for_update().get(pk=contest_round.pk)
-    locked_round.is_locked = False
-    locked_round.status = ContestRound.Status.SCORING
-    locked_round.save(update_fields=["is_locked", "status"])
-    log_action(
-        request,
-        AuditLog.ActionType.UNLOCK_RESULT,
-        f"ContestRound:{locked_round.pk}",
-        note=note,
-    )
+    unlock_round(contest_round, request.user, note=request.POST.get("note", "").strip())
     return redirect("staff:round_ranking", pk=pk)
 
 

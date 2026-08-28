@@ -1,15 +1,19 @@
+import threading
 from decimal import Decimal
 from io import BytesIO
+from unittest import skipUnless
 
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
+from core.policies import ActivityAction
+from core.services import lock_activity_for_action
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models.deletion import ProtectedError
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
 from exports.services import build_score_template_workbook
 from openpyxl import Workbook
@@ -30,6 +34,7 @@ from .services import (
     ensure_round_final_for_advancement,
     expected_score_cells,
     finalize_advancement,
+    lock_round,
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
@@ -37,6 +42,7 @@ from .services import (
     reset_round_snapshots,
     reset_round_to_draft,
     reset_test_round_snapshots,
+    unlock_round,
     validate_score,
 )
 
@@ -1120,3 +1126,257 @@ class ParticipantRegistrationFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         registration.refresh_from_db()
         self.assertEqual(registration.phone, "13800000000")
+
+    def test_apply_rejects_locked_activity(self):
+        self.activity.is_locked = True
+        self.activity.save()
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("singer_contest:apply"),
+            {
+                "activity_id": self.activity.pk,
+                "name": "Singer",
+                "student_id": "20260001",
+                "college": "College",
+                "class_name": "Class",
+                "phone": "13800000000",
+                "song_name": "Song",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(SingerRegistration.objects.exists())
+
+    def test_apply_rejects_activity_not_in_registration_open(self):
+        self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+        self.activity.save(update_fields=["phase"])
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("singer_contest:apply"),
+            {
+                "activity_id": self.activity.pk,
+                "name": "Singer",
+                "student_id": "20260001",
+                "college": "College",
+                "class_name": "Class",
+                "phone": "13800000000",
+                "song_name": "Song",
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SingerRegistration.objects.exists())
+
+
+class LockActivityForActionTests(TestCase):
+    """The canonical activity-first lock helper re-validates state under the lock."""
+
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+
+    def test_returns_authoritative_activity(self):
+        with transaction.atomic():
+            locked = lock_activity_for_action(self.activity)
+        self.assertEqual(locked.pk, self.activity.pk)
+        self.assertFalse(locked.is_locked)
+
+    def test_rejects_locked_activity(self):
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        with transaction.atomic():
+            with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
+                lock_activity_for_action(self.activity)
+
+    def test_rejects_action_not_allowed_in_phase(self):
+        self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+        self.activity.save(update_fields=["phase"])
+        with transaction.atomic():
+            with self.assertRaises(PermissionDenied):
+                lock_activity_for_action(self.activity, ActivityAction.SUBMIT_REGISTRATION)
+
+
+class RoundLockTOCTOUTests(TestCase):
+    """M0-P guards: activity-first lock and re-validation of round mutations."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="round-actor", password="pass")
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="round-singer", password="pass"),
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge")
+
+    def prepare_matrix(self):
+        prepare_round(self.round, self.user)
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): 90}, self.user)
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+
+    def test_prepare_round_rejects_locked_activity(self):
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        with self.assertRaisesMessage(PermissionDenied, "活动结果已锁定，无法准备轮次。"):
+            prepare_round(self.round, self.user)
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+
+    def test_reset_round_to_draft_rejects_locked_activity(self):
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status"])
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        with self.assertRaisesMessage(PermissionDenied, "活动结果已锁定，无法重置轮次。"):
+            reset_round_to_draft(self.round, self.user, reason="admin unwind")
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
+    def test_lock_round_rejects_already_locked_round(self):
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+        with self.assertRaisesMessage(PermissionDenied, "该比赛轮次已锁定。"):
+            lock_round(self.round, self.user)
+
+    def test_lock_round_freezes_complete_round_and_audits(self):
+        prepare_round(self.round, self.user)
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): 90}, self.user)
+        locked = lock_round(self.round, self.user)
+        self.assertTrue(locked.is_locked)
+        self.assertEqual(locked.status, ContestRound.Status.LOCKED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.RELOCK_RESULT,
+                target=f"ContestRound:{self.round.pk}",
+            ).exists()
+        )
+
+    def test_unlock_round_rejects_active_downstream(self):
+        self.prepare_matrix()
+        ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            status=ContestRound.Status.PREPARED,
+        )
+        with self.assertRaisesMessage(
+            PermissionDenied, "后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。"
+        ):
+            unlock_round(self.round, self.user)
+        self.round.refresh_from_db()
+        self.assertTrue(self.round.is_locked)
+
+    def test_unlock_round_restores_scoring_state_and_audits(self):
+        self.prepare_matrix()
+        unlocked = unlock_round(self.round, self.user, note="admin unwind")
+        self.assertFalse(unlocked.is_locked)
+        self.assertEqual(unlocked.status, ContestRound.Status.SCORING)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNLOCK_RESULT,
+                target=f"ContestRound:{self.round.pk}",
+            ).exists()
+        )
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class ActivityFirstLockConcurrencyTests(TransactionTestCase):
+    """Concurrent M0-P races must never produce a state the lock order forbids."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="concurrency-actor", password="pass")
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="concurrency-singer", password="pass"),
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge")
+
+    def _lock_round(self):
+        prepare_round(self.round, self.user)
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): 90}, self.user)
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+
+    def test_concurrent_unlock_and_downstream_prepare_never_leave_orphan(self):
+        self._lock_round()
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        results: dict[str, str] = {}
+
+        def do_unlock():
+            close_old_connections()
+            try:
+                unlock_round(self.round, self.user)
+                results["unlock"] = "ok"
+            except (PermissionDenied, ValidationError):
+                results["unlock"] = "rejected"
+            except Exception:
+                results["unlock"] = "error"
+            finally:
+                close_old_connections()
+
+        def do_prepare():
+            close_old_connections()
+            try:
+                prepare_round(semifinal, self.user)
+                results["prepare"] = "ok"
+            except (PermissionDenied, ValidationError):
+                results["prepare"] = "rejected"
+            except Exception:
+                results["prepare"] = "error"
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=do_unlock), threading.Thread(target=do_prepare)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.round.refresh_from_db()
+        semifinal.refresh_from_db()
+        downstream_active = semifinal.status != ContestRound.Status.DRAFT
+        orphan = downstream_active and not self.round.is_locked
+        self.assertFalse(
+            orphan,
+            "a PREPARED downstream round cannot coexist with an unlocked upstream",
+        )

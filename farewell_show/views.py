@@ -1,9 +1,9 @@
 from common.audit import log_action
 from common.business_rules import ensure_activity_unlocked, ensure_participant_can_edit
 from common.models import AuditLog
-from common.test_data import lock_activity_for_runtime_data
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
+from core.services import lock_activity_for_action
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -44,7 +44,7 @@ def apply_view(request):
                 {"activities": activities, "errors": errors},
             )
         with transaction.atomic():
-            activity = lock_activity_for_runtime_data(activity)
+            activity = lock_activity_for_action(activity, ActivityAction.SUBMIT_REGISTRATION)
             prog = Program(
                 activity=activity,
                 user=request.user,
@@ -127,32 +127,36 @@ def my_program_detail(request, pk):
     errors = []
     if request.method == "POST":
         try:
-            ensure_participant_can_edit(prog)
-        except PermissionDenied as error:
-            errors.append(str(error))
-        else:
-            if request.FILES.get("file"):
-                try:
+            with transaction.atomic():
+                locked_prog = (
+                    Program.objects.select_for_update()
+                    .select_related("activity")
+                    .get(pk=prog.pk, user=request.user)
+                )
+                lock_activity_for_action(locked_prog.activity)
+                ensure_participant_can_edit(locked_prog)
+                if request.FILES.get("file"):
                     submission_file = store_submission_file(
-                        owner=prog,
+                        owner=locked_prog,
                         uploaded_file=request.FILES["file"],
                         purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                         uploaded_by=request.user,
                     )
-                except ValidationError as error:
-                    errors.extend(error.messages)
-                else:
-                    sync_program_material_checks(prog)
+                    sync_program_material_checks(locked_prog)
                     log_action(
                         request,
                         AuditLog.ActionType.UPLOAD_FILE,
                         f"SubmissionFile:{submission_file.pk}",
                         new_value=submission_file.original_name,
                     )
-            else:
-                errors.extend(_update_program(request, prog))
-            if not errors:
-                return redirect("farewell_show:my_program_detail", pk=prog.pk)
+                else:
+                    errors.extend(_update_program(request, locked_prog))
+        except PermissionDenied as error:
+            errors.append(str(error))
+        except ValidationError as error:
+            errors.extend(error.messages)
+        if not errors:
+            return redirect("farewell_show:my_program_detail", pk=prog.pk)
     sync_program_material_checks(prog)
     return render(
         request,

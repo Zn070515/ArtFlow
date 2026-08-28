@@ -1,6 +1,7 @@
 from functools import partial
 from pathlib import PurePath
 
+from common.business_rules import ensure_activity_unlocked
 from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.core.files.storage import Storage
@@ -103,6 +104,7 @@ def _owner_filter(owner):
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose)
     activity = lock_activity_for_runtime_data(owner.activity)
+    ensure_activity_unlocked(activity)
     # Serialize all file operations for the same owner, including the first
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)

@@ -4,7 +4,7 @@ import tempfile
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.test import TestCase, override_settings
@@ -83,6 +83,20 @@ class SubmissionFileLifecycleTests(TestCase):
         self.assertFalse(first.is_current)
         self.assertTrue(second.is_current)
         self.assertEqual(second.version, 2)
+
+    def test_store_submission_file_rejects_locked_activity(self):
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+
+        with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
+            store_submission_file(
+                owner=self.registration,
+                uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+            )
+
+        self.assertFalse(SubmissionFile.objects.exists())
 
     def test_deleting_submission_file_removes_database_row_and_storage_object(self):
         submission = store_submission_file(
