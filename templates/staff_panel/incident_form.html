@@ -5,6 +5,9 @@
 {% block content %}
 <div class="max-w-lg mx-auto px-4 py-10">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">添加异常记录</h1>
+    {% if error %}
+    <div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">{{ error }}</div>
+    {% endif %}
     <form method="post" class="space-y-4">
         {% csrf_token %}
         <div>

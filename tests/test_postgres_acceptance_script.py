@@ -55,6 +55,7 @@ def test_postgres_backup_restore_script_has_isolated_target_and_safety_contract(
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh is required for PowerShell syntax checks")
 def test_postgres_backup_restore_script_has_valid_powershell_syntax():
+    assert PWSH is not None  # skipif above guarantees pwsh is available
     escaped_script_path = str(BACKUP_SCRIPT_PATH).replace("'", "''")
     parser_command = (
         "$parseErrors = $null; "
@@ -77,6 +78,7 @@ def test_postgres_backup_restore_script_has_valid_powershell_syntax():
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh is required for PowerShell syntax checks")
 def test_postgres_acceptance_script_has_valid_powershell_syntax():
+    assert PWSH is not None  # skipif above guarantees pwsh is available
     escaped_script_path = str(SCRIPT_PATH).replace("'", "''")
     parser_command = (
         "$parseErrors = $null; "
@@ -141,6 +143,7 @@ def run_acceptance_script(
 ) -> subprocess.CompletedProcess[str]:
     caller_directory = tmp_path / "caller"
     caller_directory.mkdir()
+    assert PWSH is not None  # callers are all skipif-gated on pwsh availability
     return subprocess.run(
         [PWSH, "-NoProfile", "-File", str(SCRIPT_PATH), *arguments],
         cwd=caller_directory,

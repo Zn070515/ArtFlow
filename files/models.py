@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class SubmissionFile(models.Model):
@@ -57,6 +58,13 @@ class SubmissionFile(models.Model):
                 condition=models.Q(is_current=True, program__isnull=False),
                 name="files_one_current_program_purpose",
             ),
+            models.CheckConstraint(
+                condition=(
+                    (Q(singer_registration__isnull=False) & Q(program__isnull=True))
+                    | (Q(singer_registration__isnull=True) & Q(program__isnull=False))
+                ),
+                name="files_owner_singer_program_xor",
+            ),
         ]
 
     def __str__(self):
@@ -110,6 +118,15 @@ class StaffNote(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (Q(singer_registration__isnull=False) & Q(program__isnull=True))
+                    | (Q(singer_registration__isnull=True) & Q(program__isnull=False))
+                ),
+                name="staffnote_owner_singer_program_xor",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.created_by}: {self.content[:50]}"
@@ -141,6 +158,15 @@ class MaterialCheck(models.Model):
 
     class Meta:
         ordering = ["sort_order"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (Q(singer_registration__isnull=False) & Q(program__isnull=True))
+                    | (Q(singer_registration__isnull=True) & Q(program__isnull=False))
+                ),
+                name="materialcheck_owner_singer_program_xor",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.item_name} — {self.get_status_display()}"

@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import F, Q
 
 
 class VoteSession(models.Model):
@@ -26,6 +27,20 @@ class VoteSession(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(is_locked=True, is_open=True),
+                name="vote_locked_must_be_closed",
+            ),
+            models.CheckConstraint(
+                condition=Q(max_selections__gte=1),
+                name="vote_max_selections_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(end_time__gt=F("start_time")),
+                name="vote_end_after_start",
+            ),
+        ]
 
     def __str__(self):
         return self.name

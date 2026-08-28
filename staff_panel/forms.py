@@ -1,0 +1,125 @@
+from typing import cast
+
+from core.models import Activity
+from django import forms
+from django.http import QueryDict
+from farewell_show.models import Program
+from incidents.models import IncidentRecord
+from public_portal.models import PublicPost
+from singer_contest.models import ContestRound, SingerRegistration
+from voting.models import VoteSession
+
+# Accepts both browser `datetime-local` values (naive ISO) and tz-aware ISO strings
+# such as `timezone.now().isoformat()`.
+DATETIME_INPUT_FORMATS = [
+    "%Y-%m-%dT%H:%M:%S.%f%z",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%dT%H:%M%z",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%Y-%m-%d",
+]
+
+
+class ActivityForm(forms.Form):
+    title = forms.CharField(max_length=200)
+    subtitle = forms.CharField(max_length=400, required=False)
+    activity_type = forms.ChoiceField(choices=Activity.Type.choices)
+    phase = forms.ChoiceField(choices=Activity.Phase.choices)
+    description = forms.CharField(required=False)
+
+    def __init__(self, *args, include_lifecycle=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        if include_lifecycle:
+            self.fields["is_test_mode"] = forms.BooleanField(required=False)
+
+
+class ContestRoundForm(forms.Form):
+    name = forms.CharField(max_length=100, required=False)
+    round_type = forms.ChoiceField(choices=ContestRound.RoundType.choices)
+    scoring_mode = forms.ChoiceField(
+        choices=ContestRound.ScoringMode.choices,
+        required=False,
+        initial=ContestRound.ScoringMode.AVERAGE,
+    )
+    advance_count = forms.IntegerField(min_value=0, required=False, initial=0)
+
+    def clean_advance_count(self):
+        return self.cleaned_data.get("advance_count") or 0
+
+    def clean_scoring_mode(self):
+        return self.cleaned_data.get("scoring_mode") or ContestRound.ScoringMode.AVERAGE
+
+
+class SingerReviewForm(forms.Form):
+    pre_status = forms.ChoiceField(choices=SingerRegistration.PreStatus.choices)
+    live_status = forms.ChoiceField(choices=SingerRegistration.LiveStatus.choices)
+    staff_note = forms.CharField(max_length=1000, required=False)
+
+
+class ProgramReviewForm(forms.Form):
+    status = forms.ChoiceField(choices=Program.Status.choices)
+    sort_order = forms.IntegerField(required=False, initial=0)
+    staff_note = forms.CharField(max_length=1000, required=False)
+
+    def clean_sort_order(self):
+        return self.cleaned_data.get("sort_order") or 0
+
+
+class PublicPostForm(forms.Form):
+    title = forms.CharField(max_length=200)
+    subtitle = forms.CharField(max_length=400, required=False)
+    content = forms.CharField(required=False)
+    post_type = forms.ChoiceField(choices=PublicPost.PostType.choices)
+    status = forms.ChoiceField(choices=PublicPost.Status.choices)
+    is_pinned = forms.BooleanField(required=False)
+    sort_order = forms.IntegerField(required=False, initial=0)
+    related_activity_id = forms.IntegerField(required=False)
+
+    def clean_sort_order(self):
+        return self.cleaned_data.get("sort_order") or 0
+
+
+class IncidentForm(forms.Form):
+    occurred_at = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
+    event_type = forms.ChoiceField(choices=IncidentRecord.EventType.choices)
+    resolution = forms.CharField(required=False)
+    remark = forms.CharField(required=False)
+
+
+class VoteSessionForm(forms.Form):
+    name = forms.CharField(max_length=100)
+    passcode = forms.CharField(max_length=20)
+    start_time = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
+    end_time = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
+    selection_type = forms.ChoiceField(
+        choices=VoteSession.SelectionType.choices,
+        required=False,
+        initial=VoteSession.SelectionType.SINGLE,
+    )
+    max_selections = forms.IntegerField(min_value=1, required=False, initial=1)
+
+    def _posted_singer_ids(self):
+        data = cast(QueryDict, self.data)
+        return [value for value in data.getlist("singers") if value]
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned is None:
+            cleaned = {}
+        selection_type = cleaned.get("selection_type") or VoteSession.SelectionType.SINGLE
+        max_selections = cleaned.get("max_selections") or 1
+        singer_ids = self._posted_singer_ids()
+        if not singer_ids:
+            raise forms.ValidationError("请至少选择一个候选选手。")
+        if selection_type == VoteSession.SelectionType.MULTI and max_selections > len(singer_ids):
+            raise forms.ValidationError("多选可选项数不能超过候选选手数量。")
+        if cleaned.get("start_time") and cleaned.get("end_time"):
+            if cleaned["end_time"] <= cleaned["start_time"]:
+                raise forms.ValidationError("结束时间必须晚于开始时间。")
+        cleaned["selection_type"] = selection_type
+        cleaned["max_selections"] = max_selections
+        return cleaned

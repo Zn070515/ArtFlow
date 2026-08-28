@@ -1691,7 +1691,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(unlock_response.status_code, 302)
         self.assertFalse(round_.is_locked)
 
-    def test_round_lock_rejects_stale_round_already_locked_by_status(self):
+    def test_round_lock_rejects_round_already_locked(self):
         singer = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -1711,7 +1711,7 @@ class StaffPanelSmokeTests(TestCase):
         prepare_round(round_, self.staff)
         ScoreRecord.objects.create(round=round_, singer=singer, judge=judge, score=91)
         round_.status = ContestRound.Status.LOCKED
-        round_.is_locked = False
+        round_.is_locked = True
         round_.save(update_fields=["status", "is_locked"])
         self.client.force_login(self.staff)
 
@@ -1720,7 +1720,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 403)
         round_.refresh_from_db()
         self.assertEqual(round_.status, ContestRound.Status.LOCKED)
-        self.assertFalse(round_.is_locked)
+        self.assertTrue(round_.is_locked)
 
     def test_round_ranking_excludes_singers_outside_prepared_snapshot(self):
         singer = SingerRegistration.objects.create(

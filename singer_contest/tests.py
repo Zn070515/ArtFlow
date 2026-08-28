@@ -399,7 +399,8 @@ class ScoringServiceTests(TestCase):
     def test_prepare_semifinal_rejects_when_upstream_not_locked(self):
         self._lock_scored_round(self.round, singer_count=5, advance_count=0)
         self.round.status = ContestRound.Status.SCORING
-        self.round.save(update_fields=["status"])
+        self.round.is_locked = False
+        self.round.save(update_fields=["status", "is_locked"])
 
         semifinal = ContestRound.objects.create(
             activity=self.activity,
@@ -572,7 +573,8 @@ class ScoringServiceTests(TestCase):
     def test_apply_scores_rejects_locked_round_status(self):
         prepare_round(self.round, self.user)
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["status"])
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
 
         with self.assertRaisesMessage(ValidationError, "该比赛轮次已锁定"):
             apply_scores(

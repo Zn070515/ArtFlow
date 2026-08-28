@@ -3,6 +3,7 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 from .deletion import cascade_draft_snapshots_or_protect_prepared
 
@@ -98,6 +99,18 @@ class ContestRound(models.Model):
 
     class Meta:
         unique_together = [("activity", "round_type")]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(status="locked", is_locked=True) | (~Q(status="locked") & Q(is_locked=False))
+                ),
+                name="round_status_lock_consistent",
+            ),
+            models.CheckConstraint(
+                condition=Q(advance_count__gte=0),
+                name="round_advance_count_non_negative",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.activity.title} — {self.get_round_type_display()}"

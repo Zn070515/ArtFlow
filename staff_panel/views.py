@@ -66,9 +66,26 @@ from voting.services import (
     unlock_vote_session,
 )
 
+from staff_panel.forms import (
+    ActivityForm,
+    ContestRoundForm,
+    IncidentForm,
+    ProgramReviewForm,
+    PublicPostForm,
+    SingerReviewForm,
+    VoteSessionForm,
+)
+
 
 def _choices(enum_class):
     return enum_class.choices
+
+
+def _form_error(form):
+    for field_errors in form.errors.values():
+        if field_errors:
+            return field_errors[0]
+    return "提交的数据无效。"
 
 
 def _require_admin(user):
@@ -81,48 +98,6 @@ def _active_worksheet(workbook):
     if not isinstance(worksheet, Worksheet):
         raise ValueError("The active workbook sheet must be a worksheet.")
     return worksheet
-
-
-def _get_activity_form_data(request, *, include_lifecycle):
-    data = {
-        "title": request.POST.get("title", "").strip(),
-        "subtitle": request.POST.get("subtitle", "").strip(),
-        "activity_type": request.POST.get("activity_type", Activity.Type.GENERAL),
-        "phase": request.POST.get("phase", Activity.Phase.DRAFT),
-        "description": request.POST.get("description", "").strip(),
-    }
-    if include_lifecycle:
-        data["is_test_mode"] = request.POST.get("is_test_mode") == "on"
-    errors = []
-    if not data["title"]:
-        errors.append("活动标题不能为空")
-    return data, errors
-
-
-def _get_post_form_data(request):
-    """Extract and validate post form data from request, returns (data, errors)."""
-    data = {}
-    errors = []
-
-    title = request.POST.get("title", "").strip()
-    if not title:
-        errors.append("标题不能为空")
-    data["title"] = title
-
-    data["subtitle"] = request.POST.get("subtitle", "").strip()
-    data["content"] = request.POST.get("content", "").strip()
-    data["post_type"] = request.POST.get("post_type", PublicPost.PostType.NORMAL_ARTICLE)
-    data["status"] = request.POST.get("status", PublicPost.Status.DRAFT)
-    data["is_pinned"] = request.POST.get("is_pinned", "") == "on"
-    data["related_activity_id"] = request.POST.get("related_activity_id") or None
-
-    sort_str = request.POST.get("sort_order", "0").strip()
-    try:
-        data["sort_order"] = int(sort_str) if sort_str else 0
-    except ValueError:
-        data["sort_order"] = 0
-
-    return data, errors
 
 
 @staff_required
@@ -140,19 +115,19 @@ def activity_list(request):
 def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
-        data, errors = _get_activity_form_data(request, include_lifecycle=True)
-        if errors:
+        form = ActivityForm(request.POST, include_lifecycle=True)
+        if not form.is_valid():
             return render(
                 request,
                 "staff_panel/activity_form.html",
                 {
-                    "error": errors[0],
+                    "error": _form_error(form),
                     "activity_types": _choices(Activity.Type),
                     "phases": _choices(Activity.Phase),
-                    "data": data,
+                    "data": request.POST,
                 },
             )
-        activity = Activity.objects.create(**data)
+        activity = Activity.objects.create(**form.cleaned_data)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
             activity.save(update_fields=["cover_image"])
@@ -177,20 +152,20 @@ def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     if request.method == "POST":
-        data, errors = _get_activity_form_data(request, include_lifecycle=False)
-        if errors:
+        form = ActivityForm(request.POST)
+        if not form.is_valid():
             return render(
                 request,
                 "staff_panel/activity_form.html",
                 {
-                    "error": errors[0],
+                    "error": _form_error(form),
                     "activity": activity,
                     "activity_types": _choices(Activity.Type),
                     "phases": _choices(Activity.Phase),
-                    "data": data,
+                    "data": request.POST,
                 },
             )
-        for key, value in data.items():
+        for key, value in form.cleaned_data.items():
             setattr(activity, key, value)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
@@ -221,18 +196,19 @@ def post_list(request):
 @staff_required
 def post_create(request):
     if request.method == "POST":
-        data, errors = _get_post_form_data(request)
-        if errors:
+        form = PublicPostForm(request.POST)
+        if not form.is_valid():
             return render(
                 request,
                 "staff_panel/post_form.html",
                 {
-                    "error": errors[0],
+                    "error": _form_error(form),
                     "post_types": _choices(PublicPost.PostType),
                     "statuses": _choices(PublicPost.Status),
                     "activities": Activity.objects.all(),
                 },
             )
+        data = form.cleaned_data
         related_activity = None
         if data["related_activity_id"]:
             related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
@@ -276,19 +252,20 @@ def post_create(request):
 def post_edit(request, pk):
     post = get_object_or_404(PublicPost, pk=pk)
     if request.method == "POST":
-        data, errors = _get_post_form_data(request)
-        if errors:
+        form = PublicPostForm(request.POST)
+        if not form.is_valid():
             return render(
                 request,
                 "staff_panel/post_form.html",
                 {
-                    "error": errors[0],
+                    "error": _form_error(form),
                     "post": post,
                     "post_types": _choices(PublicPost.PostType),
                     "statuses": _choices(PublicPost.Status),
                     "activities": Activity.objects.all(),
                 },
             )
+        data = form.cleaned_data
         old_value = f"status={post.status}; title={post.title}"
         related_activity = None
         if data["related_activity_id"]:
@@ -377,28 +354,29 @@ def singer_registration_detail(request, pk):
                         new_value=submission_file.original_name,
                     )
         else:
-            old_value = f"pre={reg.pre_status}; live={reg.live_status}"
-            if "pre_status" in request.POST:
-                reg.pre_status = request.POST["pre_status"]
-            if "live_status" in request.POST:
-                reg.live_status = request.POST["live_status"]
-            if "staff_note" in request.POST:
-                note = request.POST["staff_note"].strip()
+            form = SingerReviewForm(request.POST)
+            if not form.is_valid():
+                errors = [_form_error(form)]
+            else:
+                old_value = f"pre={reg.pre_status}; live={reg.live_status}"
+                reg.pre_status = form.cleaned_data["pre_status"]
+                reg.live_status = form.cleaned_data["live_status"]
+                note = form.cleaned_data.get("staff_note", "").strip()
                 if note:
                     StaffNote.objects.create(
                         singer_registration=reg,
                         content=note,
                         created_by=request.user,
                     )
-            reg.save()
-            log_action(
-                request,
-                AuditLog.ActionType.UPDATE_STATUS,
-                f"SingerRegistration:{reg.pk}",
-                old_value=old_value,
-                new_value=f"pre={reg.pre_status}; live={reg.live_status}",
-            )
-        return redirect("staff:singer_registration_detail", pk=reg.pk)
+                reg.save()
+                log_action(
+                    request,
+                    AuditLog.ActionType.UPDATE_STATUS,
+                    f"SingerRegistration:{reg.pk}",
+                    old_value=old_value,
+                    new_value=f"pre={reg.pre_status}; live={reg.live_status}",
+                )
+                return redirect("staff:singer_registration_detail", pk=reg.pk)
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
     checks = reg.material_checks.all()
@@ -455,31 +433,29 @@ def program_detail(request, pk):
                         new_value=submission_file.original_name,
                     )
         else:
-            old_value = f"status={prog.status}; sort_order={prog.sort_order}"
-            if "status" in request.POST:
-                prog.status = request.POST["status"]
-            if "sort_order" in request.POST:
-                try:
-                    prog.sort_order = int(request.POST["sort_order"])
-                except ValueError:
-                    pass
-            if "staff_note" in request.POST:
-                note = request.POST["staff_note"].strip()
+            form = ProgramReviewForm(request.POST)
+            if not form.is_valid():
+                errors = [_form_error(form)]
+            else:
+                old_value = f"status={prog.status}; sort_order={prog.sort_order}"
+                prog.status = form.cleaned_data["status"]
+                prog.sort_order = form.cleaned_data["sort_order"]
+                note = form.cleaned_data.get("staff_note", "").strip()
                 if note:
                     StaffNote.objects.create(
                         program=prog,
                         content=note,
                         created_by=request.user,
                     )
-            prog.save()
-            log_action(
-                request,
-                AuditLog.ActionType.REVIEW_MATERIAL,
-                f"Program:{prog.pk}",
-                old_value=old_value,
-                new_value=f"status={prog.status}; sort_order={prog.sort_order}",
-            )
-        return redirect("staff:program_detail", pk=prog.pk)
+                prog.save()
+                log_action(
+                    request,
+                    AuditLog.ActionType.REVIEW_MATERIAL,
+                    f"Program:{prog.pk}",
+                    old_value=old_value,
+                    new_value=f"status={prog.status}; sort_order={prog.sort_order}",
+                )
+                return redirect("staff:program_detail", pk=prog.pk)
     notes = prog.staff_notes.select_related("created_by")
     files = prog.files.all()
     checks = prog.material_checks.all()
@@ -612,14 +588,28 @@ def round_list(request):
 @staff_required
 def round_create(request):
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        form = ContestRoundForm(request.POST)
+        activity = get_object_or_404(Activity, pk=request.POST.get("activity_id"))
         ensure_activity_unlocked(activity)
+        if not form.is_valid():
+            return render(
+                request,
+                "staff_panel/round_form.html",
+                {
+                    "error": _form_error(form),
+                    "activities": Activity.objects.filter(
+                        activity_type=Activity.Type.SINGER_CONTEST
+                    ),
+                    "round_types": _choices(ContestRound.RoundType),
+                    "scoring_modes": _choices(ContestRound.ScoringMode),
+                },
+            )
         contest_round = ContestRound.objects.create(
             activity=activity,
-            round_type=request.POST["round_type"],
-            scoring_mode=request.POST.get("scoring_mode", ContestRound.ScoringMode.AVERAGE),
-            name=request.POST.get("name", ""),
-            advance_count=int(request.POST.get("advance_count", 0) or 0),
+            round_type=form.cleaned_data["round_type"],
+            scoring_mode=form.cleaned_data["scoring_mode"],
+            name=form.cleaned_data["name"],
+            advance_count=form.cleaned_data["advance_count"],
         )
         log_action(
             request,
@@ -867,9 +857,25 @@ def vote_session_list(request):
 @transaction.atomic
 def vote_session_create(request):
     if request.method == "POST":
+        form = VoteSessionForm(request.POST)
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
+        if not form.is_valid():
+            return render(
+                request,
+                "staff_panel/vote_session_form.html",
+                {
+                    "error": _form_error(form),
+                    "activities": Activity.objects.filter(
+                        activity_type=Activity.Type.SINGER_CONTEST
+                    ),
+                    "singers": SingerRegistration.objects.filter(
+                        pre_status=SingerRegistration.PreStatus.APPROVED, is_test_data=False
+                    ),
+                    "selection_types": _choices(VoteSession.SelectionType),
+                },
+            )
         singer_ids = request.POST.getlist("singers")
         if len(singer_ids) != len(set(singer_ids)):
             raise PermissionDenied("Vote options cannot contain duplicate singers.")
@@ -885,12 +891,12 @@ def vote_session_create(request):
             ensure_same_activity(activity, singer, label="Vote option singer")
         vote_session = VoteSession.objects.create(
             activity=activity,
-            name=request.POST["name"],
-            passcode=request.POST["passcode"],
-            start_time=request.POST["start_time"],
-            end_time=request.POST["end_time"],
-            selection_type=request.POST.get("selection_type", VoteSession.SelectionType.SINGLE),
-            max_selections=int(request.POST.get("max_selections", 1) or 1),
+            name=form.cleaned_data["name"],
+            passcode=form.cleaned_data["passcode"],
+            start_time=form.cleaned_data["start_time"],
+            end_time=form.cleaned_data["end_time"],
+            selection_type=form.cleaned_data["selection_type"],
+            max_selections=form.cleaned_data["max_selections"],
             is_test_data=activity.is_test_mode,
         )
         for i, sid in enumerate(singer_ids):
@@ -1791,9 +1797,23 @@ def incident_list(request):
 @transaction.atomic
 def incident_create(request):
     if request.method == "POST":
+        form = IncidentForm(request.POST)
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
+        if not form.is_valid():
+            return render(
+                request,
+                "staff_panel/incident_form.html",
+                {
+                    "error": _form_error(form),
+                    "activities": Activity.objects.all(),
+                    "singers": SingerRegistration.objects.filter(
+                        pre_status=SingerRegistration.PreStatus.APPROVED
+                    ),
+                    "event_types": _choices(IncidentRecord.EventType),
+                },
+            )
         singer = None
         if request.POST.get("singer_id"):
             singer = get_object_or_404(SingerRegistration, pk=request.POST["singer_id"])
@@ -1804,13 +1824,13 @@ def incident_create(request):
             ensure_same_activity(activity, program, label="Incident program")
         incident = IncidentRecord.objects.create(
             activity=activity,
-            occurred_at=request.POST["occurred_at"],
-            event_type=request.POST.get("event_type", IncidentRecord.EventType.OTHER),
+            occurred_at=form.cleaned_data["occurred_at"],
+            event_type=form.cleaned_data["event_type"],
             singer=singer,
             program=program,
             handled_by_id=request.user.pk,
-            resolution=request.POST.get("resolution", ""),
-            remark=request.POST.get("remark", ""),
+            resolution=form.cleaned_data.get("resolution", ""),
+            remark=form.cleaned_data.get("remark", ""),
             is_test=activity.is_test_mode,
         )
         log_action(

@@ -27,6 +27,7 @@ def create_documentation_repository(tmp_path: Path) -> Path:
 
 
 def run_checker(repository_root: Path) -> subprocess.CompletedProcess[str]:
+    assert PWSH is not None  # skipif above guarantees pwsh is available
     return subprocess.run(
         [PWSH, "-NoProfile", "-File", "scripts/check_docs.ps1"],
         cwd=repository_root,
