@@ -1,5 +1,7 @@
+import json
 import os
 import subprocess
+import tarfile
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -32,6 +34,7 @@ from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, StaffNote, SubmissionFile
+from files.services import store_submission_file
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from singer_contest.models import (
@@ -45,6 +48,14 @@ from singer_contest.models import (
     SingerRegistration,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
+
+from common.management.commands.backup_artflow import (
+    apply_migration_heads,
+    collect_counts,
+    create_media_archive,
+    media_content_digest,
+)
+from common.management.commands.verify_app_backup import validate_counts
 
 from . import models as common_models
 from .business_rules import ensure_same_activity
@@ -1204,3 +1215,115 @@ class DemoSeedCommandTests(TestCase):
         self.assertTrue(Program.objects.filter(pk=program.pk).exists())
         self.assertTrue(MaterialCheck.objects.filter(pk=unowned_check.pk).exists())
         self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
+
+class AppBackupVerificationTests(TestCase):
+    def setUp(self):
+        self._media = TemporaryDirectory()
+        self._manifest = TemporaryDirectory()
+        self._override = override_settings(MEDIA_ROOT=self._media.name)
+        self._override.enable()
+        self.user = User.objects.create_user(username="backup-participant", password="pass")
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Singer",
+            student_id="20260002",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+
+    def tearDown(self):
+        self._override.disable()
+        self._media.cleanup()
+        self._manifest.cleanup()
+
+    def test_collect_counts_reflects_runtime_records(self):
+        counts = collect_counts()
+        self.assertGreaterEqual(counts["activities"], 1)
+        self.assertEqual(counts["registrations"], 1)
+
+    def test_media_content_digest_is_stable_and_sensitive_to_content(self):
+        root = Path(self._media.name)
+        (root / "a.txt").write_text("hello", encoding="utf-8")
+        nested = root / "nested"
+        nested.mkdir()
+        (nested / "b.txt").write_text("world", encoding="utf-8")
+
+        first = media_content_digest(root)
+        self.assertEqual(first, media_content_digest(root))
+        (root / "c.txt").write_text("x", encoding="utf-8")
+        self.assertNotEqual(first, media_content_digest(root))
+
+    def test_create_media_archive_skips_excluded_directory(self):
+        root = Path(self._media.name)
+        media = root / "media"
+        include_dir = media / "include"
+        exclude_dir = media / "exclude"
+        include_dir.mkdir(parents=True)
+        exclude_dir.mkdir(parents=True)
+        (include_dir / "f.txt").write_text("f", encoding="utf-8")
+        (exclude_dir / "g.txt").write_text("g", encoding="utf-8")
+        output_dir = root / "out"
+        output_dir.mkdir()
+        archive_path = output_dir / "media.tar.gz"
+
+        create_media_archive(media, archive_path, exclude_dir)
+
+        with tarfile.open(archive_path, "r:gz") as archive:
+            names = archive.getnames()
+        self.assertIn("include/f.txt", names)
+        self.assertNotIn("exclude/g.txt", names)
+
+    def test_validate_counts_reports_mismatch(self):
+        problems = validate_counts({"counts": {"activities": 1}}, {"activities": 2})
+        self.assertEqual(problems, ["activities: expected 1, restored 2"])
+
+    def test_backup_artflow_requires_postgresql(self):
+        self.assertFalse(settings.DATABASES["default"]["ENGINE"].endswith("postgresql"))
+        with self.assertRaises(CommandError):
+            call_command("backup_artflow", "--output", str(Path(self._media.name) / "bk"))
+
+    def test_verify_app_backup_passes_when_manifest_matches(self):
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+        head, _applied, _count = apply_migration_heads()
+        manifest = {
+            "django_migration_head": head,
+            "media_content_sha256": media_content_digest(Path(settings.MEDIA_ROOT)),
+            "counts": collect_counts(),
+        }
+        manifest_path = Path(self._manifest.name) / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        output = StringIO()
+        call_command("verify_app_backup", "--manifest", str(manifest_path), stdout=output)
+
+        self.assertIn("restore verification passed", output.getvalue())
+
+    def test_verify_app_backup_fails_when_media_digest_differs(self):
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+        manifest = {
+            "media_content_sha256": "0" * 64,
+            "counts": collect_counts(),
+        }
+        manifest_path = Path(self._manifest.name) / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        with self.assertRaises(CommandError):
+            call_command("verify_app_backup", "--manifest", str(manifest_path))
