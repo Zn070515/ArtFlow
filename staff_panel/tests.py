@@ -28,7 +28,7 @@ from singer_contest.models import (
     ScoreSummary,
     SingerRegistration,
 )
-from singer_contest.services import prepare_round
+from singer_contest.services import apply_scores, prepare_round
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 
@@ -136,7 +136,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Activity.objects.filter(title="New Contest").exists())
 
-    def test_formal_activity_toggle_is_rejected_without_mutating_lifecycle(self):
+    def test_formal_activity_cannot_be_reopened_in_test_mode(self):
         formal_activity = Activity.objects.create(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -376,6 +376,47 @@ class StaffPanelSmokeTests(TestCase):
                 action_type=AuditLog.ActionType.UPDATE_STATUS,
                 target=f"ContestRound:{round_.pk}",
             ).exists()
+        )
+
+    def test_formal_score_update_stays_formal(self):
+        formal_activity = Activity.objects.create(
+            title="Formal Score Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        registration = SingerRegistration.objects.create(
+            activity=formal_activity,
+            user=self.participant,
+            name="Formal Scored Singer",
+            student_id="20260019",
+            college="Info",
+            class_name="CS1",
+            phone="13800000018",
+            song_name="Formal Score Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        judge = Judge.objects.create(activity=formal_activity, name="Formal Score Judge")
+        round_ = ContestRound.objects.create(
+            activity=formal_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        ScoreRecord.objects.create(
+            round=round_,
+            singer=registration,
+            judge=judge,
+            score=91,
+            is_test_data=True,
+        )
+
+        apply_scores(round_, {(registration.pk, judge.pk): "91"}, self.staff)
+
+        self.assertFalse(
+            ScoreRecord.objects.get(round=round_, singer=registration, judge=judge).is_test_data
+        )
+        self.assertFalse(
+            ScoreSummary.objects.get(round=round_, singer=registration).is_test_data
         )
 
     def test_unprepared_round_cannot_accept_scores(self):
@@ -619,7 +660,7 @@ class StaffPanelSmokeTests(TestCase):
             ).exists()
         )
 
-    def test_clear_test_data_preserves_formal_records(self):
+    def test_test_cleanup_cannot_delete_formal_registration(self):
         formal_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -668,6 +709,33 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(VoteSession.objects.filter(name="Formal Vote").exists())
         self.assertFalse(VoteSession.objects.filter(name="Test Vote").exists())
 
+    def test_formal_file_creation_stays_formal(self):
+        formal_activity = Activity.objects.create(
+            title="Formal File Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        registration = SingerRegistration.objects.create(
+            activity=formal_activity,
+            user=self.participant,
+            name="Formal File Singer",
+            student_id="20260020",
+            college="Info",
+            class_name="CS1",
+            phone="13800000019",
+            song_name="Formal File Song",
+            is_test_data=False,
+        )
+
+        submission = store_submission_file(
+            owner=registration,
+            uploaded_file=SimpleUploadedFile("formal.mp3", b"audio", content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.participant,
+        )
+
+        self.assertFalse(submission.is_test_data)
+
     def test_leaving_test_mode_rejects_residual_test_data(self):
         test_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
@@ -708,7 +776,6 @@ class StaffPanelSmokeTests(TestCase):
             uploaded_file=SimpleUploadedFile("test.mp3", b"audio", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.participant,
-            is_test_data=True,
         )
         stored_name = submission.file.name
         self.client.force_login(self.admin)

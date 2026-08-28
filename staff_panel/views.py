@@ -10,7 +10,11 @@ from common.business_rules import (
     ensure_vote_session_unlocked,
 )
 from common.models import AuditLog
-from common.test_data import clear_activity_test_data, leave_test_mode
+from common.test_data import (
+    clear_activity_test_data,
+    leave_test_mode,
+    lock_activity_for_runtime_data,
+)
 from core.models import Activity
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -352,7 +356,6 @@ def singer_registration_detail(request, pk):
                         uploaded_file=f,
                         purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                         uploaded_by=request.user,
-                        is_test_data=reg.is_test_data or reg.activity.is_test_mode,
                     )
                 except ValidationError as error:
                     errors.extend(error.messages)
@@ -431,7 +434,6 @@ def program_detail(request, pk):
                         uploaded_file=f,
                         purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                         uploaded_by=request.user,
-                        is_test_data=prog.is_test_data or prog.activity.is_test_mode,
                     )
                 except ValidationError as error:
                     errors.extend(error.messages)
@@ -788,9 +790,11 @@ def award_list(request):
 
 
 @staff_member_required
+@transaction.atomic
 def award_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         singer_id = request.POST.get("singer_id")
         if singer_id:
@@ -836,6 +840,7 @@ def vote_session_list(request):
 def vote_session_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         singer_ids = request.POST.getlist("singers")
         if len(singer_ids) != len(set(singer_ids)):
@@ -865,6 +870,7 @@ def vote_session_create(request):
                 vote_session=vote_session,
                 singer_id=sid,
                 sort_order=i,
+                is_test_data=activity.is_test_mode,
             )
         log_action(
             request,
@@ -1751,9 +1757,11 @@ def incident_list(request):
 
 
 @staff_member_required
+@transaction.atomic
 def incident_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         singer = None
         if request.POST.get("singer_id"):
@@ -1831,7 +1839,7 @@ def activity_test_toggle(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     if not activity.is_test_mode:
-        raise PermissionDenied("Formal activities cannot re-enter test mode.")
+        raise PermissionDenied("Formal activities cannot re-enter test mode. Clone the activity instead.")
     leave_test_mode(
         activity,
         operator=request.user,

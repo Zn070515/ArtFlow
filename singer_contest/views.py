@@ -1,6 +1,7 @@
 from common.audit import log_action
 from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
+from common.test_data import lock_activity_for_runtime_data
 from core.models import Activity
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -39,6 +40,7 @@ def apply_view(request):
                 {"activities": activities, "errors": errors},
             )
         with transaction.atomic():
+            activity = lock_activity_for_runtime_data(activity)
             reg = SingerRegistration(
                 activity=activity,
                 user=request.user,
@@ -63,7 +65,6 @@ def apply_view(request):
                     uploaded_file=accompaniment,
                     purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                     uploaded_by=request.user,
-                    is_test_data=reg.is_test_data,
                 )
             performance_video = request.FILES.get("performance_video")
             if performance_video:
@@ -72,7 +73,6 @@ def apply_view(request):
                     uploaded_file=performance_video,
                     purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
                     uploaded_by=request.user,
-                    is_test_data=reg.is_test_data,
                 )
             sync_singer_material_checks(reg)
             log_action(
@@ -99,7 +99,6 @@ def my_submission_view(request):
                     uploaded_file=f,
                     purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                     uploaded_by=request.user,
-                    is_test_data=reg.is_test_data or reg.activity.is_test_mode,
                 )
             except ValidationError as error:
                 errors.extend(error.messages)

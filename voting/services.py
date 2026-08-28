@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from common.test_data import lock_activity_for_runtime_data
+
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
@@ -39,6 +41,7 @@ def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
 
     with transaction.atomic():
         locked_session = VoteSession.objects.select_for_update().get(pk=vote_session.pk)
+        locked_activity = lock_activity_for_runtime_data(locked_session.activity)
         ballot = VoteBallot.objects.filter(
             vote_session=locked_session, browser_session_key=browser_session_key
         ).first()
@@ -50,7 +53,7 @@ def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
                     vote_session=locked_session,
                     browser_session_key=browser_session_key,
                     ip_address=ip_address,
-                    is_test_data=locked_session.is_test_data,
+                    is_test_data=locked_activity.is_test_mode,
                 )
         except IntegrityError:
             return VoteBallot.objects.get(
@@ -64,7 +67,7 @@ def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
                 vote_option=option,
                 browser_session_key=browser_session_key,
                 ip_address=ip_address,
-                is_test_data=locked_session.is_test_data,
+                is_test_data=locked_activity.is_test_mode,
             )
         return ballot
 

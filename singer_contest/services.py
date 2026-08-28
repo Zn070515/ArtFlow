@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 from common.models import AuditLog
+from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
@@ -244,6 +245,7 @@ def apply_scores(
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
+    locked_round.activity = lock_activity_for_runtime_data(locked_round.activity)
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备比赛轮次后再评分。")
     if locked_round.status == ContestRound.Status.LOCKED:
@@ -260,7 +262,7 @@ def apply_scores(
             round=locked_round, singer_id=singer_id, judge_id=judge_id
         ).first()
         old_score = record.score if record else None
-        if old_score == score:
+        if old_score == score and record.is_test_data == locked_round.activity.is_test_mode:
             continue
         ScoreRecord.objects.update_or_create(
             round=locked_round,
