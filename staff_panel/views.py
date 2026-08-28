@@ -854,12 +854,12 @@ def round_lock(request, pk):
     missing_cells = missing_score_cells(contest_round)
     if missing_cells:
         raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
+    if contest_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
+        raise PermissionDenied("晋级线存在同分，请先人工核定晋级名单。")
     contest_round.is_locked = True
     contest_round.status = ContestRound.Status.LOCKED
     contest_round.save(update_fields=["is_locked", "status"])
     log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"ContestRound:{contest_round.pk}")
-    if contest_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
-        messages.warning(request, "晋级线存在同分，请人工核定晋级名单。")
     return redirect("staff:round_ranking", pk=pk)
 
 

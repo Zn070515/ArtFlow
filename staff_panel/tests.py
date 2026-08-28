@@ -2110,6 +2110,78 @@ class StaffPanelSmokeTests(TestCase):
         round_.refresh_from_db()
         self.assertFalse(round_.is_locked)
 
+    def _make_boundary_tie_round(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Tie Singer",
+            student_id="20260021",
+            college="Info",
+            class_name="CS1",
+            phone="13800000020",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        extra_user = User.objects.create_user(username="participant-tie", password="pass")
+        extra = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=extra_user,
+            name="Tie Extra",
+            student_id="20260022",
+            college="Info",
+            class_name="CS1",
+            phone="13800000021",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Judge A", is_active=True)
+        round_ = ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=1,
+        )
+        prepare_round(round_, self.staff)
+        judge_ids = list(RoundJudge.objects.filter(round=round_).values_list("judge_id", flat=True))
+        score_values = {}
+        for judge_id in judge_ids:
+            score_values[(singer.pk, judge_id)] = 91
+            score_values[(extra.pk, judge_id)] = 91
+        apply_scores(round_, score_values, self.staff)
+        round_.refresh_from_db()
+        self.assertEqual(round_.advancement_status, ContestRound.AdvancementStatus.NEEDS_REVIEW)
+        return round_, singer, extra
+
+    def test_round_lock_rejects_boundary_tie_until_finalized(self):
+        round_, singer, _extra = self._make_boundary_tie_round()
+        self.client.force_login(self.staff)
+
+        lock_response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+        self.assertEqual(lock_response.status_code, 403)
+        round_.refresh_from_db()
+        self.assertFalse(round_.is_locked)
+        self.assertNotEqual(round_.status, ContestRound.Status.LOCKED)
+
+        finalize_response = self.client.post(
+            reverse("staff:round_finalize_advancement", args=[round_.pk]),
+            data={"selected_singer_ids": [str(singer.pk)]},
+        )
+        self.assertEqual(finalize_response.status_code, 302)
+        round_.refresh_from_db()
+        self.assertEqual(round_.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
+
+        relock_response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
+        self.assertEqual(relock_response.status_code, 302)
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.LOCKED)
+        self.assertTrue(round_.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.staff,
+                action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
+                target=f"ContestRound:{round_.pk}",
+            ).exists()
+        )
+
     def test_award_creation_rejects_singer_from_another_activity(self):
         foreign_singer = SingerRegistration.objects.create(
             activity=self.singer_activity,

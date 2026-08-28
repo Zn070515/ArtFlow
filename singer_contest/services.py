@@ -4,6 +4,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
+from common.business_rules import ensure_round_unlocked
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
@@ -393,6 +394,7 @@ def finalize_advancement(
     )
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备并完成比赛轮次后再核定晋级名单。")
+    ensure_round_unlocked(locked_round)
     if missing_score_cells(locked_round):
         raise ValidationError("评分尚未完成，无法核定晋级名单。")
     entrants = set(_eligible_singers(locked_round).values_list("pk", flat=True))
@@ -401,6 +403,9 @@ def finalize_advancement(
         raise ValidationError("请选择至少一名晋级选手。")
     if not selected <= entrants:
         raise ValidationError("晋级选手必须属于当前轮次。")
+    advance_count = locked_round.advance_count
+    if advance_count and len(selected) != advance_count:
+        raise ValidationError(f"晋级核定人数必须等于该轮晋级名额（{advance_count} 人）。")
 
     old_advanced = set(
         ScoreSummary.objects.filter(round=locked_round, is_advanced=True).values_list(

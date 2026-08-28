@@ -5,7 +5,7 @@ from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
 from django.contrib import admin
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
@@ -445,6 +445,28 @@ class ScoringServiceTests(TestCase):
         outsider = self.make_singer(student_id="outsider")
         with self.assertRaisesMessage(ValidationError, "晋级选手必须属于当前轮次"):
             finalize_advancement(self.round, [outsider.pk], self.user)
+
+    def test_finalize_advancement_rejects_locked_round(self):
+        self._prepare_boundary_tie_round()
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+        with self.assertRaises(PermissionDenied):
+            finalize_advancement(self.round, [self.singer.pk], self.user)
+
+    def test_finalize_advancement_rejects_locked_activity(self):
+        self._prepare_boundary_tie_round()
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        with self.assertRaises(PermissionDenied):
+            finalize_advancement(self.round, [self.singer.pk], self.user)
+
+    def test_finalize_advancement_requires_exact_advance_count(self):
+        self._prepare_boundary_tie_round()
+        with self.assertRaisesMessage(
+            ValidationError, "晋级核定人数必须等于该轮晋级名额（2 人）。"
+        ):
+            finalize_advancement(self.round, [self.singer.pk], self.user)
 
     def test_advancement_without_boundary_tie_stays_auto(self):
         self._lock_scored_round(self.round, singer_count=4, advance_count=2)
