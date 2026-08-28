@@ -17,6 +17,8 @@ from common.test_data import (
     lock_activity_for_runtime_data,
 )
 from core.models import Activity
+from core.policies import ActivityAction, ensure_activity_action_allowed
+from core.services import transition_activity_phase
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -148,6 +150,7 @@ def activity_create(request):
 
 
 @admin_required
+@transaction.atomic
 def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
@@ -165,7 +168,11 @@ def activity_edit(request, pk):
                     "data": request.POST,
                 },
             )
-        for key, value in form.cleaned_data.items():
+        data = dict(form.cleaned_data)
+        target_phase = data.pop("phase")
+        if target_phase != activity.phase:
+            activity = transition_activity_phase(activity, target_phase, actor=request.user)
+        for key, value in data.items():
             setattr(activity, key, value)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
@@ -334,6 +341,7 @@ def singer_registration_detail(request, pk):
     if request.method == "POST":
         ensure_activity_unlocked(reg.activity)
         if "upload_file" in request.POST:
+            ensure_activity_action_allowed(reg.activity, ActivityAction.UPLOAD_MATERIAL)
             f = request.FILES.get("file")
             if f:
                 try:
@@ -354,6 +362,7 @@ def singer_registration_detail(request, pk):
                         new_value=submission_file.original_name,
                     )
         else:
+            ensure_activity_action_allowed(reg.activity, ActivityAction.REVIEW_REGISTRATION)
             form = SingerReviewForm(request.POST)
             if not form.is_valid():
                 errors = [_form_error(form)]
@@ -413,6 +422,7 @@ def program_detail(request, pk):
     if request.method == "POST":
         ensure_activity_unlocked(prog.activity)
         if "upload_file" in request.POST:
+            ensure_activity_action_allowed(prog.activity, ActivityAction.UPLOAD_MATERIAL)
             f = request.FILES.get("file")
             if f:
                 try:
@@ -433,6 +443,7 @@ def program_detail(request, pk):
                         new_value=submission_file.original_name,
                     )
         else:
+            ensure_activity_action_allowed(prog.activity, ActivityAction.REVIEW_REGISTRATION)
             form = ProgramReviewForm(request.POST)
             if not form.is_valid():
                 errors = [_form_error(form)]
@@ -636,6 +647,7 @@ def round_create(request):
 def round_prepare(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
     ensure_activity_unlocked(contest_round.activity)
+    ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
     prepare_round(contest_round, request.user)
     return redirect("staff:round_list")
 
@@ -659,6 +671,7 @@ def round_score_entry(request, pk):
     errors = []
     if request.method == "POST":
         ensure_round_unlocked(contest_round)
+        ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
         score_values = {}
         for singer in singers:
             for judge in judges:
@@ -718,6 +731,7 @@ def round_lock(request, pk):
     contest_round = get_object_or_404(
         ContestRound.objects.select_for_update().select_related("activity"), pk=pk
     )
+    ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
     if (
         contest_round.status
         not in {
@@ -815,6 +829,7 @@ def award_create(request):
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
+        ensure_activity_action_allowed(activity, ActivityAction.MANAGE_AWARD)
         singer_id = request.POST.get("singer_id")
         if singer_id:
             singer = get_object_or_404(SingerRegistration, pk=singer_id)
@@ -861,6 +876,7 @@ def vote_session_create(request):
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
+        ensure_activity_action_allowed(activity, ActivityAction.MANAGE_VOTE)
         if not form.is_valid():
             return render(
                 request,
@@ -951,7 +967,8 @@ def vote_session_detail(request, pk):
 @staff_required
 @require_POST
 def vote_session_open(request, pk):
-    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
+    ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
     open_vote_session(vote_session, request.user)
     return redirect("staff:vote_session_detail", pk=pk)
 
@@ -959,7 +976,8 @@ def vote_session_open(request, pk):
 @staff_required
 @require_POST
 def vote_session_close(request, pk):
-    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
+    ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
     close_vote_session(vote_session, request.user)
     return redirect("staff:vote_session_detail", pk=pk)
 
@@ -968,7 +986,8 @@ def vote_session_close(request, pk):
 @require_POST
 @transaction.atomic
 def vote_session_lock(request, pk):
-    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
+    ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
     lock_vote_session(vote_session, request.user)
     _generate_popularity_award(vote_session)
     return redirect("staff:vote_session_detail", pk=pk)

@@ -17,6 +17,7 @@ class AuditLog(models.Model):
         PUBLISH_POST = "publish_post", "发布/隐藏公开内容"
         UNLOCK_RESULT = "unlock_result", "解锁结果"
         RELOCK_RESULT = "relock_result", "重新锁定结果"
+        PHASE_TRANSITION = "phase_transition", "阶段变更"
         UPDATE_PERMISSION = "update_permission", "修改用户权限"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
         OTHER = "other", "其他"

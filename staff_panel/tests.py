@@ -2156,3 +2156,144 @@ class AdminAuthBoundaryTests(TestCase):
         self.client.force_login(self.participant)
         response = self.client.get(reverse("staff:dashboard"))
         self.assertEqual(response.status_code, 403)
+
+
+class ActivityPhaseEditTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="phase-admin",
+            password="pass",
+            role=User.Role.ADMIN,
+        )
+
+    def test_admin_edit_advances_phase_through_service(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.DRAFT,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Contest",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.REGISTRATION_OPEN)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.PHASE_TRANSITION,
+                operator=self.admin,
+                old_value=Activity.Phase.DRAFT,
+                new_value=Activity.Phase.REGISTRATION_OPEN,
+            ).exists()
+        )
+
+    def test_admin_edit_rejects_backward_phase_transition(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.LIVE,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Contest",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.DRAFT,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.LIVE)
+
+
+class ActivityPhaseViewEnforcementTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="enforce-staff",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        self.participant = User.objects.create_user(
+            username="enforce-participant",
+            password="pass",
+            role=User.Role.PARTICIPANT,
+        )
+
+    def _approved_registration(self, activity, student_id="20260001", is_test_data=True):
+        return SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Singer",
+            student_id=student_id,
+            college="Music",
+            class_name="Class A",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=is_test_data,
+        )
+
+    def test_draft_activity_cannot_enter_scores(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        registration = self._approved_registration(activity)
+        judge = Judge.objects.create(activity=activity, name="Judge A")
+        round_ = ContestRound.objects.create(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            scoring_mode=ContestRound.ScoringMode.AVERAGE,
+        )
+        prepare_round(round_, self.staff)
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:round_score_entry", args=[round_.pk]),
+            {f"score_{registration.pk}_{judge.pk}": "90"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_archived_activity_cannot_review_registration(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+        )
+        registration = self._approved_registration(activity)
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:singer_registration_detail", args=[registration.pk]),
+            {
+                "pre_status": SingerRegistration.PreStatus.APPROVED,
+                "live_status": SingerRegistration.LiveStatus.NOT_CHECKED_IN,
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_results_published_activity_cannot_change_registration_status(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+        )
+        registration = self._approved_registration(activity)
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:singer_registration_detail", args=[registration.pk]),
+            {
+                "pre_status": SingerRegistration.PreStatus.APPROVED,
+                "live_status": SingerRegistration.LiveStatus.SCORED,
+            },
+        )
+        self.assertEqual(response.status_code, 403)

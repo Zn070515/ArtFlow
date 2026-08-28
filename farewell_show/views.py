@@ -3,6 +3,7 @@ from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from core.models import Activity
+from core.policies import ActivityAction, ensure_activity_action_allowed
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -22,6 +23,7 @@ def apply_view(request):
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         ensure_activity_unlocked(activity)
+        ensure_activity_action_allowed(activity, ActivityAction.SUBMIT_REGISTRATION)
         upload_map = {
             "accompaniment": SubmissionFile.Purpose.ACCOMPANIMENT,
             "background_video": SubmissionFile.Purpose.BACKGROUND_VIDEO,
