@@ -10,7 +10,7 @@ from unittest.mock import patch
 from django.core.checks import Error
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, connections
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
 DEVELOPMENT_SECRET_KEY = "django-insecure-dev-only-change-me"
 
@@ -304,6 +304,20 @@ class SettingsTests(SimpleTestCase):
                     environment, result = self.run_production_startup(command)
 
                     self.assert_incomplete_production_startup_is_rejected(environment, result)
+
+    def test_production_does_not_route_django_admin(self):
+        from django.urls import clear_url_caches
+
+        import config.urls
+
+        with override_settings(APP_ENV="production"):
+            importlib.reload(config.urls)
+            clear_url_caches()
+            response = self.client.get("/admin/login/")
+        self.assertEqual(response.status_code, 404)
+
+        importlib.reload(config.urls)
+        clear_url_caches()
 
     def test_valid_production_environment_allows_django_setup_with_postgresql(self):
         environment, result = self.run_production_startup(

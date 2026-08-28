@@ -1,6 +1,7 @@
 import io
 import zipfile
 
+from accounts.decorators import admin_required, staff_required
 from archive.models import ArchivePackage
 from common.audit import log_action
 from common.business_rules import (
@@ -16,7 +17,6 @@ from common.test_data import (
     lock_activity_for_runtime_data,
 )
 from core.models import Activity
-from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -116,18 +116,18 @@ def _get_post_form_data(request):
     return data, errors
 
 
-@staff_member_required
+@staff_required
 def dashboard(request):
     return render(request, "staff_panel/dashboard.html")
 
 
-@staff_member_required
+@staff_required
 def activity_list(request):
     activities = Activity.objects.all()
     return render(request, "staff_panel/activity_list.html", {"activities": activities})
 
 
-@staff_member_required
+@admin_required
 def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
@@ -163,7 +163,7 @@ def activity_create(request):
     )
 
 
-@staff_member_required
+@admin_required
 def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
@@ -203,13 +203,13 @@ def activity_edit(request, pk):
     )
 
 
-@staff_member_required
+@staff_required
 def post_list(request):
     posts = PublicPost.objects.all()
     return render(request, "staff_panel/post_list.html", {"posts": posts})
 
 
-@staff_member_required
+@staff_required
 def post_create(request):
     if request.method == "POST":
         data, errors = _get_post_form_data(request)
@@ -263,7 +263,7 @@ def post_create(request):
     )
 
 
-@staff_member_required
+@staff_required
 def post_edit(request, pk):
     post = get_object_or_404(PublicPost, pk=pk)
     if request.method == "POST":
@@ -329,7 +329,7 @@ def post_edit(request, pk):
 # --- Singer registration management ---
 
 
-@staff_member_required
+@staff_required
 def singer_registration_list(request):
     registrations = SingerRegistration.objects.select_related("activity", "user")
     return render(
@@ -341,7 +341,7 @@ def singer_registration_list(request):
     )
 
 
-@staff_member_required
+@staff_required
 def singer_registration_detail(request, pk):
     reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
     errors = []
@@ -413,13 +413,13 @@ def singer_registration_detail(request, pk):
 # --- Program management ---
 
 
-@staff_member_required
+@staff_required
 def program_list(request):
     programs = Program.objects.select_related("activity", "user")
     return render(request, "staff_panel/program_list.html", {"programs": programs})
 
 
-@staff_member_required
+@staff_required
 def program_detail(request, pk):
     prog = get_object_or_404(Program.objects.select_related("activity", "user"), pk=pk)
     errors = []
@@ -494,7 +494,7 @@ def program_detail(request, pk):
 # --- Excel export ---
 
 
-@staff_member_required
+@staff_required
 def export_registrations(request):
     wb = Workbook()
     ws = _active_worksheet(wb)
@@ -540,7 +540,7 @@ def export_registrations(request):
     return response
 
 
-@staff_member_required
+@staff_required
 def export_programs(request):
     wb = Workbook()
     ws = _active_worksheet(wb)
@@ -591,7 +591,7 @@ def export_programs(request):
 # --- Singer contest scoring ---
 
 
-@staff_member_required
+@staff_required
 def round_list(request):
     rounds = ContestRound.objects.select_related("activity").annotate(
         entry_count=Count("entries", distinct=True),
@@ -600,7 +600,7 @@ def round_list(request):
     return render(request, "staff_panel/round_list.html", {"rounds": rounds})
 
 
-@staff_member_required
+@staff_required
 def round_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
@@ -632,7 +632,7 @@ def round_create(request):
     )
 
 
-@staff_member_required
+@staff_required
 @require_POST
 def round_prepare(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
@@ -641,7 +641,7 @@ def round_prepare(request, pk):
     return redirect("staff:round_list")
 
 
-@staff_member_required
+@staff_required
 def round_score_entry(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     if contest_round.status == ContestRound.Status.DRAFT:
@@ -692,7 +692,7 @@ def round_score_entry(request, pk):
     )
 
 
-@staff_member_required
+@staff_required
 def round_ranking(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     summaries = ScoreSummary.objects.filter(
@@ -712,7 +712,7 @@ def round_ranking(request, pk):
     )
 
 
-@staff_member_required
+@staff_required
 @require_POST
 @transaction.atomic
 def round_lock(request, pk):
@@ -740,7 +740,7 @@ def round_lock(request, pk):
     return redirect("staff:round_ranking", pk=pk)
 
 
-@staff_member_required
+@admin_required
 @require_POST
 @transaction.atomic
 def round_unlock(request, pk):
@@ -765,13 +765,13 @@ def round_unlock(request, pk):
     return redirect("staff:round_ranking", pk=pk)
 
 
-@staff_member_required
+@staff_required
 def judge_list(request):
     judges = Judge.objects.select_related("activity")
     return render(request, "staff_panel/judge_list.html", {"judges": judges})
 
 
-@staff_member_required
+@staff_required
 def judge_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
@@ -787,13 +787,13 @@ def judge_create(request):
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
 
 
-@staff_member_required
+@staff_required
 def award_list(request):
     awards = Award.objects.select_related("singer", "activity")
     return render(request, "staff_panel/award_list.html", {"awards": awards})
 
 
-@staff_member_required
+@staff_required
 @transaction.atomic
 def award_create(request):
     if request.method == "POST":
@@ -833,13 +833,13 @@ def award_create(request):
 # --- Vote session management ---
 
 
-@staff_member_required
+@staff_required
 def vote_session_list(request):
     sessions = VoteSession.objects.select_related("activity")
     return render(request, "staff_panel/vote_session_list.html", {"sessions": sessions})
 
 
-@staff_member_required
+@staff_required
 @transaction.atomic
 def vote_session_create(request):
     if request.method == "POST":
@@ -900,7 +900,7 @@ def vote_session_create(request):
     )
 
 
-@staff_member_required
+@staff_required
 def vote_session_detail(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
     options = vote_session.options.select_related("singer")
@@ -919,7 +919,7 @@ def vote_session_detail(request, pk):
     )
 
 
-@staff_member_required
+@staff_required
 @require_POST
 def vote_session_toggle(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
@@ -937,7 +937,7 @@ def vote_session_toggle(request, pk):
     return redirect("staff:vote_session_detail", pk=pk)
 
 
-@staff_member_required
+@staff_required
 @require_POST
 @transaction.atomic
 def vote_session_lock(request, pk):
@@ -950,7 +950,7 @@ def vote_session_lock(request, pk):
     return redirect("staff:vote_session_detail", pk=pk)
 
 
-@staff_member_required
+@admin_required
 @require_POST
 def vote_session_unlock(request, pk):
     _require_admin(request.user)
@@ -969,7 +969,7 @@ def vote_session_unlock(request, pk):
     return redirect("staff:vote_session_detail", pk=pk)
 
 
-@staff_member_required
+@staff_required
 def vote_session_export(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
     wb = Workbook()
@@ -1031,19 +1031,19 @@ def _generate_popularity_award(vote_session):
 # --- QR code center ---
 
 
-@staff_member_required
+@staff_required
 def qr_center(request):
     activities = Activity.objects.all()
     return render(request, "staff_panel/qr_center.html", {"activities": activities})
 
 
-@staff_member_required
+@staff_required
 def qr_generate(request, pk):
     activity = get_object_or_404(Activity, pk=pk)
     return render(request, "staff_panel/qr_detail.html", {"activity": activity})
 
 
-@staff_member_required
+@staff_required
 def qr_image(request, pk, kind):
     activity = get_object_or_404(Activity, pk=pk)
     if kind == "registration":
@@ -1071,7 +1071,7 @@ def qr_image(request, pk, kind):
 # --- Export center ---
 
 
-@staff_member_required
+@staff_required
 def export_center(request):
     activities = Activity.objects.all()
     templates = ArticleTemplate.objects.all()
@@ -1085,7 +1085,7 @@ def export_center(request):
     )
 
 
-@staff_member_required
+@staff_required
 def _legacy_excel_material_checklist(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     wb = Workbook()
@@ -1112,7 +1112,7 @@ def _legacy_excel_material_checklist(request, activity_id):
     return response
 
 
-@staff_member_required
+@staff_required
 def excel_material_checklist(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     wb = Workbook()
@@ -1151,7 +1151,7 @@ def excel_material_checklist(request, activity_id):
     return response
 
 
-@staff_member_required
+@staff_required
 def excel_score_template(request, round_id):
     contest_round = get_object_or_404(ContestRound, pk=round_id)
     singers = _eligible_singers(contest_round)
@@ -1174,7 +1174,7 @@ def excel_score_template(request, round_id):
     return response
 
 
-@staff_member_required
+@staff_required
 def excel_import_scores(request, round_id):
     contest_round = get_object_or_404(ContestRound, pk=round_id)
     errors = []
@@ -1204,7 +1204,7 @@ def excel_import_scores(request, round_id):
 # --- Word generation ---
 
 
-@staff_member_required
+@staff_required
 @require_POST
 def word_generate(request, template_id, activity_id):
     template = get_object_or_404(ArticleTemplate, pk=template_id)
@@ -1266,7 +1266,7 @@ def word_generate(request, template_id, activity_id):
 # --- Execution & archive packages ---
 
 
-@staff_member_required
+@staff_required
 def execution_package(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     buf = io.BytesIO()
@@ -1282,7 +1282,7 @@ def execution_package(request, activity_id):
     return response
 
 
-@staff_member_required
+@staff_required
 @require_POST
 def archive_package_create(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
@@ -1760,13 +1760,13 @@ def _complete_activity_excel_generators(activity):
 # --- Incident records ---
 
 
-@staff_member_required
+@staff_required
 def incident_list(request):
     incidents = IncidentRecord.objects.select_related("activity", "singer", "handled_by")
     return render(request, "staff_panel/incident_list.html", {"incidents": incidents})
 
 
-@staff_member_required
+@staff_required
 @transaction.atomic
 def incident_create(request):
     if request.method == "POST":
@@ -1812,7 +1812,7 @@ def incident_create(request):
     )
 
 
-@staff_member_required
+@staff_required
 def incident_export(request):
     wb = Workbook()
     ws = _active_worksheet(wb)
@@ -1843,7 +1843,7 @@ def incident_export(request):
 # --- Test mode management ---
 
 
-@staff_member_required
+@admin_required
 @require_POST
 def activity_test_toggle(request, pk):
     _require_admin(request.user)
@@ -1861,7 +1861,7 @@ def activity_test_toggle(request, pk):
     return redirect("staff:export_center")
 
 
-@staff_member_required
+@admin_required
 @require_POST
 def activity_clear_test_data(request, pk):
     _require_admin(request.user)
@@ -1875,7 +1875,7 @@ def activity_clear_test_data(request, pk):
 # --- Activity management ---
 
 
-@staff_member_required
+@admin_required
 @require_POST
 @transaction.atomic
 def activity_lock(request, pk):
@@ -1891,7 +1891,7 @@ def activity_lock(request, pk):
     return redirect("staff:export_center")
 
 
-@staff_member_required
+@admin_required
 @require_POST
 @transaction.atomic
 def activity_unlock(request, pk):
@@ -1915,7 +1915,7 @@ def activity_unlock(request, pk):
     return redirect("staff:export_center")
 
 
-@staff_member_required
+@admin_required
 @require_POST
 @transaction.atomic
 def activity_clone(request, pk):
@@ -1978,7 +1978,7 @@ def activity_clone(request, pk):
 # --- Audit log ---
 
 
-@staff_member_required
+@staff_required
 def audit_log_list(request):
     logs = AuditLog.objects.select_related("operator")[:200]
     return render(request, "staff_panel/audit_log_list.html", {"logs": logs})

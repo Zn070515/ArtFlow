@@ -36,6 +36,14 @@ from singer_contest.services import apply_scores, prepare_round
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
+def login_admin(client, user):
+    client.force_login(user)
+    session = client.session
+    session["artflow_admin_verified"] = True
+    session["artflow_admin_verified_at"] = timezone.now().isoformat()
+    session.save()
+
+
 def _close_file_response_resources(response: Any):
     closers = response._resource_closers
     filelikes = []
@@ -149,7 +157,7 @@ class StaffPanelSmokeTests(TestCase):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
     def test_admin_can_create_activity_from_staff_panel(self):
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         response = self.client.post(
             reverse("staff:activity_create"),
             {
@@ -168,7 +176,7 @@ class StaffPanelSmokeTests(TestCase):
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
 
         response = self.client.post(
@@ -186,7 +194,7 @@ class StaffPanelSmokeTests(TestCase):
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         response = self.client.get(reverse("staff:export_center"))
 
@@ -527,7 +535,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         prepare_round(round_, self.staff)
         ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.client.post(reverse("staff:round_lock", args=[round_.pk]))
         snapshot_counts = (round_.entries.count(), round_.round_judges.count())
 
@@ -660,7 +668,7 @@ class StaffPanelSmokeTests(TestCase):
             status=ContestRound.Status.LOCKED,
             is_locked=True,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
         response = self.client.post(
@@ -690,7 +698,7 @@ class StaffPanelSmokeTests(TestCase):
             is_locked=True,
             is_open=False,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
         response = self.client.post(
@@ -720,7 +728,7 @@ class StaffPanelSmokeTests(TestCase):
             is_open=True,
             is_locked=False,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         response = self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
 
@@ -753,7 +761,7 @@ class StaffPanelSmokeTests(TestCase):
             403,
         )
 
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         response = self.client.post(
             reverse("staff:vote_session_unlock", args=[vote_session.pk]), {"note": "fix typo"}
         )
@@ -808,7 +816,7 @@ class StaffPanelSmokeTests(TestCase):
             end_time=timezone.now() + timedelta(minutes=10),
             is_test_data=True,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         response = self.client.post(
             reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
         )
@@ -857,7 +865,7 @@ class StaffPanelSmokeTests(TestCase):
             ip_address="127.0.0.1",
             is_test_data=False,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
 
         response = self.client.post(
@@ -909,7 +917,7 @@ class StaffPanelSmokeTests(TestCase):
             ip_address="127.0.0.1",
             is_test_data=False,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
 
         response = self.client.post(
@@ -944,7 +952,7 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=False,
             uploaded_by=self.participant,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
 
         response = self.client.post(
@@ -994,7 +1002,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Test Song",
             is_test_data=True,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         response = self.client.post(
             reverse("staff:activity_test_toggle", args=[self.singer_activity.pk])
@@ -1024,7 +1032,7 @@ class StaffPanelSmokeTests(TestCase):
             uploaded_by=self.participant,
         )
         stored_name = submission.file.name
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         response = self.client.post(
             reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
@@ -1380,7 +1388,7 @@ class StaffPanelSmokeTests(TestCase):
             browser_session_key="winner-1",
             ip_address="127.0.0.1",
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
         self.client.post(
             reverse("staff:vote_session_unlock", args=[vote_session.pk]),
@@ -1457,7 +1465,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         prepare_round(round_, self.staff)
         ScoreRecord.objects.create(round=round_, singer=singer, judge=judge, score=91)
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         lock_response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
         round_.refresh_from_db()
@@ -1592,7 +1600,7 @@ class StaffPanelSmokeTests(TestCase):
             title="Other Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         response = self.client.post(
             reverse("staff:award_create"),
@@ -1622,7 +1630,7 @@ class StaffPanelSmokeTests(TestCase):
             title="Other Vote Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
 
         response = self.client.post(
             reverse("staff:vote_session_create"),
@@ -1833,7 +1841,7 @@ class StaffPanelSmokeTests(TestCase):
             file=SimpleUploadedFile("runtime.docx", b"runtime document"),
             created_by=self.staff,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         response = self.client.post(reverse("staff:activity_clone", args=[self.singer_activity.pk]))
         self.assertEqual(response.status_code, 302)
         clone = Activity.objects.exclude(pk=self.singer_activity.pk).get(
@@ -1864,3 +1872,75 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteBallot.objects.filter(vote_session__activity=clone).exists())
         self.assertFalse(VoteRecord.objects.filter(vote_session__activity=clone).exists())
         self.assertFalse(GeneratedDocument.objects.filter(activity=clone).exists())
+
+
+class AdminAuthBoundaryTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="boundary_admin",
+            password="pass",
+            role=User.Role.ADMIN,
+        )
+        self.staff = User.objects.create_user(
+            username="boundary_staff",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        self.participant = User.objects.create_user(
+            username="boundary_participant",
+            password="pass",
+            role=User.Role.PARTICIPANT,
+        )
+
+    def _force_login_with_marker(self, user):
+        self.client.force_login(user)
+        session = self.client.session
+        session["artflow_admin_verified"] = True
+        session["artflow_admin_verified_at"] = timezone.now().isoformat()
+        session.save()
+
+    def test_unauthenticated_staff_redirects_to_artflow_login(self):
+        response = self.client.get(reverse("staff:dashboard"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(reverse("accounts:login")))
+
+    def test_unauthenticated_staff_does_not_redirect_to_django_admin(self):
+        response = self.client.get(reverse("staff:dashboard"))
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("/admin/login/", response["Location"])
+
+    def test_admin_without_verification_is_rejected_on_admin_endpoint(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("staff:activity_create"))
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(reverse("accounts:admin_login")))
+
+    def test_admin_with_verification_can_access_admin_endpoint(self):
+        self._force_login_with_marker(self.admin)
+        response = self.client.post(
+            reverse("staff:activity_create"),
+            {
+                "title": "Verified Admin Activity",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+                "is_test_mode": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("staff:activity_list"))
+        self.assertTrue(Activity.objects.filter(title="Verified Admin Activity").exists())
+
+    def test_staff_can_access_staff_endpoint(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:dashboard"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_staff_cannot_access_admin_endpoint(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:activity_create"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_participant_cannot_access_staff_endpoint(self):
+        self.client.force_login(self.participant)
+        response = self.client.get(reverse("staff:dashboard"))
+        self.assertEqual(response.status_code, 403)

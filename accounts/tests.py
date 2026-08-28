@@ -86,6 +86,21 @@ class LoginModeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "该账号不是管理员账号。")
 
+    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    def test_admin_login_sets_verified_session_marker(self):
+        response = self.client.post(
+            reverse("accounts:admin_login"),
+            {
+                "username": "admin",
+                "password": "pass12345",
+                "admin_key": "secret-key",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get("artflow_admin_verified"))
+        self.assertIsNotNone(session.get("artflow_admin_verified_at"))
+
     def test_normal_login_page_links_to_admin_login(self):
         response = self.client.get(reverse("accounts:login"))
         self.assertContains(response, reverse("accounts:admin_login"))

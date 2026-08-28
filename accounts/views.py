@@ -3,6 +3,7 @@ from common.models import AuditLog
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
@@ -46,9 +47,10 @@ def login_view(request):
 
 def admin_login_view(request):
     if request.user.is_authenticated:
-        return redirect(
-            "staff:dashboard" if request.user.is_staff_or_admin else "public_portal:home"
-        )
+        if request.user.is_admin and request.session.get("artflow_admin_verified"):
+            return redirect("staff:dashboard")
+        if not request.user.is_admin:
+            return redirect("public_portal:home")
 
     next_url = request.GET.get("next", "")
     if request.method == "POST":
@@ -56,6 +58,8 @@ def admin_login_view(request):
         if form.is_valid():
             user = form.get_user()
             login(request, user)
+            request.session["artflow_admin_verified"] = True
+            request.session["artflow_admin_verified_at"] = timezone.now().isoformat()
             log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}", note="admin_login")
             if next_url and url_has_allowed_host_and_scheme(
                 next_url, allowed_hosts={request.get_host()}
