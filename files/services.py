@@ -1,10 +1,17 @@
+from functools import partial
 from pathlib import PurePath
 
 from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
+from django.core.files.storage import Storage
 from django.db import transaction
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
+
+
+def delete_storage_object(storage: Storage, name: str) -> None:
+    storage.delete(name)
+
 
 MAX_UPLOAD_BYTES = {
     SubmissionFile.Purpose.PROGRAM_IMAGE: 10 * 1024 * 1024,
@@ -95,7 +102,10 @@ def _owner_filter(owner):
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose)
     activity = lock_activity_for_runtime_data(owner.activity)
-    owner_filter = _owner_filter(owner)
+    # Serialize all file operations for the same owner, including the first
+    # upload where no current submission row yet exists to lock.
+    locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
+    owner_filter = _owner_filter(locked_owner)
     SubmissionFile.objects.select_for_update().filter(
         **owner_filter, file_purpose=purpose, is_current=True
     ).update(is_current=False)
@@ -139,7 +149,7 @@ def delete_submission_file(submission_file: SubmissionFile) -> None:
             replacement.is_current = True
             replacement.save(update_fields=["is_current"])
     if stored_name:
-        storage.delete(stored_name)
+        transaction.on_commit(partial(delete_storage_object, storage, stored_name))
 
 
 DEFAULT_SINGER_REQUIREMENTS = [

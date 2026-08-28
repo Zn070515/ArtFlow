@@ -5,6 +5,7 @@ from accounts.models import User
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import transaction
 from django.test import TestCase, override_settings
 from singer_contest.models import SingerRegistration
 
@@ -86,7 +87,8 @@ class SubmissionFileLifecycleTests(TestCase):
         stored_name = submission.file.name
         self.assertTrue(submission.file.storage.exists(stored_name))
 
-        delete_submission_file(submission)
+        with self.captureOnCommitCallbacks(execute=True):
+            delete_submission_file(submission)
 
         self.assertFalse(SubmissionFile.objects.filter(pk=submission.pk).exists())
         self.assertFalse(submission.file.storage.exists(stored_name))
@@ -109,3 +111,24 @@ class SubmissionFileLifecycleTests(TestCase):
 
         first.refresh_from_db()
         self.assertTrue(first.is_current)
+
+    def test_deleting_submission_file_defers_storage_removal_until_commit(self):
+        submission = store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+        stored_name = submission.file.name
+        self.assertTrue(submission.file.storage.exists(stored_name))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                delete_submission_file(submission)
+                # The physical file must survive until the transaction commits,
+                # so a later rollback cannot leave a row pointing at a removed file.
+                self.assertTrue(submission.file.storage.exists(stored_name))
+                self.assertFalse(SubmissionFile.objects.filter(pk=submission.pk).exists())
+
+        # After the commit callback runs the physical object is finally removed.
+        self.assertFalse(submission.file.storage.exists(stored_name))

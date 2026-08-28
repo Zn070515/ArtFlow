@@ -141,7 +141,8 @@ class GeneratedDocumentTestDataCleanupTests(TestCase):
         stored_name = document.file.name
         storage = document.file.storage
 
-        counts = clear_activity_test_data(self.activity, operator=self.operator)
+        with self.captureOnCommitCallbacks(execute=True):
+            counts = clear_activity_test_data(self.activity, operator=self.operator)
 
         self.assertEqual(counts["generated_documents"], 1)
         self.assertFalse(GeneratedDocument.objects.filter(pk=document.pk).exists())

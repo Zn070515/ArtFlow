@@ -1241,9 +1241,10 @@ class StaffPanelSmokeTests(TestCase):
         stored_name = submission.file.name
         login_admin(self.client, self.admin)
 
-        response = self.client.post(
-            reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
+            )
 
         self.assertEqual(response.status_code, 302)
         self.assertFalse(submission.file.storage.exists(stored_name))

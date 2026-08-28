@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from functools import partial
 from typing import Any
 
 from django.core.exceptions import PermissionDenied
@@ -105,7 +106,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from exports.models import GeneratedDocument
     from farewell_show.models import Program
     from files.models import SubmissionFile
-    from files.services import delete_submission_file
+    from files.services import delete_storage_object, delete_submission_file
     from incidents.models import IncidentRecord
     from singer_contest.models import (
         Award,
@@ -143,8 +144,11 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     for generated_document in GeneratedDocument.objects.filter(
         activity=locked_activity, is_test_data=True
     ):
-        generated_document.file.delete(save=False)
+        storage = generated_document.file.storage
+        stored_name = generated_document.file.name
         generated_document.delete()
+        if stored_name:
+            transaction.on_commit(partial(delete_storage_object, storage, stored_name))
     Award.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
