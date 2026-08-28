@@ -10,6 +10,7 @@ from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.storage import Storage
 from django.http import FileResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -52,6 +53,28 @@ def _close_file_response_resources(response: Any):
         filelike.close()
     response.file_to_stream = None
     closers.clear()
+
+
+class PathlessStorage(Storage):
+    """Delegate file reads while modeling a storage backend without paths."""
+
+    def __init__(self, delegate: Storage):
+        self.delegate = delegate
+
+    def _open(self, name: str, mode: str = "rb"):
+        return self.delegate.open(name, mode)
+
+    def _save(self, name: str, content: Any):
+        return self.delegate.save(name, content)
+
+    def exists(self, name: str) -> bool:
+        return self.delegate.exists(name)
+
+    def url(self, name: str) -> str:
+        return self.delegate.url(name)
+
+    def path(self, name: str) -> str:
+        raise NotImplementedError("This storage does not expose local paths.")
 
 
 class StaffPanelSmokeTests(TestCase):
@@ -1130,6 +1153,30 @@ class StaffPanelSmokeTests(TestCase):
             names = set(archive.namelist())
         self.assertIn(f"推文_{formal_document.pk}.docx", names)
         self.assertNotIn(f"推文_{test_document.pk}.docx", names)
+
+    def test_formal_archive_reads_generated_document_without_storage_path(self):
+        document = GeneratedDocument.objects.create(
+            activity=self.singer_activity,
+            title="Storage-backed announcement",
+            file=SimpleUploadedFile("storage.docx", b"storage document"),
+            created_by=self.staff,
+            is_test_data=False,
+        )
+        file_field = GeneratedDocument._meta.get_field("file")
+        pathless_storage = PathlessStorage(file_field.storage)
+        self.client.force_login(self.staff)
+
+        with patch.object(file_field, "storage", pathless_storage):
+            response = self.client.post(
+                reverse("staff:archive_package_create", args=[self.singer_activity.pk])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            self.assertEqual(
+                archive.read(f"推文_{document.pk}.docx"),
+                b"storage document",
+            )
 
     def test_formal_word_generation_creates_formal_document(self):
         formal_activity = Activity.objects.create(

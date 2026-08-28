@@ -1292,7 +1292,8 @@ def archive_package_create(request, activity_id):
         # Include generated docs
         for doc in GeneratedDocument.objects.filter(activity=activity, is_test_data=False):
             if doc.file:
-                zf.write(doc.file.path, f"推文_{doc.pk}.docx")
+                with doc.file.open("rb") as document_file:
+                    zf.writestr(f"推文_{doc.pk}.docx", document_file.read())
     buf.seek(0)
     package = ArchivePackage.objects.create(
         activity=activity,
