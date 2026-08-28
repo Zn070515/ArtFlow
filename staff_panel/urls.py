@@ -11,6 +11,7 @@ urlpatterns = [
     path("activities/<int:pk>/edit/", views.activity_edit, name="activity_edit"),
     path("posts/", views.post_list, name="post_list"),
     path("posts/new/", views.post_create, name="post_create"),
+    path("posts/<int:pk>/preview/", views.post_preview, name="post_preview"),
     path("posts/<int:pk>/edit/", views.post_edit, name="post_edit"),
     path("registrations/", views.singer_registration_list, name="singer_registration_list"),
     path(

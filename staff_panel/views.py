@@ -112,6 +112,15 @@ def _ensure_activity_mutable(activity):
     ensure_activity_unlocked(activity)
 
 
+def _ensure_publication_allowed(related_activity, status):
+    if (
+        status == PublicPost.Status.PUBLISHED
+        and related_activity is not None
+        and related_activity.data_lifecycle == Activity.DataLifecycle.TEST
+    ):
+        raise PermissionDenied("测试活动的公开内容不能直接发布，请保存为草稿或隐藏。")
+
+
 def _active_worksheet(workbook):
     worksheet = workbook.active
     if not isinstance(worksheet, Worksheet):
@@ -243,6 +252,7 @@ def post_create(request):
         if data["related_activity_id"]:
             related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
             ensure_activity_unlocked(related_activity)
+        _ensure_publication_allowed(related_activity, data["status"])
         post = PublicPost(
             title=data["title"],
             subtitle=data["subtitle"],
@@ -279,6 +289,17 @@ def post_create(request):
 
 
 @staff_required
+def post_preview(request, pk):
+    post = get_object_or_404(PublicPost, pk=pk)
+    media_items = post.media_items.filter(is_published=True)
+    return render(
+        request,
+        "public_portal/post_detail.html",
+        {"post": post, "media_items": media_items, "preview": True},
+    )
+
+
+@staff_required
 def post_edit(request, pk):
     post = get_object_or_404(PublicPost, pk=pk)
     if request.method == "POST":
@@ -306,6 +327,7 @@ def post_edit(request, pk):
         for activity in (old_activity, new_activity):
             if activity is not None:
                 ensure_activity_unlocked(activity)
+        _ensure_publication_allowed(new_activity, data["status"])
         post.title = data["title"]
         post.subtitle = data["subtitle"]
         post.content = data["content"]

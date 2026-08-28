@@ -1,3 +1,4 @@
+from core.models import Activity
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, render
 
@@ -5,7 +6,7 @@ from .models import PublicMedia, PublicPost
 
 
 def home(request):
-    posts = PublicPost.objects.filter(status=PublicPost.Status.PUBLISHED)
+    posts = PublicPost.published_public()
     announcements = posts.filter(post_type=PublicPost.PostType.ANNOUNCEMENT)[:5]
     showcases = posts.filter(post_type=PublicPost.PostType.SHOWCASE)[:6]
     results = posts.filter(post_type=PublicPost.PostType.RESULT_PUBLICATION)[:5]
@@ -22,10 +23,14 @@ def home(request):
         )
         .distinct()[:6]
     )
-    activity_photos = PublicMedia.objects.filter(
-        is_published=True,
-        post__status=PublicPost.Status.PUBLISHED,
-    ).select_related("post")[:12]
+    activity_photos = (
+        PublicMedia.objects.filter(
+            is_published=True,
+            post__status=PublicPost.Status.PUBLISHED,
+        )
+        .exclude(post__related_activity__data_lifecycle=Activity.DataLifecycle.TEST)
+        .select_related("post")[:12]
+    )
 
     return render(
         request,
@@ -43,7 +48,7 @@ def home(request):
 
 
 def post_detail(request, pk):
-    post = get_object_or_404(PublicPost, pk=pk, status=PublicPost.Status.PUBLISHED)
+    post = get_object_or_404(PublicPost.published_public(), pk=pk)
     media_items = post.media_items.filter(is_published=True)
     return render(
         request,
@@ -56,24 +61,21 @@ def post_detail(request, pk):
 
 
 def showcase_list(request):
-    posts = PublicPost.objects.filter(
+    posts = PublicPost.published_public().filter(
         post_type=PublicPost.PostType.SHOWCASE,
-        status=PublicPost.Status.PUBLISHED,
     )
     return render(request, "public_portal/showcase_list.html", {"posts": posts})
 
 
 def announcement_list(request):
-    posts = PublicPost.objects.filter(
+    posts = PublicPost.published_public().filter(
         post_type=PublicPost.PostType.ANNOUNCEMENT,
-        status=PublicPost.Status.PUBLISHED,
     )
     return render(request, "public_portal/announcement_list.html", {"posts": posts})
 
 
 def result_list(request):
-    posts = PublicPost.objects.filter(
+    posts = PublicPost.published_public().filter(
         post_type=PublicPost.PostType.RESULT_PUBLICATION,
-        status=PublicPost.Status.PUBLISHED,
     )
     return render(request, "public_portal/result_list.html", {"posts": posts})

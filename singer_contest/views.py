@@ -20,6 +20,8 @@ def apply_view(request):
         activity_type=Activity.Type.SINGER_CONTEST,
         phase=Activity.Phase.REGISTRATION_OPEN,
     )
+    if not request.user.is_staff_or_admin:
+        activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         ensure_activity_unlocked(activity)

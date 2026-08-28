@@ -849,6 +849,7 @@ class SingerUploadViewTests(TestCase):
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
         )
 
     def test_apply_rejects_disallowed_file_without_creating_registration(self):
@@ -1380,3 +1381,52 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
             orphan,
             "a PREPARED downstream round cannot coexist with an unlocked upstream",
         )
+
+
+class ParticipantApplyVisibilityTests(TestCase):
+    def setUp(self):
+        self.participant = User.objects.create_user(username="apply-participant", password="pass")
+        self.staff = User.objects.create_user(
+            username="apply-staff", password="pass", role=User.Role.STAFF
+        )
+        self.formal = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.testing = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+
+    def test_participant_apply_hides_test_activity(self):
+        self.client.force_login(self.participant)
+        response = self.client.get(reverse("singer_contest:apply"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.formal.title)
+        self.assertNotContains(response, self.testing.title)
+
+    def test_participant_cannot_submit_to_test_activity(self):
+        self.client.force_login(self.participant)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("singer_contest:apply"),
+            {
+                "activity_id": str(self.testing.pk),
+                "name": "Intruder",
+                "student_id": "20269999",
+                "college": "College",
+                "class_name": "Class",
+                "song_name": "Song",
+            },
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(SingerRegistration.objects.filter(activity=self.testing).exists())
+
+    def test_staff_apply_can_preview_test_activity(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("singer_contest:apply"))
+        self.assertContains(response, self.testing.title)

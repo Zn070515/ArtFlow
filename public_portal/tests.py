@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from core.models import Activity
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
@@ -124,3 +125,65 @@ class PublicPhotoImportTests(TestCase):
         self.assertFalse(PublicMedia.objects.exists())
         self.remove_created_links()
         self.assertTrue((external_album / "external.jpg").exists())
+
+
+class PublicPortalVisibilityTests(TestCase):
+    def setUp(self):
+        self.formal = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.testing = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+
+    def _showcase(self, title, activity):
+        return PublicPost.objects.create(
+            title=title,
+            post_type=PublicPost.PostType.SHOWCASE,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=activity,
+        )
+
+    def test_home_hides_test_related_published_post(self):
+        self._showcase("Test Showcase", self.testing)
+        self._showcase("Formal Showcase", self.formal)
+        PublicPost.objects.create(
+            title="Null Showcase",
+            post_type=PublicPost.PostType.SHOWCASE,
+            status=PublicPost.Status.PUBLISHED,
+        )
+        response = self.client.get(reverse("public_portal:home"))
+        titles = [post.title for post in response.context["showcases"]]
+        self.assertIn("Formal Showcase", titles)
+        self.assertIn("Null Showcase", titles)
+        self.assertNotIn("Test Showcase", titles)
+
+    def test_post_detail_test_related_published_returns_404(self):
+        test_post = self._showcase("Test Showcase", self.testing)
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[test_post.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_historical_test_published_row_still_hidden(self):
+        # Legacy dirty data: a TEST-related post that was published directly.
+        legacy = PublicPost.objects.create(
+            title="Legacy Test",
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.testing,
+        )
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[legacy.pk]))
+        self.assertEqual(response.status_code, 404)
+        # It is kept in the DB (not deleted), just never served publicly.
+        self.assertTrue(PublicPost.objects.filter(pk=legacy.pk).exists())
+
+    def test_formal_published_post_is_public(self):
+        formal_post = self._showcase("Formal Showcase", self.formal)
+        response = self.client.get(reverse("public_portal:post_detail", args=[formal_post.pk]))
+        self.assertEqual(response.status_code, 200)

@@ -48,16 +48,25 @@ def controlled_media(request, path):
             raise PermissionDenied("You do not have access to this file.")
         return _media_file_response(relative_path, submission_file.original_name)
 
-    if PublicPost.objects.filter(
-        cover_image=relative_path, status=PublicPost.Status.PUBLISHED
-    ).exists():
+    if (
+        PublicPost.objects.filter(
+            cover_image=relative_path,
+            status=PublicPost.Status.PUBLISHED,
+        )
+        .exclude(related_activity__data_lifecycle="test")
+        .exists()
+    ):
         return _media_file_response(relative_path)
 
-    if PublicMedia.objects.filter(
-        image=relative_path,
-        is_published=True,
-        post__status=PublicPost.Status.PUBLISHED,
-    ).exists():
+    if (
+        PublicMedia.objects.filter(
+            image=relative_path,
+            is_published=True,
+            post__status=PublicPost.Status.PUBLISHED,
+        )
+        .exclude(post__related_activity__data_lifecycle="test")
+        .exists()
+    ):
         return _media_file_response(relative_path)
 
     if GeneratedDocument.objects.filter(file=relative_path).exists():

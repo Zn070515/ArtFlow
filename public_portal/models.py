@@ -53,6 +53,21 @@ class PublicPost(models.Model):
     class Meta:
         ordering = ["-is_pinned", "sort_order", "-created_at"]
 
+    @classmethod
+    def published_public(cls):
+        """Published posts that are safe to show on the public site.
+
+        Defense-in-depth: a publication tied to a TEST activity must never be
+        public. Posts with no related activity (or a FORMAL one) remain public,
+        while TEST-related rows are excluded even if they were published by
+        legacy/dirty history.
+        """
+        from core.models import Activity
+
+        return cls.objects.filter(status=cls.Status.PUBLISHED).exclude(
+            related_activity__data_lifecycle=Activity.DataLifecycle.TEST
+        )
+
     def __str__(self):
         return self.title
 

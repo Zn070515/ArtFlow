@@ -63,7 +63,7 @@ from .business_rules import ensure_same_activity
 from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
-from .test_data import clear_activity_test_data
+from .test_data import clear_activity_test_data, leave_test_mode
 from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
@@ -126,6 +126,44 @@ class ActivityLifecycleTests(TestCase):
 
         with self.assertRaises(ValidationError):
             activity.save()
+
+
+class LeaveTestModeProtectsPublicPostsTests(TestCase):
+    def test_leave_test_mode_demotes_published_test_posts_and_audits(self):
+        operator = User.objects.create_user(username="promote-operator", password="pass")
+        activity = Activity.objects.create(
+            title="Test contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        post = PublicPost.objects.create(
+            title="Test showcase",
+            post_type=PublicPost.PostType.SHOWCASE,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=activity,
+        )
+        unrelated = PublicPost.objects.create(
+            title="Unrelated",
+            status=PublicPost.Status.PUBLISHED,
+        )
+
+        leave_test_mode(activity, operator=operator)
+
+        post.refresh_from_db()
+        self.assertEqual(post.status, PublicPost.Status.DRAFT)
+        self.assertIsNone(post.published_at)
+        self.assertTrue(PublicPost.objects.filter(pk=post.pk).exists())
+        unrelated.refresh_from_db()
+        self.assertEqual(unrelated.status, PublicPost.Status.PUBLISHED)
+        activity.refresh_from_db()
+        self.assertFalse(activity.is_test_mode)
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=operator,
+                action_type=AuditLog.ActionType.OTHER,
+                note__startswith="leave_test_mode: demoted",
+            ).exists()
+        )
 
 
 class GeneratedDocumentTestDataCleanupTests(TestCase):

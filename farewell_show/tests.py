@@ -14,6 +14,7 @@ class FarewellUploadViewTests(TestCase):
             title="Farewell",
             activity_type=Activity.Type.FAREWELL_SHOW,
             phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
         )
         self.client.force_login(user)
 

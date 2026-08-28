@@ -125,6 +125,7 @@ class StaffPanelSmokeTests(TestCase):
             title="Farewell Show",
             activity_type=Activity.Type.FAREWELL_SHOW,
             phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
         )
 
     def tearDown(self):
@@ -3442,3 +3443,88 @@ class PublicPostMoveLockTests(TestCase):
         self.assertEqual(response.status_code, 403)
         post.refresh_from_db()
         self.assertEqual(post.related_activity_id, self.activity.pk)
+
+
+class PublicPortalPublicationTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="pub-staff", password="pass", role=User.Role.STAFF
+        )
+        self.formal = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.testing = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+
+    def _post_payload(self, *, status, related_activity_id):
+        return {
+            "title": "A Post",
+            "subtitle": "",
+            "content": "",
+            "post_type": PublicPost.PostType.NORMAL_ARTICLE,
+            "status": status,
+            "sort_order": "0",
+            "related_activity_id": str(related_activity_id),
+        }
+
+    def test_post_create_rejects_published_for_test_activity(self):
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:post_create"),
+            self._post_payload(
+                status=PublicPost.Status.PUBLISHED, related_activity_id=self.testing.pk
+            ),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(PublicPost.objects.filter(title="A Post").exists())
+
+    def test_post_create_allows_draft_for_test_activity(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_create"),
+            self._post_payload(status=PublicPost.Status.DRAFT, related_activity_id=self.testing.pk),
+        )
+        self.assertEqual(response.status_code, 302)
+        post = PublicPost.objects.get(title="A Post")
+        self.assertEqual(post.status, PublicPost.Status.DRAFT)
+        self.assertEqual(post.related_activity_id, self.testing.pk)
+
+    def test_post_edit_rejects_published_when_moving_to_test_activity(self):
+        post = PublicPost.objects.create(
+            title="A Post", related_activity=self.formal, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:post_edit", args=[post.pk]),
+            self._post_payload(
+                status=PublicPost.Status.PUBLISHED, related_activity_id=self.testing.pk
+            ),
+        )
+        self.assertEqual(response.status_code, 403)
+        post.refresh_from_db()
+        self.assertEqual(post.related_activity_id, self.formal.pk)
+
+    def test_post_preview_staff_accessible_public_forbidden(self):
+        draft = PublicPost.objects.create(
+            title="Preview Draft",
+            status=PublicPost.Status.DRAFT,
+            related_activity=self.testing,
+            created_by=self.staff,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:post_preview", args=[draft.pk]))
+        self.assertEqual(response.status_code, 200)
+        # A staff preview must not expose a non-published post on the public route.
+        self.client.force_login(User.objects.create_user(username="post-pub-anon", password="pass"))
+        self.client.raise_request_exception = False
+        public_response = self.client.get(reverse("public_portal:post_detail", args=[draft.pk]))
+        self.assertEqual(public_response.status_code, 404)

@@ -61,6 +61,30 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
     }
 
 
+def _restore_test_related_posts_to_draft(activity: Any, *, operator: Any) -> None:
+    """Demote any published public post linked to a test activity to DRAFT.
+
+    A test activity's public content must never follow the activity into FORMAL.
+    Posts are kept (never deleted), just rolled back to DRAFT before the activity
+    leaves test mode, so the public homepage is only published via an explicit
+    staff action after it becomes formal.
+    """
+    from public_portal.models import PublicPost
+
+    published = PublicPost.objects.filter(
+        related_activity=activity, status=PublicPost.Status.PUBLISHED
+    )
+    if not published.exists():
+        return
+    count = published.update(status=PublicPost.Status.DRAFT, published_at=None)
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"Activity:{activity.pk}",
+        note=f"leave_test_mode: demoted {count} published post(s) to draft",
+    )
+
+
 def _reject_mixed_marker_dependencies(activity: Any) -> None:
     from files.models import SubmissionFile
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
@@ -198,6 +222,7 @@ def leave_test_mode(
         if not reason.strip():
             raise PermissionDenied("清理并退出测试模式必须填写原因。")
         clear_activity_test_data(locked_activity, operator=operator)
+    _restore_test_related_posts_to_draft(locked_activity, operator=operator)
     locked_activity.is_test_mode = False
     locked_activity.data_lifecycle = Activity.DataLifecycle.FORMAL
     locked_activity.save(
