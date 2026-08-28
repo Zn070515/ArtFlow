@@ -11,31 +11,29 @@ from core.policies import ActivityAction, ensure_activity_action_allowed
 
 from .models import Activity
 
-# Canonical forward order. An activity may advance through the lifecycle but may
-# not regress; ARCHIVED is terminal (reopen requires an explicit, separate path).
-_PHASE_ORDER: list[str] = [
-    Activity.Phase.DRAFT,
-    Activity.Phase.TESTING,
-    Activity.Phase.REGISTRATION_OPEN,
-    Activity.Phase.REGISTRATION_CLOSED,
-    Activity.Phase.REVIEWING,
-    Activity.Phase.REHEARSAL,
-    Activity.Phase.LIVE,
-    Activity.Phase.RESULTS_PENDING,
-    Activity.Phase.RESULTS_PUBLISHED,
-    Activity.Phase.ARCHIVED,
-]
-
-# Explicit generic-transition edge set. A phase may move to any later lifecycle
-# phase, but ARCHIVED is deliberately absent from every successor set: the
-# generic service (and the create/edit forms that feed it) can never manufacture
-# an archived activity. Only enter_archived_phase(), used by the formal archive
-# flow, may move an activity into ARCHIVED.
-_PHASE_EDGES: dict[str, frozenset[str]] = {
-    phase: frozenset(
-        later for later in _PHASE_ORDER[phase_index + 1 :] if later != Activity.Phase.ARCHIVED
-    )
-    for phase_index, phase in enumerate(_PHASE_ORDER)
+# Explicit generic-transition edge set. This is a literal state machine: every
+# edge below is an approved forward step, and nothing is derived positionally.
+# ARCHIVED is deliberately absent from every successor set, so the generic
+# service (and the create/edit forms that feed it) can never manufacture an
+# archived activity — only _enter_archived_phase_locked(), used by the formal
+# archive flow, may reach ARCHIVED. DRAFT may not skip ahead to the results
+# phases; it starts with TESTING or opens registration directly.
+PHASE_EDGES: dict[str, frozenset[str]] = {
+    Activity.Phase.DRAFT: frozenset(
+        {
+            Activity.Phase.TESTING,
+            Activity.Phase.REGISTRATION_OPEN,
+        }
+    ),
+    Activity.Phase.TESTING: frozenset({Activity.Phase.REGISTRATION_OPEN}),
+    Activity.Phase.REGISTRATION_OPEN: frozenset({Activity.Phase.REGISTRATION_CLOSED}),
+    Activity.Phase.REGISTRATION_CLOSED: frozenset({Activity.Phase.REVIEWING}),
+    Activity.Phase.REVIEWING: frozenset({Activity.Phase.REHEARSAL}),
+    Activity.Phase.REHEARSAL: frozenset({Activity.Phase.LIVE}),
+    Activity.Phase.LIVE: frozenset({Activity.Phase.RESULTS_PENDING}),
+    Activity.Phase.RESULTS_PENDING: frozenset({Activity.Phase.RESULTS_PUBLISHED}),
+    Activity.Phase.RESULTS_PUBLISHED: frozenset(),
+    Activity.Phase.ARCHIVED: frozenset(),
 }
 
 
@@ -76,7 +74,7 @@ def transition_activity_phase(
     if locked_activity.phase == target_phase:
         return locked_activity
 
-    if target_phase not in _PHASE_EDGES.get(locked_activity.phase, frozenset()):
+    if target_phase not in PHASE_EDGES.get(locked_activity.phase, frozenset()):
         raise PermissionDenied(
             f"Cannot move activity from '{locked_activity.phase}' to '{target_phase}'."
         )

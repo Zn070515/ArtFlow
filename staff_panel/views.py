@@ -79,6 +79,7 @@ from voting.services import (
 )
 
 from staff_panel.forms import (
+    CREATE_PHASE_CHOICES,
     ActivityForm,
     ContestRoundForm,
     IncidentForm,
@@ -133,7 +134,9 @@ def activity_list(request):
 def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
-        form = ActivityForm(request.POST, include_lifecycle=True)
+        form = ActivityForm(
+            request.POST, include_lifecycle=True, phase_choices=CREATE_PHASE_CHOICES
+        )
         if not form.is_valid():
             return render(
                 request,
@@ -141,12 +144,13 @@ def activity_create(request):
                 {
                     "error": _form_error(form),
                     "activity_types": _choices(Activity.Type),
-                    "phases": _choices(Activity.Phase),
+                    "phases": CREATE_PHASE_CHOICES,
                     "data": request.POST,
                 },
             )
-        if form.cleaned_data["phase"] == Activity.Phase.ARCHIVED:
-            raise PermissionDenied("不能直接创建已归档活动。")
+        # A new activity always starts as a draft; the selected phase on the
+        # create form is never trusted to start the activity mid-lifecycle.
+        form.cleaned_data["phase"] = Activity.Phase.DRAFT
         activity = Activity.objects.create(**form.cleaned_data)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
@@ -162,7 +166,7 @@ def activity_create(request):
         "staff_panel/activity_form.html",
         {
             "activity_types": _choices(Activity.Type),
-            "phases": _choices(Activity.Phase),
+            "phases": CREATE_PHASE_CHOICES,
         },
     )
 

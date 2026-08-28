@@ -24,6 +24,22 @@ DATETIME_INPUT_FORMATS = [
 ]
 
 
+# Phases a brand-new activity may be created in. LIVE, the results phases and
+# ARCHIVED are deliberate: they can only be reached by advancing through the
+# lifetime (or the archive flow), never by directly creating an activity there.
+_NON_CREATEABLE_PHASES = frozenset(
+    {
+        Activity.Phase.LIVE,
+        Activity.Phase.RESULTS_PENDING,
+        Activity.Phase.RESULTS_PUBLISHED,
+        Activity.Phase.ARCHIVED,
+    }
+)
+CREATE_PHASE_CHOICES = [
+    choice for choice in Activity.Phase.choices if choice[0] not in _NON_CREATEABLE_PHASES
+]
+
+
 class ActivityForm(forms.Form):
     title = forms.CharField(max_length=200)
     subtitle = forms.CharField(max_length=400, required=False)
@@ -31,10 +47,12 @@ class ActivityForm(forms.Form):
     phase = forms.ChoiceField(choices=Activity.Phase.choices)
     description = forms.CharField(required=False)
 
-    def __init__(self, *args, include_lifecycle=False, **kwargs):
+    def __init__(self, *args, include_lifecycle=False, phase_choices=None, **kwargs):
         super().__init__(*args, **kwargs)
         if include_lifecycle:
             self.fields["is_test_mode"] = forms.BooleanField(required=False)
+        if phase_choices is not None:
+            cast(forms.ChoiceField, self.fields["phase"]).choices = phase_choices
 
 
 class ContestRoundForm(forms.Form):

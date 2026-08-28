@@ -151,6 +151,22 @@ class ActivityPhaseTransitionTests(TestCase):
         live.refresh_from_db()
         self.assertEqual(live.phase, Activity.Phase.LIVE)
 
+    def test_draft_cannot_skip_to_results_pending(self):
+        with self.assertRaises(PermissionDenied):
+            transition_activity_phase(
+                self.activity, Activity.Phase.RESULTS_PENDING, actor=self.user
+            )
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.DRAFT)
+
+    def test_draft_cannot_skip_to_results_published(self):
+        with self.assertRaises(PermissionDenied):
+            transition_activity_phase(
+                self.activity, Activity.Phase.RESULTS_PUBLISHED, actor=self.user
+            )
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.DRAFT)
+
     def test_archived_cannot_return_to_live(self):
         archived = Activity.objects.create(
             title="Archived",

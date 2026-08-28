@@ -4,7 +4,7 @@ import tempfile
 import zipfile
 from datetime import timedelta
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from accounts.models import User
@@ -12,6 +12,7 @@ from archive.models import ArchivePackage
 from common.models import AuditLog
 from core.models import Activity
 from core.services import unarchive_activity
+from django import forms
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -39,6 +40,8 @@ from singer_contest.models import (
 )
 from singer_contest.services import apply_scores, prepare_round
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
+
+from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
 
 
 def login_admin(client, user):
@@ -175,6 +178,37 @@ class StaffPanelSmokeTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Activity.objects.filter(title="New Contest").exists())
+
+    def test_activity_create_always_defaults_to_draft(self):
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            reverse("staff:activity_create"),
+            {
+                "title": "Started Mid-Lifecycle",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+                "is_test_mode": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        created = Activity.objects.get(title="Started Mid-Lifecycle")
+        self.assertEqual(created.phase, Activity.Phase.DRAFT)
+
+    def test_create_form_phase_choices_exclude_live_and_terminal_phases(self):
+        form = ActivityForm(phase_choices=CREATE_PHASE_CHOICES)
+        offered = [
+            value
+            for value, _label in cast(
+                list[tuple[str, str]], cast(forms.ChoiceField, form.fields["phase"]).choices
+            )
+        ]
+        for excluded in (
+            Activity.Phase.LIVE,
+            Activity.Phase.RESULTS_PENDING,
+            Activity.Phase.RESULTS_PUBLISHED,
+            Activity.Phase.ARCHIVED,
+        ):
+            self.assertNotIn(excluded, offered)
 
     def test_activity_edit_cannot_change_lifecycle(self):
         formal_activity = Activity.objects.create(
@@ -2912,6 +2946,8 @@ class ActivityPhaseEditTests(TestCase):
         )
 
     def test_admin_create_cannot_create_archived(self):
+        # ARCHIVED is not a creatable phase; the form rejects it before the
+        # view can run, so the create must not succeed or persist a row.
         login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
         response = self.client.post(
@@ -2923,7 +2959,7 @@ class ActivityPhaseEditTests(TestCase):
                 "is_test_mode": "on",
             },
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertNotEqual(response.status_code, 302)
         self.assertFalse(Activity.objects.filter(title="Fake Archived").exists())
 
 
