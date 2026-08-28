@@ -1,6 +1,37 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, router, transaction
+
+
+class ActivityQuerySet(models.QuerySet):
+    lifecycle_fields = {"is_test_mode", "data_lifecycle"}
+
+    def update(self, **kwargs):
+        if self.lifecycle_fields.intersection(kwargs):
+            raise ValidationError("Activity lifecycle must be changed through Activity.save().")
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        if kwargs.get("update_conflicts") and self.lifecycle_fields.intersection(
+            kwargs.get("update_fields", ())
+        ):
+            raise ValidationError("Activity lifecycle must be changed through Activity.save().")
+        objs = list(objs)
+        for activity in objs:
+            activity.data_lifecycle = (
+                activity.DataLifecycle.TEST
+                if activity.is_test_mode
+                else activity.DataLifecycle.FORMAL
+            )
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        if self.lifecycle_fields.intersection(fields):
+            raise ValidationError("Activity lifecycle must be changed through Activity.save().")
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+ActivityManager = models.Manager.from_queryset(ActivityQuerySet)
 
 
 class Activity(models.Model):
@@ -48,10 +79,12 @@ class Activity(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = ActivityManager()
 
     class Meta:
         verbose_name_plural = "activities"
         ordering = ["-created_at"]
+        base_manager_name = "objects"
 
     def __str__(self):
         return self.title
@@ -62,24 +95,41 @@ class Activity(models.Model):
                 self.DataLifecycle.TEST if self.is_test_mode else self.DataLifecycle.FORMAL
             )
         else:
-            persisted_lifecycle = (
-                type(self)
-                ._default_manager.filter(pk=self.pk)
-                .values_list("data_lifecycle", flat=True)
-                .first()
+            using = (
+                kwargs.get("using")
+                or self._state.db
+                or router.db_for_write(type(self), instance=self)
             )
-            if persisted_lifecycle == self.DataLifecycle.FORMAL:
-                if (
-                    self.is_test_mode
-                    or self.data_lifecycle == self.DataLifecycle.TEST
-                ):
-                    raise ValidationError("Formal activities cannot re-enter test mode.")
-                self.is_test_mode = False
-                self.data_lifecycle = self.DataLifecycle.FORMAL
-            elif self.is_test_mode:
-                self.data_lifecycle = self.DataLifecycle.TEST
-            else:
-                self.data_lifecycle = self.DataLifecycle.FORMAL
+            kwargs["using"] = using
+            with transaction.atomic(using=using):
+                persisted_lifecycle = (
+                    type(self)
+                    ._default_manager.using(using)
+                    .select_for_update()
+                    .filter(pk=self.pk)
+                    .values_list("data_lifecycle", flat=True)
+                    .first()
+                )
+                if persisted_lifecycle == self.DataLifecycle.FORMAL:
+                    if (
+                        self.is_test_mode
+                        or self.data_lifecycle == self.DataLifecycle.TEST
+                    ):
+                        raise ValidationError("Formal activities cannot re-enter test mode.")
+                    self.is_test_mode = False
+                    self.data_lifecycle = self.DataLifecycle.FORMAL
+                elif self.is_test_mode:
+                    self.data_lifecycle = self.DataLifecycle.TEST
+                else:
+                    self.data_lifecycle = self.DataLifecycle.FORMAL
+
+                update_fields = kwargs.get("update_fields")
+                if update_fields is not None:
+                    kwargs["update_fields"] = set(update_fields) | {
+                        "data_lifecycle",
+                        "is_test_mode",
+                    }
+                return super().save(*args, **kwargs)
 
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:

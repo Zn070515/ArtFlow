@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event, Thread
+from unittest import skipUnless
 from unittest.mock import patch
 
 from accounts.models import User
@@ -13,10 +15,17 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import DatabaseError, IntegrityError, transaction
+from django.db import (
+    DatabaseError,
+    IntegrityError,
+    close_old_connections,
+    connection,
+    transaction,
+)
 from django.db import models as django_models
+from django.db.models.signals import pre_save
 from django.http import Http404
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate
@@ -94,6 +103,145 @@ class ActivityLifecycleTests(TestCase):
 
         with self.assertRaises(ValidationError):
             activity.save()
+
+
+class ActivityLifecycleBulkWriteTests(TestCase):
+    def test_queryset_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.filter(pk=activity.pk).update(is_test_mode=True)
+
+    def test_base_manager_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity._base_manager.filter(pk=activity.pk).update(
+                data_lifecycle=Activity.DataLifecycle.TEST
+            )
+
+    def test_bulk_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        activity.is_test_mode = True
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.bulk_update([activity], ["is_test_mode"])
+
+    def test_bulk_create_aligns_lifecycle_marker(self):
+        activity = Activity(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        Activity.objects.bulk_create([activity])
+        activity.refresh_from_db()
+
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
+
+    def test_bulk_create_conflict_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        stale_activity = Activity(
+            pk=activity.pk,
+            title=activity.title,
+            activity_type=activity.activity_type,
+            is_test_mode=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.bulk_create(
+                [stale_activity],
+                update_conflicts=True,
+                update_fields=["is_test_mode", "data_lifecycle"],
+                unique_fields=["pk"],
+            )
+
+
+@skipUnless(
+    connection.features.has_select_for_update,
+    "Activity lifecycle race protection requires database row locking.",
+)
+class ActivityLifecycleConcurrencyTests(TransactionTestCase):
+    def test_stale_test_save_waits_for_formal_promotion_lock(self):
+        activity = Activity.objects.create(
+            title="Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        stale_activity = Activity.objects.get(pk=activity.pk)
+        formal_save_started = Event()
+        release_formal_save = Event()
+        stale_save_started = Event()
+        stale_save_finished = Event()
+        formal_errors = []
+        stale_errors = []
+
+        def hold_formal_save(sender, instance, **kwargs):
+            if instance.pk == activity.pk and not instance.is_test_mode:
+                formal_save_started.set()
+                release_formal_save.wait(timeout=5)
+
+        def promote_activity():
+            close_old_connections()
+            try:
+                formal_activity = Activity.objects.get(pk=activity.pk)
+                formal_activity.is_test_mode = False
+                formal_activity.save()
+            except Exception as error:
+                formal_errors.append(error)
+            finally:
+                close_old_connections()
+
+        def save_stale_activity():
+            close_old_connections()
+            stale_save_started.set()
+            try:
+                stale_activity.save()
+            except Exception as error:
+                stale_errors.append(error)
+            finally:
+                stale_save_finished.set()
+                close_old_connections()
+
+        pre_save.connect(hold_formal_save, sender=Activity, weak=False)
+        formal_thread = Thread(target=promote_activity)
+        stale_thread = Thread(target=save_stale_activity)
+        try:
+            formal_thread.start()
+            self.assertTrue(formal_save_started.wait(timeout=5))
+            stale_thread.start()
+            self.assertTrue(stale_save_started.wait(timeout=5))
+            self.assertFalse(stale_save_finished.wait(timeout=0.2))
+        finally:
+            release_formal_save.set()
+            formal_thread.join(timeout=5)
+            stale_thread.join(timeout=5)
+            pre_save.disconnect(hold_formal_save, sender=Activity)
+
+        self.assertFalse(formal_thread.is_alive())
+        self.assertFalse(stale_thread.is_alive())
+        self.assertEqual(formal_errors, [])
+        self.assertEqual(len(stale_errors), 1)
+        self.assertIsInstance(stale_errors[0], ValidationError)
+        activity.refresh_from_db()
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
 
 
 class ActivityOwnershipTests(TestCase):
