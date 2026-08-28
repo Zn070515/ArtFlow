@@ -1,3 +1,4 @@
+import os
 import shutil
 import tempfile
 import zipfile
@@ -1583,7 +1584,7 @@ class StaffPanelSmokeTests(TestCase):
             is_test_mode=True,
         )
         with self.assertRaises(PermissionDenied):
-            archive_activity(activity, self.staff)
+            archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_residual_test_data(self):
         activity = Activity.objects.create(
@@ -1604,7 +1605,7 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=True,
         )
         with self.assertRaises(PermissionDenied):
-            archive_activity(activity, self.staff)
+            archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_unlocked_round(self):
         activity = Activity.objects.create(
@@ -1633,13 +1634,13 @@ class StaffPanelSmokeTests(TestCase):
         )
         prepare_round(contest_round, self.staff)
         with self.assertRaises(PermissionDenied):
-            archive_activity(activity, self.staff)
+            archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_missing_scores(self):
         activity = self._make_finalized_round_activity()
         ScoreRecord.objects.all().delete()
         with self.assertRaises(PermissionDenied):
-            archive_activity(activity, self.staff)
+            archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_unlocked_vote(self):
         activity = Activity.objects.create(
@@ -1659,11 +1660,11 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=False,
         )
         with self.assertRaises(PermissionDenied):
-            archive_activity(activity, self.staff)
+            archive_activity(activity, self.admin)
 
-    def test_archive_activity_finalizes_and_locks(self):
+    def test_archive_activity_admin_finalizes_and_locks(self):
         activity = self._make_finalized_round_activity()
-        self.client.force_login(self.staff)
+        login_admin(self.client, self.admin)
         response = self.client.post(
             reverse("staff:activity_archive", args=[activity.pk]), {"note": "event over"}
         )
@@ -1676,6 +1677,57 @@ class StaffPanelSmokeTests(TestCase):
             AuditLog.objects.filter(
                 action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
                 target=f"Activity:{activity.pk}",
+            ).exists()
+        )
+
+    def test_archive_activity_staff_forbidden(self):
+        activity = self._make_finalized_round_activity()
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:activity_archive", args=[activity.pk]), {"note": "event over"}
+        )
+        self.assertEqual(response.status_code, 403)
+        activity.refresh_from_db()
+        self.assertNotEqual(activity.phase, Activity.Phase.ARCHIVED)
+        self.assertFalse(ArchivePackage.objects.filter(activity=activity).exists())
+
+    def test_archive_activity_rejects_duplicate_archive(self):
+        activity = self._make_finalized_round_activity()
+        archive_activity(activity, self.admin)
+        self.assertEqual(ArchivePackage.objects.filter(activity=activity).count(), 1)
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.admin)
+        self.assertEqual(ArchivePackage.objects.filter(activity=activity).count(), 1)
+
+    def test_failed_archive_leaves_no_orphan_row_or_file(self):
+        activity = self._make_finalized_round_activity()
+        ScoreRecord.objects.all().delete()
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.admin)
+        self.assertFalse(ArchivePackage.objects.filter(activity=activity).exists())
+        archives_dir = os.path.join(self.media_root, "archives")
+        orphan_files = (
+            [name for name in os.listdir(archives_dir) if name.startswith(f"archive_{activity.pk}")]
+            if os.path.isdir(archives_dir)
+            else []
+        )
+        self.assertEqual(orphan_files, [])
+
+    def test_archive_preview_does_not_change_state(self):
+        activity = self._make_finalized_round_activity()
+        self.client.force_login(self.staff)
+        response = self.client.post(reverse("staff:archive_package_create", args=[activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as zf:
+            self.assertIn("score_results.xlsx", zf.namelist())
+        activity.refresh_from_db()
+        self.assertNotEqual(activity.phase, Activity.Phase.ARCHIVED)
+        self.assertFalse(activity.is_locked)
+        self.assertFalse(ArchivePackage.objects.filter(activity=activity).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.EXPORT,
+                target=f"归档预览: {activity.title}",
             ).exists()
         )
 

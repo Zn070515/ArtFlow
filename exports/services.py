@@ -565,8 +565,12 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
     from archive.models import ArchivePackage
 
     locked_activity = lock_activity_for_runtime_data(activity)
+    if not actor.is_admin:
+        raise PermissionDenied("只有管理员才能归档。")
     if locked_activity.data_lifecycle != Activity.DataLifecycle.FORMAL:
         raise PermissionDenied("只有正式活动才能归档。")
+    if locked_activity.phase == Activity.Phase.ARCHIVED:
+        raise PermissionDenied("活动已经归档。")
     ensure_activity_action_allowed(locked_activity, ActivityAction.ARCHIVE)
 
     if any(get_test_data_counts(locked_activity).values()):
@@ -590,25 +594,35 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         note=note,
         created_by=actor,
     )
-    package.file.save(
-        f"archive_{locked_activity.pk}.zip", ContentFile(build_package_zip(artifacts))
-    )
+    saved_name: str | None = None
+    try:
+        package.file.save(
+            f"archive_{locked_activity.pk}.zip", ContentFile(build_package_zip(artifacts))
+        )
+        saved_name = package.file.name
 
-    old_phase = locked_activity.phase
-    if old_phase != Activity.Phase.ARCHIVED:
-        transition_activity_phase(locked_activity, Activity.Phase.ARCHIVED, actor=actor, note=note)
-        locked_activity = lock_activity_for_runtime_data(locked_activity)
-    locked_activity.is_locked = True
-    locked_activity.locked_at = timezone.now()
-    locked_activity.locked_by = actor
-    locked_activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
+        old_phase = locked_activity.phase
+        if old_phase != Activity.Phase.ARCHIVED:
+            transition_activity_phase(
+                locked_activity, Activity.Phase.ARCHIVED, actor=actor, note=note
+            )
+            locked_activity = lock_activity_for_runtime_data(locked_activity)
+        locked_activity.is_locked = True
+        locked_activity.locked_at = timezone.now()
+        locked_activity.locked_by = actor
+        locked_activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
 
-    AuditLog.objects.create(
-        operator=actor,
-        action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
-        target=f"Activity:{locked_activity.pk}",
-        old_value=old_phase,
-        new_value=Activity.Phase.ARCHIVED,
-        note=note,
-    )
+        AuditLog.objects.create(
+            operator=actor,
+            action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
+            target=f"Activity:{locked_activity.pk}",
+            old_value=old_phase,
+            new_value=Activity.Phase.ARCHIVED,
+            note=note,
+        )
+    except Exception:
+        # The storage write is not rolled back with the DB; drop the orphan file.
+        if saved_name:
+            package.file.storage.delete(saved_name)
+        raise
     return package

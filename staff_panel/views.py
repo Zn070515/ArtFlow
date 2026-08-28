@@ -3,7 +3,6 @@ import io
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
 from accounts.services import change_user_role, set_user_active
-from archive.models import ArchivePackage
 from common.audit import log_action
 from common.business_rules import (
     ensure_activity_unlocked,
@@ -1455,26 +1454,20 @@ def execution_package(request, activity_id):
 @staff_required
 @require_POST
 def archive_package_create(request, activity_id):
+    """Produce a source-of-truth-free preview ZIP; never mutates the activity."""
     activity = get_object_or_404(Activity, pk=activity_id)
     artifacts = build_archive_package(activity)
     response = HttpResponse(build_package_zip(artifacts), content_type="application/zip")
     response["Content-Disposition"] = f"attachment; filename=archive_{activity_id}.zip"
-    package = ArchivePackage.objects.create(
-        activity=activity,
-        includes=", ".join(a.name for a in artifacts),
-        note="Generated archive package",
-        created_by=request.user,
-    )
-    package.file.save(f"archive_{activity_id}.zip", ContentFile(response.content))
     AuditLog.objects.create(
         operator=request.user,
-        action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
-        target=f"归档: {activity.title}",
+        action_type=AuditLog.ActionType.EXPORT,
+        target=f"归档预览: {activity.title}",
     )
     return response
 
 
-@staff_required
+@admin_required
 @require_POST
 def activity_archive(request, pk):
     activity = get_object_or_404(Activity, pk=pk)
