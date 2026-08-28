@@ -1727,7 +1727,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(
             AuditLog.objects.filter(
                 action_type=AuditLog.ActionType.EXPORT,
-                target=f"归档预览: {activity.title}",
+                target=f"archive_preview: {activity.title}",
             ).exists()
         )
 
@@ -2373,6 +2373,8 @@ class StaffPanelSmokeTests(TestCase):
             file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
+        Judge.objects.create(activity=self.singer_activity, name="Judge B")
+        Judge.objects.create(activity=self.singer_activity, name="Judge C")
         contest_round = ContestRound.objects.create(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -3127,3 +3129,170 @@ class UserRoleAdministrationTests(TestCase):
                 target=f"User:{self.participant.pk}",
             ).exists()
         )
+
+
+class ExportPrivacyTests(TestCase):
+    """Exports that carry personal data default to activity scope, not cross-activity."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="staff_export", password="pass", role=User.Role.STAFF
+        )
+        self.admin = User.objects.create_user(
+            username="admin_export", password="pass", role=User.Role.ADMIN
+        )
+        self.participant = User.objects.create_user(username="participant_export", password="pass")
+        self.contest = Activity.objects.create(
+            title="Ten Best Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.other = Activity.objects.create(
+            title="Other Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+
+    def _registration(self, activity, name, student_id):
+        return SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name=name,
+            student_id=student_id,
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            wechat="wx",
+            song_name=f"{name} Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+    def _program(self, activity, name, contact):
+        return Program.objects.create(
+            activity=activity,
+            user=self.participant,
+            name=name,
+            program_type=Program.ProgramType.SONG,
+            contact_name=contact,
+            contact_phone="13900000000",
+            class_name="Class",
+        )
+
+    def _first_column_from(self, response):
+        wb = load_workbook(BytesIO(response.content))
+        ws = wb.active
+        return [ws.cell(row=idx, column=1).value for idx in range(2, ws.max_row + 1)]
+
+    def test_staff_export_registrations_requires_activity_scope(self):
+        self._registration(self.contest, "Contest Singer", "S1")
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:export_registrations"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_export_registrations_scopes_to_selected_activity(self):
+        self._registration(self.contest, "Contest Singer", "S1")
+        self._registration(self.other, "Other Singer", "S2")
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:export_registrations"), {"activity_id": self.other.pk}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._first_column_from(response), ["Other Singer"])
+        log = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.EXPORT, operator=self.staff
+        ).get()
+        self.assertIn('"activity_id": %d' % self.other.pk, log.note)
+        self.assertIn('"row_count": 1', log.note)
+
+    def test_admin_export_registrations_can_export_all_activities(self):
+        self._registration(self.contest, "Contest Singer", "S1")
+        self._registration(self.other, "Other Singer", "S2")
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:export_registrations"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Contest Singer", self._first_column_from(response))
+        self.assertIn("Other Singer", self._first_column_from(response))
+
+    def test_staff_export_programs_scopes_to_selected_activity(self):
+        self._program(self.contest, "Contest Program", "C1")
+        self._program(self.other, "Other Program", "C2")
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:export_programs"), {"activity_id": self.other.pk})
+        self.assertEqual(response.status_code, 200)
+        wb = load_workbook(BytesIO(response.content))
+        ws = wb.active
+        names = [ws.cell(row=idx, column=2).value for idx in range(2, ws.max_row + 1)]
+        self.assertEqual(names, ["Other Program"])
+
+    def test_staff_incident_export_scopes_to_selected_activity(self):
+        IncidentRecord.objects.create(
+            activity=self.contest,
+            occurred_at=timezone.now(),
+            event_type=IncidentRecord.EventType.OTHER,
+        )
+        IncidentRecord.objects.create(
+            activity=self.other,
+            occurred_at=timezone.now(),
+            event_type=IncidentRecord.EventType.OTHER,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:incident_export"), {"activity_id": self.other.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self._first_column_from(response), [self.other.title])
+
+    def test_all_exports_record_export_audit(self):
+        self._registration(self.contest, "Contest Singer", "S1")
+        self.client.force_login(self.staff)
+        self.client.get(reverse("staff:export_registrations"), {"activity_id": self.contest.pk})
+        self.client.get(reverse("staff:excel_material_checklist", args=[self.contest.pk]))
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.EXPORT, operator=self.staff
+            ).exists()
+        )
+
+
+class PublicPostMoveLockTests(TestCase):
+    """Moving a post between activities must respect the lock of both activities."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="staff_post", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="A",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+
+    def test_staff_post_edit_cannot_move_from_locked_activity(self):
+        unlocked = Activity.objects.create(
+            title="B",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.activity.is_locked = True
+        self.activity.save()
+        post = PublicPost.objects.create(
+            title="Post", related_activity=self.activity, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_edit", args=[post.pk]),
+            {
+                "title": "Post",
+                "subtitle": "",
+                "content": "",
+                "post_type": PublicPost.PostType.NORMAL_ARTICLE,
+                "status": PublicPost.Status.DRAFT,
+                "sort_order": "0",
+                "related_activity_id": str(unlocked.pk),
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        post.refresh_from_db()
+        self.assertEqual(post.related_activity_id, self.activity.pk)

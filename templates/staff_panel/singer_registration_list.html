@@ -9,9 +9,21 @@
             <h1 class="text-2xl font-bold text-gray-900">歌手比赛报名</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 报名管理</p>
         </div>
-        {% if registrations %}
-        <a href="{% url 'staff:export_registrations' %}" class="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700 transition-colors">导出 Excel</a>
-        {% endif %}
+        <div class="flex items-center gap-2">
+            <form method="get" class="flex items-center gap-2">
+                <select name="activity_id" onchange="this.form.submit()" class="text-xs border border-gray-300 rounded px-2 py-1">
+                    <option value="">全部活动</option>
+                    {% for a in activities %}
+                    <option value="{{ a.pk }}" {% if selected_activity_id == a.pk|stringformat:"s" %}selected{% endif %}>{{ a.title }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% if selected_activity_id %}
+            <a href="{% url 'staff:export_registrations' %}?activity_id={{ selected_activity_id }}" class="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700 transition-colors">导出 Excel</a>
+            {% elif user.is_admin %}
+            <a href="{% url 'staff:export_registrations' %}" class="bg-green-600 text-white px-3 py-1.5 rounded text-xs hover:bg-green-700 transition-colors">全量导出</a>
+            {% endif %}
+        </div>
     </div>
 
     {% if registrations %}

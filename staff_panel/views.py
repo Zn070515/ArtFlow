@@ -3,7 +3,7 @@ import io
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
 from accounts.services import change_user_role, set_user_active
-from common.audit import log_action
+from common.audit import audit_export, log_action
 from common.business_rules import (
     ensure_activity_unlocked,
     ensure_lifecycle_consistent,
@@ -286,10 +286,15 @@ def post_edit(request, pk):
             )
         data = form.cleaned_data
         old_value = f"status={post.status}; title={post.title}"
-        related_activity = None
+        old_activity = post.related_activity
+        new_activity = None
         if data["related_activity_id"]:
-            related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
-        ensure_activity_unlocked(related_activity or post.related_activity)
+            new_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
+        # A move from a locked activity to an unlocked one must still be blocked;
+        # checking only the new activity would let staff bypass the old lock.
+        for activity in (old_activity, new_activity):
+            if activity is not None:
+                ensure_activity_unlocked(activity)
         post.title = data["title"]
         post.subtitle = data["subtitle"]
         post.content = data["content"]
@@ -337,11 +342,16 @@ def post_edit(request, pk):
 @staff_required
 def singer_registration_list(request):
     registrations = SingerRegistration.objects.select_related("activity", "user")
+    activity_id = request.GET.get("activity_id")
+    if activity_id:
+        registrations = registrations.filter(activity_id=activity_id)
     return render(
         request,
         "staff_panel/singer_registration_list.html",
         {
             "registrations": registrations,
+            "activities": Activity.objects.all(),
+            "selected_activity_id": activity_id,
         },
     )
 
@@ -424,7 +434,18 @@ def singer_registration_detail(request, pk):
 @staff_required
 def program_list(request):
     programs = Program.objects.select_related("activity", "user")
-    return render(request, "staff_panel/program_list.html", {"programs": programs})
+    activity_id = request.GET.get("activity_id")
+    if activity_id:
+        programs = programs.filter(activity_id=activity_id)
+    return render(
+        request,
+        "staff_panel/program_list.html",
+        {
+            "programs": programs,
+            "activities": Activity.objects.all(),
+            "selected_activity_id": activity_id,
+        },
+    )
 
 
 @staff_required
@@ -584,8 +605,23 @@ def activity_material_requirement_delete(request, activity_id, pk):
 # --- Excel export ---
 
 
+def _export_activity(request):
+    """Resolve the ?activity_id= scope, or None for a cross-activity export.
+
+    A staff user must pick an activity; only an admin may export across all
+    activities (enforced by the caller). Returns the Activity or None.
+    """
+    activity_id = request.GET.get("activity_id")
+    if not activity_id:
+        return None
+    return get_object_or_404(Activity, pk=activity_id)
+
+
 @staff_required
 def export_registrations(request):
+    activity = _export_activity(request)
+    if activity is None and not request.user.is_admin:
+        raise PermissionDenied("全量导出仅管理员可用；请先用活动筛选导出单个活动。")
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "报名名单"
@@ -605,7 +641,15 @@ def export_registrations(request):
             "提交时间",
         ]
     )
-    for r in SingerRegistration.objects.select_related("activity").filter(is_test_data=False):
+    if activity is not None:
+        rows = scope_runtime(
+            SingerRegistration.objects.select_related("activity").filter(activity=activity),
+            activity,
+        )
+    else:
+        rows = SingerRegistration.objects.select_related("activity").filter(is_test_data=False)
+    row_count = 0
+    for r in rows:
         ws.append(
             [
                 r.name,
@@ -622,6 +666,8 @@ def export_registrations(request):
                 r.created_at.strftime("%Y-%m-%d %H:%M"),
             ]
         )
+        row_count += 1
+    audit_export(request, activity, "registration_list", row_count=row_count)
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -632,6 +678,9 @@ def export_registrations(request):
 
 @staff_required
 def export_programs(request):
+    activity = _export_activity(request)
+    if activity is None and not request.user.is_admin:
+        raise PermissionDenied("全量导出仅管理员可用；请先用活动筛选导出单个活动。")
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "节目单"
@@ -652,7 +701,14 @@ def export_programs(request):
             "提交时间",
         ]
     )
-    for p in Program.objects.select_related("activity").filter(is_test_data=False):
+    if activity is not None:
+        rows = scope_runtime(
+            Program.objects.select_related("activity").filter(activity=activity), activity
+        )
+    else:
+        rows = Program.objects.select_related("activity").filter(is_test_data=False)
+    row_count = 0
+    for p in rows:
         ws.append(
             [
                 p.sort_order,
@@ -670,6 +726,8 @@ def export_programs(request):
                 p.created_at.strftime("%Y-%m-%d %H:%M"),
             ]
         )
+        row_count += 1
+    audit_export(request, activity, "program_list", row_count=row_count)
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1136,8 +1194,10 @@ def vote_session_export(request, pk):
     from django.db.models import Count
 
     options = vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
+    options = list(options)
     for opt in options:
         ws.append([opt.singer.name, opt.vote_count])
+    audit_export(request, vote_session.activity, "vote_result", row_count=len(options))
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1290,6 +1350,7 @@ def excel_material_checklist(request, activity_id):
     ws = _active_worksheet(wb)
     ws.title = "Material Checklist"
     ws.append(["Owner Type", "Owner", "Item", "Status"])
+    row_count = 0
     for c in MaterialCheck.objects.filter(
         singer_registration__activity=activity,
         singer_registration__is_test_data=runtime_is_test(activity),
@@ -1302,6 +1363,7 @@ def excel_material_checklist(request, activity_id):
                 c.get_status_display(),
             ]
         )
+        row_count += 1
     for c in MaterialCheck.objects.filter(
         program__activity=activity,
         program__is_test_data=runtime_is_test(activity),
@@ -1314,6 +1376,8 @@ def excel_material_checklist(request, activity_id):
                 c.get_status_display(),
             ]
         )
+        row_count += 1
+    audit_export(request, activity, "material_checklist", row_count=row_count)
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1337,6 +1401,7 @@ def excel_score_template(request, round_id):
     for col_idx, judge in enumerate(judges, 2):
         ws.cell(row=1, column=col_idx).font = Font(bold=True)
         ws.cell(row=1, column=col_idx).alignment = Alignment(horizontal="center")
+    audit_export(request, contest_round.activity, "score_template", row_count=len(singers))
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
@@ -1421,11 +1486,7 @@ def word_generate(request, template_id, activity_id):
         doc_obj.file.save(
             f"{template.template_type}_{activity_id}.docx", ContentFile(buf.getvalue())
         )
-    AuditLog.objects.create(
-        operator=request.user,
-        action_type=AuditLog.ActionType.EXPORT,
-        target=f"生成Word: {template.name}",
-    )
+    audit_export(request, activity, "word_generate")
     response = HttpResponse(
         buf.read(),
         content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1445,11 +1506,7 @@ def execution_package(request, activity_id):
     artifacts = build_execution_package(activity, request)
     response = HttpResponse(build_package_zip(artifacts), content_type="application/zip")
     response["Content-Disposition"] = f"attachment; filename=execution_{activity_id}.zip"
-    AuditLog.objects.create(
-        operator=request.user,
-        action_type=AuditLog.ActionType.EXPORT,
-        target=f"执行包: {activity.title}",
-    )
+    audit_export(request, activity, "execution_package")
     return response
 
 
@@ -1461,11 +1518,7 @@ def archive_package_create(request, activity_id):
     artifacts = build_archive_package(activity)
     response = HttpResponse(build_package_zip(artifacts), content_type="application/zip")
     response["Content-Disposition"] = f"attachment; filename=archive_{activity_id}.zip"
-    AuditLog.objects.create(
-        operator=request.user,
-        action_type=AuditLog.ActionType.EXPORT,
-        target=f"归档预览: {activity.title}",
-    )
+    audit_export(request, activity, "archive_preview")
     return response
 
 
@@ -1561,13 +1614,22 @@ def incident_create(request):
 
 @staff_required
 def incident_export(request):
+    activity = _export_activity(request)
+    if activity is None and not request.user.is_admin:
+        raise PermissionDenied("全量导出仅管理员可用；请先用活动筛选导出单个活动。")
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "异常记录"
     ws.append(["活动", "时间", "类型", "选手", "处理人", "处理结果", "备注"])
-    incidents = IncidentRecord.objects.select_related("activity", "singer", "handled_by").filter(
-        is_test=False
-    )
+    if activity is not None:
+        incidents = IncidentRecord.objects.select_related(
+            "activity", "singer", "handled_by"
+        ).filter(activity=activity, is_test=runtime_is_test(activity))
+    else:
+        incidents = IncidentRecord.objects.select_related(
+            "activity", "singer", "handled_by"
+        ).filter(is_test=False)
+    row_count = 0
     for inc in incidents:
         ws.append(
             [
@@ -1580,6 +1642,8 @@ def incident_export(request):
                 inc.remark,
             ]
         )
+        row_count += 1
+    audit_export(request, activity, "incident_list", row_count=row_count)
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )

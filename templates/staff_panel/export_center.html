@@ -35,8 +35,8 @@
             </div>
 
             <div class="flex flex-wrap gap-1.5 mb-3">
-                <a href="{% url 'staff:export_registrations' %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">报名名单</a>
-                <a href="{% url 'staff:incident_export' %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">异常记录</a>
+                <a href="{% url 'staff:export_registrations' %}?activity_id={{ a.pk }}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">报名名单</a>
+                <a href="{% url 'staff:incident_export' %}?activity_id={{ a.pk }}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">异常记录</a>
             </div>
 
             <div class="flex flex-wrap gap-1.5">
@@ -72,6 +72,15 @@
         </div>
         {% endfor %}
     </div>
+
+    {% if user.is_admin %}
+    <div class="mt-6 border border-red-200 bg-red-50 rounded-lg p-4 text-xs text-gray-600">
+        <p class="font-medium text-red-600 mb-1">管理员全量导出（包含所有活动的个人数据，请谨慎）</p>
+        <a href="{% url 'staff:export_registrations' %}" class="text-red-600 underline mr-3">全量报名名单</a>
+        <a href="{% url 'staff:export_programs' %}" class="text-red-600 underline mr-3">全量节目单</a>
+        <a href="{% url 'staff:incident_export' %}" class="text-red-600 underline mr-3">全量异常记录</a>
+    </div>
+    {% endif %}
 
     {% if templates %}
     <h2 class="text-xl font-semibold text-gray-900 mt-10 mb-4">Word 推文生成</h2>

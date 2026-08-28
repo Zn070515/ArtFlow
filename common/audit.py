@@ -1,3 +1,8 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
 from django.conf import settings
 from django.http import HttpRequest
 
@@ -33,4 +38,32 @@ def log_action(
         new_value=new_value,
         ip_address=client_ip(request),
         note=note,
+    )
+
+
+def audit_export(
+    request: HttpRequest,
+    activity: Any | None,
+    export_type: str,
+    *,
+    row_count: int | None = None,
+) -> AuditLog:
+    """Record a uniform EXPORT audit for any data export.
+
+    `export_type` is a stable machine-readable label (e.g. "registration_list");
+    the audit note carries the activity scope and row count so a later question
+    like "who exported these phone numbers?" can be answered in one query.
+    """
+    details = {
+        "export_type": export_type,
+        "activity_id": activity.pk if activity else None,
+        "row_count": row_count,
+    }
+    target = f"{export_type}: {activity.title}" if activity else export_type
+    return AuditLog.objects.create(
+        operator=request.user if request.user.is_authenticated else None,
+        action_type=AuditLog.ActionType.EXPORT,
+        target=target,
+        note=json.dumps(details, ensure_ascii=False),
+        ip_address=client_ip(request),
     )

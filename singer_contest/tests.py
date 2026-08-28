@@ -534,6 +534,26 @@ class ScoringServiceTests(TestCase):
             [self.judge.pk, second_judge.pk],
         )
 
+    def test_prepare_round_rejects_drop_high_low_with_fewer_than_three_judges(self):
+        self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
+        self.round.save()
+        Judge.objects.create(activity=self.activity, name="Second Judge")
+
+        with self.assertRaises(ValidationError):
+            prepare_round(self.round, self.user)
+
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+
+    def test_prepare_round_allows_drop_high_low_with_three_judges(self):
+        self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
+        self.round.save()
+        Judge.objects.create(activity=self.activity, name="Second Judge")
+        Judge.objects.create(activity=self.activity, name="Third Judge")
+
+        prepared = prepare_round(self.round, self.user)
+
+        self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
+
     def test_prepare_round_is_rejected_after_preparation(self):
         prepare_round(self.round, self.user)
 
