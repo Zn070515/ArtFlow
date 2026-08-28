@@ -5,14 +5,16 @@ from unittest import skipUnless
 
 from accounts.models import User
 from common.models import AuditLog
+from common.test_data import clear_activity_test_data
 from core.models import Activity
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import connection, transaction
+from django.db import OperationalError, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
-from singer_contest.models import SingerRegistration
+from singer_contest.models import ContestRound, Judge, SingerRegistration
+from singer_contest.services import apply_scores, prepare_round
 
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from .services import (
@@ -138,6 +140,205 @@ class VoteBallotTests(TestCase):
             )
 
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
+
+
+class VoteActivityLockOverlayTests(TestCase):
+    """The Activity global lock is an overlay that rejects public ballots."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="overlay-voter", password="pass")
+        self.activity = Activity.objects.create(
+            title="Overlay Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_locked=False,
+        )
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Overlay Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        self.session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        self.option = VoteOption.objects.create(vote_session=self.session, singer=singer)
+
+    def _cast_ballot(self):
+        client = self.client_class()
+        entry = client.post(
+            reverse("voting:vote_entry", args=[self.session.pk]),
+            {"passcode": self.session.passcode},
+        )
+        self.assertEqual(entry.status_code, 302)
+        return client.post(
+            reverse("voting:vote_cast", args=[self.session.pk]),
+            {"selected_option": [str(self.option.pk)]},
+        )
+
+    def test_activity_locked_while_session_open_rejects_ballot(self):
+        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+
+        response = self._cast_ballot()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "尚未开放或已锁定")
+        self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
+
+    def test_activity_unlock_resumes_voting_on_open_session(self):
+        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        self._cast_ballot()
+        self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
+
+        Activity.objects.filter(pk=self.activity.pk).update(is_locked=False)
+        response = self._cast_ballot()
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("voting:vote_done", args=[self.session.pk]))
+        self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 1)
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class VoteActivityLockConcurrencyTests(TransactionTestCase):
+    """Verify the Activity row lock is taken before the child rows."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(username="concurrent-staff", password="pass")
+        user = User.objects.create_user(username="concurrent-overlay-voter", password="pass")
+        self.activity = Activity.objects.create(
+            title="Concurrent Overlay Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+            is_locked=False,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=user,
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+            is_test_data=True,
+        )
+        self.option = VoteOption.objects.create(
+            vote_session=self.session, singer=self.singer, is_test_data=True
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Concurrent Judge")
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            scoring_mode=ContestRound.ScoringMode.AVERAGE,
+            advance_count=1,
+        )
+        prepare_round(self.round, self.admin)
+
+    def test_concurrent_activity_lock_rejects_ballot_after_commit(self):
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error = {}
+
+        def hold_activity_lock():
+            try:
+                with transaction.atomic():
+                    activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    activity.is_locked = True
+                    activity.save(update_fields=["is_locked"])
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                connection.close()
+
+        holder = threading.Thread(target=hold_activity_lock)
+        holder.start()
+        self.assertTrue(lock_held.wait(timeout=10))
+
+        submit_result: dict[str, object] = {}
+
+        def try_submit():
+            try:
+                submit_ballot(
+                    self.session,
+                    browser_session_key="browser-overlay",
+                    option_ids=[self.option.pk],
+                    ip_address="10.0.0.9",
+                )
+                submit_result["accepted"] = True
+            except ValidationError:
+                submit_result["rejected"] = True
+            except Exception as error:  # pragma: no cover - diagnostic only
+                submit_result["error"] = error
+            finally:
+                connection.close()
+
+        submitter = threading.Thread(target=try_submit)
+        submitter.start()
+        time.sleep(1)  # let the submitter block on the Activity row lock
+        release_lock.set()
+        holder.join(timeout=10)
+        submitter.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.assertTrue(submit_result.get("rejected"), f"expected rejection, got {submit_result}")
+        self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
+
+    def test_clear_and_score_concurrently_do_not_deadlock(self):
+        results: dict[str, str] = {}
+
+        def run_clear():
+            try:
+                clear_activity_test_data(self.activity, operator=self.admin)
+                results["clear"] = "ok"
+            except OperationalError as error:
+                results["clear"] = "deadlock" if "deadlock" in str(error).lower() else "error"
+            except Exception:
+                results["clear"] = "error"
+            finally:
+                connection.close()
+
+        def run_score():
+            try:
+                apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
+                results["score"] = "ok"
+            except OperationalError as error:
+                results["score"] = "deadlock" if "deadlock" in str(error).lower() else "error"
+            except Exception:
+                results["score"] = "error"
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=run_clear), threading.Thread(target=run_score)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertEqual(results.get("clear"), "ok")
+        self.assertNotEqual(results.get("score"), "deadlock")
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

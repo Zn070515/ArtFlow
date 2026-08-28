@@ -3,6 +3,7 @@ from datetime import timedelta
 from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
+from core.policies import ActivityAction, ensure_activity_action_allowed
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -41,13 +42,16 @@ def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
         raise ValidationError("候选项不属于当前投票。")
 
     with transaction.atomic():
+        locked_activity = lock_activity_for_runtime_data(vote_session.activity)
+        ensure_activity_action_allowed(locked_activity, ActivityAction.CAST_VOTE)
+        if locked_activity.is_locked:
+            raise ValidationError("投票尚未开放或已锁定。")
         locked_session = VoteSession.objects.select_for_update().get(pk=vote_session.pk)
         now = timezone.now()
         if not locked_session.is_open or locked_session.is_locked:
             raise ValidationError("投票尚未开放或已锁定。")
         if now < locked_session.start_time or now > locked_session.end_time:
             raise ValidationError("当前不在投票时间内。")
-        locked_activity = lock_activity_for_runtime_data(locked_session.activity)
         ballot = VoteBallot.objects.filter(
             vote_session=locked_session, browser_session_key=browser_session_key
         ).first()
@@ -111,8 +115,8 @@ def _audit_vote_state(vote_session, operator, action_type, old_value, new_value,
 
 def open_vote_session(vote_session, operator):
     with transaction.atomic():
+        _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
-        _locked_runtime_activity(locked.activity)
         if locked.is_locked:
             raise PermissionDenied("投票已锁定，无法开放。")
         if locked.is_open:
@@ -127,8 +131,8 @@ def open_vote_session(vote_session, operator):
 
 def close_vote_session(vote_session, operator):
     with transaction.atomic():
+        _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
-        _locked_runtime_activity(locked.activity)
         if not locked.is_open:
             return locked
         locked.is_open = False
@@ -141,8 +145,8 @@ def close_vote_session(vote_session, operator):
 
 def lock_vote_session(vote_session, operator):
     with transaction.atomic():
+        _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
-        _locked_runtime_activity(locked.activity)
         if locked.is_locked:
             return locked
         locked.is_locked = True
@@ -156,8 +160,8 @@ def lock_vote_session(vote_session, operator):
 
 def unlock_vote_session(vote_session, operator, *, note: str = ""):
     with transaction.atomic():
+        _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
-        _locked_runtime_activity(locked.activity)
         if not locked.is_locked:
             return locked
         locked.is_locked = False

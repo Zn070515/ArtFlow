@@ -818,11 +818,8 @@ def round_ranking(request, pk):
 
 @staff_required
 @require_POST
-@transaction.atomic
 def round_finalize_advancement(request, pk):
-    contest_round = get_object_or_404(
-        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
-    )
+    contest_round = get_object_or_404(ContestRound, pk=pk)
     ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
     try:
         finalize_advancement(
@@ -871,9 +868,7 @@ def round_lock(request, pk):
 @transaction.atomic
 def round_unlock(request, pk):
     _require_admin(request.user)
-    contest_round = get_object_or_404(
-        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
-    )
+    contest_round = get_object_or_404(ContestRound, pk=pk)
     note = request.POST.get("note", "").strip()
     if contest_round.status != ContestRound.Status.LOCKED or not contest_round.is_locked:
         raise PermissionDenied("该比赛轮次未锁定。")
@@ -881,13 +876,14 @@ def round_unlock(request, pk):
         raise PermissionDenied("后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。")
     locked_activity = lock_activity_for_runtime_data(contest_round.activity)
     ensure_activity_unlocked(locked_activity)
-    contest_round.is_locked = False
-    contest_round.status = ContestRound.Status.SCORING
-    contest_round.save(update_fields=["is_locked", "status"])
+    locked_round = ContestRound.objects.select_for_update().get(pk=contest_round.pk)
+    locked_round.is_locked = False
+    locked_round.status = ContestRound.Status.SCORING
+    locked_round.save(update_fields=["is_locked", "status"])
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
-        f"ContestRound:{contest_round.pk}",
+        f"ContestRound:{locked_round.pk}",
         note=note,
     )
     return redirect("staff:round_ranking", pk=pk)
@@ -897,9 +893,7 @@ def round_unlock(request, pk):
 @require_POST
 def round_reset(request, pk):
     _require_admin(request.user)
-    contest_round = get_object_or_404(
-        ContestRound.objects.select_for_update().select_related("activity"), pk=pk
-    )
+    contest_round = get_object_or_404(ContestRound, pk=pk)
     reason = request.POST.get("reason", "")
     if not reason.strip():
         raise PermissionDenied("重置轮次必须填写原因。")

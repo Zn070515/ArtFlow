@@ -11,6 +11,7 @@ class ActivityAction(StrEnum):
     REVIEW_REGISTRATION = "review_registration"
     UPLOAD_MATERIAL = "upload_material"
     SCORE = "score"
+    CAST_VOTE = "cast_vote"
     MANAGE_VOTE = "manage_vote"
     MANAGE_AWARD = "manage_award"
     PUBLISH_RESULT = "publish_result"
@@ -29,6 +30,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
         {
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.REVIEW_REGISTRATION,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
         }
@@ -38,6 +40,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.REVIEW_REGISTRATION,
             ActivityAction.SCORE,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
         }
@@ -48,6 +51,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.REVIEW_REGISTRATION,
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.SCORE,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
         }
     ),
@@ -56,6 +60,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.REVIEW_REGISTRATION,
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.SCORE,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
         }
     ),
@@ -69,12 +74,14 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
         {
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.SCORE,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
         }
     ),
     "live": frozenset(
         {
             ActivityAction.SCORE,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
         }
@@ -82,6 +89,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
     "results_pending": frozenset(
         {
             ActivityAction.SCORE,
+            ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
             ActivityAction.ARCHIVE,

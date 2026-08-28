@@ -32,6 +32,7 @@ def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
 
 @transaction.atomic
 def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
+    lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
@@ -109,6 +110,7 @@ def reset_test_round_snapshots(
     owned_singer_ids: set[int],
     owned_judge_ids: set[int],
 ) -> ContestRound:
+    lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
@@ -165,6 +167,7 @@ def reset_round_snapshots(
     test-marked; otherwise a test rehearsal snapshot is silently wiping formal
     rows. A formal activity is intentionally allowed to unwind via this path.
     """
+    lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
@@ -215,6 +218,7 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
     """
     if not reason.strip():
         raise ValidationError("重置轮次必须填写原因。")
+    lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
@@ -391,6 +395,7 @@ def finalize_advancement(
     database order. Staff explicitly choose who advances; that choice is frozen
     for downstream round consumption and audited.
     """
+    lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
@@ -439,10 +444,10 @@ def apply_scores(
     *,
     note: str = "",
 ) -> list[dict[str, int | str | None]]:
+    lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
-    locked_round.activity = lock_activity_for_runtime_data(locked_round.activity)
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备比赛轮次后再评分。")
     if locked_round.status == ContestRound.Status.LOCKED:
