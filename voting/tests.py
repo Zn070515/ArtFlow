@@ -175,6 +175,8 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
+            finally:
+                connection.close()
 
         holder = threading.Thread(target=hold_lock)
         holder.start()
@@ -195,6 +197,8 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
                 submit_result["rejected"] = True
             except Exception as error:  # pragma: no cover - diagnostic only
                 submit_result["error"] = error
+            finally:
+                connection.close()
 
         submitter = threading.Thread(target=try_submit)
         submitter.start()
