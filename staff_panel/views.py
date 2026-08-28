@@ -1,5 +1,4 @@
 import io
-import zipfile
 
 from accounts.decorators import admin_required, staff_required
 from archive.models import ArchivePackage
@@ -30,6 +29,12 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from exports.models import ArticleTemplate, GeneratedDocument
+from exports.services import (
+    archive_activity,
+    build_archive_package,
+    build_execution_package,
+    build_package_zip,
+)
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 from files.services import (
@@ -1348,16 +1353,14 @@ def word_generate(request, template_id, activity_id):
 @staff_required
 def execution_package(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for label, gen in _complete_activity_excel_generators(activity):
-            wb = gen()
-            stream = io.BytesIO()
-            wb.save(stream)
-            zf.writestr(f"{label}.xlsx", stream.getvalue())
-    buf.seek(0)
-    response = HttpResponse(buf.read(), content_type="application/zip")
+    artifacts = build_execution_package(activity, request)
+    response = HttpResponse(build_package_zip(artifacts), content_type="application/zip")
     response["Content-Disposition"] = f"attachment; filename=execution_{activity_id}.zip"
+    AuditLog.objects.create(
+        operator=request.user,
+        action_type=AuditLog.ActionType.EXPORT,
+        target=f"执行包: {activity.title}",
+    )
     return response
 
 
@@ -1365,485 +1368,35 @@ def execution_package(request, activity_id):
 @require_POST
 def archive_package_create(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for label, gen in _complete_activity_excel_generators(activity):
-            wb = gen()
-            stream = io.BytesIO()
-            wb.save(stream)
-            zf.writestr(f"{label}.xlsx", stream.getvalue())
-        # Include generated docs
-        for doc in scope_runtime(GeneratedDocument.objects.filter(activity=activity), activity):
-            if doc.file:
-                with doc.file.open("rb") as document_file:
-                    zf.writestr(f"推文_{doc.pk}.docx", document_file.read())
-    buf.seek(0)
+    artifacts = build_archive_package(activity)
+    response = HttpResponse(build_package_zip(artifacts), content_type="application/zip")
+    response["Content-Disposition"] = f"attachment; filename=archive_{activity_id}.zip"
     package = ArchivePackage.objects.create(
         activity=activity,
-        includes=", ".join(label for label, _ in _complete_activity_excel_generators(activity)),
+        includes=", ".join(a.name for a in artifacts),
         note="Generated archive package",
         created_by=request.user,
     )
-    package.file.save(f"archive_{activity_id}.zip", ContentFile(buf.getvalue()))
+    package.file.save(f"archive_{activity_id}.zip", ContentFile(response.content))
     AuditLog.objects.create(
         operator=request.user,
         action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
         target=f"归档: {activity.title}",
     )
-    response = HttpResponse(buf.read(), content_type="application/zip")
-    response["Content-Disposition"] = f"attachment; filename=archive_{activity_id}.zip"
     return response
 
 
-def _activity_excel_generators(activity):
-    """Yield (label, callable returning Workbook) for common exports."""
-
-    def _registration_list():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "报名名单"
-        ws.append(["姓名", "学号", "学院", "班级", "手机", "微信", "曲目", "原创", "赛前状态"])
-        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
-            ws.append(
-                [
-                    r.name,
-                    r.student_id,
-                    r.college,
-                    r.class_name,
-                    r.phone,
-                    r.wechat,
-                    r.song_name,
-                    "是" if r.is_original else "否",
-                    r.get_pre_status_display(),
-                ]
-            )
-        return wb
-
-    def _material_checklist():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "材料清单"
-        ws.append(["姓名", "项目", "状态"])
-        for c in MaterialCheck.objects.filter(
-            singer_registration__activity=activity,
-            singer_registration__is_test_data=runtime_is_test(activity),
-        ):
-            ws.append(
-                [
-                    c.singer_registration.name if c.singer_registration else "",
-                    c.item_name,
-                    c.get_status_display(),
-                ]
-            )
-        return wb
-
-    def _incidents():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "异常记录"
-        ws.append(["时间", "类型", "选手", "处理人", "处理结果", "备注"])
-        for inc in IncidentRecord.objects.filter(
-            activity=activity, is_test=runtime_is_test(activity)
-        ):
-            ws.append(
-                [
-                    inc.occurred_at.strftime("%m/%d %H:%M"),
-                    inc.get_event_type_display(),
-                    inc.singer.name if inc.singer else "",
-                    inc.handled_by.username if inc.handled_by else "",
-                    inc.resolution,
-                    inc.remark,
-                ]
-            )
-        return wb
-
-    def _staff_notes():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "工作人员备注"
-        ws.append(["关联", "内容", "创建人", "时间"])
-        for n in StaffNote.objects.filter(
-            singer_registration__activity=activity,
-            singer_registration__is_test_data=runtime_is_test(activity),
-        ).select_related("created_by"):
-            ws.append(
-                [
-                    f"选手: {n.singer_registration.name}" if n.singer_registration else "",
-                    n.content,
-                    n.created_by.username if n.created_by else "",
-                    n.created_at.strftime("%m/%d %H:%M"),
-                ]
-            )
-        return wb
-
-    def _contacts():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "联系方式表"
-        ws.append(["姓名", "学号", "手机", "微信", "学院", "班级", "曲目"])
-        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
-            ws.append(
-                [r.name, r.student_id, r.phone, r.wechat, r.college, r.class_name, r.song_name]
-            )
-        return wb
-
-    return [
-        ("报名名单", _registration_list),
-        ("材料清单", _material_checklist),
-        ("联系方式表", _contacts),
-        ("异常记录", _incidents),
-        ("工作人员备注", _staff_notes),
-    ]
-
-
-def _autosize_sheet(ws):
-    for column in ws.columns:
-        letter = column[0].column_letter
-        width = max(len(str(cell.value or "")) for cell in column)
-        ws.column_dimensions[letter].width = min(max(width + 2, 10), 36)
-
-
-def _complete_activity_excel_generators(activity):
-    """Yield stable workbook exports for execution and archive packages."""
-
-    def _registration_list():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Registration List"
-        ws.append(
-            [
-                "Name",
-                "Student ID",
-                "College",
-                "Class",
-                "Phone",
-                "Wechat",
-                "Song",
-                "Original",
-                "Pre Status",
-                "Live Status",
-            ]
-        )
-        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
-            ws.append(
-                [
-                    r.name,
-                    r.student_id,
-                    r.college,
-                    r.class_name,
-                    r.phone,
-                    r.wechat,
-                    r.song_name,
-                    "yes" if r.is_original else "no",
-                    r.get_pre_status_display(),
-                    r.get_live_status_display(),
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _program_list():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Program List"
-        ws.append(
-            [
-                "Order",
-                "Name",
-                "Type",
-                "Contact",
-                "Phone",
-                "Class/Dept",
-                "Performers",
-                "Duration",
-                "Status",
-                "Mic",
-                "Props",
-                "Notes",
-            ]
-        )
-        for p in scope_runtime(Program.objects.filter(activity=activity), activity):
-            ws.append(
-                [
-                    p.sort_order,
-                    p.name,
-                    p.get_program_type_display(),
-                    p.contact_name,
-                    p.contact_phone,
-                    p.class_name,
-                    p.performers,
-                    p.estimated_duration,
-                    p.get_status_display(),
-                    p.mic_requirements,
-                    p.prop_requirements,
-                    p.special_notes,
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _material_checklist():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Material Checklist"
-        ws.append(["Owner Type", "Owner", "Item", "Status"])
-        for c in MaterialCheck.objects.filter(
-            singer_registration__activity=activity,
-            singer_registration__is_test_data=runtime_is_test(activity),
-        ).select_related("singer_registration"):
-            ws.append(
-                [
-                    "singer",
-                    c.singer_registration.name if c.singer_registration else "",
-                    c.item_name,
-                    c.get_status_display(),
-                ]
-            )
-        for c in MaterialCheck.objects.filter(
-            program__activity=activity, program__is_test_data=runtime_is_test(activity)
-        ).select_related("program"):
-            ws.append(
-                [
-                    "program",
-                    c.program.name if c.program else "",
-                    c.item_name,
-                    c.get_status_display(),
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _contact_list():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Contacts"
-        ws.append(["Owner Type", "Name", "Student ID", "Phone", "Wechat", "College/Class", "Item"])
-        for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
-            ws.append(
-                [
-                    "singer",
-                    r.name,
-                    r.student_id,
-                    r.phone,
-                    r.wechat,
-                    f"{r.college} {r.class_name}",
-                    r.song_name,
-                ]
-            )
-        for p in scope_runtime(Program.objects.filter(activity=activity), activity):
-            ws.append(["program", p.contact_name, "", p.contact_phone, "", p.class_name, p.name])
-        _autosize_sheet(ws)
-        return wb
-
-    def _score_results():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Score Results"
-        ws.append(["Round", "Singer", "Average Score", "Rank", "Advanced"])
-        summaries = (
-            ScoreSummary.objects.filter(
-                round__activity=activity, is_test_data=runtime_is_test(activity)
-            )
-            .select_related("round", "singer")
-            .order_by("round_id", "rank")
-        )
-        for s in summaries:
-            ws.append(
-                [
-                    s.round.name or s.round.get_round_type_display(),
-                    s.singer.name,
-                    s.average_score,
-                    s.rank,
-                    "yes" if s.is_advanced else "no",
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _vote_results():
-        from django.db.models import Count
-
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Vote Results"
-        ws.append(["Session", "Singer", "Song", "Votes"])
-        options = (
-            VoteOption.objects.filter(
-                vote_session__activity=activity,
-                vote_session__is_test_data=runtime_is_test(activity),
-            )
-            .select_related("vote_session", "singer")
-            .annotate(vote_count=Count("records"))
-        )
-        for opt in options:
-            ws.append(
-                [opt.vote_session.name, opt.singer.name, opt.singer.song_name, opt.vote_count]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _award_list():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Awards"
-        ws.append(["Singer", "Song", "Award"])
-        awards = scope_runtime(Award.objects.filter(activity=activity), activity).select_related(
-            "singer"
-        )
-        for award in awards:
-            ws.append([award.singer.name, award.singer.song_name, award.name])
-        _autosize_sheet(ws)
-        return wb
-
-    def _attachment_index():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Attachment Index"
-        ws.append(
-            [
-                "Owner Type",
-                "Owner",
-                "Purpose",
-                "Original Name",
-                "Size",
-                "Uploaded By",
-                "Uploaded At",
-                "Current",
-                "Public",
-            ]
-        )
-        singer_files = SubmissionFile.objects.filter(
-            singer_registration__activity=activity,
-            singer_registration__is_test_data=runtime_is_test(activity),
-            is_test_data=runtime_is_test(activity),
-        ).select_related("singer_registration", "uploaded_by")
-        for f in singer_files:
-            ws.append(
-                [
-                    "singer",
-                    f.singer_registration.name if f.singer_registration else "",
-                    f.get_file_purpose_display(),
-                    f.original_name,
-                    f.file_size,
-                    f.uploaded_by.username if f.uploaded_by else "",
-                    f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
-                    "yes" if f.is_current else "no",
-                    "yes" if f.is_public else "no",
-                ]
-            )
-        program_files = SubmissionFile.objects.filter(
-            program__activity=activity,
-            program__is_test_data=runtime_is_test(activity),
-            is_test_data=runtime_is_test(activity),
-        ).select_related("program", "uploaded_by")
-        for f in program_files:
-            ws.append(
-                [
-                    "program",
-                    f.program.name if f.program else "",
-                    f.get_file_purpose_display(),
-                    f.original_name,
-                    f.file_size,
-                    f.uploaded_by.username if f.uploaded_by else "",
-                    f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
-                    "yes" if f.is_current else "no",
-                    "yes" if f.is_public else "no",
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _public_content_index():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Public Content"
-        ws.append(["Title", "Type", "Status", "Pinned", "Published At", "Updated By"])
-        for post in PublicPost.objects.filter(related_activity=activity).select_related(
-            "updated_by"
-        ):
-            ws.append(
-                [
-                    post.title,
-                    post.get_post_type_display(),
-                    post.get_status_display(),
-                    "yes" if post.is_pinned else "no",
-                    post.published_at.strftime("%Y-%m-%d %H:%M") if post.published_at else "",
-                    post.updated_by.username if post.updated_by else "",
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _incident_list():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Incidents"
-        ws.append(["Time", "Type", "Singer", "Program", "Handler", "Resolution", "Remark"])
-        for inc in IncidentRecord.objects.filter(
-            activity=activity, is_test=runtime_is_test(activity)
-        ).select_related("singer", "program", "handled_by"):
-            ws.append(
-                [
-                    inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
-                    inc.get_event_type_display(),
-                    inc.singer.name if inc.singer else "",
-                    inc.program.name if inc.program else "",
-                    inc.handled_by.username if inc.handled_by else "",
-                    inc.resolution,
-                    inc.remark,
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    def _staff_notes():
-        wb = Workbook()
-        ws = _active_worksheet(wb)
-        ws.title = "Staff Notes"
-        ws.append(["Owner Type", "Owner", "Content", "Created By", "Time"])
-        singer_notes = StaffNote.objects.filter(
-            singer_registration__activity=activity,
-            singer_registration__is_test_data=runtime_is_test(activity),
-        ).select_related("singer_registration", "created_by")
-        for n in singer_notes:
-            ws.append(
-                [
-                    "singer",
-                    n.singer_registration.name if n.singer_registration else "",
-                    n.content,
-                    n.created_by.username if n.created_by else "",
-                    n.created_at.strftime("%Y-%m-%d %H:%M"),
-                ]
-            )
-        program_notes = StaffNote.objects.filter(
-            program__activity=activity, program__is_test_data=runtime_is_test(activity)
-        ).select_related("program", "created_by")
-        for n in program_notes:
-            ws.append(
-                [
-                    "program",
-                    n.program.name if n.program else "",
-                    n.content,
-                    n.created_by.username if n.created_by else "",
-                    n.created_at.strftime("%Y-%m-%d %H:%M"),
-                ]
-            )
-        _autosize_sheet(ws)
-        return wb
-
-    return [
-        ("registration_list", _registration_list),
-        ("program_list", _program_list),
-        ("material_checklist", _material_checklist),
-        ("contact_list", _contact_list),
-        ("score_results", _score_results),
-        ("vote_results", _vote_results),
-        ("award_list", _award_list),
-        ("attachment_index", _attachment_index),
-        ("public_content_index", _public_content_index),
-        ("incident_list", _incident_list),
-        ("staff_notes", _staff_notes),
-    ]
+@staff_required
+@require_POST
+def activity_archive(request, pk):
+    activity = get_object_or_404(Activity, pk=pk)
+    try:
+        archive_activity(activity, request.user, note=request.POST.get("note", "").strip())
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, str(error))
+        return redirect("staff:export_center")
+    messages.success(request, "活动已归档并锁定。")
+    return redirect("staff:export_center")
 
 
 # --- Incident records ---

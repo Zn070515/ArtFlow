@@ -7,8 +7,10 @@ from typing import Any
 from unittest.mock import patch
 
 from accounts.models import User
+from archive.models import ArchivePackage
 from common.models import AuditLog
 from core.models import Activity
+from django.core.exceptions import PermissionDenied
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import FileResponse
@@ -16,6 +18,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
+from exports.services import archive_activity
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from files.services import store_submission_file
@@ -1480,6 +1483,201 @@ class StaffPanelSmokeTests(TestCase):
                 archive.read(f"推文_{document.pk}.docx"),
                 b"storage document",
             )
+
+    def _make_finalized_round_activity(self):
+        activity = Activity.objects.create(
+            title="Archive Ready Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+        singer = SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Final Singer",
+            student_id="20260088",
+            college="Info",
+            class_name="CS1",
+            phone="13800000001",
+            song_name="Final Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        judge = Judge.objects.create(activity=activity, name="Judge F", is_active=True)
+        contest_round = ContestRound.objects.create(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=1,
+        )
+        prepare_round(contest_round, self.staff)
+        locked_round = ContestRound.objects.get(pk=contest_round.pk)
+        ScoreRecord.objects.create(round=locked_round, singer=singer, judge=judge, score=95)
+        locked_round.status = ContestRound.Status.LOCKED
+        locked_round.is_locked = True
+        locked_round.save(update_fields=["status", "is_locked"])
+        return activity
+
+    def test_execution_package_omits_archive_only_sheets(self):
+        activity = Activity.objects.create(
+            title="Exec Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=False,
+        )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Exec Singer",
+            student_id="20260077",
+            college="Info",
+            class_name="CS1",
+            phone="13800000002",
+            song_name="Exec Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        Judge.objects.create(activity=activity, name="Judge X", is_active=True)
+        contest_round = ContestRound.objects.create(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=1,
+        )
+        prepare_round(contest_round, self.staff)
+        vote_session = VoteSession.objects.create(
+            activity=activity,
+            name="Pop",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+            is_test_data=False,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:execution_package", args=[activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as zf:
+            names = set(zf.namelist())
+        self.assertIn("registration_list.xlsx", names)
+        self.assertIn("contact_list.xlsx", names)
+        self.assertIn("program_list.xlsx", names)
+        self.assertIn("material_checklist.xlsx", names)
+        self.assertIn("missing_materials.xlsx", names)
+        self.assertIn("host_script.xlsx", names)
+        self.assertIn("incident_empty_form.xlsx", names)
+        self.assertIn(f"score_template_{contest_round.pk}.xlsx", names)
+        self.assertIn(f"vote_qr_{vote_session.pk}.png", names)
+        for omitted in [
+            "score_results.xlsx",
+            "vote_results.xlsx",
+            "award_list.xlsx",
+            "attachment_index.xlsx",
+            "public_content_index.xlsx",
+        ]:
+            self.assertNotIn(omitted, names)
+
+    def test_archive_activity_rejects_test_activity(self):
+        activity = Activity.objects.create(
+            title="Test Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=True,
+        )
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.staff)
+
+    def test_archive_activity_rejects_residual_test_data(self):
+        activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Test Singer",
+            student_id="20260066",
+            college="Info",
+            class_name="CS1",
+            phone="13800000003",
+            song_name="Test Song",
+            is_test_data=True,
+        )
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.staff)
+
+    def test_archive_activity_rejects_unlocked_round(self):
+        activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Singer",
+            student_id="20260065",
+            college="Info",
+            class_name="CS1",
+            phone="13800000004",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        Judge.objects.create(activity=activity, name="Judge", is_active=True)
+        contest_round = ContestRound.objects.create(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=1,
+        )
+        prepare_round(contest_round, self.staff)
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.staff)
+
+    def test_archive_activity_rejects_missing_scores(self):
+        activity = self._make_finalized_round_activity()
+        ScoreRecord.objects.all().delete()
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.staff)
+
+    def test_archive_activity_rejects_unlocked_vote(self):
+        activity = Activity.objects.create(
+            title="Formal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+        VoteSession.objects.create(
+            activity=activity,
+            name="Pop",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=False,
+            is_locked=False,
+            is_test_data=False,
+        )
+        with self.assertRaises(PermissionDenied):
+            archive_activity(activity, self.staff)
+
+    def test_archive_activity_finalizes_and_locks(self):
+        activity = self._make_finalized_round_activity()
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:activity_archive", args=[activity.pk]), {"note": "event over"}
+        )
+        self.assertEqual(response.status_code, 302)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.ARCHIVED)
+        self.assertTrue(activity.is_locked)
+        self.assertTrue(ArchivePackage.objects.filter(activity=activity).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
+                target=f"Activity:{activity.pk}",
+            ).exists()
+        )
 
     def test_formal_word_generation_creates_formal_document(self):
         formal_activity = Activity.objects.create(

@@ -22,6 +22,15 @@
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">归档包</button>
                 </form>
+                {% if a.phase == 'results_pending' or a.phase == 'results_published' %}
+                {% if not a.is_locked %}
+                <form method="post" action="{% url 'staff:activity_archive' a.pk %}" class="inline" onsubmit="return confirm('确认正式归档？活动将切换为已归档状态并锁定。')">
+                    {% csrf_token %}
+                    <input type="text" name="note" placeholder="归档说明（选填）" class="text-xs border border-gray-300 rounded px-2 py-1">
+                    <button type="submit" class="text-xs border border-blue-200 text-blue-600 px-2 py-1 rounded hover:bg-blue-50">正式归档</button>
+                </form>
+                {% endif %}
+                {% endif %}
                 <a href="{% url 'staff:excel_material_checklist' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">材料清单</a>
             </div>
 

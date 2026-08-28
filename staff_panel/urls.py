@@ -88,6 +88,7 @@ urlpatterns = [
     ),
     path("activity/<int:pk>/lock/", views.activity_lock, name="activity_lock"),
     path("activity/<int:pk>/unlock/", views.activity_unlock, name="activity_unlock"),
+    path("activity/<int:pk>/archive/", views.activity_archive, name="activity_archive"),
     path("activity/<int:pk>/clone/", views.activity_clone, name="activity_clone"),
     path("audit-logs/", views.audit_log_list, name="audit_log_list"),
 ]
