@@ -158,7 +158,9 @@ class Command(BaseCommand):
                 "activity_type": Activity.Type.SINGER_CONTEST,
                 "phase": Activity.Phase.REGISTRATION_OPEN,
                 "description": "Demo-only singer contest configuration.",
-                "is_test_mode": True,
+                "is_test_mode": self._demo_activity_seed_is_test(
+                    Activity, "demo.activity.singer_contest"
+                ),
             },
         )
         farewell_activity = self._upsert(
@@ -170,9 +172,13 @@ class Command(BaseCommand):
                 "activity_type": Activity.Type.FAREWELL_SHOW,
                 "phase": Activity.Phase.REHEARSAL,
                 "description": "Demo-only farewell show configuration.",
-                "is_test_mode": True,
+                "is_test_mode": self._demo_activity_seed_is_test(
+                    Activity, "demo.activity.farewell_show"
+                ),
             },
         )
+        singer_is_test = runtime_is_test(singer_activity)
+        farewell_is_test = runtime_is_test(farewell_activity)
         self._upsert(
             "demo.post.singer_contest",
             PublicPost,
@@ -243,7 +249,7 @@ class Command(BaseCommand):
                 "remark": "",
                 "pre_status": SingerRegistration.PreStatus.APPROVED,
                 "live_status": SingerRegistration.LiveStatus.SCORED,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         singer_two = self._upsert(
@@ -264,7 +270,7 @@ class Command(BaseCommand):
                 "remark": "",
                 "pre_status": SingerRegistration.PreStatus.APPROVED,
                 "live_status": SingerRegistration.LiveStatus.SCORED,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -286,7 +292,7 @@ class Command(BaseCommand):
                 "special_notes": "",
                 "sort_order": 1,
                 "status": Program.Status.APPROVED,
-                "is_test_data": True,
+                "is_test_data": farewell_is_test,
             },
         )
         self._upsert(
@@ -308,7 +314,7 @@ class Command(BaseCommand):
                 "special_notes": "",
                 "sort_order": 2,
                 "status": Program.Status.APPROVED,
-                "is_test_data": True,
+                "is_test_data": farewell_is_test,
             },
         )
         judge_one = self._upsert(
@@ -359,7 +365,7 @@ class Command(BaseCommand):
                 "judge": judge_one,
                 "score": Decimal("91.00"),
                 "notes": "Demo score",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -371,7 +377,7 @@ class Command(BaseCommand):
                 "judge": judge_two,
                 "score": Decimal("93.00"),
                 "notes": "Demo score",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -383,7 +389,7 @@ class Command(BaseCommand):
                 "judge": judge_one,
                 "score": Decimal("87.00"),
                 "notes": "Demo score",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -395,7 +401,7 @@ class Command(BaseCommand):
                 "judge": judge_two,
                 "score": Decimal("89.00"),
                 "notes": "Demo score",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -407,7 +413,7 @@ class Command(BaseCommand):
                 "average_score": Decimal("92.000"),
                 "rank": 1,
                 "is_advanced": True,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -419,7 +425,7 @@ class Command(BaseCommand):
                 "average_score": Decimal("88.000"),
                 "rank": 2,
                 "is_advanced": False,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -429,7 +435,7 @@ class Command(BaseCommand):
                 "activity": singer_activity,
                 "singer": singer_one,
                 "name": "Demo First Place",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         vote_session = self._upsert(
@@ -444,7 +450,7 @@ class Command(BaseCommand):
                 "is_open": True,
                 "selection_type": VoteSession.SelectionType.SINGLE,
                 "max_selections": 1,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         option_one = self._upsert(
@@ -454,7 +460,7 @@ class Command(BaseCommand):
                 "vote_session": vote_session,
                 "singer": singer_one,
                 "sort_order": 1,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         option_two = self._upsert(
@@ -464,7 +470,7 @@ class Command(BaseCommand):
                 "vote_session": vote_session,
                 "singer": singer_two,
                 "sort_order": 2,
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -475,7 +481,7 @@ class Command(BaseCommand):
                 "vote_option": option_one,
                 "browser_session_key": "demo-browser-session-one",
                 "ip_address": "127.0.0.1",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -486,7 +492,7 @@ class Command(BaseCommand):
                 "vote_option": option_two,
                 "browser_session_key": "demo-browser-session-two",
                 "ip_address": "127.0.0.2",
-                "is_test_data": True,
+                "is_test_data": singer_is_test,
             },
         )
         self._upsert(
@@ -500,7 +506,7 @@ class Command(BaseCommand):
                 "handled_by": admin,
                 "resolution": "Demo issue resolved.",
                 "remark": "",
-                "is_test": True,
+                "is_test": singer_is_test,
             },
         )
 
@@ -636,6 +642,21 @@ class Command(BaseCommand):
             content_type=content_type,
             object_id__in=object_ids,
         ).count() == len(object_ids)
+
+    def _demo_activity_seed_is_test(self, model: Any, key: str) -> bool:
+        """Seed an activity as test, unless an existing formal row must be preserved.
+
+        Re-running seed on a promoted (formal) demo activity must not force it back
+        into test mode.
+        """
+        content_type = ContentType.objects.get_for_model(model)
+        seed_record = SeedRecord.objects.filter(key=key, content_type=content_type).first()
+        if seed_record is None:
+            return True
+        activity = model._default_manager.filter(pk=seed_record.object_id).first()
+        if activity is None:
+            return True
+        return runtime_is_test(activity)
 
     def _demo_activity_ids(self) -> list[int]:
         activity_type = ContentType.objects.get_for_model(Activity)

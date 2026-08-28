@@ -16,6 +16,7 @@ class ActivityAdmin(admin.ModelAdmin):
     ]
     list_filter = ["activity_type", "phase", "data_lifecycle", "is_test_mode"]
     search_fields = ["title"]
+    readonly_fields = ["is_test_mode", "data_lifecycle"]
 
 
 @admin.register(ActivityPhase)

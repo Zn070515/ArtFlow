@@ -4,7 +4,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
-from common.lifecycle import scope_runtime
+from common.lifecycle import runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
@@ -61,6 +61,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
                     activity=locked_round.activity,
                     summaries__round=previous_round,
                     summaries__is_advanced=True,
+                    summaries__is_test_data=runtime_is_test(locked_round.activity),
                 ),
                 locked_round.activity,
             ).order_by("pk")

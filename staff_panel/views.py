@@ -10,7 +10,7 @@ from common.business_rules import (
     ensure_same_activity,
     ensure_vote_session_unlocked,
 )
-from common.lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
+from common.lifecycle import runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import (
     clear_activity_test_data,
@@ -517,7 +517,7 @@ def export_registrations(request):
             "提交时间",
         ]
     )
-    for r in scope_lifecycle(SingerRegistration.objects.select_related("activity")):
+    for r in SingerRegistration.objects.select_related("activity").filter(is_test_data=False):
         ws.append(
             [
                 r.name,
@@ -564,7 +564,7 @@ def export_programs(request):
             "提交时间",
         ]
     )
-    for p in scope_lifecycle(Program.objects.select_related("activity")):
+    for p in Program.objects.select_related("activity").filter(is_test_data=False):
         ws.append(
             [
                 p.sort_order,
@@ -818,8 +818,8 @@ def award_create(request):
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = scope_lifecycle(
-        SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
+    singers = SingerRegistration.objects.filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED, is_test_data=False
     )
     return render(
         request,
@@ -886,8 +886,8 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = scope_lifecycle(
-        SingerRegistration.objects.filter(pre_status=SingerRegistration.PreStatus.APPROVED)
+    singers = SingerRegistration.objects.filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED, is_test_data=False
     )
     return render(
         request,
@@ -1830,9 +1830,8 @@ def incident_export(request):
     ws = _active_worksheet(wb)
     ws.title = "异常记录"
     ws.append(["活动", "时间", "类型", "选手", "处理人", "处理结果", "备注"])
-    incidents = scope_lifecycle(
-        IncidentRecord.objects.select_related("activity", "singer", "handled_by"),
-        marker="is_test",
+    incidents = IncidentRecord.objects.select_related("activity", "singer", "handled_by").filter(
+        is_test=False
     )
     for inc in incidents:
         ws.append(

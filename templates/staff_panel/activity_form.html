@@ -43,10 +43,12 @@
             {% if activity.cover_image %}<p class="text-xs text-gray-500 mb-1">当前：{{ activity.cover_image.name }}</p>{% endif %}
             <input type="file" name="cover_image" class="text-sm">
         </div>
+        {% if not activity %}
         <label class="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" name="is_test_mode" {% if data.is_test_mode or activity.is_test_mode or not activity %}checked{% endif %}>
+            <input type="checkbox" name="is_test_mode" {% if data.is_test_mode or not activity %}checked{% endif %}>
             测试模式
         </label>
+        {% endif %}
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">活动说明</label>
             <textarea name="description" rows="5" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ data.description|default:activity.description|default:'' }}</textarea>
