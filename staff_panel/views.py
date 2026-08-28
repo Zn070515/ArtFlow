@@ -19,7 +19,7 @@ from common.test_data import (
 )
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
-from core.services import transition_activity_phase
+from core.services import transition_activity_phase, unarchive_activity
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
@@ -105,6 +105,12 @@ def _require_admin(user):
         raise PermissionDenied("Only admins can manage this resource.")
 
 
+def _ensure_activity_mutable(activity):
+    if activity.phase == Activity.Phase.ARCHIVED:
+        raise PermissionDenied("活动已归档，为只读状态。")
+    ensure_activity_unlocked(activity)
+
+
 def _active_worksheet(workbook):
     worksheet = workbook.active
     if not isinstance(worksheet, Worksheet):
@@ -167,6 +173,7 @@ def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     if request.method == "POST":
+        _ensure_activity_mutable(activity)
         form = ActivityForm(request.POST)
         if not form.is_valid():
             return render(
@@ -561,6 +568,7 @@ def _material_review_redirect(owner):
 def activity_material_requirements(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     if request.method == "POST":
+        _ensure_activity_mutable(activity)
         applies_to = request.POST.get("applies_to")
         item_name = request.POST.get("item_name", "").strip()
         if not item_name:
@@ -597,6 +605,7 @@ def activity_material_requirements(request, activity_id):
 @require_POST
 def activity_material_requirement_delete(request, activity_id, pk):
     activity = get_object_or_404(Activity, pk=activity_id)
+    _ensure_activity_mutable(activity)
     MaterialRequirement.objects.filter(pk=pk, activity=activity).delete()
     messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
@@ -1661,6 +1670,8 @@ def activity_unlock(request, pk):
     _require_admin(request.user)
     note = request.POST.get("note", "").strip()
     activity = get_object_or_404(Activity.objects.select_for_update(), pk=pk)
+    if activity.phase == Activity.Phase.ARCHIVED:
+        raise PermissionDenied("活动已归档，请使用解归档功能。")
     activity.is_locked = False
     activity.locked_at = None
     activity.locked_by = None
@@ -1673,6 +1684,16 @@ def activity_unlock(request, pk):
         new_value="unlocked",
         note=note,
     )
+    return redirect("staff:export_center")
+
+
+@admin_required
+@require_POST
+def activity_unarchive(request, pk):
+    _require_admin(request.user)
+    activity = get_object_or_404(Activity, pk=pk)
+    unarchive_activity(activity, actor=request.user, note=request.POST.get("note", "").strip())
+    messages.success(request, "活动已解归档并恢复到结果公示阶段。")
     return redirect("staff:export_center")
 
 

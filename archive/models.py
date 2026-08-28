@@ -15,6 +15,8 @@ class ArchivePackage(models.Model):
         null=True,
         related_name="archive_packages",
     )
+    version = models.PositiveIntegerField(default=1, help_text="同一活动的归档包版本号")
+    is_current = models.BooleanField(default=True, help_text="是否当前正式归档包")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

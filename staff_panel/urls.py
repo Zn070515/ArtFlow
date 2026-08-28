@@ -100,6 +100,7 @@ urlpatterns = [
         name="activity_material_requirement_delete",
     ),
     path("activity/<int:pk>/archive/", views.activity_archive, name="activity_archive"),
+    path("activity/<int:pk>/unarchive/", views.activity_unarchive, name="activity_unarchive"),
     path("activity/<int:pk>/clone/", views.activity_clone, name="activity_clone"),
     path("audit-logs/", views.audit_log_list, name="audit_log_list"),
     path("users/", views.user_list, name="user_list"),

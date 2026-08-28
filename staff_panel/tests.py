@@ -11,6 +11,7 @@ from accounts.models import User
 from archive.models import ArchivePackage
 from common.models import AuditLog
 from core.models import Activity
+from core.services import unarchive_activity
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -1703,6 +1704,108 @@ class StaffPanelSmokeTests(TestCase):
         with self.assertRaises(PermissionDenied):
             archive_activity(activity, self.admin)
         self.assertEqual(ArchivePackage.objects.filter(activity=activity).count(), 1)
+
+    def _make_archived_activity(self):
+        return Activity.objects.create(
+            title="Archived Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_test_mode=False,
+            is_locked=True,
+        )
+
+    def test_activity_unlock_rejects_archived_activity(self):
+        activity = self._make_archived_activity()
+        login_admin(self.client, self.admin)
+        response = self.client.post(reverse("staff:activity_unlock", args=[activity.pk]))
+        self.assertEqual(response.status_code, 403)
+        activity.refresh_from_db()
+        self.assertTrue(activity.is_locked)
+
+    def test_activity_edit_rejects_archived_activity(self):
+        activity = self._make_archived_activity()
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Edited Archived",
+                "activity_type": Activity.Type.SINGER_CONTEST,
+                "phase": Activity.Phase.ARCHIVED,
+                "subtitle": "should not persist",
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        activity.refresh_from_db()
+        self.assertEqual(activity.title, "Archived Contest")
+
+    def test_material_requirement_create_rejects_archived_activity(self):
+        activity = self._make_archived_activity()
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:activity_material_requirements", args=[activity.pk]),
+            {"applies_to": "singer", "item_name": "伴奏"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(MaterialRequirement.objects.filter(activity=activity).exists())
+
+    def test_material_requirement_delete_rejects_archived_activity(self):
+        activity = self._make_archived_activity()
+        requirement = MaterialRequirement.objects.create(
+            activity=activity,
+            applies_to=MaterialRequirement.AppliesTo.SINGER,
+            item_name="伴奏",
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse(
+                "staff:activity_material_requirement_delete", args=[activity.pk, requirement.pk]
+            )
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(MaterialRequirement.objects.filter(pk=requirement.pk).exists())
+
+    def test_activity_unarchive_staff_forbidden(self):
+        activity = self._make_archived_activity()
+        self.client.force_login(self.staff)
+        response = self.client.post(reverse("staff:activity_unarchive", args=[activity.pk]))
+        self.assertEqual(response.status_code, 403)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.ARCHIVED)
+
+    def test_activity_unarchive_admin_restores_and_audits(self):
+        activity = self._make_archived_activity()
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            reverse("staff:activity_unarchive", args=[activity.pk]), {"note": "reopen"}
+        )
+        self.assertEqual(response.status_code, 302)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.RESULTS_PUBLISHED)
+        self.assertFalse(activity.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNARCHIVE_ACTIVITY,
+                target=f"Activity:{activity.pk}",
+                old_value=Activity.Phase.ARCHIVED,
+                new_value=Activity.Phase.RESULTS_PUBLISHED,
+            ).exists()
+        )
+
+    def test_unarchive_demotes_archive_package_and_rearchive_bumps_version(self):
+        activity = self._make_finalized_round_activity()
+        archive_activity(activity, self.admin)
+        first_package = ArchivePackage.objects.get(activity=activity, is_current=True)
+        self.assertEqual(first_package.version, 1)
+
+        unarchive_activity(activity, actor=self.admin)
+        first_package.refresh_from_db()
+        self.assertFalse(first_package.is_current)
+        self.assertEqual(activity.phase, Activity.Phase.RESULTS_PUBLISHED)
+
+        archive_activity(activity, self.admin)
+        second_package = ArchivePackage.objects.get(activity=activity, is_current=True)
+        self.assertEqual(second_package.version, 2)
+        self.assertTrue(second_package.is_current)
 
     def test_failed_archive_leaves_no_orphan_row_or_file(self):
         activity = self._make_finalized_round_activity()

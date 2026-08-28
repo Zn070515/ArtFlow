@@ -101,7 +101,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.ARCHIVE,
         }
     ),
-    "archived": frozenset({ActivityAction.ARCHIVE}),
+    "archived": frozenset(),
 }
 
 

@@ -10,11 +10,11 @@ from common.models import AuditLog
 from common.test_data import get_test_data_counts, lock_activity_for_runtime_data
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
-from core.services import enter_archived_phase
+from core.services import _enter_archived_phase_locked
 from django.core.exceptions import PermissionDenied
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.urls import reverse
 from django.utils import timezone
 from farewell_show.models import Program
@@ -627,11 +627,22 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
             raise PermissionDenied(f"投票「{vote_session.name}」尚未锁定，不能归档。")
 
     artifacts = build_archive_package(locked_activity)
+    ArchivePackage.objects.filter(activity=locked_activity, is_current=True).update(
+        is_current=False
+    )
+    next_version = (
+        ArchivePackage.objects.filter(activity=locked_activity).aggregate(
+            max_version=Max("version")
+        )["max_version"]
+        or 0
+    ) + 1
     package = ArchivePackage.objects.create(
         activity=locked_activity,
         includes=", ".join(a.name for a in artifacts),
         note=note,
         created_by=actor,
+        version=next_version,
+        is_current=True,
     )
     saved_name: str | None = None
     try:
@@ -642,7 +653,7 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
 
         old_phase = locked_activity.phase
         if old_phase != Activity.Phase.ARCHIVED:
-            locked_activity = enter_archived_phase(locked_activity, actor=actor, note=note)
+            locked_activity = _enter_archived_phase_locked(locked_activity, actor=actor, note=note)
         locked_activity.is_locked = True
         locked_activity.locked_at = timezone.now()
         locked_activity.locked_by = actor

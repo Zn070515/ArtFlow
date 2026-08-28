@@ -5,7 +5,11 @@ from django.test import TestCase
 
 from .models import Activity, ActivityPhase, QRCodeLink
 from .policies import ActivityAction, allowed_actions, ensure_activity_action_allowed
-from .services import enter_archived_phase, transition_activity_phase
+from .services import (
+    _enter_archived_phase_locked,
+    transition_activity_phase,
+    unarchive_activity,
+)
 
 User = get_user_model()
 
@@ -92,12 +96,14 @@ class ActivityPhasePolicyTests(TestCase):
 
     def test_archived_is_read_only(self):
         activity = self._activity(Activity.Phase.ARCHIVED)
+        self.assertEqual(allowed_actions(activity), frozenset())
         for action in (
             ActivityAction.SUBMIT_REGISTRATION,
             ActivityAction.REVIEW_REGISTRATION,
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.SCORE,
             ActivityAction.MANAGE_VOTE,
+            ActivityAction.ARCHIVE,
         ):
             self.assertNotIn(action, allowed_actions(activity))
 
@@ -174,7 +180,7 @@ class ActivityPhaseTransitionTests(TestCase):
         )
 
     def test_archived_phase_only_entered_via_archive_authority(self):
-        result = enter_archived_phase(self.activity, actor=self.user)
+        result = _enter_archived_phase_locked(self.activity, actor=self.user)
         self.assertEqual(result.phase, Activity.Phase.ARCHIVED)
         self.assertTrue(
             AuditLog.objects.filter(
@@ -192,3 +198,47 @@ class ActivityPhaseTransitionTests(TestCase):
         )
         with self.assertRaises(PermissionDenied):
             transition_activity_phase(expecting_archived, Activity.Phase.ARCHIVED, actor=self.user)
+
+
+class ActivityUnarchiveTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="unarchive-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.staff = User.objects.create_user(
+            username="unarchive-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_test_mode=False,
+            is_locked=True,
+        )
+
+    def test_unarchive_rejects_non_admin(self):
+        with self.assertRaises(PermissionDenied):
+            unarchive_activity(self.activity, actor=self.staff)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.ARCHIVED)
+
+    def test_unarchive_rejects_non_archived_activity(self):
+        self.activity.phase = Activity.Phase.RESULTS_PUBLISHED
+        self.activity.save(update_fields=["phase"])
+        with self.assertRaises(PermissionDenied):
+            unarchive_activity(self.activity, actor=self.admin)
+
+    def test_unarchive_restores_results_published_unlocks_and_audits(self):
+        result = unarchive_activity(self.activity, actor=self.admin, note="moved back")
+        self.assertEqual(result.phase, Activity.Phase.RESULTS_PUBLISHED)
+        self.assertFalse(result.is_locked)
+        self.assertIsNone(result.locked_at)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNARCHIVE_ACTIVITY,
+                operator=self.admin,
+                target=f"Activity:{self.activity.pk}",
+                old_value=Activity.Phase.ARCHIVED,
+                new_value=Activity.Phase.RESULTS_PUBLISHED,
+            ).exists()
+        )

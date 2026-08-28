@@ -21,6 +21,7 @@ class AuditLog(models.Model):
         FINALIZE_ADVANCEMENT = "finalize_advancement", "核定晋级名单"
         UPDATE_PERMISSION = "update_permission", "修改用户权限"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
+        UNARCHIVE_ACTIVITY = "unarchive_activity", "解归档活动"
         OTHER = "other", "其他"
 
     operator = models.ForeignKey(

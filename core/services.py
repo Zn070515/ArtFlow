@@ -96,12 +96,14 @@ def transition_activity_phase(
 
 
 @transaction.atomic
-def enter_archived_phase(activity: Activity, *, actor: Any = None, note: str = "") -> Activity:
+def _enter_archived_phase_locked(
+    activity: Activity, *, actor: Any = None, note: str = ""
+) -> Activity:
     """Move an activity into the terminal ARCHIVED phase.
 
-    This is the single archive-authority path: generic phase transitions must
-    never target ARCHIVED, so only the formal archive flow (archive_activity)
-    may reach this state. Audits the transition like any other phase change.
+    Private archive-authority path (belongs to the internal archive flow): generic
+    phase transitions must never target ARCHIVED, so only archive_activity may
+    reach this state. Locks the Activity row and audits the transition.
     """
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
     if locked_activity.phase == Activity.Phase.ARCHIVED:
@@ -115,6 +117,44 @@ def enter_archived_phase(activity: Activity, *, actor: Any = None, note: str = "
         target=f"Activity:{locked_activity.pk}",
         old_value=old_phase,
         new_value=Activity.Phase.ARCHIVED,
+        note=note,
+    )
+    return locked_activity
+
+
+@transaction.atomic
+def unarchive_activity(activity: Activity, *, actor: Any = None, note: str = "") -> Activity:
+    """Move an archived activity back to a defined, non-archived phase.
+
+    The single unarchive authority: an admin unlocks the archived activity,
+    restores it to RESULTS_PUBLISHED (never LIVE), and demotes the current
+    archive package, then audits the change. Ordinary results-unlock and generic
+    phase transitions can never reach ARCHIVED, so this is the only back door.
+    """
+    if actor is None or not actor.is_admin:
+        raise PermissionDenied("只有管理员才能解归档。")
+    locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
+    if locked_activity.phase != Activity.Phase.ARCHIVED:
+        raise PermissionDenied("只有已归档活动才能解归档。")
+    from archive.models import ArchivePackage
+
+    ArchivePackage.objects.filter(activity=locked_activity, is_current=True).update(
+        is_current=False
+    )
+    old_phase = locked_activity.phase
+    locked_activity.phase = Activity.Phase.RESULTS_PUBLISHED
+    locked_activity.is_locked = False
+    locked_activity.locked_at = None
+    locked_activity.locked_by = None
+    locked_activity.save(
+        update_fields=["phase", "is_locked", "locked_at", "locked_by"],
+    )
+    AuditLog.objects.create(
+        operator=actor,
+        action_type=AuditLog.ActionType.UNARCHIVE_ACTIVITY,
+        target=f"Activity:{locked_activity.pk}",
+        old_value=old_phase,
+        new_value=Activity.Phase.RESULTS_PUBLISHED,
         note=note,
     )
     return locked_activity
