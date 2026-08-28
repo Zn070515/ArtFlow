@@ -29,7 +29,7 @@ from singer_contest.models import (
     SingerRegistration,
 )
 from singer_contest.services import apply_scores, prepare_round
-from voting.models import VoteOption, VoteRecord, VoteSession
+from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
 def _close_file_response_resources(response: Any):
@@ -708,6 +708,90 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(SingerRegistration.objects.filter(pk=test_registration.pk).exists())
         self.assertTrue(VoteSession.objects.filter(name="Formal Vote").exists())
         self.assertFalse(VoteSession.objects.filter(name="Test Vote").exists())
+
+    def test_cleanup_rejects_formal_vote_dependents_under_test_session(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Test Session Singer",
+            student_id="20260021",
+            college="Info",
+            class_name="CS1",
+            phone="13800000020",
+            song_name="Test Session Song",
+            is_test_data=True,
+        )
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Test Vote",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_test_data=True,
+        )
+        option = VoteOption.objects.create(
+            vote_session=vote_session,
+            singer=registration,
+            is_test_data=False,
+        )
+        ballot = VoteBallot.objects.create(
+            vote_session=vote_session,
+            browser_session_key="formal-ballot",
+            ip_address="127.0.0.1",
+            is_test_data=False,
+        )
+        record = VoteRecord.objects.create(
+            ballot=ballot,
+            vote_session=vote_session,
+            vote_option=option,
+            browser_session_key="formal-ballot",
+            ip_address="127.0.0.1",
+            is_test_data=False,
+        )
+        self.client.force_login(self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(VoteSession.objects.filter(pk=vote_session.pk).exists())
+        self.assertFalse(VoteOption.objects.get(pk=option.pk).is_test_data)
+        self.assertFalse(VoteBallot.objects.get(pk=ballot.pk).is_test_data)
+        self.assertFalse(VoteRecord.objects.get(pk=record.pk).is_test_data)
+
+    def test_cleanup_rejects_formal_file_under_test_owner(self):
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Test File Singer",
+            student_id="20260022",
+            college="Info",
+            class_name="CS1",
+            phone="13800000021",
+            song_name="Test File Song",
+            is_test_data=True,
+        )
+        submission = SubmissionFile.objects.create(
+            singer_registration=registration,
+            file=SimpleUploadedFile("formal.mp3", b"audio", content_type="audio/mpeg"),
+            original_name="formal.mp3",
+            file_size=5,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            is_test_data=False,
+            uploaded_by=self.participant,
+        )
+        self.client.force_login(self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:activity_clear_test_data", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(SingerRegistration.objects.filter(pk=registration.pk).exists())
+        self.assertFalse(SubmissionFile.objects.get(pk=submission.pk).is_test_data)
 
     def test_formal_file_creation_stays_formal(self):
         formal_activity = Activity.objects.create(
