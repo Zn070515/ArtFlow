@@ -182,7 +182,7 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
         holder.start()
         self.assertTrue(lock_held.wait(timeout=10))
 
-        submit_result = {}
+        submit_result: dict[str, object] = {}
 
         def try_submit():
             try:

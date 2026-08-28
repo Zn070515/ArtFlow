@@ -136,7 +136,7 @@ class GeneratedDocumentTestDataCleanupTests(TestCase):
 
         self.assertEqual(counts["generated_documents"], 1)
         self.assertFalse(GeneratedDocument.objects.filter(pk=document.pk).exists())
-        self.assertFalse(storage.exists(stored_name))
+        self.assertFalse(storage.exists(stored_name or ""))
 
 
 class ActivityLifecycleBulkWriteTests(TestCase):

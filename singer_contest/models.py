@@ -1,3 +1,5 @@
+from typing import Any
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -114,6 +116,9 @@ class Judge(models.Model):
 
 
 class RoundSnapshotMixin:
+    objects: Any
+    pk: int
+
     def _ensure_round_is_draft(self, round_id):
         if not round_id:
             return
@@ -126,12 +131,12 @@ class RoundSnapshotMixin:
 
     def delete(self, *args, **kwargs):
         self._ensure_round_is_draft(self._stored_round_id())
-        return super().delete(*args, **kwargs)
+        return super().delete(*args, **kwargs)  # type: ignore[misc]
 
 
 class RoundSnapshotQuerySet(models.QuerySet):
     related_field = ""
-    related_model = None
+    related_model: type[models.Model] | None = None
 
     def _ensure_draft_rounds(self):
         if self.exclude(round__status=ContestRound.Status.DRAFT).exists():

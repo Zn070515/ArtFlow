@@ -72,7 +72,7 @@ class PathlessStorage(Storage):
     def exists(self, name: str) -> bool:
         return self.delegate.exists(name)
 
-    def url(self, name: str) -> str:
+    def url(self, name: str | None) -> str:
         return self.delegate.url(name)
 
     def path(self, name: str) -> str:
@@ -1234,8 +1234,8 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(GeneratedDocument.objects.filter(pk=formal_document.pk).exists())
         self.assertTrue(GeneratedDocument.objects.filter(pk=test_document.pk).exists())
-        self.assertTrue(formal_document.file.storage.exists(formal_document.file.name))
-        self.assertTrue(test_document.file.storage.exists(test_document.file.name))
+        self.assertTrue(formal_document.file.storage.exists(formal_document.file.name or ""))
+        self.assertTrue(test_document.file.storage.exists(test_document.file.name or ""))
         with zipfile.ZipFile(BytesIO(response.content)) as archive:
             names = set(archive.namelist())
         self.assertIn(f"推文_{formal_document.pk}.docx", names)
@@ -1285,7 +1285,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         document = GeneratedDocument.objects.get(template=template, activity=formal_activity)
         self.assertFalse(document.is_test_data)
-        self.assertTrue(document.file.storage.exists(document.file.name))
+        self.assertTrue(document.file.storage.exists(document.file.name or ""))
 
     def test_test_word_generation_creates_test_document(self):
         template = ArticleTemplate.objects.create(
@@ -1302,7 +1302,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         document = GeneratedDocument.objects.get(template=template, activity=self.singer_activity)
         self.assertTrue(document.is_test_data)
-        self.assertTrue(document.file.storage.exists(document.file.name))
+        self.assertTrue(document.file.storage.exists(document.file.name or ""))
 
     def test_locking_vote_session_generates_popularity_award(self):
         registration = SingerRegistration.objects.create(

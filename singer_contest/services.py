@@ -266,7 +266,11 @@ def apply_scores(
             round=locked_round, singer_id=singer_id, judge_id=judge_id
         ).first()
         old_score = record.score if record else None
-        if old_score == score and record.is_test_data == locked_round.activity.is_test_mode:
+        if (
+            record is not None
+            and record.score == score
+            and record.is_test_data == locked_round.activity.is_test_mode
+        ):
             continue
         ScoreRecord.objects.update_or_create(
             round=locked_round,
