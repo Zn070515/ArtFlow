@@ -714,8 +714,13 @@ class StaffPanelSmokeTests(TestCase):
         assert worksheet is not None
         self.assertEqual(
             list(worksheet.values),
-            [("选手\\评委", judge.name), (registration.name, None)],
+            [
+                ("选手ID", "姓名", f"J{judge.pk} {judge.name}"),
+                (registration.pk, registration.name, None),
+            ],
         )
+        self.assertIn("ArtFlowMeta", workbook.sheetnames)
+        self.assertEqual(workbook["ArtFlowMeta"].sheet_state, "hidden")
 
     def test_locked_activity_blocks_staff_score_entry(self):
         registration = SingerRegistration.objects.create(

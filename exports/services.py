@@ -314,19 +314,58 @@ def _empty_incident_form_workbook(activity: Activity) -> Workbook:
     return wb
 
 
-def _score_template_workbook(contest_round: ContestRound) -> Workbook:
+def _add_artflow_meta(
+    workbook: Workbook,
+    contest_round: ContestRound,
+    *,
+    entry_ids: list[int],
+    judge_ids: list[int],
+) -> None:
+    """Write a hidden ArtFlowMeta sheet so the importer can fingerprint the file.
+
+    ID is authority on import; name is only a hint. The snapshot lists the exact
+    singer/judge set frozen at export time, which lets the importer reject a
+    stale or mismatched workbook.
+    """
+    meta = workbook.create_sheet("ArtFlowMeta")
+    rows = [
+        ("schema_version", "1"),
+        ("activity_id", str(contest_round.activity_id)),
+        ("round_id", str(contest_round.pk)),
+        ("exported_at", timezone.now().isoformat()),
+        ("entry_ids", ",".join(str(pk) for pk in entry_ids)),
+        ("judge_ids", ",".join(str(pk) for pk in judge_ids)),
+    ]
+    for key, value in rows:
+        meta.append([key, value])
+    meta.sheet_state = "hidden"
+
+
+def build_score_template_workbook(contest_round: ContestRound) -> Workbook:
+    judges = list(_active_judges(contest_round))
+    singers = list(_eligible_singers(contest_round))
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "Score Template"
-    header = ["Singer\\Judge"] + [j.name for j in _active_judges(contest_round)]
+    header = ["选手ID", "姓名"] + [f"J{j.pk} {j.name}" for j in judges]
     ws.append(header)
-    for singer in _eligible_singers(contest_round):
-        ws.append([singer.name] + ["" for _ in header[1:]])
-    for col_idx in range(2, len(header) + 1):
+    for singer in singers:
+        ws.append([singer.pk, singer.name] + ["" for _ in judges])
+    for col_idx in range(3, len(header) + 1):
         ws.cell(row=1, column=col_idx).font = Font(bold=True)
         ws.cell(row=1, column=col_idx).alignment = Alignment(horizontal="center")
+    _add_artflow_meta(
+        wb,
+        contest_round,
+        entry_ids=[singer.pk for singer in singers],
+        judge_ids=[judge.pk for judge in judges],
+    )
     _autosize_sheet(ws)
     return wb
+
+
+def _score_template_workbook(contest_round: ContestRound) -> Workbook:
+    return build_score_template_workbook(contest_round)
 
 
 def _qr_artifact(prefix: str, url: str) -> PackageArtifact:

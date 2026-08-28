@@ -36,6 +36,7 @@ from exports.services import (
     build_archive_package,
     build_execution_package,
     build_package_zip,
+    build_score_template_workbook,
 )
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
@@ -47,7 +48,6 @@ from files.services import (
 )
 from incidents.models import IncidentRecord
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
 from singer_contest.models import (
@@ -1389,18 +1389,8 @@ def excel_material_checklist(request, activity_id):
 @staff_required
 def excel_score_template(request, round_id):
     contest_round = get_object_or_404(ContestRound, pk=round_id)
-    singers = _eligible_singers(contest_round)
-    judges = _active_judges(contest_round)
-    wb = Workbook()
-    ws = _active_worksheet(wb)
-    ws.title = "评分表模板"
-    header = ["选手\\评委"] + [j.name for j in judges]
-    ws.append(header)
-    for singer in singers:
-        ws.append([singer.name] + ["" for _ in judges])
-    for col_idx, judge in enumerate(judges, 2):
-        ws.cell(row=1, column=col_idx).font = Font(bold=True)
-        ws.cell(row=1, column=col_idx).alignment = Alignment(horizontal="center")
+    singers = list(_eligible_singers(contest_round))
+    wb = build_score_template_workbook(contest_round)
     audit_export(request, contest_round.activity, "score_template", row_count=len(singers))
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

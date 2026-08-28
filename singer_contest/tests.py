@@ -11,6 +11,7 @@ from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from exports.services import build_score_template_workbook
 from openpyxl import Workbook
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
@@ -763,6 +764,73 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(scores, {(self.singer.pk, self.judge.pk): Decimal("90")})
         self.assertEqual(len(errors), 1)
         self.assertFalse(ScoreRecord.objects.exists())
+
+    def _parse_workbook(self, workbook):
+        upload = BytesIO()
+        workbook.save(upload)
+        upload.seek(0)
+        return parse_score_workbook(upload, self.round)
+
+    def _set_meta(self, workbook, key, value):
+        for row in workbook["ArtFlowMeta"].iter_rows():
+            if row and row[0].value == key:
+                row[1].value = str(value)
+                return workbook
+        raise AssertionError(f"{key} not found in ArtFlowMeta")
+
+    def test_score_template_emits_ids_and_hidden_artflow_meta(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        ws = wb.active
+        self.assertEqual(ws.cell(row=1, column=1).value, "选手ID")
+        self.assertEqual(ws.cell(row=1, column=2).value, "姓名")
+        self.assertEqual(ws.cell(row=1, column=3).value, f"J{self.judge.pk} {self.judge.name}")
+        self.assertEqual(ws.cell(row=2, column=1).value, self.singer.pk)
+        self.assertIn("ArtFlowMeta", wb.sheetnames)
+        self.assertEqual(wb["ArtFlowMeta"].sheet_state, "hidden")
+        self.assertEqual(
+            [cell.value for cell in wb["ArtFlowMeta"][1]],
+            ["schema_version", "1"],
+        )
+
+    def test_parse_score_workbook_uses_id_as_authority(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        ws = wb.active
+        ws.cell(row=2, column=3).value = 91
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(errors, [])
+        self.assertEqual(scores, {(self.singer.pk, self.judge.pk): Decimal("91")})
+
+    def test_parse_score_workbook_rejects_wrong_activity(self):
+        prepare_round(self.round, self.user)
+        other = Activity.objects.create(
+            title="Other",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "activity_id", other.pk)
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("其他活动" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_wrong_round(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "round_id", self.round.pk + 1)
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("其他轮次" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_singer_outside_round(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        ws = wb.active
+        ws.append([999999, "Ghost", ""])
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("不属于当前轮次" in error for error in errors))
 
 
 class SingerUploadViewTests(TestCase):

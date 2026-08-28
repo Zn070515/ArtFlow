@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
@@ -505,22 +506,97 @@ def apply_scores(
     return changes
 
 
-def parse_score_workbook(uploaded_file, contest_round: ContestRound):
-    from openpyxl import load_workbook
+_META_SHEET_NAME = "ArtFlowMeta"
 
-    workbook = load_workbook(uploaded_file, data_only=True, read_only=True)
-    worksheet = workbook.active
-    if worksheet is None:
-        return {}, ["评分表没有工作表。"]
-    rows = worksheet.iter_rows(values_only=True)
-    try:
-        header_row = next(rows)
-    except StopIteration:
-        return {}, ["评分表不能为空。"]
 
-    headers = [str(value).strip() if value is not None else "" for value in header_row]
-    if not headers or not headers[0]:
-        return {}, ["评分表第一列必须是选手姓名。"]
+def _read_artflow_meta(workbook) -> dict[str, str]:
+    if _META_SHEET_NAME not in workbook.sheetnames:
+        return {}
+    meta_worksheet = workbook[_META_SHEET_NAME]
+    data: dict[str, str] = {}
+    for row in meta_worksheet.iter_rows(values_only=True):
+        if not row or len(row) < 2 or row[0] is None:
+            continue
+        key = str(row[0]).strip()
+        value = row[1]
+        if key:
+            data[key] = str(value).strip() if value is not None else ""
+    return data
+
+
+def _resolve_judge_header(header: str, judge_by_id, judge_by_name):
+    header = header.strip()
+    if not header:
+        return None
+    match = re.match(r"^J(\d+)\b", header)
+    if match:
+        return judge_by_id.get(int(match.group(1)))
+    return judge_by_name.get(header)
+
+
+def _parse_id_authority_workbook(rows, headers, meta, contest_round: ContestRound):
+    """Parse a workbook generated with its ArtFlowMeta sheet.
+
+    Singer and judge IDs are the authority; the name column is only a hint and
+    is never used for lookup. A mismatched activity/round is rejected outright.
+    """
+    errors: list[str] = []
+    if meta.get("activity_id") and str(contest_round.activity_id) != meta["activity_id"]:
+        errors.append("评分表属于其他活动。")
+    if meta.get("round_id") and str(contest_round.pk) != meta["round_id"]:
+        errors.append("评分表属于其他轮次。")
+
+    active_judges = list(_active_judges(contest_round))
+    judge_by_id = {judge.pk: judge for judge in active_judges}
+    judge_by_name = {judge.name: judge for judge in active_judges}
+    singers = {singer.pk: singer for singer in _eligible_singers(contest_round)}
+
+    valid_judges: dict[int, object] = {}
+    for column in range(2, len(headers)):
+        header = headers[column]
+        if not header:
+            continue
+        judge = _resolve_judge_header(header, judge_by_id, judge_by_name)
+        if judge is None:
+            errors.append(f"第 {column + 1} 列评委不存在: {header}")
+        else:
+            valid_judges[column] = judge
+
+    scores = {}
+    for row_number, row in enumerate(rows, start=2):
+        if not row:
+            continue
+        singer_value = row[0] if len(row) > 0 else None
+        try:
+            singer_id = int(str(singer_value).strip()) if singer_value is not None else None
+        except (TypeError, ValueError):
+            singer_id = None
+        if singer_id is None or singer_id not in singers:
+            errors.append(f"第 {row_number} 行选手不属于当前轮次: {singer_value}")
+            continue
+        for column, score_value in enumerate(row[2:], start=2):
+            if score_value is None or str(score_value).strip() == "":
+                continue
+            judge = valid_judges.get(column)
+            if judge is None:
+                errors.append(f"第 {row_number} 行存在没有评委标题的分数。")
+                continue
+            pair = (singer_id, judge.pk)
+            if pair in scores:
+                errors.append(f"分数重复: 选手{singer_id} {judge.name}")
+                continue
+            try:
+                scores[pair] = validate_score(score_value)
+            except ValidationError as error:
+                errors.extend(
+                    f"第 {row_number} 行分数错误: 选手{singer_id} {judge.name} ({message})"
+                    for message in error.messages
+                )
+    return scores, errors
+
+
+def _parse_name_based_workbook(rows, headers, contest_round: ContestRound):
+    """Legacy fallback that matches singers and judges by exact name only."""
     judge_names = headers[1:]
     duplicate_judge_names = {name for name in judge_names if name and judge_names.count(name) > 1}
     errors = [f"评委姓名重复: {name}" for name in sorted(duplicate_judge_names)]
@@ -573,3 +649,26 @@ def parse_score_workbook(uploaded_file, contest_round: ContestRound):
                     for message in error.messages
                 )
     return scores, errors
+
+
+def parse_score_workbook(uploaded_file, contest_round: ContestRound):
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(uploaded_file, data_only=True, read_only=True)
+    worksheet = workbook.active
+    if worksheet is None:
+        return {}, ["评分表没有工作表。"]
+    rows = worksheet.iter_rows(values_only=True)
+    try:
+        header_row = next(rows)
+    except StopIteration:
+        return {}, ["评分表不能为空。"]
+
+    headers = [str(value).strip() if value is not None else "" for value in header_row]
+    if not headers or not headers[0]:
+        return {}, ["评分表第一列必须是选手姓名。"]
+
+    meta = _read_artflow_meta(workbook)
+    if meta.get("round_id"):
+        return _parse_id_authority_workbook(rows, headers, meta, contest_round)
+    return _parse_name_based_workbook(rows, headers, contest_round)
