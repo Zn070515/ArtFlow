@@ -821,7 +821,7 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         self.assertEqual(
             self.client.post(
-                reverse("staff:vote_session_toggle", args=[vote_session.pk])
+                reverse("staff:vote_session_open", args=[vote_session.pk])
             ).status_code,
             403,
         )
@@ -847,7 +847,7 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         self.assertEqual(
             self.client.post(
-                reverse("staff:vote_session_toggle", args=[vote_session.pk])
+                reverse("staff:vote_session_close", args=[vote_session.pk])
             ).status_code,
             403,
         )
@@ -883,6 +883,81 @@ class StaffPanelSmokeTests(TestCase):
                 note="fix typo",
             ).exists()
         )
+
+    def test_admin_can_unlock_vote_session_without_note(self):
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Popularity no note",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_locked=True,
+        )
+        login_admin(self.client, self.admin)
+
+        response = self.client.post(reverse("staff:vote_session_unlock", args=[vote_session.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        vote_session.refresh_from_db()
+        self.assertFalse(vote_session.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNLOCK_RESULT,
+                target=f"VoteSession:{vote_session.pk}",
+            ).exists()
+        )
+
+    def test_vote_session_open_and_close_update_state(self):
+        vote_session = VoteSession.objects.create(
+            activity=self.singer_activity,
+            name="Toggleable",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_locked=False,
+            is_open=False,
+        )
+        login_admin(self.client, self.admin)
+
+        self.client.post(reverse("staff:vote_session_open", args=[vote_session.pk]))
+        vote_session.refresh_from_db()
+        self.assertTrue(vote_session.is_open)
+
+        self.client.post(reverse("staff:vote_session_close", args=[vote_session.pk]))
+        vote_session.refresh_from_db()
+        self.assertFalse(vote_session.is_open)
+        self.assertFalse(vote_session.is_locked)
+
+    def test_admin_can_unlock_activity_without_note(self):
+        login_admin(self.client, self.admin)
+        self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
+
+        response = self.client.post(
+            reverse("staff:activity_unlock", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.singer_activity.refresh_from_db()
+        self.assertFalse(self.singer_activity.is_locked)
+
+    def test_round_unlock_rejects_while_activity_locked(self):
+        ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            status=ContestRound.Status.LOCKED,
+            is_locked=True,
+        )
+        login_admin(self.client, self.admin)
+        self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
+
+        response = self.client.post(
+            reverse(
+                "staff:round_unlock",
+                args=[ContestRound.objects.get(activity=self.singer_activity).pk],
+            ),
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_test_cleanup_cannot_delete_formal_registration(self):
         self.singer_activity = Activity.objects.create(

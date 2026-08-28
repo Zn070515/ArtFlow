@@ -8,7 +8,6 @@ from common.business_rules import (
     ensure_activity_unlocked,
     ensure_round_unlocked,
     ensure_same_activity,
-    ensure_vote_session_unlocked,
 )
 from common.lifecycle import runtime_is_test, scope_runtime
 from common.models import AuditLog
@@ -60,6 +59,12 @@ from singer_contest.services import (
     reset_round_to_draft,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
+from voting.services import (
+    close_vote_session,
+    lock_vote_session,
+    open_vote_session,
+    unlock_vote_session,
+)
 
 
 def _choices(enum_class):
@@ -753,12 +758,12 @@ def round_unlock(request, pk):
         ContestRound.objects.select_for_update().select_related("activity"), pk=pk
     )
     note = request.POST.get("note", "").strip()
-    if not note:
-        raise PermissionDenied("解锁结果必须填写原因。")
     if contest_round.status != ContestRound.Status.LOCKED or not contest_round.is_locked:
         raise PermissionDenied("该比赛轮次未锁定。")
     if downstream_rounds(contest_round).exclude(status=ContestRound.Status.DRAFT).exists():
         raise PermissionDenied("后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。")
+    locked_activity = lock_activity_for_runtime_data(contest_round.activity)
+    ensure_activity_unlocked(locked_activity)
     contest_round.is_locked = False
     contest_round.status = ContestRound.Status.SCORING
     contest_round.save(update_fields=["is_locked", "status"])
@@ -939,19 +944,17 @@ def vote_session_detail(request, pk):
 
 @staff_required
 @require_POST
-def vote_session_toggle(request, pk):
+def vote_session_open(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
-    ensure_vote_session_unlocked(vote_session)
-    old_value = f"is_open={vote_session.is_open}"
-    vote_session.is_open = not vote_session.is_open
-    vote_session.save()
-    log_action(
-        request,
-        AuditLog.ActionType.VOTE_MANAGE,
-        f"VoteSession:{vote_session.pk}",
-        old_value=old_value,
-        new_value=f"is_open={vote_session.is_open}",
-    )
+    open_vote_session(vote_session, request.user)
+    return redirect("staff:vote_session_detail", pk=pk)
+
+
+@staff_required
+@require_POST
+def vote_session_close(request, pk):
+    vote_session = get_object_or_404(VoteSession, pk=pk)
+    close_vote_session(vote_session, request.user)
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -960,11 +963,8 @@ def vote_session_toggle(request, pk):
 @transaction.atomic
 def vote_session_lock(request, pk):
     vote_session = get_object_or_404(VoteSession, pk=pk)
-    vote_session.is_locked = True
-    vote_session.is_open = False
-    vote_session.save()
+    lock_vote_session(vote_session, request.user)
     _generate_popularity_award(vote_session)
-    log_action(request, AuditLog.ActionType.RELOCK_RESULT, f"VoteSession:{vote_session.pk}")
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -974,16 +974,7 @@ def vote_session_unlock(request, pk):
     _require_admin(request.user)
     vote_session = get_object_or_404(VoteSession, pk=pk)
     note = request.POST.get("note", "").strip()
-    if not note:
-        raise PermissionDenied("解锁投票必须填写原因。")
-    vote_session.is_locked = False
-    vote_session.save()
-    log_action(
-        request,
-        AuditLog.ActionType.UNLOCK_RESULT,
-        f"VoteSession:{vote_session.pk}",
-        note=note,
-    )
+    unlock_vote_session(vote_session, request.user, note=note)
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -1928,8 +1919,6 @@ def activity_lock(request, pk):
 def activity_unlock(request, pk):
     _require_admin(request.user)
     note = request.POST.get("note", "").strip()
-    if not note:
-        raise PermissionDenied("解锁活动必须填写原因。")
     activity = get_object_or_404(Activity.objects.select_for_update(), pk=pk)
     activity.is_locked = False
     activity.locked_at = None

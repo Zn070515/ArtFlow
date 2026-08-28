@@ -4,15 +4,22 @@ from datetime import timedelta
 from unittest import skipUnless
 
 from accounts.models import User
+from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 from singer_contest.models import SingerRegistration
 
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
-from .services import submit_ballot
+from .services import (
+    close_vote_session,
+    lock_vote_session,
+    open_vote_session,
+    submit_ballot,
+    unlock_vote_session,
+)
 
 
 class VoteBallotTests(TestCase):
@@ -210,3 +217,88 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
         self.assertFalse(holder_error, holder_error)
         self.assertTrue(submit_result.get("rejected"), f"expected rejection, got {submit_result}")
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
+
+
+class VoteStateServiceTests(TestCase):
+    def setUp(self):
+        self.operator = User.objects.create_user(username="vote-staff", password="pass")
+        self.activity = Activity.objects.create(
+            title="State Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        self.session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=10),
+            end_time=timezone.now() + timedelta(minutes=10),
+        )
+
+    def test_open_vote_session_is_idempotent(self):
+        opened = open_vote_session(self.session, self.operator)
+        self.assertTrue(opened.is_open)
+
+        again = open_vote_session(self.session, self.operator)
+        self.assertTrue(again.is_open)
+        self.assertTrue(VoteSession.objects.get(pk=self.session.pk).is_open)
+
+    def test_close_vote_session_is_idempotent(self):
+        open_vote_session(self.session, self.operator)
+        closed = close_vote_session(self.session, self.operator)
+        self.assertFalse(closed.is_open)
+
+        close_vote_session(self.session, self.operator)
+        self.assertFalse(VoteSession.objects.get(pk=self.session.pk).is_open)
+
+    def test_lock_vote_session_sets_locked_and_closed(self):
+        open_vote_session(self.session, self.operator)
+        locked = lock_vote_session(self.session, self.operator)
+        self.assertTrue(locked.is_locked)
+        self.assertFalse(locked.is_open)
+
+        again = lock_vote_session(self.session, self.operator)
+        self.assertTrue(again.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.RELOCK_RESULT,
+                target=f"VoteSession:{self.session.pk}",
+            ).exists()
+        )
+
+    def test_unlock_vote_session_clears_lock_and_preserves_state(self):
+        lock_vote_session(self.session, self.operator)
+        unlocked = unlock_vote_session(self.session, self.operator, note="fix typo")
+        self.assertFalse(unlocked.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNLOCK_RESULT,
+                target=f"VoteSession:{self.session.pk}",
+                note="fix typo",
+            ).exists()
+        )
+
+    def test_unlock_vote_session_is_idempotent(self):
+        unlock_vote_session(self.session, self.operator)
+        unlock_vote_session(self.session, self.operator)
+        self.assertFalse(VoteSession.objects.get(pk=self.session.pk).is_locked)
+
+    def test_open_locked_vote_session_is_denied(self):
+        lock_vote_session(self.session, self.operator)
+        with self.assertRaises(PermissionDenied):
+            open_vote_session(self.session, self.operator)
+
+    def test_activity_lock_blocks_child_state_mutations(self):
+        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        for action in (
+            open_vote_session,
+            close_vote_session,
+            lock_vote_session,
+            unlock_vote_session,
+        ):
+            with self.assertRaises(PermissionDenied):
+                action(self.session, self.operator)
+
+        session = VoteSession.objects.get(pk=self.session.pk)
+        self.assertFalse(session.is_open)
+        self.assertFalse(session.is_locked)

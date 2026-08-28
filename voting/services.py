@@ -1,7 +1,9 @@
 from datetime import timedelta
 
+from common.business_rules import ensure_activity_unlocked
+from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -82,3 +84,90 @@ def recent_ballot_from_ip(vote_session, ip_address):
         ip_address=ip_address,
         submitted_at__gte=timezone.now() - timedelta(seconds=10),
     ).count()
+
+
+def _locked_vote_session(vote_session):
+    return (
+        VoteSession.objects.select_for_update().select_related("activity").get(pk=vote_session.pk)
+    )
+
+
+def _locked_runtime_activity(activity):
+    locked_activity = lock_activity_for_runtime_data(activity)
+    ensure_activity_unlocked(locked_activity)
+    return locked_activity
+
+
+def _audit_vote_state(vote_session, operator, action_type, old_value, new_value, *, note=""):
+    return AuditLog.objects.create(
+        operator=operator,
+        action_type=action_type,
+        target=f"VoteSession:{vote_session.pk}",
+        old_value=old_value,
+        new_value=new_value,
+        note=note,
+    )
+
+
+def open_vote_session(vote_session, operator):
+    with transaction.atomic():
+        locked = _locked_vote_session(vote_session)
+        _locked_runtime_activity(locked.activity)
+        if locked.is_locked:
+            raise PermissionDenied("投票已锁定，无法开放。")
+        if locked.is_open:
+            return locked
+        locked.is_open = True
+        locked.save(update_fields=["is_open"])
+        _audit_vote_state(
+            locked, operator, AuditLog.ActionType.VOTE_MANAGE, "is_open=false", "is_open=true"
+        )
+        return locked
+
+
+def close_vote_session(vote_session, operator):
+    with transaction.atomic():
+        locked = _locked_vote_session(vote_session)
+        _locked_runtime_activity(locked.activity)
+        if not locked.is_open:
+            return locked
+        locked.is_open = False
+        locked.save(update_fields=["is_open"])
+        _audit_vote_state(
+            locked, operator, AuditLog.ActionType.VOTE_MANAGE, "is_open=true", "is_open=false"
+        )
+        return locked
+
+
+def lock_vote_session(vote_session, operator):
+    with transaction.atomic():
+        locked = _locked_vote_session(vote_session)
+        _locked_runtime_activity(locked.activity)
+        if locked.is_locked:
+            return locked
+        locked.is_locked = True
+        locked.is_open = False
+        locked.save(update_fields=["is_locked", "is_open"])
+        _audit_vote_state(
+            locked, operator, AuditLog.ActionType.RELOCK_RESULT, "is_locked=false", "is_locked=true"
+        )
+        return locked
+
+
+def unlock_vote_session(vote_session, operator, *, note: str = ""):
+    with transaction.atomic():
+        locked = _locked_vote_session(vote_session)
+        _locked_runtime_activity(locked.activity)
+        if not locked.is_locked:
+            return locked
+        locked.is_locked = False
+        locked.save(update_fields=["is_locked"])
+        _audit_vote_state(
+            locked,
+            operator,
+            AuditLog.ActionType.UNLOCK_RESULT,
+            "is_locked=true",
+            "is_locked=false",
+            note=note,
+        )
+        return locked

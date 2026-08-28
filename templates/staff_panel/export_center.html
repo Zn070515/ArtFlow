@@ -50,7 +50,7 @@
                 {% if user.is_admin %}
                 <form method="post" action="{% url 'staff:activity_unlock' a.pk %}">
                     {% csrf_token %}
-                    <input type="text" name="note" required placeholder="解锁原因" class="text-xs border border-red-200 rounded px-2 py-1">
+                    <input type="text" name="note" placeholder="解锁原因（选填）" class="text-xs border border-red-200 rounded px-2 py-1">
                     <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">解锁活动</button>
                 </form>
                 {% endif %}

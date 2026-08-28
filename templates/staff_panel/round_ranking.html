@@ -21,7 +21,7 @@
             {% if user.is_admin %}
             <form method="post" action="{% url 'staff:round_unlock' round.pk %}" class="flex gap-1">
                 {% csrf_token %}
-                <input name="note" required placeholder="解锁原因" class="text-xs border border-red-200 rounded px-2 py-1">
+                <input name="note" placeholder="解锁原因（选填）" class="text-xs border border-red-200 rounded px-2 py-1">
                 <button type="submit" class="text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded hover:bg-red-100">解锁</button>
             </form>
             {% endif %}

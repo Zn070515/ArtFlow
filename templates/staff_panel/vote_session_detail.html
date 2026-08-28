@@ -49,12 +49,17 @@
         </div>
         <div class="flex gap-2 mt-4">
             {% if not vote_session.is_locked %}
-            <form method="post" action="{% url 'staff:vote_session_toggle' vote_session.pk %}">
+            {% if vote_session.is_open %}
+            <form method="post" action="{% url 'staff:vote_session_close' vote_session.pk %}">
                 {% csrf_token %}
-                <button type="submit" class="text-xs px-3 py-1.5 rounded {% if vote_session.is_open %}bg-yellow-100 text-yellow-700 hover:bg-yellow-200{% else %}bg-green-100 text-green-700 hover:bg-green-200{% endif %} transition-colors">
-                    {% if vote_session.is_open %}关闭投票{% else %}开启投票{% endif %}
-                </button>
+                <button type="submit" class="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded transition-colors">关闭投票</button>
             </form>
+            {% else %}
+            <form method="post" action="{% url 'staff:vote_session_open' vote_session.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="text-xs bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded transition-colors">开启投票</button>
+            </form>
+            {% endif %}
             <form method="post" action="{% url 'staff:vote_session_lock' vote_session.pk %}">
                 {% csrf_token %}
                 <button type="submit" class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors">锁定结果</button>
@@ -62,7 +67,7 @@
             {% elif request.user.is_admin %}
             <form method="post" action="{% url 'staff:vote_session_unlock' vote_session.pk %}" class="flex gap-2">
                 {% csrf_token %}
-                <input type="text" name="note" required placeholder="解锁原因" class="text-xs border border-gray-300 rounded px-2 py-1">
+                <input type="text" name="note" placeholder="解锁原因（选填）" class="text-xs border border-gray-300 rounded px-2 py-1">
                 <button type="submit" class="text-xs border border-red-300 text-red-700 px-3 py-1.5 rounded hover:bg-red-50 transition-colors">解锁结果</button>
             </form>
             {% endif %}
