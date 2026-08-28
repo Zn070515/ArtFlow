@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event, Thread
+from unittest import skipUnless
 from unittest.mock import patch
 
 from accounts.models import User
@@ -11,15 +13,23 @@ from core.models import Activity
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import DatabaseError, IntegrityError, transaction
+from django.db import (
+    DatabaseError,
+    IntegrityError,
+    close_old_connections,
+    connection,
+    transaction,
+)
 from django.db import models as django_models
+from django.db.models.signals import pre_save
 from django.http import Http404
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-from exports.models import ArticleTemplate
+from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, StaffNote, SubmissionFile
 from incidents.models import IncidentRecord
@@ -28,6 +38,8 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    RoundEntry,
+    RoundJudge,
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
@@ -38,11 +50,232 @@ from . import models as common_models
 from .business_rules import ensure_same_activity
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
+from .test_data import clear_activity_test_data
 from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
 DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
 DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
+
+
+class ActivityLifecycleTests(TestCase):
+    def test_formal_activity_cannot_reenter_test_mode(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        activity.is_test_mode = True
+
+        with self.assertRaises(ValidationError):
+            activity.save()
+
+    def test_new_formal_activity_has_consistent_marker(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
+
+    def test_test_activity_becomes_formal_when_test_mode_is_disabled(self):
+        activity = Activity.objects.create(
+            title="Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+
+        activity.is_test_mode = False
+        activity.save(update_fields=["is_test_mode", "updated_at"])
+        activity.refresh_from_db()
+
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
+
+    def test_formal_activity_cannot_downgrade_lifecycle_marker(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        activity.data_lifecycle = Activity.DataLifecycle.TEST
+
+        with self.assertRaises(ValidationError):
+            activity.save()
+
+
+class GeneratedDocumentTestDataCleanupTests(TestCase):
+    def setUp(self):
+        self.media_directory = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_directory.name)
+        self.media_override.enable()
+        self.operator = User.objects.create_user(username="cleanup-operator", password="pass")
+        self.activity = Activity.objects.create(
+            title="Test activity", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def tearDown(self):
+        self.media_override.disable()
+        self.media_directory.cleanup()
+
+    def test_generated_test_document_is_removed_with_file(self):
+        document = GeneratedDocument.objects.create(
+            activity=self.activity,
+            title="Test document",
+            file=SimpleUploadedFile("test-document.docx", b"test document"),
+            created_by=self.operator,
+            is_test_data=True,
+        )
+        stored_name = document.file.name
+        storage = document.file.storage
+
+        counts = clear_activity_test_data(self.activity, operator=self.operator)
+
+        self.assertEqual(counts["generated_documents"], 1)
+        self.assertFalse(GeneratedDocument.objects.filter(pk=document.pk).exists())
+        self.assertFalse(storage.exists(stored_name))
+
+
+class ActivityLifecycleBulkWriteTests(TestCase):
+    def test_queryset_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.filter(pk=activity.pk).update(is_test_mode=True)
+
+    def test_base_manager_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity._base_manager.filter(pk=activity.pk).update(
+                data_lifecycle=Activity.DataLifecycle.TEST
+            )
+
+    def test_bulk_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        activity.is_test_mode = True
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.bulk_update([activity], ["is_test_mode"])
+
+    def test_bulk_create_aligns_lifecycle_marker(self):
+        activity = Activity(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+
+        Activity.objects.bulk_create([activity])
+        activity.refresh_from_db()
+
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
+
+    def test_bulk_create_conflict_update_rejects_lifecycle_changes(self):
+        activity = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        stale_activity = Activity(
+            pk=activity.pk,
+            title=activity.title,
+            activity_type=activity.activity_type,
+            is_test_mode=True,
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.bulk_create(
+                [stale_activity],
+                update_conflicts=True,
+                update_fields=["is_test_mode", "data_lifecycle"],
+                unique_fields=["pk"],
+            )
+
+
+@skipUnless(
+    connection.features.has_select_for_update,
+    "Activity lifecycle race protection requires database row locking.",
+)
+class ActivityLifecycleConcurrencyTests(TransactionTestCase):
+    def test_stale_test_save_waits_for_formal_promotion_lock(self):
+        activity = Activity.objects.create(
+            title="Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        stale_activity = Activity.objects.get(pk=activity.pk)
+        formal_save_started = Event()
+        release_formal_save = Event()
+        stale_save_started = Event()
+        stale_save_finished = Event()
+        formal_errors = []
+        stale_errors = []
+
+        def hold_formal_save(sender, instance, **kwargs):
+            if instance.pk == activity.pk and not instance.is_test_mode:
+                formal_save_started.set()
+                release_formal_save.wait(timeout=5)
+
+        def promote_activity():
+            close_old_connections()
+            try:
+                formal_activity = Activity.objects.get(pk=activity.pk)
+                formal_activity.is_test_mode = False
+                formal_activity.save()
+            except Exception as error:
+                formal_errors.append(error)
+            finally:
+                close_old_connections()
+
+        def save_stale_activity():
+            close_old_connections()
+            stale_save_started.set()
+            try:
+                stale_activity.save()
+            except Exception as error:
+                stale_errors.append(error)
+            finally:
+                stale_save_finished.set()
+                close_old_connections()
+
+        pre_save.connect(hold_formal_save, sender=Activity, weak=False)
+        formal_thread = Thread(target=promote_activity)
+        stale_thread = Thread(target=save_stale_activity)
+        try:
+            formal_thread.start()
+            self.assertTrue(formal_save_started.wait(timeout=5))
+            stale_thread.start()
+            self.assertTrue(stale_save_started.wait(timeout=5))
+            self.assertFalse(stale_save_finished.wait(timeout=0.2))
+        finally:
+            release_formal_save.set()
+            formal_thread.join(timeout=5)
+            stale_thread.join(timeout=5)
+            pre_save.disconnect(hold_formal_save, sender=Activity)
+
+        self.assertFalse(formal_thread.is_alive())
+        self.assertFalse(stale_thread.is_alive())
+        self.assertEqual(formal_errors, [])
+        self.assertEqual(len(stale_errors), 1)
+        self.assertIsInstance(stale_errors[0], ValidationError)
+        activity.refresh_from_db()
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(activity.is_test_mode)
 
 
 class ActivityOwnershipTests(TestCase):
@@ -433,7 +666,7 @@ class DemoSeedCommandTests(TestCase):
             first_counts,
             {
                 "activities": 2,
-                "users": 2,
+                "users": 3,
                 "posts": 2,
                 "templates": 2,
                 "singers": 2,
@@ -447,7 +680,7 @@ class DemoSeedCommandTests(TestCase):
                 "vote_options": 2,
                 "vote_records": 2,
                 "incidents": 1,
-                "seed_records": 28,
+                "seed_records": 29,
             },
         )
         self.assertEqual(
@@ -455,6 +688,7 @@ class DemoSeedCommandTests(TestCase):
             {
                 "demo.user.admin",
                 "demo.user.participant",
+                "demo.user.participant_two",
                 "demo.activity.singer_contest",
                 "demo.activity.farewell_show",
                 "demo.post.singer_contest",
@@ -490,6 +724,27 @@ class DemoSeedCommandTests(TestCase):
         self.assertTrue(
             all(getattr(record, "is_test_data", False) for record in VoteRecord.objects.all())
         )
+        seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        self.assertEqual(seeded_round.status, ContestRound.Status.PREPARED)
+        self.assertFalse(seeded_round.is_locked)
+        self.assertEqual(RoundEntry.objects.filter(round=seeded_round).count(), 2)
+        self.assertEqual(RoundJudge.objects.filter(round=seeded_round).count(), 2)
+        self.assertEqual(
+            set(
+                ScoreRecord.objects.filter(round=seeded_round).values_list(
+                    "singer_id", "judge_id"
+                )
+            ),
+            set(
+                (entry.singer_id, round_judge.judge_id)
+                for entry in RoundEntry.objects.filter(round=seeded_round)
+                for round_judge in RoundJudge.objects.filter(round=seeded_round)
+            ),
+        )
+        self.assertSetEqual(
+            set(ScoreSummary.objects.filter(round=seeded_round).values_list("singer_id", flat=True)),
+            set(RoundEntry.objects.filter(round=seeded_round).values_list("singer_id", flat=True)),
+        )
         self.assertEqual(output.getvalue(), "Demo data seeded.\n")
 
         second_output = StringIO()
@@ -521,6 +776,44 @@ class DemoSeedCommandTests(TestCase):
             first_ownership,
         )
         self.assertEqual(second_output.getvalue(), "Demo data seeded.\n")
+
+    def test_seed_refuses_to_prepare_demo_round_with_unowned_eligible_candidates(self):
+        call_command("seed_demo_data")
+        call_command("seed_demo_data", "--reset")
+        singer_activity = Activity.objects.get(title="Demo Singer Contest")
+        participant = User.objects.get(username="demo-participant")
+        unowned_user = User.objects.create_user(
+            username="unowned-eligible", password="pass"
+        )
+        unowned_singer = SingerRegistration.objects.create(
+            activity=singer_activity,
+            user=unowned_user,
+            name="Unowned Eligible Singer",
+            student_id="UNOWNED2026001",
+            college="Arts College",
+            class_name="Demo Class C",
+            phone="13800000003",
+            song_name="Unowned Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        unowned_judge = Judge.objects.create(
+            activity=singer_activity,
+            name="Unowned Active Judge",
+        )
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "Cannot prepare demo round with unowned eligible singers or active judges.",
+        ):
+            call_command("seed_demo_data")
+
+        contest_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        self.assertEqual(contest_round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(RoundEntry.objects.filter(round=contest_round).exists())
+        self.assertFalse(RoundJudge.objects.filter(round=contest_round).exists())
+        self.assertFalse(RoundEntry.objects.filter(singer=unowned_singer).exists())
+        self.assertFalse(RoundJudge.objects.filter(judge=unowned_judge).exists())
 
     def test_reset_removes_only_registered_demo_runtime_data(self):
         formal_user = User.objects.create_user(
@@ -633,6 +926,19 @@ class DemoSeedCommandTests(TestCase):
                 is_test=True,
             ).exists()
         )
+        seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        self.assertEqual(seeded_round.status, ContestRound.Status.DRAFT)
+        self.assertFalse(seeded_round.is_locked)
+        self.assertFalse(RoundEntry.objects.filter(round=seeded_round).exists())
+        self.assertFalse(RoundJudge.objects.filter(round=seeded_round).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=User.objects.get(username="demo-admin"),
+                action_type=AuditLog.ActionType.OTHER,
+                target=f"ContestRound:{seeded_round.pk}",
+                note="Demo test round reset",
+            ).exists()
+        )
         self.assertEqual(
             PublicPost.objects.filter(related_activity_id__in=demo_activity_ids).count(),
             2,
@@ -685,6 +991,8 @@ class DemoSeedCommandTests(TestCase):
     def test_reset_retains_singer_with_an_unowned_award(self):
         call_command("seed_demo_data")
         singer = SingerRegistration.objects.get(name="Demo Singer One")
+        seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        snapshot_counts = (seeded_round.entries.count(), seeded_round.round_judges.count())
         unowned_award = Award.objects.create(
             activity=singer.activity,
             singer=singer,
@@ -697,6 +1005,59 @@ class DemoSeedCommandTests(TestCase):
 
         self.assertTrue(SingerRegistration.objects.filter(pk=singer.pk).exists())
         self.assertTrue(Award.objects.filter(pk=unowned_award.pk).exists())
+        seeded_round.refresh_from_db()
+        self.assertEqual(seeded_round.status, ContestRound.Status.PREPARED)
+        self.assertEqual(
+            (seeded_round.entries.count(), seeded_round.round_judges.count()), snapshot_counts
+        )
+        self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
+
+    def test_reset_retains_round_with_an_unowned_non_test_snapshot_parent(self):
+        call_command("seed_demo_data")
+        contest_round = ContestRound.objects.get(name="Demo Preliminary Round")
+        participant = User.objects.get(username="demo-participant")
+        contest_round.status = ContestRound.Status.DRAFT
+        contest_round.save(update_fields=["status"])
+        unowned_user = User.objects.create_user(
+            username="unowned-snapshot", password="pass"
+        )
+        unowned_singer = SingerRegistration.objects.create(
+            activity=contest_round.activity,
+            user=unowned_user,
+            name="Unowned Snapshot Singer",
+            student_id="UNOWNED2026002",
+            college="Arts College",
+            class_name="Demo Class C",
+            phone="13800000004",
+            song_name="Unowned Snapshot Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        snapshot = RoundEntry.objects.create(round=contest_round, singer=unowned_singer)
+        contest_round.status = ContestRound.Status.PREPARED
+        contest_round.save(update_fields=["status"])
+        runtime_counts = {
+            "scores": ScoreRecord.objects.count(),
+            "summaries": ScoreSummary.objects.count(),
+            "awards": Award.objects.count(),
+            "vote_sessions": VoteSession.objects.count(),
+        }
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.status, ContestRound.Status.PREPARED)
+        self.assertTrue(RoundEntry.objects.filter(pk=snapshot.pk, singer=unowned_singer).exists())
+        self.assertEqual(
+            {
+                "scores": ScoreRecord.objects.count(),
+                "summaries": ScoreSummary.objects.count(),
+                "awards": Award.objects.count(),
+                "vote_sessions": VoteSession.objects.count(),
+            },
+            runtime_counts,
+        )
         self.assertEqual(output.getvalue(), "Demo reset retained unsafe runtime data.\n")
 
     def test_reset_retains_singer_with_an_unowned_staff_note(self):

@@ -3,6 +3,8 @@ from pathlib import PurePath
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from common.test_data import lock_activity_for_runtime_data
+
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 
 MAX_UPLOAD_BYTES = {
@@ -91,8 +93,9 @@ def _owner_filter(owner):
 
 
 @transaction.atomic
-def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by, is_test_data):
+def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose)
+    activity = lock_activity_for_runtime_data(owner.activity)
     owner_filter = _owner_filter(owner)
     SubmissionFile.objects.select_for_update().filter(
         **owner_filter, file_purpose=purpose, is_current=True
@@ -112,7 +115,7 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by, is_test
         file_size=uploaded_file.size,
         file_purpose=purpose,
         uploaded_by=uploaded_by,
-        is_test_data=is_test_data,
+        is_test_data=activity.is_test_mode,
         is_current=True,
         version=latest + 1,
     )

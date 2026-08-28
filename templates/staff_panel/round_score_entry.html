@@ -9,13 +9,22 @@
         <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round.get_round_type_display }}</h1>
         <div class="flex items-center gap-3">
             <span class="text-xs text-gray-500">{{ round.get_scoring_mode_display }}</span>
+            <span class="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{{ round.get_status_display }}</span>
             {% if round.is_locked %}
             <span class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded font-medium">已锁定</span>
             {% endif %}
         </div>
     </div>
 
-    {% if not score_grid %}
+    {% if preparation_required %}
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-8 text-center text-yellow-800">
+        <p>请先准备比赛轮次后再录入评分。</p>
+        <form method="post" action="{% url 'staff:round_prepare' round.pk %}" class="mt-4">
+            {% csrf_token %}
+            <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">准备轮次</button>
+        </form>
+    </div>
+    {% elif not score_grid %}
     <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
         <p>该活动没有已审核通过的选手</p>
     </div>

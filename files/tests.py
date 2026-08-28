@@ -63,14 +63,12 @@ class SubmissionFileLifecycleTests(TestCase):
             uploaded_file=SimpleUploadedFile("first.mp3", b"first", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
-            is_test_data=True,
         )
         second = store_submission_file(
             owner=self.registration,
             uploaded_file=SimpleUploadedFile("second.mp3", b"second", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
-            is_test_data=True,
         )
 
         first.refresh_from_db()
@@ -84,7 +82,6 @@ class SubmissionFileLifecycleTests(TestCase):
             uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
-            is_test_data=True,
         )
         stored_name = submission.file.name
         self.assertTrue(submission.file.storage.exists(stored_name))
@@ -100,14 +97,12 @@ class SubmissionFileLifecycleTests(TestCase):
             uploaded_file=SimpleUploadedFile("first.mp3", b"first", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
-            is_test_data=True,
         )
         second = store_submission_file(
             owner=self.registration,
             uploaded_file=SimpleUploadedFile("second.mp3", b"second", content_type="audio/mpeg"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
-            is_test_data=True,
         )
 
         delete_submission_file(second)

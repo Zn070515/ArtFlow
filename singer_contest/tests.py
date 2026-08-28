@@ -4,18 +4,33 @@ from io import BytesIO
 from accounts.models import User
 from common.models import AuditLog
 from core.models import Activity
+from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from openpyxl import Workbook
 
-from .models import ContestRound, Judge, ScoreRecord, SingerRegistration
+from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
+from .models import (
+    ContestRound,
+    Judge,
+    RoundEntry,
+    RoundJudge,
+    ScoreRecord,
+    ScoreSummary,
+    SingerRegistration,
+)
 from .services import (
     apply_scores,
     expected_score_cells,
     missing_score_cells,
     parse_score_workbook,
+    prepare_round,
+    recalculate_round,
+    reset_test_round_snapshots,
     validate_score,
 )
 
@@ -44,10 +59,340 @@ class ScoringServiceTests(TestCase):
         )
         self.judge = Judge.objects.create(activity=self.activity, name="Judge")
 
+    def make_singer(self, *, student_id, activity=None, name=None, user=None):
+        user = user or User.objects.create_user(username=f"singer-{student_id}", password="pass")
+        return SingerRegistration.objects.create(
+            activity=activity or self.activity,
+            user=user,
+            name=name or f"Singer {student_id}",
+            student_id=student_id,
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+    def test_round_entry_rejects_singer_from_another_activity(self):
+        other_activity = Activity.objects.create(
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        foreign = self.make_singer(activity=other_activity, student_id="foreign")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.create(round=self.round, singer=foreign)
+
+    def test_round_judge_rejects_judge_from_another_activity(self):
+        other_activity = Activity.objects.create(
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        foreign = Judge.objects.create(activity=other_activity, name="Foreign Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.create(round=self.round, judge=foreign)
+
+    def test_round_snapshot_pairs_are_unique(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RoundEntry.objects.create(round=self.round, singer=self.singer)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RoundJudge.objects.create(round=self.round, judge=self.judge)
+
+    def test_round_admin_lists_status_lock_and_snapshot_counts(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.is_locked = True
+        self.round.save(update_fields=["status", "is_locked"])
+
+        round_admin = ContestRoundAdmin(ContestRound, admin.site)
+
+        self.assertEqual(
+            round_admin.list_display,
+            [
+                "name",
+                "activity",
+                "round_type",
+                "scoring_mode",
+                "status",
+                "is_locked",
+                "entry_count",
+                "judge_count",
+            ],
+        )
+        self.assertEqual(round_admin.entry_count(self.round), 1)
+        self.assertEqual(round_admin.judge_count(self.round), 1)
+        request = RequestFactory().get("/admin/")
+        request.user = self.user
+        form = round_admin.get_form(request, self.round)
+        self.assertNotIn("status", form.base_fields)
+        self.assertNotIn("is_locked", form.base_fields)
+
+    def test_test_round_reset_requires_explicit_opt_in(self):
+        self.singer.is_test_data = True
+        self.singer.save(update_fields=["is_test_data"])
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(
+            ValidationError, "Test round reset requires explicit test-only opt-in."
+        ):
+            reset_test_round_snapshots(
+                self.round,
+                self.user,
+                owned_singer_ids={self.singer.pk},
+                owned_judge_ids={self.judge.pk},
+            )
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+        self.assertTrue(RoundEntry.objects.filter(round=self.round, singer=self.singer).exists())
+        self.assertTrue(RoundJudge.objects.filter(round=self.round, judge=self.judge).exists())
+
+    def test_prepared_round_rejects_snapshot_creates(self):
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-create")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Create Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.create(round=self.round, singer=singer)
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.create(round=self.round, judge=judge)
+
+    def test_prepared_round_rejects_snapshot_updates(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        entry.singer = self.make_singer(activity=self.activity, student_id="prepared-update")
+        round_judge.judge = Judge.objects.create(activity=self.activity, name="Prepared Update Judge")
+
+        with self.assertRaises(ValidationError):
+            entry.save()
+        with self.assertRaises(ValidationError):
+            round_judge.save()
+
+    def test_prepared_round_rejects_snapshot_deletes(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+
+        with self.assertRaises(ValidationError):
+            entry.delete()
+        with self.assertRaises(ValidationError):
+            round_judge.delete()
+
+        self.assertTrue(RoundEntry.objects.filter(pk=entry.pk).exists())
+        self.assertTrue(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+    def test_admin_bulk_delete_rejects_prepared_snapshots(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        request = RequestFactory().post("/admin/")
+
+        with self.assertRaises(ValidationError):
+            RoundEntryAdmin(RoundEntry, admin.site).delete_queryset(
+                request, RoundEntry.objects.filter(pk=entry.pk)
+            )
+        with self.assertRaises(ValidationError):
+            RoundJudgeAdmin(RoundJudge, admin.site).delete_queryset(
+                request, RoundJudge.objects.filter(pk=round_judge.pk)
+            )
+
+        self.assertTrue(RoundEntry.objects.filter(pk=entry.pk).exists())
+        self.assertTrue(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+    def test_prepared_round_rejects_snapshot_queryset_deletes(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.filter(pk=entry.pk).delete()
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.filter(pk=round_judge.pk).delete()
+
+    def test_prepared_round_rejects_snapshot_queryset_updates(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-queryset-update")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Queryset Update Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.filter(pk=entry.pk).update(singer_id=singer.pk)
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.filter(pk=round_judge.pk).update(judge_id=judge.pk)
+
+    def test_prepared_round_rejects_snapshot_bulk_creates(self):
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-bulk-create")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Bulk Create Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=singer)])
+        with self.assertRaises(ValidationError):
+            RoundJudge.objects.bulk_create([RoundJudge(round=self.round, judge=judge)])
+
+    def test_prepared_snapshots_protect_parents_from_deletion(self):
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+
+        with self.assertRaises(ProtectedError):
+            self.round.delete()
+        with self.assertRaises(ProtectedError):
+            self.singer.delete()
+        with self.assertRaises(ProtectedError):
+            self.judge.delete()
+
+    def test_draft_round_allows_snapshot_bulk_operations(self):
+        entry = RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=self.singer)])[0]
+        round_judge = RoundJudge.objects.bulk_create([RoundJudge(round=self.round, judge=self.judge)])[0]
+        singer = self.make_singer(activity=self.activity, student_id="draft-queryset-update")
+        judge = Judge.objects.create(activity=self.activity, name="Draft Queryset Update Judge")
+
+        self.assertEqual(
+            RoundEntry.objects.filter(pk=entry.pk).update(singer_id=singer.pk),
+            1,
+        )
+        self.assertEqual(
+            RoundJudge.objects.filter(pk=round_judge.pk).update(judge_id=judge.pk),
+            1,
+        )
+        self.assertEqual(RoundEntry.objects.filter(pk=entry.pk).delete()[0], 1)
+        self.assertEqual(RoundJudge.objects.filter(pk=round_judge.pk).delete()[0], 1)
+
+    def test_base_manager_rejects_prepared_snapshot_bulk_mutations(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save()
+        singer = self.make_singer(activity=self.activity, student_id="prepared-base-manager")
+        judge = Judge.objects.create(activity=self.activity, name="Prepared Base Manager Judge")
+
+        with self.assertRaises(ValidationError):
+            RoundEntry._base_manager.filter(pk=entry.pk).update(singer_id=singer.pk)
+        with self.assertRaises(ValidationError):
+            RoundJudge._base_manager.filter(pk=round_judge.pk).delete()
+        with self.assertRaises(ValidationError):
+            RoundEntry._base_manager.bulk_create([RoundEntry(round=self.round, singer=singer)])
+        with self.assertRaises(ValidationError):
+            RoundJudge._base_manager.bulk_create([RoundJudge(round=self.round, judge=judge)])
+
+    def test_draft_snapshots_allow_parent_deletion(self):
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+
+        self.round.delete()
+
+        self.assertFalse(RoundEntry.objects.filter(pk=entry.pk).exists())
+        self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+        singer_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        singer = self.make_singer(activity=self.activity, student_id="draft-parent-singer")
+        singer_entry = RoundEntry.objects.create(round=singer_round, singer=singer)
+
+        singer.delete()
+
+        self.assertFalse(RoundEntry.objects.filter(pk=singer_entry.pk).exists())
+
+        other_activity = Activity.objects.create(
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        judge_round = ContestRound.objects.create(
+            activity=other_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        judge = Judge.objects.create(activity=other_activity, name="Draft Parent Judge")
+        round_judge = RoundJudge.objects.create(round=judge_round, judge=judge)
+
+        judge.delete()
+
+        self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
+
+    def test_prepare_preliminary_round_snapshots_approved_non_test_singers(self):
+        test_singer = self.make_singer(student_id="prepared-test")
+        test_singer.is_test_data = True
+        test_singer.save(update_fields=["is_test_data"])
+        unapproved_singer = self.make_singer(student_id="prepared-unapproved")
+        unapproved_singer.pre_status = SingerRegistration.PreStatus.SUBMITTED
+        unapproved_singer.save(update_fields=["pre_status"])
+
+        prepared_round = prepare_round(self.round, self.user)
+
+        self.assertEqual(
+            list(RoundEntry.objects.filter(round=self.round).values_list("singer_id", flat=True)),
+            [self.singer.pk],
+        )
+        self.assertEqual(prepared_round.status, ContestRound.Status.PREPARED)
+        self.assertFalse(prepared_round.is_locked)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.user,
+                action_type=AuditLog.ActionType.UPDATE_STATUS,
+                target=f"ContestRound:{self.round.pk}",
+            ).exists()
+        )
+
+    def test_prepare_semifinal_round_uses_only_previous_advancers(self):
+        semifinal = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        for index in range(20):
+            singer = self.make_singer(student_id=f"2027{index:04d}")
+            ScoreSummary.objects.create(
+                round=self.round,
+                singer=singer,
+                average_score=90 - index,
+                rank=index + 1,
+                is_advanced=index < 10,
+            )
+
+        prepare_round(semifinal, self.user)
+
+        self.assertEqual(RoundEntry.objects.filter(round=semifinal).count(), 10)
+
+    def test_prepare_round_snapshots_active_judges(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        Judge.objects.create(activity=self.activity, name="Inactive Judge", is_active=False)
+
+        prepare_round(self.round, self.user)
+
+        self.assertEqual(
+            list(RoundJudge.objects.filter(round=self.round).values_list("judge_id", flat=True)),
+            [self.judge.pk, second_judge.pk],
+        )
+
+    def test_prepare_round_is_rejected_after_preparation(self):
+        prepare_round(self.round, self.user)
+
+        with self.assertRaises(ValidationError):
+            prepare_round(self.round, self.user)
+
     def test_expected_cells_include_approved_singer_and_active_judge(self):
+        prepare_round(self.round, self.user)
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
 
     def test_missing_cells_report_absent_score_record(self):
+        prepare_round(self.round, self.user)
+
         self.assertEqual(
             missing_score_cells(self.round),
             [
@@ -63,6 +408,114 @@ class ScoringServiceTests(TestCase):
         ScoreRecord.objects.create(round=self.round, singer=self.singer, judge=self.judge, score=90)
         self.assertEqual(missing_score_cells(self.round), [])
 
+    def test_new_global_judge_does_not_change_prepared_matrix(self):
+        prepare_round(self.round, self.user)
+        new_judge = Judge.objects.create(activity=self.activity, name="Late Judge")
+
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        self.assertEqual(
+            missing_score_cells(self.round),
+            [
+                {
+                    "singer_id": self.singer.pk,
+                    "singer_name": self.singer.name,
+                    "judge_id": self.judge.pk,
+                    "judge_name": self.judge.name,
+                }
+            ],
+        )
+        self.assertNotIn((self.singer.pk, new_judge.pk), expected_score_cells(self.round))
+
+    def test_registration_status_change_does_not_change_prepared_roster(self):
+        prepare_round(self.round, self.user)
+        self.singer.pre_status = SingerRegistration.PreStatus.SUBMITTED
+        self.singer.save(update_fields=["pre_status"])
+
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        self.assertEqual(
+            missing_score_cells(self.round),
+            [
+                {
+                    "singer_id": self.singer.pk,
+                    "singer_name": self.singer.name,
+                    "judge_id": self.judge.pk,
+                    "judge_name": self.judge.name,
+                }
+            ],
+        )
+
+    def test_recalculate_ignores_score_from_judge_outside_snapshot(self):
+        prepare_round(self.round, self.user)
+        inactive_judge = Judge.objects.create(
+            activity=self.activity, name="Inactive Judge", is_active=False
+        )
+        ScoreRecord.objects.create(round=self.round, singer=self.singer, judge=self.judge, score=90)
+        ScoreRecord.objects.create(
+            round=self.round, singer=self.singer, judge=inactive_judge, score=0
+        )
+
+        recalculate_round(self.round)
+
+        self.assertEqual(
+            ScoreSummary.objects.get(round=self.round, singer=self.singer).average_score,
+            Decimal("90"),
+        )
+
+    def test_apply_scores_rejects_draft_round(self):
+        with self.assertRaisesMessage(ValidationError, "请先准备比赛轮次"):
+            apply_scores(
+                self.round,
+                {(self.singer.pk, self.judge.pk): "90"},
+                self.user,
+            )
+
+    def test_apply_scores_transitions_prepared_round_to_scoring(self):
+        prepare_round(self.round, self.user)
+
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+        )
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.SCORING)
+
+    def test_apply_scores_keeps_prepared_round_prepared_when_submission_is_empty(self):
+        prepare_round(self.round, self.user)
+
+        apply_scores(self.round, {}, self.user)
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
+    def test_apply_scores_keeps_prepared_round_prepared_when_scores_are_unchanged(self):
+        prepare_round(self.round, self.user)
+        ScoreRecord.objects.create(
+            round=self.round,
+            singer=self.singer,
+            judge=self.judge,
+            score=90,
+            is_test_data=True,
+        )
+
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.user)
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
+    def test_apply_scores_rejects_locked_round_status(self):
+        prepare_round(self.round, self.user)
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(ValidationError, "该比赛轮次已锁定"):
+            apply_scores(
+                self.round,
+                {(self.singer.pk, self.judge.pk): "90"},
+                self.user,
+            )
+
     def test_validate_score_rejects_invalid_values(self):
         for value in ("", "abc", "-0.01", "100.01", "NaN", "Infinity", "1.234"):
             with self.subTest(value=value):
@@ -73,6 +526,8 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(validate_score("99.50"), Decimal("99.50"))
 
     def test_apply_scores_is_atomic_when_one_cell_is_invalid(self):
+        prepare_round(self.round, self.user)
+
         with self.assertRaises(ValidationError):
             apply_scores(
                 self.round,
@@ -81,9 +536,13 @@ class ScoringServiceTests(TestCase):
             )
 
         self.assertFalse(ScoreRecord.objects.exists())
-        self.assertFalse(AuditLog.objects.exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ENTER_SCORE).exists()
+        )
 
     def test_apply_scores_records_edit_details_and_recalculates(self):
+        prepare_round(self.round, self.user)
+
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "91"}, self.user)
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "92.50"}, self.user)
 
@@ -101,9 +560,10 @@ class ScoringServiceTests(TestCase):
         self.assertIn('"new": "92.50"', audit.new_value)
 
     def test_parse_score_workbook_reports_late_invalid_cell_without_writing(self):
+        second_user = User.objects.create_user(username="singer-two", password="pass")
         second_singer = SingerRegistration.objects.create(
             activity=self.activity,
-            user=self.user,
+            user=second_user,
             name="Second Singer",
             student_id="20260002",
             college="College",
@@ -112,6 +572,7 @@ class ScoringServiceTests(TestCase):
             song_name="Song 2",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
+        prepare_round(self.round, self.user)
         workbook = Workbook()
         worksheet = workbook.active
         assert worksheet is not None
@@ -158,3 +619,51 @@ class SingerUploadViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "文件类型")
         self.assertFalse(SingerRegistration.objects.exists())
+
+    def test_apply_rejects_duplicate_registration_for_same_user(self):
+        self.client.force_login(self.user)
+        payload = {
+            "activity_id": self.activity.pk,
+            "name": "Singer",
+            "student_id": "20260001",
+            "college": "College",
+            "class_name": "Class",
+            "phone": "13800000000",
+            "song_name": "Song",
+        }
+
+        first = self.client.post(reverse("singer_contest:apply"), payload)
+        self.assertEqual(first.status_code, 302)
+
+        second = self.client.post(reverse("singer_contest:apply"), payload)
+        self.assertEqual(second.status_code, 200)
+        self.assertContains(second, "请勿重复提交")
+        self.assertEqual(
+            SingerRegistration.objects.filter(activity=self.activity, user=self.user).count(), 1
+        )
+
+    def test_duplicate_registration_by_student_id_is_rejected_at_db_level(self):
+        SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="First Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+        other_user = User.objects.create_user(username="applicant-two", password="pass")
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                SingerRegistration.objects.create(
+                    activity=self.activity,
+                    user=other_user,
+                    name="Second Singer",
+                    student_id="20260001",
+                    college="College",
+                    class_name="Class",
+                    phone="13800000001",
+                    song_name="Song 2",
+                )

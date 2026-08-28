@@ -5,22 +5,142 @@ from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 from common.models import AuditLog
+from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
 
-from .models import ContestRound, Judge, ScoreRecord, ScoreSummary, SingerRegistration
+from .models import (
+    ContestRound,
+    Judge,
+    RoundEntry,
+    RoundJudge,
+    ScoreRecord,
+    ScoreSummary,
+    SingerRegistration,
+)
 
 
 def _eligible_singers(contest_round: ContestRound) -> QuerySet[SingerRegistration]:
-    return SingerRegistration.objects.filter(
-        activity=contest_round.activity,
-        pre_status=SingerRegistration.PreStatus.APPROVED,
-    ).order_by("pk")
+    return SingerRegistration.objects.filter(round_entries__round=contest_round).order_by("pk")
 
 
 def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
-    return Judge.objects.filter(activity=contest_round.activity, is_active=True).order_by("pk")
+    return Judge.objects.filter(round_assignments__round=contest_round).order_by("pk")
+
+
+@transaction.atomic
+def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if locked_round.status != ContestRound.Status.DRAFT:
+        raise ValidationError("比赛轮次只能从草稿状态准备。")
+
+    if locked_round.round_type == ContestRound.RoundType.PRELIMINARY:
+        singers = list(
+            SingerRegistration.objects.filter(
+                activity=locked_round.activity,
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=False,
+            ).order_by("pk")
+        )
+    else:
+        previous_round = ContestRound.objects.filter(
+            activity=locked_round.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        ).first()
+        if previous_round is None:
+            raise ValidationError("后续轮次必须先有上一轮比赛。")
+        singers = list(
+            SingerRegistration.objects.filter(
+                activity=locked_round.activity,
+                summaries__round=previous_round,
+                summaries__is_advanced=True,
+            ).order_by("pk")
+        )
+
+    judges = list(
+        Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
+    )
+    if not singers or not judges:
+        raise ValidationError("准备比赛轮次需要至少一名选手和一名活跃评委。")
+
+    RoundEntry.objects.bulk_create([RoundEntry(round=locked_round, singer=singer) for singer in singers])
+    RoundJudge.objects.bulk_create([RoundJudge(round=locked_round, judge=judge) for judge in judges])
+    locked_round.status = ContestRound.Status.PREPARED
+    locked_round.is_locked = False
+    locked_round.save(update_fields=["status", "is_locked"])
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.UPDATE_STATUS,
+        target=f"ContestRound:{locked_round.pk}",
+        new_value=json.dumps(
+            {
+                "round": locked_round.pk,
+                "status": ContestRound.Status.PREPARED,
+                "entries": len(singers),
+                "judges": len(judges),
+            },
+            ensure_ascii=False,
+        ),
+    )
+    return locked_round
+
+
+@transaction.atomic
+def reset_test_round_snapshots(
+    contest_round: ContestRound,
+    operator,
+    *,
+    test_only: bool = False,
+    owned_singer_ids: set[int],
+    owned_judge_ids: set[int],
+) -> ContestRound:
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if not test_only:
+        raise ValidationError("Test round reset requires explicit test-only opt-in.")
+    if not locked_round.activity.is_test_mode:
+        raise ValidationError("Only test-mode activities can reset prepared round snapshots.")
+    if (
+        RoundEntry.objects.filter(round=locked_round)
+        .exclude(singer_id__in=owned_singer_ids)
+        .exists()
+        or RoundEntry.objects.filter(round=locked_round, singer__is_test_data=False).exists()
+        or RoundJudge.objects.filter(round=locked_round)
+        .exclude(judge_id__in=owned_judge_ids)
+        .exists()
+    ):
+        raise ValidationError("Test reset requires test-owned snapshot parents.")
+
+    old_value = json.dumps(
+        {
+            "status": locked_round.status,
+            "is_locked": locked_round.is_locked,
+            "entries": locked_round.entries.count(),
+            "judges": locked_round.round_judges.count(),
+        },
+        ensure_ascii=False,
+    )
+    locked_round.status = ContestRound.Status.DRAFT
+    locked_round.is_locked = False
+    locked_round.save(update_fields=["status", "is_locked"])
+    RoundEntry.objects.filter(round=locked_round).delete()
+    RoundJudge.objects.filter(round=locked_round).delete()
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value=old_value,
+        new_value=json.dumps(
+            {"status": ContestRound.Status.DRAFT, "is_locked": False, "entries": 0, "judges": 0},
+            ensure_ascii=False,
+        ),
+        note="Demo test round reset",
+    )
+    return locked_round
 
 
 def validate_score(value: object) -> Decimal:
@@ -79,11 +199,12 @@ def recalculate_round(contest_round: ContestRound) -> None:
         return
 
     singers = _eligible_singers(contest_round)
+    judge_ids = _active_judges(contest_round).values_list("pk", flat=True)
     for singer in singers:
         singer_scores = list(
-            ScoreRecord.objects.filter(round=contest_round, singer=singer).values_list(
-                "score", flat=True
-            )
+            ScoreRecord.objects.filter(
+                round=contest_round, singer=singer, judge_id__in=judge_ids
+            ).values_list("score", flat=True)
         )
         if (
             contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
@@ -124,6 +245,11 @@ def apply_scores(
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
+    locked_round.activity = lock_activity_for_runtime_data(locked_round.activity)
+    if locked_round.status == ContestRound.Status.DRAFT:
+        raise ValidationError("请先准备比赛轮次后再评分。")
+    if locked_round.status == ContestRound.Status.LOCKED:
+        raise ValidationError("该比赛轮次已锁定。")
     if locked_round.is_locked or locked_round.activity.is_locked:
         raise ValidationError("该比赛轮次或活动已锁定。")
 
@@ -136,7 +262,7 @@ def apply_scores(
             round=locked_round, singer_id=singer_id, judge_id=judge_id
         ).first()
         old_score = record.score if record else None
-        if old_score == score:
+        if old_score == score and record.is_test_data == locked_round.activity.is_test_mode:
             continue
         ScoreRecord.objects.update_or_create(
             round=locked_round,
@@ -157,6 +283,9 @@ def apply_scores(
         )
 
     recalculate_round(locked_round)
+    if changes and locked_round.status == ContestRound.Status.PREPARED:
+        locked_round.status = ContestRound.Status.SCORING
+        locked_round.save(update_fields=["status"])
     if changes:
         AuditLog.objects.create(
             operator=operator,

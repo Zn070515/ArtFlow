@@ -24,6 +24,7 @@ urlpatterns = [
     path("export/programs/", views.export_programs, name="export_programs"),
     path("rounds/", views.round_list, name="round_list"),
     path("rounds/new/", views.round_create, name="round_create"),
+    path("rounds/<int:pk>/prepare/", views.round_prepare, name="round_prepare"),
     path("rounds/<int:pk>/scores/", views.round_score_entry, name="round_score_entry"),
     path("rounds/<int:pk>/ranking/", views.round_ranking, name="round_ranking"),
     path("rounds/<int:pk>/lock/", views.round_lock, name="round_lock"),

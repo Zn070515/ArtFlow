@@ -31,7 +31,7 @@
             </div>
 
             <div class="flex flex-wrap gap-1.5">
-                {% if not a.is_locked %}
+                {% if not a.is_locked and a.is_test_mode %}
                 <form method="post" action="{% url 'staff:activity_test_toggle' a.pk %}">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-yellow-300 {% if a.is_test_mode %}bg-yellow-100 text-yellow-700{% else %}text-yellow-600{% endif %} px-2 py-1 rounded hover:bg-yellow-100">{% if a.is_test_mode %}退出测试{% else %}测试模式{% endif %}</button>
