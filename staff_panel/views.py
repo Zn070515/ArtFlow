@@ -57,6 +57,11 @@ from incidents.models import IncidentRecord
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
+from ruleset import editor as ruleset_editor
+from ruleset.compiler import compile_definition
+from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
+from ruleset.services import RulesetInvalidError, freeze_ruleset_version
 from singer_contest.models import (
     Award,
     ContestRound,
@@ -1968,3 +1973,395 @@ def user_set_active(request, pk):
             request, f"已{'启用' if updated.is_active else '停用'}账号 {updated.username}。"
         )
     return redirect("staff:user_list")
+
+
+@staff_required
+def ruleset_template_list(request):
+    templates = RulesetTemplate.objects.all()
+    activities = Activity.objects.all().order_by("-created_at")
+    return render(
+        request,
+        "staff_panel/ruleset_template_list.html",
+        {"templates": templates, "total": templates.count(), "activities": activities},
+    )
+
+
+@staff_required
+def ruleset_template_detail(request, pk):
+    template = get_object_or_404(RulesetTemplate, pk=pk)
+    nodes = parse_definition(template.definition)["nodes"] if template.definition else []
+    activities = Activity.objects.all().order_by("-created_at")
+    return render(
+        request,
+        "staff_panel/ruleset_template_detail.html",
+        {"template": template, "nodes": nodes, "activities": activities},
+    )
+
+
+def _starter_definition():
+    """Minimal forward-only graph a blank ruleset starts from."""
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _unique_key(nodes, base):
+    used = {n["key"] for n in nodes}
+    candidate = base
+    counter = 1
+    while candidate in used:
+        candidate = f"{base}_{counter}"
+        counter += 1
+    return candidate
+
+
+def _last_node_of(output_types, nodes):
+    for node in reversed(nodes):
+        if NODE_TYPE_SPEC[node["type"]].output_type in output_types:
+            return node["key"]
+    return ENTRY_KEY
+
+
+def _default_node(new_type, nodes):
+    best_spec = NODE_TYPE_SPEC.get(new_type)
+    if best_spec is None:
+        raise ValueError(f"unknown node type {new_type!r}")
+    node = {"key": _unique_key(nodes, new_type.lower()), "type": new_type}
+    expects = (best_spec.expects or {}).get("source")
+    if expects and OutputType.SCOREMAP in expects:
+        source = _last_node_of({OutputType.SCOREMAP, OutputType.RANKED_ROSTER}, nodes)
+    elif expects and OutputType.RANKED_ROSTER in expects:
+        source = _last_node_of({OutputType.RANKED_ROSTER}, nodes)
+    else:
+        source = ENTRY_KEY
+    for field in best_spec.required:
+        if field == "source":
+            node["source"] = source
+        elif field == "count":
+            node["count"] = 1
+        elif field == "sources":
+            node["sources"] = [ENTRY_KEY]
+        elif field == "by":
+            node["by"] = "组1"
+        elif field == "aggregate":
+            src = _last_node_of({OutputType.SCOREMAP}, nodes)
+            node["aggregate"] = {
+                "type": "weighted_sum",
+                "components": [{"source": src or ENTRY_KEY, "weight": 1.0}],
+            }
+        elif field == "branches":
+            node["branches"] = [{"when": "default", "into": ENTRY_KEY}]
+        elif field == "minuend":
+            node["minuend"] = ENTRY_KEY
+        elif field == "subtrahend":
+            node["subtrahend"] = ENTRY_KEY
+        elif field == "quota":
+            node["quota"] = 1
+        elif field == "groups":
+            node["groups"] = 1
+        elif field == "from":
+            node["from"] = ENTRY_KEY
+        elif field == "into":
+            node["into"] = _last_node_of({OutputType.GROUP_MAP}, nodes)
+        elif field == "award":
+            node["award"] = "默认奖项"
+    if new_type == "ASSESS":
+        node["round"] = f"r{len(nodes) + 1}"
+    return node
+
+
+def _swap_nodes(nodes, key, delta):
+    index = next((i for i, n in enumerate(nodes) if n["key"] == key), None)
+    if index is None:
+        return nodes
+    target = index + delta
+    if target < 0 or target >= len(nodes):
+        return nodes
+    nodes = list(nodes)
+    nodes[index], nodes[target] = nodes[target], nodes[index]
+    return nodes
+
+
+def _edit_nodes(post, nodes):
+    action = post.get("action")
+    if action == "add":
+        nodes = nodes + [_default_node(post.get("new_type", "ASSESS"), nodes)]
+    elif action == "delete":
+        key = post.get("key")
+        nodes = [n for n in nodes if n["key"] != key]
+    elif action == "move_up":
+        nodes = _swap_nodes(nodes, post.get("key"), -1)
+    elif action == "move_down":
+        nodes = _swap_nodes(nodes, post.get("key"), +1)
+    elif action == "save":
+        return ruleset_editor.definition_from_form(post)
+    else:
+        raise ValueError(f"unknown action {action!r}")
+    return {"schema_version": 1, "nodes": nodes}
+
+
+def _node_field_entries(node, index, sources):
+    """Render data-driven edit fields for one node card (select/text/checkbox/json/aggregate)."""
+    labels = ruleset_editor.field_labels()
+    allowed = ruleset_editor.field_allowed()
+    spec = NODE_TYPE_SPEC.get(node.get("type"))
+    fields = []
+    for field in list(spec.required) + list(spec.optional):
+        label = labels.get(field, field)
+        base = f"node_{index}_{field}"
+        value = node.get(field)
+        if field == "aggregate":
+            aggregate = node.get("aggregate", {})
+            fields.append(
+                {
+                    "kind": "aggregate",
+                    "label": label,
+                    "index": index,
+                    "aggregate_type": aggregate.get("type", "weighted_sum"),
+                    "components": [
+                        {"source": c.get("source", ""), "weight": c.get("weight", 1.0)}
+                        for c in aggregate.get("components", [])
+                    ],
+                }
+            )
+        elif field == "within":
+            fields.append(
+                {
+                    "kind": "select",
+                    "label": label,
+                    "name": base,
+                    "value": value or "",
+                    "options": sources,
+                }
+            )
+        elif field in ("branches", "conversion"):
+            fields.append(
+                {
+                    "kind": "json",
+                    "label": label,
+                    "name": f"{base}_json",
+                    "value": json.dumps(value, ensure_ascii=False) if value else "",
+                }
+            )
+        elif isinstance(value, bool):
+            fields.append({"kind": "checkbox", "label": label, "name": base, "value": value})
+        elif allowed.get(field):
+            fields.append(
+                {
+                    "kind": "select",
+                    "label": label,
+                    "name": base,
+                    "value": value if value is not None else "",
+                    "options": allowed[field],
+                }
+            )
+        elif field in ("source", "by", "minuend", "subtrahend", "from", "into", "round"):
+            options = sources if field == "source" else ([value] if value else [""])
+            fields.append(
+                {
+                    "kind": "select",
+                    "label": label,
+                    "name": base,
+                    "value": value or "",
+                    "options": options,
+                }
+            )
+        elif field == "sources":
+            fields.append(
+                {
+                    "kind": "text",
+                    "label": label,
+                    "name": base,
+                    "value": ", ".join(value) if value else "",
+                }
+            )
+        else:
+            fields.append(
+                {
+                    "kind": "text",
+                    "label": label,
+                    "name": base,
+                    "value": value if value is not None else "",
+                }
+            )
+    return fields
+
+
+def _build_card(node, index, sources):
+    return {
+        "node": node,
+        "index": index,
+        "type": node.get("type"),
+        "sources": sources,
+        "fields": _node_field_entries(node, index, sources),
+    }
+
+
+@staff_required
+def contest_ruleset_create(request):
+    if request.method == "POST":
+        activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+        name = (request.POST.get("name") or "").strip()
+        if not name:
+            messages.error(request, "请填写赛制名称。")
+            return redirect("staff:contest_ruleset_create")
+        template = None
+        template_pk = request.POST.get("template")
+        if template_pk:
+            template = get_object_or_404(RulesetTemplate, pk=template_pk)
+        definition = template.definition if template else _starter_definition()
+        ruleset = ContestRuleset.objects.create(
+            activity=activity,
+            name=name,
+            source_template=template,
+            is_test_data=runtime_is_test(activity),
+            created_by=request.user,
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=definition,
+            created_by=request.user,
+        )
+        messages.success(request, "赛制已创建，进入编辑。")
+        return redirect("staff:ruleset_edit", pk=version.pk)
+    activities = Activity.objects.all().order_by("-created_at")
+    templates = RulesetTemplate.objects.all().order_by("name")
+    return render(
+        request,
+        "staff_panel/ruleset_create.html",
+        {"activities": activities, "templates": templates},
+    )
+
+
+@staff_required
+def ruleset_edit(request, pk):
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    if version.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    if request.method == "POST":
+        try:
+            current = parse_definition(version.definition)["nodes"]
+            definition = _edit_nodes(request.POST, current)
+            parse_definition(definition)
+        except (ValueError, ValidationError) as exc:
+            messages.error(request, f"保存失败：{exc}")
+            return redirect("staff:ruleset_edit", pk=pk)
+        version.definition = json.dumps(definition, ensure_ascii=False)
+        version.save()
+        messages.success(request, "赛制已保存。")
+        return redirect("staff:ruleset_edit", pk=pk)
+    try:
+        nodes = parse_definition(version.definition)["nodes"]
+    except ValidationError:
+        nodes = []
+    cards = [
+        _build_card(node, i, ruleset_editor.available_sources(nodes, i))
+        for i, node in enumerate(nodes)
+    ]
+    return render(
+        request,
+        "staff_panel/ruleset_editor.html",
+        {
+            "version": version,
+            "ruleset": version.ruleset,
+            "cards": cards,
+            "node_types": sorted(NODE_TYPE_SPEC.keys()),
+        },
+    )
+
+
+@staff_required
+def ruleset_validate(request, pk):
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    report, plan = compile_definition(version.definition)
+    return render(
+        request,
+        "staff_panel/ruleset_validate.html",
+        {
+            "version": version,
+            "passes": report.passes(),
+            "issues": [i.to_dict() for i in report.issues],
+            "counts": report.counts(),
+            "summary": plan.summary if plan else None,
+        },
+    )
+
+
+@staff_required
+def ruleset_preview(request, pk):
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    report, plan, result = ruleset_editor.preview_definition(version.definition)
+    return render(
+        request,
+        "staff_panel/ruleset_preview.html",
+        {
+            "version": version,
+            "passes": report.passes(),
+            "issues": [i.to_dict() for i in report.issues],
+            "summary": plan.summary if plan else None,
+            "status": result.status.value if result else "—",
+            "node_values": result.node_values if result else None,
+            "decisions": [d.to_dict() for d in result.decisions][:20] if result else None,
+        },
+    )
+
+
+@staff_required
+@require_POST
+def ruleset_freeze(request, pk):
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    try:
+        freeze_ruleset_version(version, request.user)
+    except PermissionDenied as exc:
+        messages.error(request, str(exc))
+    except RulesetInvalidError as exc:
+        errors = [i.message for i in exc.report.issues if i.severity.value == "error"]
+        messages.error(request, "赛制排版未通过校验：" + ("；".join(errors) or "存在 ERROR"))
+    except ValidationError as exc:
+        messages.error(request, "；".join(exc.messages))
+    else:
+        messages.success(request, "赛制已冻结。")
+    return redirect("staff:ruleset_edit", pk=pk)
+
+
+@staff_required
+@require_POST
+def ruleset_clone_from_template(request, template_pk):
+    template = get_object_or_404(RulesetTemplate, pk=template_pk)
+    activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+    name = (request.POST.get("name") or "").strip() or template.name
+    ruleset, _created = ContestRuleset.objects.get_or_create(
+        activity=activity,
+        defaults={
+            "name": name,
+            "source_template": template,
+            "is_test_data": runtime_is_test(activity),
+            "created_by": request.user,
+        },
+    )
+    ruleset.name = name
+    ruleset.source_template = template
+    ruleset.is_test_data = runtime_is_test(activity)
+    ruleset.save()
+    version = RulesetVersion.objects.create(
+        ruleset=ruleset,
+        definition=template.definition,
+        created_by=request.user,
+    )
+    messages.success(request, f"已从「{template.name}」克隆到活动，进入编辑。")
+    return redirect("staff:ruleset_edit", pk=version.pk)
+
+
+@staff_required
+@require_POST
+def ruleset_clone_last_year(request):
+    template = get_object_or_404(RulesetTemplate, name="院十佳")
+    return ruleset_clone_from_template(request, template.pk)
