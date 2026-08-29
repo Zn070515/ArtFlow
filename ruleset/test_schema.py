@@ -122,6 +122,58 @@ def partition_subtract_repechage_merge():
     )
 
 
+def xiaofeng_chain():
+    """2025 校十佳屏峰: 20 -> 5 groups x 4 -> top1/group -> 15 -> R1 top12 -> R2 top7
+    -> merge 12 -> 3 groups x 4 -> manual 0~2/group -> fill to total 6.
+
+    Generic example of the group-direct / remainder / repechage / merge / manual
+    group decision / conditional-fill control flow. No dedicated resolver; only the
+    M1-E linear nodes plus a `by`-scoped SELECT. No hardcoded 2025 values.
+    """
+    return _def(
+        [
+            {
+                "key": "groups_initial",
+                "type": "PARTITION",
+                "source": ENTRY_KEY,
+                "by": "initial_group",
+            },
+            {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+            {"key": "rank_r1", "type": "RANK", "source": "assess_r1", "descending": True},
+            {
+                "key": "direct",
+                "type": "SELECT",
+                "source": "rank_r1",
+                "count": 1,
+                "by": "groups_initial",
+            },
+            {"key": "leftover", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
+            {"key": "repech_r1", "type": "ASSESS", "source": "leftover", "round": "r1"},
+            {"key": "repech_rank", "type": "RANK", "source": "repech_r1", "descending": True},
+            {"key": "top12", "type": "SELECT", "source": "repech_rank", "count": 12},
+            {"key": "repech_r2", "type": "ASSESS", "source": "top12", "round": "r2"},
+            {"key": "repech_rank2", "type": "RANK", "source": "repech_r2", "descending": True},
+            {"key": "top7", "type": "SELECT", "source": "repech_rank2", "count": 7},
+            {"key": "merged", "type": "MERGE", "sources": ["direct", "top7"]},
+            {"key": "final_groups", "type": "PARTITION", "source": "merged", "by": "final_group"},
+            {
+                "key": "manual",
+                "type": "MANUAL_SELECT",
+                "source": "final_groups",
+                "groups": 3,
+                "quota": 2,
+            },
+            {
+                "key": "filled",
+                "type": "FILL_TO_QUOTA",
+                "from": "merged",
+                "into": "manual",
+                "quota": 2,
+            },
+        ]
+    )
+
+
 # Simple, valid definition reused by the model-level tests.
 DEF = json.dumps(
     _def(
@@ -180,6 +232,26 @@ class SchemaAcceptanceStructureParsingTests(SimpleTestCase):
     def test_parses_json_string_too(self):
         parsed = parse_definition(json.dumps(weighted_composite_topn(), ensure_ascii=False))
         self.assertEqual(parsed["nodes"][-1]["key"], "winners")
+
+    def test_group_scoped_select_parses(self):
+        definition = _def(
+            [
+                {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "class"},
+                {"key": "scored", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "ranked", "type": "RANK", "source": "scored", "descending": True},
+                {
+                    "key": "top1_each_group",
+                    "type": "SELECT",
+                    "source": "ranked",
+                    "count": 1,
+                    "by": "groups",
+                },
+            ]
+        )
+        parsed = parse_definition(definition)
+        outputs = parsed["outputs"]
+        self.assertEqual(outputs["groups"], OutputType.GROUP_MAP)
+        self.assertEqual(outputs["top1_each_group"], OutputType.ROSTER)
 
 
 class SchemaRejectionTests(SimpleTestCase):

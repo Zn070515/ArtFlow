@@ -32,6 +32,7 @@ from ruleset.test_schema import (
     partition_subtract_repechage_merge,
     weighted_composite_topn,
     weighted_previous_composite_topn,
+    xiaofeng_chain,
 )
 
 
@@ -57,6 +58,15 @@ class CompilerValidCorpusTests(SimpleTestCase):
 
     def test_weighted_previous_composite_topn_compiles(self):
         self._expect_green(weighted_previous_composite_topn())
+
+    def test_xiaofeng_chain_compiles(self):
+        # The 校十佳屏峰 control flow (group-direct / remainder / repechage / merge /
+        # manual group decision / conditional fill) is expressible with generic nodes.
+        report, plan = self._expect_green(xiaofeng_chain())
+        self.assertIsNotNone(plan)
+        self.assertEqual(report.counts().get("error", 0), 0)
+        codes = report.codes()
+        self.assertNotIn("MISSING_SCORE_DEPENDENCY", codes)
 
     def test_partition_subtract_repechage_merge_compiles(self):
         self._expect_green(partition_subtract_repechage_merge())
@@ -461,6 +471,61 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             )
         )
         self.assertTrue(report.passes())
+
+    def test_xiaofeng_fallback_invalid_aggregate_rejected(self):
+        """§12.4 — the historical 校十佳 fallback references R1+R2+R3, but the group
+        top-1 direct winners never reach R2/R3. The aggregate mixes a full-roster R1
+        (all 20) with subset R2/R3 (15 leftover), so the Validator must FAIL with
+        MISSING_SCORE_DEPENDENCY instead of the resolver guessing a score."""
+        report, plan = self._assert_invalid(
+            _def(
+                [
+                    {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "initial"},
+                    {"key": "r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                    {"key": "rank1", "type": "RANK", "source": "r1", "descending": True},
+                    {
+                        "key": "direct",
+                        "type": "SELECT",
+                        "source": "rank1",
+                        "count": 1,
+                        "by": "groups",
+                    },
+                    {
+                        "key": "leftover",
+                        "type": "SUBTRACT",
+                        "minuend": ENTRY_KEY,
+                        "subtrahend": "direct",
+                    },
+                    {"key": "r2", "type": "ASSESS", "source": "leftover", "round": "r2"},
+                    {"key": "r3", "type": "ASSESS", "source": "leftover", "round": "r3"},
+                    {
+                        "key": "fallback",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "r1", "weight": 0.3},
+                                {"source": "r2", "weight": 0.5},
+                                {"source": "r3", "weight": 0.2},
+                            ],
+                        },
+                    },
+                ],
+                context={
+                    "entry_size": 20,
+                    "rounds": {
+                        "r1": {"scope": "all"},
+                        "r2": {"scope": "subset"},
+                        "r3": {"scope": "subset"},
+                    },
+                },
+            ),
+            "MISSING_SCORE_DEPENDENCY",
+        )
+        golden = report.by_code("MISSING_SCORE_DEPENDENCY")[0]
+        # The guard fires on whichever subset round (R2 or R3) it reaches first; the
+        # §12.4 requirement is that the mixed full/subset fallback is rejected at all.
+        self.assertIn(golden.context["missing_round"], ("r2", "r3"))
 
     def test_missing_score_dependency_golden(self):
         report, plan = self._assert_invalid(

@@ -263,7 +263,9 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
     elif ntype == "SELECT":
         p["pool_sig"] = ("select", node["key"])
         p["pool_relation"] = POOL_SUBSET
-        p["size"] = node["count"]
+        # A `by`-scoped select picks count per group; its flat size depends on the
+        # partition's group count, which is not statically known here.
+        p["size"] = None if node.get("by") else node["count"]
     elif ntype == "SUBTRACT":
         minuend = prov[node["minuend"]]
         subt = prov[node["subtrahend"]]
@@ -841,6 +843,8 @@ def _is_final(by_key: dict[str, dict], key: str) -> bool:
 def _source_refs(node: dict) -> list[str]:
     source = node.get("source")
     refs = [source] if source else []
+    if node.get("by"):
+        refs.append(node["by"])
     refs.extend(node.get("sources") or [])
     if node.get("minuend"):
         refs.append(node["minuend"])
