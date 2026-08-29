@@ -802,6 +802,13 @@ class ScoringServiceTests(TestCase):
                 return workbook
         raise AssertionError(f"{key} not found in ArtFlowMeta")
 
+    def _meta_dict(self, workbook):
+        data = {}
+        for row in workbook["ArtFlowMeta"].iter_rows():
+            if row and len(row) >= 2 and row[0].value is not None:
+                data[str(row[0].value)] = str(row[1].value) if row[1].value is not None else ""
+        return data
+
     def test_score_template_emits_ids_and_hidden_artflow_meta(self):
         prepare_round(self.round, self.user)
         wb = build_score_template_workbook(self.round)
@@ -858,6 +865,61 @@ class ScoringServiceTests(TestCase):
         scores, errors = self._parse_workbook(wb)
         self.assertEqual(scores, {})
         self.assertTrue(any("不属于当前轮次" in error for error in errors))
+
+    def test_score_template_meta_embeds_snapshot_fingerprint_and_ruleset_version(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        meta = self._meta_dict(wb)
+        self.assertEqual(meta["schema_version"], "1")
+        self.assertEqual(meta["activity_id"], str(self.activity.pk))
+        self.assertEqual(meta["round_id"], str(self.round.pk))
+        self.assertEqual(meta["entry_ids"], str(self.singer.pk))
+        self.assertEqual(meta["judge_ids"], str(self.judge.pk))
+        self.assertIn("ruleset_version", meta)
+        self.assertIn("snapshot_fingerprint", meta)
+        self.assertTrue(meta["snapshot_fingerprint"])
+
+    def test_parse_score_workbook_accepts_matching_snapshot(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        ws = wb.active
+        assert ws is not None
+        ws.cell(row=2, column=3).value = 88
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(errors, [])
+        self.assertEqual(scores, {(self.singer.pk, self.judge.pk): Decimal("88")})
+
+    def test_parse_score_workbook_rejects_stale_entry_snapshot(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "entry_ids", "1,999999")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("选手名单" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_stale_judge_snapshot(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "judge_ids", "1,999999")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("评委名单" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_tampered_fingerprint(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "snapshot_fingerprint", "deadbeef")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("指纹不匹配" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_unsupported_schema_version(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "schema_version", "9")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("schema_version" in error for error in errors))
 
 
 class SingerUploadViewTests(TestCase):
