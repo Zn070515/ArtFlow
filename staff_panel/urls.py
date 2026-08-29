@@ -116,6 +116,16 @@ urlpatterns = [
         views.ruleset_template_detail,
         name="ruleset_template_detail",
     ),
+    path(
+        "ruleset-templates/<int:template_pk>/clone/",
+        views.ruleset_clone_from_template,
+        name="ruleset_clone_from_template",
+    ),
+    path(
+        "ruleset-templates/clone-last-year/",
+        views.ruleset_clone_last_year,
+        name="ruleset_clone_last_year",
+    ),
     path("rulesets/create/", views.contest_ruleset_create, name="contest_ruleset_create"),
     path("rulesets/<int:pk>/edit/", views.ruleset_edit, name="ruleset_edit"),
     path("rulesets/<int:pk>/validate/", views.ruleset_validate, name="ruleset_validate"),

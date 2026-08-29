@@ -15,6 +15,24 @@
     </div>
     <p class="text-sm text-gray-500 mb-6">{{ template.description }}</p>
 
+    <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <h2 class="text-sm font-semibold text-gray-800 mb-2">克隆到活动</h2>
+        <form method="post" action="{% url 'staff:ruleset_clone_from_template' template.pk %}" class="flex flex-wrap items-end gap-2">
+            {% csrf_token %}
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">赛制名称</label>
+                <input name="name" value="{{ template.name }}" class="border border-gray-300 rounded px-2 py-1 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">活动</label>
+                <select name="activity" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                    {% for activity in activities %}<option value="{{ activity.pk }}">{{ activity.title }}</option>{% endfor %}
+                </select>
+            </div>
+            <button class="bg-brand text-white px-4 py-1.5 rounded text-sm">克隆</button>
+        </form>
+    </div>
+
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div class="bg-gray-50 border-b border-gray-200 px-5 py-2.5">
             <h2 class="text-sm font-semibold text-gray-800">赛制节点图（{{ nodes|length }} 个节点）</h2>

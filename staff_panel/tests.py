@@ -4287,6 +4287,79 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertContains(response, "AGGREGATE")
         self.assertContains(response, "节点")
 
+    def _clone_activity(self, title="院十佳2026"):
+        return Activity.objects.create(
+            title=title,
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+
+    def test_clone_from_template_creates_ruleset_and_version(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+
+        activity = self._clone_activity()
+        template = RulesetTemplate.objects.get(name="院十佳")
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "院十佳2026克隆"},
+        )
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        self.assertEqual(ruleset.name, "院十佳2026克隆")
+        self.assertEqual(ruleset.source_template, template)
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+        self.assertEqual(version.status, "draft")
+        self.assertEqual(version.definition, template.definition)
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_clone_into_activity_with_existing_ruleset_reuses_it(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+
+        activity = self._clone_activity("院十佳2027")
+        existing = ContestRuleset.objects.create(
+            activity=activity,
+            name="已有赛制",
+            is_test_data=True,
+            created_by=self.staff,
+        )
+        template = RulesetTemplate.objects.get(name="院十佳")
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "院十佳2027复制"},
+        )
+        self.assertEqual(ContestRuleset.objects.filter(activity=activity).count(), 1)
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        self.assertEqual(ruleset.pk, existing.pk)
+        self.assertEqual(ruleset.name, "院十佳2027复制")
+        self.assertEqual(ruleset.source_template, template)
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_clone_last_year_picks_golden_template_by_name(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        activity = self._clone_activity("校十佳2026")
+        response = self.client.post(
+            reverse("staff:ruleset_clone_last_year"),
+            {"activity": activity.pk, "name": "校十佳2026"},
+        )
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        self.assertEqual(ruleset.source_template.name, "院十佳")
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_clone_requires_staff_and_post(self):
+        activity = self._clone_activity()
+        from ruleset.models import RulesetTemplate
+
+        template = RulesetTemplate.objects.get(name="院十佳")
+        self.client.logout()
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "x"},
+        )
+        self.assertEqual(response.status_code, 302)
+
 
 def _acceptance_definition_json():
     """院十佳2026 walkthrough: 16人 R1 40% R2 60% → Top12 → fin Top6."""

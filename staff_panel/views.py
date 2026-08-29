@@ -1978,10 +1978,11 @@ def user_set_active(request, pk):
 @staff_required
 def ruleset_template_list(request):
     templates = RulesetTemplate.objects.all()
+    activities = Activity.objects.all().order_by("-created_at")
     return render(
         request,
         "staff_panel/ruleset_template_list.html",
-        {"templates": templates, "total": templates.count()},
+        {"templates": templates, "total": templates.count(), "activities": activities},
     )
 
 
@@ -1989,10 +1990,11 @@ def ruleset_template_list(request):
 def ruleset_template_detail(request, pk):
     template = get_object_or_404(RulesetTemplate, pk=pk)
     nodes = parse_definition(template.definition)["nodes"] if template.definition else []
+    activities = Activity.objects.all().order_by("-created_at")
     return render(
         request,
         "staff_panel/ruleset_template_detail.html",
-        {"template": template, "nodes": nodes},
+        {"template": template, "nodes": nodes, "activities": activities},
     )
 
 
@@ -2328,3 +2330,38 @@ def ruleset_freeze(request, pk):
     else:
         messages.success(request, "赛制已冻结。")
     return redirect("staff:ruleset_edit", pk=pk)
+
+
+@staff_required
+@require_POST
+def ruleset_clone_from_template(request, template_pk):
+    template = get_object_or_404(RulesetTemplate, pk=template_pk)
+    activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+    name = (request.POST.get("name") or "").strip() or template.name
+    ruleset, _created = ContestRuleset.objects.get_or_create(
+        activity=activity,
+        defaults={
+            "name": name,
+            "source_template": template,
+            "is_test_data": runtime_is_test(activity),
+            "created_by": request.user,
+        },
+    )
+    ruleset.name = name
+    ruleset.source_template = template
+    ruleset.is_test_data = runtime_is_test(activity)
+    ruleset.save()
+    version = RulesetVersion.objects.create(
+        ruleset=ruleset,
+        definition=template.definition,
+        created_by=request.user,
+    )
+    messages.success(request, f"已从「{template.name}」克隆到活动，进入编辑。")
+    return redirect("staff:ruleset_edit", pk=version.pk)
+
+
+@staff_required
+@require_POST
+def ruleset_clone_last_year(request):
+    template = get_object_or_404(RulesetTemplate, name="院十佳")
+    return ruleset_clone_from_template(request, template.pk)
