@@ -1,127 +1,436 @@
 # GOAL.md
 
-# ArtFlow 文艺部活动运行平台开发目标 v2
+# ArtFlow 文艺活动运行平台开发目标 v3
 
-> **状态：MVP Phase 1–5 完成（2026-07-06）**
+> **状态：M0 System Invariant Hardening 已完成；进入 M1 Contest Domain & Rehearsal Readiness**
 >
-> 实现范围以当前源码、迁移和测试为准；不在此记录容易过期的模型、视图或路由统计。
+> 本文档自本版本起取代旧 `GOAL.md v2`，作为 ArtFlow 的**产品目标与领域设计最高优先级基线**。
 >
-> 全部 35 章节的核心需求已覆盖。详见 `CLAUDE.md` 工程约束和 `README.md` 启动说明。
-
-## 0. 项目总定位
-
-ArtFlow 是一个面向学生文艺部的活动运行平台。
-
-它不是简单官网，不是普通报名表，也不是只服务团学答辩的展示项目。
-
-它的目标是：
-
-> 让文艺部的活动从公开展示、报名、材料收集、状态管理、现场录分、观众投票、结果公示、推文 Word 生成到活动归档，都能在一个系统里稳定跑通。
-
-第一版可以分阶段实现，但整体架构必须从一开始就按照最终完整版设计。
-
-不要为了快而写一堆临时页面。
-
-不要让 MVP 变成一次性脚本。
-
-不要把“轻量版”理解成“功能残缺版”。
-
-正确理解是：
-
-> 最终系统的模型、权限、路由、数据结构先设计完整；第一阶段只开放部分功能，但不能阻断后续扩展。
+> 具体实现细节、阶段任务、验收和 ChatGPT 审核结论见 `ChatGPT.md`。
+>
+> 当前第一生产目标仍然是信息工程学院真实文艺活动，尤其是**十佳歌手决赛的后台运行**。系统不能为了抽象完整性牺牲现场可靠性，也不能把某一年的具体赛制写死成系统规则。
 
 ---
 
-## 1. 项目背景
+## 0. 一句话定义
 
-使用场景是浙江工业大学信息工程学院文艺部相关活动。
+ArtFlow 是面向学生文艺活动的 **EventOps 活动运行系统**。
 
-主要活动包括：
+它要解决的不是“做一个报名网站”，而是把文艺活动筹备和现场中散落在：
 
-1. 歌手比赛，例如院十佳、校十佳相关比赛。
-2. 毕晚，即草坪音乐节/毕业晚会相关活动，后续统一称为“毕晚”，不要拆成两个活动。
-3. 普通节目征集、主持人征集、志愿者征集等轻量活动。
-4. 往届风采、活动回顾、结果公示等公开展示内容。
+- 微信/QQ群；
+- Excel；
+- Word；
+- 纸质评分表；
+- 主持手卡；
+- 网盘/附件；
+- 临时口头通知；
+- 人工排名、筛选、加权、补位；
 
-去年歌手比赛中，现场纸质评分后需要人工录入 Excel 计算排名，因为赛制复杂，算分慢，现场出现真空。
+里的工作，收束成一套：
 
-因此系统必须重点解决：
-
-* 活动入口不统一
-* 报名材料分散
-* 状态不清楚
-* 现场录分慢
-* 观众投票依赖问卷星
-* 活动结束后资料难归档
-* 微信推文需要反复手工整理
-* 下一届接手成本高
+> **有状态、有版本、有权限、有审计、有回退、能快速给出现场唯一结果的工作系统。**
 
 ---
 
-## 2. 最重要的开发原则
+# 1. 当前真实业务基线
 
-### 2.1 最终架构优先
+ArtFlow 后续设计必须以真实工作留痕为基线，而不是假想一个“标准十佳”。
 
-本项目必须先设计最终完整版架构。
+## 1.1 现场输入仍以人工为主
 
-MVP 只是分期实现，不是临时替代品。
+现阶段必须接受以下现实：
 
-错误做法：
+- 评委可以继续使用纸质评分表；
+- 分数由后台工作人员人工录入；
+- 观众投票可能由系统产生，也可能只得到人工整理后的“观众分”；
+- 选手材料、歌曲、帮唱嘉宾、节目需求等仍可能由工作人员人工收集后录入；
+- 第一场正式生产不强迫评委、主持人或所有工作人员改变既有习惯。
+
+ArtFlow 的第一价值不是强行“无纸化”，而是：
+
+> **人工只负责输入现实中必须由人判断或收集的信息；确定性的计算、排序、排除、合流、补位、名单生成全部交给系统。**
+
+---
+
+## 1.2 主持人不设电子工作台为第一优先级
+
+真实现场中：
+
+- 主持人上台使用纸质手卡；
+- 初始手卡中待公布结果的位置预留横线；
+- 后台算分完成后，工作人员现场把最终名字写到手卡上；
+- 后台与舞台通常只隔一道帘子。
+
+因此 ArtFlow 不应把“主持人网页端”作为核心需求。
+
+真正要做的是：
+
+> **后台抄卡模式 / Backstage Result Board**
+
+系统必须在结果可宣布后，按主持稿/手卡所需顺序给出：
+
+- `HOLD`：不能宣布；
+- `REVIEW`：存在人工裁决/缺失/冲突；
+- `READY`：结果完整、已确认、可抄手卡；
+- 对应的最终姓名、编号或必要说明。
+
+---
+
+## 1.3 十佳初赛与决赛优先级不同
+
+### 院十佳初赛
+
+初赛通常不是高复杂度、高风险环节。
+
+目标：
+
+- 能收报名；
+- 能审核；
+- 能进行简单打分或人工筛选；
+- 能形成可靠的决赛 roster；
+- 数据不丢；
+- 操作简单。
+
+不要为了初赛设计复杂 tournament engine。
+
+### 院十佳决赛
+
+是 ArtFlow 第一优先级。
+
+重点：
+
+- 多轮；
+- 分组；
+- 不同评分表；
+- 评委原始分；
+- 多轮加权；
+- 观众分/观众票；
+- 晋级；
+- 结果锁定；
+- 快速抄主持手卡；
+- 音频/歌曲/帮唱材料；
+- 现场异常与回退。
+
+### 校十佳屏峰校区决赛（若当年存在）
+
+复杂度可能高于院十佳，应作为高级 Ruleset 的压力测试和生产候选。
+
+---
+
+# 2. 2025 历史黄金样例
+
+历史材料用于：
+
+1. 验证模型表达能力；
+2. 做 Golden Test；
+3. 发现未来配置器必须支持的赛制原语；
+4. 防止开发者把赛制写死。
+
+**历史规则不是 2026 规则。**
+
+---
+
+## 2.1 2025 院十佳决赛黄金样例
+
+已找到实际使用的三份工作人员/评委评分 Excel：
+
+- `第一阶段评分表.xlsx`
+- `第三轮评分表.xlsx`
+- `第四轮评分表xlsx.xlsx`
+
+可以确认：
+
+### 决赛人数
+
+- 15 位决赛选手。
+
+### 第一轮
+
+- 5 组 × 3 人；
+- 同组共同演唱；
+- 仍按个人评分；
+- 5 位评委；
+- Rubric：
+  - 音准节奏 30；
+  - 演唱技巧 30；
+  - 情感表达 20；
+  - 默契程度 20。
+
+### 第二轮
+
+- 15 人；
+- 5 位评委；
+- Rubric：
+  - 音准节奏 30；
+  - 演唱技巧 30；
+  - 情感表达 20；
+  - 舞台感染力 20。
+
+### 第一阶段总分
+
+实际 Excel 公式：
 
 ```text
-先随便写几个页面
-先写死一个十佳歌手报名表
-先写死一个投票页面
-先写死几个 Excel 导出
-后面再说
+第一阶段总分
+=
+第一轮评委平均 × 30%
++
+第二轮评委平均 × 60%
++
+第一阶段观众分 × 10%
 ```
 
-正确做法：
+然后形成第一阶段排名/晋级。
+
+### 第三轮
+
+- 10 人；
+- 5 位评委；
+- Rubric：
+  - 合作默契 30；
+  - 演唱技巧 30；
+  - 情感表达 25；
+  - 舞台创意 15。
+
+第三轮工作人员表实际公式：
 
 ```text
-先设计 User / Activity / Registration / File / Score / Vote / PublicPost / Export / Archive 等核心模型
-第一版只启用部分字段和页面
-后续功能在同一模型体系上扩展
+第三阶段综合结果
+=
+第一阶段总分 × 60%
++
+第三轮评委平均 × 40%
+```
+
+### 第四轮
+
+- 5 人；
+- 5 位评委；
+- Rubric：
+  - 演唱功底 30；
+  - 情感表达 25；
+  - 舞台掌控 20；
+  - 歌曲完成度 15；
+  - 舞台感染力 10。
+
+第四轮工作人员表实际公式：
+
+```text
+第四阶段总分
+=
+第三轮评委平均 × 30%
++
+第四轮评委平均 × 50%
++
+第四轮观众分 × 20%
+```
+
+### 关键领域结论
+
+2025 院十佳证明 ArtFlow 必须支持：
+
+- 同一活动任意数量的比赛轮次；
+- 分组表演与个人评分分离；
+- 每轮不同 Rubric；
+- 任意评委人数；
+- Round Score；
+- Composite Score；
+- Composite 可以引用前一阶段 Composite；
+- 观众结果可进入 Composite；
+- 多阶段晋级；
+- 后续轮歌曲/伴奏/嘉宾在晋级前提前准备；
+- 规则冻结前可以多次修改。
+
+---
+
+## 2.2 2025 校十佳屏峰校区决赛黄金样例
+
+正式赛制终稿可确认：
+
+```text
+20 人
+↓
+第一轮：5组×4人
+↓
+每组1人直接晋级第三轮：共5人
+↓
+剩余15人按第一轮分数取前12进入复活赛
+↓
+第二轮：12人复活赛
+↓
+按第二轮评委分取前7
+↓
+5名直通 + 7名复活 = 第三轮12人
+↓
+第三轮：3组×4人
+↓
+每组由评委人工决定直接晋级0~2人
+↓
+若总人数不足6
+则按某个加权结果自动补足到6
+↓
+6人中产生后续晋级名单
+```
+
+正式文档给出的补位公式为：
+
+```text
+第一轮 20%
++
+第二轮 30%
++
+第三轮 50%
+```
+
+### 必须保留的历史歧义
+
+第一轮直接晋级第三轮的选手不参加第二轮，但补位公式又引用第二轮成绩。
+
+现有历史材料没有明确说明：
+
+- 直通选手是否进入补位池；
+- 如果进入，其第二轮缺失值如何处理；
+- 是否应对直通选手使用另一套公式。
+
+因此：
+
+> **ArtFlow 不能擅自发明答案。**
+
+该历史赛制必须成为 `RulesetValidator` 的黄金错误样例：
+
+```text
+若某条候选路径无法产生 Composite 所需要的全部输入，
+Ruleset 不得 Freeze。
 ```
 
 ---
 
-### 2.2 不做大而全，但要能长期演进
+# 3. 赛制不确定性本身就是产品需求
 
-不做“万能学生组织系统”。
+每年的以下信息都可能变化：
 
-但必须覆盖文艺部活动的长期需求：
+- 报名人数；
+- 决赛人数；
+- 轮次数量；
+- 评委人数；
+- 评委是否分组/分 Panel；
+- 是否去最高最低；
+- 每轮 Rubric；
+- 每轮权重；
+- 是否累计上一阶段成绩；
+- 是否有观众票；
+- 观众票是否计分；
+- 观众分如何换算；
+- 是否有人气奖；
+- 是否分组；
+- 每组是否直通；
+- 是否复活；
+- 是否 PK；
+- 是否轮空；
+- 是否有待定席；
+- 晋级名额；
+- 是否人工裁决；
+- 平分处理；
+- 是否存在赛道/专业组配额；
+- 是否多校区合流；
+- 是否有踢馆/挑战替换。
 
-* 公开首页
-* 活动入口
-* 报名
-* 材料
-* 状态
-* 评分
-* 投票
-* 结果
-* 推文
-* 导出
-* 归档
-* 复盘
+因此开发目标不是：
 
-如果某个功能明显属于这些主流程，就应该在最终架构中预留位置。
+> “提前预测 2026 赛制。”
 
-如果第一阶段不做，也要在模型、路由或模块边界上预留扩展空间。
+而是：
+
+> **让常见变化在赛制正式公布后无需修改 Python，只需要复制模板、调整参数、验证并 Freeze。**
 
 ---
 
-### 2.3 先单体，后扩展
+# 4. 赛制变化的代码修改目标
 
-第一版使用 Django 单体项目。
+## 4.1 常规变化：0 行 Python
 
-不要上微服务。
+以下变化必须通过配置完成：
 
-不要上复杂前后端分离。
+- 选手人数；
+- 评委人数；
+- 轮数；
+- 分组数；
+- 每组人数；
+- Top N；
+- 每组 Top N；
+- Rubric；
+- 平均/去极值平均；
+- Round 权重；
+- Composite 权重；
+- 观众票开关；
+- 人气奖开关；
+- 观众是否进入正式成绩；
+- 直通；
+- 复活；
+- 分支；
+- 合流；
+- 自动补位；
+- 常见 PK；
+- 常见轮空；
+- 常见赛道配额；
+- 平分进入人工复核。
 
-不要一开始就写 WebSocket、大屏、微信 API、短信 API。
+## 4.2 新 primitive 才允许改代码
 
-推荐技术路线：
+只有当正式赛制出现：
+
+> 现有强类型赛制原语无法表达的新运算语义
+
+时，才新增 primitive。
+
+新增 primitive 必须同时新增：
+
+- schema；
+- validator；
+- resolver；
+- tests；
+- audit/reproducibility；
+- 至少一个真实或合成 Golden Case。
+
+禁止现场临时在 Python 中写：
+
+```python
+if activity_id == ...
+```
+
+或：
+
+```python
+if year == 2026:
+```
+
+---
+
+# 5. 产品边界
+
+ArtFlow 不是：
+
+- 校级第二课堂系统；
+- 通用学生管理系统；
+- 商业票务平台；
+- 通用低代码工作流平台；
+- 任意公式执行器；
+- BPMN 引擎；
+- 微信生态替代品；
+- 强制无纸化系统。
+
+ArtFlow 是：
+
+> **围绕文艺活动筹备、评审、现场决策、材料、结果、导出和归档的专业化轻量 EventOps。**
+
+---
+
+# 6. 总技术路线
+
+继续保持 Django 单体。
+
+推荐主线：
 
 ```text
 Django
@@ -129,2002 +438,1702 @@ PostgreSQL
 Django Templates
 Tailwind CSS
 少量 Alpine.js / HTMX
-Docker Compose
-Nginx 或 Caddy
+Gunicorn
+Nginx/Caddy
+Docker Compose（开发/验收）
 ```
 
-导出相关：
+不要因为 M1 引入：
+
+- 微服务；
+- Celery（除非后续出现明确异步刚需）；
+- Redis（除非明确需要共享状态/缓存）；
+- 任意规则脚本解释器；
+- React 大重构；
+- 工作流引擎。
+
+---
+
+# 7. M0 已冻结的系统不变量
+
+M1 不允许破坏以下已经 harden 的规则。
+
+---
+
+## 7.1 身份与权限
+
+角色：
 
 ```text
-openpyxl 或 django-import-export：Excel 导入导出
-python-docx 或 docxtpl：Word 文档生成
-qrcode 或 django-qr-code：二维码生成
+Guest
+Participant
+Staff
+Admin
 ```
+
+原则：
+
+- Staff 只能执行工作人员职责；
+- Admin 才能修改角色、关键权限、正式归档/解归档、紧急高风险操作；
+- Production 不依赖 Django Admin 作为业务后台；
+- Admin 二次密钥机制继续保留；
+- 至少一个有效 Admin 的 invariant 必须保持；
+- 权限修改必须审计。
 
 ---
 
-## 3. Repository 调研要求
+## 7.2 Activity 是事务 aggregate root
 
-正式写核心代码前，必须先做 repository 调研。
-
-不要只找一个项目照抄。
-
-请搜索并参考以下方向：
-
-### 3.1 Django event management / event registration
-
-搜索关键词：
+所有 Activity-owned mutation 必须遵守：
 
 ```text
-Django event management system
-Django event registration app
-Django college event management system
-Django event management GitHub
-Django event registration Tailwind
+Activity
+→ child aggregate / owner
+→ dependent rows
 ```
 
-学习重点：
+任何依赖：
 
-* 活动模型
-* 报名模型
-* 活动状态
-* 报名导出
-* 后台管理结构
+- Activity lock；
+- phase；
+- lifecycle；
+- ActivityAction；
 
----
-
-### 3.2 Django voting / poll / election system
-
-搜索关键词：
+的 mutation，都必须在同一事务中：
 
 ```text
-Django voting system
-Django poll system
-Django e voting system
-Django online voting GitHub
-Django audience voting app
+Activity SELECT FOR UPDATE
+→ 锁后重新验证
+→ child SELECT FOR UPDATE
+→ mutation
+→ audit
 ```
 
-学习重点：
-
-* 投票场次
-* 候选项
-* 投票记录
-* 重复投票限制
-* 投票结果锁定
+事务外检查只用于 UX，不是业务 authority。
 
 ---
 
-### 3.3 Django file upload / file manager
+## 7.3 GET 必须安全只读
 
-搜索关键词：
+普通 GET/HEAD 不得：
+
+- 创建数据库记录；
+- 自动同步派生状态；
+- 改锁；
+- 改结果；
+- 改材料检查；
+- 改归档；
+- 改权限。
+
+需要 reconciliation 的数据只能在明确 mutation 中维护。
+
+---
+
+## 7.4 TEST / FORMAL 严格隔离
+
+TEST 活动：
+
+- 仅 Staff/Admin 可进入完整测试路径；
+- 普通用户不得误入 TEST 报名或 TEST 投票；
+- TEST 内容不得公开为正式内容；
+- TEST 数据必须带 lifecycle marker；
+- TEST → FORMAL 前必须清理 runtime test data；
+- 公开内容按规则保留为 Draft/Hidden。
+
+---
+
+## 7.5 锁定与归档
+
+Activity global lock 是全局 overlay。
+
+子锁：
+
+- Round lock；
+- VoteSession lock；
+- Ruleset freeze；
+- Result lock；
+
+必须保持自己的独立状态。
+
+`ARCHIVED`：
+
+- 默认业务只读；
+- 普通 unlock 不等于 unarchive；
+- 只有明确 Admin unarchive operation 可以恢复；
+- ArchivePackage 必须版本化；
+- 正式归档必须可重现并可审计。
+
+---
+
+## 7.6 文件
+
+内部材料必须经过受控访问。
+
+必须保留：
+
+- owner；
+- material slot / purpose；
+- version；
+- current；
+- upload actor/time；
+- file metadata。
+
+正式 M1 迁移后，“一个 owner + 一个粗粒度 file purpose 只有一个 current”的旧模型不再足够，必须逐步迁移到更精确的材料槽位。
+
+---
+
+# 8. Activity 生命周期
+
+保留当前阶段：
 
 ```text
-Django file upload management
-Django file manager
-Django media files permissions
-Django FileField upload GitHub
+DRAFT
+TESTING
+REGISTRATION_OPEN
+REGISTRATION_CLOSED
+REVIEWING
+REHEARSAL
+LIVE
+RESULTS_PENDING
+RESULTS_PUBLISHED
+ARCHIVED
 ```
 
-学习重点：
+阶段转换必须是显式 graph。
 
-* 文件上传
-* 文件权限
-* 文件与活动/报名的关联
-* 材料完整性检查
-* 附件索引
+禁止：
 
----
+> “只要向后的 phase 都能跳。”
 
-### 3.4 Django Excel import/export
+`ARCHIVED` 不允许 generic transition。
 
-搜索关键词：
+赛制节点和比赛轮次不是 Activity Phase。
+
+不要把：
 
 ```text
-django-import-export examples
-Django export Excel openpyxl
-Django import Excel data
-Django admin Excel export
+Round 1
+Round 2
+PK
+复活
 ```
 
-学习重点：
-
-* 报名表导出
-* 评分表模板导出
-* 成绩导出
-* 投票结果导出
-* 节目单导出
-* Excel 导入评分
+塞进 Activity Phase。
 
 ---
 
-### 3.5 Python docx generation
+# 9. 歌手比赛领域重新定义
 
-搜索关键词：
+M1 的核心是把当前“固定初赛+复赛模型”迁移成通用但有限的比赛模型。
+
+---
+
+## 9.1 ContestRound 不再以 PRELIMINARY/SEMI_FINAL 作为业务权威
+
+Round 应逐步转向：
 
 ```text
-python-docx generate Word document
-docxtpl generate docx template
-Django generate docx file
-Python generate WeChat article Word document
+name
+sequence
+scheduled_at（可选）
+venue（可选）
+rubric
+judge panel
+performance configuration
+ruleset binding
 ```
 
-学习重点：
+旧 `round_type` 可以作为 migration compatibility 字段暂时保留。
 
-* 生成 .docx
-* 插入标题、段落、表格
-* 插入二维码图片
-* 从模板填充活动数据
-* 导出微信公众号可导入的 Word 初稿
-
-注意：本项目不直接调用微信公众号 API，而是生成可供微信公众号后台导入的 Word 文档。
+禁止直接一次性 destructive migration。
 
 ---
 
-### 3.6 QR code generation
+## 9.2 Round roster 必须是显式 snapshot
 
-搜索关键词：
+真正参赛名单由 `RoundEntry`/等价 snapshot 表达。
+
+来源可能是：
+
+- 报名筛选；
+- 上一阶段 Top N；
+- 每组直通；
+- 复活；
+- 多来源合流；
+- 人工确认；
+- Admin emergency override。
+
+不要依赖一个固定：
 
 ```text
-Django QR code generator
-django-qr-code
-Python qrcode generate image
-Django download QR code
+previous_round_id
 ```
 
-学习重点：
-
-* 报名二维码
-* 投票二维码
-* 公示二维码
-* 材料补交二维码
-* 二维码下载
+来推断所有来源。
 
 ---
 
-### 3.7 Minimal admin dashboard / university style web design
+## 9.3 Performance 与 Registration 分开
 
-搜索关键词：
+`SingerRegistration` 表示：
+
+> 这个人报名参加活动。
+
+`Performance` / `RoundPerformance` 表示：
+
+> 这个人在某轮具体演什么。
+
+至少需要表达：
+
+- singer；
+- round；
+- song；
+- sequence；
+- group；
+- guest/collaborator；
+- duration；
+- notes；
+- material slots。
+
+不要继续在 `SingerRegistration` 上增加：
 
 ```text
-Django Tailwind admin dashboard
-Django HTMX Tailwind template
-Tailwind minimal admin dashboard
-Django Jazzmin
-Django Unfold admin
-Minimal Admin Template Tailwind
-University website design simple clean
-College event website design
+song2
+song3
+song4
 ```
 
-学习重点：
-
-* 简洁后台布局
-* 大学官网式公开首页
-* 清晰导航
-* 卡片但不过度
-* 表格可读
-* 状态标签
-* 手机端适配
-
-只参考结构和审美，不要照搬复杂模板。
-
 ---
 
-## 4. 视觉与交互要求
+## 9.4 分组表演与评分对象分开
 
-页面必须美观、简约、真实、干净。
-
-不要一股子 AI 味。
-
-### 4.1 禁止的风格
-
-不要出现：
-
-* 夸张渐变背景
-* 科技感大屏风
-* 赛博朋克发光边框
-* 玻璃拟态滥用
-* 大量虚假宣传语
-* 一屏塞满很多卡片
-* 过多 icon
-* 过多阴影
-* “赋能”“重塑”“闭环”“智慧化生态”这类空话
-* 看起来像 AI 自动生成的 SaaS 落地页
-
----
-
-### 4.2 推荐风格
-
-参考方向：
-
-* 大学官网的正式感
-* 学院活动页的可信感
-* Notion 的清爽
-* GitHub 的克制
-* Linear 的层次
-* 飞书文档的干净
-
-视觉目标：
+需要支持：
 
 ```text
-白底或浅灰底
-黑白灰为主
-少量学院蓝或文艺部识别色作为强调
-表格清楚
-按钮克制
-状态标签清晰
-信息层级明确
-手机端可用
+PerformanceGroup
 ```
 
-最终感觉：
-
-> 像一个认真学生做出来的、真实能长期用的文艺部活动平台，而不是 AI 生成的概念网站。
-
----
-
-## 5. 系统总结构
-
-推荐 Django app 结构：
+例如：
 
 ```text
-ArtFlow
-├── accounts            用户、登录、权限
-├── core                活动、阶段、基础配置
-├── public_portal       首页、公开内容、往届风采、公告、公示
-├── files               附件上传、材料要求、材料完整性
-├── singer_contest      歌手比赛、初赛、复赛、评分、排名
-├── farewell_show       毕晚节目征集、节目单、材料管理
-├── voting              观众投票
-├── exports             Excel、Word、zip 导出
-├── archive             活动归档包、归档索引
-├── incidents           异常记录
-├── staff_panel         工作人员后台
-└── common              通用工具
+第一组：
+A
+B
+C
 ```
+
+共同表演一首歌。
+
+但 Score 仍可以针对每个 singer。
+
+不要把：
+
+> 同组表演
+
+误建成：
+
+> 整组只有一个 Score。
 
 ---
 
-## 6. 用户角色
+# 10. Rubric / 评分表
 
-第一版只区分四类身份。
+评分维度必须模板化。
+
+核心概念：
 
 ```text
-Guest：游客
-Participant：选手 / 节目负责人
-Staff：工作人员
-Admin：管理员
+ScoringRubric
+RubricCriterion
 ```
 
-不要第一版就做复杂角色矩阵。
-
-但是代码结构要允许未来扩展更多权限。
-
----
-
-### 6.1 Guest 游客
-
-可以：
-
-* 浏览公开首页
-* 浏览往届风采
-* 查看活动介绍
-* 进入公开报名入口
-* 进入观众投票入口
-* 查看公开公示页
-
-不能：
-
-* 查看内部材料
-* 查看报名名单
-* 查看分数
-* 下载附件
-* 进入后台
-
----
-
-### 6.2 Participant 选手 / 节目负责人
-
-可以：
-
-* 注册登录
-* 提交自己的报名
-* 修改自己的报名
-* 上传自己的附件
-* 查看自己的材料状态
-* 查看自己的审核反馈
-* 查看自己的赛前/赛中状态
-
-不能：
-
-* 查看其他选手信息
-* 查看其他选手附件
-* 修改其他人的信息
-* 进入工作人员后台
-
----
-
-### 6.3 Staff 工作人员
-
-可以：
-
-* 查看所有报名
-* 查看所有附件
-* 修改所有选手/节目状态
-* 添加工作人员备注
-* 审核材料
-* 录入分数
-* 查看排名
-* 导出 Excel
-* 导出 Word
-* 管理投票场次
-* 查看投票结果
-* 记录异常事件
-* 管理公开首页内容
-* 发布/隐藏往届风采、公告、公示
-
-不能：
-
-* 管理用户权限
-* 删除核心数据
-* 修改系统底层配置
-* 解锁已锁定结果
-
----
-
-### 6.4 Admin 管理员
-
-可以：
-
-* 拥有 Staff 全部权限
-* 管理用户
-* 设置工作人员身份
-* 创建/复制/归档活动
-* 修改活动配置
-* 解锁已经锁定的结果
-* 查看完整操作日志
-* 备份数据
-* 删除异常文件或异常数据
-
-重要规则：
-
-> 结果锁定后，普通工作人员不能再修改成绩、奖项和投票结果；管理员可以随时解锁、修改、重新锁定，以避免现场突发问题。所有解锁、修改、重新锁定行为都必须自动写入操作日志。解锁备注可以选填，不要强制填写，避免现场被流程卡住。
-
----
-
-## 7. 公开首页与内容管理
-
-这是最终系统的重要组成部分，不是可有可无的装饰。
-
-系统首页应该像大学官网/学院官网一样，是一个公开门户。
-
-用户第一次打开系统时，不应该直接进入后台，而应该看到正式、清楚的活动门户。
-
----
-
-### 7.1 首页结构
-
-公开首页建议结构：
-
-```text
-顶部导航
-├── 首页
-├── 活动报名
-├── 往届风采
-├── 通知公告
-├── 结果公示
-└── 右上角：登录 / 注册 / 个人中心 / 工作人员后台
-
-首页主体
-├── 头图 / 轮播图
-├── 当前活动
-├── 报名入口
-├── 观众投票入口
-├── 通知公告
-├── 往届风采
-├── 结果公示
-└── 页脚
-```
-
-右上角显示逻辑：
-
-```text
-游客：登录 / 注册
-选手：我的报名 / 退出登录
-工作人员：工作人员后台 / 退出登录
-管理员：管理员后台 / 退出登录
-```
-
----
-
-### 7.2 首页公开展示内容
-
-游客不登录也能看：
-
-* 文艺部简介
-* 当前开放活动
-* 报名入口
-* 投票入口
-* 往届风采
-* 通知公告
-* 结果公示
-* 活动照片或视频链接
-
----
-
-### 7.3 工作人员可维护首页
-
-工作人员应能在后台维护首页内容。
-
-需要增加：
-
-```text
-公开内容管理模块 Public CMS
-```
-
-第一版不做复杂 CMS，但必须支持常用内容维护。
-
-工作人员后台可以管理：
-
-* 首页轮播图/头图
-* 当前活动卡片
-* 往届风采
-* 通知公告
-* 结果公示
-* 报名入口链接
-* 投票入口链接
-* 活动照片/视频链接
-
----
-
-### 7.4 PublicPost 模型
-
-建议设计统一模型：
-
-```text
-PublicPost
-```
-
-字段建议：
-
-* title
-* subtitle
-* content
-* cover_image
-* post_type
-* related_activity
-* is_published
-* is_pinned
-* sort_order
-* created_by
-* updated_by
-* published_at
-* created_at
-* updated_at
-
-post_type 包括：
-
-```text
-announcement：通知公告
-showcase：往届风采
-activity_review：活动回顾
-registration_entry：报名入口
-voting_entry：投票入口
-result_publication：结果公示
-normal_article：普通文章
-```
-
----
-
-### 7.5 内容状态
-
-公开内容状态保持简单：
-
-```text
-草稿
-已发布
-已隐藏
-```
-
-工作人员可以：
-
-* 创建草稿
-* 编辑内容
-* 发布内容
-* 隐藏内容
-
-管理员可以：
-
-* 删除内容
-* 恢复内容
-* 管理所有内容
-
----
-
-### 7.6 往届风采
-
-往届风采作为公开内容的一种。
-
-字段建议：
-
-* 活动名称
-* 活动年份
-* 活动时间
-* 活动简介
-* 封面图
-* 照片若干
-* 视频链接
-* 获奖名单，可选
-* 活动回顾文字
-* 关联活动
-* 关联归档包，仅工作人员可见
-
-游客看到：
-
-* 封面
-* 标题
-* 简介
-* 公开照片
-* 公开回顾
-
-工作人员看到额外内容：
-
-* 报名名单
-* 材料清单
-* 评分结果
-* 异常记录
-* 归档包
-
----
-
-## 8. 活动类型
-
-第一版支持三类活动：
-
-```text
-SingerContest：歌手比赛
-FarewellShow：毕晚
-GeneralEvent：普通活动
-```
-
-不同活动走不同业务路由，但底层共用用户、文件、导出、二维码、权限、公开内容模块。
-
----
-
-## 9. 总路由设计
-
-建议路由：
-
-```text
-/
-├── /login/
-├── /register/
-├── /me/
-├── /showcase/
-├── /announcements/
-├── /results/
-├── /events/
-│
-├── /contest/
-│   ├── /apply/
-│   ├── /my-submission/
-│   ├── /preliminary/
-│   ├── /semifinal/
-│   ├── /score-input/
-│   ├── /ranking/
-│   ├── /vote/
-│   └── /export/
-│
-├── /farewell/
-│   ├── /apply/
-│   ├── /my-program/
-│   ├── /materials/
-│   ├── /program-list/
-│   └── /export/
-│
-├── /vote/
-│   ├── /<vote_session_id>/
-│   └── /success/
-│
-├── /public/
-│   ├── /posts/
-│   ├── /results/
-│   └── /showcase/
-│
-└── /staff/
-    ├── /dashboard/
-    ├── /activities/
-    ├── /public-posts/
-    ├── /participants/
-    ├── /submissions/
-    ├── /files/
-    ├── /scores/
-    ├── /votes/
-    ├── /exports/
-    ├── /articles/
-    ├── /archive/
-    ├── /incidents/
-    └── /logs/
-```
-
----
-
-## 10. 活动阶段控制
-
-每个活动必须有阶段。
-
-```text
-DRAFT：草稿
-TESTING：测试/彩排
-REGISTRATION_OPEN：报名中
-REGISTRATION_CLOSED：报名截止
-REVIEWING：审核中
-REHEARSAL：彩排中
-LIVE：现场进行中
-RESULTS_PENDING：结果整理中
-RESULTS_PUBLISHED：结果公示中
-ARCHIVED：已归档
-```
-
-不同阶段允许不同操作。
+Criterion 至少包含：
+
+- name；
+- max_score；
+- sequence；
+- description（可选）。
 
 示例：
 
 ```text
-报名中：
-选手可以提交和修改报名。
-
-报名截止：
-选手不能新增报名，工作人员可以修改。
-
-审核中：
-工作人员审核材料，选手只能补交被退回的材料。
-
-现场进行中：
-工作人员可以修改选手状态、录分、开启投票。
-
-已归档：
-核心数据只读，只有管理员可以解归档或复制活动。
+第一轮合唱：
+音准节奏 30
+演唱技巧 30
+情感表达 20
+默契程度 20
 ```
 
----
-
-## 11. 活动复制功能
-
-必须做。
-
-目标：
-
-> 明年办同类活动时，不需要从零配置。
-
-复制活动时保留：
-
-* 活动类型
-* 报名字段
-* 材料要求
-* 评分规则
-* 投票设置模板
-* 导出模板
-* 推文模板
-* 阶段配置
-* 公开内容模板，可选
-
-复制活动时清空：
-
-* 选手报名
-* 附件
-* 分数
-* 投票记录
-* 异常记录
-* 工作人员备注
-* 结果数据
+不同 Round 可使用不同 Rubric。
 
 ---
 
-## 12. 报名与材料模块
+## 10.1 评分输入方式
 
-### 12.1 歌手比赛报名字段
-
-第一版可以固定字段，但模型要允许后续扩展动态报名字段。
-
-字段建议：
-
-* 姓名
-* 学号
-* 学院
-* 班级
-* 手机号
-* 微信号，可选
-* 节目名称
-* 曲目名称
-* 节目简介
-* 是否原创
-* 伴奏文件
-* 演唱视频，可选
-* 备注
-
----
-
-### 12.2 毕晚节目征集字段
-
-字段建议：
-
-* 节目名称
-* 节目类型
-* 负责人姓名
-* 负责人联系方式
-* 所属班级/部门
-* 演员名单
-* 预计时长
-* 节目简介
-* 伴奏文件
-* 背景视频，可选
-* 文字材料，可选
-* 麦克风需求
-* 道具需求
-* 特殊备注
-
----
-
-### 12.3 材料完整性检查
-
-必须做。
-
-每个报名/节目显示材料状态：
+P0：
 
 ```text
-基本信息：已完成
-联系方式：已完成
-伴奏文件：已上传
-视频文件：未上传
-节目简介：已填写
-工作人员审核：待审核
+纸质评分
+→ Staff 快速录入
 ```
 
-后台需要有“材料缺失名单”。
-
-示例：
+可选：
 
 ```text
-03号 张三：缺伴奏文件
-07号 李四：缺联系方式
-12号 王五：视频格式需要确认
+评委网页打分
+```
+
+评委端不能成为唯一生产路径。
+
+---
+
+## 10.2 支持的基础聚合
+
+至少：
+
+```text
+MEAN
+TRIMMED_MEAN
+```
+
+未来按真实规则可扩展：
+
+```text
+WEIGHTED_JUDGE_PANEL
+BALLOT_COUNT
+MAJORITY_BALLOT
+```
+
+去最高最低必须配置参数，例如：
+
+```text
+trim_high=1
+trim_low=1
+```
+
+如果 Judge 数量不足，Ruleset 不允许 Freeze/Prepare。
+
+禁止静默退化成普通平均。
+
+---
+
+# 11. Audience Vote
+
+VoteSession 永远负责：
+
+> 收票与形成票数事实。
+
+不要让 VoteSession 自己决定是否进入正式成绩。
+
+Vote 至少有业务用途：
+
+```text
+POPULARITY
+SCORE_COMPONENT
+SELECTION
+OTHER
+```
+
+### Popularity
+
+```text
+Vote
+→ Award
+```
+
+不影响正式晋级。
+
+### Score Component
+
+```text
+Vote result
+→ VoteScoringRule
+→ normalized AudienceScore
+→ Composite
+```
+
+### Selection
+
+例如：
+
+```text
+失败者池
+→ 观众复活 Top1
+```
+
+直接产生 roster decision。
+
+---
+
+## 11.1 不允许猜 VoteCount → AudienceScore 公式
+
+2025 院十佳工作人员表里已经存在：
+
+```text
+第一阶段观众打分
+第四轮观众打分
+```
+
+但现有留痕没有给出：
+
+> 原始票数如何转换成 0–100 观众分。
+
+因此第一版可以支持：
+
+```text
+Staff 手工输入已归一化 AudienceScore
+```
+
+如果当年正式规则明确换算公式，再配置自动转换。
+
+禁止开发者擅自假定：
+
+```text
+最高票 = 100
+其他按比例
 ```
 
 ---
 
-### 12.4 工作人员内部备注
+# 12. Versioned Ruleset
 
-每个报名/节目下方要有工作人员备注。
+赛制必须从 Python 分支逻辑中抽离。
 
-特点：
-
-* 选手不可见
-* 工作人员和管理员可见
-* 支持多条备注
-* 记录备注人和时间
-
-示例：
+核心概念：
 
 ```text
-该选手今晚补交伴奏。
-该节目彩排时音频有问题。
-该节目需要两个立麦。
-负责人回复较慢，后续提前催。
+ContestRuleset
+RulesetVersion
+```
+
+RulesetVersion 至少：
+
+- activity/template association；
+- version；
+- schema_version；
+- definition；
+- status：
+  - DRAFT；
+  - FROZEN；
+  - SUPERSEDED；
+- content_hash；
+- created_by；
+- created_at；
+- frozen_by；
+- frozen_at。
+
+推荐赛制拓扑使用：
+
+> **受 schema 严格约束的 versioned JSON definition**
+
+而不是为每种赛制建一套 Python class。
+
+---
+
+# 13. Ruleset 是强类型规则图，不是任意低代码
+
+M1 使用：
+
+> **Forward-only Typed Rule Graph**
+
+节点只能引用此前已经产生的输出。
+
+禁止：
+
+- 任意 Python；
+- 任意 JS；
+- 自定义 SQL；
+- 自由数学表达式；
+- 任意循环；
+- 动态未知 node type。
+
+---
+
+## 13.1 核心 primitive
+
+第一版目标支持以下有限原语。
+
+### ROSTER
+
+产生/引用候选人集合。
+
+来源：
+
+- approved registration；
+- previous node；
+- manual seed；
+- merge result。
+
+### PARTITION
+
+按：
+
+- 分组；
+- 赛道；
+- 队伍；
+- 指定名单；
+
+拆成多个 group。
+
+### PAIR
+
+根据：
+
+- 相邻；
+- 1 vs N；
+- seeded；
+- manual challenge；
+
+生成 PK pair。
+
+### ASSESS
+
+产生原始评价结果。
+
+可以是：
+
+- judge score；
+- judge ballot；
+- audience vote；
+- manual decision。
+
+### AGGREGATE
+
+把 Assessment 变成一个数值/结果。
+
+至少支持：
+
+- mean；
+- trimmed mean；
+- weighted source sum。
+
+### RANK
+
+根据某个 Score/Composite 对 roster 排序。
+
+### SELECT
+
+至少：
+
+- Top N；
+- Bottom N；
+- Top N per group；
+- Top percentage（后续需要再开放）。
+
+### BRANCH
+
+把同一 roster 分成受控 outcome：
+
+- DIRECT；
+- ADVANCED；
+- REPECHAGE；
+- PENDING；
+- ELIMINATED；
+- WILDCARD；
+- 其他受控 outcome。
+
+### SUBTRACT
+
+从候选池排除已经：
+
+- direct；
+- selected；
+- eliminated；
+
+的选手。
+
+### MERGE
+
+合并多个 roster。
+
+必须自动去重/检测重复。
+
+### FILL_TO_QUOTA
+
+已有选中人数不足目标时：
+
+```text
+target = N
+current = X
+need = N-X
+```
+
+自动从指定 pool 按指定 ranking 补足。
+
+### MANUAL_SELECT
+
+只用于赛制本身明确要求人作裁决。
+
+必须配置：
+
+- source roster；
+- min；
+- max；
+- per-group / global；
+- actor role。
+
+### REPLACE
+
+用于挑战/踢馆类：
+
+```text
+challenger wins
+→ replace existing slot
+```
+
+### AWARD
+
+根据：
+
+- final rank；
+- vote；
+- manual selection；
+
+产生奖项。
+
+---
+
+# 14. StageDecision 不再只有 is_advanced
+
+未来不要把复杂赛制继续压成：
+
+```text
+is_advanced=True/False
+```
+
+至少需要：
+
+```text
+StageDecision
+    contestant
+    source_node
+    outcome_code
+    rank/score（可选）
+    reason/details
+    ruleset_version
+    result_version
+```
+
+常见 outcome：
+
+```text
+DIRECT
+ADVANCED
+REPECHAGE
+PENDING
+ELIMINATED
+WILDCARD
+FINALIST
 ```
 
 ---
 
-## 13. 选手状态管理
+# 15. Composite Score
 
-状态分为赛前状态和赛中状态。
-
-### 13.1 赛前状态
-
-```text
-DRAFT：草稿
-SUBMITTED：已提交
-NEED_SUPPLEMENT：资料待补充
-APPROVED：审核通过
-REJECTED：审核未通过
-WITHDRAWN：已撤回
-```
-
-选手只能修改自己的报名。
-
-工作人员可以修改所有人的赛前状态。
-
----
-
-### 13.2 赛中状态
-
-```text
-NOT_CHECKED_IN：未签到
-CHECKED_IN：已签到
-WAITING：已候场
-PERFORMED：已表演
-WAITING_SCORE：待录分
-SCORED：已录分
-SCORE_REVIEWED：成绩已复核
-ADVANCED：已晋级
-NOT_ADVANCED：未晋级
-ABANDONED：弃赛
-DELAYED：延后出场
-```
-
-工作人员和管理员可以修改所有选手的赛中状态。
-
-选手只能查看自己的状态。
-
----
-
-## 14. 歌手比赛模块
-
-歌手比赛是唯一需要评分和排名的复杂模块。
-
-### 14.1 支持轮次
-
-第一版支持：
-
-```text
-单轮
-初赛 + 复赛
-```
-
-只有歌手比赛需要初赛和复赛。
-
-毕晚不需要评分，不需要初赛复赛。
-
----
-
-### 14.2 评分模式
-
-第一版必须支持：
-
-```text
-纸质评分 + 工作人员录入
-```
-
-这是去年实际使用过的方式，必须作为 P0。
-
-可选支持：
-
-```text
-评委端网页打分
-```
-
-评委端可以先开发基础版本，但不能作为唯一方案。
-
----
-
-### 14.3 评分录入
-
-工作人员可以录入：
-
-* 轮次
-* 选手
-* 评委
-* 分数
-* 备注
-
-支持两种计算方式：
-
-```text
-平均分
-去最高最低后平均
-```
-
-第一版不考虑：
-
-* 分组赛制
-* 加减分
-* 复杂同分规则
-* 网络投票计入正式总分
-* 时间超时扣分
-
-但模型设计时不要阻断后续增加更多计分规则。
-
----
-
-### 14.4 实时缺失提示
-
-录分页面需要显示：
-
-* 哪些选手还没录完
-* 哪些评委分数缺失
-* 哪些分数超出范围
-* 哪些选手已可计算
-* 哪些结果未复核
-
-不需要复杂异常检测。
-
----
-
-### 14.5 晋级与排名
+Composite 必须是正式一等公民。
 
 支持：
 
 ```text
-前 N 名晋级
-工作人员手动选择晋级
+RoundScore × weight
+CompositeScore × weight
+AudienceScore × weight
 ```
 
-支持导出：
-
-* 初赛成绩
-* 初赛晋级名单
-* 复赛成绩
-* 最终排名
-* 获奖名单
-
----
-
-### 14.6 奖项等级
-
-支持两种方式：
+例如 2025 院十佳：
 
 ```text
-按排名自动分配奖项
-工作人员手动指定奖项
+Stage1 =
+R1 × 0.30
++ R2 × 0.60
++ Audience1 × 0.10
 ```
 
-奖项示例：
+再：
 
-* 十佳
-* 一等奖
-* 二等奖
-* 三等奖
-* 优秀奖
-* 最佳人气奖
-* 最佳台风奖
-* 特别奖
+```text
+Stage2 =
+Stage1 × 0.60
++ R3 × 0.40
+```
+
+禁止为具体 Stage 写：
+
+```python
+if round_number == 3:
+```
 
 ---
 
-## 15. 观众投票模块
+# 16. Ruleset Validator / Compiler
 
-投票方式确定为：
+Ruleset 不能只做到“JSON 能保存”。
+
+Freeze 前必须静态验证。
+
+至少包括：
+
+---
+
+## 16.1 图合法性
+
+- node id 唯一；
+- 所有 source 存在；
+- 只能引用过去节点；
+- 无循环；
+- output type 与 input type 匹配。
+
+---
+
+## 16.2 Score dependency
+
+对于 Composite 中的每个 source：
+
+> 所有可能进入该 Composite 候选池的路径，都必须能产生对应 score。
+
+若无法保证：
+
+```text
+Ruleset INVALID
+```
+
+2025 校十佳：
+
+> 第一轮 direct 选手没有 R2，却可能进入引用 R2 的 fallback
+
+必须作为 validator Golden Error。
+
+---
+
+## 16.3 Weight
+
+需要归一化时：
+
+```text
+sum(weights) == 1.0 / 100%
+```
+
+禁止：
+
+- 30+60+20；
+- 漏 component；
+- 重复 component。
+
+---
+
+## 16.4 Score scale
+
+禁止未经转换直接混合：
+
+- 10 分制；
+- 100 分制；
+- raw votes；
+- rank ordinal。
+
+如需转换，必须有明确 ScoringRule。
+
+---
+
+## 16.5 Judge count
+
+如：
+
+```text
+TRIMMED_MEAN high=1 low=1
+```
+
+则 Judge 数必须足够。
+
+---
+
+## 16.6 Quota
+
+检查：
+
+- Top N 不超过理论候选人数；
+- FillToQuota pool 足够；
+- group top N 不超过组容量；
+- manual min/max 合法。
+
+---
+
+## 16.7 Pairing
+
+若人数为奇数：
+
+必须明确：
+
+- bye；
+- wildcard；
+- manual；
+- reject。
+
+---
+
+## 16.8 Tie
+
+所有决定性 cutoff 必须明确：
+
+- 自动 tie-breaker；
+- extra round；
+- manual review；
+- score component fallback。
+
+若无规则：
+
+```text
+REVIEW
+```
+
+禁止按 PK/数据库顺序偷偷决定。
+
+---
+
+## 16.9 Vote dependency
+
+如果某 Ranking 引用 Vote：
+
+- VoteSession 必须在该 node 之前产生可用结果；
+- Vote purpose 必须允许被该 component 使用；
+- 如果需归一化，规则必须存在。
+
+---
+
+# 17. Ruleset Freeze
+
+正式评分前：
+
+```text
+RulesetVersion = FROZEN
+```
+
+Freeze 后普通 Staff 不得修改：
+
+- node；
+- weight；
+- scoring mode；
+- advancement；
+- vote role；
+- tie rule；
+- material/round critical binding。
+
+如果规则临时变更：
+
+```text
+Admin unlock / supersede
+→ 创建新 RulesetVersion
+→ 重新验证
+→ Freeze 新版本
+→ Audit
+```
+
+禁止原地修改已经冻结 JSON。
+
+正式结果必须记录：
+
+```text
+ruleset_version
+content_hash
+```
+
+保证赛后可以回答：
+
+> “当时到底按哪一版规则算？”
+
+---
+
+# 18. Runtime Resolver
+
+正式现场不允许工作人员手工执行确定性规则。
+
+Raw input：
+
+- ScoreRecord；
+- VoteResult；
+- ManualDecision；
+- roster snapshots。
+
+进入：
+
+```text
+StageResolver
+```
+
+产生：
+
+- Score/Composite；
+- Rank；
+- StageDecision；
+- AnnouncementResult；
+- execution state。
+
+---
+
+## 18.1 Resolver 状态
+
+后台只允许三类主要状态：
+
+```text
+HOLD
+REVIEW
+READY
+```
+
+### HOLD
+
+缺必要输入，例如：
+
+- 评委漏分；
+- Vote 未结束；
+- manual node 未提交。
+
+### REVIEW
+
+系统已经算出，但存在规则要求的人工判断，例如：
+
+- cutoff tie；
+- manual group direct；
+- emergency override。
+
+### READY
+
+所有必要输入完整；
+
+所有 deterministic rule 已执行；
+
+所有 manual node 已完成；
+
+结果可锁定/宣布。
+
+---
+
+## 18.2 自动运行
+
+最后一个必要输入写入后：
+
+```text
+commit raw input
+↓
+auto evaluate
+↓
+auto resolve
+↓
+update result state
+```
+
+不应要求工作人员：
+
+```text
+录完 → 点计算 → 打开排名 → 手工勾人
+```
+
+---
+
+# 19. 现场性能目标
+
+比赛人数通常只有几十人，数学计算量非常小。
+
+目标：
+
+```text
+最后一个必要 input commit
+→ resolver complete
+< 200 ms（目标）
+```
+
+```text
+最后一个必要 input
+→ 后台结果页显示 READY
+< 1 s（目标）
+```
+
+真正耗时应主要来自：
+
+> 工作人员把纸上的原始分录入系统。
+
+---
+
+# 20. Rapid Score Entry
+
+录分页面优先服务键盘速度。
+
+必须考虑：
+
+- Grid；
+- Enter/方向键；
+- 自动跳格；
+- 分数范围即时验证；
+- 批量粘贴表格；
+- 缺失格高亮；
+- 已录/总数；
+- 多工作人员并发录不同 Judge；
+- 最后一格完成自动触发 resolver；
+- 不要求额外“计算”按钮。
+
+UI 美观服从录入效率。
+
+---
+
+# 21. Backstage Result Board / 抄卡模式
+
+这是 M1 现场核心能力。
+
+结果页面应：
+
+- 大字；
+- 高对比；
+- 少信息；
+- 与主持手卡顺序一致；
+- 清晰显示 HOLD/REVIEW/READY。
+
+示例：
+
+```text
+READY
+
+直接晋级第三轮（5）
+1. ...
+2. ...
+
+进入复活赛（12）
+1. ...
+...
+
+本轮淘汰（3）
+1. ...
+```
+
+工作人员只需要照抄。
+
+不要求主持人登录或联网。
+
+可选后续：
+
+- 一键复制纯文本；
+- 生成打印小条；
+- 与主持稿模板关联。
+
+---
+
+# 22. Material / Performance Slot
+
+2025 院十佳证明：
+
+> 后续轮次歌曲、伴奏、帮唱嘉宾可能在晋级前全部提前收集。
+
+所以一个 Singer 不能只有：
+
+```text
+一个 current accompaniment
+```
+
+未来必须支持：
+
+```text
+MaterialSlot
+```
+
+例如：
+
+```text
+R1 accompaniment
+R2 accompaniment
+R3 accompaniment
+R4 accompaniment
+R3 guest material
+lyrics
+background video
+```
+
+材料槽可以提前完整准备。
+
+晋级只决定：
+
+> 哪些 Performance/MaterialSlot 真正在现场执行。
+
+---
+
+# 23. 初赛 / Screening
+
+初赛优先简单。
+
+至少支持：
+
+### Manual Screening
+
+Staff 对 approved registrations：
+
+```text
+选择进入决赛
+```
+
+### Simple Judge Ranking
+
+```text
+Round
+→ Score
+→ Top N
+```
+
+### 多校区
+
+允许分别形成 shortlist，再由 Staff/Admin 合并为决赛 roster。
+
+不要为了初赛先做复杂 multi-venue tournament engine。
+
+---
+
+# 24. Ruleset Templates
+
+模板是：
+
+> Ruleset definition 的可复制预设。
+
+不是特殊 Python 类。
+
+至少准备：
+
+1. `Simple Screening`
+2. `Single Round Top-N`
+3. `Weighted Multi-Round`
+4. `Judge + Audience Composite`
+5. `Independent Popularity Award`
+6. `Group Direct + Repechage`
+7. `Seeded PK + Wildcard`
+8. `Direct Bye + Middle PK + Bottom Elimination`
+9. `Team / Track Quota`
+10. `Multi-Venue Merge`
+11. `Challenge / Replacement`（高级模板）
+
+产品 UI 第一阶段不必一次展示全部。
+
+---
+
+# 25. Template 与 Instance 分离
+
+```text
+RulesetTemplate
+```
+
+只保存通用结构。
+
+```text
+RulesetVersion / ContestRulesetInstance
+```
+
+绑定某一实际活动。
+
+复制模板后：
+
+- 修改人数；
+- 修改评委；
+- 修改权重；
+- 增删 Vote；
+- 修改 Rubric；
+- 修改晋级参数；
+
+都只影响当前活动实例。
+
+系统模板更新不能改变历史活动。
+
+---
+
+# 26. 2026 规则正式公布后的目标流程
+
+规则出来后：
+
+```text
+选择最接近的模板
+↓
+复制为活动 Ruleset Draft
+↓
+调整参数
+↓
+运行 Validator
+↓
+用模拟数据 preview
+↓
+工作人员/负责人核对
+↓
+Freeze
+↓
+正式评分
+```
+
+理想情况：
+
+> 0 行 Python 修改。
+
+---
+
+# 27. Emergency Override
+
+现场必须有最后兜底。
+
+如果由于：
+
+- 主席团临时裁决；
+- 选手退赛；
+- 文档本身有歧义；
+- 不可预见的特殊情况；
+
+需要改变系统建议结果：
+
+只有 Admin 可以：
+
+```text
+Emergency Override
+```
+
+必须保留：
+
+- 原始评分；
+- 原规则计算结果；
+- old decision；
+- new decision；
+- actor；
+- timestamp；
+- optional note；
+- audit。
+
+禁止通过直接改 ScoreRecord 伪造人工裁决。
+
+---
+
+# 28. Score Workbook / Excel fallback
+
+Excel 继续是重要现场 Plan B。
+
+必须：
+
+- 使用稳定 ID；
+- 有 activity id；
+- round id；
+- snapshot entry ids；
+- judge ids；
+- schema version；
+- snapshot fingerprint。
+
+导入时必须严格验证当前 snapshot。
+
+旧 workbook：
+
+```text
+reset / reprepare 后 roster 或 judge 变化
+```
+
+必须拒绝。
+
+错误导入：
+
+> 全表失败，0 partial ScoreRecord mutation。
+
+---
+
+# 29. 观众投票生产策略
+
+保持：
 
 ```text
 扫码 + 现场口令
 ```
 
-不要做复杂实名制，不要强制观众注册。
+轻量防刷。
+
+第一生产目标：
+
+- 能投；
+- 能开关；
+- 能锁；
+- 能导出；
+- 不误伤正常观众；
+- 能作为 Ruleset source 或 Award source。
+
+不做：
+
+- 微信强实名；
+- 手机号验证；
+- 高复杂设备指纹。
 
 ---
 
-### 15.1 投票流程
+# 30. 毕晚
+
+毕晚不进入复杂评分 engine。
+
+核心：
+
+- 节目征集；
+- 审核；
+- 多材料槽；
+- 彩排；
+- 节目顺序；
+- 负责人；
+- 音频/视频/文字；
+- 主持素材；
+- 现场执行包；
+- 归档。
+
+Contest Ruleset 不能污染毕晚主流程。
+
+---
+
+# 31. Public Portal
+
+继续支持：
+
+- 当前活动；
+- 报名；
+- 通知；
+- 往届风采；
+- 结果；
+- 活动回顾。
+
+要求：
+
+- TEST 内容普通用户不可见；
+- 页面像真实学院活动网站；
+- 不做明显 AI 风；
+- 工作人员能维护；
+- 不把 public portal 和后台核心交易耦合。
+
+---
+
+# 32. Material Review
+
+保持：
 
 ```text
-观众扫码
-→ 进入投票页
-→ 输入现场口令
-→ 选择选手
-→ 提交
-→ 系统提示已投票
+MISSING
+UPLOADED
+APPROVED / REVIEWED
+NEEDS_SUPPLEMENT
 ```
 
----
-
-### 15.2 后台控制
-
-工作人员可以：
-
-* 创建投票场次
-* 绑定活动
-* 绑定候选选手
-* 设置现场口令
-* 设置投票开始/结束时间
-* 设置单选或多选
-* 设置最多可选人数
-* 开启投票
-* 关闭投票
-* 查看实时票数
-* 锁定投票结果
-* 导出投票结果
-
----
-
-### 15.3 防刷策略
-
-第一版只做轻量防刷：
-
-```text
-现场口令
-投票时间窗口
-同一浏览器限制一次
-同一 IP 短时间限流
-结果锁定
-```
-
-不要做复杂微信授权、手机号验证、设备指纹。
-
-现实判断：
-
-> 学生文艺活动里，一般没人闲着刷票。重点是现场顺利投、工作人员能控制开关、结果能导出。
-
----
-
-### 15.4 投票用途
-
-第一版默认用于：
-
-```text
-最佳人气奖
-```
-
-不要默认计入正式排名。
-
-但数据模型要允许未来配置投票是否进入总分。
-
----
-
-## 16. 毕晚模块
-
-毕晚不评分。
-
-毕晚模块核心：
-
-* 节目征集
-* 节目审核
-* 材料收集
-* 节目单编排
-* 音视频/文字材料清单
-* 主持稿素材
-* 联系方式表
-* 现场执行包
-* 归档包
-
----
-
-### 16.1 节目单
-
-工作人员可以手动调整节目顺序。
-
-字段：
-
-* 顺序号
-* 节目名称
-* 节目类型
-* 负责人
-* 节目时长
-* 是否已确认材料
-* 是否已彩排
-* 备注
-
-第一版不要做复杂拖拽排序，可以用上移/下移或输入顺序号。
-
----
-
-## 17. 二维码中心
-
-必须做。
-
-每个活动可以生成：
-
-* 报名二维码
-* 投票二维码
-* 结果公示二维码
-* 材料补交二维码
-* 选手个人中心入口二维码
-
-后台支持：
-
-* 查看二维码
-* 下载二维码 PNG
-* 复制链接
-
----
-
-## 18. 导出模块
-
-导出是核心能力，不是附属功能。
-
-必须支持 Excel 导出和 Word 导出。
-
----
-
-### 18.1 Excel 导出
-
-至少支持：
-
-* 报名名单
-* 联系方式表
-* 材料清单
-* 节目单
-* 评分表模板
-* 初赛成绩
-* 复赛成绩
-* 最终排名
-* 晋级名单
-* 投票结果
-* 获奖名单
-* 异常记录
-
----
-
-### 18.2 Excel 导入
-
-至少支持：
-
-* 导入纸质评分后整理出来的评分表
-* 导入选手名单，可选
-* 导入节目顺序，可选
-
-导入时必须做校验：
-
-* 选手是否存在
-* 分数是否超出范围
-* 评委是否存在
-* 是否重复录入
-* 错误行提示
-
----
-
-## 19. Word 推文生成模块
-
-这是重要功能。
-
-模块名：
-
-```text
-微信推送 Word 生成器
-```
-
-目标：
-
-> 生成可以被微信公众号后台导入的 .docx 推文初稿。
-
-注意：不是直接发公众号，不调用公众号 API。
-
----
-
-### 19.1 支持的 Word 模板
-
-第一版至少支持：
-
-* 歌手比赛报名开启推文
-* 歌手比赛初赛通知
-* 歌手比赛复赛通知
-* 歌手比赛获奖名单公示
-* 观众投票说明
-* 毕晚节目征集推文
-* 毕晚节目单发布
-* 毕晚活动回顾初稿
-* 彩排通知
-
----
-
-### 19.2 Word 内容结构
-
-Word 文档应包含：
-
-* 主标题
-* 副标题
-* 活动基本信息
-* 正文段落
-* 小标题
-* 时间地点
-* 报名方式
-* 二维码图片
-* 注意事项
-* 联系方式
-* 表格，例如节目单、获奖名单
-* 结尾落款
-
-第一版不追求复杂排版，但要干净、正式、可编辑。
-
-导出后由工作人员自行润色，再导入微信公众号后台。
-
----
-
-### 19.3 其他通知文案
-
-除了公众号推文外，其他短通知可以直接在后台显示纯文本，支持复制即可。
-
-例如：
-
-* 群通知
-* 报名提醒
-* 资料补交提醒
-* 投票开启提醒
-* 彩排通知简版
-
----
-
-## 20. 现场执行包
-
-必须做。
-
-活动开始前，工作人员一键导出现场执行包。
-
-现场执行包包括：
-
-* 选手名单
-* 联系方式表
-* 节目顺序表
-* 材料清单
-* 缺失材料名单
-* 评分表模板
-* 投票二维码
-* 主持人口播名单
-* 工作人员备注
-* 异常记录空表
-
-可以以多个 Excel/Word 文件打包为 zip。
-
----
-
-## 21. 归档包
-
-必须做。
-
-活动结束后，一键生成归档包。
-
-归档包包括：
-
-* 活动基本信息
-* 报名名单
-* 材料清单
-* 节目单
-* 评分结果
-* 投票结果
-* 获奖名单
-* 异常记录
-* 工作人员备注
-* Word 推文初稿
-* 公开公示文档
-* 附件索引
-* 公开首页展示内容索引
-
-第一版不强制把所有大文件打包进 zip，可以先生成“附件索引 + 下载链接”。
-
----
-
-## 22. 异常记录
-
-必须做，有利于活动结束后开会分析。
-
-字段：
-
-* 活动
-* 时间
-* 事件类型
-* 涉及选手/节目
-* 处理人
-* 处理结果
-* 备注
-
-事件类型示例：
-
-* 选手迟到
-* 伴奏异常
-* 视频打不开
-* 顺序调整
-* 评分补录
-* 投票异常
-* 临时弃赛
-* 设备问题
-* 信息填写错误
-* 其他
-
----
-
-## 23. 测试 / 彩排模式
-
-必须做。
-
-每个活动可以处于测试模式。
-
-测试模式下可以：
-
-* 创建测试选手
-* 上传测试附件
-* 录入测试分数
-* 创建测试投票
-* 测试导出
-* 测试 Word 生成
-* 测试公开首页展示
-
-正式开始前支持：
-
-* 清空测试报名
-* 清空测试分数
-* 清空测试投票
-* 清空测试异常记录
-* 保留活动配置
-* 保留公开内容草稿
-* 切换到正式模式
-
-注意：不要让测试数据混进正式活动。
-
----
-
-## 24. 结果锁定机制
-
-第一版做轻量锁定，但模型要稳定。
-
----
-
-### 24.1 未锁定
-
-工作人员和管理员可以修改：
-
-* 分数
-* 排名备注
-* 奖项
-* 投票场次
-* 投票结果备注
-* 公示内容
-
----
-
-### 24.2 已锁定
-
-普通工作人员只能：
-
-* 查看
-* 导出
-
-不能：
-
-* 修改分数
-* 修改排名
-* 修改奖项
-* 修改投票结果
-* 修改公示内容
-
----
-
-### 24.3 管理员解锁
-
-管理员可以随时解锁。
-
-不要做复杂审批。
-
-不要强制填写解锁原因。
-
-但是必须自动写入日志：
-
-* 谁解锁
-* 什么时候解锁
-* 解锁了哪个活动/轮次/投票场次
-* 解锁后修改了什么
-* 什么时候重新锁定
-
-可以提供选填备注。
-
-原则：
-
-> 锁定是为了防止工作人员误改，不是为了卡死现场。管理员必须能处理突发情况。
-
----
-
-## 25. 操作日志
-
-必须做。
-
-至少记录：
-
-* 用户登录
-* 用户修改报名
-* 工作人员修改状态
-* 工作人员审核材料
-* 工作人员上传/删除文件
-* 工作人员录入/修改分数
-* 工作人员导出文件
-* 工作人员创建/修改投票
-* 工作人员发布/隐藏公开内容
-* 管理员解锁结果
-* 管理员重新锁定结果
-* 管理员修改用户权限
-* 管理员归档活动
-
-日志字段：
-
-* 操作人
-* 操作类型
-* 操作对象
-* 原值
-* 新值
-* 时间
-* IP，可选
-* 备注，可选
-
----
-
-## 26. 文件权限
-
-文件权限必须严格。
-
-游客：
-
-```text
-不能看内部附件。
-```
+或等价清晰状态。
 
 选手：
 
-```text
-只能看自己上传的文件。
-```
+- 报名开放时可修改允许字段；
+- 审核阶段只补被退回内容；
+- LIVE/归档后只读。
 
-工作人员：
-
-```text
-可以看所有活动材料。
-```
-
-管理员：
-
-```text
-可以删除、恢复、归档文件。
-```
-
-文件表需要记录：
-
-* 原始文件名
-* 存储文件名
-* 文件大小
-* 文件类型
-* 上传人
-* 所属活动
-* 所属报名/节目
-* 文件用途
-* 上传时间
-* 是否公开
-* 是否归档
-
-文件用途示例：
-
-* 伴奏
-* 背景视频
-* 演唱视频
-* 节目图片
-* 歌词/台词
-* 主持稿素材
-* 公开首页图片
-* 往届风采图片
-* 其他附件
+GET 不允许自动 reconciliation 写库。
 
 ---
 
-## 27. 不做文件自动重命名
+# 33. Export
 
-第一版不要做“导出时自动重命名文件”。
+敏感数据默认必须 activity-scoped。
 
-原因：
+Staff：
 
-* 容易造成文件名和原始文件对不上
-* 可能引发现场误用
-* 增加 Bug 风险
+> 默认只能导指定 Activity。
 
-只做材料清单和附件索引即可。
+Admin：
 
----
+> 可以显式跨 Activity 导出。
 
-## 28. 部署目标
+所有包含：
 
-项目最终需要部署到云服务器。
+- 手机号；
+- 微信；
+- 学号；
+- 私有材料；
+- 成绩；
 
-部署形态：
-
-```text
-Linux server
-Docker Compose
-Django
-PostgreSQL
-Nginx or Caddy
-```
-
-公网访问原则：
-
-* 公开首页允许所有人访问
-* 报名页允许公开访问，但提交需要登录
-* 投票页允许公开访问，但需要现场口令
-* 后台必须登录
-* 数据库端口不能暴露公网
-* 只开放 80/443
-* SSH 端口尽量限制访问 IP
-* 上传文件大小要有限制
-* 后台操作要有日志
-
-第一阶段可以先用服务器公网 IP 访问，后续再考虑域名和备案。
+的导出必须 Audit。
 
 ---
 
-## 29. 数据模型初稿
+# 34. Execution Package
 
-请先设计数据库模型，再写页面。
+现场执行包与归档包必须分开。
 
-核心模型建议：
+执行包是活动前/现场使用：
+
+- 正式 roster；
+- 顺序；
+- 联系方式；
+- 材料状态；
+- 当前伴奏/音频索引；
+- 评分空表；
+- QR；
+- 工作人员备注；
+- 手卡待填项/结果抄写模板；
+- 异常记录空表。
+
+归档包是活动后事实。
+
+---
+
+# 35. Archive
+
+正式归档至少包含：
+
+- activity metadata；
+- ruleset frozen version/hash；
+- roster snapshots；
+- raw scores；
+- composite results；
+- decisions；
+- vote results；
+- awards；
+- materials index；
+- GeneratedDocuments；
+- incidents；
+- audit summary；
+- final exported results。
+
+ArchivePackage：
+
+- version 唯一；
+- 一个 Activity 最多一个 current；
+- 解归档后旧包保留历史；
+- 重新归档产生新 version。
+
+---
+
+# 36. Backup / Restore
+
+数据库备份不等于完整 ArtFlow 备份。
+
+Application backup set：
 
 ```text
-User
-Activity
-ActivityPhase
-PublicPost
-PublicMedia
-Registration
-Program
-SubmissionFile
-MaterialRequirement
-MaterialCheck
-StaffNote
-ContestRound
-Judge
-ScoreRecord
-ScoreSummary
-Award
-VoteSession
-VoteOption
-VoteRecord
-QRCodeLink
-ExportTask
-ArticleTemplate
-GeneratedDocument
-IncidentRecord
-AuditLog
-ArchivePackage
+database
+media
+manifest
+hashes
+migration/version information
 ```
 
-模型设计原则：
+正式活动前必须完成真实恢复演练：
 
-* 不要把首页内容写死到模板里。
-* 不要把歌手比赛和毕晚混在一个巨大的表里。
-* 不要让投票和评委评分混在一张表里。
-* 不要把附件直接存数据库。
-* 不要让 MVP 的模型阻断最终完整版功能。
-* 可以第一版少做页面，但核心关系要留好。
-
----
-
-## 30. 最终完整版目标
-
-最终完整版不是一开始全部完成，但架构要支持这些能力。
-
-### 30.1 公开门户完整版
-
-最终应支持：
-
-* 首页轮播/头图
-* 当前活动展示
-* 报名入口
-* 投票入口
-* 通知公告
-* 往届风采
-* 结果公示
-* 活动回顾
-* 公开照片/视频链接
-* 工作人员后台维护公开内容
-
-MVP 可以先做基础列表，但不能写死首页。
+- 新 PostgreSQL；
+- 新 media；
+- 恢复；
+- 登录；
+- 分数；
+- 投票；
+- 文档；
+- 伴奏真实可访问。
 
 ---
 
-### 30.2 活动管理完整版
+# 37. 第一场生产的大文件策略
 
-最终应支持：
+大视频不是第一优先级。
 
-* 歌手比赛
-* 毕晚
-* 普通活动
-* 活动复制
-* 活动阶段控制
-* 测试模式
-* 归档状态
-* 公开内容关联活动
-* 导出包关联活动
+第一场建议 ArtFlow 原生管理：
 
-MVP 可以先做固定活动类型，但不能让活动变成一次性页面。
+- 伴奏；
+- 图片；
+- Word/PDF/普通附件；
+- 歌词/主持材料。
 
----
+几百 MB 视频如果非刚需：
 
-### 30.3 报名材料完整版
+> 使用已有网盘/学校存储链接。
 
-最终应支持：
-
-* 不同活动不同报名字段
-* 材料要求
-* 附件上传
-* 材料完整性检查
-* 工作人员备注
-* 选手状态
-* 工作人员审核
-* 选手补交材料
-* 材料清单导出
-
-MVP 可以先写固定字段，但模型要允许后续动态字段。
+不要让三个慢速 500MB 上传占满 Web worker。
 
 ---
 
-### 30.4 歌手比赛完整版
+# 38. UI 总原则
 
-最终应支持：
+公开端：
 
-* 单轮
-* 初赛 + 复赛
-* 纸质评分录入
-* 可选评委端
-* 平均分
-* 去最高最低平均
-* 分数缺失提示
-* 晋级名单
-* 最终排名
-* 奖项等级
-* 结果锁定
-* 管理员解锁
-* 成绩导出
+- 简洁；
+- 大学活动门户感；
+- 清楚；
+- 少装饰；
+- 不要 AI 风。
 
-MVP 可以先做纸质评分录入，但不能堵死评委端。
+后台：
 
----
-
-### 30.5 观众投票完整版
-
-最终应支持：
-
-* 扫码投票
-* 现场口令
-* 单选/多选
-* 投票时间窗口
-* 同浏览器限制一次
-* IP 限流
-* 后台实时票数
-* 结果锁定
-* 投票结果导出
-* 人气奖生成
-
-MVP 可以先做单选投票，但模型要支持多选。
+- 信息密度服从工作效率；
+- 状态明显；
+- 危险操作明确；
+- 表格适合快速扫描；
+- 现场模式优先键盘和大字；
+- 不为“炫酷”牺牲可靠性。
 
 ---
 
-### 30.6 Word 推文完整版
+# 39. 生产验收目标
 
-最终应支持：
+正式十佳前必须完成：
 
-* 报名开启推文
-* 初赛通知
-* 复赛通知
-* 获奖名单公示
-* 观众投票说明
-* 毕晚节目征集
-* 毕晚节目单发布
-* 毕晚活动回顾
-* 彩排通知
-* 插入二维码
-* 插入节目单表格
-* 插入获奖名单表格
-* 导出 .docx
+### 数据与权限
 
-MVP 可以先做 2-3 个模板，但导出引擎要可扩展。
+- M0 invariants 全绿；
+- PostgreSQL transaction tests；
+- TEST/FORMAL 隔离；
+- archive immutability；
+- role authority。
 
----
+### 赛制
 
-### 30.7 归档完整版
+- Ruleset 可 Freeze；
+- Validator 全绿；
+- 2025 院十佳 Golden Test；
+- 2025 校十佳屏峰 Golden Test；
+- 当前正式规则实例化后通过模拟。
 
-最终应支持：
+### 现场
 
-* 现场执行包
-* 活动归档包
-* 附件索引
-* 公开内容索引
-* 异常记录
-* 工作人员备注
-* 评分结果
-* 投票结果
-* Word 推文初稿
-* 活动复制复用
+- 纸质评分 → 快速录入；
+- 自动计算；
+- HOLD/REVIEW/READY；
+- 可直接抄主持手卡；
+- deterministic selection 无人工筛选。
 
-MVP 可以先导出 Excel/Word 文件，但归档包结构要稳定。
+### 回退
+
+- Excel fallback；
+- backup/restore；
+- Admin emergency override；
+- 服务重启。
 
 ---
 
-## 31. MVP 开发顺序
+# 40. 现场 SLO
 
-严格按顺序推进，不要跳着做花哨功能。
-
-注意：MVP 的每一步都必须服务最终完整版，不允许写临时废弃代码。
-
----
-
-### Phase 1：基础框架 + 公开首页
-
-目标：
+正式彩排时记录：
 
 ```text
-系统打开后像大学官网一样，有公开首页，有登录注册，有当前活动和往届风采入口。
+最后一张必要评分纸到后台
+→ READY
 ```
 
-任务：
+参考目标：
 
-* Django 项目初始化
-* 用户注册登录
-* 角色区分：游客/选手/工作人员/管理员
-* 活动模型
-* 活动阶段
-* PublicPost 模型
-* 公开首页
-* 往届风采列表
-* 通知公告列表
-* 结果公示列表
-* 右上角登录/注册/个人中心逻辑
-* 工作人员后台基础布局
-* 工作人员可新增/编辑/发布/隐藏公开内容
+- 单人熟练录入：尽量 < 60 s；
+- 两人并行录入：尽量 < 30 s；
+- 最后一项输入 commit 后系统计算：< 1 s。
 
-完成标准：
+实际目标根据彩排数据调整。
+
+---
+
+# 41. M1 开发顺序
+
+具体任务、原因、实现约束、验收详见 `ChatGPT.md`。
+
+总体顺序：
 
 ```text
-游客能看到首页、往届风采、通知公告。
-登录后能根据身份看到不同入口。
-工作人员能在后台修改首页展示内容。
+M1-A 迁移/黄金夹具/残余 P1 基线
+M1-B Generic Contest Domain Foundation
+M1-C Versioned Typed Ruleset Schema
+M1-D Ruleset Compiler / Validator
+M1-E Deterministic Resolver / StageDecision
+M1-F 2025 院十佳 Golden Simulation
+M1-G 2025 校十佳屏峰 Golden Simulation
+M1-H Backstage Rapid Entry & Result Board
+M1-I Template Library & Ruleset Editor
+M1-J Production Rehearsal / DR / Operations
+M1-K 2026 正式赛制实例化、Freeze 与上线 Gate
 ```
+
+禁止跨阶段一次性大重构。
 
 ---
 
-### Phase 2：报名与材料
+# 42. 当前明确未知、禁止擅自决定的事项
 
-任务：
+在正式规则公布前，任何 Agent 不得自行决定：
 
-* 歌手比赛报名
-* 毕晚节目征集
-* 选手个人中心
-* 附件上传
-* 工作人员查看所有报名
-* 工作人员修改状态
-* 材料完整性检查
-* 工作人员备注
-* 报名名单 Excel 导出
+- 2026 院十佳决赛人数；
+- 2026 校十佳屏峰是否举办；
+- 评委人数；
+- 是否去最高最低；
+- 各轮权重；
+- 观众是否计分；
+- 观众原始票如何换分；
+- 每轮晋级数；
+- 是否复活；
+- 是否 PK；
+- 平分规则；
+- 人气奖规则；
+- 初赛具体形式。
 
-完成标准：
+这些必须留为配置。
+
+---
+
+# 43. 历史资料证据优先级
+
+当历史资料互相冲突时：
 
 ```text
-一个选手能报名并上传材料，工作人员能审核、备注、导出。
+实际工作人员算分表 / 实际现场记录
+>
+最终赛制终稿
+>
+最终主持稿/议程
+>
+预热推送/宣传材料
+>
+早期策划草案
 ```
 
----
+但即使高优先级文件仍存在歧义，也不得擅自补全。
 
-### Phase 3：歌手比赛评分
-
-任务：
-
-* 初赛/复赛模型
-* 纸质评分后工作人员录入
-* 平均分计算
-* 去最高最低后平均
-* 分数缺失提示
-* 自动排名
-* 晋级名单
-* 奖项等级
-* 成绩 Excel 导出
-* 结果锁定
-* 管理员解锁
-
-完成标准：
+应记录：
 
 ```text
-工作人员能把纸质评分录进系统，系统能自动算排名并导出。
-锁定后工作人员不能改，管理员可随时解锁。
+UNRESOLVED
 ```
 
----
-
-### Phase 4：观众投票
-
-任务：
-
-* 投票场次
-* 候选选手
-* 现场口令
-* 投票二维码
-* 开启/关闭投票
-* 观众投票页
-* 同浏览器限制一次
-* 后台查看票数
-* 投票结果导出
-* 人气奖结果
-
-完成标准：
-
-```text
-现场扫码输入口令后能投票，后台能关闭投票并导出结果。
-```
+并让 Ruleset Validator / 当前负责人解决。
 
 ---
 
-### Phase 5：导出、推文与归档
+# 44. 关键历史资料
 
-任务：
+目前应长期保留为开发/测试依据：
 
-* 二维码中心
-* 现场执行包
-* 归档包
-* 异常记录
-* Word 微信推送文案生成
-* Word 获奖公示文档
-* 活动复制
-* 测试模式清空数据
+### 2025 院十佳
 
-完成标准：
+- `第一阶段评分表.xlsx`
+- `第三轮评分表.xlsx`
+- `第四轮评分表xlsx.xlsx`
+- 2025“逐星”十佳相关策划/主持/歌曲名单
+- `artflow_2025_legacy_fixture`
 
-```text
-活动前能导出现场包，活动后能导出归档包，公众号推文能生成 docx 初稿。
-```
+### 2025 校十佳屏峰
 
----
+- `“旷野”屏峰校区决赛赛制终稿.docx`
+- `2025 旷野校十佳主持稿终稿...`
+- `“旷野”校十佳歌手决赛议程...`
+- `副本校十佳歌曲名单.xlsx`
 
-## 32. 工作人员后台菜单
-
-建议后台菜单：
-
-```text
-工作人员后台
-├── 总览 Dashboard
-├── 活动管理
-├── 公开内容管理
-│   ├── 首页展示
-│   ├── 往届风采
-│   ├── 通知公告
-│   └── 结果公示
-├── 报名管理
-├── 材料管理
-├── 状态管理
-├── 歌手比赛评分
-├── 观众投票
-├── 二维码中心
-├── 导出中心
-├── 推文 Word 生成
-├── 异常记录
-├── 归档包
-└── 操作日志
-```
-
-后台必须清楚，不要让工作人员迷路。
+这些是 Golden Test 来源，不是新赛季默认规则。
 
 ---
 
-## 33. 开发工作要求
+# 45. 最终原则
 
-### 33.1 每次改动前
+ArtFlow 第一目标不是功能多。
 
-先说明：
+第一目标是：
 
-* 要做什么
-* 涉及哪些文件
-* 可能影响哪些已有功能
-* 是否符合最终完整版架构
+> **活动能完整跑下来，尤其结果产生环节不能掉链子。**
 
----
+第二目标是：
 
-### 33.2 每次改动后
+> **确定性规则不让人手工筛选；人只处理真正需要人判断的部分。**
 
-必须输出：
+第三目标是：
 
-* 改了哪些文件
-* 新增了哪些功能
-* 如何运行
-* 如何测试
-* 下一步建议
-* 是否产生技术债
+> **赛制变化尽可能只改配置，不改核心代码。**
 
----
+第四目标是：
 
-### 33.3 不要破坏已有功能
+> **所有正式结果都能回答：谁输入、按哪版规则、如何算出、何时锁定、是否被改过。**
 
-每次新增功能后，要检查：
+第五目标是：
 
-* 登录是否还能用
-* 权限是否还能用
-* 首页是否还能打开
-* 工作人员后台是否还能打开
-* 已有页面是否报错
-* 数据库迁移是否正常
-* 导出是否正常
-
----
-
-### 33.4 不要写临时垃圾代码
-
-禁止：
-
-* 为了快把数据写死到 HTML
-* 为了快跳过权限检查
-* 为了快把公开内容写死
-* 为了快绕过模型关系
-* 为了快把多个业务塞进一个巨大 view
-* 为了快忽略日志
-* 为了快忽略文件权限
-
-可以简化功能，但不能破坏架构。
-
----
-
-## 34. 第一版验收标准
-
-第一版完成后，应该能完整跑通下面三个场景。
-
----
-
-### 场景 A：公开门户
-
-1. 游客打开首页。
-2. 首页像大学官网/学院官网一样展示当前活动、通知公告、往届风采、结果公示。
-3. 右上角显示登录/注册。
-4. 选手登录后能进入个人中心。
-5. 工作人员登录后能进入工作人员后台。
-6. 工作人员能新增一条往届风采。
-7. 工作人员能发布一条通知公告。
-8. 首页自动展示已发布内容。
-
----
-
-### 场景 B：歌手比赛
-
-1. 管理员创建歌手比赛。
-2. 管理员设置活动为报名中。
-3. 选手注册登录。
-4. 选手提交报名和材料。
-5. 工作人员查看报名。
-6. 工作人员审核材料。
-7. 工作人员导出报名名单。
-8. 工作人员创建初赛轮次。
-9. 工作人员录入评委纸质评分。
-10. 系统自动计算初赛排名。
-11. 工作人员选择晋级名单。
-12. 工作人员创建复赛轮次。
-13. 工作人员录入复赛评分。
-14. 系统自动生成最终排名。
-15. 工作人员创建观众投票。
-16. 观众扫码输入口令投票。
-17. 工作人员关闭投票并生成人气奖。
-18. 管理员锁定结果。
-19. 管理员可以随时解锁处理现场问题。
-20. 系统导出获奖名单、成绩表、投票结果、归档包。
-
----
-
-### 场景 C：毕晚
-
-1. 管理员创建毕晚活动。
-2. 活动进入节目征集阶段。
-3. 节目负责人注册登录。
-4. 节目负责人提交节目和材料。
-5. 工作人员审核节目。
-6. 工作人员查看材料完整性。
-7. 工作人员添加内部备注。
-8. 工作人员编排节目单。
-9. 系统导出节目单、联系方式表、材料清单。
-10. 系统生成毕晚节目征集/节目单发布 Word 推文。
-11. 活动结束后导出归档包。
-12. 异常记录可用于会后复盘。
-
----
-
-## 35. 最终提醒
-
-这个项目不是为了炫技。
-
-请始终优先考虑：
-
-* 公开入口是否清楚
-* 文艺部工作人员能不能用
-* 选手会不会迷路
-* 现场会不会卡住
-* 数据能不能导出
-* 出错能不能兜底
-* 页面是不是清楚
-* 下一届能不能接手
-* 后续功能能不能在当前架构上继续做
-
-项目第一目标：
-
-> 一个活动能完整跑下来，而且现场不掉链子。
-
-项目第二目标：
-
-> 首页像真实大学活动门户，后台像真实工作系统，整体不要 AI 味。
-
-项目第三目标：
-
-> MVP 不是一次性平替，而是最终完整版的第一阶段。
+> **不强迫真实现场改变所有既有习惯，而是先替换最危险、最耗时、最容易出事故的人工环节。**
