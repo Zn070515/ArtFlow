@@ -71,6 +71,7 @@ def transition_activity_phase(
         raise ValidationError(f"Unknown phase: {target_phase}")
 
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
+    ensure_activity_unlocked(locked_activity)
     if locked_activity.phase == target_phase:
         return locked_activity
 

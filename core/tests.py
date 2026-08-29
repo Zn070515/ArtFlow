@@ -182,6 +182,18 @@ class ActivityPhaseTransitionTests(TestCase):
             AuditLog.objects.filter(action_type=AuditLog.ActionType.PHASE_TRANSITION).exists()
         )
 
+    def test_locked_activity_cannot_transition(self):
+        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        with self.assertRaises(PermissionDenied):
+            transition_activity_phase(
+                self.activity, Activity.Phase.REGISTRATION_OPEN, actor=self.user
+            )
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.DRAFT)
+        self.assertFalse(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.PHASE_TRANSITION).exists()
+        )
+
     def test_unknown_phase_is_rejected(self):
         with self.assertRaises(ValidationError):
             transition_activity_phase(self.activity, "not_a_phase", actor=self.user)

@@ -491,8 +491,9 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
             try:
                 with transaction.atomic():
                     session = VoteSession.objects.select_for_update().get(pk=self.session.pk)
+                    session.is_open = False
                     session.is_locked = True
-                    session.save(update_fields=["is_locked"])
+                    session.save(update_fields=["is_open", "is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only

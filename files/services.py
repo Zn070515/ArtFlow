@@ -244,11 +244,10 @@ def review_material_check(check, *, status, note, actor):
     if owner is None:
         raise ValidationError("材料检查项未关联有效报名，无法审核。")
     activity = lock_activity_for_action(owner.activity, ActivityAction.REVIEW_REGISTRATION)
-    locked_check = (
-        MaterialCheck.objects.select_for_update()
-        .select_related("singer_registration", "program")
-        .get(pk=check.pk)
-    )
+    # A left outer join is invalid with FOR UPDATE on PostgreSQL (the nullable
+    # singer_registration / program FKs become the null side), so lock the row
+    # without select_related and resolve the owner lazily.
+    locked_check = MaterialCheck.objects.select_for_update().get(pk=check.pk)
     locked_owner = locked_check.singer_registration or locked_check.program
     if locked_owner is None or locked_owner.activity_id != activity.pk:
         raise ValidationError("材料检查项不属于当前活动。")

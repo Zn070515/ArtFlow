@@ -328,7 +328,7 @@ class ActivityLifecycleConcurrencyTests(TransactionTestCase):
             try:
                 formal_activity = Activity.objects.get(pk=activity.pk)
                 formal_activity.is_test_mode = False
-                formal_activity.save()
+                formal_activity.save(_allow_lifecycle_transition=True)
             except Exception as error:
                 formal_errors.append(error)
             finally:
