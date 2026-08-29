@@ -61,6 +61,34 @@ class CompilerValidCorpusTests(SimpleTestCase):
     def test_partition_subtract_repechage_merge_compiles(self):
         self._expect_green(partition_subtract_repechage_merge())
 
+    def test_within_scoped_composite_compiles(self):
+        # Mixing a full source (a1) with a subset source (a3) would normally be a
+        # MISSING_SCORE_DEPENDENCY error; scoping the aggregate to the advance roster
+        # (within=top10) declares that intent and must compile clean.
+        definition = _def(
+            [
+                {"key": "a1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "a1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                {"key": "a3", "type": "ASSESS", "source": "top10", "round": "r3"},
+                {
+                    "key": "agg",
+                    "type": "AGGREGATE",
+                    "within": "top10",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "a1", "weight": 0.6},
+                            {"source": "a3", "weight": 0.4},
+                        ],
+                    },
+                },
+            ]
+        )
+        report, plan = self._expect_green(definition)
+        self.assertNotIn("MISSING_SCORE_DEPENDENCY", report.codes())
+        self.assertIsNotNone(plan)
+
     def _annotated_clean(self):
         return _def(
             [

@@ -14,8 +14,11 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
+from ruleset.compiler import ExecutionPlan, compile_version
+from ruleset.resolver import ResolveInput, resolve
 
 from .models import (
+    CompositeResult,
     ContestRound,
     Judge,
     RoundEntry,
@@ -23,6 +26,8 @@ from .models import (
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
+    StageDecision,
+    StageResult,
 )
 
 
@@ -744,3 +749,153 @@ def parse_score_workbook(uploaded_file, contest_round: ContestRound):
     if meta.get("round_id"):
         return _parse_id_authority_workbook(rows, headers, meta, contest_round)
     return _parse_name_based_workbook(rows, headers, contest_round)
+
+
+# --- M1-F: bind a frozen ruleset to the database, resolve, and persist. ---------
+
+
+def bind_resolve_input(
+    version,
+    activity,
+    *,
+    round_keys: Mapping[str, ContestRound],
+    vote_scores=None,
+    group_of=None,
+    manual=None,
+) -> ResolveInput:
+    """Load a :class:`ResolveInput` from the DB for a frozen ruleset.
+
+    The roster is the activity's approved singers (runtime-scoped, canonical pk
+    order). Round scores are read raw from :class:`ScoreRecord` grouped
+    round -> singer -> judge scores, so the engine owns the scoring mode. Vote
+    scores arrive already normalized (§16.9): the caller supplies the single
+    Decimal per contestant — the binder never re-derives a raw-vote score.
+    """
+    roster = tuple(
+        str(pk)
+        for pk in scope_runtime(
+            SingerRegistration.objects.filter(
+                activity=activity,
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+            ).order_by("pk"),
+            activity,
+        ).values_list("pk", flat=True)
+    )
+    round_scores = {}
+    for rkey, contest_round in round_keys.items():
+        grouped: dict[str, list[Decimal]] = {}
+        records = (
+            ScoreRecord.objects.filter(round=contest_round)
+            .select_related("singer", "judge")
+            .order_by("singer_id", "judge__pk")
+        )
+        for rec in records:
+            grouped.setdefault(str(rec.singer_id), []).append(rec.score)
+        round_scores[rkey] = {k: tuple(v) for k, v in grouped.items()}
+    return ResolveInput(
+        roster=roster,
+        round_scores=round_scores,
+        vote_scores=vote_scores or {},
+        group_of=group_of or {},
+        manual=manual or {},
+    )
+
+
+def _plan_from_version(version) -> ExecutionPlan:
+    if version.execution_plan:
+        return ExecutionPlan.from_dict(json.loads(version.execution_plan))
+    report, plan = compile_version(version)
+    if not report.passes():
+        raise ValidationError("无法解析无效赛制版本。")
+    return plan
+
+
+@transaction.atomic
+def persist_stage_result(version, activity, result, *, stage_key, computed_by):
+    """Write a :class:`ResolveResult` into StageResult + decisions + composites."""
+    if version.ruleset.activity_id != activity.pk:
+        raise ValidationError("Ruleset version must belong to the result activity.")
+    is_test = runtime_is_test(activity)
+    singer_by_key = {str(s.pk): s for s in SingerRegistration.objects.filter(activity=activity)}
+    missing = [d.contestant for d in result.decisions if d.contestant not in singer_by_key]
+    if missing:
+        raise ValidationError(f"无法将结果写回选手：{missing}")
+
+    stage = StageResult.objects.create(
+        activity=activity,
+        ruleset_version=version,
+        created_by=computed_by,
+        stage_key=stage_key,
+        status=result.status.value,
+        reasons=list(result.reasons),
+        content_hash=result.content_hash,
+        schema_version=result.schema_version,
+        plan_version=result.plan_version,
+        result_version=result.result_version,
+        is_test_data=is_test,
+    )
+    StageDecision.objects.bulk_create(
+        [
+            StageDecision(
+                stage_result=stage,
+                singer=singer_by_key[d.contestant],
+                outcome_code=d.outcome_code.value,
+                source_node=d.source_node,
+                rank=d.rank,
+                score=d.score,
+                reason=d.reason,
+                is_test_data=is_test,
+            )
+            for d in result.decisions
+        ]
+    )
+    CompositeResult.objects.bulk_create(
+        [
+            CompositeResult(
+                stage_result=stage,
+                singer=singer_by_key[c.contestant],
+                node_key=c.node_key,
+                value=c.value,
+                components=[
+                    {
+                        "source": source,
+                        "weight": str(weight),
+                        "value": str(value),
+                        "contribution": str(contribution),
+                    }
+                    for (source, weight, value, contribution) in c.components
+                ],
+                is_test_data=is_test,
+            )
+            for c in result.composites
+            if c.contestant in singer_by_key
+        ]
+    )
+    return stage
+
+
+@transaction.atomic
+def run_ruleset(
+    version,
+    activity,
+    *,
+    stage_key,
+    computed_by,
+    round_keys: Mapping[str, ContestRound],
+    vote_scores=None,
+    group_of=None,
+    manual=None,
+) -> StageResult:
+    """Single generic entry: bind -> resolve -> persist. Returns the StageResult."""
+    inputs = bind_resolve_input(
+        version,
+        activity,
+        round_keys=round_keys,
+        vote_scores=vote_scores,
+        group_of=group_of,
+        manual=manual,
+    )
+    result = resolve(version.definition, inputs, plan=_plan_from_version(version))
+    return persist_stage_result(
+        version, activity, result, stage_key=stage_key, computed_by=computed_by
+    )

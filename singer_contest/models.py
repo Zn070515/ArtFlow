@@ -1,9 +1,11 @@
 from typing import Any
 
+from common.lifecycle import runtime_is_test
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from ruleset.resolver import OutcomeCode, ResolverState
 
 from .deletion import cascade_draft_snapshots_or_protect_prepared
 
@@ -497,9 +499,7 @@ class CriterionScore(models.Model):
     score_record = models.ForeignKey(
         ScoreRecord, on_delete=models.CASCADE, related_name="criterion_scores"
     )
-    criterion = models.ForeignKey(
-        RubricCriterion, on_delete=models.CASCADE, related_name="scores"
-    )
+    criterion = models.ForeignKey(RubricCriterion, on_delete=models.CASCADE, related_name="scores")
     value = models.DecimalField(max_digits=5, decimal_places=2)
     is_test_data = models.BooleanField(default=False)
 
@@ -527,3 +527,216 @@ class CriterionScore(models.Model):
 
     def __str__(self):
         return f"{self.criterion.name}: {self.value}"
+
+
+class StageResultQuerySet(models.QuerySet):
+    """Guard: a READY (locked/announced) stage result is immutable."""
+
+    def _ensure_mutable(self):
+        if self.filter(status=StageResult.Status.READY).exists():
+            raise ValidationError("A READY stage result is immutable.")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+StageResultManager = models.Manager.from_queryset(StageResultQuerySet)
+
+
+class StageResult(models.Model):
+    """A persisted outcome of replaying a frozen ruleset over raw facts (M1-F)."""
+
+    class Status(models.TextChoices):
+        HOLD = ResolverState.HOLD.value, "待齐数据"
+        REVIEW = ResolverState.REVIEW.value, "待人工核定"
+        READY = ResolverState.READY.value, "可发布"
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="stage_results"
+    )
+    ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion", on_delete=models.PROTECT, related_name="stage_results"
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stage_results",
+    )
+    stage_key = models.CharField(
+        max_length=100, help_text="Bindable stage identifier, e.g. '院十佳'."
+    )
+    status = models.CharField(max_length=16, choices=Status, default=Status.HOLD)
+    reasons = models.JSONField(default=list, blank=True)
+    content_hash = models.CharField(max_length=64, blank=True)
+    schema_version = models.PositiveIntegerField(default=1)
+    plan_version = models.PositiveIntegerField(default=0)
+    result_version = models.PositiveIntegerField(default=1)
+    computed_at = models.DateTimeField(auto_now_add=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = StageResultManager()
+
+    class Meta:
+        ordering = ["-computed_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "stage_key", "content_hash"],
+                name="stage_result_unique_per_activity_stage_hash",
+            )
+        ]
+
+    def clean(self):
+        if self.activity_id and bool(self.is_test_data) != runtime_is_test(self.activity):
+            raise ValidationError("A stage result's test marker must match its activity lifecycle.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.activity.title} — {self.stage_key} ({self.get_status_display()})"
+
+
+class StageDecisionQuerySet(models.QuerySet):
+    """Guard: decisions of a READY (locked) stage result are immutable."""
+
+    def _ensure_mutable(self):
+        if self.filter(stage_result__status=StageResult.Status.READY).exists():
+            raise ValidationError("Decisions of a READY stage result are immutable.")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+StageDecisionManager = models.Manager.from_queryset(StageDecisionQuerySet)
+
+
+class StageDecision(models.Model):
+    """Per-contestant decision produced by the deterministic resolver (M1-F)."""
+
+    stage_result = models.ForeignKey(
+        StageResult, on_delete=models.CASCADE, related_name="decisions"
+    )
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="stage_decisions"
+    )
+    outcome_code = models.CharField(
+        max_length=20, choices=[(v.value, v.value) for v in OutcomeCode]
+    )
+    source_node = models.CharField(max_length=100, blank=True)
+    rank = models.IntegerField(null=True, blank=True)
+    score = models.DecimalField(max_digits=14, decimal_places=6, null=True, blank=True)
+    reason = models.TextField(blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = StageDecisionManager()
+
+    class Meta:
+        ordering = ["stage_result", "rank", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stage_result", "singer"],
+                name="stage_decision_one_per_result_singer",
+            )
+        ]
+
+    def clean(self):
+        result = self.stage_result if self.stage_result_id else None
+        if result:
+            if bool(self.is_test_data) != bool(result.is_test_data):
+                raise ValidationError("A stage decision's test marker must match its stage result.")
+            singer = self.singer if self.singer_id else None
+            if singer and singer.activity_id != result.activity_id:
+                raise ValidationError("A stage decision singer must belong to the result activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.singer.name} — {self.outcome_code}"
+
+
+class CompositeResultQuerySet(models.QuerySet):
+    """Guard: composites of a READY (locked) stage result are immutable."""
+
+    def _ensure_mutable(self):
+        if self.filter(stage_result__status=StageResult.Status.READY).exists():
+            raise ValidationError("Composites of a READY stage result are immutable.")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+CompositeResultManager = models.Manager.from_queryset(CompositeResultQuerySet)
+
+
+class CompositeResult(models.Model):
+    """Per-contestant per-aggregate composite value with its component breakdown."""
+
+    stage_result = models.ForeignKey(
+        StageResult, on_delete=models.CASCADE, related_name="composites"
+    )
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="stage_composites"
+    )
+    node_key = models.CharField(max_length=100)
+    value = models.DecimalField(max_digits=14, decimal_places=6)
+    components = models.JSONField(default=list, blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = CompositeResultManager()
+
+    class Meta:
+        ordering = ["stage_result", "node_key", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stage_result", "singer", "node_key"],
+                name="composite_one_per_result_singer_node",
+            )
+        ]
+
+    def clean(self):
+        result = self.stage_result if self.stage_result_id else None
+        if result:
+            if bool(self.is_test_data) != bool(result.is_test_data):
+                raise ValidationError("A composite's test marker must match its stage result.")
+            singer = self.singer if self.singer_id else None
+            if singer and singer.activity_id != result.activity_id:
+                raise ValidationError("A composite singer must belong to the result activity.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.singer.name} — {self.node_key}: {self.value}"

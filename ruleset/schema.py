@@ -304,9 +304,9 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.AGGREGATE,
             OutputType.SCOREMAP,
             required=("aggregate",),
-            optional=("conversion",),
-            source_refs=("aggregate.components[].source",),
-            expects={"aggregate.components[].source": _SCOREMAP},
+            optional=("conversion", "within"),
+            source_refs=("aggregate.components[].source", "within"),
+            expects={"aggregate.components[].source": _SCOREMAP, "within": _ROSTER},
             validate=_validate_aggregate,
         ),
         _spec(

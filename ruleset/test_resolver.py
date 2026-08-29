@@ -67,6 +67,52 @@ def _full_flow_def():
     )
 
 
+class ResolverWithinScopeTests(SimpleTestCase):
+    """AGGREGATE may scope its computed pool to a roster via 'within'."""
+
+    def _def(self):
+        return _def(
+            [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {"key": "top1", "type": "SELECT", "source": "rank1", "count": 2},
+                {"key": "assess_r2", "type": "ASSESS", "source": "top1", "round": "r2"},
+                {
+                    "key": "agg2",
+                    "type": "AGGREGATE",
+                    "within": "top1",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.5},
+                            {"source": "assess_r2", "weight": 0.5},
+                        ],
+                    },
+                },
+                {"key": "rank2", "type": "RANK", "source": "agg2"},
+            ]
+        )
+
+    def test_within_scopes_pool_to_advanced_roster(self):
+        # Only the 2 advancees (c1, c2) have r2 scores; without 'within' the union pool
+        # would include c3/c4 and hold on the missing r2 component.
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            round_scores=_rs(
+                {
+                    "r1": {"c1": [10], "c2": [9], "c3": [8], "c4": [7]},
+                    "r2": {"c1": [80], "c2": [70]},
+                }
+            ),
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        # agg2 computes .5*mean(r1) + .5*mean(r2): c1=45, c2=39.5
+        agg2 = {d.contestant: d.score for d in result.decisions}
+        self.assertEqual(agg2["c1"], Decimal("45.0"))
+        self.assertEqual(agg2["c2"], Decimal("39.5"))
+
+
 class ResolverReadyTests(SimpleTestCase):
     def test_weighted_composite_topn_ready(self):
         roster = tuple(f"c{i}" for i in range(1, 13))
@@ -407,3 +453,186 @@ class ResolverPerfTests(SimpleTestCase):
         elapsed = time.perf_counter() - start
         self.assertEqual(result.status, ResolverState.READY)
         self.assertLess(elapsed, 2.0)
+
+
+class GoldenSchiduiTopTenTests(SimpleTestCase):
+    """M1-F golden 院十佳 full-graph resolve (pure, DB-free, no 2025 in Python).
+
+    One frozen definition resolves the whole 15->10->5->3 chain via
+    composite-of-composite within a single graph. AGGREGATE ``within`` scopes
+    each stage's pool to the current advance roster so the eliminated
+    contestants (lacking R3/R4 scores) never cause a spurious HOLD. Weights are
+    exactly the §11.3 values (30/60/10, 60/40, 30/50/20) — but they live in the
+    definition, not in this module.
+    """
+
+    def _def(self):
+        return _def(
+            [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                {
+                    "key": "assess_a1",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "vote_source": "audience1",
+                },
+                {
+                    "key": "stage1",
+                    "type": "AGGREGATE",
+                    "within": ENTRY_KEY,
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.30},
+                            {"source": "assess_r2", "weight": 0.60},
+                            {"source": "assess_a1", "weight": 0.10},
+                        ],
+                    },
+                },
+                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                {"key": "assess_r3", "type": "ASSESS", "source": "top10", "round": "r3"},
+                {
+                    "key": "stage2",
+                    "type": "AGGREGATE",
+                    "within": "top10",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "stage1", "weight": 0.60},
+                            {"source": "assess_r3", "weight": 0.40},
+                        ],
+                    },
+                },
+                {"key": "rank2", "type": "RANK", "source": "stage2", "descending": True},
+                {"key": "top5", "type": "SELECT", "source": "rank2", "count": 5},
+                {"key": "assess_r4", "type": "ASSESS", "source": "top5", "round": "r4"},
+                {
+                    "key": "assess_a4",
+                    "type": "ASSESS",
+                    "source": "top5",
+                    "vote_source": "audience4",
+                },
+                {
+                    "key": "final",
+                    "type": "AGGREGATE",
+                    "within": "top5",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r3", "weight": 0.30},
+                            {"source": "assess_r4", "weight": 0.50},
+                            {"source": "assess_a4", "weight": 0.20},
+                        ],
+                    },
+                },
+                {"key": "rank3", "type": "RANK", "source": "final", "descending": True},
+                {"key": "top3", "type": "SELECT", "source": "rank3", "count": 3},
+            ]
+        )
+
+    def _inputs(self):
+        roster = tuple(f"c{i}" for i in range(1, 16))
+        r1 = {f"c{i}": (Decimal(100 - i),) for i in range(1, 16)}
+        r2 = {f"c{i}": (Decimal(90 - i),) for i in range(1, 16)}
+        r3 = {f"c{i}": (Decimal(100 - i),) for i in range(1, 11)}
+        r4 = {f"c{i}": (Decimal(100 - i),) for i in range(1, 6)}
+        a1 = {f"c{i}": Decimal("50") for i in range(1, 16)}
+        a4 = {f"c{i}": Decimal(90 - i) for i in range(1, 6)}
+        return ResolveInput(
+            roster=roster,
+            round_scores={"r1": r1, "r2": r2, "r3": r3, "r4": r4},
+            vote_scores={"audience1": a1, "audience4": a4},
+        )
+
+    def _composite_map(self, result, node_key):
+        return {c.contestant: c.value for c in result.composites if c.node_key == node_key}
+
+    def assertStage(self, result, node_key, expected):
+        values = self._composite_map(result, node_key)
+        self.assertEqual(values, expected, f"composite {node_key} mismatch")
+
+    def test_golden_schidui_topten_full_chain(self):
+        definition = self._def()
+        result = resolve(definition, self._inputs())
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.reasons, ())
+        self.assertEqual(result.schema_version, 1)
+        self.assertEqual(result.result_version, 1)
+        self.assertTrue(result.content_hash)
+
+        # §11.3 layered Decimals: Stage1 (30/60/10), Stage2 (60/40), Final (30/50/20).
+        self.assertStage(
+            result,
+            "stage1",
+            {
+                "c1": Decimal("88.1"),
+                "c2": Decimal("87.2"),
+                "c3": Decimal("86.3"),
+                "c4": Decimal("85.4"),
+                "c5": Decimal("84.5"),
+                "c6": Decimal("83.6"),
+                "c7": Decimal("82.7"),
+                "c8": Decimal("81.8"),
+                "c9": Decimal("80.9"),
+                "c10": Decimal("80.0"),
+                "c11": Decimal("79.1"),
+                "c12": Decimal("78.2"),
+                "c13": Decimal("77.3"),
+                "c14": Decimal("76.4"),
+                "c15": Decimal("75.5"),
+            },
+        )
+        self.assertStage(
+            result,
+            "stage2",
+            {
+                "c1": Decimal("92.46"),
+                "c2": Decimal("91.52"),
+                "c3": Decimal("90.58"),
+                "c4": Decimal("89.64"),
+                "c5": Decimal("88.70"),
+                "c6": Decimal("87.76"),
+                "c7": Decimal("86.82"),
+                "c8": Decimal("85.88"),
+                "c9": Decimal("84.94"),
+                "c10": Decimal("84.00"),
+            },
+        )
+        self.assertStage(
+            result,
+            "final",
+            {
+                "c1": Decimal("97.0"),
+                "c2": Decimal("96.0"),
+                "c3": Decimal("95.0"),
+                "c4": Decimal("94.0"),
+                "c5": Decimal("93.0"),
+            },
+        )
+
+        # Roster staging: 15 -> 10 -> 5 -> 3.
+        self.assertEqual(result.node_values["top10"], [f"c{i}" for i in range(1, 11)])
+        self.assertEqual(result.node_values["top5"], [f"c{i}" for i in range(1, 6)])
+        self.assertEqual(result.node_values["top3"], ["c1", "c2", "c3"])
+
+        # Origin tags: everyone who reached top-10 was directly selected (DIRECT);
+        # contestants never selected into any advance roster are eliminated.
+        by_contestant = {d.contestant: d for d in result.decisions}
+        self.assertEqual(by_contestant["c1"].outcome_code, OutcomeCode.DIRECT)
+        self.assertEqual(by_contestant["c2"].outcome_code, OutcomeCode.DIRECT)
+        self.assertEqual(by_contestant["c3"].outcome_code, OutcomeCode.DIRECT)
+        self.assertEqual(by_contestant["c1"].rank, 1)
+        self.assertEqual(by_contestant["c2"].rank, 2)
+        self.assertEqual(by_contestant["c3"].rank, 3)
+        for c in (f"c{i}" for i in range(4, 11)):
+            self.assertEqual(by_contestant[c].outcome_code, OutcomeCode.DIRECT)
+        for c in (f"c{i}" for i in range(11, 16)):
+            self.assertEqual(by_contestant[c].outcome_code, OutcomeCode.ELIMINATED)
+
+    def test_golden_schidui_definition_is_forward_only(self):
+        """The golden definition resolves READY with all raw facts present."""
+        result = resolve(self._def(), self._inputs())
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(len(result.decisions), 15)
