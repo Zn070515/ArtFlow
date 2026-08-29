@@ -4,12 +4,18 @@ from pathlib import PurePath
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
 from django.utils import timezone
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
+
+VIDEO_PURPOSES = (
+    SubmissionFile.Purpose.BACKGROUND_VIDEO,
+    SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+)
 
 
 def delete_storage_object(storage: Storage, name: str) -> None:
@@ -75,12 +81,38 @@ ALLOWED_CONTENT_TYPES = {
 }
 
 
-def validate_upload(uploaded_file, purpose):
+def video_upload_cap_bytes(activity) -> int:
+    """Deny oversized video direct-uploads for a formal activity.
+
+    Test-mode and non-activity scenarios keep the larger developer cap so local
+    rehearsal data still works; a formal activity's performers are not expected
+    to source a large file through the browser on the first round.
+    """
+    if activity is not None and activity.data_lifecycle == Activity.DataLifecycle.FORMAL:
+        return settings.ARTFLOW_VIDEO_UPLOAD_MAX_MB * 1024 * 1024
+    return max(MAX_UPLOAD_BYTES[purpose] for purpose in VIDEO_PURPOSES)
+
+
+def large_video_upload_allowed(activity) -> bool:
+    """Whether the UI may offer a video direct-upload for this activity.
+
+    A formal activity hides the performer-sourced video field; test-mode or
+    unloaded activities keep it available for local rehearsal. The byte cap is
+    enforced separately by validate_upload for any crafted request.
+    """
+    return activity is None or activity.data_lifecycle != Activity.DataLifecycle.FORMAL
+
+
+def validate_upload(uploaded_file, purpose, *, activity=None):
     if purpose not in MAX_UPLOAD_BYTES:
         raise ValidationError("文件用途无效。")
     if not uploaded_file or not getattr(uploaded_file, "size", 0):
         raise ValidationError("不能上传空文件。")
-    if uploaded_file.size > MAX_UPLOAD_BYTES[purpose]:
+    if purpose in VIDEO_PURPOSES:
+        cap = video_upload_cap_bytes(activity)
+        if cap <= 0 or uploaded_file.size > cap:
+            raise ValidationError("正式活动不支持大视频直传。")
+    elif uploaded_file.size > MAX_UPLOAD_BYTES[purpose]:
         raise ValidationError("文件超过该用途允许的大小限制。")
     extension = PurePath(str(uploaded_file.name)).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS[purpose]:
@@ -103,7 +135,7 @@ def _owner_filter(owner):
 
 @transaction.atomic
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
-    validate_upload(uploaded_file, purpose)
+    validate_upload(uploaded_file, purpose, activity=owner.activity)
     activity = lock_activity_for_action(owner.activity, ActivityAction.UPLOAD_MATERIAL)
     # Serialize all file operations for the same owner, including the first
     # upload where no current submission row yet exists to lock.

@@ -802,6 +802,13 @@ class ScoringServiceTests(TestCase):
                 return workbook
         raise AssertionError(f"{key} not found in ArtFlowMeta")
 
+    def _meta_dict(self, workbook):
+        data = {}
+        for row in workbook["ArtFlowMeta"].iter_rows():
+            if row and len(row) >= 2 and row[0].value is not None:
+                data[str(row[0].value)] = str(row[1].value) if row[1].value is not None else ""
+        return data
+
     def test_score_template_emits_ids_and_hidden_artflow_meta(self):
         prepare_round(self.round, self.user)
         wb = build_score_template_workbook(self.round)
@@ -858,6 +865,61 @@ class ScoringServiceTests(TestCase):
         scores, errors = self._parse_workbook(wb)
         self.assertEqual(scores, {})
         self.assertTrue(any("不属于当前轮次" in error for error in errors))
+
+    def test_score_template_meta_embeds_snapshot_fingerprint_and_ruleset_version(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        meta = self._meta_dict(wb)
+        self.assertEqual(meta["schema_version"], "1")
+        self.assertEqual(meta["activity_id"], str(self.activity.pk))
+        self.assertEqual(meta["round_id"], str(self.round.pk))
+        self.assertEqual(meta["entry_ids"], str(self.singer.pk))
+        self.assertEqual(meta["judge_ids"], str(self.judge.pk))
+        self.assertIn("ruleset_version", meta)
+        self.assertIn("snapshot_fingerprint", meta)
+        self.assertTrue(meta["snapshot_fingerprint"])
+
+    def test_parse_score_workbook_accepts_matching_snapshot(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        ws = wb.active
+        assert ws is not None
+        ws.cell(row=2, column=3).value = 88
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(errors, [])
+        self.assertEqual(scores, {(self.singer.pk, self.judge.pk): Decimal("88")})
+
+    def test_parse_score_workbook_rejects_stale_entry_snapshot(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "entry_ids", "1,999999")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("选手名单" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_stale_judge_snapshot(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "judge_ids", "1,999999")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("评委名单" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_tampered_fingerprint(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "snapshot_fingerprint", "deadbeef")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("指纹不匹配" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_unsupported_schema_version(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "schema_version", "9")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("schema_version" in error for error in errors))
 
 
 class SingerUploadViewTests(TestCase):
@@ -1856,6 +1918,38 @@ class ParticipantApplyVisibilityTests(TestCase):
         self.client.force_login(self.staff)
         response = self.client.get(reverse("singer_contest:apply"))
         self.assertContains(response, self.testing.title)
+
+    def test_participant_apply_hides_video_field_for_formal_activity(self):
+        self.client.force_login(self.participant)
+        response = self.client.get(reverse("singer_contest:apply"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "performance_video")
+
+    def test_staff_apply_shows_video_field_for_test_activity(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("singer_contest:apply"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "performance_video")
+
+    def test_participant_apply_rejects_oversize_video_for_formal_activity(self):
+        self.client.force_login(self.participant)
+        response = self.client.post(
+            reverse("singer_contest:apply"),
+            {
+                "activity_id": str(self.formal.pk),
+                "name": "Singer",
+                "student_id": "20260001",
+                "college": "College",
+                "class_name": "Class",
+                "song_name": "Song",
+                "performance_video": SimpleUploadedFile(
+                    "clip.mp4", b"x" * (200 * 1024 * 1024), content_type="video/mp4"
+                ),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "正式活动不支持大视频直传。")
+        self.assertFalse(SingerRegistration.objects.filter(activity=self.formal).exists())
 
 
 class StageResultModelTests(TestCase):

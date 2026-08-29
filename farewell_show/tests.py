@@ -75,9 +75,7 @@ class ProgramMaterialPurityTests(TestCase):
                 "item_name", "status", "sort_order", "review_note"
             )
         )
-        response = self.client.get(
-            reverse("farewell_show:my_program_detail", args=[self.prog.pk])
-        )
+        response = self.client.get(reverse("farewell_show:my_program_detail", args=[self.prog.pk]))
         self.assertEqual(response.status_code, 200)
         after = list(
             self.prog.material_checks.order_by("pk").values_list(
@@ -91,9 +89,7 @@ class ProgramMaterialPurityTests(TestCase):
         self.activity.save(update_fields=["phase"])
         self.client.force_login(self.user)
         before = self.prog.material_checks.count()
-        response = self.client.get(
-            reverse("farewell_show:my_program_detail", args=[self.prog.pk])
-        )
+        response = self.client.get(reverse("farewell_show:my_program_detail", args=[self.prog.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.prog.material_checks.count(), before)
 

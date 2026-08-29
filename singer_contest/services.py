@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from decimal import Decimal, InvalidOperation
@@ -583,6 +584,7 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
 
 
 _META_SHEET_NAME = "ArtFlowMeta"
+_SCORE_WORKBOOK_SCHEMA_VERSION = "1"
 
 
 def _read_artflow_meta(workbook) -> dict[str, str]:
@@ -598,6 +600,59 @@ def _read_artflow_meta(workbook) -> dict[str, str]:
         if key:
             data[key] = str(value).strip() if value is not None else ""
     return data
+
+
+def _split_ids(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [token for token in (str(value).strip().split(",")) if token]
+
+
+def snapshot_fingerprint(
+    *,
+    schema_version: str,
+    activity_id,
+    round_id,
+    ruleset_version: str,
+    entry_ids: list[str],
+    judge_ids: list[str],
+) -> str:
+    """Deterministic fingerprint of the snapshot a score workbook was built from.
+
+    Any drift in the rosters or the bound ruleset (or tampering with the meta
+    sheet) changes the fingerprint, so the importer can reject a stale or edited
+    workbook outright with zero partial mutation.
+    """
+    payload = json.dumps(
+        {
+            "schema_version": str(schema_version),
+            "activity_id": str(activity_id),
+            "round_id": str(round_id),
+            "ruleset_version": str(ruleset_version or ""),
+            "entry_ids": [str(x) for x in entry_ids],
+            "judge_ids": [str(x) for x in judge_ids],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def bound_ruleset_version_label(contest_round: ContestRound) -> str:
+    """Label the frozen ruleset version bound to a round via round_keys, if any."""
+    from ruleset.models import ContestRuleset, RulesetVersion
+
+    for ruleset in ContestRuleset.objects.filter(activity_id=contest_round.activity_id):
+        for round_key, round_pk in (ruleset.round_keys or {}).items():
+            if str(round_pk) != str(contest_round.pk):
+                continue
+            version = RulesetVersion.objects.filter(
+                ruleset=ruleset,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            ).first()
+            return f"{ruleset.pk}.{version.version}" if version else f"{ruleset.pk}.draft"
+    return ""
 
 
 def _resolve_judge_header(
@@ -624,10 +679,40 @@ def _parse_id_authority_workbook(rows, headers, meta, contest_round: ContestRoun
     if meta.get("round_id") and str(contest_round.pk) != meta["round_id"]:
         errors.append("评分表属于其他轮次。")
 
+    if meta.get("schema_version") and meta["schema_version"] != _SCORE_WORKBOOK_SCHEMA_VERSION:
+        errors.append(f"评分表 schema_version 不受支持（{meta['schema_version']}）。")
+
     active_judges = list(_active_judges(contest_round))
     judge_by_id = {judge.pk: judge for judge in active_judges}
     judge_by_name = {judge.name: judge for judge in active_judges}
     singers = {singer.pk: singer for singer in _eligible_singers(contest_round)}
+
+    meta_entries = _split_ids(meta.get("entry_ids"))
+    current_entries = sorted(str(pk) for pk in singers)
+    if meta_entries and set(current_entries) != set(meta_entries):
+        errors.append("评分表选手名单过期或与当前轮次不一致。")
+
+    meta_judges = _split_ids(meta.get("judge_ids"))
+    current_judges = sorted(str(pk) for pk in judge_by_id)
+    if meta_judges and set(current_judges) != set(meta_judges):
+        errors.append("评分表评委名单过期或与当前轮次不一致。")
+
+    if meta.get("ruleset_version"):
+        bound = bound_ruleset_version_label(contest_round)
+        if bound and meta["ruleset_version"] != bound:
+            errors.append("评分表所属赛制版本已过期。")
+
+    if meta.get("snapshot_fingerprint"):
+        expected = snapshot_fingerprint(
+            schema_version=meta.get("schema_version", _SCORE_WORKBOOK_SCHEMA_VERSION),
+            activity_id=meta.get("activity_id", str(contest_round.activity_id)),
+            round_id=meta.get("round_id", str(contest_round.pk)),
+            ruleset_version=meta.get("ruleset_version", ""),
+            entry_ids=meta_entries,
+            judge_ids=meta_judges,
+        )
+        if expected != meta["snapshot_fingerprint"]:
+            errors.append("评分表指纹不匹配（快照已过期或被修改）。")
 
     valid_judges: dict[int, Judge] = {}
     for column in range(2, len(headers)):

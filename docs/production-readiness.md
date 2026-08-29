@@ -16,6 +16,8 @@ ArtFlow 首次正式活动前必须完成一次完整彩排，并保留验证记
 | 当前媒体替换 | 同一用途上传多个版本并删除当前版 | 只有一个当前版本，删除后自动恢复最近历史版 |
 | 解锁改分重锁 | 锁定、管理员带原因解锁、改分、重新锁定 | 缺分仍不能锁定，评分审计含 old/new 明细 |
 | 人气奖重算 | A 锁定获奖，解锁后 B 获胜再锁定 | 只有当前一个“最佳人气奖”，来源投票会话一致 |
+| 过期评分 Excel | 导入名单/评委名单/规则版本或指纹与当前轮次不一致的工作簿 | 全表拒绝，0 partial mutation，提示“名单过期/版本过期/指纹不匹配”（§15.5） |
+| 大视频直传 | 正式活动 POST 超过 `ARTFLOW_VIDEO_UPLOAD_MAX_MB` 的演唱/背景视频 | 被拒“正式活动不支持大视频直传”，正式报名页不出现视频字段；测试活动仍可传（§15.6） |
 | PostgreSQL 恢复 | 创建备份并在隔离数据库恢复 | `pg_restore` 成功、Django check 通过，源卷未被重置 |
 
 ## 发布门禁
@@ -48,3 +50,20 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 ```
 
 备份脚本必须在源服务仍运行时执行。它只创建隔离恢复目标，不允许使用 `down --volumes`、源库 `dropdb` 或任何重置源卷的命令。
+
+## Production Rehearsal Report
+
+每次正式彩排（§15.2 正常 / §15.3 恶意 / §15.4 灾难）完成后，把结果追加到本节。一份报告一场演练；首次正式活动前必须至少完成一份，并把“录分到 READY 时间”和“实际恢复时间”填入。
+
+| 字段 | 内容 |
+| --- | --- |
+| 时间 | `YYYY-MM-DD HH:MM` |
+| 参与者 | Admin / Staff / Participant 各几人，Judge/Audience 是否模拟 |
+| 场景 | 正常彩排 / 恶意彩排 / 灾难演练（web crash、PG 重启、media restore、database loss、clean restore） |
+| 结论 | PASS / FAIL |
+| 录分到 READY 时间 | 从第一张纸质评分录入到最后一次自动 resolve 的耗时 |
+| 实际恢复时间 | 从模拟故障到 login/ruleset/score/decision/vote/material/document/archive 全通的耗时 |
+| 已知风险 | 本次发现的尚未修复问题 |
+| Plan B | 压轴时的降级/绕行方案 |
+
+> 注：`录分到 READY` 需配套 M1-H 的 `round_scores_api` 自动 resolve（`recompute_activity_result`）链路；若评分表在彩排中依赖 Excel 导入，另按 §15.5 用过期工作簿验证全表拒绝。

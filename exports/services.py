@@ -27,7 +27,13 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
 from singer_contest.models import Award, ContestRound, ScoreSummary, SingerRegistration
-from singer_contest.services import _active_judges, _eligible_singers, missing_score_cells
+from singer_contest.services import (
+    _active_judges,
+    _eligible_singers,
+    bound_ruleset_version_label,
+    missing_score_cells,
+    snapshot_fingerprint,
+)
 from voting.models import VoteOption, VoteSession
 
 from .models import ArticleTemplate, GeneratedDocument
@@ -326,17 +332,29 @@ def _add_artflow_meta(
     """Write a hidden ArtFlowMeta sheet so the importer can fingerprint the file.
 
     ID is authority on import; name is only a hint. The snapshot lists the exact
-    singer/judge set frozen at export time, which lets the importer reject a
-    stale or mismatched workbook.
+    singer/judge set and bound ruleset frozen at export time, plus a fingerprint,
+    so the importer rejects a stale or mismatched workbook outright.
     """
+    ruleset_version = bound_ruleset_version_label(contest_round)
+    schema_version = "1"
+    fingerprint = snapshot_fingerprint(
+        schema_version=schema_version,
+        activity_id=contest_round.activity_id,
+        round_id=contest_round.pk,
+        ruleset_version=ruleset_version,
+        entry_ids=[str(pk) for pk in entry_ids],
+        judge_ids=[str(pk) for pk in judge_ids],
+    )
     meta = workbook.create_sheet("ArtFlowMeta")
     rows = [
-        ("schema_version", "1"),
+        ("schema_version", schema_version),
         ("activity_id", str(contest_round.activity_id)),
         ("round_id", str(contest_round.pk)),
+        ("ruleset_version", ruleset_version),
         ("exported_at", timezone.now().isoformat()),
         ("entry_ids", ",".join(str(pk) for pk in entry_ids)),
         ("judge_ids", ",".join(str(pk) for pk in judge_ids)),
+        ("snapshot_fingerprint", fingerprint),
     ]
     for key, value in rows:
         meta.append([key, value])
@@ -659,9 +677,7 @@ def generate_persistent_document(
         created_by=author,
         is_test_data=locked_activity.is_test_mode,
     )
-    doc_obj.file.save(
-        f"{template.template_type}_{locked_activity.pk}.docx", ContentFile(content)
-    )
+    doc_obj.file.save(f"{template.template_type}_{locked_activity.pk}.docx", ContentFile(content))
     AuditLog.objects.create(
         operator=author,
         action_type=AuditLog.ActionType.EXPORT,
