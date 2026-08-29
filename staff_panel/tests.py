@@ -25,7 +25,11 @@ from django.test import RequestFactory, TestCase, TransactionTestCase, override_
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
-from exports.services import archive_activity
+from exports.services import (
+    archive_activity,
+    build_archive_package,
+    generate_persistent_document,
+)
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from files.services import reconcile_singer_material_checks, store_submission_file
@@ -3407,6 +3411,179 @@ class ExportPrivacyTests(TestCase):
                 action_type=AuditLog.ActionType.EXPORT, operator=self.staff
             ).exists()
         )
+
+
+class WordGenerateArchiveAuthorityTests(TestCase):
+    """M0-Y: persistent Word assets stop at the archive boundary.
+
+    A GeneratedDocument is a persistent business asset of the Activity. Once the
+    activity is ARCHIVED it must not grow; only a preview/download remains, which
+    never creates a row. Source data is re-read under the Activity lock, so a
+    generation racing a phase change cannot freeze stale data as the latest doc.
+    """
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="word-staff", password="pass", role=User.Role.STAFF
+        )
+        self.template = ArticleTemplate.objects.create(
+            name="Notice",
+            template_type=ArticleTemplate.TemplateType.PRELIMINARY_NOTICE,
+            body="{title}",
+        )
+        self.activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=False,
+        )
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+        super().tearDown()
+
+    def test_persistent_generation_creates_document(self):
+        doc_obj, content = generate_persistent_document(
+            self.activity, self.template, self.staff
+        )
+        self.assertEqual(doc_obj.activity, self.activity)
+        self.assertFalse(doc_obj.is_test_data)
+        self.assertTrue(doc_obj.file.storage.exists(doc_obj.file.name or ""))
+        self.assertTrue(content)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.EXPORT,
+                target=f"GeneratedDocument:{doc_obj.pk}",
+            ).exists()
+        )
+
+    def test_persistent_generation_rejects_archived(self):
+        self.activity.phase = Activity.Phase.ARCHIVED
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["phase", "is_locked"])
+        with self.assertRaises(PermissionDenied):
+            generate_persistent_document(self.activity, self.template, self.staff)
+        self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
+
+    def test_persistent_generation_rejects_locked(self):
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        with self.assertRaises(PermissionDenied):
+            generate_persistent_document(self.activity, self.template, self.staff)
+        self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
+
+    def test_archived_word_generate_is_preview_download_only(self):
+        # Case C: an archived activity may produce a downloadable preview but must
+        # not grow a persistent GeneratedDocument.
+        self.activity.phase = Activity.Phase.ARCHIVED
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["phase", "is_locked"])
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:word_generate", args=[self.template.pk, self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
+
+    def test_locked_word_generate_rejects(self):
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:word_generate", args=[self.template.pk, self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
+
+    def test_persisted_document_is_seen_by_archive_package(self):
+        # Case A: the document persists before the archive, so the authoritative
+        # archive package (built from DB state) must include it.
+        doc_obj, _ = generate_persistent_document(
+            self.activity, self.template, self.staff
+        )
+        names = [a.name for a in build_archive_package(self.activity)]
+        self.assertIn(f"推文_{doc_obj.pk}.docx", names)
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
+    """M0-Y Case B/D: a generation racing an archive commit must not persist."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="arch-word-staff", password="pass", role=User.Role.STAFF
+        )
+        self.template = ArticleTemplate.objects.create(
+            name="Notice",
+            template_type=ArticleTemplate.TemplateType.PRELIMINARY_NOTICE,
+            body="{title}",
+        )
+        self.activity = Activity.objects.create(
+            title="Concurrent Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=False,
+        )
+
+    def test_generation_never_lands_after_archive_commits(self):
+        hold_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def commit_archive():
+            try:
+                with transaction.atomic():
+                    activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    activity.phase = Activity.Phase.ARCHIVED
+                    activity.is_locked = True
+                    activity.save(update_fields=["phase", "is_locked"])
+                    hold_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=commit_archive)
+        holder.start()
+        self.assertTrue(hold_held.wait(timeout=10))
+
+        gen_result: dict[str, object] = {}
+
+        def try_generate():
+            close_old_connections()
+            try:
+                generate_persistent_document(self.activity, self.template, self.staff)
+                gen_result["done"] = True
+            except PermissionDenied as error:
+                gen_result["rejected"] = str(error)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                gen_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        worker = threading.Thread(target=try_generate)
+        worker.start()
+        time.sleep(1)  # let the generation block on the Activity row lock
+        release_lock.set()
+        holder.join(timeout=10)
+        worker.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.ARCHIVED)
+        self.assertNotIn("done", gen_result, gen_result)
+        self.assertIn("rejected", gen_result, gen_result)
+        self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
 
 
 class PublicPostMoveLockTests(TestCase):

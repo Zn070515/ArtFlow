@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from dataclasses import dataclass
 from typing import Any
 
+from common.business_rules import ensure_activity_unlocked
 from common.lifecycle import runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import get_test_data_counts, lock_activity_for_runtime_data
@@ -28,7 +30,7 @@ from singer_contest.models import Award, ContestRound, ScoreSummary, SingerRegis
 from singer_contest.services import _active_judges, _eligible_singers, missing_score_cells
 from voting.models import VoteOption, VoteSession
 
-from .models import GeneratedDocument
+from .models import ArticleTemplate, GeneratedDocument
 
 
 @dataclass
@@ -595,6 +597,87 @@ def build_archive_package(activity: Activity) -> list[PackageArtifact]:
             with doc.file.open("rb") as document_file:
                 artifacts.append(PackageArtifact(f"推文_{doc.pk}.docx", document_file.read()))
     return artifacts
+
+
+def render_document_bytes(template: ArticleTemplate, activity: Activity) -> bytes:
+    """Render a Word document from the template and the activity's current data.
+
+    Used by the preview/download-only path for archived activities and by the
+    persistent path, where it runs under the authoritative Activity lock.
+    """
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading(activity.title, 0)
+    body = template.body
+    singers = scope_runtime(
+        SingerRegistration.objects.filter(
+            activity=activity,
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        ),
+        activity,
+    )
+    singer_lines = "\n".join(f"{s.name} — {s.song_name}" for s in singers)
+    programs = scope_runtime(Program.objects.filter(activity=activity), activity)
+    program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)
+    body = body.replace("{title}", activity.title)
+    body = body.replace("{subtitle}", activity.subtitle or "")
+    body = body.replace("{date}", activity.created_at.strftime("%Y年%m月%d日"))
+    body = body.replace("{time}", "")
+    body = body.replace("{venue}", "")
+    body = body.replace("{content}", "")
+    body = body.replace("{singers}", singer_lines)
+    body = body.replace("{programs}", program_lines)
+    body = body.replace("{sign_off}", "浙江工业大学 信息工程学院 文艺部")
+    for para_text in body.split("\n"):
+        doc.add_paragraph(para_text)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+@transaction.atomic
+def generate_persistent_document(
+    activity: Activity, template: ArticleTemplate, author: Any, *, note: str = ""
+) -> tuple[GeneratedDocument, bytes]:
+    """Generate and persist an official Word asset under the Activity lock.
+
+    The Activity row is locked first, then ARCHIVED / global-lock are rejected,
+    then source data is re-read under the authoritative state before the document
+    is built. This keeps the persisted asset consistent with the DB and prevents a
+    stale pre-lock document from being frozen as the latest one.
+    """
+    locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
+    if locked_activity.phase == Activity.Phase.ARCHIVED:
+        raise PermissionDenied("活动已归档，不能新增正式文档。")
+    ensure_activity_unlocked(locked_activity)
+    content = render_document_bytes(template, locked_activity)
+    doc_obj = GeneratedDocument.objects.create(
+        template=template,
+        activity=locked_activity,
+        title=template.name,
+        created_by=author,
+        is_test_data=locked_activity.is_test_mode,
+    )
+    doc_obj.file.save(
+        f"{template.template_type}_{locked_activity.pk}.docx", ContentFile(content)
+    )
+    AuditLog.objects.create(
+        operator=author,
+        action_type=AuditLog.ActionType.EXPORT,
+        target=f"GeneratedDocument:{doc_obj.pk}",
+        new_value=json.dumps(
+            {
+                "template": template.template_type,
+                "activity": locked_activity.pk,
+                "title": template.name,
+                "is_test_data": locked_activity.is_test_mode,
+            },
+            ensure_ascii=False,
+        ),
+        note=note,
+    )
+    return doc_obj, content
 
 
 @transaction.atomic

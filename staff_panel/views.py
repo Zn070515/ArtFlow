@@ -26,7 +26,6 @@ from core.services import (
 )
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Count
 from django.http import Http404, HttpResponse
@@ -34,13 +33,15 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from exports.models import ArticleTemplate, GeneratedDocument
+from exports.models import ArticleTemplate
 from exports.services import (
     archive_activity,
     build_archive_package,
     build_execution_package,
     build_package_zip,
     build_score_template_workbook,
+    generate_persistent_document,
+    render_document_bytes,
 )
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
@@ -1504,50 +1505,20 @@ def excel_import_scores(request, round_id):
 def word_generate(request, template_id, activity_id):
     template = get_object_or_404(ArticleTemplate, pk=template_id)
     activity = get_object_or_404(Activity, pk=activity_id)
-    from docx import Document
+    if activity.phase == Activity.Phase.ARCHIVED:
+        # Read-only preview/download for an archived activity. Archived data is
+        # immutable, so this never creates a persistent asset and the official
+        # archive package stays the authoritative record of it.
+        content = render_document_bytes(template, activity)
+        audit_export(request, activity, "word_preview")
+        return _docx_response(content, template, activity.pk)
+    doc_obj, content = generate_persistent_document(activity, template, request.user)
+    return _docx_response(content, template, activity.pk)
 
-    doc = Document()
-    doc.add_heading(activity.title, 0)
-    body = template.body
-    singers = scope_runtime(
-        SingerRegistration.objects.filter(
-            activity=activity,
-            pre_status=SingerRegistration.PreStatus.APPROVED,
-        ),
-        activity,
-    )
-    singer_lines = "\n".join(f"{s.name} — {s.song_name}" for s in singers)
-    programs = scope_runtime(Program.objects.filter(activity=activity), activity)
-    program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)
-    body = body.replace("{title}", activity.title)
-    body = body.replace("{subtitle}", activity.subtitle or "")
-    body = body.replace("{date}", activity.created_at.strftime("%Y年%m月%d日"))
-    body = body.replace("{time}", "")
-    body = body.replace("{venue}", "")
-    body = body.replace("{content}", "")
-    body = body.replace("{singers}", singer_lines)
-    body = body.replace("{programs}", program_lines)
-    body = body.replace("{sign_off}", "浙江工业大学 信息工程学院 文艺部")
-    for para_text in body.split("\n"):
-        doc.add_paragraph(para_text)
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    with transaction.atomic():
-        activity = lock_activity_for_runtime_data(activity)
-        doc_obj = GeneratedDocument.objects.create(
-            template=template,
-            activity=activity,
-            title=template.name,
-            created_by=request.user,
-            is_test_data=activity.is_test_mode,
-        )
-        doc_obj.file.save(
-            f"{template.template_type}_{activity_id}.docx", ContentFile(buf.getvalue())
-        )
-    audit_export(request, activity, "word_generate")
+
+def _docx_response(content: bytes, template: ArticleTemplate, activity_id: int) -> HttpResponse:
     response = HttpResponse(
-        buf.read(),
+        content,
         content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
     response["Content-Disposition"] = (
