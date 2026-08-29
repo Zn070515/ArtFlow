@@ -24,8 +24,11 @@ from ruleset.schema import (
 )
 
 
-def _def(nodes):
-    return {"schema_version": 1, "nodes": nodes}
+def _def(nodes, context=None):
+    definition = {"schema_version": 1, "nodes": nodes}
+    if context is not None:
+        definition["context"] = context
+    return definition
 
 
 # --- §8.8 acceptance structures -------------------------------------------

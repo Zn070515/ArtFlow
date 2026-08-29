@@ -19,6 +19,7 @@ class AuditLog(models.Model):
         RELOCK_RESULT = "relock_result", "重新锁定结果"
         PHASE_TRANSITION = "phase_transition", "阶段变更"
         FINALIZE_ADVANCEMENT = "finalize_advancement", "核定晋级名单"
+        FINALIZE_RULESET = "finalize_ruleset", "核定冻结赛制"
         UPDATE_PERMISSION = "update_permission", "修改用户权限"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
         UNARCHIVE_ACTIVITY = "unarchive_activity", "解归档活动"
