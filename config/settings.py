@@ -8,6 +8,7 @@ from config.runtime import (
     get_app_env,
     get_bool,
     get_csv,
+    get_int,
     load_environment,
     validate_production_environment,
 )
@@ -132,6 +133,11 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
+
+# Formalities that don't need a performer-sourced video on the first round.
+# Above this many MiB, a PERFORMANCE_VIDEO / BACKGROUND_VIDEO direct upload is
+# rejected for a FORMAL activity (test-mode activities keep the larger dev cap).
+ARTFLOW_VIDEO_UPLOAD_MAX_MB = get_int(os.environ, "ARTFLOW_VIDEO_UPLOAD_MAX_MB", 100)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -85,10 +85,12 @@
                 <label class="block text-sm font-medium text-gray-700 mb-1">伴奏文件</label>
                 <input type="file" name="accompaniment" class="text-sm">
             </div>
+            {% if video_upload_allowed %}
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">背景视频（可选）</label>
                 <input type="file" name="background_video" class="text-sm">
             </div>
+            {% endif %}
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">文字材料（可选）</label>
                 <input type="file" name="lyrics_script" class="text-sm">

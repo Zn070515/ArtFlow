@@ -9,7 +9,12 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
-from files.services import reconcile_program_material_checks, store_submission_file, validate_upload
+from files.services import (
+    large_video_upload_allowed,
+    reconcile_program_material_checks,
+    store_submission_file,
+    validate_upload,
+)
 
 from .models import Program
 
@@ -22,6 +27,7 @@ def apply_view(request):
     )
     if not request.user.is_staff_or_admin:
         activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    video_upload_allowed = any(large_video_upload_allowed(activity) for activity in activities)
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         ensure_activity_unlocked(activity)
@@ -36,14 +42,18 @@ def apply_view(request):
             uploaded_file = request.FILES.get(field_name)
             if uploaded_file:
                 try:
-                    validate_upload(uploaded_file, purpose)
+                    validate_upload(uploaded_file, purpose, activity=activity)
                 except ValidationError as error:
                     errors.extend(error.messages)
         if errors:
             return render(
                 request,
                 "farewell_show/apply.html",
-                {"activities": activities, "errors": errors},
+                {
+                    "activities": activities,
+                    "errors": errors,
+                    "video_upload_allowed": video_upload_allowed,
+                },
             )
         with transaction.atomic():
             activity = lock_activity_for_action(activity, ActivityAction.SUBMIT_REGISTRATION)
@@ -82,7 +92,11 @@ def apply_view(request):
                 new_value="submitted",
             )
         return redirect("farewell_show:my_program")
-    return render(request, "farewell_show/apply.html", {"activities": activities})
+    return render(
+        request,
+        "farewell_show/apply.html",
+        {"activities": activities, "video_upload_allowed": video_upload_allowed},
+    )
 
 
 PROGRAM_EDITABLE_FIELDS = (
@@ -161,6 +175,13 @@ def my_program_detail(request, pk):
             errors.extend(error.messages)
         if not errors:
             return redirect("farewell_show:my_program_detail", pk=prog.pk)
+    file_purposes = SubmissionFile.Purpose.choices
+    if prog.activity.data_lifecycle == Activity.DataLifecycle.FORMAL:
+        video_values = {
+            SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+            SubmissionFile.Purpose.BACKGROUND_VIDEO,
+        }
+        file_purposes = [choice for choice in file_purposes if choice[0] not in video_values]
     return render(
         request,
         "farewell_show/my_program.html",
@@ -169,7 +190,7 @@ def my_program_detail(request, pk):
             "can_edit": _participant_can_edit(prog),
             "files": prog.files.all(),
             "checks": prog.material_checks.all(),
-            "file_purposes": SubmissionFile.Purpose.choices,
+            "file_purposes": file_purposes,
             "program_types": Program.ProgramType.choices,
             "errors": errors,
         },

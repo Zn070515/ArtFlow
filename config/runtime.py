@@ -45,6 +45,16 @@ def get_csv(env: Mapping[str, str], name: str, default: str = "") -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def get_int(env: Mapping[str, str], name: str, default: int) -> int:
+    value = env.get(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value.strip())
+    except ValueError as error:
+        raise ImproperlyConfigured(f"{name} must be an integer value.") from error
+
+
 def is_placeholder_value(value: str) -> bool:
     normalized_value = value.strip().lower()
     return (

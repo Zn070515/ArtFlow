@@ -9,7 +9,12 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
-from files.services import reconcile_singer_material_checks, store_submission_file, validate_upload
+from files.services import (
+    large_video_upload_allowed,
+    reconcile_singer_material_checks,
+    store_submission_file,
+    validate_upload,
+)
 
 from .models import SingerRegistration
 
@@ -22,6 +27,10 @@ def apply_view(request):
     )
     if not request.user.is_staff_or_admin:
         activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    # Only offer a performer-sourced video upload when the page shows a non-formal
+    # activity. The public apply path filters to FORMAL activities, so participants
+    # never see the field; staff previewing test data still can.
+    video_upload_allowed = any(large_video_upload_allowed(activity) for activity in activities)
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         ensure_activity_unlocked(activity)
@@ -34,14 +43,18 @@ def apply_view(request):
         for uploaded_file, purpose in uploads:
             if uploaded_file:
                 try:
-                    validate_upload(uploaded_file, purpose)
+                    validate_upload(uploaded_file, purpose, activity=activity)
                 except ValidationError as error:
                     errors.extend(error.messages)
         if errors:
             return render(
                 request,
                 "singer_contest/apply.html",
-                {"activities": activities, "errors": errors},
+                {
+                    "activities": activities,
+                    "errors": errors,
+                    "video_upload_allowed": video_upload_allowed,
+                },
             )
         if SingerRegistration.objects.filter(activity=activity, user=request.user).exists():
             return render(
@@ -50,6 +63,7 @@ def apply_view(request):
                 {
                     "activities": activities,
                     "errors": ["您已报名该活动，请勿重复提交。"],
+                    "video_upload_allowed": video_upload_allowed,
                 },
             )
         if SingerRegistration.objects.filter(
@@ -61,6 +75,7 @@ def apply_view(request):
                 {
                     "activities": activities,
                     "errors": ["该学号已报名本活动。"],
+                    "video_upload_allowed": video_upload_allowed,
                 },
             )
         try:
@@ -116,7 +131,11 @@ def apply_view(request):
                 },
             )
         return redirect("singer_contest:my_submission")
-    return render(request, "singer_contest/apply.html", {"activities": activities})
+    return render(
+        request,
+        "singer_contest/apply.html",
+        {"activities": activities, "video_upload_allowed": video_upload_allowed},
+    )
 
 
 SINGER_EDITABLE_FIELDS = (
@@ -194,6 +213,13 @@ def my_registration_detail(request, pk):
             errors.extend(error.messages)
         if not errors:
             return redirect("singer_contest:my_registration_detail", pk=reg.pk)
+    file_purposes = SubmissionFile.Purpose.choices
+    if reg.activity.data_lifecycle == Activity.DataLifecycle.FORMAL:
+        video_values = {
+            SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+            SubmissionFile.Purpose.BACKGROUND_VIDEO,
+        }
+        file_purposes = [choice for choice in file_purposes if choice[0] not in video_values]
     return render(
         request,
         "singer_contest/my_submission.html",
@@ -202,7 +228,7 @@ def my_registration_detail(request, pk):
             "can_edit": _participant_can_edit(reg),
             "files": reg.files.all(),
             "checks": reg.material_checks.all(),
-            "file_purposes": SubmissionFile.Purpose.choices,
+            "file_purposes": file_purposes,
             "errors": errors,
         },
     )

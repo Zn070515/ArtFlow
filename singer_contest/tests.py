@@ -1919,6 +1919,38 @@ class ParticipantApplyVisibilityTests(TestCase):
         response = self.client.get(reverse("singer_contest:apply"))
         self.assertContains(response, self.testing.title)
 
+    def test_participant_apply_hides_video_field_for_formal_activity(self):
+        self.client.force_login(self.participant)
+        response = self.client.get(reverse("singer_contest:apply"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "performance_video")
+
+    def test_staff_apply_shows_video_field_for_test_activity(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("singer_contest:apply"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "performance_video")
+
+    def test_participant_apply_rejects_oversize_video_for_formal_activity(self):
+        self.client.force_login(self.participant)
+        response = self.client.post(
+            reverse("singer_contest:apply"),
+            {
+                "activity_id": str(self.formal.pk),
+                "name": "Singer",
+                "student_id": "20260001",
+                "college": "College",
+                "class_name": "Class",
+                "song_name": "Song",
+                "performance_video": SimpleUploadedFile(
+                    "clip.mp4", b"x" * (200 * 1024 * 1024), content_type="video/mp4"
+                ),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "正式活动不支持大视频直传。")
+        self.assertFalse(SingerRegistration.objects.filter(activity=self.formal).exists())
+
 
 class StageResultModelTests(TestCase):
     """Characterization of the M1-F result models (StageResult + children)."""

@@ -16,6 +16,7 @@ from singer_contest.models import SingerRegistration
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 from .services import (
     delete_submission_file,
+    large_video_upload_allowed,
     reconcile_activity_material_checks,
     reconcile_singer_material_checks,
     review_material_check,
@@ -269,6 +270,116 @@ class MaterialCheckReviewTests(TestCase):
         self.assertEqual(check.review_note, "")
 
 
+class VideoDirectUploadGateTests(TestCase):
+    """§15.6 — a FORMAL activity must not accept oversized video direct-uploads."""
+
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(username="participant", password="pass")
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _video(self, size):
+        return SimpleUploadedFile("clip.mp4", b"x" * size, content_type="video/mp4")
+
+    def test_formal_activity_rejects_oversize_video(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        upload = self._video(200 * 1024 * 1024)
+
+        with self.assertRaisesMessage(ValidationError, "正式活动不支持大视频直传。"):
+            validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
+
+    def test_formal_activity_accepts_small_video_under_cap(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        upload = self._video(1024 * 1024)
+
+        validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
+
+    def test_test_mode_activity_keeps_full_video_cap(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.TEST)
+        upload = self._video(50 * 1024 * 1024)
+
+        validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
+
+    def test_zero_cap_bans_any_video_for_formal_activity(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        with override_settings(ARTFLOW_VIDEO_UPLOAD_MAX_MB=0):
+            upload = self._video(1024)
+
+            with self.assertRaisesMessage(ValidationError, "正式活动不支持大视频直传。"):
+                validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
+
+    def test_large_video_upload_allowed_flips_with_lifecycle(self):
+        formal = Activity.objects.create(
+            title="Formal",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        test = Activity.objects.create(
+            title="Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+
+        self.assertFalse(large_video_upload_allowed(formal))
+        self.assertTrue(large_video_upload_allowed(test))
+
+    def test_store_submission_file_blocks_formal_video_upload(self):
+        activity = Activity.objects.create(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        reg = SingerRegistration.objects.create(
+            activity=activity,
+            user=self.user,
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "正式活动不支持大视频直传。"):
+            store_submission_file(
+                owner=reg,
+                uploaded_file=self._video(200 * 1024 * 1024),
+                purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+                uploaded_by=self.user,
+            )
+        self.assertFalse(SubmissionFile.objects.exists())
+
+
 class MaterialCheckReconcileTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="participant", password="pass")
@@ -290,9 +401,7 @@ class MaterialCheckReconcileTests(TestCase):
         )
 
     def test_reconcile_activity_adds_check_after_requirement_add(self):
-        reconcile_activity_material_checks(
-            self.activity, MaterialRequirement.AppliesTo.SINGER
-        )
+        reconcile_activity_material_checks(self.activity, MaterialRequirement.AppliesTo.SINGER)
         self.assertEqual(
             set(self.registration.material_checks.values_list("item_name", flat=True)),
             {"基本信息", "联系方式", "伴奏文件"},
@@ -303,9 +412,7 @@ class MaterialCheckReconcileTests(TestCase):
             item_name="往届照片",
             file_purpose=SubmissionFile.Purpose.SHOWCASE_IMAGE,
         )
-        reconcile_activity_material_checks(
-            self.activity, MaterialRequirement.AppliesTo.SINGER
-        )
+        reconcile_activity_material_checks(self.activity, MaterialRequirement.AppliesTo.SINGER)
         self.assertIn(
             "往届照片",
             set(self.registration.material_checks.values_list("item_name", flat=True)),
@@ -324,9 +431,7 @@ class MaterialCheckReconcileTests(TestCase):
             item_name="歌词",
             file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
         )
-        reconcile_activity_material_checks(
-            self.activity, MaterialRequirement.AppliesTo.SINGER
-        )
+        reconcile_activity_material_checks(self.activity, MaterialRequirement.AppliesTo.SINGER)
         self.assertEqual(
             set(self.registration.material_checks.values_list("item_name", flat=True)),
             {"伴奏", "歌词"},
@@ -336,18 +441,14 @@ class MaterialCheckReconcileTests(TestCase):
             applies_to=MaterialRequirement.AppliesTo.SINGER,
             item_name="歌词",
         ).delete()
-        reconcile_activity_material_checks(
-            self.activity, MaterialRequirement.AppliesTo.SINGER
-        )
+        reconcile_activity_material_checks(self.activity, MaterialRequirement.AppliesTo.SINGER)
         self.assertEqual(
             set(self.registration.material_checks.values_list("item_name", flat=True)),
             {"伴奏"},
         )
 
     def test_unique_constraint_rejects_duplicate_owner_item(self):
-        MaterialCheck.objects.create(
-            singer_registration=self.registration, item_name="唯一项"
-        )
+        MaterialCheck.objects.create(singer_registration=self.registration, item_name="唯一项")
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 MaterialCheck.objects.create(
