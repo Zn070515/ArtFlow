@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class ArchivePackage(models.Model):
@@ -21,6 +22,17 @@ class ArchivePackage(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "version"],
+                name="archive_unique_version_per_activity",
+            ),
+            models.UniqueConstraint(
+                fields=["activity"],
+                condition=Q(is_current=True),
+                name="archive_one_current_per_activity",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.activity.title} — 归档包 ({self.created_at:%Y-%m-%d})"
