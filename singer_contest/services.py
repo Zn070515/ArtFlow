@@ -504,10 +504,11 @@ def apply_scores(
         )
 
     recalculate_round(locked_round)
-    if changes and locked_round.status == ContestRound.Status.PREPARED:
-        locked_round.status = ContestRound.Status.SCORING
-        locked_round.save(update_fields=["status"])
     if changes:
+        if locked_round.status == ContestRound.Status.PREPARED:
+            locked_round.status = ContestRound.Status.SCORING
+        locked_round.score_version += 1
+        locked_round.save(update_fields=["status", "score_version"])
         AuditLog.objects.create(
             operator=operator,
             action_type=AuditLog.ActionType.ENTER_SCORE,
@@ -899,3 +900,100 @@ def run_ruleset(
     return persist_stage_result(
         version, activity, result, stage_key=stage_key, computed_by=computed_by
     )
+
+
+def recompute_activity_result(
+    activity,
+    computed_by,
+    *,
+    ruleset=None,
+    round_keys: Mapping[str, int] | None = None,
+) -> StageResult:
+    """Re-resolve an activity's current ruleset against its bound rounds (M1-H).
+
+    The ruleset carries the production binding: ``stage_key`` and ``round_keys``
+    (round key -> ContestRound pk). ``round_keys`` may be overridden (e.g. a test or
+    a one-off re-resolve). Returns the persisted :class:`StageResult`.
+    """
+    from ruleset.models import ContestRuleset, RulesetVersion
+
+    ruleset = ruleset or (
+        ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by("-pk").first()
+    )
+    if ruleset is None:
+        raise ValidationError("该活动尚未绑定可自动重算的赛制。")
+    raw_keys = round_keys or ruleset.round_keys or {}
+    round_ids = list(raw_keys.values())
+    rounds = {r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=activity)}
+    missing = [rid for rid in round_ids if rid not in rounds]
+    if missing:
+        raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
+    version = (
+        ruleset.versions.filter(is_current=True, status=RulesetVersion.Status.FROZEN)
+        .order_by("-version")
+        .first()
+    )
+    if version is None:
+        raise ValidationError("该赛制没有可用的当前冻结版本。")
+    bound = {key: rounds[rid] for key, rid in raw_keys.items()}
+    return run_ruleset(
+        version,
+        activity,
+        stage_key=ruleset.stage_key,
+        computed_by=computed_by,
+        round_keys=bound,
+    )
+
+
+_OUTCOME_LABELS = {
+    "direct": "直接晋级",
+    "advanced": "晋级",
+    "repechage": "复活赛",
+    "pending": "待定",
+    "eliminated": "淘汰",
+    "wildcard": "外卡",
+    "finalist": "最终晋级",
+}
+
+
+def stage_decisions_by_blocks(stage_result: StageResult) -> list[dict]:
+    """Group a stage result's decisions into handcard announcement blocks.
+
+    Uses the ruleset's ``announcement_blocks`` config (list of ``{label,
+    outcome_codes}``) when present; otherwise falls back to grouping by
+    ``outcome_code``. Decisions are ordered by ``rank`` then pk within a block
+    so a staff member can read the result card top-to-bottom.
+    """
+    decisions = list(stage_result.decisions.select_related("singer").order_by("rank", "pk"))
+    ruleset = stage_result.ruleset_version.ruleset
+    blocks_config = (ruleset.announcement_blocks or []) if ruleset else []
+    by_code: dict[str, list[StageDecision]] = {}
+    for decision in decisions:
+        by_code.setdefault(decision.outcome_code, []).append(decision)
+
+    if blocks_config:
+        blocks = []
+        consumed: set[int] = set()
+        for block in blocks_config:
+            label = block.get("label") or "公告"
+            members = []
+            for code in block.get("outcome_codes") or []:
+                for decision in by_code.get(code, []):
+                    if decision.pk not in consumed:
+                        members.append(decision)
+                        consumed.add(decision.pk)
+            if members:
+                blocks.append({"label": label, "decisions": members})
+        leftover = [d for d in decisions if d.pk not in consumed]
+        if leftover:
+            blocks.append({"label": "其他", "decisions": leftover})
+        return blocks
+
+    ordered_codes: list[str] = []
+    for decision in decisions:
+        if decision.outcome_code not in ordered_codes:
+            ordered_codes.append(decision.outcome_code)
+    return [
+        {"label": _OUTCOME_LABELS.get(code, code), "decisions": by_code[code]}
+        for code in ordered_codes
+    ]

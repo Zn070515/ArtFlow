@@ -27,6 +27,7 @@ urlpatterns = [
     path("rounds/new/", views.round_create, name="round_create"),
     path("rounds/<int:pk>/prepare/", views.round_prepare, name="round_prepare"),
     path("rounds/<int:pk>/scores/", views.round_score_entry, name="round_score_entry"),
+    path("rounds/<int:pk>/scores/api/", views.round_scores_api, name="round_scores_api"),
     path("rounds/<int:pk>/ranking/", views.round_ranking, name="round_ranking"),
     path(
         "rounds/<int:pk>/advancement/",
@@ -103,6 +104,12 @@ urlpatterns = [
     path("activity/<int:pk>/archive/", views.activity_archive, name="activity_archive"),
     path("activity/<int:pk>/unarchive/", views.activity_unarchive, name="activity_unarchive"),
     path("activity/<int:pk>/clone/", views.activity_clone, name="activity_clone"),
+    path(
+        "activity/<int:activity_id>/result-board/",
+        views.activity_result_board,
+        name="activity_result_board",
+    ),
+    path("stage-results/<int:pk>/", views.stage_result_detail, name="stage_result_detail"),
     path("audit-logs/", views.audit_log_list, name="audit_log_list"),
     path("users/", views.user_list, name="user_list"),
     path("users/<int:pk>/role/", views.user_role_update, name="user_role_update"),

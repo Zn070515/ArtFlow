@@ -2557,3 +2557,96 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
             group_of=self._group_of(),
             manual=self._manual(),
         )
+
+
+class RapidEntryServiceTests(TestCase):
+    """M1-H rapid-entry backstage: stale-edit version bump + auto re-resolve service."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="rapid-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="录分活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="r1",
+        )
+        self.singer = self._make_singer(1)
+        self.judge = Judge.objects.create(activity=self.activity, name="评委A")
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status"])
+
+    def _make_singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"rapid-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"2026m1h{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def test_apply_scores_bumps_score_version(self):
+        from .services import apply_scores
+
+        self.assertEqual(self.round.score_version, 0)
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "95"}, self.admin)
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.score_version, 1)
+        # Re-saving the same value is a no-op and must not bump again.
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "95"}, self.admin)
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.score_version, 1)
+
+    def test_recompute_activity_result_persists_ready(self):
+        import json
+
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        from .services import recompute_activity_result
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="录分规则",
+            is_test_data=True,
+            stage_key="院十佳",
+            round_keys={"r1": self.round.pk},
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        # Seed the single cell so the composite resolves (no HOLD).
+        from .services import apply_scores
+
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
+
+        stage = recompute_activity_result(self.activity, self.admin, ruleset=ruleset)
+        self.assertEqual(stage.stage_key, "院十佳")
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.ruleset_version, version)
+        self.assertEqual(stage.decisions.count(), 1)
+        decision = stage.decisions.get()
+        self.assertEqual(decision.outcome_code, "direct")

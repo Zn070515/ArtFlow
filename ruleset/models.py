@@ -71,6 +71,21 @@ class ContestRuleset(models.Model):
         related_name="derived_rulesets",
     )
     is_test_data = models.BooleanField(default=False)
+    stage_key = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Bindable stage identifier, e.g. '院十佳'; drives auto re-resolve.",
+    )
+    round_keys = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Maps a ruleset round key to a ContestRound pk, e.g. {'r1': 3, 'r2': 5}.",
+    )
+    announcement_blocks = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Handcard blocks: list of {label, outcome_codes} for the result board.",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

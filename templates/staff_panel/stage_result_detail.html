@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{{ stage.stage_key }} 手卡 — {{ activity.title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> /
+        <a href="{% url 'staff:activity_result_board' activity.pk %}" class="hover:underline">结果公示板</a> /
+        {{ stage.stage_key }}
+    </p>
+    <div class="flex items-center justify-between gap-4 mb-2">
+        <h1 class="text-2xl font-bold text-gray-900">{{ stage.stage_key }}</h1>
+        {% if stage.status == "ready" %}
+        <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1 rounded font-medium">可发布</span>
+        {% elif stage.status == "review" %}
+        <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-3 py-1 rounded font-medium">待人工核定</span>
+        {% else %}
+        <span class="text-xs bg-gray-50 border border-gray-300 text-gray-700 px-3 py-1 rounded font-medium">待齐数据</span>
+        {% endif %}
+    </div>
+    <p class="text-xs text-gray-500 mb-4">
+        {{ stage.ruleset_version.ruleset.name }} ·
+        {% if stage.created_by %}由 {{ stage.created_by }} 计算{% else %}自动计算{% endif %}
+        · {{ stage.computed_at|date:"Y-m-d H:i" }}
+    </p>
+
+    {% if stage.reasons %}
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-6">
+        <ul class="list-disc list-inside space-y-1">
+            {% for reason in stage.reasons %}<li>{{ reason }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% for block in blocks %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-5 py-2.5">
+            <h2 class="text-sm font-semibold text-gray-800">{{ block.label }}</h2>
+        </div>
+        <ul class="divide-y divide-gray-100">
+            {% for decision in block.decisions %}
+            <li class="flex items-center gap-4 px-5 py-3">
+                <span class="text-gray-400 text-xs w-6 text-right">{{ forloop.counter }}</span>
+                <span class="font-mono text-xs text-gray-400 w-10 text-right">{{ decision.rank|default:"—" }}</span>
+                <span class="font-medium text-gray-900">{{ decision.singer.name }}</span>
+                <span class="text-xs text-gray-500 truncate">{{ decision.singer.song_name }}</span>
+                <span class="ml-auto font-mono text-sm text-gray-800">{{ decision.score|floatformat:2|default:"—" }}</span>
+                {% if decision.reason %}
+                <span class="text-xs text-gray-500 max-w-xs truncate" title="{{ decision.reason }}">{{ decision.reason }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% empty %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>暂无结果条目。</p>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

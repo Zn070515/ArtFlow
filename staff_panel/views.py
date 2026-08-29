@@ -1,4 +1,5 @@
 import io
+import json
 
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
@@ -28,7 +29,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -63,6 +64,7 @@ from singer_contest.models import (
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
+    StageResult,
 )
 from singer_contest.services import (
     _active_judges,
@@ -74,6 +76,7 @@ from singer_contest.services import (
     parse_score_workbook,
     prepare_round,
     reset_round_to_draft,
+    stage_decisions_by_blocks,
     unlock_round,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
@@ -335,9 +338,7 @@ def post_edit(request, pk):
         activity_ids = sorted({a for a in (old_hint_activity_id, new_activity_id) if a is not None})
         locked_by_pk = {
             a.pk: a
-            for a in Activity.objects.select_for_update()
-            .filter(pk__in=activity_ids)
-            .order_by("pk")
+            for a in Activity.objects.select_for_update().filter(pk__in=activity_ids).order_by("pk")
         }
         if len(locked_by_pk) != len(activity_ids):
             raise Http404("关联的活动不存在。")
@@ -423,9 +424,7 @@ def singer_registration_detail(request, pk):
     errors = []
     if request.method == "POST":
         is_upload = "upload_file" in request.POST
-        action = (
-            ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
-        )
+        action = ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
         ensure_activity_action_allowed(reg.activity, action)
         with transaction.atomic():
             activity = lock_activity_for_action(reg.activity, action)
@@ -443,9 +442,7 @@ def singer_registration_detail(request, pk):
                         submission_file = store_submission_file(
                             owner=locked_reg,
                             uploaded_file=f,
-                            purpose=request.POST.get(
-                                "file_purpose", SubmissionFile.Purpose.OTHER
-                            ),
+                            purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                             uploaded_by=request.user,
                         )
                     except ValidationError as error:
@@ -528,9 +525,7 @@ def program_detail(request, pk):
     errors = []
     if request.method == "POST":
         is_upload = "upload_file" in request.POST
-        action = (
-            ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
-        )
+        action = ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
         ensure_activity_action_allowed(prog.activity, action)
         with transaction.atomic():
             activity = lock_activity_for_action(prog.activity, action)
@@ -548,9 +543,7 @@ def program_detail(request, pk):
                         submission_file = store_submission_file(
                             owner=locked_prog,
                             uploaded_file=f,
-                            purpose=request.POST.get(
-                                "file_purpose", SubmissionFile.Purpose.OTHER
-                            ),
+                            purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                             uploaded_by=request.user,
                         )
                     except ValidationError as error:
@@ -585,8 +578,7 @@ def program_detail(request, pk):
                         f"Program:{locked_prog.pk}",
                         old_value=old_value,
                         new_value=(
-                            f"status={locked_prog.status}; sort_order="
-                            f"{locked_prog.sort_order}"
+                            f"status={locked_prog.status}; sort_order={locked_prog.sort_order}"
                         ),
                     )
                     return redirect("staff:program_detail", pk=prog.pk)
@@ -696,9 +688,7 @@ def activity_material_requirement_delete(request, activity_id, pk):
     with transaction.atomic():
         locked_activity = lock_activity_for_action(activity)
         _ensure_activity_mutable(locked_activity)
-        requirement = MaterialRequirement.objects.filter(
-            pk=pk, activity=locked_activity
-        ).first()
+        requirement = MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).first()
         if requirement is not None:
             applies_to = requirement.applies_to
             requirement.delete()
@@ -920,46 +910,115 @@ def round_score_entry(request, pk):
             {"round": contest_round, "preparation_required": True},
         )
 
-    singers = _eligible_singers(contest_round)
-    judges = _active_judges(contest_round)
-    scores = {
-        (s.singer_id, s.judge_id): s.score for s in ScoreRecord.objects.filter(round=contest_round)
-    }
-
-    errors = []
-    if request.method == "POST":
-        ensure_round_unlocked(contest_round)
-        ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
-        score_values = {}
-        for singer in singers:
-            for judge in judges:
-                key = f"score_{singer.pk}_{judge.pk}"
-                value = request.POST.get(key, "").strip()
-                if value:
-                    score_values[(singer.pk, judge.pk)] = value
-        try:
-            apply_scores(contest_round, score_values, request.user)
-        except ValidationError as error:
-            errors.extend(error.messages)
-        else:
-            return redirect("staff:round_score_entry", pk=pk)
-
-    # Pre-compute score grid: list of (singer, [(judge_pk, score), ...])
-    score_grid = []
-    for singer in singers:
-        row = [(judge.pk, scores.get((singer.pk, judge.pk), "")) for judge in judges]
-        score_grid.append((singer, row))
-
     return render(
         request,
         "staff_panel/round_score_entry.html",
         {
             "round": contest_round,
-            "judges": judges,
-            "score_grid": score_grid,
-            "errors": errors,
+            "grid_payload": _round_grid_payload(contest_round),
+            "is_locked": contest_round.is_locked
+            or contest_round.status == ContestRound.Status.LOCKED,
         },
     )
+
+
+def _round_grid_payload(contest_round: ContestRound) -> dict:
+    singers = list(_eligible_singers(contest_round))
+    judges = list(_active_judges(contest_round))
+    scores = {
+        (s.singer_id, s.judge_id): str(s.score)
+        for s in ScoreRecord.objects.filter(round=contest_round)
+    }
+    grid = [
+        {
+            "singer_id": singer.pk,
+            "singer_name": singer.name,
+            "song": singer.song_name,
+            "cells": [
+                {
+                    "judge_id": judge.pk,
+                    "judge_name": judge.name,
+                    "score": scores.get((singer.pk, judge.pk), ""),
+                }
+                for judge in judges
+            ],
+        }
+        for singer in singers
+    ]
+    return {
+        "version": contest_round.score_version,
+        "matrix_complete": not missing_score_cells(contest_round),
+        "grid": grid,
+        "judges": [{"id": judge.pk, "name": judge.name} for judge in judges],
+    }
+
+
+@staff_required
+def round_scores_api(request, pk):
+    """Backstage rapid-entry endpoint (M1-H).
+
+    GET returns the current grid + ``score_version`` (the client's base version).
+    POST accepts sparse ``cells`` and ``base_version``; a version mismatch is a 409
+    (stale edit) so two staff never silently overwrite each other. When the save
+    completes the score matrix the server re-resolves the activity's bound ruleset
+    (best-effort) and reports the resulting stage status.
+    """
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+
+    if request.method == "GET":
+        return JsonResponse({**_round_grid_payload(contest_round)})
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "请求体不是有效 JSON。"}, status=400)
+    base_version = payload.get("base_version")
+    cells = payload.get("cells", [])
+    if base_version is None:
+        return JsonResponse({"detail": "缺少 base_version。"}, status=400)
+
+    score_values = {}
+    for cell in cells:
+        try:
+            singer_id = int(cell["singer_id"])
+            judge_id = int(cell["judge_id"])
+        except (KeyError, TypeError, ValueError):
+            return JsonResponse({"detail": "单元格缺少 singer_id/judge_id。"}, status=400)
+        score_values[(singer_id, judge_id)] = str(cell.get("score", "")).strip()
+
+    try:
+        with transaction.atomic():
+            locked_round = ContestRound.objects.select_for_update().get(pk=contest_round.pk)
+            if locked_round.status == ContestRound.Status.DRAFT:
+                return JsonResponse({"detail": "请先准备比赛轮次后再录入评分。"}, status=400)
+            if int(base_version) != locked_round.score_version:
+                return JsonResponse(
+                    {**_round_grid_payload(locked_round), "conflict": True}, status=409
+                )
+            try:
+                apply_scores(locked_round, score_values, request.user)
+            except ValidationError as error:
+                return JsonResponse({"detail": error.messages}, status=400)
+            locked_round.refresh_from_db()
+            matrix_complete = not missing_score_cells(locked_round)
+            resolved_status = None
+            if matrix_complete:
+                from singer_contest.services import recompute_activity_result
+
+                try:
+                    stage = recompute_activity_result(locked_round.activity, request.user)
+                except ValidationError:
+                    stage = None
+                resolved_status = stage.status if stage else None
+            return JsonResponse(
+                {
+                    "version": locked_round.score_version,
+                    "matrix_complete": matrix_complete,
+                    "resolved_status": resolved_status,
+                }
+            )
+    except PermissionDenied as error:
+        return JsonResponse({"detail": str(error)}, status=403)
 
 
 @staff_required
@@ -978,6 +1037,46 @@ def round_ranking(request, pk):
             "preparation_required": contest_round.status == ContestRound.Status.DRAFT,
             "has_missing": bool(missing_cells),
             "missing_cells": missing_cells,
+        },
+    )
+
+
+@staff_required
+def activity_result_board(request, activity_id):
+    """List the latest StageResult per stage_key with HOLD/REVIEW/READY banners (M1-H)."""
+    activity = get_object_or_404(Activity, pk=activity_id)
+    stages = []
+    seen = set()
+    for stage in (
+        StageResult.objects.filter(activity=activity)
+        .select_related("ruleset_version__ruleset", "created_by")
+        .order_by("-computed_at", "-pk")
+    ):
+        if stage.stage_key in seen:
+            continue
+        seen.add(stage.stage_key)
+        stages.append(stage)
+    return render(
+        request,
+        "staff_panel/activity_result_board.html",
+        {"activity": activity, "stages": stages},
+    )
+
+
+@staff_required
+def stage_result_detail(request, pk):
+    """Render a single stage result's decisions grouped into handcard blocks (M1-H)."""
+    stage = get_object_or_404(
+        StageResult.objects.select_related("ruleset_version__ruleset", "activity", "created_by"),
+        pk=pk,
+    )
+    return render(
+        request,
+        "staff_panel/stage_result_detail.html",
+        {
+            "stage": stage,
+            "activity": stage.activity,
+            "blocks": stage_decisions_by_blocks(stage),
         },
     )
 
