@@ -1,10 +1,13 @@
 import os
 import shutil
 import tempfile
+import threading
+import time
 import zipfile
 from datetime import timedelta
 from io import BytesIO
 from typing import Any, cast
+from unittest import skipUnless
 from unittest.mock import patch
 
 from accounts.models import User
@@ -16,8 +19,9 @@ from django import forms
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import close_old_connections, connection, transaction
 from django.http import FileResponse
-from django.test import TestCase, override_settings
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
@@ -42,6 +46,7 @@ from singer_contest.services import apply_scores, prepare_round
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
+from staff_panel.views import post_edit
 
 
 def login_admin(client, user):
@@ -3446,6 +3451,193 @@ class PublicPostMoveLockTests(TestCase):
         self.assertEqual(response.status_code, 403)
         post.refresh_from_db()
         self.assertEqual(post.related_activity_id, self.activity.pk)
+
+    def _edit_payload(self, *, related_activity_id, title="Post", status=None):
+        payload = {
+            "title": title,
+            "subtitle": "",
+            "content": "",
+            "post_type": PublicPost.PostType.NORMAL_ARTICLE,
+            "status": status or PublicPost.Status.DRAFT,
+            "sort_order": "0",
+            "related_activity_id": str(related_activity_id),
+        }
+        return payload
+
+    def test_staff_post_edit_same_parent_edit_succeeds(self):
+        post = PublicPost.objects.create(
+            title="Post", related_activity=self.activity, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_edit", args=[post.pk]),
+            self._edit_payload(related_activity_id=self.activity.pk, title="Updated"),
+        )
+        self.assertEqual(response.status_code, 302)
+        post.refresh_from_db()
+        self.assertEqual(post.title, "Updated")
+        self.assertEqual(post.related_activity_id, self.activity.pk)
+
+    def test_staff_post_edit_reparent_succeeds(self):
+        target = Activity.objects.create(
+            title="B",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=False,
+        )
+        post = PublicPost.objects.create(
+            title="Post", related_activity=self.activity, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_edit", args=[post.pk]),
+            self._edit_payload(related_activity_id=target.pk),
+        )
+        self.assertEqual(response.status_code, 302)
+        post.refresh_from_db()
+        self.assertEqual(post.related_activity_id, target.pk)
+
+    def test_staff_post_edit_cannot_move_to_locked_activity(self):
+        target = Activity.objects.create(
+            title="B",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        target.is_locked = True
+        target.save()
+        post = PublicPost.objects.create(
+            title="Post", related_activity=self.activity, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:post_edit", args=[post.pk]),
+            self._edit_payload(related_activity_id=target.pk),
+        )
+        self.assertEqual(response.status_code, 403)
+        post.refresh_from_db()
+        self.assertEqual(post.related_activity_id, self.activity.pk)
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class PublicPostReparentConcurrencyTests(TransactionTestCase):
+    """M0-X: a stale reparent must never bypass the current parent's authority."""
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="reparent-staff", password="pass", role=User.Role.STAFF
+        )
+        self.a = Activity.objects.create(
+            title="A",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.b = Activity.objects.create(
+            title="B",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.c = Activity.objects.create(
+            title="C",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.post = PublicPost.objects.create(
+            title="Post", related_activity=self.a, created_by=self.staff
+        )
+
+    def _reparent_request(self, target_id):
+        return RequestFactory().post(
+            "/x",
+            {
+                "title": "Post",
+                "subtitle": "",
+                "content": "",
+                "post_type": PublicPost.PostType.NORMAL_ARTICLE,
+                "status": PublicPost.Status.DRAFT,
+                "sort_order": "0",
+                "related_activity_id": str(target_id),
+            },
+        )
+
+    def _run_stale_reparent(self):
+        """T2: attempt a reparent off a stale hint (A) while the post lock is held.
+
+        The holder thread commits A->B under the post row lock and only releases
+        after T2 is already blocked on that same row, so T2's pre-lock hint is
+        guaranteed to be the stale A.
+        """
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def commit_reparent_to_b():
+            try:
+                with transaction.atomic():
+                    locked_post = PublicPost.objects.select_for_update().get(pk=self.post.pk)
+                    locked_post.related_activity_id = self.b.pk
+                    locked_post.save(update_fields=["related_activity_id"])
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=commit_reparent_to_b)
+        holder.start()
+        self.assertTrue(lock_held.wait(timeout=10))
+
+        t2_result: dict[str, object] = {}
+
+        def try_stale_reparent():
+            close_old_connections()
+            try:
+                request = self._reparent_request(self.c.pk)
+                request.user = self.staff
+                post_edit(request, self.post.pk)
+                t2_result["done"] = True
+            except PermissionDenied as error:
+                t2_result["rejected"] = str(error)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                t2_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        t2 = threading.Thread(target=try_stale_reparent)
+        t2.start()
+        time.sleep(1)  # let T2 read the stale hint (A) and block on the post row
+        release_lock.set()
+        holder.join(timeout=10)
+        t2.join(timeout=10)
+        return holder_error, t2_result
+
+    def test_stale_reparent_rejected_and_final_parent_holds(self):
+        # T1 moves A->B; T2, based on a stale A->C attempt, must be rejected.
+        holder_error, t2_result = self._run_stale_reparent()
+        self.assertFalse(holder_error, holder_error)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.related_activity_id, self.b.pk)
+        self.assertNotIn("done", t2_result, t2_result)
+        self.assertIn("rejected", t2_result, t2_result)
+
+    def test_stale_reparent_cannot_bypass_locked_new_parent(self):
+        # After T1 A->B, B is locked. A stale T2 must not bypass B's lock to move
+        # to C: it never locks B, so only the stale-parent check can refuse it.
+        self.b.is_locked = True
+        self.b.save()
+        holder_error, t2_result = self._run_stale_reparent()
+        self.assertFalse(holder_error, holder_error)
+        self.post.refresh_from_db()
+        self.b.refresh_from_db()
+        self.assertEqual(self.post.related_activity_id, self.b.pk)
+        self.assertTrue(self.b.is_locked)
+        self.assertNotIn("done", t2_result, t2_result)
+        self.assertIn("rejected", t2_result, t2_result)
 
 
 class PublicPortalPublicationTests(TestCase):

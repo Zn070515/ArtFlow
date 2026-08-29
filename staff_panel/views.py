@@ -29,7 +29,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Count
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -326,54 +326,61 @@ def post_edit(request, pk):
                 },
             )
         data = form.cleaned_data
+        old_hint_activity_id = post.related_activity_id
+        new_activity_id = data["related_activity_id"]
         old_value = f"status={post.status}; title={post.title}"
-        old_activity = post.related_activity
-        new_activity = None
-        if data["related_activity_id"]:
-            new_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
         # A reparent touches up to two activities; lock both in stable ascending
         # PK order so two concurrent reparents cannot deadlock on opposite order.
-        activity_ids = sorted({a.pk for a in (old_activity, new_activity) if a is not None})
+        activity_ids = sorted({a for a in (old_hint_activity_id, new_activity_id) if a is not None})
         locked_by_pk = {
             a.pk: a
             for a in Activity.objects.select_for_update()
             .filter(pk__in=activity_ids)
             .order_by("pk")
         }
-        old_locked = locked_by_pk.get(old_activity.pk) if old_activity else None
-        new_locked = locked_by_pk.get(new_activity.pk) if new_activity else None
+        if len(locked_by_pk) != len(activity_ids):
+            raise Http404("关联的活动不存在。")
+        # Lock the post too; its current parent is the authority, not the
+        # pre-lock hint. If a reparent committed between our hint read and this
+        # lock the row no longer matches — reject rather than chase a newly
+        # revealed parent, which would break the stable Activity→PublicPost order.
+        locked_post = PublicPost.objects.select_for_update().get(pk=post.pk)
+        if locked_post.related_activity_id != old_hint_activity_id:
+            raise PermissionDenied("页面内容已发生并发修改，请刷新后重新编辑。")
+        old_locked = locked_by_pk.get(old_hint_activity_id) if old_hint_activity_id else None
+        new_locked = locked_by_pk.get(new_activity_id) if new_activity_id else None
         # A move from a locked activity to an unlocked one must still be blocked;
         # checking only the new activity would let staff bypass the old lock.
         for locked_activity in (old_locked, new_locked):
             if locked_activity is not None:
                 ensure_activity_unlocked(locked_activity)
         _ensure_publication_allowed(new_locked, data["status"])
-        post.title = data["title"]
-        post.subtitle = data["subtitle"]
-        post.content = data["content"]
-        post.post_type = data["post_type"]
-        old_status = post.status
-        post.status = data["status"]
-        post.sort_order = data["sort_order"]
-        post.is_pinned = data["is_pinned"]
-        post.related_activity_id = data["related_activity_id"]
-        post.updated_by = request.user
+        locked_post.title = data["title"]
+        locked_post.subtitle = data["subtitle"]
+        locked_post.content = data["content"]
+        locked_post.post_type = data["post_type"]
+        old_status = locked_post.status
+        locked_post.status = data["status"]
+        locked_post.sort_order = data["sort_order"]
+        locked_post.is_pinned = data["is_pinned"]
+        locked_post.related_activity_id = data["related_activity_id"]
+        locked_post.updated_by = request.user
         if request.FILES.get("cover_image"):
-            post.cover_image = request.FILES["cover_image"]
-        if data["status"] == PublicPost.Status.PUBLISHED and not post.published_at:
-            post.published_at = timezone.now()
+            locked_post.cover_image = request.FILES["cover_image"]
+        if data["status"] == PublicPost.Status.PUBLISHED and not locked_post.published_at:
+            locked_post.published_at = timezone.now()
         elif (
             data["status"] != PublicPost.Status.PUBLISHED
             and old_status == PublicPost.Status.PUBLISHED
         ):
-            post.published_at = None
-        post.save()
+            locked_post.published_at = None
+        locked_post.save()
         log_action(
             request,
             AuditLog.ActionType.PUBLISH_POST,
-            f"PublicPost:{post.pk}",
+            f"PublicPost:{locked_post.pk}",
             old_value=old_value,
-            new_value=f"status={post.status}; title={post.title}",
+            new_value=f"status={locked_post.status}; title={locked_post.title}",
         )
         return redirect("staff:post_list")
 
