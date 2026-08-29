@@ -4286,3 +4286,197 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertContains(response, "assess_r1")
         self.assertContains(response, "AGGREGATE")
         self.assertContains(response, "节点")
+
+
+def _acceptance_definition_json():
+    """院十佳2026 walkthrough: 16人 R1 40% R2 60% → Top12 → fin Top6."""
+    import json
+
+    from ruleset.schema import ENTRY_KEY
+
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                {
+                    "key": "stage1",
+                    "type": "AGGREGATE",
+                    "within": ENTRY_KEY,
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.4},
+                            {"source": "assess_r2", "weight": 0.6},
+                        ],
+                    },
+                },
+                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
+                {"key": "top12", "type": "SELECT", "source": "rank1", "count": 12},
+                {"key": "assess_r3", "type": "ASSESS", "source": "top12", "round": "r3"},
+                {
+                    "key": "fin",
+                    "type": "AGGREGATE",
+                    "within": "top12",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "stage1", "weight": 0.5},
+                            {"source": "assess_r3", "weight": 0.5},
+                        ],
+                    },
+                },
+                {"key": "rank2", "type": "RANK", "source": "fin", "descending": True},
+                {"key": "top6", "type": "SELECT", "source": "rank2", "count": 6},
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _invalid_definition_json():
+    """Parse-valid but compiles with an ERROR (AGGREGATE weights sum to 0.9)."""
+    import json
+
+    from ruleset.schema import ENTRY_KEY
+
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                {
+                    "key": "comp",
+                    "type": "AGGREGATE",
+                    "within": ENTRY_KEY,
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.5},
+                            {"source": "assess_r2", "weight": 0.4},
+                        ],
+                    },
+                },
+                {"key": "rank", "type": "RANK", "source": "comp", "descending": True},
+                {"key": "top", "type": "SELECT", "source": "rank", "count": 5},
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+class RulesetEditorTests(TestCase):
+    def setUp(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        self.admin = User.objects.create_user(
+            username="editor-admin",
+            password="pass",
+            role=User.Role.ADMIN,
+        )
+        self.activity = Activity.objects.create(
+            title="院十佳2026",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.admin)
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="院十佳2026规则",
+            is_test_data=True,
+            created_by=self.admin,
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=_acceptance_definition_json(),
+            created_by=self.admin,
+        )
+
+    def _nodes(self):
+        import json
+
+        self.version.refresh_from_db()
+        return json.loads(self.version.definition)["nodes"]
+
+    def test_contest_ruleset_create_creates_version_and_redirects(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        response = self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "新赛制2026"},
+        )
+        created = RulesetVersion.objects.get(ruleset__name="新赛制2026")
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[created.pk]))
+        self.assertEqual(ContestRuleset.objects.filter(name="新赛制2026").count(), 1)
+        self.assertEqual(created.status, "draft")
+
+    def test_editor_validate_clean_on_acceptance_definition(self):
+        response = self.client.post(reverse("staff:ruleset_validate", args=[self.version.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "校验通过")
+
+    def test_editor_preview_shows_candidate_pool_sizes(self):
+        response = self.client.post(reverse("staff:ruleset_preview", args=[self.version.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "READY")
+        self.assertContains(response, "候选池规模")
+
+    def test_editor_add_node_roundtrips(self):
+        before = len(self._nodes())
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "add", "new_type": "ASSESS"},
+        )
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        nodes = self._nodes()
+        self.assertEqual(len(nodes), before + 1)
+        self.assertEqual(nodes[-1]["type"], "ASSESS")
+
+    def test_editor_move_node_reorders(self):
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "move_up", "key": "assess_r2"},
+        )
+        self.assertEqual(response.status_code, 302)
+        keys = [n["key"] for n in self._nodes()]
+        self.assertLess(keys.index("assess_r2"), keys.index("assess_r1"))
+
+    def test_editor_delete_node_removes(self):
+        before = len(self._nodes())
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "delete", "key": "top6"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(self._nodes()), before - 1)
+
+    def test_editor_refuses_frozen_version_edit(self):
+        self.version.status = "frozen"
+        self.version.save(update_fields=["status"])
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_freeze_refuses_invalid_and_accepts_valid(self):
+        from ruleset.models import RulesetVersion
+
+        invalid = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=_invalid_definition_json(),
+            version=99,
+            is_current=False,
+            created_by=self.admin,
+        )
+        response = self.client.post(reverse("staff:ruleset_freeze", args=[invalid.pk]))
+        self.assertEqual(response.status_code, 302)
+        invalid.refresh_from_db()
+        self.assertEqual(invalid.status, "draft")
+
+        response = self.client.post(reverse("staff:ruleset_freeze", args=[self.version.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.version.refresh_from_db()
+        self.assertEqual(self.version.status, "frozen")
+        self.assertTrue(self.version.is_current)
+        self.assertTrue(self.version.execution_plan)

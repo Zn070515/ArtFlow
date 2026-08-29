@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}新建赛制 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> / 新建赛制
+    </p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">新建赛制</h1>
+
+    <form method="post" class="space-y-4">
+        {% csrf_token %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">所属活动</label>
+            <select name="activity" required class="w-full border border-gray-300 rounded px-3 py-2">
+                {% for activity in activities %}
+                <option value="{{ activity.pk }}">{{ activity.title }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">赛制名称</label>
+            <input name="name" required class="w-full border border-gray-300 rounded px-3 py-2">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">来源模板（可选）</label>
+            <select name="template" class="w-full border border-gray-300 rounded px-3 py-2">
+                <option value="">（从空白开始）</option>
+                {% for template in templates %}
+                <option value="{{ template.pk }}">{{ template.name }}（v{{ template.schema_version }}）</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="bg-brand text-white px-4 py-2 rounded">创建并进入编辑</button>
+    </form>
+</div>
+{% endblock %}

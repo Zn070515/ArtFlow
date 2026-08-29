@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}预览 — 赛制 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">返回编辑</a> / 预览
+    </p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">{{ version.ruleset }}</h1>
+
+    <div class="mb-4 text-sm px-3 py-2 rounded bg-emerald-50 border border-emerald-300 text-emerald-800">
+        解析状态：<span class="font-mono font-semibold">{{ status|upper }}</span>
+    </div>
+
+    {% if not passes %}
+    <div class="mb-4 text-sm px-3 py-2 rounded bg-amber-50 border border-amber-300 text-amber-800">存在校验问题（仍展示可计算部分）。</div>
+    {% endif %}
+
+    {% if summary %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">候选池规模</div>
+        <ul class="divide-y divide-gray-100">
+            {% for key, size in summary.candidate_pool_sizes.items %}
+            <li class="px-4 py-2 text-sm"><span class="font-mono">{{ key }}</span>：{{ size }} 人</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if decisions %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">结果预览（前 20）</div>
+        <ol class="divide-y divide-gray-100">
+            {% for decision in decisions %}
+            <li class="px-4 py-2 text-sm flex items-center gap-3">
+                <span class="text-gray-400 text-xs w-6 text-right">{{ forloop.counter }}</span>
+                <span class="font-mono text-gray-900">{{ decision.contestant }}</span>
+                <span class="text-xs bg-brand border border-brand/20 text-brand px-2 py-0.5 rounded">{{ decision.outcome_code }}</span>
+                {% if decision.rank %}<span class="text-xs text-gray-400">第 {{ decision.rank }} 名</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ol>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

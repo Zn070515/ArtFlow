@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}赛制编辑 — {{ ruleset.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> / 赛制编辑
+    </p>
+    <div class="flex items-center justify-between gap-4 mb-2">
+        <h1 class="text-2xl font-bold text-gray-900">{{ ruleset.name }}</h1>
+        <span class="text-xs bg-gray-50 border border-gray-300 text-gray-600 px-3 py-1 rounded font-medium">
+            v{{ version.version }} · {{ version.get_status_display }}
+        </span>
+    </div>
+    <p class="text-sm text-gray-500 mb-4">
+        <a href="{% url 'staff:activity_list' %}" class="hover:underline">{{ ruleset.activity.title }}</a>
+    </p>
+
+    <div class="flex items-center gap-3 mb-6">
+        <form method="post" action="{% url 'staff:ruleset_validate' version.pk %}">
+            {% csrf_token %}<button class="border border-gray-300 px-3 py-1.5 rounded text-sm">校验</button>
+        </form>
+        <form method="post" action="{% url 'staff:ruleset_preview' version.pk %}">
+            {% csrf_token %}<button class="border border-gray-300 px-3 py-1.5 rounded text-sm">预览</button>
+        </form>
+        <form method="post" action="{% url 'staff:ruleset_freeze' version.pk %}"
+              onsubmit="return confirm('确认冻结该赛制？冻结后不可编辑。');">
+            {% csrf_token %}<button class="bg-brand text-white px-3 py-1.5 rounded text-sm">冻结</button>
+        </form>
+    </div>
+
+    {% for message in messages %}
+    <div class="mb-3 text-sm px-3 py-2 rounded border
+        {% if message.tags == 'error' %}bg-red-50 border-red-300 text-red-800{% else %}bg-emerald-50 border-emerald-300 text-emerald-800{% endif %}">
+        {{ message }}
+    </div>
+    {% endfor %}
+
+    <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
+        {% csrf_token %}
+        <input type="hidden" name="node_order"
+               value="{% for card in cards %}node_{{ card.index }}{% if not forloop.last %},{% endif %}{% endfor %}">
+        {% for card in cards %}
+        <div class="bg-white border border-gray-200 rounded-lg mb-3 overflow-hidden">
+            <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center justify-between">
+                <span class="font-mono text-sm font-medium">{{ card.node.key }}</span>
+                <span class="text-xs bg-brand border border-brand/20 text-brand px-2 py-0.5 rounded">{{ card.type }}</span>
+            </div>
+            <div class="px-4 py-3">
+                <input type="hidden" name="node_{{ card.index }}_key" value="{{ card.node.key }}">
+                <input type="hidden" name="node_{{ card.index }}_type" value="{{ card.type }}">
+                <div class="grid sm:grid-cols-2 gap-3">
+                    {% for f in card.fields %}
+                        {% if f.kind == "select" %}
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</label>
+                            <select name="{{ f.name }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                {% for opt in f.options %}<option value="{{ opt }}" {% if f.value == opt %}selected{% endif %}>{{ opt }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        {% elif f.kind == "text" %}
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</label>
+                            <input name="{{ f.name }}" value="{{ f.value }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                        </div>
+                        {% elif f.kind == "checkbox" %}
+                        <div class="flex items-center gap-2 pt-5">
+                            <input type="checkbox" name="{{ f.name }}" value="1" {% if f.value %}checked{% endif %} class="rounded border-gray-300">
+                            <span class="text-xs text-gray-600">{{ f.label }}</span>
+                        </div>
+                        {% elif f.kind == "json" %}
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}（JSON）</label>
+                            <textarea name="{{ f.name }}" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ f.value }}</textarea>
+                        </div>
+                        {% elif f.kind == "aggregate" %}
+                        <div class="sm:col-span-2">
+                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</label>
+                            <input type="hidden" name="node_{{ f.index }}_aggregate_type" value="{{ f.aggregate_type }}">
+                            {% for comp in f.components %}
+                            <div class="flex items-center gap-2 mb-1">
+                                <input name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_source"
+                                       value="{{ comp.source }}" placeholder="来源节点"
+                                       class="border border-gray-300 rounded px-2 py-1 text-sm flex-1">
+                                <input name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_weight"
+                                       value="{{ comp.weight }}" placeholder="权重"
+                                       class="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right">
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">该赛制没有节点。</div>
+        {% endfor %}
+        <button class="bg-brand text-white px-4 py-2 rounded">保存全部</button>
+    </form>
+
+    <div class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">节点操作与新增</div>
+        <div class="px-4 py-3 space-y-2">
+            {% for card in cards %}
+            <div class="flex items-center gap-3 text-sm">
+                <span class="font-mono text-gray-700 w-28">{{ card.node.key }}</span>
+                <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
+                    {% csrf_token %}<input type="hidden" name="action" value="move_up"><input type="hidden" name="key" value="{{ card.node.key }}">
+                    <button class="text-xs text-gray-600 border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">上移</button>
+                </form>
+                <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
+                    {% csrf_token %}<input type="hidden" name="action" value="move_down"><input type="hidden" name="key" value="{{ card.node.key }}">
+                    <button class="text-xs text-gray-600 border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">下移</button>
+                </form>
+                <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" onsubmit="return confirm('确认删除节点 {{ card.node.key }}？');">
+                    {% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{ card.node.key }}">
+                    <button class="text-xs text-red-600 border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">删除</button>
+                </form>
+            </div>
+            {% endfor %}
+            <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" class="flex items-center gap-2 pt-2">
+                {% csrf_token %}<input type="hidden" name="action" value="add">
+                <select name="new_type" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
+                    {% for t in node_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                </select>
+                <button class="border border-gray-300 px-3 py-1.5 rounded text-sm">新增节点</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -36,6 +36,10 @@
             <h3 class="font-medium text-gray-900">奖项管理</h3>
             <p class="mt-1 text-sm text-gray-500">为选手颁发奖项</p>
         </a>
+        <a href="{% url 'staff:contest_ruleset_create' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">赛制编辑</h3>
+            <p class="mt-1 text-sm text-gray-500">新建/编辑赛制、校验、预览、冻结</p>
+        </a>
         <a href="{% url 'staff:ruleset_template_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
             <h3 class="font-medium text-gray-900">赛制模板库</h3>
             <p class="mt-1 text-sm text-gray-500">浏览赛制模板、查看晋级节点图</p>

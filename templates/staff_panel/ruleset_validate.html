@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}校验结果 — 赛制 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">返回编辑</a> / 校验结果
+    </p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">{{ version.ruleset }}</h1>
+
+    {% if passes %}
+    <div class="mb-4 text-sm px-3 py-2 rounded bg-emerald-50 border border-emerald-300 text-emerald-800">校验通过</div>
+    {% else %}
+    <div class="mb-4 text-sm px-3 py-2 rounded bg-red-50 border border-red-300 text-red-800">存在错误，无法冻结。</div>
+    {% endif %}
+
+    {% if issues %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">校验问题（{{ issues|length }}）</div>
+        <ul class="divide-y divide-gray-100">
+            {% for issue in issues %}
+            <li class="px-4 py-2 text-sm">
+                <span class="text-xs font-mono border px-1.5 py-0.5 mr-1 rounded
+                    {% if issue.severity == 'error' %}bg-red-50 text-red-700{% else %}bg-amber-50 text-amber-700{% endif %}">
+                    {{ issue.severity }}
+                </span>
+                <span class="font-mono text-gray-700">{{ issue.code }}</span>
+                <span class="text-gray-600">— {{ issue.message }}</span>
+                {% if issue.node_key %}<span class="text-gray-400 text-xs">（{{ issue.node_key }}）</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if summary %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">候选池规模</div>
+        <ul class="divide-y divide-gray-100">
+            {% for key, size in summary.candidate_pool_sizes.items %}
+            <li class="px-4 py-2 text-sm"><span class="font-mono">{{ key }}</span>：{{ size }} 人</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
