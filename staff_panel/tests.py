@@ -1531,7 +1531,7 @@ class StaffPanelSmokeTests(TestCase):
         activity = Activity.objects.create(
             title="Archive Ready Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.RESULTS_PUBLISHED,
+            phase=Activity.Phase.REHEARSAL,
             is_test_mode=False,
         )
         singer = SingerRegistration.objects.create(
@@ -1553,6 +1553,8 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=1,
         )
         prepare_round(contest_round, self.staff)
+        activity.phase = Activity.Phase.RESULTS_PUBLISHED
+        activity.save(update_fields=["phase"])
         locked_round = ContestRound.objects.get(pk=contest_round.pk)
         ScoreRecord.objects.create(round=locked_round, singer=singer, judge=judge, score=95)
         locked_round.status = ContestRound.Status.LOCKED
@@ -1653,7 +1655,7 @@ class StaffPanelSmokeTests(TestCase):
         activity = Activity.objects.create(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.RESULTS_PUBLISHED,
+            phase=Activity.Phase.REHEARSAL,
             is_test_mode=False,
         )
         SingerRegistration.objects.create(
@@ -1675,6 +1677,8 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=1,
         )
         prepare_round(contest_round, self.staff)
+        activity.phase = Activity.Phase.RESULTS_PUBLISHED
+        activity.save(update_fields=["phase"])
         with self.assertRaises(PermissionDenied):
             archive_activity(activity, self.admin)
 
@@ -2997,21 +3001,19 @@ class ActivityPhaseViewEnforcementTests(TestCase):
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
-        registration = self._approved_registration(activity)
-        judge = Judge.objects.create(activity=activity, name="Judge A")
+        self._approved_registration(activity)
+        Judge.objects.create(activity=activity, name="Judge A")
         round_ = ContestRound.objects.create(
             activity=activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             scoring_mode=ContestRound.ScoringMode.AVERAGE,
         )
-        prepare_round(round_, self.staff)
-        self.client.force_login(self.staff)
-        self.client.raise_request_exception = False
-        response = self.client.post(
-            reverse("staff:round_score_entry", args=[round_.pk]),
-            {f"score_{registration.pk}_{judge.pk}": "90"},
-        )
-        self.assertEqual(response.status_code, 403)
+        with self.assertRaises(PermissionDenied):
+            prepare_round(round_, self.staff)
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.DRAFT)
+        self.assertEqual(round_.entries.count(), 0)
+        self.assertEqual(round_.round_judges.count(), 0)
 
     def test_archived_activity_cannot_review_registration(self):
         activity = Activity.objects.create(

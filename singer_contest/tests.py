@@ -1294,10 +1294,28 @@ class RoundLockTOCTOUTests(TestCase):
     def test_prepare_round_rejects_locked_activity(self):
         self.activity.is_locked = True
         self.activity.save(update_fields=["is_locked"])
-        with self.assertRaisesMessage(PermissionDenied, "活动结果已锁定，无法准备轮次。"):
+        with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
             prepare_round(self.round, self.user)
         self.round.refresh_from_db()
         self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+
+    def test_prepare_round_rejects_phase_without_score_authority(self):
+        # M0-W: prepare_round must be its own authority — it re-checks the SCORE
+        # action policy after acquiring the Activity lock, not before.
+        self.activity.phase = Activity.Phase.DRAFT
+        self.activity.save(update_fields=["phase"])
+        with self.assertRaises(PermissionDenied):
+            prepare_round(self.round, self.user)
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+        self.assertEqual(self.round.entries.count(), 0)
+        self.assertEqual(self.round.round_judges.count(), 0)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UPDATE_STATUS,
+                target=f"ContestRound:{self.round.pk}",
+            ).exists()
+        )
 
     def test_reset_round_to_draft_rejects_locked_activity(self):
         self.round.status = ContestRound.Status.PREPARED
@@ -1438,6 +1456,89 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
             orphan,
             "a PREPARED downstream round cannot coexist with an unlocked upstream",
         )
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
+    """M0-W: a no-SCORE phase commit must prevent prepare_round from landing."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="prepare-actor", password="pass")
+        self.activity = Activity.objects.create(
+            title="Prepared Score Authority",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="prepare-singer", password="pass"),
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.activity, name="Judge", is_active=True)
+
+    def test_prepare_never_lands_after_no_score_phase_commits(self):
+        phased_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def transition_to_no_score_phase():
+            try:
+                with transaction.atomic():
+                    activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    activity.phase = Activity.Phase.REVIEWING
+                    activity.save(update_fields=["phase"])
+                    phased_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=transition_to_no_score_phase)
+        holder.start()
+        self.assertTrue(phased_held.wait(timeout=10))
+
+        prepare_result: dict[str, object] = {}
+
+        def try_prepare():
+            close_old_connections()
+            try:
+                prepare_round(self.round, self.user)
+                prepare_result["done"] = True
+            except PermissionDenied as error:
+                prepare_result["rejected"] = str(error)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                prepare_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        worker = threading.Thread(target=try_prepare)
+        worker.start()
+        time.sleep(1)  # let the worker block on the Activity row lock
+        release_lock.set()
+        holder.join(timeout=10)
+        worker.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        self.round.refresh_from_db()
+        self.assertEqual(self.activity.phase, Activity.Phase.REVIEWING)
+        self.assertNotIn("done", prepare_result, prepare_result)
+        self.assertIn("rejected", prepare_result, prepare_result)
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+        self.assertEqual(self.round.entries.count(), 0)
+        self.assertEqual(self.round.round_judges.count(), 0)
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

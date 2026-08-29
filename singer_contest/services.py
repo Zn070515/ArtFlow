@@ -36,12 +36,12 @@ def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
 
 @transaction.atomic
 def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
-    lock_activity_for_runtime_data(contest_round.activity)
+    locked_activity = lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
-    if locked_round.activity.is_locked:
-        raise PermissionDenied("活动结果已锁定，无法准备轮次。")
+    if locked_round.activity_id != locked_activity.pk:
+        raise PermissionDenied("轮次不属于当前活动。")
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
 
