@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -5,6 +6,7 @@ import threading
 import time
 import zipfile
 from datetime import timedelta
+from decimal import Decimal
 from io import BytesIO
 from typing import Any, cast
 from unittest import skipUnless
@@ -45,8 +47,10 @@ from singer_contest.models import (
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
+    StageDecision,
+    StageResult,
 )
-from singer_contest.services import apply_scores, prepare_round
+from singer_contest.services import apply_scores, prepare_round, stage_decisions_by_blocks
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
@@ -375,12 +379,22 @@ class StaffPanelSmokeTests(TestCase):
         prepare_round(round_, self.staff)
         self.client.force_login(self.staff)
         response = self.client.post(
-            reverse("staff:round_score_entry", args=[round_.pk]),
-            {
-                f"score_{registration.pk}_{judge.pk}": "91",
-            },
+            reverse("staff:round_scores_api", args=[round_.pk]),
+            data=json.dumps(
+                {
+                    "base_version": 0,
+                    "cells": [
+                        {
+                            "singer_id": registration.pk,
+                            "judge_id": judge.pk,
+                            "score": "91",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(ScoreSummary.objects.get(round=round_, singer=registration).rank, 1)
 
         vote_session = VoteSession.objects.create(
@@ -790,10 +804,20 @@ class StaffPanelSmokeTests(TestCase):
         self.singer_activity.save(update_fields=["is_locked"])
         self.client.force_login(self.staff)
         response = self.client.post(
-            reverse("staff:round_score_entry", args=[round_.pk]),
-            {
-                f"score_{registration.pk}_{judge.pk}": "91",
-            },
+            reverse("staff:round_scores_api", args=[round_.pk]),
+            data=json.dumps(
+                {
+                    "base_version": 0,
+                    "cells": [
+                        {
+                            "singer_id": registration.pk,
+                            "judge_id": judge.pk,
+                            "score": "91",
+                        }
+                    ],
+                }
+            ),
+            content_type="application/json",
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ScoreRecord.objects.exists())
@@ -846,9 +870,11 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         self.assertEqual(
             self.client.post(
-                reverse("staff:round_score_entry", args=[contest_round.pk])
+                reverse("staff:round_scores_api", args=[contest_round.pk]),
+                data=json.dumps({"base_version": 0, "cells": []}),
+                content_type="application/json",
             ).status_code,
-            403,
+            400,
         )
 
     def test_activity_unlock_does_not_unlock_locked_vote_session(self):
@@ -3447,9 +3473,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
         super().tearDown()
 
     def test_persistent_generation_creates_document(self):
-        doc_obj, content = generate_persistent_document(
-            self.activity, self.template, self.staff
-        )
+        doc_obj, content = generate_persistent_document(self.activity, self.template, self.staff)
         self.assertEqual(doc_obj.activity, self.activity)
         self.assertFalse(doc_obj.is_test_data)
         self.assertTrue(doc_obj.file.storage.exists(doc_obj.file.name or ""))
@@ -3507,9 +3531,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
     def test_persisted_document_is_seen_by_archive_package(self):
         # Case A: the document persists before the archive, so the authoritative
         # archive package (built from DB state) must include it.
-        doc_obj, _ = generate_persistent_document(
-            self.activity, self.template, self.staff
-        )
+        doc_obj, _ = generate_persistent_document(self.activity, self.template, self.staff)
         names = [a.name for a in build_archive_package(self.activity)]
         self.assertIn(f"推文_{doc_obj.pk}.docx", names)
 
@@ -3900,3 +3922,331 @@ class PublicPortalPublicationTests(TestCase):
         self.client.raise_request_exception = False
         public_response = self.client.get(reverse("public_portal:post_detail", args=[draft.pk]))
         self.assertEqual(public_response.status_code, 404)
+
+
+class RoundScoresApiTests(TestCase):
+    """M1-H rapid-entry API: grid, sparse cell save, stale-edit conflict, auto re-resolve."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="rapid-api-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="Rapid Entry Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity, round_type=ContestRound.RoundType.PRELIMINARY
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="rapid-api-s", password="pass"),
+            name="快速选手",
+            student_id="2026rapid01",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge A")
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status"])
+        self.client.force_login(self.admin)
+
+    def _post(self, payload):
+        return self.client.post(
+            reverse("staff:round_scores_api", args=[self.round.pk]),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_get_returns_grid_and_version(self):
+        response = self.client.get(reverse("staff:round_scores_api", args=[self.round.pk]))
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["version"], 0)
+        self.assertFalse(data["matrix_complete"])
+        self.assertEqual(len(data["grid"]), 1)
+        self.assertEqual(data["grid"][0]["singer_id"], self.singer.pk)
+
+    def test_post_applies_cell_and_bumps_version(self):
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["version"], 1)
+        self.assertTrue(data["matrix_complete"])
+        self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
+
+    def test_post_stale_base_version_is_conflict(self):
+        self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "92"}],
+            }
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(response.json()["conflict"])
+        # No silent overwrite: the stored value is unchanged.
+        self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
+
+    def test_post_out_of_range_score_is_400(self):
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "150"}],
+            }
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round).exists())
+
+    def test_post_matrix_complete_triggers_resolve(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from singer_contest.models import StageResult
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Rapid Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            round_keys={"r1": self.round.pk},
+        )
+        RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "97"}],
+            }
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["matrix_complete"])
+        self.assertEqual(data["resolved_status"], "ready")
+        self.assertTrue(StageResult.objects.filter(stage_key="快速赛段", status="ready").exists())
+
+
+class ResultBoardTests(TestCase):
+    """M1-H result board: latest-per-stage banners and block-grouped handcard."""
+
+    _DEFINITION = json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+            ],
+        }
+    )
+
+    def setUp(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        self.staff = User.objects.create_user(
+            username="result-board-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="Board Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Board Ruleset",
+            is_test_data=False,
+            stage_key="院十佳",
+            announcement_blocks=[
+                {"label": "直接晋级第三轮", "outcome_codes": ["direct"]},
+                {"label": "进入复活赛", "outcome_codes": ["repechage"]},
+                {"label": "本轮淘汰", "outcome_codes": ["eliminated"]},
+            ],
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self._DEFINITION,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        self.client.force_login(self.staff)
+
+    def _singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"rb-{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"7{index:05d}",
+            college="Info",
+            class_name="CS1",
+            phone=f"139{index:08d}",
+            song_name=f"Song {index}",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+    def _stage(self, *, status, content_hash, reasons=None, stage_key="院十佳"):
+        return StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=self.version,
+            created_by=self.staff,
+            stage_key=stage_key,
+            status=status,
+            reasons=reasons or [],
+            content_hash=content_hash,
+            is_test_data=False,
+        )
+
+    def test_board_lists_latest_stage_per_stage_key(self):
+        self._stage(
+            status=StageResult.Status.REVIEW,
+            content_hash="hash-1",
+            reasons=["缺少第三轮"],
+        )
+        ready = self._stage(status=StageResult.Status.READY, content_hash="hash-2")
+        StageDecision.objects.create(
+            stage_result=ready,
+            singer=self._singer(1),
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("91.00"),
+            is_test_data=False,
+        )
+        response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "院十佳")
+        self.assertContains(response, "可发布")
+        self.assertNotContains(response, "待人工核定")
+        self.assertNotContains(response, "缺少第三轮")
+
+    def test_board_shows_status_and_reasons_for_hold(self):
+        self._stage(
+            status=StageResult.Status.HOLD,
+            content_hash="hash-h",
+            reasons=["缺少第五轮评分"],
+        )
+        response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "待齐数据")
+        self.assertContains(response, "缺少第五轮评分")
+
+    def test_detail_groups_by_announcement_blocks_in_order(self):
+        ready = self._stage(status=StageResult.Status.READY, content_hash="hash-d")
+        direct = self._singer(2)
+        repechage = self._singer(3)
+        eliminated = self._singer(4)
+        StageDecision.objects.create(
+            stage_result=ready,
+            singer=direct,
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("92.00"),
+            is_test_data=False,
+        )
+        StageDecision.objects.create(
+            stage_result=ready,
+            singer=repechage,
+            outcome_code="repechage",
+            rank=2,
+            score=Decimal("85.00"),
+            is_test_data=False,
+        )
+        StageDecision.objects.create(
+            stage_result=ready,
+            singer=eliminated,
+            outcome_code="eliminated",
+            rank=3,
+            score=Decimal("70.00"),
+            is_test_data=False,
+        )
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode()
+        self.assertContains(response, "直接晋级第三轮")
+        self.assertContains(response, "进入复活赛")
+        self.assertContains(response, "本轮淘汰")
+        self.assertContains(response, direct.name)
+        self.assertContains(response, repechage.name)
+        self.assertContains(response, eliminated.name)
+        self.assertLess(body.index("直接晋级第三轮"), body.index("进入复活赛"))
+        self.assertLess(body.index("进入复活赛"), body.index("本轮淘汰"))
+
+    def test_detail_fallback_groups_by_outcome_when_unset(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset_b = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="No Blocks",
+            is_test_data=False,
+            stage_key="无分组",
+        )
+        version_b = RulesetVersion.objects.create(
+            ruleset=ruleset_b,
+            definition=self._DEFINITION,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version_b,
+            created_by=self.staff,
+            stage_key="无分组",
+            status=StageResult.Status.READY,
+            reasons=[],
+            content_hash="hash-fb",
+            is_test_data=False,
+        )
+        singer = self._singer(5)
+        StageDecision.objects.create(
+            stage_result=stage,
+            singer=singer,
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("88.00"),
+            is_test_data=False,
+        )
+        response = self.client.get(reverse("staff:stage_result_detail", args=[stage.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "直接晋级")
+
+    def test_stage_decisions_by_blocks_helper(self):
+        ready = self._stage(status=StageResult.Status.READY, content_hash="hash-helper")
+        singer = self._singer(6)
+        StageDecision.objects.create(
+            stage_result=ready,
+            singer=singer,
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("90.00"),
+            is_test_data=False,
+        )
+        blocks = stage_decisions_by_blocks(ready)
+        self.assertEqual(blocks[0]["label"], "直接晋级第三轮")
+        self.assertEqual(blocks[0]["decisions"][0].singer, singer)

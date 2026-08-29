@@ -109,6 +109,9 @@ class ContestRound(models.Model):
     advance_count = models.IntegerField(default=0)
     status = models.CharField(max_length=10, choices=Status, default=Status.DRAFT)
     is_locked = models.BooleanField(default=False)
+    score_version = models.PositiveIntegerField(
+        default=0, help_text="Bumped on every applied score change (stale-edit detection)."
+    )
     advancement_status = models.CharField(
         max_length=16, choices=AdvancementStatus, default=AdvancementStatus.AUTO
     )

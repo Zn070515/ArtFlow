@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}结果公示板 — {{ activity.title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> / 结果公示板</p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-1">{{ activity.title }} · 结果公示板</h1>
+    <p class="text-sm text-gray-500 mb-6">每个赛段（stage_key）显示最新一次计算结果。</p>
+
+    {% if not stages %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>该活动还没有任何赛段结果。</p>
+    </div>
+    {% else %}
+    <div class="space-y-4">
+        {% for stage in stages %}
+        <div class="bg-white border border-gray-200 rounded-lg p-5 flex items-center justify-between gap-4">
+            <div class="min-w-0">
+                <div class="flex items-center gap-3">
+                    <span class="font-semibold text-gray-900">{{ stage.stage_key }}</span>
+                    {% if stage.status == "ready" %}
+                    <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-2 py-0.5 rounded font-medium">可发布</span>
+                    {% elif stage.status == "review" %}
+                    <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2 py-0.5 rounded font-medium">待人工核定</span>
+                    {% else %}
+                    <span class="text-xs bg-gray-50 border border-gray-300 text-gray-700 px-2 py-0.5 rounded font-medium">待齐数据</span>
+                    {% endif %}
+                    <span class="text-xs text-gray-400">{{ stage.get_status_display }}</span>
+                </div>
+                <p class="text-xs text-gray-500 mt-1">
+                    {{ stage.ruleset_version.ruleset.name }} ·
+                    {% if stage.created_by %}由 {{ stage.created_by }} 计算{% else %}自动计算{% endif %}
+                    · {{ stage.computed_at|date:"Y-m-d H:i" }}
+                </p>
+                {% if stage.reasons %}
+                <ul class="mt-2 text-xs text-gray-600 list-disc list-inside space-y-0.5">
+                    {% for reason in stage.reasons %}<li>{{ reason }}</li>{% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            <a href="{% url 'staff:stage_result_detail' stage.pk %}"
+               class="shrink-0 border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-50">查看手卡</a>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
