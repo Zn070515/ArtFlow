@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}{{ template.name }} — 赛制模板 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> /
+        <a href="{% url 'staff:ruleset_template_list' %}" class="hover:underline">赛制模板库</a> /
+        {{ template.name }}
+    </p>
+    <div class="flex items-center justify-between gap-4 mb-2">
+        <h1 class="text-2xl font-bold text-gray-900">{{ template.name }}</h1>
+        <span class="text-xs bg-gray-50 border border-gray-300 text-gray-600 px-3 py-1 rounded font-medium">v{{ template.schema_version }}</span>
+    </div>
+    <p class="text-sm text-gray-500 mb-6">{{ template.description }}</p>
+
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-gray-50 border-b border-gray-200 px-5 py-2.5">
+            <h2 class="text-sm font-semibold text-gray-800">赛制节点图（{{ nodes|length }} 个节点）</h2>
+        </div>
+        {% if nodes %}
+        <ol class="divide-y divide-gray-100">
+            {% for node in nodes %}
+            <li class="flex items-center gap-4 px-5 py-3">
+                <span class="text-gray-400 text-xs w-6 text-right">{{ forloop.counter }}</span>
+                <span class="font-mono text-sm text-gray-900">{{ node.key }}</span>
+                <span class="text-xs bg-brand border border-brand/20 text-brand px-2 py-0.5 rounded">{{ node.type }}</span>
+                {% if node.source %}<span class="text-xs text-gray-500">← {{ node.source }}</span>{% endif %}
+                {% if node.round %}<span class="text-xs text-gray-400">{{ node.round }}</span>{% endif %}
+                {% if node.count %}<span class="text-xs text-gray-400">取 {{ node.count }}</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p class="p-8 text-center text-gray-500">该模板没有可显示的节点。</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

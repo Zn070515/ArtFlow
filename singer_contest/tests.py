@@ -2096,7 +2096,7 @@ def _schidui_definition():
 
 
 def _xiaofeng_definition():
-    """§12.5 校十佳屏峰 chain as one forward-only graph of generic primitives (no 2025 special-casing)."""
+    """§12.5 校十佳屏峰 chain as one forward-only graph (no 2025 special-casing)."""
     from ruleset.templates import GOLDEN_XIAOFENG
 
     return GOLDEN_XIAOFENG

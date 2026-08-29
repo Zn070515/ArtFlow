@@ -4250,3 +4250,39 @@ class ResultBoardTests(TestCase):
         blocks = stage_decisions_by_blocks(ready)
         self.assertEqual(blocks[0]["label"], "直接晋级第三轮")
         self.assertEqual(blocks[0]["decisions"][0].singer, singer)
+
+
+class RulesetTemplateLibraryTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="lib-staff",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        self.client.force_login(self.staff)
+        from ruleset.templates import seed_ruleset_templates
+
+        seed_ruleset_templates(self.staff)
+
+    def test_template_list_renders_library(self):
+        response = self.client.get(reverse("staff:ruleset_template_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "赛制模板库")
+        self.assertContains(response, "院十佳")
+        self.assertContains(response, "校十佳屏峰")
+
+    def test_template_list_requires_staff(self):
+        self.client.logout()
+        response = self.client.get(reverse("staff:ruleset_template_list"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_template_detail_renders_definition_nodes(self):
+        from ruleset.models import RulesetTemplate
+
+        template = RulesetTemplate.objects.get(name="院十佳")
+        response = self.client.get(reverse("staff:ruleset_template_detail", args=[template.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, template.name)
+        self.assertContains(response, "assess_r1")
+        self.assertContains(response, "AGGREGATE")
+        self.assertContains(response, "节点")

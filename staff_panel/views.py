@@ -57,6 +57,8 @@ from incidents.models import IncidentRecord
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
+from ruleset.models import RulesetTemplate
+from ruleset.schema import parse_definition
 from singer_contest.models import (
     Award,
     ContestRound,
@@ -1968,3 +1970,24 @@ def user_set_active(request, pk):
             request, f"已{'启用' if updated.is_active else '停用'}账号 {updated.username}。"
         )
     return redirect("staff:user_list")
+
+
+@staff_required
+def ruleset_template_list(request):
+    templates = RulesetTemplate.objects.all()
+    return render(
+        request,
+        "staff_panel/ruleset_template_list.html",
+        {"templates": templates, "total": templates.count()},
+    )
+
+
+@staff_required
+def ruleset_template_detail(request, pk):
+    template = get_object_or_404(RulesetTemplate, pk=pk)
+    nodes = parse_definition(template.definition)["nodes"] if template.definition else []
+    return render(
+        request,
+        "staff_panel/ruleset_template_detail.html",
+        {"template": template, "nodes": nodes},
+    )
