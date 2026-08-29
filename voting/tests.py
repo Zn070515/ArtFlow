@@ -26,6 +26,117 @@ from .services import (
 )
 
 
+class VotePublicStagingBoundaryTests(TestCase):
+    """TEST activity vote sessions are invisible to anonymous/ordinary users.
+
+    M0-U: a TEST VoteSession must 404 for anyone who is not authenticated
+    staff/admin, across entry, cast (including a forged POST), and done.
+    """
+
+    def setUp(self):
+        self.participant = User.objects.create_user(
+            username="vote-participant", password="pass", role=User.Role.PARTICIPANT
+        )
+        self.staff = User.objects.create_user(
+            username="vote-staff", password="pass", role=User.Role.STAFF
+        )
+        self.admin = User.objects.create_user(
+            username="vote-admin", password="pass", role=User.Role.ADMIN
+        )
+
+    def _make_session(self, *, is_test_mode):
+        activity = Activity.objects.create(
+            title="Vote Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=is_test_mode,
+        )
+        singer = SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Singer",
+            student_id="20269999",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=is_test_mode,
+        )
+        session = VoteSession.objects.create(
+            activity=activity,
+            name="Popularity",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+            is_test_data=is_test_mode,
+        )
+        option = VoteOption.objects.create(
+            vote_session=session, singer=singer, is_test_data=is_test_mode
+        )
+        return session, option
+
+    def test_test_session_anonymous_entry_404(self):
+        session, _ = self._make_session(is_test_mode=True)
+        response = self.client.get(reverse("voting:vote_entry", args=[session.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_test_session_participant_entry_404(self):
+        session, _ = self._make_session(is_test_mode=True)
+        self.client.force_login(self.participant)
+        response = self.client.get(reverse("voting:vote_entry", args=[session.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_test_session_anonymous_direct_cast_404(self):
+        session, _ = self._make_session(is_test_mode=True)
+        response = self.client.get(reverse("voting:vote_cast", args=[session.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_test_session_forged_post_cast_404_no_ballot(self):
+        session, option = self._make_session(is_test_mode=True)
+        response = self.client.post(
+            reverse("voting:vote_cast", args=[session.pk]),
+            {"selected_option": [option.pk]},
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(VoteBallot.objects.filter(vote_session=session).count(), 0)
+
+    def test_test_session_staff_preview_and_cast_allowed(self):
+        session, option = self._make_session(is_test_mode=True)
+        self.client.force_login(self.staff)
+        entry = self.client.get(reverse("voting:vote_entry", args=[session.pk]))
+        self.assertEqual(entry.status_code, 200)
+        self.client.post(reverse("voting:vote_entry", args=[session.pk]), {"passcode": "1234"})
+        cast = self.client.post(
+            reverse("voting:vote_cast", args=[session.pk]),
+            {"selected_option": [option.pk]},
+        )
+        self.assertEqual(cast.status_code, 302)
+        self.assertEqual(VoteBallot.objects.filter(vote_session=session).count(), 1)
+
+    def test_test_session_verified_admin_allowed(self):
+        session, _ = self._make_session(is_test_mode=True)
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("voting:vote_entry", args=[session.pk]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_formal_session_anonymous_flow_unchanged(self):
+        session, _ = self._make_session(is_test_mode=False)
+        response = self.client.get(reverse("voting:vote_entry", args=[session.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Popularity")
+
+    def test_formal_valid_passcode_cast_still_works(self):
+        session, option = self._make_session(is_test_mode=False)
+        self.client.post(reverse("voting:vote_entry", args=[session.pk]), {"passcode": "1234"})
+        cast = self.client.post(
+            reverse("voting:vote_cast", args=[session.pk]),
+            {"selected_option": [option.pk]},
+        )
+        self.assertEqual(cast.status_code, 302)
+        self.assertEqual(VoteBallot.objects.filter(vote_session=session).count(), 1)
+
+
 class VoteBallotTests(TestCase):
     def setUp(self):
         user = User.objects.create_user(username="participant", password="pass")
@@ -151,6 +262,7 @@ class VoteActivityLockOverlayTests(TestCase):
             title="Overlay Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
             is_locked=False,
         )
         singer = SingerRegistration.objects.create(
@@ -513,6 +625,7 @@ class VoteEntryRateLimitTests(TestCase):
         self.activity = Activity.objects.create(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
         )
         self.session = VoteSession.objects.create(
             activity=self.activity,

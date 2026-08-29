@@ -1,11 +1,31 @@
 from common.audit import client_ip
 from common.rate_limit import RateLimitExceeded, hit_rate_limit
+from core.models import Activity
 from django.core.exceptions import ValidationError
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .models import VoteBallot, VoteSession
 from .services import submit_ballot
+
+
+def _get_vote_session_for_public_request(request, pk):
+    """Activity-lifecycle boundary for a public vote session.
+
+    A FORMAL session stays fully public. A TEST activity's session is only
+    visible to authenticated staff/admin (rehearsal preview); everyone else gets
+    a 404, never a "this activity is testing" message, so the test surface is
+    indistinguishable from a missing vote. Must gate entry, cast, and done so a
+    forged direct POST cannot reach submit_ballot.
+    """
+    vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
+    if (
+        vote_session.activity.data_lifecycle != Activity.DataLifecycle.FORMAL
+        and (not request.user.is_authenticated or not request.user.is_staff_or_admin)
+    ):
+        raise Http404("Vote session not found.")
+    return vote_session
 
 
 def _hit_vote_rate_limit(request, pk):
@@ -17,7 +37,7 @@ def _hit_vote_rate_limit(request, pk):
 
 
 def vote_entry(request, pk):
-    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session = _get_vote_session_for_public_request(request, pk)
     now = timezone.now()
     error = None
 
@@ -51,7 +71,7 @@ def vote_entry(request, pk):
 
 
 def vote_cast(request, pk):
-    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session = _get_vote_session_for_public_request(request, pk)
     now = timezone.now()
     session_key = request.session.session_key
     if not session_key:
@@ -110,5 +130,5 @@ def vote_cast(request, pk):
 
 
 def vote_done(request, pk):
-    vote_session = get_object_or_404(VoteSession, pk=pk)
+    vote_session = _get_vote_session_for_public_request(request, pk)
     return render(request, "voting/vote_done.html", {"vote_session": vote_session})
