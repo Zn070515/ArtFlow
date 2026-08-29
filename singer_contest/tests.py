@@ -1096,6 +1096,50 @@ class ParticipantRegistrationFlowTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_my_registration_detail_get_does_not_mutate_material_checks(self):
+        registration = self.make_registration()
+        MaterialCheck.objects.create(
+            singer_registration=registration,
+            item_name="基本信息",
+            status=MaterialCheck.Status.UPLOADED,
+            sort_order=0,
+        )
+        MaterialCheck.objects.create(
+            singer_registration=registration,
+            item_name="伴奏文件",
+            status=MaterialCheck.Status.APPROVED,
+            review_note="ok",
+            sort_order=2,
+        )
+        self.client.force_login(self.user)
+        before = list(
+            registration.material_checks.order_by("pk").values_list(
+                "item_name", "status", "sort_order", "review_note"
+            )
+        )
+        response = self.client.get(
+            reverse("singer_contest:my_registration_detail", args=[registration.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        after = list(
+            registration.material_checks.order_by("pk").values_list(
+                "item_name", "status", "sort_order", "review_note"
+            )
+        )
+        self.assertEqual(before, after)
+
+    def test_archived_activity_get_produces_no_material_check_mutation(self):
+        registration = self.make_registration()
+        self.activity.phase = Activity.Phase.ARCHIVED
+        self.activity.save(update_fields=["phase"])
+        self.client.force_login(self.user)
+        before = registration.material_checks.count()
+        response = self.client.get(
+            reverse("singer_contest:my_registration_detail", args=[registration.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(registration.material_checks.count(), before)
+
     def test_participant_can_edit_own_registration_during_registration_open(self):
         registration = self.make_registration()
         self.client.force_login(self.user)

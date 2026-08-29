@@ -176,6 +176,16 @@ class MaterialCheck(models.Model):
                 ),
                 name="materialcheck_owner_singer_program_xor",
             ),
+            models.UniqueConstraint(
+                fields=["singer_registration", "item_name"],
+                condition=Q(singer_registration__isnull=False),
+                name="materialcheck_unique_singer_item",
+            ),
+            models.UniqueConstraint(
+                fields=["program", "item_name"],
+                condition=Q(program__isnull=False),
+                name="materialcheck_unique_program_item",
+            ),
         ]
 
     def __str__(self):

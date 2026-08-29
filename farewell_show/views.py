@@ -9,7 +9,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
-from files.services import store_submission_file, sync_program_material_checks, validate_upload
+from files.services import reconcile_program_material_checks, store_submission_file, validate_upload
 
 from .models import Program
 
@@ -74,7 +74,7 @@ def apply_view(request):
                         purpose=purpose,
                         uploaded_by=request.user,
                     )
-            sync_program_material_checks(prog)
+            reconcile_program_material_checks(prog)
             log_action(
                 request,
                 AuditLog.ActionType.UPDATE_REGISTRATION,
@@ -146,7 +146,7 @@ def my_program_detail(request, pk):
                         purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                         uploaded_by=request.user,
                     )
-                    sync_program_material_checks(locked_prog)
+                    reconcile_program_material_checks(locked_prog)
                     log_action(
                         request,
                         AuditLog.ActionType.UPLOAD_FILE,
@@ -161,7 +161,6 @@ def my_program_detail(request, pk):
             errors.extend(error.messages)
         if not errors:
             return redirect("farewell_show:my_program_detail", pk=prog.pk)
-    sync_program_material_checks(prog)
     return render(
         request,
         "farewell_show/my_program.html",

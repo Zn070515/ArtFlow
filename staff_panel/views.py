@@ -45,10 +45,11 @@ from exports.services import (
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 from files.services import (
+    reconcile_activity_material_checks,
+    reconcile_program_material_checks,
+    reconcile_singer_material_checks,
     review_material_check,
     store_submission_file,
-    sync_program_material_checks,
-    sync_singer_material_checks,
 )
 from incidents.models import IncidentRecord
 from openpyxl import Workbook
@@ -442,7 +443,7 @@ def singer_registration_detail(request, pk):
                     except ValidationError as error:
                         errors.extend(error.messages)
                     else:
-                        sync_singer_material_checks(locked_reg)
+                        reconcile_singer_material_checks(locked_reg)
                         log_action(
                             request,
                             AuditLog.ActionType.UPLOAD_FILE,
@@ -547,7 +548,7 @@ def program_detail(request, pk):
                     except ValidationError as error:
                         errors.extend(error.messages)
                     else:
-                        sync_program_material_checks(locked_prog)
+                        reconcile_program_material_checks(locked_prog)
                         log_action(
                             request,
                             AuditLog.ActionType.UPLOAD_FILE,
@@ -664,6 +665,7 @@ def activity_material_requirements(request, activity_id):
                         "sort_order": request.POST.get("sort_order", 0),
                     },
                 )
+                reconcile_activity_material_checks(locked_activity, applies_to)
                 messages.success(request, "材料检查项已保存。")
         return redirect("staff:activity_material_requirements", activity_id=activity.pk)
     requirements = MaterialRequirement.objects.filter(activity=activity)
@@ -686,7 +688,13 @@ def activity_material_requirement_delete(request, activity_id, pk):
     with transaction.atomic():
         locked_activity = lock_activity_for_action(activity)
         _ensure_activity_mutable(locked_activity)
-        MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).delete()
+        requirement = MaterialRequirement.objects.filter(
+            pk=pk, activity=locked_activity
+        ).first()
+        if requirement is not None:
+            applies_to = requirement.applies_to
+            requirement.delete()
+            reconcile_activity_material_checks(locked_activity, applies_to)
     messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 

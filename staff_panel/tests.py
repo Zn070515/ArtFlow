@@ -24,7 +24,7 @@ from exports.models import ArticleTemplate, GeneratedDocument
 from exports.services import archive_activity
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
-from files.services import store_submission_file, sync_singer_material_checks
+from files.services import reconcile_singer_material_checks, store_submission_file
 from incidents.models import IncidentRecord
 from openpyxl import load_workbook
 from public_portal.models import PublicPost
@@ -3081,7 +3081,7 @@ class MaterialReviewAndRequirementTests(TestCase):
             phone="13800000000",
             song_name="Song",
         )
-        sync_singer_material_checks(self.registration)
+        reconcile_singer_material_checks(self.registration)
         self.client.raise_request_exception = False
 
     def tearDown(self):

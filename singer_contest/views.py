@@ -9,7 +9,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
-from files.services import store_submission_file, sync_singer_material_checks, validate_upload
+from files.services import reconcile_singer_material_checks, store_submission_file, validate_upload
 
 from .models import SingerRegistration
 
@@ -99,7 +99,7 @@ def apply_view(request):
                         purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO,
                         uploaded_by=request.user,
                     )
-                sync_singer_material_checks(reg)
+                reconcile_singer_material_checks(reg)
                 log_action(
                     request,
                     AuditLog.ActionType.UPDATE_REGISTRATION,
@@ -179,7 +179,7 @@ def my_registration_detail(request, pk):
                         purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
                         uploaded_by=request.user,
                     )
-                    sync_singer_material_checks(locked_reg)
+                    reconcile_singer_material_checks(locked_reg)
                     log_action(
                         request,
                         AuditLog.ActionType.UPLOAD_FILE,
@@ -194,7 +194,6 @@ def my_registration_detail(request, pk):
             errors.extend(error.messages)
         if not errors:
             return redirect("singer_contest:my_registration_detail", pk=reg.pk)
-    sync_singer_material_checks(reg)
     return render(
         request,
         "singer_contest/my_submission.html",

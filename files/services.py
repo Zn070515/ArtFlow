@@ -1,9 +1,10 @@
 from functools import partial
 from pathlib import PurePath
 
+from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
 from django.utils import timezone
@@ -169,22 +170,76 @@ DEFAULT_PROGRAM_REQUIREMENTS = [
 ]
 
 
-def sync_singer_material_checks(registration):
-    requirements = _requirements_for(
-        registration.activity,
-        MaterialRequirement.AppliesTo.SINGER,
-        DEFAULT_SINGER_REQUIREMENTS,
+def reconcile_singer_material_checks(registration):
+    """Recompute a singer registration's MaterialCheck rows under authority.
+
+    Authoritative transaction: locks the Activity (re-checking mutability), then
+    the owner row, then reconciles checks against current requirements and prunes
+    stale rows (a deleted requirement no longer surfaces as a check).
+    """
+    return _reconcile_owner_under_authority(
+        registration, MaterialRequirement.AppliesTo.SINGER, DEFAULT_SINGER_REQUIREMENTS
     )
-    return _sync_checks(registration=registration, requirements=requirements)
 
 
-def sync_program_material_checks(program):
-    requirements = _requirements_for(
-        program.activity,
-        MaterialRequirement.AppliesTo.PROGRAM,
-        DEFAULT_PROGRAM_REQUIREMENTS,
+def reconcile_program_material_checks(program):
+    """Recompute a program's MaterialCheck rows under authority (see above)."""
+    return _reconcile_owner_under_authority(
+        program, MaterialRequirement.AppliesTo.PROGRAM, DEFAULT_PROGRAM_REQUIREMENTS
     )
-    return _sync_checks(program=program, requirements=requirements)
+
+
+@transaction.atomic
+def reconcile_activity_material_checks(activity, applies_to):
+    """Reconcile every runtime owner of an activity for one requirement scope.
+
+    Used after MaterialRequirement create/update/delete: locks the Activity,
+    re-checks mutability, then locks each affected owner and reconciles so added
+    requirements surface as new checks and pruned requirements drop their checks.
+    """
+    locked_activity = lock_activity_for_action(activity)
+    _ensure_material_checks_writable(locked_activity)
+    if applies_to not in MaterialRequirement.AppliesTo.values:
+        raise ValidationError("无效的适用范围。")
+    owner_model = _owner_model_for_applies_to(applies_to)
+    fallback = (
+        DEFAULT_SINGER_REQUIREMENTS
+        if applies_to == MaterialRequirement.AppliesTo.SINGER
+        else DEFAULT_PROGRAM_REQUIREMENTS
+    )
+    requirements = _requirements_for(locked_activity, applies_to, fallback)
+    for owner in owner_model.objects.filter(activity=locked_activity).select_for_update():
+        _reconcile_owner_checks(owner, requirements)
+    return locked_activity
+
+
+@transaction.atomic
+def _reconcile_owner_under_authority(owner, applies_to, fallback):
+    locked_activity = lock_activity_for_action(owner.activity)
+    _ensure_material_checks_writable(locked_activity)
+    locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
+    if locked_owner.activity_id != locked_activity.pk:
+        raise PermissionDenied("材料检查项不属于当前活动。")
+    requirements = _requirements_for(locked_activity, applies_to, fallback)
+    return _reconcile_owner_checks(locked_owner, requirements)
+
+
+def _ensure_material_checks_writable(activity):
+    if activity.phase == Activity.Phase.ARCHIVED:
+        raise PermissionDenied("活动已归档，为只读状态。")
+    return activity
+
+
+def _owner_model_for_applies_to(applies_to):
+    if applies_to == MaterialRequirement.AppliesTo.SINGER:
+        from singer_contest.models import SingerRegistration
+
+        return SingerRegistration
+    if applies_to == MaterialRequirement.AppliesTo.PROGRAM:
+        from farewell_show.models import Program
+
+        return Program
+    raise ValidationError("无效的适用范围。")
 
 
 def _requirements_for(activity, applies_to, fallback):
@@ -268,12 +323,20 @@ def review_material_check(check, *, status, note, actor):
     return locked_check
 
 
-def _sync_checks(registration=None, program=None, requirements=None):
-    owner_filter = {"singer_registration": registration} if registration else {"program": program}
+def _reconcile_owner_checks(owner, requirements):
+    """Reconcile checks for a single already-locked owner; caller owns authority.
+
+    Precondition: the owner row is locked and its Activity authority has been
+    validated. Creates/updates one check per effective requirement and deletes any
+    check whose requirement no longer exists, so stale rows never display.
+    """
+    owner_filter = _owner_filter(owner)
     file_queryset = SubmissionFile.objects.filter(**owner_filter)
     current = {c.item_name: c for c in MaterialCheck.objects.filter(**owner_filter)}
+    present_names = set()
     checks = []
     for index, (item_name, file_purpose) in enumerate(requirements or []):
+        present_names.add(item_name)
         existing = current.get(item_name)
         if file_purpose:
             has_file = file_queryset.filter(file_purpose=file_purpose, is_current=True).exists()
@@ -295,4 +358,7 @@ def _sync_checks(registration=None, program=None, requirements=None):
             **owner_filter,
         )
         checks.append(check)
+    stale = [c for name, c in current.items() if name not in present_names]
+    if stale:
+        MaterialCheck.objects.filter(pk__in=[c.pk for c in stale]).delete()
     return checks
