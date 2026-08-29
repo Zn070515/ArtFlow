@@ -2090,132 +2090,16 @@ class StageResolverBindingTests(TestCase):
 
 def _schidui_definition():
     """§11.3 院十佳 weights (30/60/10, 60/40, 30/50/20) as one forward-only graph."""
-    return json.dumps(
-        {
-            "schema_version": 1,
-            "nodes": [
-                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                {"key": "assess_r2", "type": "ASSESS", "source": "entry", "round": "r2"},
-                {
-                    "key": "assess_a1",
-                    "type": "ASSESS",
-                    "source": "entry",
-                    "vote_source": "audience1",
-                },
-                {
-                    "key": "stage1",
-                    "type": "AGGREGATE",
-                    "within": "entry",
-                    "aggregate": {
-                        "type": "weighted_sum",
-                        "components": [
-                            {"source": "assess_r1", "weight": 0.30},
-                            {"source": "assess_r2", "weight": 0.60},
-                            {"source": "assess_a1", "weight": 0.10},
-                        ],
-                    },
-                },
-                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
-                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
-                {"key": "assess_r3", "type": "ASSESS", "source": "top10", "round": "r3"},
-                {
-                    "key": "stage2",
-                    "type": "AGGREGATE",
-                    "within": "top10",
-                    "aggregate": {
-                        "type": "weighted_sum",
-                        "components": [
-                            {"source": "stage1", "weight": 0.60},
-                            {"source": "assess_r3", "weight": 0.40},
-                        ],
-                    },
-                },
-                {"key": "rank2", "type": "RANK", "source": "stage2", "descending": True},
-                {"key": "top5", "type": "SELECT", "source": "rank2", "count": 5},
-                {"key": "assess_r4", "type": "ASSESS", "source": "top5", "round": "r4"},
-                {
-                    "key": "assess_a4",
-                    "type": "ASSESS",
-                    "source": "top5",
-                    "vote_source": "audience4",
-                },
-                {
-                    "key": "final",
-                    "type": "AGGREGATE",
-                    "within": "top5",
-                    "aggregate": {
-                        "type": "weighted_sum",
-                        "components": [
-                            {"source": "assess_r3", "weight": 0.30},
-                            {"source": "assess_r4", "weight": 0.50},
-                            {"source": "assess_a4", "weight": 0.20},
-                        ],
-                    },
-                },
-                {"key": "rank3", "type": "RANK", "source": "final", "descending": True},
-                {"key": "top3", "type": "SELECT", "source": "rank3", "count": 3},
-            ],
-        }
-    )
+    from ruleset.templates import GOLDEN_SCHIDUI
+
+    return GOLDEN_SCHIDUI
 
 
 def _xiaofeng_definition():
-    """§12.5 校十佳屏峰 chain as one forward-only graph of generic primitives.
+    """§12.5 校十佳屏峰 chain as one forward-only graph of generic primitives (no 2025 special-casing)."""
+    from ruleset.templates import GOLDEN_XIAOFENG
 
-    20 -> top1/initial-group (5 direct) -> leftover R1 top12 -> R2 top7 -> merge 12
-    -> final groups -> manual 0~2/group -> fill to 6. No 2025-year special-casing in
-    Python (§12.5/§18); every rule (counts, groups, quota) lives in this definition.
-    """
-    return json.dumps(
-        {
-            "schema_version": 1,
-            "nodes": [
-                {
-                    "key": "groups_initial",
-                    "type": "PARTITION",
-                    "source": "entry",
-                    "by": "initial_group",
-                },
-                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                {"key": "rank_r1", "type": "RANK", "source": "assess_r1", "descending": True},
-                {
-                    "key": "direct",
-                    "type": "SELECT",
-                    "source": "rank_r1",
-                    "count": 1,
-                    "by": "groups_initial",
-                },
-                {"key": "leftover", "type": "SUBTRACT", "minuend": "entry", "subtrahend": "direct"},
-                {"key": "repech_r1", "type": "ASSESS", "source": "leftover", "round": "r1"},
-                {"key": "repech_rank", "type": "RANK", "source": "repech_r1", "descending": True},
-                {"key": "top12", "type": "SELECT", "source": "repech_rank", "count": 12},
-                {"key": "repech_r2", "type": "ASSESS", "source": "top12", "round": "r2"},
-                {"key": "repech_rank2", "type": "RANK", "source": "repech_r2", "descending": True},
-                {"key": "top7", "type": "SELECT", "source": "repech_rank2", "count": 7},
-                {"key": "merged", "type": "MERGE", "sources": ["direct", "top7"]},
-                {
-                    "key": "final_groups",
-                    "type": "PARTITION",
-                    "source": "merged",
-                    "by": "final_group",
-                },
-                {
-                    "key": "manual",
-                    "type": "MANUAL_SELECT",
-                    "source": "final_groups",
-                    "groups": 3,
-                    "quota": 2,
-                },
-                {
-                    "key": "filled",
-                    "type": "FILL_TO_QUOTA",
-                    "from": "merged",
-                    "into": "manual",
-                    "quota": 2,
-                },
-            ],
-        }
-    )
+    return GOLDEN_XIAOFENG
 
 
 class GoldenSchiduiDbTests(TestCase):

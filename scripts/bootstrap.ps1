@@ -74,6 +74,7 @@ try {
     Initialize-LocalEnvironment
     Invoke-Uv sync --locked --extra dev
     Invoke-Uv run python manage.py migrate --noinput
+    Invoke-Uv run python manage.py seed_ruleset_templates
     New-Item -ItemType Directory -Force -Path media | Out-Null
     Invoke-Uv run python manage.py collectstatic --noinput
     Invoke-Uv run python manage.py check
