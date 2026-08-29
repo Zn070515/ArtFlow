@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
@@ -190,3 +191,72 @@ class MaterialCheck(models.Model):
 
     def __str__(self):
         return f"{self.item_name} — {self.get_status_display()}"
+
+
+class MaterialSlot(models.Model):
+    class Category(models.TextChoices):
+        ACCOMPANIMENT = "accompaniment", "伴奏"
+        BACKGROUND_VIDEO = "background_video", "背景视频"
+        PERFORMANCE_VIDEO = "performance_video", "演唱视频"
+        PROGRAM_IMAGE = "program_image", "节目图片"
+        LYRICS_SCRIPT = "lyrics_script", "歌词/台词"
+        HOST_MATERIAL = "host_material", "主持稿素材"
+        OTHER = "other", "其他附件"
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="material_slots"
+    )
+    round = models.ForeignKey(
+        "singer_contest.ContestRound",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_slots",
+    )
+    singer_registration = models.ForeignKey(
+        "singer_contest.SingerRegistration",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_slots",
+    )
+    program = models.ForeignKey(
+        "farewell_show.Program",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_slots",
+    )
+    category = models.CharField(max_length=24, choices=Category.choices)
+    label = models.CharField(max_length=100)
+    is_required = models.BooleanField(default=True)
+    sequence = models.IntegerField(default=0)
+    is_test_data = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["sequence", "pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(singer_registration__isnull=True) | Q(program__isnull=True),
+                name="materialslot_owner_not_both",
+            ),
+        ]
+
+    def clean(self):
+        contest_round = self.round if self.round_id else None
+        singer = self.singer_registration if self.singer_registration_id else None
+        program = self.program if self.program_id else None
+        if self.activity_id and contest_round and contest_round.activity_id != self.activity_id:
+            raise ValidationError("材料槽必须属于轮次所在活动。")
+        if self.activity_id and singer and singer.activity_id != self.activity_id:
+            raise ValidationError("材料槽所属报名必须属于同一活动。")
+        if self.activity_id and program and program.activity_id != self.activity_id:
+            raise ValidationError("材料槽所属节目必须属于同一活动。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        target = self.singer_registration or self.program
+        return f"{self.label} — {target or '通用槽位'}"

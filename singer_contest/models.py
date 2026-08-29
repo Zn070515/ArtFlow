@@ -98,6 +98,12 @@ class ContestRound(models.Model):
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
     name = models.CharField(max_length=100, blank=True)
+    sequence = models.PositiveIntegerField(default=1, help_text="同一活动内的轮次顺序")
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    venue = models.CharField(max_length=200, blank=True)
+    rubric = models.ForeignKey(
+        "ScoringRubric", on_delete=models.SET_NULL, null=True, blank=True, related_name="rounds"
+    )
     advance_count = models.IntegerField(default=0)
     status = models.CharField(max_length=10, choices=Status, default=Status.DRAFT)
     is_locked = models.BooleanField(default=False)
@@ -106,7 +112,6 @@ class ContestRound(models.Model):
     )
 
     class Meta:
-        unique_together = [("activity", "round_type")]
         constraints = [
             models.CheckConstraint(
                 condition=(
@@ -366,3 +371,159 @@ class Award(models.Model):
 
     def __str__(self):
         return f"{self.singer.name}: {self.name}"
+
+
+class PerformanceGroup(models.Model):
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="performance_groups"
+    )
+    round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="groups")
+    name = models.CharField(max_length=100)
+    sequence = models.PositiveIntegerField(default=1)
+    is_test_data = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["sequence", "pk"]
+
+    def clean(self):
+        contest_round = self.round if self.round_id else None
+        if self.activity_id and contest_round and contest_round.activity_id != self.activity_id:
+            raise ValidationError("表演组必须属于轮次所在活动。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.round.get_round_type_display()} — {self.name}"
+
+
+class Performance(models.Model):
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="performances"
+    )
+    round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="performances")
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="performances"
+    )
+    group = models.ForeignKey(
+        PerformanceGroup,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="performances",
+    )
+    sequence = models.PositiveIntegerField(default=1)
+    song_title = models.CharField(max_length=200, blank=True)
+    guest = models.CharField(max_length=100, blank=True, help_text="助演/合作嘉宾")
+    duration = models.DurationField(null=True, blank=True, help_text="演出时长")
+    notes = models.TextField(blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["sequence", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["round", "singer"],
+                name="performance_one_per_round_per_singer",
+            )
+        ]
+
+    def clean(self):
+        contest_round = self.round if self.round_id else None
+        singer = self.singer if self.singer_id else None
+        group = self.group if self.group_id else None
+        if self.activity_id and contest_round and contest_round.activity_id != self.activity_id:
+            raise ValidationError("演出必须属于轮次所在活动。")
+        if self.activity_id and singer and singer.activity_id != self.activity_id:
+            raise ValidationError("演出选手必须属于同活动。")
+        if group and contest_round and group.round_id != contest_round.pk:
+            raise ValidationError("演出所属组必须属于同一轮次。")
+        if group and contest_round and group.activity_id != contest_round.activity_id:
+            raise ValidationError("演出所属组必须属于轮次所在活动。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.singer.name} — {self.song_title or self.round.name or self.round}"
+
+
+class ScoringRubric(models.Model):
+    activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rubrics")
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    sequence = models.PositiveIntegerField(default=1)
+    is_test_data = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["sequence", "pk"]
+
+    def __str__(self):
+        return self.name
+
+
+class RubricCriterion(models.Model):
+    rubric = models.ForeignKey(ScoringRubric, on_delete=models.CASCADE, related_name="criteria")
+    name = models.CharField(max_length=100)
+    max_score = models.DecimalField(max_digits=5, decimal_places=2)
+    sequence = models.PositiveIntegerField(default=1)
+    description = models.TextField(blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["sequence", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rubric", "name"],
+                name="rubric_criterion_unique_name",
+            )
+        ]
+
+    def clean(self):
+        if self.max_score is not None and self.max_score <= 0:
+            raise ValidationError("评分标准的最高分必须大于 0。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.max_score})"
+
+
+class CriterionScore(models.Model):
+    score_record = models.ForeignKey(
+        ScoreRecord, on_delete=models.CASCADE, related_name="criterion_scores"
+    )
+    criterion = models.ForeignKey(
+        RubricCriterion, on_delete=models.CASCADE, related_name="scores"
+    )
+    value = models.DecimalField(max_digits=5, decimal_places=2)
+    is_test_data = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["score_record", "criterion"],
+                name="criterion_score_unique_per_record_criterion",
+            )
+        ]
+
+    def clean(self):
+        if self.value is not None and self.value < 0:
+            raise ValidationError("评分必须大于等于 0。")
+        score_record = self.score_record if self.score_record_id else None
+        criterion = self.criterion if self.criterion_id else None
+        if score_record and criterion:
+            round_rubric = score_record.round.rubric if score_record.round_id else None
+            if round_rubric and criterion.rubric_id != round_rubric.pk:
+                raise ValidationError("分项评分必须使用轮次绑定的评分标准。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.criterion.name}: {self.value}"
