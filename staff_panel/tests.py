@@ -481,6 +481,7 @@ class StaffPanelSmokeTests(TestCase):
         formal_activity = Activity.objects.create(
             title="Formal Score Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
         registration = SingerRegistration.objects.create(

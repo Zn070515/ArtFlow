@@ -1,8 +1,8 @@
 from functools import partial
 from pathlib import PurePath
 
-from common.business_rules import ensure_activity_unlocked
-from common.test_data import lock_activity_for_runtime_data
+from core.policies import ActivityAction
+from core.services import lock_activity_for_action
 from django.core.exceptions import ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
@@ -103,8 +103,7 @@ def _owner_filter(owner):
 @transaction.atomic
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose)
-    activity = lock_activity_for_runtime_data(owner.activity)
-    ensure_activity_unlocked(activity)
+    activity = lock_activity_for_action(owner.activity, ActivityAction.UPLOAD_MATERIAL)
     # Serialize all file operations for the same owner, including the first
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
@@ -228,27 +227,46 @@ def _reset_matching_check(owner, purpose):
     )
 
 
+@transaction.atomic
 def review_material_check(check, *, status, note, actor):
-    """Record a staff review decision on a material check and audit it."""
+    """Record a staff review decision on a material check and audit it.
+
+    Authoritative transaction: locks the parent Activity first (re-validating the
+    global lock and the REVIEW_REGISTRATION phase action), then the MaterialCheck
+    row. A concurrent activity lock/archive therefore either commits before this
+    review (which then sees the new state) or blocks/blocks it.
+    """
     if status not in (MaterialCheck.Status.APPROVED, MaterialCheck.Status.NEEDS_SUPPLEMENT):
         raise ValidationError("无效的审核状态。")
     from common.models import AuditLog
 
-    old_status = check.status
-    check.status = status
-    check.review_note = (note or "").strip()
-    check.reviewed_by = actor
-    check.reviewed_at = timezone.now()
-    check.save(update_fields=["status", "review_note", "reviewed_by", "reviewed_at"])
+    owner = check.singer_registration or check.program
+    if owner is None:
+        raise ValidationError("材料检查项未关联有效报名，无法审核。")
+    activity = lock_activity_for_action(owner.activity, ActivityAction.REVIEW_REGISTRATION)
+    locked_check = (
+        MaterialCheck.objects.select_for_update()
+        .select_related("singer_registration", "program")
+        .get(pk=check.pk)
+    )
+    locked_owner = locked_check.singer_registration or locked_check.program
+    if locked_owner is None or locked_owner.activity_id != activity.pk:
+        raise ValidationError("材料检查项不属于当前活动。")
+    old_status = locked_check.status
+    locked_check.status = status
+    locked_check.review_note = (note or "").strip()
+    locked_check.reviewed_by = actor
+    locked_check.reviewed_at = timezone.now()
+    locked_check.save(update_fields=["status", "review_note", "reviewed_by", "reviewed_at"])
     AuditLog.objects.create(
         operator=actor,
         action_type=AuditLog.ActionType.REVIEW_MATERIAL,
-        target=f"MaterialCheck:{check.pk}",
+        target=f"MaterialCheck:{locked_check.pk}",
         old_value=old_status,
-        new_value=f"{status}: {check.review_note}",
-        note=check.item_name,
+        new_value=f"{status}: {locked_check.review_note}",
+        note=locked_check.item_name,
     )
-    return check
+    return locked_check
 
 
 def _sync_checks(registration=None, program=None, requirements=None):

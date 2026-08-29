@@ -1,22 +1,33 @@
 import threading
+import time
 from decimal import Decimal
 from io import BytesIO
 from unittest import skipUnless
 
 from accounts.models import User
 from common.models import AuditLog
+from common.test_data import clear_activity_test_data
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import (
+    IntegrityError,
+    OperationalError,
+    close_old_connections,
+    connection,
+    transaction,
+)
 from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
 from exports.services import build_score_template_workbook
+from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
+from files.services import review_material_check, store_submission_file
 from openpyxl import Workbook
+from staff_panel.views import activity_material_requirements
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .models import (
@@ -45,6 +56,7 @@ from .services import (
     unlock_round,
     validate_score,
 )
+from .views import my_registration_detail
 
 
 class ScoringServiceTests(TestCase):
@@ -53,6 +65,7 @@ class ScoringServiceTests(TestCase):
         self.activity = Activity.objects.create(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
         self.round = ContestRound.objects.create(
@@ -1381,6 +1394,269 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
             orphan,
             "a PREPARED downstream round cannot coexist with an unlocked upstream",
         )
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
+    """M0-T: an Activity lock commit must block every activity-owned mutation.
+
+    O1 participant edit, O2 singer review, O3 material-requirement change. Each
+    races a live Activity row lock against the mutation and asserts the mutation
+    never lands after the lock commits.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="boundary-participant", password="pass")
+        self.staff = User.objects.create_user(
+            username="boundary-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="Boundary Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.reg = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Boundary Singer",
+            student_id="20260050",
+            college="College",
+            class_name="Class",
+            phone="13800000050",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+    def test_o1_participant_edit_never_lands_after_activity_lock(self):
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def hold_activity_lock():
+            try:
+                with transaction.atomic():
+                    activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    activity.is_locked = True
+                    activity.save(update_fields=["is_locked"])
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=hold_activity_lock)
+        holder.start()
+        self.assertTrue(lock_held.wait(timeout=10))
+
+        edit_result: dict[str, object] = {}
+
+        def try_participant_edit():
+            close_old_connections()
+            try:
+                request = RequestFactory().post("/x", {"phone": "13800000051"})
+                request.user = self.user
+                my_registration_detail(request, self.reg.pk)
+                edit_result["done"] = True
+            except Exception as error:  # pragma: no cover - diagnostic only
+                edit_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        editor = threading.Thread(target=try_participant_edit)
+        editor.start()
+        time.sleep(1)  # let the editor block on the Activity row lock
+        release_lock.set()
+        holder.join(timeout=10)
+        editor.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        self.reg.refresh_from_db()
+        self.assertTrue(self.activity.is_locked)
+        self.assertEqual(self.reg.phone, "13800000050")
+        self.assertEqual(edit_result.get("done"), True, edit_result)
+
+    def test_o2_singer_review_never_lands_after_activity_lock(self):
+        check = MaterialCheck.objects.create(
+            singer_registration=self.reg,
+            item_name="Accompaniment",
+            status=MaterialCheck.Status.UPLOADED,
+        )
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def hold_activity_lock():
+            try:
+                with transaction.atomic():
+                    activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    activity.is_locked = True
+                    activity.save(update_fields=["is_locked"])
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=hold_activity_lock)
+        holder.start()
+        self.assertTrue(lock_held.wait(timeout=10))
+
+        review_result: dict[str, object] = {}
+
+        def try_review():
+            close_old_connections()
+            try:
+                review_material_check(
+                    check,
+                    status=MaterialCheck.Status.APPROVED,
+                    note="ok",
+                    actor=self.staff,
+                )
+                review_result["done"] = True
+            except PermissionDenied:
+                review_result["rejected"] = True
+            except Exception as error:  # pragma: no cover - diagnostic only
+                review_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        reviewer = threading.Thread(target=try_review)
+        reviewer.start()
+        time.sleep(1)
+        release_lock.set()
+        holder.join(timeout=10)
+        reviewer.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        check.refresh_from_db()
+        self.assertTrue(self.activity.is_locked)
+        self.assertEqual(check.status, MaterialCheck.Status.UPLOADED)
+        self.assertEqual(review_result.get("rejected"), True, review_result)
+
+    def test_o3_material_requirement_never_lands_after_activity_lock(self):
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def hold_activity_lock():
+            try:
+                with transaction.atomic():
+                    activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    activity.is_locked = True
+                    activity.save(update_fields=["is_locked"])
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = error
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=hold_activity_lock)
+        holder.start()
+        self.assertTrue(lock_held.wait(timeout=10))
+
+        mutate_result: dict[str, object] = {}
+
+        def try_mutate_requirements():
+            close_old_connections()
+            try:
+                request = RequestFactory().post(
+                    "/x",
+                    {
+                        "applies_to": MaterialRequirement.AppliesTo.SINGER,
+                        "item_name": "New Requirement",
+                    },
+                )
+                request.user = self.staff
+                activity_material_requirements(request, self.activity.pk)
+                mutate_result["done"] = True
+            except PermissionDenied:
+                mutate_result["rejected"] = True
+            except Exception as error:  # pragma: no cover - diagnostic only
+                mutate_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        mutator = threading.Thread(target=try_mutate_requirements)
+        mutator.start()
+        time.sleep(1)
+        release_lock.set()
+        holder.join(timeout=10)
+        mutator.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        self.assertTrue(self.activity.is_locked)
+        self.assertFalse(
+            MaterialRequirement.objects.filter(
+                activity=self.activity, item_name="New Requirement"
+            ).exists()
+        )
+        self.assertEqual(mutate_result.get("rejected"), True, mutate_result)
+
+    def test_o5_test_cleanup_vs_participant_upload_no_deadlock(self):
+        test_activity = Activity.objects.create(
+            title="Test Cleanup",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        test_user = User.objects.create_user(username="cleanup-participant", password="pass")
+        test_reg = SingerRegistration.objects.create(
+            activity=test_activity,
+            user=test_user,
+            name="Cleanup Singer",
+            student_id="20260060",
+            college="College",
+            class_name="Class",
+            phone="13800000060",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        results: dict[str, str] = {}
+
+        def run_cleanup():
+            close_old_connections()
+            try:
+                clear_activity_test_data(test_activity, operator=self.staff)
+                results["clear"] = "ok"
+            except OperationalError as error:
+                results["clear"] = "deadlock" if "deadlock" in str(error).lower() else "error"
+            except Exception:
+                results["clear"] = "error"
+            finally:
+                close_old_connections()
+
+        def run_upload():
+            close_old_connections()
+            try:
+                store_submission_file(
+                    owner=test_reg,
+                    uploaded_file=SimpleUploadedFile("a.mp3", b"x"),
+                    purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                    uploaded_by=test_user,
+                )
+                results["upload"] = "ok"
+            except OperationalError as error:
+                results["upload"] = "deadlock" if "deadlock" in str(error).lower() else "error"
+            except Exception:
+                results["upload"] = "error"
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=run_cleanup), threading.Thread(target=run_upload)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertNotEqual(results.get("clear"), "deadlock", results)
+        self.assertNotEqual(results.get("upload"), "deadlock", results)
 
 
 class ParticipantApplyVisibilityTests(TestCase):

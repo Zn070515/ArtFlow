@@ -401,7 +401,7 @@ def finalize_advancement(
     database order. Staff explicitly choose who advances; that choice is frozen
     for downstream round consumption and audited.
     """
-    lock_activity_for_runtime_data(contest_round.activity)
+    lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
@@ -454,7 +454,7 @@ def apply_scores(
     *,
     note: str = "",
 ) -> list[dict[str, int | str | None]]:
-    lock_activity_for_runtime_data(contest_round.activity)
+    lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )

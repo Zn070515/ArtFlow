@@ -1,9 +1,9 @@
 from datetime import timedelta
 
-from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from core.policies import ActivityAction, ensure_activity_action_allowed
+from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -97,9 +97,7 @@ def _locked_vote_session(vote_session):
 
 
 def _locked_runtime_activity(activity):
-    locked_activity = lock_activity_for_runtime_data(activity)
-    ensure_activity_unlocked(locked_activity)
-    return locked_activity
+    return lock_activity_for_action(activity, ActivityAction.MANAGE_VOTE)
 
 
 def _audit_vote_state(vote_session, operator, action_type, old_value, new_value, *, note=""):

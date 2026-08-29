@@ -130,12 +130,14 @@ def my_program_detail(request, pk):
     if request.method == "POST":
         try:
             with transaction.atomic():
+                activity = lock_activity_for_action(prog.activity)
                 locked_prog = (
                     Program.objects.select_for_update()
                     .select_related("activity")
                     .get(pk=prog.pk, user=request.user)
                 )
-                lock_activity_for_action(locked_prog.activity)
+                if locked_prog.activity_id != activity.pk:
+                    raise PermissionDenied("节目信息不属于当前活动。")
                 ensure_participant_can_edit(locked_prog)
                 if request.FILES.get("file"):
                     submission_file = store_submission_file(

@@ -19,7 +19,11 @@ from common.test_data import (
 )
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
-from core.services import transition_activity_phase, unarchive_activity
+from core.services import (
+    lock_activity_for_action,
+    transition_activity_phase,
+    unarchive_activity,
+)
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.base import ContentFile
@@ -186,6 +190,7 @@ def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
     if request.method == "POST":
+        activity = lock_activity_for_action(activity)
         _ensure_activity_mutable(activity)
         form = ActivityForm(request.POST)
         if not form.is_valid():
@@ -248,34 +253,36 @@ def post_create(request):
                 },
             )
         data = form.cleaned_data
-        related_activity = None
-        if data["related_activity_id"]:
-            related_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
-            ensure_activity_unlocked(related_activity)
-        _ensure_publication_allowed(related_activity, data["status"])
-        post = PublicPost(
-            title=data["title"],
-            subtitle=data["subtitle"],
-            content=data["content"],
-            post_type=data["post_type"],
-            status=data["status"],
-            sort_order=data["sort_order"],
-            is_pinned=data["is_pinned"],
-            related_activity_id=data["related_activity_id"],
-            created_by=request.user,
-            updated_by=request.user,
-        )
-        if request.FILES.get("cover_image"):
-            post.cover_image = request.FILES["cover_image"]
-        if data["status"] == PublicPost.Status.PUBLISHED:
-            post.published_at = timezone.now()
-        post.save()
-        log_action(
-            request,
-            AuditLog.ActionType.PUBLISH_POST,
-            f"PublicPost:{post.pk}",
-            new_value=f"status={post.status}",
-        )
+        with transaction.atomic():
+            related_activity = None
+            if data["related_activity_id"]:
+                related_activity = lock_activity_for_action(
+                    get_object_or_404(Activity, pk=data["related_activity_id"])
+                )
+            _ensure_publication_allowed(related_activity, data["status"])
+            post = PublicPost(
+                title=data["title"],
+                subtitle=data["subtitle"],
+                content=data["content"],
+                post_type=data["post_type"],
+                status=data["status"],
+                sort_order=data["sort_order"],
+                is_pinned=data["is_pinned"],
+                related_activity_id=data["related_activity_id"],
+                created_by=request.user,
+                updated_by=request.user,
+            )
+            if request.FILES.get("cover_image"):
+                post.cover_image = request.FILES["cover_image"]
+            if data["status"] == PublicPost.Status.PUBLISHED:
+                post.published_at = timezone.now()
+            post.save()
+            log_action(
+                request,
+                AuditLog.ActionType.PUBLISH_POST,
+                f"PublicPost:{post.pk}",
+                new_value=f"status={post.status}",
+            )
         return redirect("staff:post_list")
     return render(
         request,
@@ -300,6 +307,7 @@ def post_preview(request, pk):
 
 
 @staff_required
+@transaction.atomic
 def post_edit(request, pk):
     post = get_object_or_404(PublicPost, pk=pk)
     if request.method == "POST":
@@ -322,12 +330,23 @@ def post_edit(request, pk):
         new_activity = None
         if data["related_activity_id"]:
             new_activity = get_object_or_404(Activity, pk=data["related_activity_id"])
+        # A reparent touches up to two activities; lock both in stable ascending
+        # PK order so two concurrent reparents cannot deadlock on opposite order.
+        activity_ids = sorted({a.pk for a in (old_activity, new_activity) if a is not None})
+        locked_by_pk = {
+            a.pk: a
+            for a in Activity.objects.select_for_update()
+            .filter(pk__in=activity_ids)
+            .order_by("pk")
+        }
+        old_locked = locked_by_pk.get(old_activity.pk) if old_activity else None
+        new_locked = locked_by_pk.get(new_activity.pk) if new_activity else None
         # A move from a locked activity to an unlocked one must still be blocked;
         # checking only the new activity would let staff bypass the old lock.
-        for activity in (old_activity, new_activity):
-            if activity is not None:
-                ensure_activity_unlocked(activity)
-        _ensure_publication_allowed(new_activity, data["status"])
+        for locked_activity in (old_locked, new_locked):
+            if locked_activity is not None:
+                ensure_activity_unlocked(locked_activity)
+        _ensure_publication_allowed(new_locked, data["status"])
         post.title = data["title"]
         post.subtitle = data["subtitle"]
         post.content = data["content"]
@@ -394,53 +413,66 @@ def singer_registration_detail(request, pk):
     reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
     errors = []
     if request.method == "POST":
-        ensure_activity_unlocked(reg.activity)
-        if "upload_file" in request.POST:
-            ensure_activity_action_allowed(reg.activity, ActivityAction.UPLOAD_MATERIAL)
-            f = request.FILES.get("file")
-            if f:
-                try:
-                    submission_file = store_submission_file(
-                        owner=reg,
-                        uploaded_file=f,
-                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                        uploaded_by=request.user,
-                    )
-                except ValidationError as error:
-                    errors.extend(error.messages)
+        is_upload = "upload_file" in request.POST
+        action = (
+            ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
+        )
+        ensure_activity_action_allowed(reg.activity, action)
+        with transaction.atomic():
+            activity = lock_activity_for_action(reg.activity, action)
+            locked_reg = (
+                SingerRegistration.objects.select_for_update()
+                .select_related("activity", "user")
+                .get(pk=reg.pk)
+            )
+            if locked_reg.activity_id != activity.pk:
+                raise PermissionDenied("报名信息不属于当前活动。")
+            if is_upload:
+                f = request.FILES.get("file")
+                if f:
+                    try:
+                        submission_file = store_submission_file(
+                            owner=locked_reg,
+                            uploaded_file=f,
+                            purpose=request.POST.get(
+                                "file_purpose", SubmissionFile.Purpose.OTHER
+                            ),
+                            uploaded_by=request.user,
+                        )
+                    except ValidationError as error:
+                        errors.extend(error.messages)
+                    else:
+                        sync_singer_material_checks(locked_reg)
+                        log_action(
+                            request,
+                            AuditLog.ActionType.UPLOAD_FILE,
+                            f"SubmissionFile:{submission_file.pk}",
+                            new_value=submission_file.original_name,
+                        )
+            else:
+                form = SingerReviewForm(request.POST)
+                if not form.is_valid():
+                    errors = [_form_error(form)]
                 else:
-                    sync_singer_material_checks(reg)
+                    old_value = f"pre={locked_reg.pre_status}; live={locked_reg.live_status}"
+                    locked_reg.pre_status = form.cleaned_data["pre_status"]
+                    locked_reg.live_status = form.cleaned_data["live_status"]
+                    note = form.cleaned_data.get("staff_note", "").strip()
+                    if note:
+                        StaffNote.objects.create(
+                            singer_registration=locked_reg,
+                            content=note,
+                            created_by=request.user,
+                        )
+                    locked_reg.save()
                     log_action(
                         request,
-                        AuditLog.ActionType.UPLOAD_FILE,
-                        f"SubmissionFile:{submission_file.pk}",
-                        new_value=submission_file.original_name,
+                        AuditLog.ActionType.UPDATE_STATUS,
+                        f"SingerRegistration:{locked_reg.pk}",
+                        old_value=old_value,
+                        new_value=f"pre={locked_reg.pre_status}; live={locked_reg.live_status}",
                     )
-        else:
-            ensure_activity_action_allowed(reg.activity, ActivityAction.REVIEW_REGISTRATION)
-            form = SingerReviewForm(request.POST)
-            if not form.is_valid():
-                errors = [_form_error(form)]
-            else:
-                old_value = f"pre={reg.pre_status}; live={reg.live_status}"
-                reg.pre_status = form.cleaned_data["pre_status"]
-                reg.live_status = form.cleaned_data["live_status"]
-                note = form.cleaned_data.get("staff_note", "").strip()
-                if note:
-                    StaffNote.objects.create(
-                        singer_registration=reg,
-                        content=note,
-                        created_by=request.user,
-                    )
-                reg.save()
-                log_action(
-                    request,
-                    AuditLog.ActionType.UPDATE_STATUS,
-                    f"SingerRegistration:{reg.pk}",
-                    old_value=old_value,
-                    new_value=f"pre={reg.pre_status}; live={reg.live_status}",
-                )
-                return redirect("staff:singer_registration_detail", pk=reg.pk)
+                    return redirect("staff:singer_registration_detail", pk=reg.pk)
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
     checks = reg.material_checks.all()
@@ -486,53 +518,69 @@ def program_detail(request, pk):
     prog = get_object_or_404(Program.objects.select_related("activity", "user"), pk=pk)
     errors = []
     if request.method == "POST":
-        ensure_activity_unlocked(prog.activity)
-        if "upload_file" in request.POST:
-            ensure_activity_action_allowed(prog.activity, ActivityAction.UPLOAD_MATERIAL)
-            f = request.FILES.get("file")
-            if f:
-                try:
-                    submission_file = store_submission_file(
-                        owner=prog,
-                        uploaded_file=f,
-                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                        uploaded_by=request.user,
-                    )
-                except ValidationError as error:
-                    errors.extend(error.messages)
+        is_upload = "upload_file" in request.POST
+        action = (
+            ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
+        )
+        ensure_activity_action_allowed(prog.activity, action)
+        with transaction.atomic():
+            activity = lock_activity_for_action(prog.activity, action)
+            locked_prog = (
+                Program.objects.select_for_update()
+                .select_related("activity", "user")
+                .get(pk=prog.pk)
+            )
+            if locked_prog.activity_id != activity.pk:
+                raise PermissionDenied("节目信息不属于当前活动。")
+            if is_upload:
+                f = request.FILES.get("file")
+                if f:
+                    try:
+                        submission_file = store_submission_file(
+                            owner=locked_prog,
+                            uploaded_file=f,
+                            purpose=request.POST.get(
+                                "file_purpose", SubmissionFile.Purpose.OTHER
+                            ),
+                            uploaded_by=request.user,
+                        )
+                    except ValidationError as error:
+                        errors.extend(error.messages)
+                    else:
+                        sync_program_material_checks(locked_prog)
+                        log_action(
+                            request,
+                            AuditLog.ActionType.UPLOAD_FILE,
+                            f"SubmissionFile:{submission_file.pk}",
+                            new_value=submission_file.original_name,
+                        )
+            else:
+                form = ProgramReviewForm(request.POST)
+                if not form.is_valid():
+                    errors = [_form_error(form)]
                 else:
-                    sync_program_material_checks(prog)
+                    old_value = f"status={locked_prog.status}; sort_order={locked_prog.sort_order}"
+                    locked_prog.status = form.cleaned_data["status"]
+                    locked_prog.sort_order = form.cleaned_data["sort_order"]
+                    note = form.cleaned_data.get("staff_note", "").strip()
+                    if note:
+                        StaffNote.objects.create(
+                            program=locked_prog,
+                            content=note,
+                            created_by=request.user,
+                        )
+                    locked_prog.save()
                     log_action(
                         request,
-                        AuditLog.ActionType.UPLOAD_FILE,
-                        f"SubmissionFile:{submission_file.pk}",
-                        new_value=submission_file.original_name,
+                        AuditLog.ActionType.REVIEW_MATERIAL,
+                        f"Program:{locked_prog.pk}",
+                        old_value=old_value,
+                        new_value=(
+                            f"status={locked_prog.status}; sort_order="
+                            f"{locked_prog.sort_order}"
+                        ),
                     )
-        else:
-            ensure_activity_action_allowed(prog.activity, ActivityAction.REVIEW_REGISTRATION)
-            form = ProgramReviewForm(request.POST)
-            if not form.is_valid():
-                errors = [_form_error(form)]
-            else:
-                old_value = f"status={prog.status}; sort_order={prog.sort_order}"
-                prog.status = form.cleaned_data["status"]
-                prog.sort_order = form.cleaned_data["sort_order"]
-                note = form.cleaned_data.get("staff_note", "").strip()
-                if note:
-                    StaffNote.objects.create(
-                        program=prog,
-                        content=note,
-                        created_by=request.user,
-                    )
-                prog.save()
-                log_action(
-                    request,
-                    AuditLog.ActionType.REVIEW_MATERIAL,
-                    f"Program:{prog.pk}",
-                    old_value=old_value,
-                    new_value=f"status={prog.status}; sort_order={prog.sort_order}",
-                )
-                return redirect("staff:program_detail", pk=prog.pk)
+                    return redirect("staff:program_detail", pk=prog.pk)
     notes = prog.staff_notes.select_related("created_by")
     files = prog.files.all()
     checks = prog.material_checks.all()
@@ -561,8 +609,6 @@ def material_check_review(request):
     if owner is None:
         messages.error(request, "材料检查项未关联有效报名，无法审核。")
         return redirect("staff:export_center")
-    ensure_activity_unlocked(owner.activity)
-    ensure_activity_action_allowed(owner.activity, ActivityAction.REVIEW_REGISTRATION)
     result = request.POST.get("result")
     if result == "approve":
         status = MaterialCheck.Status.APPROVED
@@ -571,12 +617,16 @@ def material_check_review(request):
     else:
         messages.error(request, "无效的审核操作。")
         return _material_review_redirect(owner)
-    review_material_check(
-        check,
-        status=status,
-        note=request.POST.get("note", ""),
-        actor=request.user,
-    )
+    try:
+        review_material_check(
+            check,
+            status=status,
+            note=request.POST.get("note", ""),
+            actor=request.user,
+        )
+    except ValidationError as error:
+        messages.error(request, "；".join(error.messages))
+        return _material_review_redirect(owner)
     messages.success(request, f"「{check.item_name}」已审核。")
     return _material_review_redirect(owner)
 
@@ -594,25 +644,27 @@ def _material_review_redirect(owner):
 def activity_material_requirements(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     if request.method == "POST":
-        _ensure_activity_mutable(activity)
-        applies_to = request.POST.get("applies_to")
-        item_name = request.POST.get("item_name", "").strip()
-        if not item_name:
-            messages.error(request, "检查项名称不能为空。")
-        elif applies_to not in MaterialRequirement.AppliesTo.values:
-            messages.error(request, "无效的适用范围。")
-        else:
-            MaterialRequirement.objects.update_or_create(
-                activity=activity,
-                applies_to=applies_to,
-                item_name=item_name,
-                defaults={
-                    "file_purpose": request.POST.get("file_purpose", "") or "",
-                    "is_required": True,
-                    "sort_order": request.POST.get("sort_order", 0),
-                },
-            )
-            messages.success(request, "材料检查项已保存。")
+        with transaction.atomic():
+            locked_activity = lock_activity_for_action(activity)
+            _ensure_activity_mutable(locked_activity)
+            applies_to = request.POST.get("applies_to")
+            item_name = request.POST.get("item_name", "").strip()
+            if not item_name:
+                messages.error(request, "检查项名称不能为空。")
+            elif applies_to not in MaterialRequirement.AppliesTo.values:
+                messages.error(request, "无效的适用范围。")
+            else:
+                MaterialRequirement.objects.update_or_create(
+                    activity=locked_activity,
+                    applies_to=applies_to,
+                    item_name=item_name,
+                    defaults={
+                        "file_purpose": request.POST.get("file_purpose", "") or "",
+                        "is_required": True,
+                        "sort_order": request.POST.get("sort_order", 0),
+                    },
+                )
+                messages.success(request, "材料检查项已保存。")
         return redirect("staff:activity_material_requirements", activity_id=activity.pk)
     requirements = MaterialRequirement.objects.filter(activity=activity)
     return render(
@@ -631,8 +683,10 @@ def activity_material_requirements(request, activity_id):
 @require_POST
 def activity_material_requirement_delete(request, activity_id, pk):
     activity = get_object_or_404(Activity, pk=activity_id)
-    _ensure_activity_mutable(activity)
-    MaterialRequirement.objects.filter(pk=pk, activity=activity).delete()
+    with transaction.atomic():
+        locked_activity = lock_activity_for_action(activity)
+        _ensure_activity_mutable(locked_activity)
+        MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).delete()
     messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 
@@ -788,7 +842,6 @@ def round_create(request):
     if request.method == "POST":
         form = ContestRoundForm(request.POST)
         activity = get_object_or_404(Activity, pk=request.POST.get("activity_id"))
-        ensure_activity_unlocked(activity)
         if not form.is_valid():
             return render(
                 request,
@@ -802,19 +855,21 @@ def round_create(request):
                     "scoring_modes": _choices(ContestRound.ScoringMode),
                 },
             )
-        contest_round = ContestRound.objects.create(
-            activity=activity,
-            round_type=form.cleaned_data["round_type"],
-            scoring_mode=form.cleaned_data["scoring_mode"],
-            name=form.cleaned_data["name"],
-            advance_count=form.cleaned_data["advance_count"],
-        )
-        log_action(
-            request,
-            AuditLog.ActionType.OTHER,
-            f"ContestRound:{contest_round.pk}",
-            new_value=contest_round.name,
-        )
+        with transaction.atomic():
+            locked_activity = lock_activity_for_action(activity)
+            contest_round = ContestRound.objects.create(
+                activity=locked_activity,
+                round_type=form.cleaned_data["round_type"],
+                scoring_mode=form.cleaned_data["scoring_mode"],
+                name=form.cleaned_data["name"],
+                advance_count=form.cleaned_data["advance_count"],
+            )
+            log_action(
+                request,
+                AuditLog.ActionType.OTHER,
+                f"ContestRound:{contest_round.pk}",
+                new_value=contest_round.name,
+            )
         return redirect("staff:round_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
@@ -966,12 +1021,15 @@ def judge_list(request):
 def judge_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
-        ensure_activity_unlocked(activity)
-        judge = Judge.objects.create(
-            activity=activity,
-            name=request.POST["name"],
-        )
-        log_action(request, AuditLog.ActionType.OTHER, f"Judge:{judge.pk}", new_value=judge.name)
+        with transaction.atomic():
+            locked_activity = lock_activity_for_action(activity)
+            judge = Judge.objects.create(
+                activity=locked_activity,
+                name=request.POST["name"],
+            )
+            log_action(
+                request, AuditLog.ActionType.OTHER, f"Judge:{judge.pk}", new_value=judge.name
+            )
         return redirect("staff:judge_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
