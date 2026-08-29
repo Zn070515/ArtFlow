@@ -29,3 +29,4 @@ class RulesetVersionAdmin(admin.ModelAdmin):
         "frozen_at",
     )
     list_filter = ("status", "is_current")
+    readonly_fields = ("execution_plan",)

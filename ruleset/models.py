@@ -135,6 +135,9 @@ class RulesetVersion(models.Model):
     )
     definition = models.TextField(help_text="JSON ruleset definition (typed node graph).")
     content_hash = models.CharField(max_length=64, blank=True)
+    execution_plan = models.TextField(
+        blank=True, editable=False, help_text="Canonical JSON ExecutionPlan persisted at freeze."
+    )
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
     is_current = models.BooleanField(default=True)
     created_by = models.ForeignKey(

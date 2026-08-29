@@ -25,6 +25,17 @@ from django.core.exceptions import ValidationError
 # "0.3 * x + ...") are forbidden by design; composition is always structured.
 AGGREGATE_TYPES = ("weighted_sum", "average")
 
+# Semantic annotations consumed by the M1-D compiler (§16). These are optional
+# per-node fields; absent values are resolved to "unknown" by the compiler so the
+# M1-C structures (which carry none) still compile. Keep behind the type-graph so
+# M1-C parsing is unchanged.
+SCALES = frozenset({"hundred", "ten", "raw", "ordinal"})
+ASSESS_MODES = frozenset({"mean", "trimmed_mean"})
+TIE_POLICIES = frozenset({"auto_break", "extra_round", "manual", "score_fallback"})
+ODD_POLICIES = frozenset({"bye", "wildcard", "manual", "reject"})
+VOTE_PURPOSES = frozenset({"POPULARITY", "SCORE_COMPONENT", "SELECTION", "OTHER"})
+CONVERSION_METHODS = frozenset({"factor", "minmax", "rank"})
+
 # The seed node. Every definition begins by referencing ``entry`` (a Roster); it is the
 # only pre-declared output and cannot be claimed by a user node.
 ENTRY_KEY = "entry"
@@ -98,9 +109,74 @@ def _require_non_empty_str_list(name: str, node: dict, field: str) -> None:
             raise ValidationError(f"Node {name}: '{field}' entries must be non-empty strings.")
 
 
+def _require_optional_non_negative_int(name: str, node: dict, field: str) -> None:
+    if node.get(field) is None:
+        return
+    _require_non_negative_int(name, node, field)
+
+
+def _require_optional_non_empty_str(name: str, node: dict, field: str) -> None:
+    if node.get(field) is None:
+        return
+    _require_non_empty_str(name, node, field)
+
+
 def _validate_manual_select(name: str, node: dict) -> None:
     _require_non_negative_int(name, node, "groups")
     _require_non_negative_int(name, node, "quota")
+
+
+def _require_one_of(name: str, node: dict, field: str, allowed: frozenset[str]) -> None:
+    value = node.get(field)
+    if value is not None and value not in allowed:
+        raise ValidationError(
+            f"Node {name}: '{field}' must be one of {sorted(allowed)}, got {value!r}."
+        )
+
+
+def _validate_assess(name: str, node: dict) -> None:
+    _require_one_of(name, node, "scale", SCALES)
+    _require_one_of(name, node, "mode", ASSESS_MODES)
+    _require_optional_non_negative_int(name, node, "trim_high")
+    _require_optional_non_negative_int(name, node, "trim_low")
+    _require_optional_non_negative_int(name, node, "min_judges")
+    _require_optional_non_empty_str(name, node, "vote_source")
+    _require_one_of(name, node, "vote_purpose", VOTE_PURPOSES)
+
+
+def _validate_pair(name: str, node: dict) -> None:
+    _require_one_of(name, node, "odd_policy", ODD_POLICIES)
+
+
+def _validate_tie(name: str, node: dict) -> None:
+    _require_one_of(name, node, "tie_policy", TIE_POLICIES)
+
+
+def _validate_conversion(name: str, node: dict) -> None:
+    conversion = node.get("conversion")
+    if conversion is None:
+        return
+    if not isinstance(conversion, dict):
+        raise ValidationError(f"Node {name}: 'conversion' must be an object.")
+    _require_one_of(name, {"conversion": conversion.get("to")}, "conversion", SCALES)
+    conversions = conversion.get("conversions")
+    if not isinstance(conversions, list) or not conversions:
+        raise ValidationError(f"Node {name}: conversion 'conversions' must be a non-empty list.")
+    for i, entry in enumerate(conversions):
+        if not isinstance(entry, dict):
+            raise ValidationError(f"Node {name}: conversion {i} must be an object.")
+        _require_one_of(name, {"conversion": entry.get("from")}, "conversion", SCALES)
+        method = entry.get("method")
+        if method not in CONVERSION_METHODS:
+            raise ValidationError(
+                f"Node {name}: conversion {i} method {method!r} unsupported; "
+                f"expected one of {sorted(CONVERSION_METHODS)}."
+            )
+
+
+def _validate_vote(name: str, node: dict) -> None:
+    _require_optional_non_empty_str(name, node, "vote_source")
+    _require_one_of(name, node, "vote_purpose", VOTE_PURPOSES)
 
 
 def _validate_aggregate(name: str, node: dict) -> None:
@@ -135,6 +211,7 @@ def _validate_aggregate(name: str, node: dict) -> None:
         total += weight
     if total <= 0:
         raise ValidationError(f"Node {name}: aggregate component weights must sum to > 0.")
+    _validate_conversion(name, node)
 
 
 def _validate_branch(name: str, node: dict) -> None:
@@ -200,21 +277,34 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.PAIR,
             OutputType.PAIR_SET,
             required=("source",),
+            optional=("odd_policy",),
             source_refs=("source",),
             expects={"source": _ROSTER},
+            validate=_validate_pair,
         ),
         _spec(
             NodeType.ASSESS,
             OutputType.SCOREMAP,
             required=("source",),
-            optional=("round",),
+            optional=(
+                "round",
+                "scale",
+                "mode",
+                "trim_high",
+                "trim_low",
+                "min_judges",
+                "vote_source",
+                "vote_purpose",
+            ),
             source_refs=("source",),
             expects={"source": _ROSTER},
+            validate=_validate_assess,
         ),
         _spec(
             NodeType.AGGREGATE,
             OutputType.SCOREMAP,
             required=("aggregate",),
+            optional=("conversion",),
             source_refs=("aggregate.components[].source",),
             expects={"aggregate.components[].source": _SCOREMAP},
             validate=_validate_aggregate,
@@ -223,18 +313,19 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.RANK,
             OutputType.RANKED_ROSTER,
             required=("source",),
-            optional=("descending",),
+            optional=("descending", "tie_policy"),
             source_refs=("source",),
             expects={"source": _SCOREMAP},
-            validate=lambda n, d: _require_bool(n, d, "descending"),
+            validate=lambda n, d: _require_bool(n, d, "descending") or _validate_tie(n, d),
         ),
         _spec(
             NodeType.SELECT,
             OutputType.ROSTER,
             required=("source", "count"),
+            optional=("tie_policy",),
             source_refs=("source",),
             expects={"source": _RANKED_ROSTER},
-            validate=lambda n, d: _require_non_negative_int(n, d, "count"),
+            validate=lambda n, d: _require_non_negative_int(n, d, "count") or _validate_tie(n, d),
         ),
         _spec(
             NodeType.BRANCH,
@@ -278,8 +369,9 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.AWARD,
             OutputType.AWARD_SET,
             required=("source", "award"),
+            optional=("vote_source", "vote_purpose"),
             source_refs=("source",),
-            validate=lambda n, d: _require_non_empty_str(n, d, "award"),
+            validate=lambda n, d: _require_non_empty_str(n, d, "award") or _validate_vote(n, d),
         ),
     ]
 }
