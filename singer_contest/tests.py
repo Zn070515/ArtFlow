@@ -2159,6 +2159,65 @@ def _schidui_definition():
     )
 
 
+def _xiaofeng_definition():
+    """§12.5 校十佳屏峰 chain as one forward-only graph of generic primitives.
+
+    20 -> top1/initial-group (5 direct) -> leftover R1 top12 -> R2 top7 -> merge 12
+    -> final groups -> manual 0~2/group -> fill to 6. No 2025-year special-casing in
+    Python (§12.5/§18); every rule (counts, groups, quota) lives in this definition.
+    """
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {
+                    "key": "groups_initial",
+                    "type": "PARTITION",
+                    "source": "entry",
+                    "by": "initial_group",
+                },
+                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {"key": "rank_r1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {
+                    "key": "direct",
+                    "type": "SELECT",
+                    "source": "rank_r1",
+                    "count": 1,
+                    "by": "groups_initial",
+                },
+                {"key": "leftover", "type": "SUBTRACT", "minuend": "entry", "subtrahend": "direct"},
+                {"key": "repech_r1", "type": "ASSESS", "source": "leftover", "round": "r1"},
+                {"key": "repech_rank", "type": "RANK", "source": "repech_r1", "descending": True},
+                {"key": "top12", "type": "SELECT", "source": "repech_rank", "count": 12},
+                {"key": "repech_r2", "type": "ASSESS", "source": "top12", "round": "r2"},
+                {"key": "repech_rank2", "type": "RANK", "source": "repech_r2", "descending": True},
+                {"key": "top7", "type": "SELECT", "source": "repech_rank2", "count": 7},
+                {"key": "merged", "type": "MERGE", "sources": ["direct", "top7"]},
+                {
+                    "key": "final_groups",
+                    "type": "PARTITION",
+                    "source": "merged",
+                    "by": "final_group",
+                },
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "final_groups",
+                    "groups": 3,
+                    "quota": 2,
+                },
+                {
+                    "key": "filled",
+                    "type": "FILL_TO_QUOTA",
+                    "from": "merged",
+                    "into": "manual",
+                    "quota": 2,
+                },
+            ],
+        }
+    )
+
+
 class GoldenSchiduiDbTests(TestCase):
     """M1-F golden 院十佳 end-to-end: 15 singers through the DB, run_ruleset, verify.
 
@@ -2323,3 +2382,178 @@ class GoldenSchiduiDbTests(TestCase):
         composite = stage.composites.filter(node_key="stage1").first()
         self.assertEqual(len(composite.components), 3)
         self.assertIn("source", composite.components[0])
+
+
+class GoldenSchiduiXiaofengDbTests(TestCase):
+    """M1-G golden 校十佳屏峰 end-to-end (DB-bound).
+
+    20 singers -> 5 initial groups -> top1/group direct (5) -> leftover R1 top12
+    -> R2 top7 -> merge 12 -> final groups -> manual 0~2/group -> fill to 6. All
+    control flow (counts, groups, quota) lives in the frozen definition; binder and
+    run_ruleset are generic. Finalists are read from ``node_values['filled']`` because
+    every merged contestant already carries DIRECT/REPECHAGE via first-writer-wins.
+    """
+
+    JUDGE_COUNT = 5
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="xf-golden-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="校十佳屏峰",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="校十佳屏峰规则", is_test_data=True
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset, definition=_xiaofeng_definition(), is_current=False
+        )
+        self.judges = [
+            Judge.objects.create(activity=self.activity, name=f"评委{chr(0x41 + i)}")
+            for i in range(self.JUDGE_COUNT)
+        ]
+        self.rounds = {}
+        for rkey in ("r1", "r2"):
+            self.rounds[rkey] = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name=rkey,
+            )
+        self.singers = [self._make_singer(i) for i in range(1, 21)]
+        self._seed_scores()
+
+    def _make_singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"xf-golden-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"2026010{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def _score(self, round_key, singers, scorer):
+        for idx, singer in enumerate(singers, 1):
+            for judge in self.judges:
+                ScoreRecord.objects.create(
+                    round=self.rounds[round_key],
+                    singer=singer,
+                    judge=judge,
+                    score=Decimal(scorer(idx)),
+                    is_test_data=True,
+                )
+
+    def _seed_scores(self):
+        self._score("r1", self.singers, lambda i: 100 - i)
+        self._score("r2", self.singers, lambda i: 200 - i)
+
+    def _group_of(self):
+        initial = {
+            str(singer.pk): group
+            for group, start in (("G1", 0), ("G2", 4), ("G3", 8), ("G4", 12), ("G5", 16))
+            for singer in self.singers[start : start + 4]
+        }
+        final = {
+            str(singer.pk): group
+            for group, positions in (
+                ("F1", (0, 1, 2, 3)),
+                ("F2", (4, 5, 6, 7)),
+                ("F3", (8, 9, 12, 16)),
+            )
+            for position in positions
+            for singer in (self.singers[position],)
+        }
+        return {"initial_group": initial, "final_group": final}
+
+    def _manual(self):
+        # F1/F2 full (2 each), F3 short by one -> FILL_TO_QUOTA must pull c13 in.
+        return {
+            "manual": {
+                "F1": (str(self.singers[0].pk), str(self.singers[1].pk)),
+                "F2": (str(self.singers[4].pk), str(self.singers[5].pk)),
+                "F3": (str(self.singers[8].pk),),
+            }
+        }
+
+    def test_golden_xiaofeng_end_to_end_ready(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="校十佳屏峰",
+            computed_by=self.admin,
+            round_keys=dict(self.rounds),
+            group_of=self._group_of(),
+            manual=self._manual(),
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.stage_key, "校十佳屏峰")
+        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.plan_version, 1)
+        self.assertEqual(stage.decisions.count(), 20)
+
+        by_singer = {d.singer_id: d for d in stage.decisions.all()}
+        # 5 direct (top1/group), 12 repechage, 3 never-selected eliminated.
+        codes = [d.outcome_code for d in stage.decisions.all()]
+        self.assertEqual(codes.count("direct"), 5)
+        self.assertEqual(codes.count("repechage"), 12)
+        self.assertEqual(codes.count("eliminated"), 3)
+        # Direct winners are creation order 1/5/9/13/17, each seated by their global R1 rank.
+        for idx, expected_rank in ((0, 1), (4, 5), (8, 9), (12, 13), (16, 17)):
+            decision = by_singer[self.singers[idx].pk]
+            self.assertEqual(decision.outcome_code, "direct")
+            self.assertEqual(decision.rank, expected_rank)
+        # Eliminated are the three lowest leftovers: creation order 18/19/20.
+        for idx in (17, 18, 19):
+            self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "eliminated")
+
+    def test_golden_xiaofeng_fill_to_quota_finalists(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="校十佳屏峰",
+            computed_by=self.admin,
+            round_keys=dict(self.rounds),
+            group_of=self._group_of(),
+            manual=self._manual(),
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY)
+
+        # Re-resolve to inspect the fill GROUP_MAP: F3 was short one and must be topped
+        # up from the merged pool (c13). Finalists are read from node_values['filled'].
+        from ruleset.resolver import resolve
+
+        result = resolve(self.version.definition, self._resolve_input())
+        self.assertEqual(result.status.value, "ready")
+        self.assertEqual(
+            result.node_values["filled"],
+            {
+                "F1": [str(self.singers[0].pk), str(self.singers[1].pk)],
+                "F2": [str(self.singers[4].pk), str(self.singers[5].pk)],
+                "F3": [str(self.singers[8].pk), str(self.singers[12].pk)],
+            },
+        )
+        finalists = [c for group in result.node_values["filled"].values() for c in group]
+        self.assertEqual(len(finalists), 6)
+        self.assertEqual(len(set(finalists)), 6)
+
+    def _resolve_input(self):
+        from .services import bind_resolve_input
+
+        return bind_resolve_input(
+            self.version,
+            self.activity,
+            round_keys=dict(self.rounds),
+            group_of=self._group_of(),
+            manual=self._manual(),
+        )

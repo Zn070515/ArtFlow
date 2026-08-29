@@ -343,10 +343,43 @@ def _rank(node: dict, st: _Stage, by_key: dict) -> tuple:
 def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
     ranked: tuple = st.values[node["source"]]
     count = node["count"]
-    picked = list(ranked[:count])
     score_node = by_key[node["source"]].get("source")
     scores: dict = st.values.get(score_node, {}) if score_node else {}
     policy = node.get("tie_policy")
+    by = node.get("by")
+    if by:
+        # Group-scoped: pick top-count within each group of the partition, flattened
+        # in partition order. Roster-first semantics (a contestant belongs to exactly
+        # one group) make the per-group picks disjoint.
+        picked: list[str] = []
+        for g, members in st.values[by].items():
+            members_set = set(members)
+            ordered = [c for c in ranked if c in members_set]
+            lead = ordered[:count]
+            picked.extend(lead)
+            for c in lead:
+                if c not in st.outcome:
+                    st.outcome[c] = (
+                        OutcomeCode.REPECHAGE
+                        if "repechage" in st.origin.get(c, set())
+                        else OutcomeCode.DIRECT
+                    )
+                    st.source_node[c] = node["key"]
+            if count > 0 and count < len(ordered):
+                boundary = scores.get(ordered[count - 1])
+                following = scores.get(ordered[count])
+                if (
+                    boundary is not None
+                    and following is not None
+                    and boundary == following
+                    and policy != "auto_break"
+                ):
+                    st.review.append(
+                        f"SELECT {node['key']} 组 {g} 在截止名次 {count} 处同分，"
+                        f"需人工核定 (tie_policy={policy or 'review'})。"
+                    )
+        return tuple(picked)
+    picked = list(ranked[:count])
     for c in picked:
         if c not in st.outcome:
             if "repechage" in st.origin.get(c, set()):

@@ -24,6 +24,7 @@ from ruleset.test_schema import (
     _def,
     partition_subtract_repechage_merge,
     weighted_composite_topn,
+    xiaofeng_chain,
 )
 
 
@@ -111,6 +112,152 @@ class ResolverWithinScopeTests(SimpleTestCase):
         agg2 = {d.contestant: d.score for d in result.decisions}
         self.assertEqual(agg2["c1"], Decimal("45.0"))
         self.assertEqual(agg2["c2"], Decimal("39.5"))
+
+
+class ResolverGroupScopedSelectTests(SimpleTestCase):
+    """SELECT with a `by` PARTITION picks top-count within each group, not globally."""
+
+    def _def(self):
+        return _def(
+            [
+                {"key": "scored", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "grouped", "type": "PARTITION", "source": ENTRY_KEY, "by": "class"},
+                {"key": "ranked", "type": "RANK", "source": "scored", "descending": True},
+                {"key": "top1", "type": "SELECT", "source": "ranked", "count": 1, "by": "grouped"},
+            ]
+        )
+
+    def test_top1_per_group_is_direct_only_for_group_leaders(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4", "c5", "c6"),
+            round_scores=_rs(
+                {
+                    "r1": {
+                        "c1": [100],
+                        "c2": [99],
+                        "c3": [98],
+                        "c4": [97],
+                        "c5": [96],
+                        "c6": [95],
+                    }
+                }
+            ),
+            group_of={"class": {"c1": "A", "c2": "B", "c3": "A", "c4": "B", "c5": "A", "c6": "B"}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        by = {d.contestant: d for d in result.decisions}
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.DIRECT)
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.DIRECT)
+        for c in ("c3", "c4", "c5", "c6"):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.ELIMINATED)
+
+    def test_over_global_top1_under_scoped_select(self):
+        """Group leaders (c1, c2) are not the global top-N once N exceeds group size."""
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            round_scores=_rs({"r1": {"c1": [100], "c2": [99], "c3": [98], "c4": [97]}}),
+            group_of={"class": {"c1": "A", "c3": "A", "c2": "B", "c4": "B"}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        by = {d.contestant: d for d in result.decisions}
+        # Per-group top1 (count=1): A->c1, B->c2. Both are the global top-2 here, so the
+        # distinction only bites when count is per-group and groups are uneven.
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.DIRECT)
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.DIRECT)
+
+
+def _xiaofeng_inputs(manual: dict | None) -> ResolveInput:
+    roster = tuple(f"c{i}" for i in range(1, 21))
+    initial = {}
+    for group, start in zip(("G1", "G2", "G3", "G4", "G5"), (1, 5, 9, 13, 17)):
+        for i in range(start, start + 4):
+            initial[f"c{i}"] = group
+    final = {
+        "c1": "F1",
+        "c2": "F1",
+        "c3": "F1",
+        "c4": "F1",
+        "c5": "F2",
+        "c6": "F2",
+        "c7": "F2",
+        "c8": "F2",
+        "c9": "F3",
+        "c10": "F3",
+        "c13": "F3",
+        "c17": "F3",
+    }
+    return ResolveInput(
+        roster=roster,
+        round_scores=_rs(
+            {
+                "r1": {f"c{i}": (100 - i,) for i in range(1, 21)},
+                "r2": {f"c{i}": (200 - i,) for i in range(1, 21)},
+            }
+        ),
+        group_of={"initial_group": initial, "final_group": final},
+        manual={"manual": manual or {}},
+    )
+
+
+class GoldenSchiduiXiaofengTests(SimpleTestCase):
+    """2025 校十佳屏峰 golden control flow (Cases G1-G4), no 2025 special-casing.
+
+    The finalists are the union of the per-group manual picks (WILDCARD) and the
+    FillToQuota fill-ins; read from the `filled` GroupMap. Because every member of the
+    merged pool already carries DIRECT/REPECHAGE (first-writer-wins), the finalist code
+    is not a reliable axis — the `filled` node_value is.
+    """
+
+    def _resolve(self, manual):
+        return resolve(xiaofeng_chain(), _xiaofeng_inputs(manual))
+
+    def test_g1_manual_6_no_fill_quota(self):
+        result = self._resolve({"F1": ("c1", "c2"), "F2": ("c5", "c6"), "F3": ("c9", "c10")})
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        self.assertEqual(filled, {"F1": ["c1", "c2"], "F2": ["c5", "c6"], "F3": ["c9", "c10"]})
+        finalists = {c for g in filled.values() for c in g}
+        self.assertEqual(len(finalists), 6)
+
+    def test_g2_manual_5_auto_fill_1(self):
+        result = self._resolve({"F1": ("c1", "c2"), "F2": ("c5", "c6"), "F3": ("c9",)})
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        # F3 had 1 manual pick; FillToQuota fills it to 2 with the first unselected
+        # merged contestant in roster order (c13).
+        self.assertEqual(filled, {"F1": ["c1", "c2"], "F2": ["c5", "c6"], "F3": ["c9", "c13"]})
+        self.assertEqual(len({c for g in filled.values() for c in g}), 6)
+
+    def test_g3_manual_4_auto_fill_2(self):
+        result = self._resolve({"F1": ("c1", "c2"), "F2": ("c5",), "F3": ("c9",)})
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        # F2 and F3 each need 1; F2 is filled first (c13), then F3 (c17).
+        self.assertEqual(filled, {"F1": ["c1", "c2"], "F2": ["c5", "c13"], "F3": ["c9", "c17"]})
+        self.assertEqual(len({c for g in filled.values() for c in g}), 6)
+
+    def test_g4_manual_0_full_auto_fill_6(self):
+        result = self._resolve({"F1": (), "F2": (), "F3": ()})
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        self.assertEqual(len({c for g in filled.values() for c in g}), 6)
+        # Every group is filled to its quota of 2 from the merged pool (roster order).
+        self.assertTrue(all(len(gs) == 2 for gs in filled.values()))
+
+    def test_group_top1_5_direct_and_topn_layers(self):
+        result = self._resolve({"F1": (), "F2": (), "F3": ()})
+        # Top1 per group -> 5 direct winners, distinct groups.
+        self.assertEqual(len(result.node_values["direct"]), 5)
+        self.assertEqual(result.node_values["direct"], ["c1", "c5", "c9", "c13", "c17"])
+        # R1 top12 of the 15 leftover; R2 top7 of those 12; merged exactly 12.
+        self.assertEqual(len(result.node_values["top12"]), 12)
+        self.assertEqual(len(result.node_values["top7"]), 7)
+        self.assertEqual(len(result.node_values["merged"]), 12)
+        by = {d.contestant: d for d in result.decisions}
+        for c in ("c1", "c5", "c9", "c13", "c17"):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.DIRECT)
 
 
 class ResolverReadyTests(SimpleTestCase):

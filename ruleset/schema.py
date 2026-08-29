@@ -322,9 +322,9 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.SELECT,
             OutputType.ROSTER,
             required=("source", "count"),
-            optional=("tie_policy",),
-            source_refs=("source",),
-            expects={"source": _RANKED_ROSTER},
+            optional=("tie_policy", "by"),
+            source_refs=("source", "by"),
+            expects={"source": _RANKED_ROSTER, "by": _GROUP_MAP},
             validate=lambda n, d: _require_non_negative_int(n, d, "count") or _validate_tie(n, d),
         ),
         _spec(
