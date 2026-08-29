@@ -646,6 +646,11 @@ def _check_dependency(
 ) -> None:
     if node["type"] != "AGGREGATE":
         return
+    # A within-scoped aggregate only scores the referenced advance roster, so mixing
+    # full/subset components is intentional and cannot leave a pool member without a
+    # component score (the roster is the very set that provides them).
+    if node.get("within"):
+        return
     comps = node["aggregate"]["components"]
     origins: set[str] = set()
     for comp in comps:

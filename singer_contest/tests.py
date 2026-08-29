@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 from decimal import Decimal
@@ -27,10 +28,12 @@ from exports.services import build_score_template_workbook
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from files.services import review_material_check, store_submission_file
 from openpyxl import Workbook
+from ruleset.models import ContestRuleset, RulesetVersion
 from staff_panel.views import activity_material_requirements
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .models import (
+    CompositeResult,
     ContestRound,
     Judge,
     RoundEntry,
@@ -38,6 +41,8 @@ from .models import (
     ScoreRecord,
     ScoreSummary,
     SingerRegistration,
+    StageDecision,
+    StageResult,
 )
 from .services import (
     apply_scores,
@@ -1851,3 +1856,470 @@ class ParticipantApplyVisibilityTests(TestCase):
         self.client.force_login(self.staff)
         response = self.client.get(reverse("singer_contest:apply"))
         self.assertContains(response, self.testing.title)
+
+
+class StageResultModelTests(TestCase):
+    """Characterization of the M1-F result models (StageResult + children)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="stage-staff", password="pass")
+        self.activity = Activity.objects.create(
+            title="院十佳",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+                    {"key": "ranked", "type": "RANK", "source": "assess", "descending": True},
+                ],
+            }
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="院十佳规则", is_test_data=True
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset, definition=definition, is_current=False
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="选手甲",
+            student_id="20260001",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+        )
+
+    def _result(self, **overrides):
+        payload = {
+            "activity": self.activity,
+            "ruleset_version": self.version,
+            "created_by": self.user,
+            "stage_key": "院十佳",
+            "content_hash": self.version.content_hash,
+            "is_test_data": True,
+        }
+        payload.update(overrides)
+        return StageResult.objects.create(**payload)
+
+    def test_stage_result_roundtrips_with_fks(self):
+        result = self._result()
+        self.assertEqual(result.activity, self.activity)
+        self.assertEqual(result.ruleset_version, self.version)
+        self.assertEqual(result.status, StageResult.Status.HOLD)
+        self.assertTrue(result.content_hash)
+        self.assertEqual(result.schema_version, 1)
+
+    def test_children_roundtrip_with_parent(self):
+        result = self._result()
+        decision = StageDecision.objects.create(
+            stage_result=result,
+            singer=self.singer,
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("92.46"),
+            is_test_data=True,
+        )
+        composite = CompositeResult.objects.create(
+            stage_result=result,
+            singer=self.singer,
+            node_key="stage2",
+            value=Decimal("92.46"),
+            components=[
+                {"source": "stage1", "weight": "0.6", "value": "88.10", "contribution": "52.86"}
+            ],
+            is_test_data=True,
+        )
+        self.assertEqual(result.decisions.get(pk=decision.pk).stage_result, result)
+        self.assertEqual(result.composites.get(pk=composite.pk).singer, self.singer)
+        self.assertEqual(StageResult.Status.READY, StageResult.Status.READY)
+
+    def test_test_marker_mismatch_rejected(self):
+        with self.assertRaises(ValidationError):
+            self._result(is_test_data=False)
+
+    def test_child_test_marker_mismatch_rejected(self):
+        result = self._result()
+        with self.assertRaises(ValidationError):
+            StageDecision(
+                stage_result=result,
+                singer=self.singer,
+                outcome_code="direct",
+                is_test_data=False,
+            ).save()
+
+    def test_reads_immutable_after_ready(self):
+        result = self._result()
+        # A HOLD result can still be updated to READY.
+        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.READY)
+        # Once READY, further update/delete is blocked.
+        with self.assertRaises(ValidationError):
+            StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.HOLD)
+        with self.assertRaises(ValidationError):
+            StageResult.objects.filter(pk=result.pk).delete()
+
+    def test_child_immutable_when_parent_ready(self):
+        result = self._result()
+        decision = StageDecision.objects.create(
+            stage_result=result,
+            singer=self.singer,
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("92.46"),
+            is_test_data=True,
+        )
+        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.READY)
+        with self.assertRaises(ValidationError):
+            StageDecision.objects.filter(pk=decision.pk).update(rank=2)
+
+    def test_unique_activity_stage_key_hash(self):
+        self._result()
+        with self.assertRaises(IntegrityError):
+            self._result()
+
+
+class StageResolverBindingTests(TestCase):
+    """M1-F binder + run_ruleset/persist over a small DB-backed fixture."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="binder-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="院十佳",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+                    {"key": "ranked", "type": "RANK", "source": "assess", "descending": True},
+                ],
+            }
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="院十佳规则", is_test_data=True
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset, definition=definition, is_current=False
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="初赛",
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="评委甲")
+        self.singers = [self._make_singer(i) for i in range(1, 4)]
+
+    def _make_singer(self, index):
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"binder-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"2026100{index}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        ScoreRecord.objects.create(
+            round=self.round,
+            singer=singer,
+            judge=self.judge,
+            score=Decimal(80 + index),
+            is_test_data=True,
+        )
+        return singer
+
+    def test_bind_resolve_input_builds_roster_and_round_scores(self):
+        from .services import bind_resolve_input
+
+        inputs = bind_resolve_input(self.version, self.activity, round_keys={"r1": self.round})
+        self.assertEqual(inputs.roster, tuple(str(s.pk) for s in self.singers))
+        expected = {str(s.pk): (Decimal(80 + i),) for i, s in enumerate(self.singers, 1)}
+        self.assertEqual(inputs.round_scores["r1"], expected)
+        self.assertEqual(inputs.vote_scores, {})
+
+    def test_run_ruleset_persists_stage_result_and_decisions(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.stage_key, "选拔")
+        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertTrue(stage.content_hash)
+        self.assertEqual(stage.plan_version, 1)
+        self.assertEqual(stage.decisions.count(), 3)
+        self.assertEqual(stage.composites.count(), 0)
+        for decision in stage.decisions.all():
+            self.assertEqual(decision.outcome_code, "eliminated")
+            self.assertIsNotNone(decision.score)
+
+    def test_run_ruleset_rejects_version_from_other_activity(self):
+        from .services import run_ruleset
+
+        other = Activity.objects.create(
+            title="其他",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        with self.assertRaises(ValidationError):
+            run_ruleset(
+                self.version,
+                other,
+                stage_key="选拔",
+                computed_by=self.user,
+                round_keys={"r1": self.round},
+            )
+
+
+def _schidui_definition():
+    """§11.3 院十佳 weights (30/60/10, 60/40, 30/50/20) as one forward-only graph."""
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {"key": "assess_r2", "type": "ASSESS", "source": "entry", "round": "r2"},
+                {
+                    "key": "assess_a1",
+                    "type": "ASSESS",
+                    "source": "entry",
+                    "vote_source": "audience1",
+                },
+                {
+                    "key": "stage1",
+                    "type": "AGGREGATE",
+                    "within": "entry",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.30},
+                            {"source": "assess_r2", "weight": 0.60},
+                            {"source": "assess_a1", "weight": 0.10},
+                        ],
+                    },
+                },
+                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                {"key": "assess_r3", "type": "ASSESS", "source": "top10", "round": "r3"},
+                {
+                    "key": "stage2",
+                    "type": "AGGREGATE",
+                    "within": "top10",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "stage1", "weight": 0.60},
+                            {"source": "assess_r3", "weight": 0.40},
+                        ],
+                    },
+                },
+                {"key": "rank2", "type": "RANK", "source": "stage2", "descending": True},
+                {"key": "top5", "type": "SELECT", "source": "rank2", "count": 5},
+                {"key": "assess_r4", "type": "ASSESS", "source": "top5", "round": "r4"},
+                {
+                    "key": "assess_a4",
+                    "type": "ASSESS",
+                    "source": "top5",
+                    "vote_source": "audience4",
+                },
+                {
+                    "key": "final",
+                    "type": "AGGREGATE",
+                    "within": "top5",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r3", "weight": 0.30},
+                            {"source": "assess_r4", "weight": 0.50},
+                            {"source": "assess_a4", "weight": 0.20},
+                        ],
+                    },
+                },
+                {"key": "rank3", "type": "RANK", "source": "final", "descending": True},
+                {"key": "top3", "type": "SELECT", "source": "rank3", "count": 3},
+            ],
+        }
+    )
+
+
+class GoldenSchiduiDbTests(TestCase):
+    """M1-F golden 院十佳 end-to-end: 15 singers through the DB, run_ruleset, verify.
+
+    Scores are deterministic and synthetic (five identical judge scores per round so
+    the engine's mean reproduces the target exactly); audience scores are pre-normalized
+    Decimals passed as ready values — the binder never re-derives a raw-vote score
+    (§16.9). No 2025-value special-casing lives in Python: the weights and the
+    15->10->5->3 cutoffs all live in the frozen definition.
+    """
+
+    JUDGE_COUNT = 5
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="golden-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="院十佳",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="院十佳规则", is_test_data=True
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset, definition=_schidui_definition(), is_current=False
+        )
+        self.judges = [
+            Judge.objects.create(activity=self.activity, name=f"评委{chr(0x41 + i)}")
+            for i in range(self.JUDGE_COUNT)
+        ]
+        self.rounds = {}
+        for rkey in ("r1", "r2", "r3", "r4"):
+            self.rounds[rkey] = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name=rkey,
+            )
+        self.singers = [self._make_singer(i) for i in range(1, 16)]
+        self._seed_scores()
+
+    def _make_singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"golden-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"2026001{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def _score(self, round_key, singers, scorer):
+        for idx, singer in enumerate(singers, 1):
+            for judge in self.judges:
+                ScoreRecord.objects.create(
+                    round=self.rounds[round_key],
+                    singer=singer,
+                    judge=judge,
+                    score=Decimal(scorer(idx)),
+                    is_test_data=True,
+                )
+
+    def _seed_scores(self):
+        # R1/R2: the whole entry roster; R3: top-10 advancees; R4: top-5 advancees.
+        self._score("r1", self.singers, lambda i: 100 - i)
+        self._score("r2", self.singers, lambda i: 90 - i)
+        self._score("r3", self.singers[:10], lambda i: 100 - i)
+        self._score("r4", self.singers[:5], lambda i: 100 - i)
+
+    def _vote_scores(self):
+        audience1 = {str(s.pk): Decimal("50") for s in self.singers}
+        audience4 = {str(self.singers[i].pk): Decimal(90 - (i + 1)) for i in range(5)}
+        return {"audience1": audience1, "audience4": audience4}
+
+    def _round_keys(self):
+        return dict(self.rounds)
+
+    def test_golden_schidui_end_to_end_ready(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="院十佳",
+            computed_by=self.admin,
+            round_keys=self._round_keys(),
+            vote_scores=self._vote_scores(),
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.stage_key, "院十佳")
+        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.plan_version, 1)
+        self.assertEqual(stage.decisions.count(), 15)
+
+        # Composite scoping is roster-scoped: stage1 all 15, stage2 top-10, final top-5.
+        self.assertEqual(stage.composites.filter(node_key="stage1").count(), 15)
+        self.assertEqual(stage.composites.filter(node_key="stage2").count(), 10)
+        self.assertEqual(stage.composites.filter(node_key="final").count(), 5)
+
+        # Top-3 advance directly; the rest who only reached a lower roster are direct
+        # too (origin tag), and those never selected are eliminated.
+        by_singer = {d.singer_id: d for d in stage.decisions.all()}
+        for idx in range(3):
+            decision = by_singer[self.singers[idx].pk]
+            self.assertEqual(decision.outcome_code, "direct")
+            self.assertEqual(decision.rank, idx + 1)
+        for idx in range(3, 10):
+            self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "direct")
+        for idx in range(10, 15):
+            self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "eliminated")
+
+    def _composite_map(self, stage, node_key):
+        return {c.singer_id: c.value for c in stage.composites.filter(node_key=node_key)}
+
+    def test_golden_schidui_layered_decimals(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="院十佳",
+            computed_by=self.admin,
+            round_keys=self._round_keys(),
+            vote_scores=self._vote_scores(),
+        )
+
+        # Hand-computed §11.3 values keyed by creation order (pk order).
+        stage1 = self._composite_map(stage, "stage1")
+        self.assertEqual(stage1[self.singers[0].pk], Decimal("88.1"))
+        self.assertEqual(stage1[self.singers[4].pk], Decimal("84.5"))
+        self.assertEqual(stage1[self.singers[14].pk], Decimal("75.5"))
+
+        stage2 = self._composite_map(stage, "stage2")
+        self.assertEqual(stage2[self.singers[0].pk], Decimal("92.46"))
+        self.assertEqual(stage2[self.singers[9].pk], Decimal("84.00"))
+
+        final = self._composite_map(stage, "final")
+        self.assertEqual(final[self.singers[0].pk], Decimal("97.0"))
+        self.assertEqual(final[self.singers[4].pk], Decimal("93.0"))
+
+    def test_golden_schidui_persisted_result_roundtrip(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="院十佳",
+            computed_by=self.admin,
+            round_keys=self._round_keys(),
+            vote_scores=self._vote_scores(),
+        )
+        self.assertTrue(stage.content_hash)
+        self.assertEqual(stage.schema_version, 1)
+        self.assertEqual(stage.result_version, 1)
+        decision = stage.decisions.first()
+        self.assertIsNotNone(decision.singer_id)
+        self.assertIsNotNone(decision.score)
+        composite = stage.composites.filter(node_key="stage1").first()
+        self.assertEqual(len(composite.components), 3)
+        self.assertIn("source", composite.components[0])

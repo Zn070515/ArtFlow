@@ -299,7 +299,11 @@ def _aggregate(node: dict, st: _Stage, inputs: ResolveInput) -> tuple[dict, tupl
     comps = node["aggregate"]["components"]
     agg_type = node["aggregate"]["type"]
     maps = [st.values[c["source"]] for c in comps]
-    pool = _union_pool(maps, st.idx)
+    within = node.get("within")
+    if within:
+        pool = tuple(st.values[within])
+    else:
+        pool = _union_pool(maps, st.idx)
     out: dict[str, Decimal] = {}
     comp_results: list[CompositeResult] = []
     for c in pool:
