@@ -1,6 +1,7 @@
 import json
 import threading
 import time
+from contextlib import contextmanager
 from decimal import Decimal
 from io import BytesIO
 from unittest import skipUnless
@@ -64,6 +65,24 @@ from .services import (
     validate_score,
 )
 from .views import my_registration_detail
+
+
+@contextmanager
+def _manual_write_ctx():
+    """Enable the ManualDecision production write-guard while a test seeds a row directly.
+
+    R9-3 makes a bare ``ManualDecision.save()`` a production error; test setup (and the
+    model-level clean/unique_together tests) need to create rows directly, so this toggles
+    the thread-local guard for the duration and restores the prior state on exit.
+    """
+    from .models import _authorize_manual_write, _manual_write_authorized
+
+    prior = _manual_write_authorized()
+    _authorize_manual_write(True)
+    try:
+        yield
+    finally:
+        _authorize_manual_write(prior)
 
 
 class ScoringServiceTests(TestCase):
@@ -3258,7 +3277,7 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
 
     def test_recompute_auto_sources_group_and_manual_ready(self):
         """§32: recompute auto-sources group_of + manual from DB (no hand-injected kwargs)."""
-        from .models import ManualDecision, Performance, PerformanceGroup
+        from .models import Performance, PerformanceGroup
         from .services import recompute_activity_result
 
         ruleset = ContestRuleset.objects.create(
@@ -3304,15 +3323,15 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
                     group=pg,
                     is_test_data=True,
                 )
-        # Persist the manual facts as ManualDecision rows on the frozen version.
+        # Persist the manual facts as ManualDecision rows via the formal R9-3 service.
+        from .services import set_manual_decision
+
         for group_name, chosen in self._manual()["manual"].items():
-            ManualDecision.objects.create(
-                activity=self.activity,
-                ruleset_version=version,
+            set_manual_decision(
+                version,
                 manual_key="manual",
                 group=group_name,
                 chosen=[str(c) for c in chosen],
-                is_test_data=True,
                 created_by=self.admin,
             )
 
@@ -3737,22 +3756,23 @@ class BindingSourceHelperTests(TestCase):
             is_current=True,
             status=RulesetVersion.Status.FROZEN,
         )
-        ManualDecision.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            manual_key="manual",
-            group="G1",
-            chosen=[str(self.singers[0].pk)],
-            is_test_data=True,
-        )
-        ManualDecision.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            manual_key="manual",
-            group="",
-            chosen=[str(self.singers[1].pk)],
-            is_test_data=True,
-        )
+        with _manual_write_ctx():
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(self.singers[0].pk)],
+                is_test_data=True,
+            )
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                manual_key="manual",
+                group="",
+                chosen=[str(self.singers[1].pk)],
+                is_test_data=True,
+            )
         out = _source_manual(version, self.activity)
         self.assertEqual(
             out,
@@ -3817,35 +3837,404 @@ class ManualDecisionModelTests(TestCase):
             is_test_data=True,
         )
         with self.assertRaises(ValidationError):
-            ManualDecision.objects.create(
-                activity=self.activity,
-                ruleset_version=self.version,
-                manual_key="manual",
-                group="",
-                chosen=[str(foreign.pk)],
-                is_test_data=True,
-            )
+            with _manual_write_ctx():
+                ManualDecision.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    manual_key="manual",
+                    group="",
+                    chosen=[str(foreign.pk)],
+                    is_test_data=True,
+                )
 
     def test_unique_together_enforced(self):
         from .models import ManualDecision
 
-        ManualDecision.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            manual_key="manual",
-            group="G1",
-            chosen=[str(self.singer.pk)],
-            is_test_data=True,
-        )
-        with self.assertRaises(IntegrityError), transaction.atomic():
+        with _manual_write_ctx():
             ManualDecision.objects.create(
                 activity=self.activity,
                 ruleset_version=self.version,
                 manual_key="manual",
                 group="G1",
-                chosen=[],
+                chosen=[str(self.singer.pk)],
                 is_test_data=True,
             )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            with _manual_write_ctx():
+                ManualDecision.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    manual_key="manual",
+                    group="G1",
+                    chosen=[],
+                    is_test_data=True,
+                )
+
+
+class ManualDecisionServiceTests(TestCase):
+    """M1-R9 §三: ManualDecision mutation must run through the formal service (authority).
+
+    A bare ``ManualDecision.save()`` is refused unless the thread-local production guard
+    is on; only ``set_manual_decision`` / ``delete_manual_decision`` hold the Activity lock
+    and re-check the consumed-by-confirmed guard inside it. Covers upsert, delete, the
+    freeze/activity/manual-key validations, and the audit record.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="md-svc-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="手动服务",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.other = Activity.objects.create(
+            title="其他活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="手动规则", is_test_data=True
+        )
+        self.version = self._frozen(self.ruleset, self._manual_definition())
+        self.singers = [self._make_singer(i) for i in range(3)]
+
+    @staticmethod
+    def _manual_definition():
+        return {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "roster", "type": "ROSTER"},
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "roster",
+                    "groups": 2,
+                    "quota": 2,
+                },
+            ],
+        }
+
+    def _frozen(self, ruleset, definition):
+        return RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(definition, ensure_ascii=False),
+            version=RulesetVersion.objects.filter(ruleset=ruleset).count() + 1,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+
+    def _make_singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"md-svc-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"md-svc{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def test_set_upserts_group_and_flat_and_audits(self):
+        from .models import ManualDecision
+        from .services import set_manual_decision
+
+        set_manual_decision(
+            self.version,
+            manual_key="manual",
+            group="G1",
+            chosen=[self.singers[0].pk, self.singers[1].pk],
+            created_by=self.admin,
+        )
+        row = ManualDecision.objects.get(
+            activity=self.activity,
+            ruleset_version=self.version,
+            manual_key="manual",
+            group="G1",
+        )
+        self.assertEqual(row.chosen, [str(self.singers[0].pk), str(self.singers[1].pk)])
+        self.assertTrue(row.is_test_data)
+        # Re-call upserts the same row instead of duplicating it.
+        set_manual_decision(
+            self.version,
+            manual_key="manual",
+            group="G1",
+            chosen=[self.singers[2].pk],
+            created_by=self.admin,
+        )
+        total_after_group_update = ManualDecision.objects.filter(
+            activity=self.activity, ruleset_version=self.version
+        ).count()
+        self.assertEqual(total_after_group_update, 1)
+        row.refresh_from_db()
+        self.assertEqual(row.chosen, [str(self.singers[2].pk)])
+        # A flat (non-group) source uses the "" group; a distinct row.
+        set_manual_decision(
+            self.version,
+            manual_key="manual",
+            group="",
+            chosen=[self.singers[0].pk],
+            created_by=self.admin,
+        )
+        total_after_flat_add = ManualDecision.objects.filter(
+            activity=self.activity, ruleset_version=self.version
+        ).count()
+        self.assertEqual(total_after_flat_add, 2)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.admin, action_type=AuditLog.ActionType.MANUAL_DECISION
+            ).exists()
+        )
+
+    def test_delete_removes_and_returns_none_when_missing(self):
+        from .models import ManualDecision
+        from .services import delete_manual_decision, set_manual_decision
+
+        set_manual_decision(
+            self.version,
+            manual_key="manual",
+            group="G1",
+            chosen=[str(self.singers[0].pk)],
+            created_by=self.admin,
+        )
+        deleted = delete_manual_decision(
+            self.version, manual_key="manual", group="G1", deleted_by=self.admin
+        )
+        self.assertIsNotNone(deleted)
+        remaining = ManualDecision.objects.filter(
+            activity=self.activity, ruleset_version=self.version
+        )
+        self.assertFalse(remaining.exists())
+        self.assertIsNone(
+            delete_manual_decision(
+                self.version, manual_key="manual", group="G1", deleted_by=self.admin
+            )
+        )
+
+    def test_set_rejects_non_frozen_version(self):
+        from .services import set_manual_decision
+
+        draft = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=json.dumps(self._manual_definition(), ensure_ascii=False),
+            version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
+            is_current=False,
+            status=RulesetVersion.Status.DRAFT,
+        )
+        with self.assertRaises(ValidationError):
+            set_manual_decision(
+                draft,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(self.singers[0].pk)],
+                created_by=self.admin,
+            )
+
+    def test_set_rejects_undeclared_manual_key(self):
+        from .services import set_manual_decision
+
+        no_manual = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=json.dumps(
+                {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+                ensure_ascii=False,
+            ),
+            version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        with self.assertRaises(ValidationError):
+            set_manual_decision(
+                no_manual,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(self.singers[0].pk)],
+                created_by=self.admin,
+            )
+
+    def test_set_rejects_wrong_activity(self):
+        from .services import set_manual_decision
+
+        other_ruleset = ContestRuleset.objects.create(
+            activity=self.other, name="他规则", is_test_data=True
+        )
+        other_version = self._frozen(other_ruleset, self._manual_definition())
+        with self.assertRaises(ValidationError):
+            set_manual_decision(
+                other_version,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(self.singers[0].pk)],
+                created_by=self.admin,
+                activity=self.activity,
+            )
+
+    def test_set_rejects_foreign_chosen_singer(self):
+        from .services import set_manual_decision
+
+        foreign = SingerRegistration.objects.create(
+            activity=self.other,
+            user=User.objects.create_user(username="md-svc-f", password="pass"),
+            name="外人",
+            student_id="md-svc99",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        with self.assertRaises(ValidationError):
+            set_manual_decision(
+                self.version,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(foreign.pk)],
+                created_by=self.admin,
+            )
+
+    def test_direct_save_is_refused_unless_authorized(self):
+        from .models import ManualDecision
+
+        md = ManualDecision(
+            activity=self.activity,
+            ruleset_version=self.version,
+            manual_key="manual",
+            group="",
+            chosen=[str(self.singers[0].pk)],
+            is_test_data=True,
+        )
+        with self.assertRaises(ValidationError):
+            md.save()
+        with _manual_write_ctx():
+            md.save()
+        saved = ManualDecision.objects.filter(activity=self.activity, ruleset_version=self.version)
+        self.assertTrue(saved.exists())
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
+    """M1-R9 §三: a ManualDecision set racing a StageResult confirm is linearized by the
+    Activity lock — exactly one committing order wins, so a CONFIRMED stage can never hold
+    a manual pick that was mutated underneath it."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="md-race-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="并发人工选择",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="并发规则", is_test_data=True
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=json.dumps(self._manual_definition(), ensure_ascii=False),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔"},
+        )
+        self.singers = [self._make_singer(i) for i in range(3)]
+        from .services import recompute_activity_result, set_manual_decision
+
+        set_manual_decision(
+            self.version,
+            manual_key="manual",
+            group="",
+            chosen=[str(self.singers[0].pk)],
+            created_by=self.admin,
+        )
+        self.stage = recompute_activity_result(self.activity, self.admin, ruleset=self.ruleset)
+        self.assertEqual(self.stage.status, StageResult.Status.READY_TO_CONFIRM)
+
+    @staticmethod
+    def _manual_definition():
+        return {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "roster", "type": "ROSTER"},
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "roster",
+                    "groups": 0,
+                    "quota": 2,
+                },
+            ],
+        }
+
+    def _make_singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"md-race-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"md-race{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def test_set_vs_confirm_race_only_one_wins(self):
+        from .services import confirm_stage_result, set_manual_decision
+
+        outcomes = []
+        guard = threading.Lock()
+
+        def do_set():
+            close_old_connections()
+            try:
+                set_manual_decision(
+                    self.version,
+                    manual_key="manual",
+                    group="",
+                    chosen=[str(self.singers[1].pk)],
+                    created_by=self.admin,
+                )
+                with guard:
+                    outcomes.append("set-ok")
+            except Exception as exc:  # noqa: BLE001 — record any failure for the assertion
+                with guard:
+                    outcomes.append(f"set-error:{type(exc).__name__}")
+            finally:
+                close_old_connections()
+
+        def do_confirm():
+            close_old_connections()
+            try:
+                confirm_stage_result(self.stage, confirmed_by=self.admin)
+                with guard:
+                    outcomes.append("confirm-ok")
+            except Exception as exc:  # noqa: BLE001
+                with guard:
+                    outcomes.append(f"confirm-error:{type(exc).__name__}")
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=do_set), threading.Thread(target=do_confirm)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        self.assertEqual(len(outcomes), 2, outcomes)
+        set_ok = any(o == "set-ok" for o in outcomes)
+        confirm_ok = any(o == "confirm-ok" for o in outcomes)
+        # The Activity FOR UPDATE lock serializes the two conflicting writes, so exactly
+        # one committing order wins — a CONFIRMED stage never coexists with a mutated pick.
+        self.assertFalse(set_ok and confirm_ok, outcomes)
+        stage = StageResult.objects.get(pk=self.stage.pk)
+        if stage.status == StageResult.Status.CONFIRMED:
+            self.assertFalse(set_ok, outcomes)
 
 
 class ConfirmedDependencyClosureTests(TestCase):
@@ -4036,8 +4425,10 @@ class ConfirmedDependencyClosureTests(TestCase):
             unlock_vote_session(self.vs, self.user)
 
     def test_confirmed_stage_blocks_manual_decision_mutation(self):
-        from .models import ManualDecision
-        from .services import ensure_manual_not_consumed_by_confirmed_stage
+        from .services import (
+            ensure_manual_not_consumed_by_confirmed_stage,
+            set_manual_decision,
+        )
 
         definition = {
             "schema_version": 1,
@@ -4068,11 +4459,10 @@ class ConfirmedDependencyClosureTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
             ensure_manual_not_consumed_by_confirmed_stage(version, "manual")
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
-            ManualDecision.objects.create(
-                activity=self.activity,
-                ruleset_version=version,
+            set_manual_decision(
+                version,
                 manual_key="manual",
                 group="G1",
                 chosen=[str(self.singers[0].pk)],
-                is_test_data=True,
+                created_by=self.user,
             )

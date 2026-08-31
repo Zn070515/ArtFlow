@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
 
@@ -40,6 +41,8 @@ from .models import (
     SingerRegistration,
     StageDecision,
     StageResult,
+    _authorize_manual_write,
+    _manual_write_authorized,
 )
 
 
@@ -1337,6 +1340,131 @@ def ensure_manual_not_consumed_by_confirmed_stage(version, manual_key) -> None:
         stage = StageResult.objects.get(pk=stage_pk["pk"])
         if manual_key in _stage_consumed_facts(stage)["manual"]:
             raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+
+
+def _manual_node_keys(version) -> frozenset[str]:
+    """All MANUAL_SELECT node keys declared in the frozen definition."""
+    return frozenset(stage_consumed_scopes(version.definition, None)[3])
+
+
+@contextmanager
+def _authorized_manual_write():
+    """Bracket a ManualDecision write with the production write-authorization guard.
+
+    The guard is thread-local (models.py), so an untrusted direct ``.save()`` on a
+    :class:`ManualDecision` is refused; only a formal service that holds the Activity lock
+    may toggle it. Prior state is restored so a nested authorized write never leaks a
+    spurious grant out of scope.
+    """
+    prior = _manual_write_authorized()
+    _authorize_manual_write(True)
+    try:
+        yield
+    finally:
+        _authorize_manual_write(prior)
+
+
+@transaction.atomic
+def set_manual_decision(
+    version, *, manual_key, group, chosen, created_by, activity=None
+) -> ManualDecision:
+    """Upsert a staff member's manual pick for a MANUAL_SELECT node (§31 closure).
+
+    M0 lock order (Activity → RulesetVersion/ManualDecision): lock the Activity FOR
+    UPDATE (the authoritative serialization point, same as confirm/unlock/recompute),
+    then re-read the RulesetVersion fresh inside the lock. Re-validates that the version
+    is frozen, belongs to the activity, and that ``manual_key`` is a declared MANUAL_SELECT
+    node; the model's ``save`` re-checks the consumed-by-confirmed guard inside this
+    window, so a pick a CONFIRMED stage already read can never be edited even under a
+    concurrent recompute.
+    """
+    from ruleset.models import RulesetVersion
+
+    activity = activity or version.ruleset.activity
+    locked_activity = lock_activity_for_action(activity)
+    locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
+    if locked.ruleset.activity_id != locked_activity.pk:
+        raise ValidationError("赛制版本不属于当前活动。")
+    if locked.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("仅可更新已冻结赛制版本的人工选择。")
+    if manual_key not in _manual_node_keys(locked):
+        raise ValidationError(f"赛制未声明 MANUAL_SELECT 节点：{manual_key}。")
+    chosen = [str(c) for c in (chosen or [])]
+    with _authorized_manual_write():
+        decision, _created = ManualDecision.objects.update_or_create(
+            ruleset_version=locked,
+            manual_key=manual_key,
+            group=group or "",
+            defaults={
+                "activity": locked_activity,
+                "chosen": chosen,
+                "created_by": created_by,
+                "is_test_data": runtime_is_test(locked_activity),
+            },
+        )
+    AuditLog.objects.create(
+        operator=created_by,
+        action_type=AuditLog.ActionType.MANUAL_DECISION,
+        target=f"RulesetVersion:{locked.pk}",
+        old_value="",
+        new_value=json.dumps(
+            {
+                "manual_key": manual_key,
+                "group": group or "",
+                "chosen": chosen,
+                "created_by": created_by.pk if created_by else None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    return decision
+
+
+@transaction.atomic
+def delete_manual_decision(
+    version, *, manual_key, group="", activity=None, deleted_by=None
+) -> ManualDecision | None:
+    """Remove a staff member's manual pick for a MANUAL_SELECT node (§31 closure).
+
+    Same lock order and frozen/version/manual-key validation as :func:`set_manual_decision`;
+    the model's ``delete`` re-checks the consumed-by-confirmed guard inside the lock.
+    Returns the deleted row (or ``None`` if no such pick exists).
+    """
+    from ruleset.models import RulesetVersion
+
+    activity = activity or version.ruleset.activity
+    locked_activity = lock_activity_for_action(activity)
+    locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
+    if locked.ruleset.activity_id != locked_activity.pk:
+        raise ValidationError("赛制版本不属于当前活动。")
+    if locked.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("仅可删除已冻结赛制版本的人工选择。")
+    if manual_key not in _manual_node_keys(locked):
+        raise ValidationError(f"赛制未声明 MANUAL_SELECT 节点：{manual_key}。")
+    decision = ManualDecision.objects.filter(
+        ruleset_version=locked, manual_key=manual_key, group=group or ""
+    ).first()
+    if decision is None:
+        return None
+    with _authorized_manual_write():
+        decision.delete()
+    AuditLog.objects.create(
+        operator=deleted_by,
+        action_type=AuditLog.ActionType.MANUAL_DECISION,
+        target=f"RulesetVersion:{locked.pk}",
+        old_value=json.dumps(
+            {
+                "manual_key": manual_key,
+                "group": group or "",
+                "chosen": [str(c) for c in (decision.chosen or [])],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        new_value="",
+    )
+    return decision
 
 
 @transaction.atomic

@@ -22,6 +22,7 @@ class AuditLog(models.Model):
         FINALIZE_RULESET = "finalize_ruleset", "核定冻结赛制"
         CONFIRM_STAGE_RESULT = "confirm_stage_result", "核定并锁定赛段结果"
         UNLOCK_STAGE_RESULT = "unlock_stage_result", "解锁赛段结果"
+        MANUAL_DECISION = "manual_decision", "更新人工选择"
         UPDATE_PERMISSION = "update_permission", "修改用户权限"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
         UNARCHIVE_ACTIVITY = "unarchive_activity", "解归档活动"

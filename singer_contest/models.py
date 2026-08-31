@@ -1,3 +1,4 @@
+import threading
 from typing import Any
 
 from common.lifecycle import runtime_is_test
@@ -8,6 +9,22 @@ from django.db.models import Q
 from ruleset.resolver import OutcomeCode, ResolverState
 
 from .deletion import cascade_draft_snapshots_or_protect_prepared
+
+# M1-R9 (§三 ManualDecision Authority): a ManualDecision is a human picking a MANUAL_SELECT
+# outcome that a CONFIRMED stage may have already read, so its mutation must run through a
+# formal service that holds the Activity lock (Activity → RulesetVersion/ManualDecision) and
+# re-checks the consumed-by-confirmed guard inside that window. Direct ``.save()``/``.delete()``
+# bypass the lock, so they are refused unless the service is actively wrapping the write. The
+# guard is thread-local so concurrent service calls in separate threads don't leak into each other.
+_manual_writes = threading.local()
+
+
+def _manual_write_authorized() -> bool:
+    return bool(getattr(_manual_writes, "authorized", False))
+
+
+def _authorize_manual_write(authorized: bool) -> None:
+    _manual_writes.authorized = authorized
 
 
 class SingerRegistration(models.Model):
@@ -901,12 +918,18 @@ class ManualDecision(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        if not _manual_write_authorized():
+            raise ValidationError(
+                "ManualDecision 只能通过正式 service 写入（set_manual_decision）。"
+            )
         from .services import ensure_manual_not_consumed_by_confirmed_stage
 
         ensure_manual_not_consumed_by_confirmed_stage(self.ruleset_version, self.manual_key)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
+        if not _manual_write_authorized():
+            raise ValidationError("ManualDecision 只能通过正式 service 删除。")
         from .services import ensure_manual_not_consumed_by_confirmed_stage
 
         ensure_manual_not_consumed_by_confirmed_stage(self.ruleset_version, self.manual_key)

@@ -290,7 +290,11 @@ class M1StageResultTestDataCleanupTests(TestCase):
         import json
 
         from ruleset.models import ContestRuleset, RulesetVersion
-        from singer_contest.models import ManualDecision, SingerRegistration
+        from singer_contest.models import (
+            ManualDecision,
+            SingerRegistration,
+            _authorize_manual_write,
+        )
 
         singer = SingerRegistration.objects.create(
             activity=self.activity,
@@ -318,14 +322,18 @@ class M1StageResultTestDataCleanupTests(TestCase):
             is_current=True,
             status=RulesetVersion.Status.FROZEN,
         )
-        ManualDecision.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            manual_key="manual",
-            group="",
-            chosen=[str(singer.pk)],
-            is_test_data=True,
-        )
+        _authorize_manual_write(True)
+        try:
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                manual_key="manual",
+                group="",
+                chosen=[str(singer.pk)],
+                is_test_data=True,
+            )
+        finally:
+            _authorize_manual_write(False)
 
         counts = get_test_data_counts(self.activity)
         self.assertEqual(counts["manual_decisions"], 1)
