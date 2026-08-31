@@ -449,61 +449,150 @@ def _merge(node: dict, st: _Stage) -> tuple:
     return tuple(out)
 
 
+def _by_ranking(remaining: list[str], node: dict, st: _Stage) -> list[str]:
+    """Order ``remaining`` by a prior ranking node; unknowns tail the pool order.
+
+    ``ranking_source`` is an ordered roster (a RANK/SELECT/ROSTER output). Its order is
+    the only meaningful "按分数补足" axis; absent one we fall back to the candidate pool
+    order (a deterministic, documented default, not a score ranking).
+    """
+    ranking = node.get("ranking_source")
+    if not ranking:
+        return remaining
+    ordered = _order(st.values[ranking])
+    pos = {c: i for i, c in enumerate(ordered)}
+    return sorted(remaining, key=lambda c: (pos.get(c, len(ordered)), st.idx[c]))
+
+
 def _fill(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
     into: dict = st.values[node["into"]]
     pool: tuple = st.values[node["from"]]
     quota = node["quota"]
-    result: dict[str, list[str]] = {}
-    for g, cs in into.items():
-        result[g] = list(cs)
+    mode = node.get("mode", "global")
+    exclude = node.get("exclude_selected", True)
+    result: dict[str, list[str]] = {g: list(cs) for g, cs in into.items()}
     selected = {c for cs in result.values() for c in cs}
-    pool_iter = list(pool)
-    for g, cs in into.items():
-        need = quota - len(result[g])
-        while need > 0 and pool_iter:
-            nxt = pool_iter.pop(0)
-            if nxt in selected:
-                continue
-            result[g].append(nxt)
-            selected.add(nxt)
-            if nxt not in st.outcome:
-                st.outcome[nxt] = OutcomeCode.FINALIST
-                st.source_node[nxt] = node["key"]
-            need -= 1
-    unmet = {g: quota - len(result[g]) for g in into if quota - len(result[g]) > 0}
-    if unmet:
-        st.hold.append(f"FILL_TO_QUOTA {node['key']} 来源池不足，未能补满 {unmet}（不静默少补）。")
+
+    def adopt(c: str) -> None:
+        if c not in st.outcome:
+            st.outcome[c] = OutcomeCode.FINALIST
+            st.source_node[c] = node["key"]
+
+    if mode == "each_group":
+        # Every target group is topped up individually to `quota` (FILL_EACH_GROUP_TO_QUOTA).
+        pool_iter = list(pool)
+        unmet: dict[str, int] = {}
+        for g, cs in into.items():
+            need = quota - len(result[g])
+            while need > 0 and pool_iter:
+                nxt = pool_iter.pop(0)
+                if exclude and nxt in selected:
+                    continue
+                result[g].append(nxt)
+                selected.add(nxt)
+                adopt(nxt)
+                need -= 1
+            if quota - len(result[g]) > 0:
+                unmet[g] = quota - len(result[g])
+        if unmet:
+            st.hold.append(
+                f"FILL_TO_QUOTA {node['key']} 来源池不足，未能补满 {unmet}（不静默少补）。"
+            )
+        return {g: tuple(cs) for g, cs in result.items()}
+
+    # global (§22): fill until the TOTAL across the target map reaches `quota`.
+    current = len(selected)
+    need = quota - current
+    if need <= 0:
+        return {g: tuple(cs) for g, cs in result.items()}
+    remaining = [c for c in pool if not exclude or c not in selected]
+    ranked = _by_ranking(remaining, node, st)
+    take = ranked[:need]
+    if len(take) < need:
+        st.hold.append(
+            f"FILL_TO_QUOTA {node['key']} 来源池不足：需要补足 {need} 人，"
+            f"仅剩 {len(take)} 名候选（不静默少补）。"
+        )
+    groups = list(into.keys())
+    for i, c in enumerate(take):
+        g = groups[i % len(groups)] if groups else ""
+        result.setdefault(g, []).append(c)
+        selected.add(c)
+        adopt(c)
     return {g: tuple(cs) for g, cs in result.items()}
 
 
 def _manual(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
     src = st.values[node["source"]]
     is_group = isinstance(src, dict)
-    pool_set = {c for cs in src.values() for c in cs} if is_group else set(src)
+    quota = node["quota"]
     decisions = inputs.manual.get(node["key"])
     if not decisions:
         st.hold.append(
             f"MANUAL_SELECT {node['key']} 需要人工决定：来源 {node['source']}，"
-            f"允许 0~{node['quota']}，当前已选 0。"
+            f"允许 0~{quota}，当前已选 0。"
         )
         return {}
-    result: dict[str, tuple[str, ...]] = {}
+    valid = True
+
+    def mark_wildcard(c: str) -> None:
+        if c not in st.outcome:
+            st.outcome[c] = OutcomeCode.WILDCARD
+            st.source_node[c] = node["key"]
+
     if is_group:
-        for g in src:
-            chosen = tuple(c for c in decisions.get(g, ()) if c in pool_set)
+        seen: dict[str, str] = {}
+        for dk in decisions:
+            if dk not in src:
+                st.hold.append(f"MANUAL_SELECT {node['key']} 指定了不存在的组 {dk}。")
+                valid = False
+        for g, cs in src.items():
+            chosen = decisions.get(g, ())
+            if len(chosen) > quota:
+                st.hold.append(
+                    f"MANUAL_SELECT {node['key']} {g} 选入 {len(chosen)} 人，超过上限 {quota}。"
+                )
+                valid = False
             for c in chosen:
-                if c not in st.outcome:
-                    st.outcome[c] = OutcomeCode.WILDCARD
-                    st.source_node[c] = node["key"]
-            result[g] = _order(chosen)
-    else:
-        chosen = _order(tuple(c for c in decisions.get("", ()) if c in pool_set))
-        for c in chosen:
-            if c not in st.outcome:
-                st.outcome[c] = OutcomeCode.WILDCARD
-                st.source_node[c] = node["key"]
-        result[""] = chosen
-    return result
+                if c not in cs:
+                    st.hold.append(
+                        f"MANUAL_SELECT {node['key']} 把 {c} 选入 {g}，但 {c} 不属于该组。"
+                    )
+                    valid = False
+                if c in seen and seen[c] != g:
+                    st.hold.append(f"MANUAL_SELECT {node['key']} {c} 同时选入 {seen[c]} 和 {g}。")
+                    valid = False
+                else:
+                    seen[c] = g
+        if not valid:
+            return {}
+        result: dict[str, tuple[str, ...]] = {}
+        for g, cs in src.items():
+            chosen = tuple(_order(c for c in decisions.get(g, ()) if c in cs))
+            for c in chosen:
+                mark_wildcard(c)
+            result[g] = chosen
+        return result
+
+    pool_set = set(src)
+    for dk in decisions:
+        if dk != "":
+            st.hold.append(f"MANUAL_SELECT {node['key']} 非分组来源仅允许空组，收到 {dk!r}。")
+            valid = False
+    raw = decisions.get("", ())
+    if len(raw) > quota:
+        st.hold.append(f"MANUAL_SELECT {node['key']} 选入 {len(raw)} 人，超过上限 {quota}。")
+        valid = False
+    for c in raw:
+        if c not in pool_set:
+            st.hold.append(f"MANUAL_SELECT {node['key']} {c} 不在来源 {node['source']} 中。")
+            valid = False
+    if not valid:
+        return {}
+    chosen = tuple(_order(c for c in raw if c in pool_set))
+    for c in chosen:
+        mark_wildcard(c)
+    return {"": chosen}
 
 
 def _final_status(st: _Stage) -> ResolverState:

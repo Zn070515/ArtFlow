@@ -140,6 +140,7 @@ def golden_xiaofeng():
                 "from": "merged",
                 "into": "manual",
                 "quota": 2,
+                "mode": "each_group",
             },
         ]
     )
