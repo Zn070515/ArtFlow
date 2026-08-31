@@ -1385,6 +1385,26 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     locked.confirmed_by = confirmed_by
     locked.confirmed_at = timezone.now()
     locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+    AuditLog.objects.create(
+        operator=confirmed_by,
+        action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
+        target=f"StageResult:{locked.pk}",
+        old_value=StageResult.Status.READY_TO_CONFIRM,
+        new_value=json.dumps(
+            {
+                "status": StageResult.Status.CONFIRMED,
+                "stage_key": locked.stage_key,
+                "result_version": locked.result_version,
+                "ruleset_version": locked.ruleset_version_id,
+                "authority_hash": locked.ruleset_version.authority_hash,
+                "input_fingerprint": locked.input_fingerprint,
+                "confirmed_by": confirmed_by.pk,
+                "plan_version": locked.plan_version,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
     return locked
 
 

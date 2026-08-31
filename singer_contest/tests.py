@@ -3859,6 +3859,49 @@ class ConfirmedDependencyClosureTests(TestCase):
         self.assertFalse(unlocked.is_locked)
         self.assertEqual(unlocked.status, ContestRound.Status.SCORING)
 
+    def test_confirm_records_rich_audit_in_same_tx(self):
+        """M1-R8 Commit 4: the CONFIRM audit is recorded by the service in the same txn."""
+        from common.models import AuditLog
+
+        from .services import confirm_stage_result, run_ruleset
+
+        definition = {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {"key": "ranked", "type": "RANK", "source": "assess", "descending": True},
+            ],
+        }
+        version = self._frozen_version(
+            definition, {"stage_key": "选拔", "round_keys": {"r1": self.round.pk}}
+        )
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["is_locked", "status"])
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+            preview=True,
+        )
+        confirmed = confirm_stage_result(stage, confirmed_by=self.user)
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
+            target=f"StageResult:{confirmed.pk}",
+        )
+        self.assertEqual(audit.operator, self.user)
+        self.assertEqual(audit.old_value, StageResult.Status.READY_TO_CONFIRM)
+        payload = json.loads(audit.new_value)
+        self.assertEqual(payload["status"], StageResult.Status.CONFIRMED)
+        self.assertEqual(payload["stage_key"], "选拔")
+        self.assertEqual(payload["result_version"], confirmed.result_version)
+        self.assertEqual(payload["ruleset_version"], version.pk)
+        self.assertEqual(payload["authority_hash"], version.authority_hash)
+        self.assertEqual(payload["input_fingerprint"], confirmed.input_fingerprint)
+        self.assertEqual(payload["confirmed_by"], self.user.pk)
+
     def test_confirmed_vote_sourced_stage_blocks_unlock_vote_session(self):
         from voting.services import unlock_vote_session
 

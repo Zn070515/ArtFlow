@@ -4465,6 +4465,21 @@ class ResultBoardTests(TestCase):
         self.assertEqual(ready.status, StageResult.Status.CONFIRMED)
         self.assertEqual(ready.confirmed_by, self.staff)
         self.assertIsNotNone(ready.confirmed_at)
+        # M1-R8 Commit 4: the CONFIRM audit is recorded once by the service (rich payload),
+        # not duplicated by the view with a stale READY_TO_CONFIRM status.
+        from common.models import AuditLog
+
+        audits = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
+            target=f"StageResult:{ready.pk}",
+        )
+        self.assertEqual(audits.count(), 1)
+        payload = json.loads(audits.get().new_value)
+        self.assertEqual(payload["status"], StageResult.Status.CONFIRMED)
+        self.assertEqual(payload["stage_key"], "院十佳")
+        self.assertEqual(payload["result_version"], ready.result_version)
+        self.assertEqual(payload["ruleset_version"], ready.ruleset_version_id)
+        self.assertEqual(payload["input_fingerprint"], ready.input_fingerprint)
 
     def test_stage_result_confirm_rejects_unresolved(self):
         """§36-37: 核定 a HOLD stage is refused and leaves it unchanged."""

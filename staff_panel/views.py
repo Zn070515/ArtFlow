@@ -1117,12 +1117,6 @@ def stage_result_confirm(request, pk):
         messages.error(request, "；".join(error.messages))
     else:
         messages.success(request, "已核定并锁定该赛段结果，可抄主持手卡。")
-        log_action(
-            request,
-            AuditLog.ActionType.CONFIRM_STAGE_RESULT,
-            f"StageResult:{stage.pk}",
-            new_value=f"{stage.stage_key} — {stage.get_status_display()}",
-        )
     return redirect("staff:stage_result_detail", pk=pk)
 
 
