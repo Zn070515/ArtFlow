@@ -1,11 +1,50 @@
 from __future__ import annotations
 
 from common.models import AuditLog
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
+from django.utils import timezone
 
 from .models import User
+
+
+def _verification_ttl_seconds() -> int:
+    return int(settings.ADMIN_VERIFICATION_TTL_SECONDS)
+
+
+def mark_admin_verified(session) -> None:
+    """Record an admin's elevated second-factor verification on the session."""
+    session["artflow_admin_verified"] = True
+    session["artflow_admin_verified_at"] = timezone.now().isoformat()
+
+
+def admin_verification_is_valid(session) -> bool:
+    """Whether the session still holds an unexpired elevated verification.
+
+    The marker is valid only if it exists AND its timestamp is within the
+    configured TTL window (honoring the server clock, not the session age).
+    """
+    if not session.get("artflow_admin_verified"):
+        return False
+    marker = session.get("artflow_admin_verified_at")
+    if not marker:
+        return False
+    try:
+        verified_at = timezone.datetime.fromisoformat(marker)
+    except (TypeError, ValueError):
+        return False
+    if timezone.is_naive(verified_at):
+        verified_at = timezone.make_aware(verified_at, timezone.utc)
+    elapsed = (timezone.now() - verified_at).total_seconds()
+    return elapsed <= _verification_ttl_seconds()
+
+
+def expire_admin_verification(session) -> None:
+    """Drop the elevated marker so the admin must re-authenticate."""
+    session.pop("artflow_admin_verified", None)
+    session.pop("artflow_admin_verified_at", None)
 
 
 def _is_effective_admin(user: User) -> bool:

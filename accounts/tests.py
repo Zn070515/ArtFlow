@@ -1,5 +1,7 @@
 import os
 import threading
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from io import StringIO
 from unittest import skipUnless
 from unittest.mock import patch
@@ -13,9 +15,16 @@ from django.db import close_old_connections, connection
 from django.db.models import Q
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import User
-from .services import change_user_role, set_user_active
+from .services import (
+    admin_verification_is_valid,
+    change_user_role,
+    expire_admin_verification,
+    mark_admin_verified,
+    set_user_active,
+)
 
 
 class LoginModeTests(TestCase):
@@ -113,6 +122,78 @@ class LoginModeTests(TestCase):
         response = self.client.get(reverse("accounts:login"))
         self.assertContains(response, reverse("accounts:admin_login"))
         self.assertContains(response, "管理员登录")
+
+
+class AdminVerificationTTLTests(TestCase):
+    """§17 P1 — the elevated admin verification marker must expire (bounded TTL)."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_mark_admin_verified_sets_marker_and_timestamp(self):
+        session = {}
+        mark_admin_verified(session)
+        self.assertTrue(session["artflow_admin_verified"])
+        self.assertIsNotNone(session["artflow_admin_verified_at"])
+        self.assertTrue(admin_verification_is_valid(session))
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_verification_is_invalid_without_marker(self):
+        self.assertFalse(admin_verification_is_valid({}))
+        self.assertFalse(admin_verification_is_valid({"artflow_admin_verified": True}))
+        self.assertFalse(admin_verification_is_valid({"artflow_admin_verified_at": "x"}))
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_verification_expires_after_ttl_window(self):
+        session = {"artflow_admin_verified": True}
+        with patch("accounts.services.timezone.now") as mock_now:
+            mock_now.return_value = datetime(2026, 8, 29, 12, 0, 0, tzinfo=dt_timezone.utc)
+            mark_admin_verified(session)
+            mid = mock_now.return_value
+            mock_now.return_value = mid + timezone.timedelta(seconds=1800)
+            self.assertTrue(admin_verification_is_valid(session))
+            mock_now.return_value = mid + timezone.timedelta(seconds=3601)
+            self.assertFalse(admin_verification_is_valid(session))
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_expire_admin_verification_drops_marker(self):
+        session = {
+            "artflow_admin_verified": True,
+            "artflow_admin_verified_at": "2026-08-29T12:00:00+00:00",
+        }
+        expire_admin_verification(session)
+        self.assertNotIn("artflow_admin_verified", session)
+        self.assertNotIn("artflow_admin_verified_at", session)
+        self.assertFalse(admin_verification_is_valid(session))
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_admin_required_redirects_when_verification_expired(self):
+        # Log in as admin, clear the elevated marker, then hit an @admin_required view.
+        self.client.force_login(self.admin)
+        session = self.client.session
+        session["artflow_admin_verified"] = False
+        session.save()
+        target = reverse("staff:activity_create")
+        response = self.client.get(target)
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(f"{reverse('accounts:admin_login')}?"))
+        self.assertIn(f"next={target}", response["Location"])
+
+    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    def test_admin_login_uses_mark_verified_helper(self):
+        response = self.client.post(
+            reverse("accounts:admin_login"),
+            {"username": "admin", "password": "pass12345", "admin_key": "secret-key"},
+        )
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get("artflow_admin_verified"))
+        self.assertTrue(admin_verification_is_valid(session))
 
 
 class AdminLoginRateLimitTests(TestCase):

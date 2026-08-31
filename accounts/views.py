@@ -4,11 +4,11 @@ from common.rate_limit import RateLimitExceeded, hit_rate_limit
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
-from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .forms import AdminLoginForm, ParticipantLoginForm, RegisterForm
+from .services import admin_verification_is_valid, mark_admin_verified
 
 
 def register_view(request):
@@ -48,7 +48,7 @@ def login_view(request):
 
 def admin_login_view(request):
     if request.user.is_authenticated:
-        if request.user.is_admin and request.session.get("artflow_admin_verified"):
+        if request.user.is_admin and admin_verification_is_valid(request.session):
             return redirect("staff:dashboard")
         if not request.user.is_admin:
             return redirect("public_portal:home")
@@ -59,8 +59,7 @@ def admin_login_view(request):
         if form.is_valid():
             user = form.get_user()
             login(request, user)
-            request.session["artflow_admin_verified"] = True
-            request.session["artflow_admin_verified_at"] = timezone.now().isoformat()
+            mark_admin_verified(request.session)
             log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}", note="admin_login")
             if next_url and url_has_allowed_host_and_scheme(
                 next_url, allowed_hosts={request.get_host()}
