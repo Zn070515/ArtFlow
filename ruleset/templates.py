@@ -146,6 +146,143 @@ def golden_xiaofeng():
     )
 
 
+def historical_xiaofeng_control_flow():
+    """校十佳屏峰 definite control flow (§24.1): 5 groups x 4, top1/group direct,
+    remainder R1 top12, R2 top7, merge, final groups, manual 0~2/group.
+
+    The historical "按综合成绩全局补到6" and the 30/50/20 weights are deliberately NOT
+    asserted here: they depend on R2/R3 coverage (see
+    ``historical_xiaofeng_fallback_unresolved``) and would otherwise be invented.
+    """
+    return _d(
+        [
+            {
+                "key": "groups_initial",
+                "type": "PARTITION",
+                "source": ENTRY_KEY,
+                "by": "initial_group",
+            },
+            {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+            {"key": "rank_r1", "type": "RANK", "source": "assess_r1", "descending": True},
+            {
+                "key": "direct",
+                "type": "SELECT",
+                "source": "rank_r1",
+                "count": 1,
+                "by": "groups_initial",
+            },
+            {"key": "leftover", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
+            {"key": "repech_r1", "type": "ASSESS", "source": "leftover", "round": "r1"},
+            {"key": "repech_rank", "type": "RANK", "source": "repech_r1", "descending": True},
+            {"key": "top12", "type": "SELECT", "source": "repech_rank", "count": 12},
+            {"key": "repech_r2", "type": "ASSESS", "source": "top12", "round": "r2"},
+            {"key": "repech_rank2", "type": "RANK", "source": "repech_r2", "descending": True},
+            {"key": "top7", "type": "SELECT", "source": "repech_rank2", "count": 7},
+            {"key": "merged", "type": "MERGE", "sources": ["direct", "top7"]},
+            {
+                "key": "final_groups",
+                "type": "PARTITION",
+                "source": "merged",
+                "by": "final_group",
+            },
+            {
+                "key": "manual",
+                "type": "MANUAL_SELECT",
+                "source": "final_groups",
+                "groups": 3,
+                "quota": 2,
+            },
+        ]
+    )
+
+
+def historical_xiaofeng_fallback_unresolved():
+    """校十佳屏峰 historical 30/50/20 (R1+R2+R3) fallback (§24.2).
+
+    The group top-1 direct winners never reach R2/R3, so the aggregate mixes a
+    full-roster R1 with subset R2/R3: the validator MUST FAIL MISSING_SCORE_DEPENDENCY.
+    This template documents an unresolved rule; it is intentionally NOT executable.
+    """
+    return _d(
+        [
+            {
+                "key": "groups",
+                "type": "PARTITION",
+                "source": ENTRY_KEY,
+                "by": "initial",
+            },
+            {"key": "r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+            {"key": "rank1", "type": "RANK", "source": "r1", "descending": True},
+            {
+                "key": "direct",
+                "type": "SELECT",
+                "source": "rank1",
+                "count": 1,
+                "by": "groups",
+            },
+            {"key": "leftover", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
+            {"key": "r2", "type": "ASSESS", "source": "leftover", "round": "r2"},
+            {"key": "r3", "type": "ASSESS", "source": "leftover", "round": "r3"},
+            {
+                "key": "fallback",
+                "type": "AGGREGATE",
+                "aggregate": {
+                    "type": "weighted_sum",
+                    "components": [
+                        {"source": "r1", "weight": 0.3},
+                        {"source": "r2", "weight": 0.5},
+                        {"source": "r3", "weight": 0.2},
+                    ],
+                },
+            },
+        ],
+        context={
+            "entry_size": 20,
+            "rounds": {
+                "r1": {"scope": "all"},
+                "r2": {"scope": "subset"},
+                "r3": {"scope": "subset"},
+            },
+        },
+    )
+
+
+def synthetic_fill_to_quota_demo():
+    """A clean, unambiguous synthetic FILL_TO_QUOTA demo (NOT a 2025 historical rule).
+
+    6 candidates -> 2 final groups; manual 0~2/group; global FILL_TO_QUOTA to a hard
+    total of 4, ordered by the r1 ranking (the §22 semantics). Named ``synthetic``: a
+    resolver-focused fixture, not a claim about the real 2025 scoring.
+    """
+    return _d(
+        [
+            {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+            {"key": "rank_r1", "type": "RANK", "source": "assess_r1", "descending": True},
+            {
+                "key": "final_groups",
+                "type": "PARTITION",
+                "source": ENTRY_KEY,
+                "by": "final_group",
+            },
+            {
+                "key": "manual",
+                "type": "MANUAL_SELECT",
+                "source": "final_groups",
+                "groups": 2,
+                "quota": 2,
+            },
+            {
+                "key": "filled",
+                "type": "FILL_TO_QUOTA",
+                "from": ENTRY_KEY,
+                "into": "manual",
+                "quota": 4,
+                "ranking_source": "rank_r1",
+            },
+        ]
+    )
+
+
 # --- §14.2 first batch: 10 templates ---------------------------------------
 
 
@@ -361,6 +498,9 @@ _FIRST_BATCH_DEFINITIONS = _first_batch()
 
 GOLDEN_SCHIDUI = golden_schidui()
 GOLDEN_XIAOFENG = golden_xiaofeng()
+HISTORICAL_XIAOFENG_CONTROL_FLOW = historical_xiaofeng_control_flow()
+HISTORICAL_XIAOFENG_FALLBACK_UNRESOLVED = historical_xiaofeng_fallback_unresolved()
+SYNTHETIC_FILL_TO_QUOTA_DEMO = synthetic_fill_to_quota_demo()
 FIRST_BATCH = [
     {"key": key, "name": name, "description": desc, "definition": definition}
     for (key, name, desc, definition) in _FIRST_BATCH_DEFINITIONS
@@ -370,7 +510,22 @@ FIRST_BATCH = [
 def _catalog():
     catalog = [
         ("院十佳", GOLDEN_SCHIDUI, "2025 院十佳：15→10→5→3 加权晋级链"),
-        ("校十佳屏峰", GOLDEN_XIAOFENG, "2025 校十佳屏峰：分组直晋 + 复活 + 手动/补足"),
+        ("校十佳屏峰", GOLDEN_XIAOFENG, "2025 校十佳屏峰：分组直晋 + 复活 + 手动/补足（控制流）"),
+        (
+            "校十佳屏峰_历史控制流",
+            HISTORICAL_XIAOFENG_CONTROL_FLOW,
+            "校十佳屏峰确定控制流（§24.1）：5 组直晋 + 复活 + 手动，不含未决补足/权重",
+        ),
+        (
+            "校十佳屏峰_历史未决回退",
+            HISTORICAL_XIAOFENG_FALLBACK_UNRESOLVED,
+            "校十佳屏峰历史 30/50/20 回退（§24.2）：直晋无 R2，校验必须 FAIL（未决）",
+        ),
+        (
+            "合成_补足至配额演示",
+            SYNTHETIC_FILL_TO_QUOTA_DEMO,
+            "合成（非历史）FILL_TO_QUOTA 演示：全局补足 + 排名（§22 语义）",
+        ),
     ]
     for item in FIRST_BATCH:
         catalog.append((item["name"], item["definition"], item["description"]))

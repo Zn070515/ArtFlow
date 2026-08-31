@@ -30,6 +30,9 @@ from ruleset.services import (
     freeze_ruleset_version,
     supersede_ruleset_version,
 )
+from ruleset.templates import (
+    historical_xiaofeng_fallback_unresolved,
+)
 from ruleset.test_schema import (
     DEF,
     _def,
@@ -530,6 +533,17 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         golden = report.by_code("MISSING_SCORE_DEPENDENCY")[0]
         # The guard fires on whichever subset round (R2 or R3) it reaches first; the
         # §12.4 requirement is that the mixed full/subset fallback is rejected at all.
+        self.assertIn(golden.context["missing_round"], ("r2", "r3"))
+
+    def test_historical_xiaofeng_fallback_unresolved_rejected(self):
+        """§24.2 — the named historical 30/50/20 fallback template is NOT executable:
+        its direct winners never reach R2/R3, so the validator must FAIL with
+        MISSING_SCORE_DEPENDENCY rather than the resolver guessing a score."""
+        report, plan = self._assert_invalid(
+            historical_xiaofeng_fallback_unresolved(),
+            "MISSING_SCORE_DEPENDENCY",
+        )
+        golden = report.by_code("MISSING_SCORE_DEPENDENCY")[0]
         self.assertIn(golden.context["missing_round"], ("r2", "r3"))
 
     def test_missing_score_dependency_golden(self):

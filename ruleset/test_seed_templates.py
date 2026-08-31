@@ -6,13 +6,22 @@ from ruleset.templates import (
     FIRST_BATCH,
     GOLDEN_SCHIDUI,
     GOLDEN_XIAOFENG,
+    HISTORICAL_XIAOFENG_CONTROL_FLOW,
+    HISTORICAL_XIAOFENG_FALLBACK_UNRESOLVED,
+    SYNTHETIC_FILL_TO_QUOTA_DEMO,
     seed_ruleset_templates,
 )
 
 
 class TemplateLibraryTests(TestCase):
     def test_golden_definitions_are_schema_valid(self):
-        for definition in (GOLDEN_SCHIDUI, GOLDEN_XIAOFENG):
+        for definition in (
+            GOLDEN_SCHIDUI,
+            GOLDEN_XIAOFENG,
+            HISTORICAL_XIAOFENG_CONTROL_FLOW,
+            HISTORICAL_XIAOFENG_FALLBACK_UNRESOLVED,
+            SYNTHETIC_FILL_TO_QUOTA_DEMO,
+        ):
             parsed = parse_definition(definition)
             self.assertEqual(parsed["schema_version"], 1)
             self.assertTrue(parsed["nodes"])
@@ -30,7 +39,8 @@ class TemplateLibraryTests(TestCase):
     def test_seed_is_idempotent(self):
         seed_ruleset_templates(None)
         first = RulesetTemplate.objects.count()
-        self.assertEqual(first, 12)
+        # 2 golden + 3 historical/synthetic scenarios + 10 first-batch templates.
+        self.assertEqual(first, 15)
         seed_ruleset_templates(None)
         self.assertEqual(RulesetTemplate.objects.count(), first)
 

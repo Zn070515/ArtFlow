@@ -20,6 +20,7 @@ from ruleset.resolver import (
     resolve,
 )
 from ruleset.schema import ENTRY_KEY
+from ruleset.templates import synthetic_fill_to_quota_demo
 from ruleset.test_schema import (
     _def,
     partition_subtract_repechage_merge,
@@ -576,6 +577,33 @@ class ResolverFillGlobalSemanticsTests(SimpleTestCase):
         filled = result.node_values["filled"]
         # each_group tops each group to its own quota (2 each => 4 total), not global 2.
         self.assertEqual(filled, {"A": ["c1", "c2"], "B": ["c4", "c3"]})
+
+    def test_synthetic_fill_to_quota_demo_global_by_ranking(self):
+        """§24.3 — the named synthetic demo fills to a hard GLOBAL total, ordered by
+        the r1 ranking rather than roster order."""
+        inputs = ResolveInput(
+            roster=tuple(f"c{i}" for i in range(1, 7)),
+            # ascending scores: c6 is best, so RANK desc -> c6,c5,c4,c3,c2,c1
+            round_scores=_rs({"r1": {f"c{i}": (i,) for i in range(1, 7)}}),
+            group_of={
+                "final_group": {
+                    "c1": "F1",
+                    "c2": "F1",
+                    "c3": "F1",
+                    "c4": "F2",
+                    "c5": "F2",
+                    "c6": "F2",
+                }
+            },
+            manual={"manual": {"F1": ("c1",), "F2": ("c4",)}},
+        )
+        result = resolve(synthetic_fill_to_quota_demo(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        total = {c for g in filled.values() for c in g}
+        # global total 4: {c1,c4} manual + {c6,c5} as the top two remaining by score.
+        self.assertEqual(len(total), 4)
+        self.assertEqual(total, {"c1", "c4", "c6", "c5"})
 
 
 class ResolverManualSelectValidationTests(SimpleTestCase):
