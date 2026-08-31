@@ -27,6 +27,7 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         Award,
         CompositeResult,
         CriterionScore,
+        ManualDecision,
         Performance,
         ScoreRecord,
         ScoreSummary,
@@ -73,6 +74,9 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
             score_record__round__activity=activity, is_test_data=True
         ).count(),
         "performances": Performance.objects.filter(activity=activity, is_test_data=True).count(),
+        "manual_decisions": ManualDecision.objects.filter(
+            activity=activity, is_test_data=True
+        ).count(),
         "contest_rulesets": ContestRuleset.objects.filter(
             activity=activity, is_test_data=True
         ).count(),
@@ -161,6 +165,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from singer_contest.models import (
         Award,
         ContestRound,
+        ManualDecision,
         ScoreRecord,
         ScoreSummary,
         SingerRegistration,
@@ -211,6 +216,8 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         stage.status = StageResult.Status.HOLD
         stage.save(update_fields=["status"])
     StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    # ManualDecision FK's to the frozen RulesetVersion; delete before the ruleset.
+    ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ContestRuleset.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()

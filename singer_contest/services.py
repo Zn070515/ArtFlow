@@ -23,6 +23,8 @@ from .models import (
     CompositeResult,
     ContestRound,
     Judge,
+    ManualDecision,
+    Performance,
     RoundEntry,
     RoundJudge,
     ScoreRecord,
@@ -720,6 +722,8 @@ def _version_binding(version) -> dict:
             binding = {
                 "stage_key": ruleset.stage_key or "",
                 "round_keys": dict(ruleset.round_keys or {}),
+                "vote_keys": dict(ruleset.vote_keys or {}),
+                "group_keys": dict(ruleset.group_keys or {}),
                 "announcement_blocks": list(ruleset.announcement_blocks or []),
             }
     return binding
@@ -987,6 +991,72 @@ def bind_resolve_input(
     )
 
 
+def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
+    """Source the ``group_of`` ResolveInput from the binding's ``group_keys``.
+
+    Each ``by`` key resolves to a ContestRound; a singer's group is the
+    ``PerformanceGroup`` of their ``Performance`` in that round.
+    """
+    group_keys = binding.get("group_keys") or {}
+    if not group_keys:
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for by, round_pk in group_keys.items():
+        perfs = Performance.objects.filter(round_id=round_pk, group__isnull=False).select_related(
+            "group"
+        )
+        out[by] = {str(p.singer_id): p.group.name for p in perfs}
+    return out
+
+
+def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
+    """Source the ``vote_scores`` ResolveInput from the binding's ``vote_keys``.
+
+    Each ``vote_source`` key resolves to a VoteSession. Per-singer vote share is
+    scaled to a 0-10 audience score (§16.9 "10分制 audience score"): ``10 * n / total``.
+    An empty session is left unbound so the resolver holds rather than fabricates.
+    """
+    from voting.models import VoteRecord
+
+    vote_keys = binding.get("vote_keys") or {}
+    if not vote_keys:
+        return {}
+    test_flag = runtime_is_test(activity)
+    out: dict[str, dict[str, Decimal]] = {}
+    for source, vs_pk in vote_keys.items():
+        counts: dict[str, int] = {}
+        total = 0
+        records = VoteRecord.objects.filter(
+            vote_session_id=vs_pk, is_test_data=test_flag
+        ).select_related("vote_option")
+        for rec in records:
+            sid = str(rec.vote_option.singer_id)
+            counts[sid] = counts.get(sid, 0) + 1
+            total += 1
+        if not total:
+            continue
+        out[source] = {
+            sid: (Decimal(10) * Decimal(n) / Decimal(total)).quantize(Decimal("0.01"))
+            for sid, n in counts.items()
+        }
+    return out
+
+
+def _source_manual(version, activity) -> dict[str, dict[str, tuple[str, ...]]]:
+    """Source the ``manual`` ResolveInput from the version's ManualDecision rows.
+
+    Returns ``{manual_key: {group_or_empty: tuple_of_chosen_pks}}`` so the resolver's
+    group (and flat ``""``) MANUAL_SELECT paths both read it directly.
+    """
+    decisions = ManualDecision.objects.filter(ruleset_version=version, activity=activity).order_by(
+        "manual_key", "group", "pk"
+    )
+    out: dict[str, dict[str, tuple[str, ...]]] = {}
+    for d in decisions:
+        out.setdefault(d.manual_key, {})[d.group] = tuple(str(c) for c in (d.chosen or []))
+    return out
+
+
 def _plan_from_version(version) -> ExecutionPlan:
     if version.execution_plan:
         return ExecutionPlan.from_dict(json.loads(version.execution_plan))
@@ -1228,6 +1298,9 @@ def recompute_activity_result(
         stage_key=stage_key,
         computed_by=computed_by,
         round_keys=bound,
+        vote_scores=_source_vote_scores(activity, binding),
+        group_of=_source_group_of(activity, binding),
+        manual=_source_manual(version, activity),
         checkpoint=checkpoint,
     )
 

@@ -763,3 +763,59 @@ class CompositeResult(models.Model):
 
     def __str__(self):
         return f"{self.singer.name} — {self.node_key}: {self.value}"
+
+
+class ManualDecision(models.Model):
+    """A staff member's human pick for a MANUAL_SELECT node (§31 closure).
+
+    Stored against the frozen ruleset version so each ruleset carries its own
+    manual choices; recompute re-reads these to source the ``manual`` ResolveInput
+    keyed by the MANUAL_SELECT node key and (for group sources) group name.
+    """
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="manual_decisions"
+    )
+    ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion", on_delete=models.CASCADE, related_name="manual_decisions"
+    )
+    manual_key = models.CharField(
+        max_length=100, help_text="The MANUAL_SELECT node key, e.g. 'manual'."
+    )
+    group = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Group name; '' for a non-group (flat) manual source.",
+    )
+    chosen = models.JSONField(
+        default=list, help_text="Ordered SingerRegistration pk strings picked into this group."
+    )
+    is_test_data = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manual_decisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("ruleset_version", "manual_key", "group")
+
+    def clean(self):
+        singer_by_key = {
+            str(s.pk): s
+            for s in SingerRegistration.objects.filter(activity_id=self.activity_id).only("pk")
+        }
+        missing = [c for c in (self.chosen or []) if str(c) not in singer_by_key]
+        if missing:
+            raise ValidationError(f"手动选入的选手不属于该活动：{missing}")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.manual_key} — {self.group or '(整体)'}"

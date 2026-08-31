@@ -2945,6 +2945,76 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
         self.assertEqual(len(finalists), 6)
         self.assertEqual(len(set(finalists)), 6)
 
+    def test_recompute_auto_sources_group_and_manual_ready(self):
+        """§32: recompute auto-sources group_of + manual from DB (no hand-injected kwargs)."""
+        from .models import ManualDecision, Performance, PerformanceGroup
+        from .services import recompute_activity_result
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="校十佳屏峰自动源",
+            is_test_data=True,
+            stage_key="校十佳屏峰",
+            round_keys={"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk},
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=_xiaofeng_definition(),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+            binding={
+                "stage_key": "校十佳屏峰",
+                "round_keys": {"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk},
+                "vote_keys": {},
+                "group_keys": {
+                    "initial_group": self.rounds["r1"].pk,
+                    "final_group": self.rounds["r2"].pk,
+                },
+                "announcement_blocks": [],
+            },
+        )
+        # Persist the group_of facts as Performance rows keyed by the binding's group_keys.
+        group_of = self._group_of()
+        for key, round_ in (
+            ("initial_group", self.rounds["r1"]),
+            ("final_group", self.rounds["r2"]),
+        ):
+            for singer in self.singers:
+                group_name = group_of[key].get(str(singer.pk))
+                if group_name is None:
+                    continue
+                pg, _ = PerformanceGroup.objects.get_or_create(
+                    activity=self.activity, round=round_, name=group_name, is_test_data=True
+                )
+                Performance.objects.create(
+                    activity=self.activity,
+                    round=round_,
+                    singer=singer,
+                    group=pg,
+                    is_test_data=True,
+                )
+        # Persist the manual facts as ManualDecision rows on the frozen version.
+        for group_name, chosen in self._manual()["manual"].items():
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                manual_key="manual",
+                group=group_name,
+                chosen=[str(c) for c in chosen],
+                is_test_data=True,
+                created_by=self.admin,
+            )
+
+        stage = recompute_activity_result(self.activity, self.admin, ruleset=ruleset)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(stage.stage_key, "校十佳屏峰")
+        self.assertEqual(stage.ruleset_version, version)
+        self.assertEqual(stage.decisions.count(), 20)
+        codes = [d.outcome_code for d in stage.decisions.all()]
+        self.assertEqual(codes.count("direct"), 5)
+        self.assertEqual(codes.count("repechage"), 12)
+        self.assertEqual(codes.count("eliminated"), 3)
+
     def _resolve_input(self):
         from .services import bind_resolve_input
 
@@ -3142,3 +3212,227 @@ class RapidEntryServiceTests(TestCase):
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.decisions.count(), 1)
         self.assertEqual(stage.decisions.get().outcome_code, "direct")
+
+
+class BindingSourceHelperTests(TestCase):
+    """§32 binding-sourcing helpers: group_of / vote_scores / manual are read from DB."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="src-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="源活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="源规则", is_test_data=True
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="r1",
+        )
+        self.singers = [
+            SingerRegistration.objects.create(
+                activity=self.activity,
+                user=User.objects.create_user(username=f"src-s{i}", password="pass"),
+                name=f"选手{i}",
+                student_id=f"src{i:02d}",
+                college="学院",
+                class_name="班级",
+                song_name="歌曲",
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=True,
+            )
+            for i in range(1, 4)
+        ]
+
+    def test_source_group_of_reads_performance_group(self):
+        from .models import Performance, PerformanceGroup
+        from .services import _source_group_of
+
+        pg = PerformanceGroup.objects.create(
+            activity=self.activity, round=self.round, name="G1", is_test_data=True
+        )
+        Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=self.singers[0],
+            group=pg,
+            is_test_data=True,
+        )
+        out = _source_group_of(self.activity, {"group_keys": {"by": self.round.pk}})
+        self.assertEqual(out, {"by": {str(self.singers[0].pk): "G1"}})
+
+    def test_source_group_of_missing_key_returns_empty(self):
+        from .services import _source_group_of
+
+        self.assertEqual(_source_group_of(self.activity, {"group_keys": {}}), {})
+
+    def _vote_session(self):
+        from django.utils import timezone
+        from voting.models import VoteSession
+
+        return VoteSession.objects.create(
+            activity=self.activity,
+            name="大众投票",
+            passcode="0000",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(hours=1),
+            is_test_data=True,
+        )
+
+    def test_source_vote_scores_normalizes_to_10_scale(self):
+        from voting.models import VoteOption, VoteRecord
+
+        from .services import _source_vote_scores
+
+        vs = self._vote_session()
+        opts = [
+            VoteOption.objects.create(vote_session=vs, singer=s, is_test_data=True)
+            for s in self.singers
+        ]
+        # 2 + 1 + 1 votes across the three singers -> total 4.
+        for key, opt in (("a", opts[0]), ("b", opts[0]), ("c", opts[1]), ("d", opts[2])):
+            VoteRecord.objects.create(
+                vote_session=vs,
+                vote_option=opt,
+                browser_session_key=key,
+                ip_address="127.0.0.1",
+                is_test_data=True,
+            )
+        out = _source_vote_scores(self.activity, {"vote_keys": {"audience": vs.pk}})
+        self.assertEqual(out["audience"][str(self.singers[0].pk)], Decimal("5.00"))
+        self.assertEqual(out["audience"][str(self.singers[1].pk)], Decimal("2.50"))
+        self.assertEqual(out["audience"][str(self.singers[2].pk)], Decimal("2.50"))
+
+    def test_source_vote_scores_empty_session_skips(self):
+
+        from .services import _source_vote_scores
+
+        vs = self._vote_session()
+        out = _source_vote_scores(self.activity, {"vote_keys": {"audience": vs.pk}})
+        self.assertEqual(out, {})
+
+    def test_source_manual_returns_group_and_flat_keys(self):
+        from .models import ManualDecision
+        from .services import _source_manual
+
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        ManualDecision.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            manual_key="manual",
+            group="G1",
+            chosen=[str(self.singers[0].pk)],
+            is_test_data=True,
+        )
+        ManualDecision.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            manual_key="manual",
+            group="",
+            chosen=[str(self.singers[1].pk)],
+            is_test_data=True,
+        )
+        out = _source_manual(version, self.activity)
+        self.assertEqual(
+            out,
+            {
+                "manual": {
+                    "G1": (str(self.singers[0].pk),),
+                    "": (str(self.singers[1].pk),),
+                }
+            },
+        )
+
+
+class ManualDecisionModelTests(TestCase):
+    """ManualDecision clean + unique_together (§31 closure for §32 MANUAL_SELECT)."""
+
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="手动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.other = Activity.objects.create(
+            title="他活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="规则", is_test_data=True
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="md-s", password="pass"),
+            name="选手",
+            student_id="md01",
+            college="学院",
+            class_name="班级",
+            song_name="歌",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def test_chosen_must_belong_to_activity(self):
+        from .models import ManualDecision
+
+        foreign = SingerRegistration.objects.create(
+            activity=self.other,
+            user=User.objects.create_user(username="md-f", password="pass"),
+            name="他",
+            student_id="md02",
+            college="学院",
+            class_name="班级",
+            song_name="歌",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        with self.assertRaises(ValidationError):
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                manual_key="manual",
+                group="",
+                chosen=[str(foreign.pk)],
+                is_test_data=True,
+            )
+
+    def test_unique_together_enforced(self):
+        from .models import ManualDecision
+
+        ManualDecision.objects.create(
+            activity=self.activity,
+            ruleset_version=self.version,
+            manual_key="manual",
+            group="G1",
+            chosen=[str(self.singer.pk)],
+            is_test_data=True,
+        )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                manual_key="manual",
+                group="G1",
+                chosen=[],
+                is_test_data=True,
+            )

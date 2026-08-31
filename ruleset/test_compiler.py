@@ -29,6 +29,7 @@ from ruleset.services import (
     create_ruleset_version,
     freeze_ruleset_version,
     supersede_ruleset_version,
+    validate_binding,
 )
 from ruleset.templates import (
     historical_xiaofeng_fallback_unresolved,
@@ -903,6 +904,8 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
             {
                 "stage_key": "院十佳",
                 "round_keys": {"r1": round_.pk},
+                "vote_keys": {},
+                "group_keys": {},
                 "announcement_blocks": [{"label": "晋级", "outcome_codes": ["direct"]}],
             },
         )
@@ -1008,3 +1011,76 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
         )
         with self.assertRaises(ValidationError):
             ContestRuleset.objects.create(activity=farewell, name="规则", is_test_data=True)
+
+
+class BindingValidationTests(_RulesetModelBase):
+    """§32 binding normalization: round/vote/group key maps normalize and stay in-activity."""
+
+    def _singer_round(self, ruleset):
+        from singer_contest.models import ContestRound
+
+        return ContestRound.objects.create(
+            activity=ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=10,
+        )
+
+    def _vote_session(self, ruleset, *, is_test_data=False):
+        from django.utils import timezone
+        from voting.models import VoteSession
+
+        return VoteSession.objects.create(
+            activity=ruleset.activity,
+            name="大众投票",
+            passcode="0000",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(hours=1),
+            is_test_data=is_test_data,
+        )
+
+    def test_accepts_and_normalizes_pk_map(self):
+
+        ruleset = self.make_ruleset()
+        round_ = self._singer_round(ruleset)
+        vote = self._vote_session(ruleset)
+        normalized = validate_binding(
+            ruleset,
+            {
+                "stage_key": "院十佳",
+                "round_keys": {"r1": str(round_.pk), "r2": ""},
+                "vote_keys": {"audience1": str(vote.pk)},
+                "group_keys": {"by1": str(round_.pk)},
+                "announcement_blocks": [],
+            },
+        )
+        self.assertEqual(normalized["round_keys"], {"r1": round_.pk})
+        self.assertEqual(normalized["vote_keys"], {"audience1": vote.pk})
+        self.assertEqual(normalized["group_keys"], {"by1": round_.pk})
+        self.assertIsInstance(normalized["round_keys"]["r1"], int)
+        self.assertIsInstance(normalized["vote_keys"]["audience1"], int)
+
+    def test_rejects_foreign_round(self):
+        ruleset = self.make_ruleset()
+        foreign = self.make_ruleset()
+        foreign_round = self._singer_round(foreign)
+        with self.assertRaises(ValidationError):
+            validate_binding(ruleset, {"round_keys": {"r1": foreign_round.pk}})
+
+    def test_rejects_foreign_vote_session(self):
+        ruleset = self.make_ruleset()
+        foreign = self.make_ruleset()
+        foreign_vote = self._vote_session(foreign)
+        with self.assertRaises(ValidationError):
+            validate_binding(ruleset, {"vote_keys": {"audience1": foreign_vote.pk}})
+
+    def test_rejects_foreign_group_round(self):
+        ruleset = self.make_ruleset()
+        foreign = self.make_ruleset()
+        foreign_round = self._singer_round(foreign)
+        with self.assertRaises(ValidationError):
+            validate_binding(ruleset, {"group_keys": {"by1": foreign_round.pk}})
+
+    def test_rejects_non_dict_key_map(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaises(ValidationError):
+            validate_binding(ruleset, {"round_keys": ["not-a-map"]})

@@ -284,6 +284,53 @@ class M1StageResultTestDataCleanupTests(TestCase):
         self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
         self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
 
+    def test_clear_removes_manual_decision_and_counts_it(self):
+        import json
+
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from singer_contest.models import ManualDecision, SingerRegistration
+
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="md-residue", password="pass"),
+            name="Performer",
+            student_id="20260100",
+            college="College",
+            class_name="Class",
+            phone="13800000100",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="R0规则", is_test_data=True
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [{"key": "roster", "type": "ROSTER"}],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        ManualDecision.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            manual_key="manual",
+            group="",
+            chosen=[str(singer.pk)],
+            is_test_data=True,
+        )
+
+        counts = get_test_data_counts(self.activity)
+        self.assertEqual(counts["manual_decisions"], 1)
+
+        clear_activity_test_data(self.activity, operator=self.operator)
+        self.assertFalse(ManualDecision.objects.filter(activity=self.activity).exists())
+
     def test_leave_test_mode_clears_m1_residue_before_formal(self):
         import json
 

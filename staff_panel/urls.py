@@ -133,6 +133,7 @@ urlpatterns = [
     ),
     path("rulesets/create/", views.contest_ruleset_create, name="contest_ruleset_create"),
     path("rulesets/<int:pk>/edit/", views.ruleset_edit, name="ruleset_edit"),
+    path("rulesets/<int:pk>/bind/", views.ruleset_bind, name="ruleset_bind"),
     path("rulesets/<int:pk>/validate/", views.ruleset_validate, name="ruleset_validate"),
     path("rulesets/<int:pk>/preview/", views.ruleset_preview, name="ruleset_preview"),
     path("rulesets/<int:pk>/freeze/", views.ruleset_freeze, name="ruleset_freeze"),

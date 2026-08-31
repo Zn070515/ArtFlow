@@ -100,6 +100,37 @@
         <button class="bg-brand text-white px-4 py-2 rounded">保存全部</button>
     </form>
 
+    <form method="post" action="{% url 'staff:ruleset_bind' version.pk %}" class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {% csrf_token %}
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">生产绑定</div>
+        <div class="px-4 py-3 grid sm:grid-cols-2 gap-3">
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">stage_key（赛段标识）</label>
+                <input name="stage_key" value="{{ ruleset.stage_key }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">round_keys（轮次绑定，JSON）</label>
+                <textarea name="round_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.round_keys|default:"{}" }}</textarea>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">vote_keys（投票绑定，JSON）</label>
+                <textarea name="vote_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.vote_keys|default:"{}" }}</textarea>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">group_keys（分组绑定，JSON）</label>
+                <textarea name="group_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.group_keys|default:"{}" }}</textarea>
+            </div>
+            <div class="sm:col-span-2">
+                <label class="block text-xs text-gray-500 mb-0.5">announcement_blocks（公告分块，JSON）</label>
+                <textarea name="announcement_blocks" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks|default:"[]" }}</textarea>
+            </div>
+        </div>
+        <div class="px-4 pb-3">
+            <button class="bg-gray-900 text-white px-4 py-2 rounded text-sm">保存绑定</button>
+            <span class="text-xs text-gray-400 ml-2">冻结时快照进版本，供重算/手卡读取。</span>
+        </div>
+    </form>
+
     <div class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">节点操作与新增</div>
         <div class="px-4 py-3 space-y-2">

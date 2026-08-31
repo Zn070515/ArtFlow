@@ -57,43 +57,77 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
     return {
         "stage_key": ruleset.stage_key or "",
         "round_keys": dict(ruleset.round_keys or {}),
+        "vote_keys": dict(ruleset.vote_keys or {}),
+        "group_keys": dict(ruleset.group_keys or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
     }
+
+
+def _normalize_pk_map(raw, *, label):
+    """Normalize a ``{str: int}`` binding map, rejecting malformed/empty ids."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{label} 必须是 {{key: id}} 映射。")
+    out: dict[str, int] = {}
+    for key, rid in raw.items():
+        if rid in ("", None):
+            continue
+        try:
+            out[str(key)] = int(rid)
+        except (TypeError, ValueError):
+            raise ValidationError(f"{label}['{key}'] 必须是 id，got {rid!r}。")
+    return out
 
 
 def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     """Normalize and validate a binding snapshot against the ruleset's activity.
 
-    Only round keys that resolve to a ``ContestRound`` owned by the same activity are
-    accepted (a binding may only reference its own rounds). Returns a normalized dict
-    with ``{stage_key, round_keys, announcement_blocks}``.
+    Only round/vote/group keys that resolve to a ``ContestRound`` / ``VoteSession`` /
+    ``ContestRound`` owned by the same activity are accepted (a binding may only reference
+    its own resources). Returns a normalized dict with ``{stage_key, round_keys, vote_keys,
+    group_keys, announcement_blocks}``.
     """
     binding = dict(binding or {})
-    raw_round_keys = binding.get("round_keys") or {}
-    if not isinstance(raw_round_keys, dict):
-        raise ValidationError("round_keys 必须是 {round_key: round_pk} 映射。")
-    normalized_round_keys: dict[str, int] = {}
-    for key, rid in raw_round_keys.items():
-        try:
-            normalized_round_keys[str(key)] = int(rid)
-        except (TypeError, ValueError):
-            raise ValidationError(f"round_keys['{key}'] 必须是比赛轮次 id，got {rid!r}。")
+    normalized_round_keys = _normalize_pk_map(binding.get("round_keys"), label="round_keys")
+    vote_keys = _normalize_pk_map(binding.get("vote_keys"), label="vote_keys")
+    group_keys = _normalize_pk_map(binding.get("group_keys"), label="group_keys")
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
         raise ValidationError("announcement_blocks 必须是列表。")
 
     from singer_contest.models import ContestRound
+    from voting.models import VoteSession
 
     round_ids = list(normalized_round_keys.values())
-    owned = {
-        r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=ruleset.activity_id)
+    owned_rounds = {
+        r.pk for r in ContestRound.objects.filter(pk__in=round_ids, activity=ruleset.activity_id)
     }
-    missing = [rid for rid in round_ids if rid not in owned]
-    if missing:
-        raise ValidationError(f"赛制绑定的比赛轮次不属于该活动：{missing}")
+    missing_rounds = [rid for rid in round_ids if rid not in owned_rounds]
+    if missing_rounds:
+        raise ValidationError(f"赛制绑定的比赛轮次不属于该活动：{missing_rounds}")
+
+    vote_ids = list(vote_keys.values())
+    owned_votes = {
+        v.pk for v in VoteSession.objects.filter(pk__in=vote_ids, activity=ruleset.activity_id)
+    }
+    missing_votes = [vid for vid in vote_ids if vid not in owned_votes]
+    if missing_votes:
+        raise ValidationError(f"赛制绑定的投票会话不属于该活动：{missing_votes}")
+
+    group_ids = list(group_keys.values())
+    owned_groups = {
+        r.pk for r in ContestRound.objects.filter(pk__in=group_ids, activity=ruleset.activity_id)
+    }
+    missing_groups = [gid for gid in group_ids if gid not in owned_groups]
+    if missing_groups:
+        raise ValidationError(f"赛制绑定的分组成员轮次不属于该活动：{missing_groups}")
+
     return {
         "stage_key": str(binding.get("stage_key") or "").strip(),
         "round_keys": normalized_round_keys,
+        "vote_keys": vote_keys,
+        "group_keys": group_keys,
         "announcement_blocks": announcement_blocks,
     }
 

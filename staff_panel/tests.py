@@ -4816,3 +4816,119 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(self.version.status, "frozen")
         self.assertTrue(self.version.is_current)
         self.assertTrue(self.version.execution_plan)
+
+    def _bind_round(self):
+        from singer_contest.models import ContestRound
+
+        return ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="r1",
+        )
+
+    def _bind_vote(self):
+        from voting.models import VoteSession
+
+        return VoteSession.objects.create(
+            activity=self.activity,
+            name="大众投票",
+            passcode="0000",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(hours=1),
+            is_test_data=True,
+        )
+
+    def test_ruleset_bind_persists_json_fields(self):
+        round_ = self._bind_round()
+        vote = self._bind_vote()
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {
+                "stage_key": "院十佳",
+                "round_keys": json.dumps({"r1": round_.pk}),
+                "vote_keys": json.dumps({"audience": vote.pk}),
+                "group_keys": json.dumps({"initial_group": round_.pk}),
+                "announcement_blocks": json.dumps([{"label": "晋级", "outcome_codes": ["direct"]}]),
+            },
+        )
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.stage_key, "院十佳")
+        self.assertEqual(self.ruleset.round_keys, {"r1": round_.pk})
+        self.assertEqual(self.ruleset.vote_keys, {"audience": vote.pk})
+        self.assertEqual(self.ruleset.group_keys, {"initial_group": round_.pk})
+        self.assertEqual(
+            self.ruleset.announcement_blocks,
+            [{"label": "晋级", "outcome_codes": ["direct"]}],
+        )
+
+    def test_ruleset_editor_bind_form_prerenders_json(self):
+        from singer_contest.models import ContestRound
+
+        round_ = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="r1",
+        )
+        self.ruleset.stage_key = "院十佳"
+        self.ruleset.round_keys = {"r1": round_.pk}
+        self.ruleset.group_keys = {"by": round_.pk}
+        self.ruleset.save()
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.assertEqual(response.status_code, 200)
+        # The bind form must pre-render maps as JSON (autoescaped to &quot;) so a later
+        # POST of the same page round-trips through json.loads rather than a dict repr.
+        self.assertContains(response, "{&quot;r1&quot;: %d}" % round_.pk)
+
+    def test_ruleset_bind_bad_json_errors_without_mutation(self):
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {
+                "stage_key": "院十佳",
+                "round_keys": "{not-json",
+                "vote_keys": "{}",
+                "group_keys": "{}",
+                "announcement_blocks": "[]",
+            },
+        )
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.round_keys, {})
+        self.assertEqual(self.ruleset.stage_key, "")
+
+    def test_ruleset_bind_rejects_foreign_round(self):
+        from singer_contest.models import ContestRound
+
+        other = Activity.objects.create(
+            title="其他活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        foreign_round = ContestRound.objects.create(
+            activity=other,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="f",
+        )
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {
+                "stage_key": "院十佳",
+                "round_keys": json.dumps({"r1": foreign_round.pk}),
+                "vote_keys": "{}",
+                "group_keys": "{}",
+                "announcement_blocks": "[]",
+            },
+        )
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.round_keys, {})
+
+    def test_ruleset_bind_requires_unlocked_activity(self):
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {"stage_key": "院十佳"},
+        )
+        self.assertEqual(response.status_code, 403)

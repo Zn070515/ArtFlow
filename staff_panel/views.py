@@ -65,6 +65,7 @@ from ruleset.services import (
     RulesetInvalidError,
     create_ruleset_version,
     freeze_ruleset_version,
+    validate_binding,
 )
 from singer_contest.models import (
     Award,
@@ -2274,16 +2275,81 @@ def ruleset_edit(request, pk):
         _build_card(node, i, ruleset_editor.available_sources(nodes, i))
         for i, node in enumerate(nodes)
     ]
+    ruleset = version.ruleset
     return render(
         request,
         "staff_panel/ruleset_editor.html",
         {
             "version": version,
-            "ruleset": version.ruleset,
+            "ruleset": ruleset,
             "cards": cards,
             "node_types": sorted(NODE_TYPE_SPEC.keys()),
+            "binding_json": {
+                "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
+                "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),
+                "group_keys": json.dumps(ruleset.group_keys or {}, ensure_ascii=False),
+                "announcement_blocks": json.dumps(
+                    ruleset.announcement_blocks or [], ensure_ascii=False
+                ),
+            },
         },
     )
+
+
+@staff_required
+@require_POST
+@transaction.atomic
+def ruleset_bind(request, pk):
+    """Save the activity-owning binding (stage/round/vote/group/announcement) to a ruleset (§32).
+
+    Only the editable input surface (ContestRuleset) is written here; the snapshot runs at
+    freeze time via ``_snapshot_binding``.
+    """
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    lock_activity_for_action(version.ruleset.activity)
+
+    def _parse_json(name, empty):
+        raw = (request.POST.get(name) or "").strip()
+        if not raw:
+            return empty
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            raise ValidationError(f"{name} 不是合法 JSON。")
+
+    try:
+        binding = validate_binding(
+            version.ruleset,
+            {
+                "stage_key": request.POST.get("stage_key"),
+                "round_keys": _parse_json("round_keys", {}),
+                "vote_keys": _parse_json("vote_keys", {}),
+                "group_keys": _parse_json("group_keys", {}),
+                "announcement_blocks": _parse_json("announcement_blocks", []),
+            },
+        )
+    except ValidationError as exc:
+        messages.error(request, "；".join(exc.messages))
+        return redirect("staff:ruleset_edit", pk=pk)
+
+    ruleset = version.ruleset
+    ruleset.stage_key = binding["stage_key"]
+    ruleset.round_keys = binding["round_keys"]
+    ruleset.vote_keys = binding["vote_keys"]
+    ruleset.group_keys = binding["group_keys"]
+    ruleset.announcement_blocks = binding["announcement_blocks"]
+    ruleset.save(
+        update_fields=[
+            "stage_key",
+            "round_keys",
+            "vote_keys",
+            "group_keys",
+            "announcement_blocks",
+            "updated_at",
+        ]
+    )
+    messages.success(request, "生产绑定已保存。")
+    return redirect("staff:ruleset_edit", pk=pk)
 
 
 @staff_required

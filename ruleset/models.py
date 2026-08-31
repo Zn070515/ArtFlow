@@ -86,6 +86,16 @@ class ContestRuleset(models.Model):
         blank=True,
         help_text="Handcard blocks: list of {label, outcome_codes} for the result board.",
     )
+    vote_keys = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Maps a ruleset vote_source key to a VoteSession pk, e.g. {'audience1': 7}.",
+    )
+    group_keys = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Maps a group 'by' key to a ContestRound pk, e.g. {'initial_group': 3}.",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
