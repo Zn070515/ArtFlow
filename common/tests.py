@@ -63,7 +63,7 @@ from .business_rules import ensure_same_activity
 from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, SeedRecord
-from .test_data import clear_activity_test_data, leave_test_mode
+from .test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
 from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
@@ -328,6 +328,65 @@ class M1StageResultTestDataCleanupTests(TestCase):
         self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
         self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
+
+    def test_leave_test_mode_promotes_retained_m1_config(self):
+        # §7: rubrics/criteria/performance-groups are retained config, so a test rehearsal
+        # leaves them behind. On leaving test mode their is_test_data marker must be
+        # promoted to False — never left contradicting the now-FORMAL lifecycle.
+        from singer_contest.models import PerformanceGroup, RubricCriterion, ScoringRubric
+
+        rubric = ScoringRubric.objects.create(activity=self.activity, name="R", is_test_data=True)
+        criterion = RubricCriterion.objects.create(
+            rubric=rubric, name="C", max_score=10, is_test_data=True
+        )
+        contest_round = ContestRound.objects.create(
+            activity=self.activity, round_type=ContestRound.RoundType.PRELIMINARY
+        )
+        group = PerformanceGroup.objects.create(
+            activity=self.activity, round=contest_round, name="G", is_test_data=True
+        )
+
+        leave_test_mode(self.activity, operator=self.operator)
+
+        rubric.refresh_from_db()
+        criterion.refresh_from_db()
+        group.refresh_from_db()
+        self.activity.refresh_from_db()
+        self.assertFalse(rubric.is_test_data)
+        self.assertFalse(criterion.is_test_data)
+        self.assertFalse(group.is_test_data)
+        self.assertFalse(self.activity.is_test_mode)
+        self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+
+    def test_get_counts_detects_m1_runtime_residue_blocks_leave(self):
+        # §7: an M1 runtime fact (a test Performance) must be counted and therefore
+        # block leaving test mode without an explicit clear — config alone never does.
+        from singer_contest.models import Performance, SingerRegistration
+
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="perf-singer", password="pass"),
+            name="Performer",
+            student_id="20260099",
+            college="College",
+            class_name="Class",
+            phone="13800000099",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        contest_round = ContestRound.objects.create(
+            activity=self.activity, round_type=ContestRound.RoundType.PRELIMINARY
+        )
+        Performance.objects.create(
+            activity=self.activity, round=contest_round, singer=singer, is_test_data=True
+        )
+
+        counts = get_test_data_counts(self.activity)
+        self.assertEqual(counts["performances"], 1)
+
+        with self.assertRaises(PermissionDenied):
+            leave_test_mode(self.activity, operator=self.operator)
 
 
 class ActivityLifecycleBulkWriteTests(TestCase):

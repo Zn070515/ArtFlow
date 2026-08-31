@@ -25,9 +25,13 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
     from ruleset.models import ContestRuleset
     from singer_contest.models import (
         Award,
+        CompositeResult,
+        CriterionScore,
+        Performance,
         ScoreRecord,
         ScoreSummary,
         SingerRegistration,
+        StageDecision,
         StageResult,
     )
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
@@ -59,6 +63,16 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         ).count(),
         "awards": Award.objects.filter(activity=activity, is_test_data=True).count(),
         "stage_results": StageResult.objects.filter(activity=activity, is_test_data=True).count(),
+        "stage_decisions": StageDecision.objects.filter(
+            stage_result__activity=activity, is_test_data=True
+        ).count(),
+        "composite_results": CompositeResult.objects.filter(
+            stage_result__activity=activity, is_test_data=True
+        ).count(),
+        "criterion_scores": CriterionScore.objects.filter(
+            score_record__round__activity=activity, is_test_data=True
+        ).count(),
+        "performances": Performance.objects.filter(activity=activity, is_test_data=True).count(),
         "contest_rulesets": ContestRuleset.objects.filter(
             activity=activity, is_test_data=True
         ).count(),
@@ -228,6 +242,31 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     return counts
 
 
+def _promote_retained_config(activity: Any) -> dict[str, int]:
+    """Flip retained M1 config markers to a formal activity's lifecycle.
+
+    §7: a test rehearsal leaves *configuration* behind (rubrics, criteria, performance
+    groups) that is never deleted with runtime facts. When the activity leaves test
+    mode those markers must be promoted to ``is_test_data=False`` so a FORMAL activity
+    never holds config whose marker contradicts its lifecycle. Runtime facts (stage
+    results/decisions, criterion scores, performances, and ContestRuleset — which R0
+    counts and clears) are handled separately and never promoted.
+    """
+    from singer_contest.models import PerformanceGroup, RubricCriterion, ScoringRubric
+
+    return {
+        "scoring_rubrics": ScoringRubric.objects.filter(
+            activity=activity, is_test_data=True
+        ).update(is_test_data=False),
+        "rubric_criteria": RubricCriterion.objects.filter(
+            rubric__activity=activity, is_test_data=True
+        ).update(is_test_data=False),
+        "performance_groups": PerformanceGroup.objects.filter(
+            activity=activity, is_test_data=True
+        ).update(is_test_data=False),
+    }
+
+
 @transaction.atomic
 def leave_test_mode(
     activity: Any, *, operator: Any, clear: bool = False, reason: str = ""
@@ -246,6 +285,7 @@ def leave_test_mode(
         if not reason.strip():
             raise PermissionDenied("清理并退出测试模式必须填写原因。")
         clear_activity_test_data(locked_activity, operator=operator)
+    promoted = _promote_retained_config(locked_activity)
     _restore_test_related_posts_to_draft(locked_activity, operator=operator)
     locked_activity.is_test_mode = False
     locked_activity.data_lifecycle = Activity.DataLifecycle.FORMAL
@@ -259,6 +299,9 @@ def leave_test_mode(
         target=f"Activity:{locked_activity.pk}",
         old_value="is_test_mode=True",
         new_value="is_test_mode=False",
-        note=reason.strip(),
+        note=(
+            f"{reason.strip()} promoted_config="
+            f"{json.dumps(promoted, ensure_ascii=False, sort_keys=True)}"
+        ),
     )
     return counts
