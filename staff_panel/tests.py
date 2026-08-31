@@ -3427,16 +3427,103 @@ class ExportPrivacyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._first_column_from(response), [self.other.title])
 
-    def test_all_exports_record_export_audit(self):
-        self._registration(self.contest, "Contest Singer", "S1")
-        self.client.force_login(self.staff)
-        self.client.get(reverse("staff:export_registrations"), {"activity_id": self.contest.pk})
-        self.client.get(reverse("staff:excel_material_checklist", args=[self.contest.pk]))
-        self.assertTrue(
-            AuditLog.objects.filter(
-                action_type=AuditLog.ActionType.EXPORT, operator=self.staff
-            ).exists()
+
+class SensitiveExportAuditSweepTests(TestCase):
+    """§17 P1 — every sensitive export must emit a typed EXPORT audit.
+
+    Sweeps each reachable data-export endpoint and asserts every one records an
+    EXPORT AuditLog whose note names the exact export_type. This turns the
+    manual "who exported what" audit sweep into a regression invariant: a future
+    export that forgets audit_export fails this test.
+    """
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="sweep-staff", password="pass", role=User.Role.STAFF
         )
+        self.participant = User.objects.create_user(username="sweep-participant", password="pass")
+        self.activity = Activity.objects.create(
+            title="Sweep Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Sweep Singer",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            wechat="wx",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        self.program = Program.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Sweep Program",
+            program_type=Program.ProgramType.SONG,
+            contact_name="Contact",
+            contact_phone="13900000000",
+            class_name="Class",
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Sweep Judge")
+        self.round_ = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(self.round_, self.staff)
+        self.vote_session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Sweep Vote",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            is_open=True,
+        )
+        VoteOption.objects.create(vote_session=self.vote_session, singer=self.registration)
+        IncidentRecord.objects.create(
+            activity=self.activity,
+            occurred_at=timezone.now(),
+            event_type=IncidentRecord.EventType.OTHER,
+        )
+        self.client.force_login(self.staff)
+
+    def _assert_typed_audit(self, expected_export_type: str):
+        log = (
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.EXPORT, operator=self.staff)
+            .order_by("-pk")
+            .first()
+        )
+        self.assertIsNotNone(log)
+        self.assertIn(expected_export_type, log.note)
+        self.assertIn(f'"activity_id": {self.activity.pk}', log.note)
+
+    def test_registrations_export_records_typed_audit(self):
+        self.client.get(reverse("staff:export_registrations"), {"activity_id": self.activity.pk})
+        self._assert_typed_audit("registration_list")
+
+    def test_programs_export_records_typed_audit(self):
+        self.client.get(reverse("staff:export_programs"), {"activity_id": self.activity.pk})
+        self._assert_typed_audit("program_list")
+
+    def test_material_checklist_export_records_typed_audit(self):
+        self.client.get(reverse("staff:excel_material_checklist", args=[self.activity.pk]))
+        self._assert_typed_audit("material_checklist")
+
+    def test_score_template_export_records_typed_audit(self):
+        self.client.get(reverse("staff:excel_score_template", args=[self.round_.pk]))
+        self._assert_typed_audit("score_template")
+
+    def test_vote_result_export_records_typed_audit(self):
+        self.client.get(reverse("staff:vote_session_export", args=[self.vote_session.pk]))
+        self._assert_typed_audit("vote_result")
+
+    def test_incident_export_records_typed_audit(self):
+        self.client.get(reverse("staff:incident_export"), {"activity_id": self.activity.pk})
+        self._assert_typed_audit("incident_list")
 
 
 class WordGenerateArchiveAuthorityTests(TestCase):
