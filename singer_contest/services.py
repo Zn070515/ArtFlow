@@ -1483,6 +1483,7 @@ def run_ruleset(
     )
 
 
+@transaction.atomic
 def recompute_activity_result(
     activity,
     computed_by,
@@ -1498,8 +1499,20 @@ def recompute_activity_result(
     a one-off re-resolve). ``checkpoint`` (§11-15) targets a single declared stage and
     publishes it as its own :class:`StageResult` (stage_key = the checkpoint key).
     Returns the persisted :class:`StageResult`.
+
+    M1-R9 (§二): this is the AUTHORITATIVE publication path. It runs inside one
+    ``transaction.atomic`` block holding ``Activity FOR UPDATE`` (via
+    :func:`lock_activity_for_action`), so every raw fact (round scores, vote counts,
+    group map, manual picks) is read in a single serialization window and the StageResult
+    is persisted within it. Two concurrent recomputes of one activity are therefore
+    linearized — ``result_version`` cannot be minted twice.
     """
     from ruleset.models import ContestRuleset, RulesetVersion
+
+    # Activity FOR UPDATE is the serialization point for every formal recompute. It also
+    # re-validates that the activity is not operationally locked, exactly as the other
+    # formal result mutations do (confirm/unlock).
+    lock_activity_for_action(activity)
 
     if ruleset is None:
         candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by(

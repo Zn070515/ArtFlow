@@ -3525,6 +3525,105 @@ class RapidEntryServiceTests(TestCase):
         self.assertEqual(stage.decisions.get().outcome_code, "direct")
 
 
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
+    """M1-R9 §二: concurrent recomputes of one activity are linearized by the Activity
+    FOR UPDATE lock, so ``result_version`` is never minted twice (the DB unique is the
+    final guard). Identical facts converge to a single row; no thread raises IntegrityError."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="recompute-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="并发重算活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="r1",
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="recompute-s1", password="pass"),
+            name="选手一",
+            student_id="2026rc001",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="评委A")
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.save(update_fields=["status"])
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="并发规则",
+            is_test_data=True,
+            stage_key="院十佳",
+            round_keys={"r1": self.round.pk},
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "院十佳", "round_keys": {"r1": self.round.pk}},
+        )
+        from .services import apply_scores
+
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
+
+    def test_concurrent_identical_recompute_is_linearized(self):
+        from .services import recompute_activity_result
+
+        outcomes = []
+        guard = threading.Lock()
+
+        def do_recompute():
+            close_old_connections()
+            try:
+                recompute_activity_result(self.activity, self.admin, ruleset=self.ruleset)
+                with guard:
+                    outcomes.append("ok")
+            except Exception as exc:  # noqa: BLE001 — record any failure for the assert below
+                with guard:
+                    outcomes.append(f"error:{type(exc).__name__}")
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=do_recompute) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+
+        self.assertEqual(len(outcomes), 4, outcomes)
+        self.assertFalse(any(o.startswith("error") for o in outcomes), outcomes)
+        versions = list(
+            StageResult.objects.filter(activity=self.activity, stage_key="院十佳").values_list(
+                "activity_id", "stage_key", "result_version"
+            )
+        )
+        self.assertEqual(len(versions), len(set(versions)), "result_version must be unique")
+        self.assertEqual(len(versions), 1, "identical facts converge to a single row")
+
+
 class BindingSourceHelperTests(TestCase):
     """§32 binding-sourcing helpers: group_of / vote_scores / manual are read from DB."""
 

@@ -616,7 +616,15 @@ class StageResult(models.Model):
             models.UniqueConstraint(
                 fields=["activity", "stage_key", "ruleset_version", "input_fingerprint"],
                 name="stage_result_unique_identity",
-            )
+            ),
+            # M1-R9 (§二 Authoritative Recompute): the per-stage result_version is a formal
+            # publication number. Two concurrent recomputes of one activity must not mint
+            # the same version — the Activity FOR UPDATE lock serializes them, and this DB
+            # unique is the final guard that makes the race impossible rather than unlikely.
+            models.UniqueConstraint(
+                fields=["activity", "stage_key", "result_version"],
+                name="stage_result_unique_version",
+            ),
         ]
 
     _immutable_fields = (
