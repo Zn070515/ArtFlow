@@ -49,6 +49,10 @@ class PublicPost(models.Model):
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Optimistic concurrency: bumped on every save so a stale edit form (two
+    # staff editing the same post) fails with an explicit "已过期" instead of
+    # silently overwriting a co-editor's content.
+    version = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-is_pinned", "sort_order", "-created_at"]
