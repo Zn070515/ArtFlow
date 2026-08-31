@@ -572,6 +572,40 @@ def _check_tie(
             )
         )
         return
+    if policy == "auto_break":
+        # §M1-R8: a generic auto_break silently falls back to roster order — an
+        # implicit rule. It is honest only when a real secondary scoring source is
+        # declared (previous_round_score / a prior ScoreMap node). Without one,
+        # reject so a definition can never freeze with a hidden tie-break.
+        if not node.get("tie_break_source"):
+            issues.append(
+                ReportIssue(
+                    "TIE_AUTO_BREAK_NO_SOURCE",
+                    Severity.ERROR,
+                    node["key"],
+                    "tie_break_source",
+                    "平局自动破解 (auto_break) 未声明真实 tie_break_source；"
+                    "泛化 auto_break 会退回 roster order 隐式规则，已禁用。",
+                )
+            )
+            return
+        cutoffs.append({"node": node["key"], "count": node.get("count"), "tie_policy": policy})
+        return
+    if policy == "manual":
+        # §M1-R8: the manual tie decision loop (TieDecision / MANUAL_TIE_BREAK)
+        # is not yet closed. Mark the policy explicit-incomplete so a definition
+        # can never claim a real human loop it does not have.
+        cutoffs.append({"node": node["key"], "count": node.get("count"), "tie_policy": policy})
+        issues.append(
+            ReportIssue(
+                "TIE_MANUAL_INCOMPLETE",
+                Severity.REVIEW,
+                node["key"],
+                "tie_policy",
+                "平局人工核定闭环 (TieDecision) 尚未实现；当前仅 REVIEW，不真正闭环。",
+            )
+        )
+        return
     if not _tie_is_supported(node, policy):
         issues.append(
             ReportIssue(
@@ -594,14 +628,13 @@ def _feeds_decisive(by_key: dict[str, dict], key: str) -> bool:
 
 
 def _tie_is_supported(node: dict, policy: str) -> bool:
-    # §31: only strategies the resolver truly executes are supported. ``auto_break``
-    # deterministically takes the top-count; ``manual`` flags REVIEW for a human
-    # ManualDecision re-resolve loop. ``extra_round``/``score_fallback`` are declared but
-    # never actually run (they degrade to a review), so they must be a hard
-    # TIE_POLICY_UNSUPPORTED error rather than silently accepted.
-    if policy in ("auto_break", "manual"):
-        return True
-    return False
+    # §M1-R8: only strategies the resolver truly executes without a roster-order
+    # hidden rule are supported. ``manual`` degrades to a REVIEW bundle (closed by
+    # a human ManualDecision re-resolve, not by roster order). ``auto_break`` is
+    # gated earlier (needs a real tie_break_source); ``extra_round``/``score_fallback``
+    # are declared but never actually run (they degrade to a review), so they must be
+    # a hard TIE_POLICY_UNSUPPORTED error rather than silently accepted.
+    return policy == "manual"
 
 
 def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:

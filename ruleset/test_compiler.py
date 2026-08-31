@@ -144,6 +144,7 @@ class CompilerValidCorpusTests(SimpleTestCase):
                     "source": "comp",
                     "descending": True,
                     "tie_policy": "auto_break",
+                    "tie_break_source": "a1",
                 },
                 {
                     "key": "winners",
@@ -151,6 +152,7 @@ class CompilerValidCorpusTests(SimpleTestCase):
                     "source": "ranked",
                     "count": 5,
                     "tie_policy": "auto_break",
+                    "tie_break_source": "a1",
                 },
             ],
             context={
@@ -428,8 +430,11 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "TIE_POLICY_UNSUPPORTED",
         )
 
-    def test_tie_auto_break_is_supported(self):
-        report, plan = compile_definition(
+    def test_tie_auto_break_without_source_is_invalid(self):
+        # §M1-R8: a generic auto_break silently falls back to roster order — an
+        # implicit rule. It must be a compile error unless a real tie_break_source
+        # (a prior ScoreMap node) is declared.
+        self._assert_invalid(
             _def(
                 [
                     {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
@@ -440,6 +445,28 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                         "source": "r",
                         "count": 5,
                         "tie_policy": "auto_break",
+                    },
+                ],
+                context={"entry_size": 20},
+            ),
+            "TIE_AUTO_BREAK_NO_SOURCE",
+        )
+
+    def test_tie_auto_break_with_source_is_supported(self):
+        # A declared tie_break_source makes auto_break deterministic and honest.
+        report, plan = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "tb", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a", "tie_break_source": "tb"},
+                    {
+                        "key": "s",
+                        "type": "SELECT",
+                        "source": "r",
+                        "count": 5,
+                        "tie_policy": "auto_break",
+                        "tie_break_source": "tb",
                     },
                 ],
                 context={"entry_size": 20},

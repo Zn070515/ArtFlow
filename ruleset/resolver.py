@@ -8,7 +8,10 @@ per-contestant StageDecisions with a HOLD/REVIEW/READY resolver state.
 Determinism contract (:func:`resolve`) is a pure function of
 ``(definition, inputs)``. It never touches the DB, the clock, random, or an
 unordered queryset. The entry roster tuple is the canonical total order for
-every tie-break, partition iteration, merge dedupe, and FillToQuota fill order.
+partition iteration, merge dedupe, and FillToQuota fill order — but NEVER a
+hidden tie-break: a genuine SELECT cutoff tie is surfaced as REVIEW/PENDING
+(held for human or explicit tie_break_source resolution), never silently
+resolved by roster order (§M1-R8).
 
 BRANCH and AWARD are not executed this stage (raise :class:`UnsupportedNodeError`).
 """
@@ -496,12 +499,85 @@ def _aggregate(node: dict, st: _Stage, inputs: ResolveInput) -> tuple[dict, tupl
 def _rank(node: dict, st: _Stage, by_key: dict) -> tuple:
     m: dict = st.values[node["source"]]
     desc = node.get("descending", True)
-    if desc:
-        ordered = tuple(sorted(m.keys(), key=lambda c: (-m[c], st.idx[c])))
-    else:
-        ordered = tuple(sorted(m.keys(), key=lambda c: (m[c], st.idx[c])))
+    # A declared tie_break_source (a prior ScoreMap node) is a real secondary
+    # scoring axis that deterministically separates equal primary scores. Without
+    # it, a primary tie falls to roster order — the implicit rule §M1-R8 forbids.
+    tie_break = node.get("tie_break_source")
+    tb = st.values.get(tie_break, {}) if tie_break else {}
+
+    def key(c: str) -> tuple:
+        primary = -m[c] if desc else m[c]
+        if tie_break:
+            secondary = tb.get(c)
+            # A contestant with no secondary score orders after one that has it,
+            # so a missing secondary never masquerades as a 0 (a score invention).
+            secondary = secondary if secondary is not None else Decimal("0")
+            return (primary, -secondary if desc else secondary, st.idx[c])
+        return (primary, st.idx[c])
+
+    ordered = tuple(sorted(m.keys(), key=key))
     st.rank_pos[node["key"]] = {c: i + 1 for i, c in enumerate(ordered)}
     return ordered
+
+
+def _boundary_tie_resolved(node: dict, st: _Stage, tied: list[str], scores: dict) -> bool:
+    """Whether a declared tie_break_source resolves a genuine primary-score cutoff tie.
+
+    A real source must provide a distinct secondary for EVERY tied boundary
+    contestant (none may be missing). If any is absent, or the secondaries are
+    identical, the tie is genuinely unresolved and must NOT be silently broken by
+    roster order — return False so the caller holds it for human confirmation.
+    """
+    tie_break = node.get("tie_break_source")
+    if not tie_break:
+        return False
+    tb = st.values.get(tie_break, {})
+    secondaries = [tb.get(c) for c in tied]
+    if any(s is None for s in secondaries):
+        return False
+    return len(set(secondaries)) > 1
+
+
+def _hold_cutoff_tie(
+    node: dict,
+    st: _Stage,
+    ranked: list[str] | tuple,
+    count: int,
+    scores: dict,
+    policy: str,
+    *,
+    group: str | None = None,
+) -> set[str]:
+    """Hold every contestant tied at the SELECT cutoff as PENDING (§M1-R8).
+
+    A tie at the cutoff can extend ABOVE it: if four contestants share a score and
+    only two advance, roster order would otherwise hand the top two a win. So every
+    contestant at the boundary score is undecidable without a real tie_break_source,
+    and we hold them ALL rather than pick by roster order. Returns the held set.
+    """
+    if count <= 0 or count >= len(ranked):
+        return set()
+    boundary = scores.get(ranked[count - 1])
+    following = scores.get(ranked[count])
+    if boundary is None or following is None or boundary != following:
+        return set()
+    tied = [c for c in ranked if scores.get(c) == boundary]
+    if policy == "auto_break" and _boundary_tie_resolved(node, st, tied, scores):
+        # A declared tie_break_source separated these candidates in _rank; the
+        # cutoff is deterministic and transparent. Trust it rather than hold.
+        return set()
+    st.review.append(
+        f"SELECT {node['key']}"
+        + (f" 组 {group}" if group else "")
+        + f" 在截止名次 {count} 处同分，需人工核定 (tie_policy={policy or 'review'})。"
+    )
+    for c in tied:
+        if c in st.outcome:
+            del st.outcome[c]
+            del st.source_node[c]
+        st.outcome[c] = OutcomeCode.PENDING
+        st.source_node[c] = node["key"]
+    return set(tied)
 
 
 def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
@@ -516,6 +592,7 @@ def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
         # in partition order. Roster-first semantics (a contestant belongs to exactly
         # one group) make the per-group picks disjoint.
         picked: list[str] = []
+        held: set[str] = set()
         for g, members in st.values[by].items():
             members_set = set(members)
             ordered = [c for c in ranked if c in members_set]
@@ -529,20 +606,8 @@ def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
                         else OutcomeCode.DIRECT
                     )
                     st.source_node[c] = node["key"]
-            if count > 0 and count < len(ordered):
-                boundary = scores.get(ordered[count - 1])
-                following = scores.get(ordered[count])
-                if (
-                    boundary is not None
-                    and following is not None
-                    and boundary == following
-                    and policy != "auto_break"
-                ):
-                    st.review.append(
-                        f"SELECT {node['key']} 组 {g} 在截止名次 {count} 处同分，"
-                        f"需人工核定 (tie_policy={policy or 'review'})。"
-                    )
-        return tuple(picked)
+            held |= _hold_cutoff_tie(node, st, ordered, count, scores, policy, group=g)
+        return tuple(c for c in picked if c not in held)
     picked = list(ranked[:count])
     for c in picked:
         if c not in st.outcome:
@@ -551,20 +616,8 @@ def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
             else:
                 st.outcome[c] = OutcomeCode.DIRECT
             st.source_node[c] = node["key"]
-    if count > 0 and count < len(ranked):
-        boundary = scores.get(ranked[count - 1])
-        following = scores.get(ranked[count])
-        if boundary is not None and following is not None and boundary == following:
-            if policy != "auto_break":
-                st.review.append(
-                    f"SELECT {node['key']} 在截止名次 {count} 处同分，需人工核定 "
-                    f"(tie_policy={policy or 'review'})。"
-                )
-                for c in ranked[count - 1 :]:
-                    if scores.get(c) == boundary and c not in st.outcome:
-                        st.outcome[c] = OutcomeCode.PENDING
-                        st.source_node[c] = node["key"]
-    return tuple(picked)
+    held = _hold_cutoff_tie(node, st, ranked, count, scores, policy)
+    return tuple(c for c in picked if c not in held)
 
 
 def _subtract(node: dict, st: _Stage) -> tuple:

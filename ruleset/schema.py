@@ -162,6 +162,9 @@ def _validate_pair(name: str, node: dict) -> None:
 
 def _validate_tie(name: str, node: dict) -> None:
     _require_one_of(name, node, "tie_policy", TIE_POLICIES)
+    tie_break = node.get("tie_break_source")
+    if tie_break is not None:
+        _require_non_empty_str(name, node, "tie_break_source")
 
 
 def _validate_conversion(name: str, node: dict) -> None:
@@ -325,18 +328,18 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.RANK,
             OutputType.RANKED_ROSTER,
             required=("source",),
-            optional=("descending", "tie_policy"),
-            source_refs=("source",),
-            expects={"source": _SCOREMAP},
+            optional=("descending", "tie_policy", "tie_break_source"),
+            source_refs=("source", "tie_break_source"),
+            expects={"source": _SCOREMAP, "tie_break_source": _SCOREMAP},
             validate=lambda n, d: _require_bool(n, d, "descending") or _validate_tie(n, d),
         ),
         _spec(
             NodeType.SELECT,
             OutputType.ROSTER,
             required=("source", "count"),
-            optional=("tie_policy", "by"),
-            source_refs=("source", "by"),
-            expects={"source": _RANKED_ROSTER, "by": _GROUP_MAP},
+            optional=("tie_policy", "by", "tie_break_source"),
+            source_refs=("source", "by", "tie_break_source"),
+            expects={"source": _RANKED_ROSTER, "by": _GROUP_MAP, "tie_break_source": _SCOREMAP},
             validate=lambda n, d: _require_non_negative_int(n, d, "count") or _validate_tie(n, d),
         ),
         _spec(

@@ -401,25 +401,90 @@ class ResolverReviewTests(SimpleTestCase):
             ]
         )
 
-    def test_boundary_tie_no_policy_review(self):
+    def test_boundary_tie_no_policy_holds_all_pending(self):
         inputs = ResolveInput(
             roster=("c1", "c2"), round_scores=_rs({"r1": {"c1": [10], "c2": [10]}})
         )
         result = resolve(self._tie_def(), inputs)
         self.assertEqual(result.status, ResolverState.REVIEW)
         by = {d.contestant: d for d in result.decisions}
-        self.assertEqual(by["c1"].outcome_code, OutcomeCode.DIRECT)
+        # Roster order must never pick a winner on a true cutoff tie; BOTH tied
+        # boundary contestants are held as PENDING for human confirmation (§M1-R8).
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.PENDING)
         self.assertEqual(by["c2"].outcome_code, OutcomeCode.PENDING)
 
-    def test_boundary_tie_auto_break_ready(self):
+    def test_boundary_tie_auto_break_without_source_holds(self):
         inputs = ResolveInput(
             roster=("c1", "c2"), round_scores=_rs({"r1": {"c1": [10], "c2": [10]}})
         )
+        # A generic auto_break (no declared tie_break_source) must NOT silently
+        # fall back to roster order; it surfaces the tie for confirmation.
         result = resolve(self._tie_def("auto_break"), inputs)
+        self.assertEqual(result.status, ResolverState.REVIEW)
+        by = {d.contestant: d for d in result.decisions}
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.PENDING)
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.PENDING)
+
+    def _tie_def_count(self, tie_policy, count):
+        node = {"key": "s", "type": "SELECT", "source": "r", "count": count}
+        if tie_policy is not None:
+            node["tie_policy"] = tie_policy
+        return _def(
+            [
+                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "r", "type": "RANK", "source": "a", "descending": True},
+                node,
+            ]
+        )
+
+    def test_tie_extending_above_cutoff_holds_all(self):
+        # Three contestants share a score but only two advance; the tie extends
+        # ABOVE the cutoff line, so roster order must not hand the top two a win.
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3"),
+            round_scores=_rs({"r1": {"c1": [10], "c2": [10], "c3": [10]}}),
+        )
+        result = resolve(self._tie_def_count(None, 2), inputs)
+        self.assertEqual(result.status, ResolverState.REVIEW)
+        by = {d.contestant: d for d in result.decisions}
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.PENDING)
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.PENDING)
+        self.assertEqual(by["c3"].outcome_code, OutcomeCode.PENDING)
+
+    def test_boundary_tie_auto_break_with_source_resolves(self):
+        # A declared tie_break_source (a prior ScoreMap) deterministically breaks
+        # a primary tie WITHOUT any roster-order rule.
+        definition = _def(
+            [
+                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "tb", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                {
+                    "key": "r",
+                    "type": "RANK",
+                    "source": "a",
+                    "descending": True,
+                    "tie_break_source": "tb",
+                },
+                {
+                    "key": "s",
+                    "type": "SELECT",
+                    "source": "r",
+                    "count": 1,
+                    "tie_policy": "auto_break",
+                    "tie_break_source": "tb",
+                },
+            ]
+        )
+        inputs = ResolveInput(
+            roster=("c1", "c2"),
+            round_scores=_rs({"r1": {"c1": [10], "c2": [10]}, "r2": {"c1": [5], "c2": [8]}}),
+        )
+        result = resolve(definition, inputs)
         self.assertEqual(result.status, ResolverState.READY)
         by = {d.contestant: d for d in result.decisions}
-        self.assertEqual(by["c1"].outcome_code, OutcomeCode.DIRECT)
-        self.assertEqual(by["c2"].outcome_code, OutcomeCode.ELIMINATED)
+        # c2 (secondary 8) outranks c1 (secondary 5) on the primary tie → c2 advances.
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.DIRECT)
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.ELIMINATED)
 
 
 class ResolverManualSelectTests(SimpleTestCase):
@@ -836,7 +901,12 @@ class ResolverPerfTests(SimpleTestCase):
         start = time.perf_counter()
         result = resolve(definition, inputs)
         elapsed = time.perf_counter() - start
-        self.assertEqual(result.status, ResolverState.READY)
+        # This fixture genuinely produces a boundary tie (c82/c92 score the same on
+        # both primary and secondary); the honest resolver surfaces it as REVIEW
+        # rather than silently breaking it by roster order (§M1-R8). The perf gates
+        # are the real concern: resolve to a terminal state (READY/REVIEW, never
+        # HOLD or an exception) in under 2s.
+        self.assertIn(result.status, (ResolverState.READY, ResolverState.REVIEW))
         self.assertLess(elapsed, 2.0)
 
 
