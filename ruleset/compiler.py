@@ -161,6 +161,8 @@ def _map_graph_error(message: str) -> tuple[str, str]:
         return "GRAPH_RESERVED_KEY", node_key
     if "is reserved" in message:
         return "GRAPH_RESERVED_KEY", node_key
+    if "Checkpoint" in message:
+        return "GRAPH_CHECKPOINT", ""
     if "duplicate node key" in message:
         return "GRAPH_DUPLICATE_KEY", node_key
     if "unknown node type" in message:

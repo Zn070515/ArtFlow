@@ -467,6 +467,50 @@ class SchemaContentHashTests(SimpleTestCase):
         self.assertNotEqual(content_hash(definition), content_hash(changed))
 
 
+class SchemaCheckpointTests(SimpleTestCase):
+    """§11-15: the optional top-level ``checkpoints`` list references real nodes uniquely."""
+
+    def _def(self, checkpoints):
+        definition = weighted_composite_topn()
+        definition["checkpoints"] = checkpoints
+        return definition
+
+    def test_valid_checkpoints_parsed(self):
+        parsed = parse_definition(self._def([{"key": "stage1", "output": "winners"}]))
+        self.assertEqual(parsed["checkpoints"], ({"key": "stage1", "output": "winners"},))
+
+    def test_absent_checkpoints_default_empty(self):
+        parsed = parse_definition(weighted_composite_topn())
+        self.assertEqual(parsed["checkpoints"], ())
+
+    def test_output_must_be_real_node(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(self._def([{"key": "stage1", "output": "ghost"}]))
+
+    def test_duplicate_checkpoint_key_rejected(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(
+                self._def(
+                    [
+                        {"key": "stage1", "output": "winners"},
+                        {"key": "stage1", "output": "winners"},
+                    ]
+                )
+            )
+
+    def test_missing_output_rejected(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(self._def([{"key": "stage1"}]))
+
+    def test_empty_checkpoints_rejected(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(self._def([]))
+
+    def test_non_list_checkpoints_rejected(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(self._def({"key": "stage1", "output": "winners"}))
+
+
 class _RulesetModelBase(_CharacterizationBase):
     def make_ruleset(self, *, is_test_mode=False):
         return ContestRuleset.objects.create(

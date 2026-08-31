@@ -2613,6 +2613,55 @@ class GoldenSchiduiDbTests(TestCase):
         for idx in range(10, 15):
             self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "eliminated")
 
+    def test_golden_schidui_checkpoint_publishes_stage1_with_only_first_facts(self):
+        """§11-15: the stage1 checkpoint publishes READY when only R1/R2/audience1 exist."""
+        from .services import run_ruleset
+
+        audience1 = {str(s.pk): Decimal("50") for s in self.singers}
+        # Bind only the first-stage rounds; R3/R4/audience4 rows exist in DB but are unbound.
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.rounds["r1"], "r2": self.rounds["r2"]},
+            vote_scores={"audience1": audience1},
+            checkpoint="stage1",
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.stage_key, "stage1")
+        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.decisions.count(), 15)
+        # Only the stage1 composite is emitted; stage2/final are not in the closure.
+        self.assertEqual(stage.composites.filter(node_key="stage1").count(), 15)
+        self.assertEqual(stage.composites.filter(node_key="stage2").count(), 0)
+        self.assertEqual(stage.composites.filter(node_key="final").count(), 0)
+        by_singer = {d.singer_id: d for d in stage.decisions.all()}
+        for idx in range(10):
+            self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "direct")
+        for idx in range(10, 15):
+            self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "eliminated")
+
+    def test_golden_schidui_checkpoint_reuse_until_full_resolve(self):
+        """§11-15: re-resolving the same stage1 facts yields the same READY row (idempotent)."""
+        from .services import run_ruleset
+
+        audience1 = {str(s.pk): Decimal("50") for s in self.singers}
+        kwargs = dict(
+            version=self.version,
+            activity=self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.rounds["r1"], "r2": self.rounds["r2"]},
+            vote_scores={"audience1": audience1},
+            checkpoint="stage1",
+        )
+        first = run_ruleset(**kwargs)
+        second = run_ruleset(**kwargs)
+        self.assertEqual(first.status, StageResult.Status.READY)
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(first.result_version, second.result_version)
+
     def _composite_map(self, stage, node_key):
         return {c.singer_id: c.value for c in stage.composites.filter(node_key=node_key)}
 
@@ -2986,3 +3035,45 @@ class RapidEntryServiceTests(TestCase):
         self.assertEqual(stage.status, StageResult.Status.READY)
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.decisions.count(), 1)
+
+    def test_recompute_with_checkpoint_publishes_that_stage_key(self):
+        """§11-15: a checkpoint recompute persists its own READY stage, not the whole graph."""
+        import json
+
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        from .services import apply_scores, recompute_activity_result
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="检查点规则",
+            is_test_data=True,
+            stage_key="院十佳",
+            round_keys={"r1": self.round.pk},
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "checkpoints": [{"key": "stage1", "output": "top1"}],
+                    "nodes": [
+                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
+
+        stage = recompute_activity_result(
+            self.activity, self.admin, ruleset=ruleset, checkpoint="stage1"
+        )
+        self.assertEqual(stage.stage_key, "stage1")
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.ruleset_version, version)
+        self.assertEqual(stage.decisions.count(), 1)
+        self.assertEqual(stage.decisions.get().outcome_code, "direct")

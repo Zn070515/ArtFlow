@@ -222,6 +222,101 @@ def inputs_fingerprint(inputs: ResolveInput) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _dep_refs(node: dict) -> list[str]:
+    """All node-key references a node consumes (the edges of the forward-only graph)."""
+    refs = []
+    if node.get("source"):
+        refs.append(node["source"])
+    if node.get("within"):
+        refs.append(node["within"])
+    if node.get("by"):
+        refs.append(node["by"])
+    if node.get("minuend"):
+        refs.append(node["minuend"])
+    if node.get("subtrahend"):
+        refs.append(node["subtrahend"])
+    if node.get("from"):
+        refs.append(node["from"])
+    if node.get("into"):
+        refs.append(node["into"])
+    if node.get("ranking_source"):
+        refs.append(node["ranking_source"])
+    refs.extend(node.get("sources") or [])
+    agg = node.get("aggregate")
+    if isinstance(agg, dict):
+        for comp in agg.get("components") or []:
+            if comp.get("source"):
+                refs.append(comp["source"])
+    return [r for r in refs if r]
+
+
+def _dependency_closure(output_key: str, by_key: dict[str, dict]) -> set[str]:
+    """The transitive set of nodes ``output_key`` depends on (excluding the seed).
+
+    The forward-only graph makes the closure a well-ordered subset of the definition:
+    executing ``nodes`` filtered to this closure (in definition order) computes exactly
+    the subgraph that produces ``output_key`` and nothing more.
+    """
+    closure: set[str] = set()
+    stack = [output_key]
+    while stack:
+        key = stack.pop()
+        if key == ENTRY_KEY or key in closure:
+            continue
+        closure.add(key)
+        node = by_key.get(key)
+        if node:
+            stack.extend(_dep_refs(node))
+    return closure
+
+
+def _consumed_scopes(nodes: list[dict], closure: set[str]) -> tuple[set, set, set, set]:
+    """The raw-fact binding keys the closure actually reads (rounds, votes, groups, manual)."""
+    round_keys: set[str] = set()
+    vote_keys: set[str] = set()
+    group_keys: set[str] = set()
+    manual_keys: set[str] = set()
+    for node in nodes:
+        if node["key"] not in closure:
+            continue
+        if node.get("round"):
+            round_keys.add(node["round"])
+        if node.get("vote_source"):
+            vote_keys.add(node["vote_source"])
+        if node.get("by"):
+            group_keys.add(node["by"])
+        if node["type"] == "MANUAL_SELECT":
+            manual_keys.add(node["key"])
+    return round_keys, vote_keys, group_keys, manual_keys
+
+
+def _scoped_inputs_fingerprint(
+    inputs: ResolveInput,
+    round_keys: set[str],
+    vote_keys: set[str],
+    group_keys: set[str],
+    manual_keys: set[str],
+) -> str:
+    """sha256 over the raw facts a checkpoint closure consumes.
+
+    Scoping matters for progressive publication idempotency: a Stage1 checkpoint's input
+    identity must NOT change when a future stage's rounds (r3/r4) later arrive. Projecting
+    the inputs onto only the closure's binding keys keeps the fingerprint — and therefore
+    the StageResult identity — stable while facts the resolver did not read accumulate.
+    """
+    payload = _value_to_jsonable(
+        {
+            "roster": list(inputs.roster),
+            "round_scores": {k: v for k, v in inputs.round_scores.items() if k in round_keys},
+            "vote_scores": {k: v for k, v in inputs.vote_scores.items() if k in vote_keys},
+            "group_of": {k: v for k, v in inputs.group_of.items() if k in group_keys},
+            "manual": {k: v for k, v in inputs.manual.items() if k in manual_keys},
+        }
+    )
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class _Stage:
     """Mutable driver state; frozen into a :class:`ResolveResult` at the end."""
 
@@ -603,6 +698,41 @@ def _final_status(st: _Stage) -> ResolverState:
     return ResolverState.READY
 
 
+def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, dict]) -> None:
+    """Execute one node in place. The forward-only graph guarantees its refs are staged."""
+    ntype = node["type"]
+    if ntype == "ROSTER":
+        st.values[node["key"]] = st.roster
+    elif ntype == "PARTITION":
+        st.values[node["key"]] = _part(node, st, inputs)
+    elif ntype == "PAIR":
+        st.values[node["key"]] = _pair(node, st)
+    elif ntype == "ASSESS":
+        st.values[node["key"]] = _assess(node, st, inputs)
+    elif ntype == "AGGREGATE":
+        val, comps = _aggregate(node, st, inputs)
+        st.values[node["key"]] = val
+        st.composites.extend(comps)
+    elif ntype == "RANK":
+        st.values[node["key"]] = _rank(node, st, by_key)
+    elif ntype == "SELECT":
+        st.values[node["key"]] = _select(node, st, by_key)
+    elif ntype == "SUBTRACT":
+        st.values[node["key"]] = _subtract(node, st)
+    elif ntype == "MERGE":
+        st.values[node["key"]] = _merge(node, st)
+    elif ntype == "FILL_TO_QUOTA":
+        st.values[node["key"]] = _fill(node, st, inputs)
+    elif ntype == "MANUAL_SELECT":
+        st.values[node["key"]] = _manual(node, st, inputs)
+    elif ntype in ("BRANCH", "AWARD"):
+        raise UnsupportedNodeError(
+            f"Node {node['key']}: type {ntype} is not executed by the M1-E resolver."
+        )
+    else:
+        raise UnsupportedNodeError(f"Node {node['key']}: unknown type {ntype}.")
+
+
 def _build_decisions(
     st: _Stage,
     roster: tuple[str, ...],
@@ -641,6 +771,34 @@ def _build_decisions(
     return tuple(out)
 
 
+def _assemble_result(st: _Stage, obj, parsed: dict, plan, fingerprint: str) -> ResolveResult:
+    """Freeze stage state into a :class:`ResolveResult` with binding metadata."""
+    if plan is not None:
+        plan_hash = plan.content_hash
+        schema_version = plan.schema_version
+        plan_version = plan.plan_version
+    else:
+        plan_hash = content_hash(obj)
+        schema_version = parsed["schema_version"]
+        plan_version = 0
+    node_values = {
+        k: _value_to_jsonable(v) for k, v in sorted(st.values.items(), key=lambda kv: kv[0])
+    }
+    decisions = _build_decisions(st, st.roster, plan_hash, schema_version, plan_version)
+    return ResolveResult(
+        status=_final_status(st),
+        reasons=tuple(st.hold + st.review),
+        decisions=decisions,
+        composites=tuple(st.composites),
+        node_values=node_values,
+        content_hash=plan_hash,
+        input_fingerprint=fingerprint,
+        schema_version=schema_version,
+        plan_version=plan_version,
+        result_version=RESULT_VERSION,
+    )
+
+
 def resolve(definition, inputs: ResolveInput, plan=None) -> ResolveResult:
     """Deterministically replay ``definition`` over ``inputs``.
 
@@ -654,61 +812,40 @@ def resolve(definition, inputs: ResolveInput, plan=None) -> ResolveResult:
     st = _Stage(inputs.roster)
 
     for node in nodes:
-        ntype = node["type"]
-        if ntype == "ROSTER":
-            st.values[node["key"]] = st.roster
-        elif ntype == "PARTITION":
-            st.values[node["key"]] = _part(node, st, inputs)
-        elif ntype == "PAIR":
-            st.values[node["key"]] = _pair(node, st)
-        elif ntype == "ASSESS":
-            st.values[node["key"]] = _assess(node, st, inputs)
-        elif ntype == "AGGREGATE":
-            val, comps = _aggregate(node, st, inputs)
-            st.values[node["key"]] = val
-            st.composites.extend(comps)
-        elif ntype == "RANK":
-            st.values[node["key"]] = _rank(node, st, by_key)
-        elif ntype == "SELECT":
-            st.values[node["key"]] = _select(node, st, by_key)
-        elif ntype == "SUBTRACT":
-            st.values[node["key"]] = _subtract(node, st)
-        elif ntype == "MERGE":
-            st.values[node["key"]] = _merge(node, st)
-        elif ntype == "FILL_TO_QUOTA":
-            st.values[node["key"]] = _fill(node, st, inputs)
-        elif ntype == "MANUAL_SELECT":
-            st.values[node["key"]] = _manual(node, st, inputs)
-        elif ntype in ("BRANCH", "AWARD"):
-            raise UnsupportedNodeError(
-                f"Node {node['key']}: type {ntype} is not executed by the M1-E resolver."
-            )
-        else:
-            raise UnsupportedNodeError(f"Node {node['key']}: unknown type {ntype}.")
+        _run_node(node, st, inputs, by_key)
 
-    if plan is not None:
-        plan_hash = plan.content_hash
-        schema_version = plan.schema_version
-        plan_version = plan.plan_version
-    else:
-        plan_hash = content_hash(obj)
-        schema_version = parsed["schema_version"]
-        plan_version = 0
+    return _assemble_result(st, obj, parsed, plan, inputs_fingerprint(inputs))
 
-    node_values = {
-        k: _value_to_jsonable(v) for k, v in sorted(st.values.items(), key=lambda kv: kv[0])
-    }
-    decisions = _build_decisions(st, st.roster, plan_hash, schema_version, plan_version)
-    fingerprint = inputs_fingerprint(inputs)
-    return ResolveResult(
-        status=_final_status(st),
-        reasons=tuple(st.hold + st.review),
-        decisions=decisions,
-        composites=tuple(st.composites),
-        node_values=node_values,
-        content_hash=plan_hash,
-        input_fingerprint=fingerprint,
-        schema_version=schema_version,
-        plan_version=plan_version,
-        result_version=RESULT_VERSION,
-    )
+
+def resolve_to_checkpoint(
+    definition, inputs: ResolveInput, checkpoint: str, plan=None
+) -> ResolveResult:
+    """Replay only the dependency closure of a named checkpoint.
+
+    ``checkpoint`` is a ``{key, output}`` entry declared in the definition's optional
+    ``checkpoints`` list. Only the nodes that transitively produce ``output`` are
+    executed, so future-stage inputs (rounds/votes consumed by later checkpoints) that
+    are still missing never force a HOLD — a completed stage publishes READY on its own.
+    The result's ``input_fingerprint`` is scoped to the facts the closure consumed, so
+    StageResult identity is stable as later rounds arrive. Raises :class:`ValueError` if
+    the definition declares no such checkpoint.
+    """
+    parsed = parse_definition(definition)
+    nodes = parsed["nodes"]
+    checkpoints = parsed.get("checkpoints") or ()
+    by_key = {n["key"]: n for n in nodes}
+    obj = definition if isinstance(definition, dict) else json.loads(definition)
+
+    cp = next((c for c in checkpoints if c["key"] == checkpoint), None)
+    if cp is None:
+        raise ValueError(f"定义未声明检查点 {checkpoint}。")
+    closure = _dependency_closure(cp["output"], by_key)
+
+    st = _Stage(inputs.roster)
+    for node in nodes:
+        if node["key"] in closure:
+            _run_node(node, st, inputs, by_key)
+
+    round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
+    fingerprint = _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
+    return _assemble_result(st, obj, parsed, plan, fingerprint)

@@ -23,12 +23,22 @@ def _d(nodes, context=None):
     return json.dumps(definition, ensure_ascii=False)
 
 
+def _d_with_checkpoints(nodes, checkpoints):
+    return json.dumps(
+        {"schema_version": 1, "nodes": nodes, "checkpoints": checkpoints}, ensure_ascii=False
+    )
+
+
 # --- 2025 golden definitions (single source of truth) -----------------------
 
 
 def golden_schidui():
-    """§11.3 院十佳 weights (30/60/10, 60/40, 30/50/20) as one forward-only graph."""
-    return _d(
+    """§11.3 院十佳 weights (30/60/10, 60/40, 30/50/20) as one forward-only graph.
+
+    Declares three progressive checkpoints so a completed stage publishes READY before
+    later rounds exist: ``stage1`` (top10), ``stage2`` (top5), ``stage3`` (top3).
+    """
+    return _d_with_checkpoints(
         [
             {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
             {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
@@ -90,7 +100,12 @@ def golden_schidui():
             },
             {"key": "rank3", "type": "RANK", "source": "final", "descending": True},
             {"key": "top3", "type": "SELECT", "source": "rank3", "count": 3},
-        ]
+        ],
+        [
+            {"key": "stage1", "output": "top10"},
+            {"key": "stage2", "output": "top5"},
+            {"key": "stage3", "output": "top3"},
+        ],
     )
 
 

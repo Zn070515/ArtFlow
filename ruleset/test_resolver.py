@@ -18,6 +18,7 @@ from ruleset.resolver import (
     ResolverState,
     UnsupportedNodeError,
     resolve,
+    resolve_to_checkpoint,
 )
 from ruleset.schema import ENTRY_KEY
 from ruleset.templates import synthetic_fill_to_quota_demo
@@ -851,7 +852,7 @@ class GoldenSchiduiTopTenTests(SimpleTestCase):
     """
 
     def _def(self):
-        return _def(
+        definition = _def(
             [
                 {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
                 {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
@@ -915,6 +916,12 @@ class GoldenSchiduiTopTenTests(SimpleTestCase):
                 {"key": "top3", "type": "SELECT", "source": "rank3", "count": 3},
             ]
         )
+        definition["checkpoints"] = [
+            {"key": "stage1", "output": "top10"},
+            {"key": "stage2", "output": "top5"},
+            {"key": "stage3", "output": "top3"},
+        ]
+        return definition
 
     def _inputs(self):
         roster = tuple(f"c{i}" for i in range(1, 16))
@@ -1020,3 +1027,76 @@ class GoldenSchiduiTopTenTests(SimpleTestCase):
         result = resolve(self._def(), self._inputs())
         self.assertEqual(result.status, ResolverState.READY)
         self.assertEqual(len(result.decisions), 15)
+
+
+class ResolverCheckpointTests(SimpleTestCase):
+    """§11-15: a checkpoint resolves only its dependency closure, so a completed
+    stage publishes READY before later-stage inputs exist (progressive publication)."""
+
+    def _def(self):
+        return GoldenSchiduiTopTenTests()._def()
+
+    def _inputs(self, *, with_r3=False, with_r4=False, with_a4=False):
+        roster = tuple(f"c{i}" for i in range(1, 16))
+        round_scores = {
+            "r1": {f"c{i}": (Decimal(100 - i),) for i in range(1, 16)},
+            "r2": {f"c{i}": (Decimal(90 - i),) for i in range(1, 16)},
+        }
+        if with_r3:
+            round_scores["r3"] = {f"c{i}": (Decimal(100 - i),) for i in range(1, 11)}
+        if with_r4:
+            round_scores["r4"] = {f"c{i}": (Decimal(100 - i),) for i in range(1, 6)}
+        vote_scores = {"audience1": {f"c{i}": Decimal("50") for i in range(1, 16)}}
+        if with_a4:
+            vote_scores["audience4"] = {f"c{i}": Decimal(90 - i) for i in range(1, 6)}
+        return ResolveInput(roster=roster, round_scores=round_scores, vote_scores=vote_scores)
+
+    def test_stage1_checkpoint_ready_with_only_first_stage_facts(self):
+        # Only R1/R2/Audience1 exist; R3/R4/Audience4 are still missing.
+        result = resolve_to_checkpoint(self._def(), self._inputs(), "stage1")
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.reasons, ())
+        self.assertEqual(result.node_values["top10"], [f"c{i}" for i in range(1, 11)])
+        by = {d.contestant: d for d in result.decisions}
+        for c in (f"c{i}" for i in range(1, 11)):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.DIRECT)
+        for c in (f"c{i}" for i in range(11, 16)):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.ELIMINATED)
+
+    def test_stage2_checkpoint_requires_r3_not_r4(self):
+        # R1/R2/R3/Audience1 present; R4/Audience4 missing -> stage2 still READY.
+        result = resolve_to_checkpoint(self._def(), self._inputs(with_r3=True), "stage2")
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.node_values["top5"], [f"c{i}" for i in range(1, 6)])
+
+    def test_stage3_checkpoint_holds_when_final_stage_facts_missing(self):
+        # R3 present but R4/Audience4 missing -> the final stage cannot yet resolve.
+        result = resolve_to_checkpoint(self._def(), self._inputs(with_r3=True), "stage3")
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertTrue(result.reasons)
+
+    def test_stage3_checkpoint_ready_with_all_facts(self):
+        result = resolve_to_checkpoint(
+            self._def(), self._inputs(with_r3=True, with_r4=True, with_a4=True), "stage3"
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.node_values["top3"], ["c1", "c2", "c3"])
+
+    def test_checkpoint_input_fingerprint_stable_across_later_stage_data(self):
+        # Stage1 identity must not change when r3/r4/a4 (inputs stage1 does not read) arrive.
+        before = resolve_to_checkpoint(self._def(), self._inputs(), "stage1")
+        after = resolve_to_checkpoint(
+            self._def(), self._inputs(with_r3=True, with_r4=True, with_a4=True), "stage1"
+        )
+        self.assertEqual(before.status, ResolverState.READY)
+        self.assertEqual(after.status, ResolverState.READY)
+        self.assertEqual(before.input_fingerprint, after.input_fingerprint)
+
+    def test_full_resolve_still_runs_whole_graph(self):
+        # The default path is unchanged: the full graph needs r3/r4/a4 and holds without them.
+        result = resolve(self._def(), self._inputs())
+        self.assertEqual(result.status, ResolverState.HOLD)
+
+    def test_unknown_checkpoint_raises(self):
+        with self.assertRaises(ValueError):
+            resolve_to_checkpoint(self._def(), self._inputs(), "nope")

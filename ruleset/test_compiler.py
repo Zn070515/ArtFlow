@@ -682,6 +682,11 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         self.assertIn("GRAPH_PARSE_ERROR", report.codes())
         self.assertIsNone(plan)
 
+    def test_checkpoint_output_must_be_real_node(self):
+        definition = weighted_composite_topn()
+        definition["checkpoints"] = [{"key": "stage1", "output": "ghost"}]
+        self._assert_invalid(definition, "GRAPH_CHECKPOINT", expect_plan=False)
+
 
 class BoundCompileTests(SimpleTestCase):
     """§38-39: a bound activity freeze escalates "unverifiable until bound" to ERROR."""

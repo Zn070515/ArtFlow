@@ -492,6 +492,38 @@ def _validate_nodes(nodes: list) -> tuple[list[dict], dict[str, OutputType]]:
     return validated, emitted
 
 
+def _validate_checkpoints(checkpoints, node_keys: set[str]) -> tuple[dict, ...]:
+    """Validate the optional top-level ``checkpoints`` list.
+
+    A checkpoint is ``{key, output}``: a named progressive-publication boundary that
+    resolves only the dependency closure of ``output`` (so future-stage inputs never
+    force a HOLD). ``key`` is the stage identifier (becomes the ``StageResult.stage_key``);
+    ``output`` must reference a real node. Absent ``checkpoints`` returns ``()``.
+    """
+    if checkpoints is None:
+        return ()
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise ValidationError("'checkpoints' 必须是非空列表。")
+    seen: set[str] = set()
+    out: list[dict] = []
+    for index, cp in enumerate(checkpoints):
+        if not isinstance(cp, dict):
+            raise ValidationError(f"Checkpoint at index {index} must be an object.")
+        key = cp.get("key")
+        if not isinstance(key, str) or not key:
+            raise ValidationError(f"Checkpoint at index {index} is missing a non-empty 'key'.")
+        if key in seen:
+            raise ValidationError(f"Checkpoint {key}: duplicate checkpoint key.")
+        seen.add(key)
+        output = cp.get("output")
+        if not isinstance(output, str) or not output:
+            raise ValidationError(f"Checkpoint {key}: missing a non-empty 'output'.")
+        if output not in node_keys:
+            raise ValidationError(f"Checkpoint {key}: output {output!r} is not a defined node.")
+        out.append({"key": key, "output": output})
+    return tuple(out)
+
+
 def parse_definition(definition: dict | str, schema_version: int | None = None) -> dict:
     """Validate a ruleset definition and return its normalized node list.
 
@@ -507,7 +539,13 @@ def parse_definition(definition: dict | str, schema_version: int | None = None) 
     if "nodes" not in obj or not isinstance(obj["nodes"], list) or not obj["nodes"]:
         raise ValidationError("Ruleset definition must contain a non-empty 'nodes' list.")
     nodes, outputs = _validate_nodes(obj["nodes"])
-    return {"schema_version": version, "nodes": nodes, "outputs": outputs}
+    checkpoints = _validate_checkpoints(obj.get("checkpoints"), {n["key"] for n in nodes})
+    return {
+        "schema_version": version,
+        "nodes": nodes,
+        "outputs": outputs,
+        "checkpoints": checkpoints,
+    }
 
 
 def canonical_json(definition: dict | str) -> str:

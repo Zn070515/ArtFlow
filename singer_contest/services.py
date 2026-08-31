@@ -16,7 +16,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Max, QuerySet
 from ruleset.compiler import ExecutionPlan, compile_version
-from ruleset.resolver import ResolveInput, resolve
+from ruleset.resolver import ResolveInput, resolve, resolve_to_checkpoint
 
 from .models import (
     CompositeResult,
@@ -1113,8 +1113,15 @@ def run_ruleset(
     vote_scores=None,
     group_of=None,
     manual=None,
+    checkpoint=None,
 ) -> StageResult:
-    """Single generic entry: bind -> resolve -> persist. Returns the StageResult."""
+    """Single generic entry: bind -> resolve -> persist. Returns the StageResult.
+
+    ``checkpoint`` (§11-15) is an optional named boundary in the definition. When given,
+    only the checkpoint's dependency closure is resolved (future-stage inputs no longer
+    force a HOLD) and ``stage_key`` should be the checkpoint's key, so each stage persists
+    as its own progressive :class:`StageResult`.
+    """
     from ruleset.models import RulesetVersion
 
     if version.ruleset.activity_id != activity.pk:
@@ -1129,7 +1136,11 @@ def run_ruleset(
         group_of=group_of,
         manual=manual,
     )
-    result = resolve(version.definition, inputs, plan=_plan_from_version(version))
+    plan = _plan_from_version(version)
+    if checkpoint:
+        result = resolve_to_checkpoint(version.definition, inputs, checkpoint, plan=plan)
+    else:
+        result = resolve(version.definition, inputs, plan=plan)
     return persist_stage_result(
         version, activity, result, stage_key=stage_key, computed_by=computed_by
     )
@@ -1141,12 +1152,15 @@ def recompute_activity_result(
     *,
     ruleset=None,
     round_keys: Mapping[str, int] | None = None,
+    checkpoint=None,
 ) -> StageResult:
     """Re-resolve an activity's current ruleset against its bound rounds (M1-H).
 
     The ruleset carries the production binding: ``stage_key`` and ``round_keys``
     (round key -> ContestRound pk). ``round_keys`` may be overridden (e.g. a test or
-    a one-off re-resolve). Returns the persisted :class:`StageResult`.
+    a one-off re-resolve). ``checkpoint`` (§11-15) targets a single declared stage and
+    publishes it as its own :class:`StageResult` (stage_key = the checkpoint key).
+    Returns the persisted :class:`StageResult`.
     """
     from ruleset.models import ContestRuleset, RulesetVersion
 
@@ -1172,13 +1186,14 @@ def recompute_activity_result(
     if missing:
         raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     bound = {key: rounds[rid] for key, rid in raw_keys.items()}
-    stage_key = binding.get("stage_key") or ruleset.stage_key or ""
+    stage_key = checkpoint or binding.get("stage_key") or ruleset.stage_key or ""
     return run_ruleset(
         version,
         activity,
         stage_key=stage_key,
         computed_by=computed_by,
         round_keys=bound,
+        checkpoint=checkpoint,
     )
 
 
