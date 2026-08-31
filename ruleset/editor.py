@@ -44,7 +44,7 @@ _FIELD_LABELS = {
 }
 
 _FIELD_ALLOWED = {
-    "scale": ["hundred", "ten", "raw", "ordinal"],
+    "scale": ["hundred", "ten", "raw", "ordinal", "votes"],
     "mode": ["mean", "trimmed_mean"],
     "tie_policy": ["auto_break", "extra_round", "manual", "score_fallback"],
     "odd_policy": ["bye", "wildcard", "manual", "reject"],

@@ -338,10 +338,12 @@ def _round_scale(contest_round) -> str | None:
     total = ScoringRubric.objects.filter(pk=rubric_id).aggregate(s=Sum("criteria__max_score"))["s"]
     if total is None:
         return None
-    # M1-R8 (P0-3): classify a sheet by its aggregate maximum, not the single largest
-    # criterion. A 30+30+20+20 rubric sums to 100 -> hundred-mark; the old "max >= 90"
-    # heuristic misread it as ten-mark.
-    return "hundred" if Decimal(total) == Decimal("100") else "ten"
+    # M1-R9 (§25 "不要继续用 ten/hundred"): a rubric declares a numeric score_max, not a
+    # coarse "hundred"/"ten" bucket. Summing the criteria gives the true sheet maximum, so
+    # a 50-mark sheet is "50", a 10-mark sheet is "10", and a 100-mark sheet is "100".
+    # The old "non-100 is ten" collapsed 50/30/20/10 into one bucket and let a 50-mark
+    # sheet be direct-summed with a 10-mark sheet as if the units matched.
+    return str(int(Decimal(total)))
 
 
 def _vote_binding(vs_pk) -> dict:
@@ -350,13 +352,16 @@ def _vote_binding(vs_pk) -> dict:
     vs = VoteSession.objects.filter(pk=vs_pk).first()
     if vs is None:
         return {}
-    # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime READINESS.
-    # Pre-contest a VoteSession legitimately holds 0 ballots; whether a vote exists,
-    # whether it is locked, and whether a result is ready are runtime resolver HOLD
-    # conditions, never Ruleset Freeze conditions. So no ``result_ready`` fact is
-    # produced. A SCORE_COMPONENT audience vote sits on the composite's hundred-mark
-    # scale (it is normalized to a 0-100 weight before being mixed).
-    return {"scale": "hundred", "normalization": True}
+    # M1-R9 (§一/三 "Vote/Score Source Truth"): a bound VoteSession yields RAW vote counts
+    # (unit ``votes``), never a pre-normalized hundred-mark score. The loader
+    # ``_source_vote_scores`` returns raw counts; there is no VoteScoringRule to convert
+    # votes -> points yet. Declaring ``hundred + normalization`` here was the "lie" that
+    # let a SCORE_COMPONENT audience vote mix raw counts into a weighted sum as if they
+    # were already a 0-100 score. The compiler now rejects a SCORE_COMPONENT source with
+    # unit ``votes`` (VOTE_SCORE_COMPONENT_RAW) until an explicit conversion rule exists.
+    # Runtime vote readiness (ballots cast / locked / result ready) remains a resolver HOLD
+    # condition, never a Freeze gate — so no ``result_ready`` fact is produced here.
+    return {"scale": "votes"}
 
 
 def _annotated_capacity(rpk, activity):

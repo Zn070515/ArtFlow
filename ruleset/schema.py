@@ -28,8 +28,9 @@ AGGREGATE_TYPES = ("weighted_sum", "average")
 # Semantic annotations consumed by the M1-D compiler (§16). These are optional
 # per-node fields; absent values are resolved to "unknown" by the compiler so the
 # M1-C structures (which carry none) still compile. Keep behind the type-graph so
-# M1-C parsing is unchanged.
-SCALES = frozenset({"hundred", "ten", "raw", "ordinal"})
+# M1-C parsing is unchanged. ``votes`` (M1-R9) is the raw-vote-count unit: it is a
+# count, not a score, so it must never be mixed by weight as a SCORE_COMPONENT.
+SCALES = frozenset({"hundred", "ten", "raw", "ordinal", "votes"})
 ASSESS_MODES = frozenset({"mean", "trimmed_mean"})
 TIE_POLICIES = frozenset({"auto_break", "extra_round", "manual", "score_fallback"})
 ODD_POLICIES = frozenset({"bye", "wildcard", "manual", "reject"})

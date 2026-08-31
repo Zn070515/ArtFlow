@@ -609,6 +609,56 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         )
         self.assertTrue(report.passes())
 
+    def test_vote_score_component_raw_is_rejected(self):
+        # M1-R9 (§三): a SCORE_COMPONENT consumer on a raw ``votes`` unit must be a hard
+        # error. With no VoteScoringRule to convert votes->points, mixing raw counts into a
+        # weighted sum as if they were a pre-normalized score is the "looks legal but wrong"
+        # bug this milestone closes.
+        self._assert_invalid(
+            _def(
+                [
+                    {
+                        "key": "a",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "vote_source": "pop",
+                        "vote_purpose": "SCORE_COMPONENT",
+                    }
+                ],
+                context={"votes": {"pop": {"scale": "votes"}}},
+            ),
+            "VOTE_SCORE_COMPONENT_RAW",
+        )
+
+    def test_numeric_scale_mixed_rejected(self):
+        # M1-R9 (§25): a 50-mark sheet and a 10-mark sheet are distinct units (score_max
+        # 50 != 10), so a direct weighted sum must be a SCALE_MIXED error — the old
+        # "non-100 is ten" bucket collapsed both to "ten" and let them be summed.
+        self._assert_invalid(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                    {"key": "b", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "a", "weight": 0.5},
+                                {"source": "b", "weight": 0.5},
+                            ],
+                        },
+                    },
+                ],
+                context={
+                    "entry_size": 20,
+                    "rounds": {"r1": {"scale": "50"}, "r2": {"scale": "10"}},
+                },
+            ),
+            "SCALE_MIXED",
+        )
+
     def test_xiaofeng_fallback_invalid_aggregate_rejected(self):
         """§12.4 — the historical 校十佳 fallback references R1+R2+R3, but the group
         top-1 direct winners never reach R2/R3. The aggregate mixes a full-roster R1
@@ -902,14 +952,9 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
         self.assertTrue(frozen.execution_plan)
 
-    def test_bound_freeze_2025_yuan_compe_zero_ballots(self):
-        """M1-R8 (P0-2/P0-3): a 2025 院十佳-style ruleset (R1-R4 + a 0-ballot audience
-        VoteSession) must freeze.
-
-        0 ballots is a freeze-legal pre-contest state — whether a VoteSession has votes is
-        a runtime resolver HOLD condition, never a Freeze gate — and a 30+30+20+20 rubric
-        is a hundred-mark sheet, not the ten-mark the old single-max heuristic inferred.
-        """
+    def _seed_2025_yuan_compe(self, *, consumer="SCORE_COMPONENT"):
+        """Seed a 2025 院十佳-shaped activity: 12 approved singers, r1-r4 rubrics, and a
+        bound 0-ballot audience VoteSession. Return (admin, ruleset, round_keys, definition)."""
         from django.utils import timezone
         from singer_contest.models import (
             ContestRound,
@@ -922,8 +967,6 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         admin = self._admin()
         activity = self.make_activity(is_test_mode=True)
         ruleset = ContestRuleset.objects.create(activity=activity, name="院十佳", is_test_data=True)
-        # A bound freeze must prove an entry roster (quota) so the composite's top10 select
-        # is verifiable; give it 12 approved singers.
         for i in range(12):
             self.make_singer(
                 activity,
@@ -967,44 +1010,73 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         ruleset.vote_keys = {"audience1": audience.pk}
         ruleset.save(update_fields=["round_keys", "vote_keys"])
 
-        definition = json.dumps(
-            _def(
-                [
-                    {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
-                    {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
-                    {
-                        "key": "assess_a1",
-                        "type": "ASSESS",
-                        "source": ENTRY_KEY,
-                        "vote_source": "audience1",
-                        "vote_purpose": "SCORE_COMPONENT",
-                    },
-                    {
-                        "key": "stage1",
-                        "type": "AGGREGATE",
-                        "within": ENTRY_KEY,
-                        "aggregate": {
-                            "type": "weighted_sum",
-                            "components": [
-                                {"source": "assess_r1", "weight": 0.30},
-                                {"source": "assess_r2", "weight": 0.60},
-                                {"source": "assess_a1", "weight": 0.10},
-                            ],
-                        },
-                    },
-                    {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
-                    {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
-                ]
-            ),
-            ensure_ascii=False,
+        nodes = [
+            {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+            {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+        ]
+        aggregate_comps = [
+            {"source": "assess_r1", "weight": 0.4},
+            {"source": "assess_r2", "weight": 0.6},
+        ]
+        if consumer is not None:
+            audience_node = {
+                "key": "assess_a1",
+                "type": "ASSESS",
+                "source": ENTRY_KEY,
+                "vote_source": "audience1",
+                "vote_purpose": consumer,
+            }
+            nodes.insert(2, audience_node)
+            aggregate_comps = [
+                {"source": "assess_r1", "weight": 0.30},
+                {"source": "assess_r2", "weight": 0.60},
+                {"source": "assess_a1", "weight": 0.10},
+            ]
+        nodes.extend(
+            [
+                {
+                    "key": "stage1",
+                    "type": "AGGREGATE",
+                    "within": ENTRY_KEY,
+                    "aggregate": {"type": "weighted_sum", "components": aggregate_comps},
+                },
+                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+            ]
         )
+        definition = json.dumps(_def(nodes), ensure_ascii=False)
+        return admin, ruleset, round_keys, definition
 
+    def test_bound_freeze_2025_yuan_compe_zero_ballots(self):
+        """M1-R9: binding a 0-ballot audience VoteSession is freeze-legal — and a ruleset
+        that never consumes the vote as a score freezes cleanly.
+
+        0 ballots is a freeze-legal pre-contest state: whether a VoteSession has votes is a
+        runtime resolver HOLD condition, never a Freeze gate. The bound session still yields
+        a ``votes`` binding, so the composite (R1+R2, both a numeric 100-mark sheet from the
+        30+30+20+20 / 60+40 rubrics) must freeze with a verifiable quota.
+        """
+        admin, ruleset, _, definition = self._seed_2025_yuan_compe(consumer=None)
         version = self._draft(ruleset=ruleset, definition=definition)
         frozen = freeze_ruleset_version(version, admin)
         frozen.refresh_from_db()
         self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
         self.assertTrue(frozen.is_current)
         self.assertTrue(frozen.execution_plan)
+
+    def test_bound_freeze_rejects_score_component_raw_vote(self):
+        """M1-R9 (§三/验收 "raw vote 无换算规则进入综合分"): a SCORE_COMPONENT consumer on a
+        bound raw ``votes`` source must refuse to freeze — there is no VoteScoringRule to
+        convert votes -> points, so mixing raw counts into a weighted sum as if they were a
+        0-100 score would produce a "looks legal but wrong" result.
+        """
+        admin, ruleset, _, definition = self._seed_2025_yuan_compe(consumer="SCORE_COMPONENT")
+        version = self._draft(ruleset=ruleset, definition=definition)
+        with self.assertRaises(RulesetInvalidError) as ctx:
+            freeze_ruleset_version(version, admin)
+        self.assertIn("VOTE_SCORE_COMPONENT_RAW", ctx.exception.report.codes())
+        version.refresh_from_db()
+        self.assertEqual(version.status, RulesetVersion.Status.DRAFT)
 
 
 class RulesetFrozenAuthorityTests(_RulesetModelBase):

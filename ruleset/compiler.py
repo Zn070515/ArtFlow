@@ -682,9 +682,25 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
                 f"进入成绩的投票必须为 SCORE_COMPONENT，got {node.get('vote_purpose')}。",
             )
         )
+    # M1-R9 (§三/表单 "Vote/Score Source Truth"): a raw vote count (unit ``votes``) is not
+    # a score. It may feed a POPULARITY/SELECTION award, but as a SCORE_COMPONENT it would
+    # be mixed by weight as if it were already a 0-100 score — a "looks legal but wrong"
+    # result. With no VoteScoringRule/AudienceScore conversion the compiler must refuse it
+    # outright rather than silently accept raw counts into a composite.
+    if node.get("vote_purpose") == "SCORE_COMPONENT" and vote.get("scale") == "votes":
+        issues.append(
+            ReportIssue(
+                "VOTE_SCORE_COMPONENT_RAW",
+                Severity.ERROR,
+                node["key"],
+                "vote_source",
+                f"投票 {source} 为原始票数（量纲 votes），无换算规则，不可进入综合分。",
+            )
+        )
     if (
         node.get("vote_purpose") == "SCORE_COMPONENT"
         and vote.get("scale") not in (None, "hundred")
+        and vote.get("scale") != "votes"
         and not vote.get("normalization")
     ):
         issues.append(
