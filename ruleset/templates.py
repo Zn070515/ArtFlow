@@ -110,13 +110,13 @@ def golden_schidui():
 
 
 def golden_xiaofeng():
-    """校十佳屏峰 control-flow demonstration (NOT a verified 2025 historical Golden).
+    """synthetic 合成_分组逐组补足演示 (NOT a verified 2025 historical Golden).
 
     Expresses the stable control flow — 5 groups direct + remainder R1 top12 + R2 top7 +
     merge + final groups + manual 0~2/group — and uses ``mode: each_group`` as a
-    demonstrative fill. This is a resolver fixture, not a claim about the real 2025
-    scoring: the verified historical control flow is
-    :func:`historical_xiaofeng_control_flow`, and the unresolved 30/50/20 fallback is
+    demonstrative fill. This is a synthetic resolver fixture, NOT a claim about the real
+    2025 scoring: the verified historical control flow is
+    :func:`historical_xiaofeng_control_flow`, and the unresolved 20/30/50 fallback is
     :func:`historical_xiaofeng_fallback_unresolved` (validator MUST FAIL).
     """
     return _d(
@@ -173,7 +173,7 @@ def historical_xiaofeng_control_flow():
     """校十佳屏峰 definite control flow (§24.1): 5 groups x 4, top1/group direct,
     remainder R1 top12, R2 top7, merge, final groups, manual 0~2/group.
 
-    The historical "按综合成绩全局补到6" and the 30/50/20 weights are deliberately NOT
+    The historical "按综合成绩全局补到6" and the 20/30/50 weights are deliberately NOT
     asserted here: they depend on R2/R3 coverage (see
     ``historical_xiaofeng_fallback_unresolved``) and would otherwise be invented.
     """
@@ -220,11 +220,14 @@ def historical_xiaofeng_control_flow():
 
 
 def historical_xiaofeng_fallback_unresolved():
-    """校十佳屏峰 historical 30/50/20 (R1+R2+R3) fallback (§24.2).
+    """校十佳屏峰 historical 20/30/50 (R1+R2+R3) fallback (§24.2).
 
-    The group top-1 direct winners never reach R2/R3, so the aggregate mixes a
-    full-roster R1 with subset R2/R3: the validator MUST FAIL MISSING_SCORE_DEPENDENCY.
-    This template documents an unresolved rule; it is intentionally NOT executable.
+    Faithful shape: R1 scores the full roster (20); 5 group winners advance direct and
+    never reach R2; the remainder thins via R1→top12, R2→top7, merges with the 5 direct
+    to 12, and only then is scored at R3. The 20/30/50 aggregate mixes a full-roster R1
+    source with the repecher-only R2 and merged-12 R3, so the direct entrants are missing
+    R2 — the validator MUST FAIL MISSING_SCORE_DEPENDENCY. This template documents an
+    unresolved rule; it is intentionally NOT executable.
     """
     return _d(
         [
@@ -244,17 +247,23 @@ def historical_xiaofeng_fallback_unresolved():
                 "by": "groups",
             },
             {"key": "leftover", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
-            {"key": "r2", "type": "ASSESS", "source": "leftover", "round": "r2"},
-            {"key": "r3", "type": "ASSESS", "source": "leftover", "round": "r3"},
+            {"key": "repech_r1", "type": "ASSESS", "source": "leftover", "round": "r1"},
+            {"key": "repech_rank", "type": "RANK", "source": "repech_r1", "descending": True},
+            {"key": "repech12", "type": "SELECT", "source": "repech_rank", "count": 12},
+            {"key": "r2", "type": "ASSESS", "source": "repech12", "round": "r2"},
+            {"key": "repech_rank2", "type": "RANK", "source": "r2", "descending": True},
+            {"key": "top7", "type": "SELECT", "source": "repech_rank2", "count": 7},
+            {"key": "merged", "type": "MERGE", "sources": ["direct", "top7"]},
+            {"key": "r3", "type": "ASSESS", "source": "merged", "round": "r3"},
             {
                 "key": "fallback",
                 "type": "AGGREGATE",
                 "aggregate": {
                     "type": "weighted_sum",
                     "components": [
-                        {"source": "r1", "weight": 0.3},
-                        {"source": "r2", "weight": 0.5},
-                        {"source": "r3", "weight": 0.2},
+                        {"source": "r1", "weight": 0.2},
+                        {"source": "r2", "weight": 0.3},
+                        {"source": "r3", "weight": 0.5},
                     ],
                 },
             },
@@ -534,10 +543,10 @@ def _catalog():
     catalog = [
         ("院十佳", GOLDEN_SCHIDUI, "2025 院十佳：15→10→5→3 加权晋级链"),
         (
-            "校十佳屏峰",
+            "合成_分组逐组补足演示",
             GOLDEN_XIAOFENG,
-            "校十佳屏峰控制流演示（each_group 补足，非 2025 历史 Golden；"
-            "历史确定控制流见『校十佳屏峰_历史控制流』）",
+            "合成（非历史）分组逐组补足演示（each_group 补足）；"
+            "真正的历史规则见『校十佳屏峰_历史控制流』与『校十佳屏峰_历史未决回退』",
         ),
         (
             "校十佳屏峰_历史控制流",
@@ -547,7 +556,7 @@ def _catalog():
         (
             "校十佳屏峰_历史未决回退",
             HISTORICAL_XIAOFENG_FALLBACK_UNRESOLVED,
-            "校十佳屏峰历史 30/50/20 回退（§24.2）：直晋无 R2，校验必须 FAIL（未决）",
+            "校十佳屏峰历史 20/30/50 回退（§24.2）：直晋无 R2，校验必须 FAIL（未决）",
         ),
         (
             "合成_补足至配额演示",

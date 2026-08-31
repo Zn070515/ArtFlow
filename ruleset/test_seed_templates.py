@@ -52,14 +52,14 @@ class TemplateLibraryTests(TestCase):
     def test_seed_creates_golden_templates(self):
         seed_ruleset_templates(None)
         self.assertEqual(RulesetTemplate.objects.filter(name="院十佳").count(), 1)
-        self.assertEqual(RulesetTemplate.objects.filter(name="校十佳屏峰").count(), 1)
+        self.assertEqual(RulesetTemplate.objects.filter(name="合成_分组逐组补足演示").count(), 1)
 
     def test_xiaofeng_demo_is_not_passed_off_as_historical_golden(self):
         # §23: the each_group control-flow demo must not claim to be the verified
         # 2025 校十佳屏峰 Golden — that is what historical_xiaofeng_control_flow is for.
         import ruleset.templates as _templates
 
-        entry = next(e for e in _templates._catalog() if e[0] == "校十佳屏峰")
+        entry = next(e for e in _templates._catalog() if e[0] == "合成_分组逐组补足演示")
         description = entry[2]
         self.assertIn("演示", description)
         self.assertNotIn("2025 校十佳屏峰：", description)
