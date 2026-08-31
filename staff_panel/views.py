@@ -2197,9 +2197,11 @@ def _build_card(node, index, sources):
 
 
 @staff_required
+@transaction.atomic
 def contest_ruleset_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+        activity = lock_activity_for_action(activity)
         name = (request.POST.get("name") or "").strip()
         if not name:
             messages.error(request, "请填写赛制名称。")
@@ -2233,11 +2235,13 @@ def contest_ruleset_create(request):
 
 
 @staff_required
+@transaction.atomic
 def ruleset_edit(request, pk):
     version = get_object_or_404(RulesetVersion, pk=pk)
     if version.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
     if request.method == "POST":
+        lock_activity_for_action(version.ruleset.activity)
         try:
             current = parse_definition(version.definition)["nodes"]
             definition = _edit_nodes(request.POST, current)
@@ -2325,9 +2329,11 @@ def ruleset_freeze(request, pk):
 
 @staff_required
 @require_POST
+@transaction.atomic
 def ruleset_clone_from_template(request, template_pk):
     template = get_object_or_404(RulesetTemplate, pk=template_pk)
     activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+    activity = lock_activity_for_action(activity)
     name = (request.POST.get("name") or "").strip() or template.name
     ruleset, _created = ContestRuleset.objects.get_or_create(
         activity=activity,

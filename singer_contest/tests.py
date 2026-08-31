@@ -1871,6 +1871,153 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         self.assertNotEqual(results.get("upload"), "deadlock", results)
 
 
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class RulesetActivityLockConcurrencyTests(TransactionTestCase):
+    """R0 §44: ruleset edits/clones serialize on the Activity lock (M0 authority).
+
+    A ruleset mutation must never land after an Activity lock (or ARCHIVED) commits
+    — the mutation re-validates the lock inside ``lock_activity_for_action``.
+    """
+
+    def setUp(self):
+        import json as _json
+
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+
+        self.admin = User.objects.create_user(
+            username="r0-rule-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="R0 Ruleset Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="R0规则",
+            is_test_data=False,
+            created_by=self.admin,
+        )
+        definition = _json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+                    {"key": "ranked", "type": "RANK", "source": "assess", "descending": True},
+                ],
+            }
+        )
+        self.version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=definition,
+            version=1,
+            is_current=True,
+            created_by=self.admin,
+        )
+        self.template = RulesetTemplate.objects.create(
+            name="院十佳", definition=definition, created_by=self.admin
+        )
+
+    def _hold_lock(self, *, phase=None, locked=False):
+        lock_held = threading.Event()
+        release_lock = threading.Event()
+        holder_error: dict[str, object] = {}
+
+        def hold():
+            try:
+                with transaction.atomic():
+                    act = Activity.objects.select_for_update().get(pk=self.activity.pk)
+                    updated = []
+                    if phase is not None:
+                        act.phase = phase
+                        updated.append("phase")
+                    if locked:
+                        act.is_locked = True
+                        updated.append("is_locked")
+                    act.save(update_fields=updated)
+                    lock_held.set()
+                    release_lock.wait(timeout=10)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                holder_error["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        holder = threading.Thread(target=hold)
+        holder.start()
+        self.assertTrue(lock_held.wait(timeout=10))
+        return holder, release_lock, holder_error
+
+    def test_ruleset_edit_never_lands_after_activity_lock(self):
+        from staff_panel.views import ruleset_edit
+
+        holder, release_lock, holder_error = self._hold_lock(locked=True)
+        edit_result: dict[str, object] = {}
+
+        def try_edit():
+            close_old_connections()
+            try:
+                request = RequestFactory().post("/x", {"action": "add", "new_type": "ASSESS"})
+                request.user = self.admin
+                ruleset_edit(request, self.version.pk)
+                edit_result["done"] = True
+            except PermissionDenied as error:
+                edit_result["rejected"] = str(error)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                edit_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        worker = threading.Thread(target=try_edit)
+        worker.start()
+        time.sleep(1)
+        release_lock.set()
+        holder.join(timeout=10)
+        worker.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        self.version.refresh_from_db()
+        self.assertTrue(self.activity.is_locked)
+        self.assertNotIn("done", edit_result, edit_result)
+        self.assertIn("rejected", edit_result, edit_result)
+        nodes = json.loads(self.version.definition)["nodes"]
+        self.assertEqual(len(nodes), 2)
+
+    def test_ruleset_clone_never_lands_after_activity_lock(self):
+        from staff_panel.views import ruleset_clone_from_template
+
+        holder, release_lock, holder_error = self._hold_lock(locked=True)
+        clone_result: dict[str, object] = {}
+
+        def try_clone():
+            close_old_connections()
+            try:
+                request = RequestFactory().post("/x", {"activity": self.activity.pk, "name": "X"})
+                request.user = self.admin
+                ruleset_clone_from_template(request, self.template.pk)
+                clone_result["done"] = True
+            except PermissionDenied as error:
+                clone_result["rejected"] = str(error)
+            except Exception as error:  # pragma: no cover - diagnostic only
+                clone_result["error"] = repr(error)
+            finally:
+                close_old_connections()
+
+        worker = threading.Thread(target=try_clone)
+        worker.start()
+        time.sleep(1)
+        release_lock.set()
+        holder.join(timeout=10)
+        worker.join(timeout=10)
+
+        self.assertFalse(holder_error, holder_error)
+        self.activity.refresh_from_db()
+        self.assertTrue(self.activity.is_locked)
+        self.assertNotIn("done", clone_result, clone_result)
+        self.assertIn("rejected", clone_result, clone_result)
+
+
 class ParticipantApplyVisibilityTests(TestCase):
     def setUp(self):
         self.participant = User.objects.create_user(username="apply-participant", password="pass")
@@ -2102,7 +2249,10 @@ class StageResolverBindingTests(TestCase):
             activity=self.activity, name="院十佳规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
-            ruleset=self.ruleset, definition=definition, is_current=False
+            ruleset=self.ruleset,
+            definition=definition,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
         )
         self.round = ContestRound.objects.create(
             activity=self.activity,
@@ -2181,6 +2331,39 @@ class StageResolverBindingTests(TestCase):
                 round_keys={"r1": self.round},
             )
 
+    def test_run_ruleset_rejects_draft_version(self):
+        """A DRAFT ruleset version is not an execution authority (R0 boundary)."""
+        from .services import run_ruleset
+
+        draft = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.DRAFT,
+        )
+        with self.assertRaises(ValidationError):
+            run_ruleset(
+                draft,
+                self.activity,
+                stage_key="选拔",
+                computed_by=self.user,
+                round_keys={"r1": self.round},
+            )
+
+    def test_run_ruleset_accepts_frozen_same_activity_version(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.status, StageResult.Status.READY)
+
 
 def _schidui_definition():
     """§11.3 院十佳 weights (30/60/10, 60/40, 30/50/20) as one forward-only graph."""
@@ -2222,7 +2405,10 @@ class GoldenSchiduiDbTests(TestCase):
             activity=self.activity, name="院十佳规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
-            ruleset=self.ruleset, definition=_schidui_definition(), is_current=False
+            ruleset=self.ruleset,
+            definition=_schidui_definition(),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
         )
         self.judges = [
             Judge.objects.create(activity=self.activity, name=f"评委{chr(0x41 + i)}")
@@ -2388,7 +2574,10 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
             activity=self.activity, name="校十佳屏峰规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
-            ruleset=self.ruleset, definition=_xiaofeng_definition(), is_current=False
+            ruleset=self.ruleset,
+            definition=_xiaofeng_definition(),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
         )
         self.judges = [
             Judge.objects.create(activity=self.activity, name=f"评委{chr(0x41 + i)}")

@@ -22,7 +22,14 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
     from farewell_show.models import Program
     from files.models import SubmissionFile
     from incidents.models import IncidentRecord
-    from singer_contest.models import Award, ScoreRecord, ScoreSummary, SingerRegistration
+    from ruleset.models import ContestRuleset
+    from singer_contest.models import (
+        Award,
+        ScoreRecord,
+        ScoreSummary,
+        SingerRegistration,
+        StageResult,
+    )
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
     return {
@@ -51,6 +58,10 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
             round__activity=activity, is_test_data=True
         ).count(),
         "awards": Award.objects.filter(activity=activity, is_test_data=True).count(),
+        "stage_results": StageResult.objects.filter(activity=activity, is_test_data=True).count(),
+        "contest_rulesets": ContestRuleset.objects.filter(
+            activity=activity, is_test_data=True
+        ).count(),
         "incidents": IncidentRecord.objects.filter(activity=activity, is_test=True).count(),
         "files": SubmissionFile.objects.filter(is_test_data=True)
         .filter(Q(singer_registration__activity=activity) | Q(program__activity=activity))
@@ -132,12 +143,14 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from files.models import SubmissionFile
     from files.services import delete_storage_object, delete_submission_file
     from incidents.models import IncidentRecord
+    from ruleset.models import ContestRuleset
     from singer_contest.models import (
         Award,
         ContestRound,
         ScoreRecord,
         ScoreSummary,
         SingerRegistration,
+        StageResult,
     )
     from singer_contest.services import reset_round_snapshots
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
@@ -174,6 +187,17 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         if stored_name:
             transaction.on_commit(partial(delete_storage_object, storage, stored_name))
     Award.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    # StageResult.ruleset_version is PROTECT-ed by RulesetVersion, so results must
+    # go before the ruleset (which cascades to its versions). Singers are deleted
+    # later, and their stage decisions cascade only when the results are gone. The
+    # StageResult/StageDecision querysets refuse to delete READY rows — but a test
+    # activity legitimately holds READY test results, so demote them first.
+    demo = StageResult.objects.filter(activity=locked_activity, is_test_data=True)
+    for stage in demo:
+        stage.status = StageResult.Status.HOLD
+        stage.save(update_fields=["status"])
+    StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    ContestRuleset.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     VoteRecord.objects.filter(
