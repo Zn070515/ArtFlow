@@ -766,13 +766,51 @@ def _node_plan(node: dict, prov: dict, outputs: dict) -> dict:
 # --- public entry points ------------------------------------------------------
 
 
+# §38-39: facts that are only "unverifiable until bound" (a template legitimately
+# lacks real entities). A bound activity freeze has no such excuse — if any of these
+# still fires once the real binding is supplied, the freeze must fail rather than
+# succeed on a WARN.
+_BOUND_STRICT_CODES = {
+    "JUDGE_UNVERIFIABLE",
+    "QUOTA_UNVERIFIABLE",
+    "ODD_UNVERIFIABLE",
+    "SCORE_DEPENDENCY_UNVERIFIABLE",
+    "VOTE_UNVERIFIABLE",
+    "SCALE_UNDECLARED",
+}
+
+
+def _escalate_unverifiable(issues: tuple[ReportIssue, ...]) -> tuple[ReportIssue, ...]:
+    out = []
+    for issue in issues:
+        if issue.code in _BOUND_STRICT_CODES and issue.severity is Severity.WARN:
+            out.append(
+                ReportIssue(
+                    issue.code,
+                    Severity.ERROR,
+                    issue.node_key,
+                    issue.path,
+                    f"绑定模式：{issue.message}",
+                    issue.context,
+                )
+            )
+        else:
+            out.append(issue)
+    return tuple(out)
+
+
 def compile_definition(
-    definition: dict | str, *, context: dict | None = None
+    definition: dict | str, *, context: dict | None = None, bound: bool = False
 ) -> tuple[ValidationReport, ExecutionPlan | None]:
     """Validate a definition and build its ExecutionPlan.
 
     Returns ``(report, plan)``. ``plan`` is ``None`` when the definition fails the
     static graph gate (D1) — an unparseable graph has no executable plan.
+
+    ``bound=True`` is the §39 *bound activity freeze* level: facts the compiler could
+    otherwise only WARN about as "unverifiable until bound" are promoted to ERROR, so a
+    freeze never succeeds while a real binding is still missing. Templates leave it
+    ``False`` (they legitimately have no real entities and may WARN).
     """
     try:
         parsed = parse_definition(definition)
@@ -824,7 +862,7 @@ def compile_definition(
                 }
             )
 
-    report = ValidationReport(tuple(issues))
+    report = ValidationReport(_escalate_unverifiable(tuple(issues)) if bound else tuple(issues))
 
     summary = {
         "total_nodes": len(nodes),

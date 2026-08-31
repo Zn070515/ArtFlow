@@ -683,6 +683,36 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         self.assertIsNone(plan)
 
 
+class BoundCompileTests(SimpleTestCase):
+    """§38-39: a bound activity freeze escalates "unverifiable until bound" to ERROR."""
+
+    def test_bound_escalates_unverifiable_quota(self):
+        # DEF (ASSESS/RANK/SELECT count=1) without an entry_size can only WARN the quota;
+        # a bound freeze must escalate that to an ERROR and refuse to compile.
+        report, plan = compile_definition(DEF, bound=True)
+        self.assertFalse(report.passes())
+        self.assertIn("QUOTA_UNVERIFIABLE", report.codes())
+        self.assertEqual(report.by_code("QUOTA_UNVERIFIABLE")[0].severity.value, "error")
+
+    def test_template_level_allows_warn(self):
+        report, plan = compile_definition(DEF, bound=False)
+        self.assertTrue(report.passes())
+        self.assertIn("QUOTA_UNVERIFIABLE", report.codes())
+        self.assertEqual(report.by_code("QUOTA_UNVERIFIABLE")[0].severity.value, "warn")
+
+    def test_bound_passes_with_full_context(self):
+        report, plan = compile_definition(
+            DEF,
+            context={
+                "entry_size": 5,
+                "rounds": {"r1": {"judge_count": 3, "scale": "hundred", "scope": "full"}},
+            },
+            bound=True,
+        )
+        self.assertTrue(report.passes(), [i.to_dict() for i in report.issues])
+        self.assertIsNotNone(plan)
+
+
 class RulesetFreezeServiceTests(_RulesetModelBase):
     def _admin(self):
         user = self.make_user("ruleset-admin")
@@ -786,6 +816,35 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         self.assertFalse(
             AuditLog.objects.filter(action_type=AuditLog.ActionType.FINALIZE_RULESET).exists()
         )
+
+    def test_bound_freeze_refuses_unverifiable_context(self):
+        admin = self._admin()
+        version = self._draft()
+        with self.assertRaises(RulesetInvalidError):
+            freeze_ruleset_version(
+                version,
+                admin,
+                bound_context={
+                    "rounds": {"r1": {"judge_count": 3, "scale": "hundred", "scope": "full"}}
+                },
+            )
+        version.refresh_from_db()
+        self.assertEqual(version.status, RulesetVersion.Status.DRAFT)
+
+    def test_bound_freeze_passes_with_full_context(self):
+        admin = self._admin()
+        version = self._draft()
+        frozen = freeze_ruleset_version(
+            version,
+            admin,
+            bound_context={
+                "entry_size": 5,
+                "rounds": {"r1": {"judge_count": 3, "scale": "hundred", "scope": "full"}},
+            },
+        )
+        frozen.refresh_from_db()
+        self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+        self.assertTrue(frozen.execution_plan)
 
 
 class RulesetFrozenAuthorityTests(_RulesetModelBase):

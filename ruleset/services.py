@@ -26,7 +26,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .compiler import ExecutionPlan, ValidationReport, compile_version
+from .compiler import ExecutionPlan, ValidationReport, compile_definition, compile_version
 from .models import ContestRuleset, RulesetVersion
 
 
@@ -100,16 +100,23 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
 
 @transaction.atomic
 def freeze_ruleset_version(
-    version: RulesetVersion, operator, *, binding: dict | None = None
+    version: RulesetVersion,
+    operator,
+    *,
+    binding: dict | None = None,
+    bound_context: dict | None = None,
 ) -> RulesetVersion:
     """Freeze a DRAFT ruleset version, snapshotting its binding. Returns the locked, frozen version.
 
     ``binding`` is optional: when omitted, the ruleset's current binding fields are
     snapshotted verbatim (the default for an existing editor flow). When provided, it is
-    validated and becomes the snapshot. Raises :class:`PermissionDenied` if the operator
-    is not an effective admin or the activity is locked; :class:`ValidationError` if the
-    version is already frozen or the binding is invalid; :class:`RulesetInvalidError` if
-    compilation reports any ERROR.
+    validated and becomes the snapshot. ``bound_context`` (optional, §39) supplies the real
+    round/judge/entry facts so the definition is compiled at the *bound activity freeze*
+    level — anything the compiler could otherwise only WARN about as unverifiable becomes
+    an ERROR and aborts the freeze. Without it the compile stays template-level (WARNs
+    allowed). Raises :class:`PermissionDenied` if the operator is not an effective admin
+    or the activity is locked; :class:`ValidationError` if the version is already frozen
+    or the binding is invalid; :class:`RulesetInvalidError` if compilation reports any ERROR.
     """
     lock_activity_for_action(version.ruleset.activity)
     ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
@@ -124,7 +131,10 @@ def freeze_ruleset_version(
     if locked.status == RulesetVersion.Status.FROZEN:
         raise ValidationError("该赛制版本已冻结。")
 
-    report, plan = compile_version(locked)
+    if bound_context is not None:
+        report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
+    else:
+        report, plan = compile_version(locked)
     if not report.passes():
         raise RulesetInvalidError(report, plan)
 
