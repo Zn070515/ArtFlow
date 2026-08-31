@@ -22,6 +22,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, transaction
+from django.db.models import Max
 from django.http import FileResponse
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
@@ -4290,6 +4291,14 @@ class ResultBoardTests(TestCase):
         )
 
     def _stage(self, *, status, ruleset_hash, reasons=None, stage_key="院十佳"):
+        # R9-2 added a unique (activity, stage_key, result_version) publication number, so
+        # a helper that mints several rows for one stage_key must increment the version.
+        last = (
+            StageResult.objects.filter(activity=self.activity, stage_key=stage_key).aggregate(
+                m=Max("result_version")
+            )["m"]
+            or 0
+        )
         return StageResult.objects.create(
             activity=self.activity,
             ruleset_version=self.version,
@@ -4298,6 +4307,7 @@ class ResultBoardTests(TestCase):
             status=status,
             reasons=reasons or [],
             ruleset_hash=ruleset_hash,
+            result_version=last + 1,
             # Identity is (ruleset_version, input_fingerprint): every distinct result
             # needs its own fingerprint so one version can publish multiple rows.
             input_fingerprint=f"fp-{ruleset_hash}",
@@ -4450,13 +4460,20 @@ class ResultBoardTests(TestCase):
         contest_round.is_locked = True
         contest_round.status = ContestRound.Status.LOCKED
         contest_round.save(update_fields=["is_locked", "status"])
+        # R9-4/R9-5: 核定 finalizes only a result grounded on the *current* FROZEN
+        # authority, so demote the setUp current version, make this frozen v2 the single
+        # current runner, then persist a formal StageResult (not an isolated preview).
+        RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id).exclude(
+            pk=version.pk
+        ).update(is_current=False)
+        RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
+        version.refresh_from_db()
         ready = run_ruleset(
             version,
             self.activity,
             stage_key="院十佳",
             computed_by=self.staff,
             round_keys={"r1": contest_round},
-            preview=True,
         )
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
         response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))
