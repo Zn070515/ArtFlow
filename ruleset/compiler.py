@@ -247,7 +247,14 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
         src = prov[node["source"]]
         rnd = node.get("round")
         p.update(pool_sig=src["pool_sig"], pool_relation=src["pool_relation"], size=src["size"])
-        p["scale"] = node.get("scale") or _round_scale(ctx, rnd) or "unknown"
+        # A vote_source ASSESS adopts its vote config scale (a SCORE_COMPONENT audience
+        # vote sits on the composite's hundred-mark scale), so an AGGREGATE mixing a
+        # judge rubric and an audience vote is not misread as a scale mismatch.
+        vote_scale = None
+        vote_source = node.get("vote_source")
+        if vote_source:
+            vote_scale = (ctx.get("votes") or {}).get(vote_source, {}).get("scale")
+        p["scale"] = node.get("scale") or vote_scale or _round_scale(ctx, rnd) or "unknown"
     elif ntype == "AGGREGATE":
         comps = node["aggregate"]["components"]
         if comps:
@@ -625,17 +632,9 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
             )
         )
         return
-    if not vote.get("result_ready"):
-        issues.append(
-            ReportIssue(
-                "VOTE_NOT_READY",
-                Severity.ERROR,
-                node["key"],
-                "vote_source",
-                f"投票 {source} 尚无可用结果。",
-            )
-        )
-        return
+    # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness. Whether
+    # a VoteSession has collected ballots / is locked / has a result is a runtime
+    # resolver HOLD condition — never a Ruleset Freeze gate. So no ``result_ready`` fact.
     if (
         node.get("vote_purpose")
         and node["type"] == "ASSESS"

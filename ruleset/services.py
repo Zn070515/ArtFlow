@@ -276,8 +276,9 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
     activity freeze must prove every verifiable fact or fail. ``entry_size`` is the
     scoped approved-singer count; each bound round contributes its real ``judge_count``,
     a ``scope`` ("full" when the round's RoundEntries cover the entry roster, else
-    "subset"), and a ``scale`` derived from its rubric's highest criterion max_score;
-    each vote source contributes ``result_ready``/``scale``/``normalization``; each group
+    "subset"), and a ``scale`` derived from its rubric's aggregate criterion maximum;
+    each vote source contributes its CONFIG ``scale``/``normalization`` (never a runtime
+    ``result_ready`` — 0 ballots is a freeze-legal pre-contest state); each group
     partition contributes per-group ``capacity``. Facts the DB cannot supply are left
     unset so the bound compiler escalates the corresponding "unverifiable" WARN to a
     hard ERROR and refuses the freeze instead of inventing a value.
@@ -302,9 +303,11 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
             item["scale"] = scale
         round_ctx[rkey] = item
 
-    votes = {
-        source: _vote_binding(vs_pk) for source, vs_pk in (binding.get("vote_keys") or {}).items()
-    }
+    votes = {}
+    for source, vs_pk in (binding.get("vote_keys") or {}).items():
+        vote = _vote_binding(vs_pk)
+        if vote:
+            votes[source] = vote
 
     groups = {}
     for by, rpk in (binding.get("group_keys") or {}).items():
@@ -327,23 +330,33 @@ def _round_scale(contest_round) -> str | None:
     rubric_id = getattr(contest_round, "rubric_id", None)
     if rubric_id is None:
         return None
-    from django.db.models import Max
+    from decimal import Decimal
+
+    from django.db.models import Sum
     from singer_contest.models import ScoringRubric
 
-    top = ScoringRubric.objects.filter(pk=rubric_id).aggregate(m=Max("criteria__max_score"))["m"]
-    if top is None:
+    total = ScoringRubric.objects.filter(pk=rubric_id).aggregate(s=Sum("criteria__max_score"))["s"]
+    if total is None:
         return None
-    return "hundred" if top >= 90 else "ten"
+    # M1-R8 (P0-3): classify a sheet by its aggregate maximum, not the single largest
+    # criterion. A 30+30+20+20 rubric sums to 100 -> hundred-mark; the old "max >= 90"
+    # heuristic misread it as ten-mark.
+    return "hundred" if Decimal(total) == Decimal("100") else "ten"
 
 
 def _vote_binding(vs_pk) -> dict:
-    from voting.models import VoteRecord, VoteSession
+    from voting.models import VoteSession
 
     vs = VoteSession.objects.filter(pk=vs_pk).first()
     if vs is None:
         return {}
-    ready = VoteRecord.objects.filter(vote_session=vs).exists()
-    return {"result_ready": ready, "scale": "ten", "normalization": True}
+    # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime READINESS.
+    # Pre-contest a VoteSession legitimately holds 0 ballots; whether a vote exists,
+    # whether it is locked, and whether a result is ready are runtime resolver HOLD
+    # conditions, never Ruleset Freeze conditions. So no ``result_ready`` fact is
+    # produced. A SCORE_COMPONENT audience vote sits on the composite's hundred-mark
+    # scale (it is normalized to a 0-100 weight before being mixed).
+    return {"scale": "hundred", "normalization": True}
 
 
 def _annotated_capacity(rpk, activity):

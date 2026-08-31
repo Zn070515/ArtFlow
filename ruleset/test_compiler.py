@@ -494,14 +494,35 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         self.assertIn("TIE_REVIEW", report.codes())
         self.assertTrue(report.passes(), "TIE_REVIEW must not block a freeze")
 
-    def test_vote_not_ready(self):
+    def test_vote_unbound_blocks(self):
         self._assert_invalid(
             _def(
                 [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "vote_source": "pop"}],
-                context={"votes": {"pop": {"result_ready": False}}},
+                context={"votes": {"other": {"scale": "hundred"}}},
             ),
             "VOTE_NOT_READY",
         )
+
+    def test_vote_without_runtime_ready_does_not_block(self):
+        # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness.
+        # A configured VoteSession that has not yet received a ballot must not raise
+        # VOTE_NOT_READY — 0 ballots is a freeze-legal pre-contest state, and any
+        # "no result yet" is a runtime resolver HOLD condition.
+        report, _ = compile_definition(
+            _def(
+                [
+                    {
+                        "key": "a",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "vote_source": "pop",
+                        "vote_purpose": "SCORE_COMPONENT",
+                    }
+                ],
+                context={"votes": {"pop": {"scale": "hundred", "normalization": True}}},
+            )
+        )
+        self.assertTrue(report.passes(), [i.to_dict() for i in report.issues])
 
     def test_vote_purpose(self):
         self._assert_invalid(
@@ -515,7 +536,7 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                         "vote_purpose": "POPULARITY",
                     }
                 ],
-                context={"votes": {"pop": {"result_ready": True, "scale": "hundred"}}},
+                context={"votes": {"pop": {"scale": "hundred"}}},
             ),
             "VOTE_PURPOSE",
         )
@@ -532,7 +553,7 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                         "vote_purpose": "SCORE_COMPONENT",
                     }
                 ],
-                context={"votes": {"pop": {"result_ready": True, "scale": "ten"}}},
+                context={"votes": {"pop": {"scale": "ten"}}},
             ),
             "VOTE_NO_NORM",
         )
@@ -552,7 +573,6 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                 context={
                     "votes": {
                         "pop": {
-                            "result_ready": True,
                             "scale": "ten",
                             "normalization": {"method": "minmax"},
                         }
@@ -853,6 +873,110 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         frozen = freeze_ruleset_version(version, admin)
         frozen.refresh_from_db()
         self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+        self.assertTrue(frozen.execution_plan)
+
+    def test_bound_freeze_2025_yuan_compe_zero_ballots(self):
+        """M1-R8 (P0-2/P0-3): a 2025 院十佳-style ruleset (R1-R4 + a 0-ballot audience
+        VoteSession) must freeze.
+
+        0 ballots is a freeze-legal pre-contest state — whether a VoteSession has votes is
+        a runtime resolver HOLD condition, never a Freeze gate — and a 30+30+20+20 rubric
+        is a hundred-mark sheet, not the ten-mark the old single-max heuristic inferred.
+        """
+        from django.utils import timezone
+        from singer_contest.models import (
+            ContestRound,
+            RubricCriterion,
+            ScoringRubric,
+            SingerRegistration,
+        )
+        from voting.models import VoteSession
+
+        admin = self._admin()
+        activity = self.make_activity(is_test_mode=True)
+        ruleset = ContestRuleset.objects.create(activity=activity, name="院十佳", is_test_data=True)
+        # A bound freeze must prove an entry roster (quota) so the composite's top10 select
+        # is verifiable; give it 12 approved singers.
+        for i in range(12):
+            self.make_singer(
+                activity,
+                username=f"rj-entry-{i}",
+                student_id=f"9{i:03d}",
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=True,
+            )
+        round_keys = {}
+        for key, crits in (
+            ("r1", [30, 30, 20, 20]),
+            ("r2", [60, 40]),
+            ("r3", [100]),
+            ("r4", [70, 30]),
+        ):
+            rubric = ScoringRubric.objects.create(
+                activity=activity, name=f"{key}评分", is_test_data=True
+            )
+            for i, m in enumerate(crits):
+                RubricCriterion.objects.create(
+                    rubric=rubric, name=f"标准{i}", max_score=m, is_test_data=True
+                )
+            round_ = ContestRound.objects.create(
+                activity=activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name=key,
+            )
+            round_.rubric = rubric
+            round_.save(update_fields=["rubric"])
+            round_keys[key] = round_.pk
+
+        audience = VoteSession.objects.create(
+            activity=activity,
+            name="观众投票",
+            passcode="0000",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(hours=1),
+            is_test_data=True,
+        )
+        ruleset.round_keys = round_keys
+        ruleset.vote_keys = {"audience1": audience.pk}
+        ruleset.save(update_fields=["round_keys", "vote_keys"])
+
+        definition = json.dumps(
+            _def(
+                [
+                    {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                    {"key": "assess_r2", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                    {
+                        "key": "assess_a1",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "vote_source": "audience1",
+                        "vote_purpose": "SCORE_COMPONENT",
+                    },
+                    {
+                        "key": "stage1",
+                        "type": "AGGREGATE",
+                        "within": ENTRY_KEY,
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "assess_r1", "weight": 0.30},
+                                {"source": "assess_r2", "weight": 0.60},
+                                {"source": "assess_a1", "weight": 0.10},
+                            ],
+                        },
+                    },
+                    {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
+                    {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                ]
+            ),
+            ensure_ascii=False,
+        )
+
+        version = self._draft(ruleset=ruleset, definition=definition)
+        frozen = freeze_ruleset_version(version, admin)
+        frozen.refresh_from_db()
+        self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+        self.assertTrue(frozen.is_current)
         self.assertTrue(frozen.execution_plan)
 
 
