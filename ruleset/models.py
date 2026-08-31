@@ -100,10 +100,15 @@ class ContestRuleset(models.Model):
         ordering = ["-created_at"]
 
     def clean(self):
-        if self.activity_id and bool(self.is_test_data) != runtime_is_test(self.activity):
-            raise ValidationError(
-                "A contest ruleset's test marker must match its activity lifecycle."
-            )
+        if self.activity_id:
+            from core.models import Activity
+
+            if self.activity.activity_type != Activity.Type.SINGER_CONTEST:
+                raise ValidationError("赛制只能绑定歌手比赛活动。")
+            if bool(self.is_test_data) != runtime_is_test(self.activity):
+                raise ValidationError(
+                    "A contest ruleset's test marker must match its activity lifecycle."
+                )
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -141,7 +146,14 @@ class RulesetVersion(models.Model):
         DRAFT = "draft", "草稿"
         FROZEN = "frozen", "已冻结"
 
-    immutable_fields = ("definition", "schema_version", "content_hash", "status", "is_current")
+    immutable_fields = (
+        "definition",
+        "schema_version",
+        "content_hash",
+        "status",
+        "is_current",
+        "binding",
+    )
 
     ruleset = models.ForeignKey(ContestRuleset, on_delete=models.CASCADE, related_name="versions")
     version = models.PositiveIntegerField(default=1, help_text="Ruleset instance version counter")
@@ -150,6 +162,11 @@ class RulesetVersion(models.Model):
     )
     definition = models.TextField(help_text="JSON ruleset definition (typed node graph).")
     content_hash = models.CharField(max_length=64, blank=True)
+    binding = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Freeze-time binding snapshot: {stage_key, round_keys, announcement_blocks}.",
+    )
     execution_plan = models.TextField(
         blank=True, editable=False, help_text="Canonical JSON ExecutionPlan persisted at freeze."
     )

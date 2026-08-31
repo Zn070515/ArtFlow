@@ -638,20 +638,43 @@ def snapshot_fingerprint(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _version_binding(version) -> dict:
+    """The frozen version's binding snapshot, falling back to the ruleset for legacy data.
+
+    A frozen version is self-authoritative: once bound at freeze, the runtime reads the
+    binding from the version and never from the still-mutable :class:`ContestRuleset`
+    fields. Pre-R1 frozen versions carried no snapshot, so we fall back to the ruleset's
+    fields — the data migration backfills those, and this fallback only survives for
+    unmigrated rows.
+    """
+    binding = version.binding or {}
+    if not binding.get("stage_key") and not binding.get("round_keys"):
+        ruleset = version.ruleset
+        if ruleset.round_keys or ruleset.stage_key:
+            binding = {
+                "stage_key": ruleset.stage_key or "",
+                "round_keys": dict(ruleset.round_keys or {}),
+                "announcement_blocks": list(ruleset.announcement_blocks or []),
+            }
+    return binding
+
+
 def bound_ruleset_version_label(contest_round: ContestRound) -> str:
-    """Label the frozen ruleset version bound to a round via round_keys, if any."""
+    """Label the frozen ruleset version bound to a round via its binding snapshot, if any."""
     from ruleset.models import ContestRuleset, RulesetVersion
 
     for ruleset in ContestRuleset.objects.filter(activity_id=contest_round.activity_id):
-        for round_key, round_pk in (ruleset.round_keys or {}).items():
-            if str(round_pk) != str(contest_round.pk):
-                continue
-            version = RulesetVersion.objects.filter(
-                ruleset=ruleset,
-                is_current=True,
-                status=RulesetVersion.Status.FROZEN,
-            ).first()
-            return f"{ruleset.pk}.{version.version}" if version else f"{ruleset.pk}.draft"
+        version = (
+            ruleset.versions.filter(is_current=True, status=RulesetVersion.Status.FROZEN)
+            .order_by("-version")
+            .first()
+        )
+        binding = _version_binding(version) if version is not None else {}
+        if not binding.get("round_keys"):
+            binding = {"round_keys": dict(ruleset.round_keys or {})}
+        for round_pk in binding.get("round_keys", {}).values():
+            if str(round_pk) == str(contest_round.pk):
+                return f"{ruleset.pk}.{version.version}" if version else f"{ruleset.pk}.draft"
     return ""
 
 
@@ -1013,12 +1036,6 @@ def recompute_activity_result(
     )
     if ruleset is None:
         raise ValidationError("该活动尚未绑定可自动重算的赛制。")
-    raw_keys = round_keys or ruleset.round_keys or {}
-    round_ids = list(raw_keys.values())
-    rounds = {r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=activity)}
-    missing = [rid for rid in round_ids if rid not in rounds]
-    if missing:
-        raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     version = (
         ruleset.versions.filter(is_current=True, status=RulesetVersion.Status.FROZEN)
         .order_by("-version")
@@ -1026,11 +1043,21 @@ def recompute_activity_result(
     )
     if version is None:
         raise ValidationError("该赛制没有可用的当前冻结版本。")
+    # The frozen version is authoritative: read its binding snapshot (never the still
+    # mutable ContestRuleset rounding fields), except when round_keys is overridden.
+    binding = _version_binding(version)
+    raw_keys = round_keys if round_keys is not None else binding.get("round_keys") or {}
+    round_ids = list(raw_keys.values())
+    rounds = {r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=activity)}
+    missing = [rid for rid in round_ids if rid not in rounds]
+    if missing:
+        raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     bound = {key: rounds[rid] for key, rid in raw_keys.items()}
+    stage_key = binding.get("stage_key") or ruleset.stage_key or ""
     return run_ruleset(
         version,
         activity,
-        stage_key=ruleset.stage_key,
+        stage_key=stage_key,
         computed_by=computed_by,
         round_keys=bound,
     )
@@ -1056,8 +1083,8 @@ def stage_decisions_by_blocks(stage_result: StageResult) -> list[dict]:
     so a staff member can read the result card top-to-bottom.
     """
     decisions = list(stage_result.decisions.select_related("singer").order_by("rank", "pk"))
-    ruleset = stage_result.ruleset_version.ruleset
-    blocks_config = (ruleset.announcement_blocks or []) if ruleset else []
+    version = stage_result.ruleset_version
+    blocks_config = (_version_binding(version).get("announcement_blocks") or []) if version else []
     by_code: dict[str, list[StageDecision]] = {}
     for decision in decisions:
         by_code.setdefault(decision.outcome_code, []).append(decision)

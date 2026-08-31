@@ -4510,6 +4510,29 @@ class RulesetTemplateLibraryTests(TestCase):
         version = RulesetVersion.objects.get(ruleset=ruleset)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 
+    def test_clone_twice_into_same_activity_avoids_one_current_collision(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+
+        activity = self._clone_activity("院十佳2028")
+        template = RulesetTemplate.objects.get(name="院十佳")
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "赛制A"},
+        )
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "赛制B"},
+        )
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        versions = list(RulesetVersion.objects.filter(ruleset=ruleset).order_by("version"))
+        self.assertEqual(len(versions), 2)
+        self.assertEqual([v.version for v in versions], [1, 2])
+        self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset, is_current=True).count(), 1)
+        latest = versions[-1]
+        latest.refresh_from_db()
+        self.assertTrue(latest.is_current)
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[latest.pk]))
+
     def test_clone_last_year_picks_golden_template_by_name(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
