@@ -110,7 +110,15 @@ def golden_schidui():
 
 
 def golden_xiaofeng():
-    """§12.5 校十佳屏峰 chain as one forward-only graph of generic primitives."""
+    """校十佳屏峰 control-flow demonstration (NOT a verified 2025 historical Golden).
+
+    Expresses the stable control flow — 5 groups direct + remainder R1 top12 + R2 top7 +
+    merge + final groups + manual 0~2/group — and uses ``mode: each_group`` as a
+    demonstrative fill. This is a resolver fixture, not a claim about the real 2025
+    scoring: the verified historical control flow is
+    :func:`historical_xiaofeng_control_flow`, and the unresolved 30/50/20 fallback is
+    :func:`historical_xiaofeng_fallback_unresolved` (validator MUST FAIL).
+    """
     return _d(
         [
             {
@@ -525,7 +533,12 @@ FIRST_BATCH = [
 def _catalog():
     catalog = [
         ("院十佳", GOLDEN_SCHIDUI, "2025 院十佳：15→10→5→3 加权晋级链"),
-        ("校十佳屏峰", GOLDEN_XIAOFENG, "2025 校十佳屏峰：分组直晋 + 复活 + 手动/补足（控制流）"),
+        (
+            "校十佳屏峰",
+            GOLDEN_XIAOFENG,
+            "校十佳屏峰控制流演示（each_group 补足，非 2025 历史 Golden；"
+            "历史确定控制流见『校十佳屏峰_历史控制流』）",
+        ),
         (
             "校十佳屏峰_历史控制流",
             HISTORICAL_XIAOFENG_CONTROL_FLOW,
