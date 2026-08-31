@@ -973,6 +973,12 @@ def run_ruleset(
     manual=None,
 ) -> StageResult:
     """Single generic entry: bind -> resolve -> persist. Returns the StageResult."""
+    from ruleset.models import RulesetVersion
+
+    if version.ruleset.activity_id != activity.pk:
+        raise ValidationError("Ruleset version must belong to the result activity.")
+    if version.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("Only a frozen ruleset version may be executed.")
     inputs = bind_resolve_input(
         version,
         activity,

@@ -231,6 +231,105 @@ class GeneratedDocumentTestDataCleanupTests(TestCase):
         self.assertEqual(counts["singer_registrations"], 1)
 
 
+class M1StageResultTestDataCleanupTests(TestCase):
+    """R0: test-mode cleanup must clear M1 ruleset + stage-result residue, even READY."""
+
+    def setUp(self):
+        self.operator = User.objects.create_user(username="m1-cleanup", password="pass")
+        self.activity = Activity.objects.create(
+            title="R0 Test Activity", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def test_clear_removes_ready_stage_result_and_ruleset(self):
+        import json
+
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from singer_contest.models import StageResult
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="R0规则", is_test_data=True
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {
+                            "key": "assess",
+                            "type": "ASSESS",
+                            "source": "entry",
+                            "round": "r1",
+                        },
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.operator,
+            stage_key="院十佳",
+            status=StageResult.Status.READY,
+            content_hash="abcdef",
+            is_test_data=True,
+        )
+
+        counts = clear_activity_test_data(self.activity, operator=self.operator)
+
+        self.assertEqual(counts["stage_results"], 1)
+        self.assertEqual(counts["contest_rulesets"], 1)
+        self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
+        self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
+
+    def test_leave_test_mode_clears_m1_residue_before_formal(self):
+        import json
+
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from singer_contest.models import StageResult
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="R0规则", is_test_data=True
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {
+                            "key": "assess",
+                            "type": "ASSESS",
+                            "source": "entry",
+                            "round": "r1",
+                        },
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.operator,
+            stage_key="院十佳",
+            status=StageResult.Status.READY,
+            content_hash="ffff",
+            is_test_data=True,
+        )
+
+        leave_test_mode(self.activity, operator=self.operator, clear=True, reason="R0 cleanup")
+
+        self.activity.refresh_from_db()
+        self.assertFalse(self.activity.is_test_mode)
+        self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
+        self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
+
+
 class ActivityLifecycleBulkWriteTests(TestCase):
     def test_queryset_update_rejects_lifecycle_changes(self):
         activity = Activity.objects.create(

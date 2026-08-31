@@ -4661,6 +4661,26 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(ContestRuleset.objects.filter(name="新赛制2026").count(), 1)
         self.assertEqual(created.status, "draft")
 
+    def test_contest_ruleset_create_requires_unlocked_activity(self):
+        """R0: ruleset creation must re-validate the activity lock (DRAFT/FORMAL)."""
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        response = self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "锁定活动禁止建赛制"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_rule_edit_requires_unlocked_activity(self):
+        """R0: ruleset edit must re-validate the activity lock before mutating."""
+        self.activity.is_locked = True
+        self.activity.save(update_fields=["is_locked"])
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "add", "new_type": "ASSESS"},
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_editor_validate_clean_on_acceptance_definition(self):
         response = self.client.post(reverse("staff:ruleset_validate", args=[self.version.pk]))
         self.assertEqual(response.status_code, 200)
