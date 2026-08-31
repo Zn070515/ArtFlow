@@ -76,9 +76,11 @@ from singer_contest.models import (
     StageResult,
 )
 from singer_contest.services import (
+    StaleScoreVersionError,
     _active_judges,
     _eligible_singers,
     apply_scores,
+    apply_scores_if_version,
     finalize_advancement,
     lock_round,
     missing_score_cells,
@@ -1013,39 +1015,30 @@ def round_scores_api(request, pk):
             return JsonResponse({"detail": "单元格缺少 singer_id/judge_id。"}, status=400)
         score_values[(singer_id, judge_id)] = str(cell.get("score", "")).strip()
 
+    # ``apply_scores_if_version`` owns the Activity→Round transaction and its locks;
+    # the view holds no row lock itself (M0 canonical order, §13.2 stale-guard).
     try:
-        with transaction.atomic():
-            locked_round = ContestRound.objects.select_for_update().get(pk=contest_round.pk)
-            if locked_round.status == ContestRound.Status.DRAFT:
-                return JsonResponse({"detail": "请先准备比赛轮次后再录入评分。"}, status=400)
-            if int(base_version) != locked_round.score_version:
-                return JsonResponse(
-                    {**_round_grid_payload(locked_round), "conflict": True}, status=409
-                )
-            try:
-                apply_scores(locked_round, score_values, request.user)
-            except ValidationError as error:
-                return JsonResponse({"detail": error.messages}, status=400)
-            locked_round.refresh_from_db()
-            matrix_complete = not missing_score_cells(locked_round)
-            resolved_status = None
-            if matrix_complete:
-                from singer_contest.services import recompute_activity_result
-
-                try:
-                    stage = recompute_activity_result(locked_round.activity, request.user)
-                except ValidationError:
-                    stage = None
-                resolved_status = stage.status if stage else None
-            return JsonResponse(
-                {
-                    "version": locked_round.score_version,
-                    "matrix_complete": matrix_complete,
-                    "resolved_status": resolved_status,
-                }
-            )
+        result = apply_scores_if_version(
+            contest_round.pk, base_version, score_values, request.user
+        )
+    except StaleScoreVersionError:
+        contest_round.refresh_from_db()
+        return JsonResponse({**_round_grid_payload(contest_round), "conflict": True}, status=409)
+    except ValidationError as error:
+        return JsonResponse({"detail": error.messages}, status=400)
     except PermissionDenied as error:
         return JsonResponse({"detail": str(error)}, status=403)
+
+    resolved_status = None
+    if result["matrix_complete"]:
+        from singer_contest.services import recompute_activity_result
+
+        try:
+            stage = recompute_activity_result(contest_round.activity, request.user)
+        except ValidationError:
+            stage = None
+        resolved_status = stage.status if stage else None
+    return JsonResponse({**result, "resolved_status": resolved_status})
 
 
 @staff_required

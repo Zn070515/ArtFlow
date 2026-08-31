@@ -275,6 +275,35 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "SCALE_MIXED",
         )
 
+    def test_conversion_declared_is_forbidden(self):
+        # §29-30: conversion is schema-approved but unimplemented by the resolver
+        # (which does w*v), so a declared conversion must be a hard ERROR, not silently
+        # skipped as it was before.
+        self._assert_invalid(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
+                    {"key": "b", "type": "ASSESS", "source": ENTRY_KEY, "scale": "ten"},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "a", "weight": 0.5},
+                                {"source": "b", "weight": 0.5},
+                            ],
+                        },
+                        "conversion": {
+                            "to": "hundred",
+                            "conversions": [{"from": "ten", "method": "factor", "factor": 10}],
+                        },
+                    },
+                ]
+            ),
+            "CONVERSION_UNSUPPORTED",
+        )
+
     def test_scale_undeclared_is_warn_not_error(self):
         report, _ = compile_definition(
             _def(
@@ -396,6 +425,58 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                 context={"entry_size": 20},
             ),
             "TIE_POLICY_UNSUPPORTED",
+        )
+
+    def test_tie_auto_break_is_supported(self):
+        report, plan = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a"},
+                    {
+                        "key": "s",
+                        "type": "SELECT",
+                        "source": "r",
+                        "count": 5,
+                        "tie_policy": "auto_break",
+                    },
+                ],
+                context={"entry_size": 20},
+            )
+        )
+        self.assertTrue(report.passes())
+        self.assertIn("auto_break", plan.policies["tie"].values())
+
+    def test_branch_is_unsupported_runtime(self):
+        # §27-28: BRANCH is not executable by the resolver, so the compiler must refuse
+        # to validate/freeze it — otherwise a definition validates, freezes, then blows
+        # up on-stage (Compiler says executable, Runtime says no).
+        self._assert_invalid(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {
+                        "key": "b",
+                        "type": "BRANCH",
+                        "source": "a",
+                        "branches": [{"when": {"gte": 60}, "into": "x"}],
+                    },
+                ],
+                context={"entry_size": 20},
+            ),
+            "NODE_UNSUPPORTED_RUNTIME",
+        )
+
+    def test_award_is_unsupported_runtime(self):
+        self._assert_invalid(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "w", "type": "AWARD", "source": "a", "award": "best"},
+                ],
+                context={"entry_size": 20},
+            ),
+            "NODE_UNSUPPORTED_RUNTIME",
         )
 
     def test_tie_review_is_nonblocking(self):

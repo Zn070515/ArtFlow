@@ -332,6 +332,22 @@ def _check_weight(agg: dict, node_key: str, issues: list[ReportIssue]) -> None:
         )
 
 
+def _check_conversion(node: dict, issues: list[ReportIssue]) -> None:
+    # §29-30: scale conversion is declared in the schema but NOT implemented by the
+    # resolver, which silently does ``w * v``. Deciding or ignoring it yields wrong
+    # math, so forbid it outright (roadmap option B) until a real conversion exists.
+    if node.get("conversion"):
+        issues.append(
+            ReportIssue(
+                "CONVERSION_UNSUPPORTED",
+                Severity.ERROR,
+                node["key"],
+                "conversion",
+                "分数制换算当前未实现，禁止声明 conversion。",
+            )
+        )
+
+
 def _check_scale(
     node: dict, prov: dict, by_key: dict, ctx: dict, issues: list[ReportIssue]
 ) -> None:
@@ -346,8 +362,6 @@ def _check_scale(
         )
         return
     if len(set(resolved)) == 1:
-        return
-    if node.get("conversion"):
         return
     if any(s == "unknown" for s in scales):
         _warn_scale(
@@ -563,13 +577,12 @@ def _feeds_decisive(by_key: dict[str, dict], key: str) -> bool:
 
 
 def _tie_is_supported(node: dict, policy: str) -> bool:
-    if policy == "auto_break":
-        return True
-    if policy == "extra_round":
-        return bool(node.get("extra_round"))
-    if policy == "score_fallback":
-        return bool(node.get("fallback_component"))
-    if policy == "manual":
+    # §31: only strategies the resolver truly executes are supported. ``auto_break``
+    # deterministically takes the top-count; ``manual`` flags REVIEW for a human
+    # ManualDecision re-resolve loop. ``extra_round``/``score_fallback`` are declared but
+    # never actually run (they degrade to a review), so they must be a hard
+    # TIE_POLICY_UNSUPPORTED error rather than silently accepted.
+    if policy in ("auto_break", "manual"):
         return True
     return False
 
@@ -781,9 +794,20 @@ def compile_definition(
 
     for node in nodes:
         prov[node["key"]] = _resolve(node, prov, by_key, ctx)
+        if node["type"] in ("BRANCH", "AWARD"):
+            issues.append(
+                ReportIssue(
+                    "NODE_UNSUPPORTED_RUNTIME",
+                    Severity.ERROR,
+                    node["key"],
+                    "type",
+                    "该节点类型当前未实现运行时语义，禁止编译/冻结。",
+                )
+            )
         if node["type"] == "AGGREGATE":
             _check_weight(node["aggregate"], node["key"], issues)
         _check_scale(node, prov, by_key, ctx, issues)
+        _check_conversion(node, issues)
         _check_judges(node, prov, ctx, issues)
         _check_quota(node, prov, by_key, ctx, issues)
         _check_pair(node, prov, ctx, issues)

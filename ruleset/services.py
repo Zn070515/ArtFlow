@@ -111,6 +111,8 @@ def freeze_ruleset_version(
     version is already frozen or the binding is invalid; :class:`RulesetInvalidError` if
     compilation reports any ERROR.
     """
+    lock_activity_for_action(version.ruleset.activity)
+    ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
     locked = (
         RulesetVersion.objects.select_for_update()
         .select_related("ruleset__activity")
@@ -122,7 +124,6 @@ def freeze_ruleset_version(
     if locked.status == RulesetVersion.Status.FROZEN:
         raise ValidationError("该赛制版本已冻结。")
 
-    lock_activity_for_action(locked.ruleset.activity)
     report, plan = compile_version(locked)
     if not report.passes():
         raise RulesetInvalidError(report, plan)
@@ -177,6 +178,8 @@ def supersede_ruleset_version(
     through the base manager so the one-current partial unique constraint holds). Freezing
     the successor later re-promotes it to current FROZEN.
     """
+    lock_activity_for_action(version.ruleset.activity)
+    ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
     locked = (
         RulesetVersion.objects.select_for_update()
         .select_related("ruleset__activity")
@@ -184,7 +187,6 @@ def supersede_ruleset_version(
     )
     if locked.status != RulesetVersion.Status.FROZEN:
         raise ValidationError("只有已冻结的赛制版本可以被继任覆盖。")
-    lock_activity_for_action(locked.ruleset.activity)
     last = locked.ruleset.versions.order_by("-version").values_list("version", flat=True).first()
     next_version = (last or 0) + 1
     RulesetVersion._base_manager.filter(ruleset_id=locked.ruleset_id, is_current=True).update(
@@ -212,6 +214,7 @@ def create_ruleset_version(
     numbering uses ``max(version)+1`` to avoid the unique ``(ruleset, version)``
     collision when a ruleset — or an activity's ruleset — is cloned repeatedly.
     """
+    lock_activity_for_action(ruleset.activity)
     locked = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
     last = locked.versions.order_by("-version").values_list("version", flat=True).first()
     next_version = (last or 0) + 1

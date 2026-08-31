@@ -522,6 +522,54 @@ def apply_scores(
     return changes
 
 
+class StaleScoreVersionError(Exception):
+    """Raised when a rapid-entry save's ``base_version`` no longer matches the round.
+
+    Signals a stale editor so the caller can surface a 409 and a fresh grid instead of
+    silently overwriting another staff member's column.
+    """
+
+    def __init__(self, current_version: int):
+        self.current_version = current_version
+        super().__init__(f"评分已过期，当前版本为 {current_version}。")
+
+
+@transaction.atomic
+def apply_scores_if_version(
+    round_id: int,
+    base_version: int | None,
+    score_values: Mapping[tuple[int, int], object],
+    operator,
+    *,
+    note: str = "",
+) -> dict:
+    """Apply a sparse cell save under the M0 Activity→Round lock order (M1-H).
+
+    The version check, score application, and version bump all happen inside one
+    transaction that takes the Activity lock first, then the ContestRound lock — never
+    ``Round → Activity``. A ``base_version`` mismatch raises
+    :class:`StaleScoreVersionError` (409) rather than being written over. Returns the
+    new ``score_version`` and whether the matrix is now complete.
+    """
+    if base_version is None:
+        raise ValidationError("缺少 base_version。")
+    contest_round = ContestRound.objects.get(pk=round_id)
+    lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=round_id)
+    )
+    if locked_round.status == ContestRound.Status.DRAFT:
+        raise ValidationError("请先准备比赛轮次后再录入评分。")
+    if int(base_version) != locked_round.score_version:
+        raise StaleScoreVersionError(locked_round.score_version)
+    apply_scores(locked_round, score_values, operator, note=note)
+    locked_round.refresh_from_db()
+    return {
+        "version": locked_round.score_version,
+        "matrix_complete": not missing_score_cells(locked_round),
+    }
+
+
 @transaction.atomic
 def lock_round(contest_round: ContestRound, operator) -> ContestRound:
     """Freeze a prepared/scoring round once its score matrix is complete."""
