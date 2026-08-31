@@ -610,7 +610,7 @@ class RulesetLifecycleInvariantTests(_RulesetModelBase):
 class RulesetVersionConstraintTests(_RulesetModelBase):
     def test_duplicate_version_for_ruleset_rejected(self):
         ruleset = self.make_ruleset()
-        RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF, is_current=True)
+        RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF, is_current=False)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 RulesetVersion.objects.create(
@@ -619,24 +619,51 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
 
     def test_second_current_for_ruleset_rejected(self):
         ruleset = self.make_ruleset()
-        RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF, is_current=True)
+        RulesetVersion.objects.create(
+            ruleset=ruleset,
+            version=1,
+            definition=DEF,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 RulesetVersion.objects.create(
-                    ruleset=ruleset, version=2, definition=DEF, is_current=True
+                    ruleset=ruleset,
+                    version=2,
+                    definition=DEF,
+                    is_current=True,
+                    status=RulesetVersion.Status.FROZEN,
                 )
 
     def test_sequential_versions_single_current_ok(self):
         ruleset = self.make_ruleset()
         RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF, is_current=False)
-        RulesetVersion.objects.create(ruleset=ruleset, version=2, definition=DEF, is_current=True)
+        RulesetVersion.objects.create(
+            ruleset=ruleset,
+            version=2,
+            definition=DEF,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
         self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset, is_current=True).count(), 1)
         self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset).count(), 2)
+
+    def test_draft_cannot_be_current(self):
+        # M1-R9 (§四): ``is_current`` means *current official FROZEN authority*. A DRAFT
+        # version is a draft editor, never official authority, so the DB CHECK forbids a
+        # current-DRAFT row (a historical ``default=True`` could once mint one).
+        ruleset = self.make_ruleset()
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                RulesetVersion.objects.create(
+                    ruleset=ruleset, version=1, definition=DEF, is_current=True
+                )
 
     def test_content_hash_computed_on_save(self):
         ruleset = self.make_ruleset()
         version = RulesetVersion.objects.create(
-            ruleset=ruleset, version=1, definition=DEF, is_current=True
+            ruleset=ruleset, version=1, definition=DEF, is_current=False
         )
         self.assertTrue(version.content_hash)
         self.assertEqual(version.content_hash, content_hash(DEF))
@@ -649,7 +676,11 @@ class RulesetTemplateIndependenceTests(_RulesetModelBase):
         ruleset.source_template = template
         ruleset.save(update_fields=["source_template"])
         version = RulesetVersion.objects.create(
-            ruleset=ruleset, version=1, definition=DEF, is_current=True
+            ruleset=ruleset,
+            version=1,
+            definition=DEF,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
         )
         template.delete()
         ruleset.refresh_from_db()

@@ -829,7 +829,7 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         definition=DEF,
         version=1,
         *,
-        is_current=True,
+        is_current=False,
         status=RulesetVersion.Status.DRAFT,
     ):
         ruleset = ruleset or self.make_ruleset()
@@ -1110,7 +1110,9 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
         ruleset.save()
         return ruleset, round_
 
-    def _draft_on(self, ruleset, *, version=1, is_current=True, status=RulesetVersion.Status.DRAFT):
+    def _draft_on(
+        self, ruleset, *, version=1, is_current=False, status=RulesetVersion.Status.DRAFT
+    ):
         return RulesetVersion.objects.create(
             ruleset=ruleset,
             version=version,

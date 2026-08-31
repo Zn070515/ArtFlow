@@ -195,7 +195,11 @@ class RulesetVersion(models.Model):
         blank=True, editable=False, help_text="Canonical JSON ExecutionPlan persisted at freeze."
     )
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
-    is_current = models.BooleanField(default=True)
+    # M1-R9 (§四): ``is_current`` means *current official FROZEN authority*. A fresh
+    # version is a DRAFT draft, so it must be non-current until frozen — the old
+    # default=True silently made a bare ``create()`` a "Draft official authority" that
+    # could shadow the next real freeze's partial-unique and inject a false authority.
+    is_current = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -227,6 +231,13 @@ class RulesetVersion(models.Model):
                 fields=["ruleset"],
                 condition=Q(is_current=True),
                 name="rulesetversion_one_current_per_ruleset",
+            ),
+            # M1-R9 (§四): a DB invariant — only a FROZEN version may be marked
+            # current. A DRAFT ``is_current=True`` row (from the historical
+            # ``default=True``) is invalid authority and must be demoted at migration.
+            models.CheckConstraint(
+                condition=Q(is_current=False) | Q(status="frozen"),
+                name="rulesetversion_current_implies_frozen",
             ),
         ]
 
