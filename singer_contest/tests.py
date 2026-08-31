@@ -2141,7 +2141,7 @@ class StageResultModelTests(TestCase):
             "ruleset_version": self.version,
             "created_by": self.user,
             "stage_key": "院十佳",
-            "content_hash": self.version.content_hash,
+            "ruleset_hash": self.version.content_hash,
             "is_test_data": True,
         }
         payload.update(overrides)
@@ -2152,7 +2152,7 @@ class StageResultModelTests(TestCase):
         self.assertEqual(result.activity, self.activity)
         self.assertEqual(result.ruleset_version, self.version)
         self.assertEqual(result.status, StageResult.Status.HOLD)
-        self.assertTrue(result.content_hash)
+        self.assertTrue(result.ruleset_hash)
         self.assertEqual(result.schema_version, 1)
 
     def test_children_roundtrip_with_parent(self):
@@ -2305,8 +2305,10 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(stage.status, StageResult.Status.READY)
         self.assertEqual(stage.stage_key, "选拔")
         self.assertEqual(stage.ruleset_version, self.version)
-        self.assertTrue(stage.content_hash)
+        self.assertTrue(stage.ruleset_hash)
+        self.assertTrue(stage.input_fingerprint)
         self.assertEqual(stage.plan_version, 1)
+        self.assertEqual(stage.result_version, 1)
         self.assertEqual(stage.decisions.count(), 3)
         self.assertEqual(stage.composites.count(), 0)
         for decision in stage.decisions.all():
@@ -2363,6 +2365,88 @@ class StageResolverBindingTests(TestCase):
         )
         self.assertEqual(stage.ruleset_version, self.version)
         self.assertEqual(stage.status, StageResult.Status.READY)
+
+    def test_persist_idempotent_same_input_reuses_stage(self):
+        """§18: identical ruleset + input → idempotent reuse, no duplicate/version bump."""
+        from .services import run_ruleset
+
+        first = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        second = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(second.result_version, 1)
+        stage_count = StageResult.objects.filter(activity=self.activity, stage_key="选拔").count()
+        self.assertEqual(stage_count, 1)
+        self.assertEqual(second.decisions.count(), 3)
+
+    def test_persist_changed_input_bumps_result_version(self):
+        """§18: an input change yields a new input_fingerprint and a new versioned result."""
+        from .services import run_ruleset
+
+        first = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(first.result_version, 1)
+        # Correct a single score (the §16 scenario): the raw facts change.
+        rec = ScoreRecord.objects.filter(round=self.round).first()
+        rec.score += Decimal("0.50")
+        rec.save()
+        second = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(second.result_version, 2)
+        self.assertEqual(
+            StageResult.objects.filter(activity=self.activity, stage_key="选拔").count(), 2
+        )
+        # The first (READY) result stays immutable; the new one is also READY here.
+        immutable_ready = StageResult.objects.filter(
+            pk=first.pk, status=StageResult.Status.READY
+        ).exists()
+        self.assertTrue(immutable_ready)
+
+    def test_persist_ready_same_input_returned_unchanged(self):
+        """§16: recomputing an already-READY result over identical facts returns it as-is."""
+        from .services import run_ruleset
+
+        first = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        refreshed = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(refreshed.pk, first.pk)
+        self.assertEqual(refreshed.status, StageResult.Status.READY)
+        stage_count = StageResult.objects.filter(activity=self.activity, stage_key="选拔").count()
+        self.assertEqual(stage_count, 1)
+        self.assertEqual(first.decisions.count(), 3)
 
 
 def _schidui_definition():
@@ -2537,7 +2621,8 @@ class GoldenSchiduiDbTests(TestCase):
             round_keys=self._round_keys(),
             vote_scores=self._vote_scores(),
         )
-        self.assertTrue(stage.content_hash)
+        self.assertTrue(stage.ruleset_hash)
+        self.assertTrue(stage.input_fingerprint)
         self.assertEqual(stage.schema_version, 1)
         self.assertEqual(stage.result_version, 1)
         decision = stage.decisions.first()

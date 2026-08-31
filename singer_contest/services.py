@@ -14,7 +14,7 @@ from core.policies import ActivityAction
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Max, QuerySet
 from ruleset.compiler import ExecutionPlan, compile_version
 from ruleset.resolver import ResolveInput, resolve
 
@@ -921,7 +921,15 @@ def _plan_from_version(version) -> ExecutionPlan:
 
 @transaction.atomic
 def persist_stage_result(version, activity, result, *, stage_key, computed_by):
-    """Write a :class:`ResolveResult` into StageResult + decisions + composites."""
+    """Write a :class:`ResolveResult` into StageResult + decisions + composites.
+
+    Idempotency + versioning: the identity is ``(ruleset_hash, input_fingerprint)``.
+    Recomputing the same frozen ruleset over the same raw facts reuses the existing
+    StageResult (a READY one is returned as-is since it is immutable); any input change
+    produces a new input_fingerprint and therefore a new versioned StageResult whose
+    ``result_version`` is one past the stage's latest. This is what makes repeated
+    recompute safe (no IntegrityError, no silent overwrite of a published result).
+    """
     if version.ruleset.activity_id != activity.pk:
         raise ValidationError("Ruleset version must belong to the result activity.")
     is_test = runtime_is_test(activity)
@@ -930,6 +938,35 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     if missing:
         raise ValidationError(f"无法将结果写回选手：{missing}")
 
+    ruleset_hash = result.content_hash
+    fingerprint = result.input_fingerprint
+    existing = StageResult.objects.filter(
+        activity=activity,
+        stage_key=stage_key,
+        ruleset_hash=ruleset_hash,
+        input_fingerprint=fingerprint,
+    ).first()
+    if existing is not None:
+        if existing.status == StageResult.Status.READY:
+            return existing
+        # Identical facts over a still-mutable (HOLD/REVIEW) row: refresh in place.
+        # A READY stage is immutable and protected by the queryset guard, so it is
+        # never reached here (identical input implies the same status).
+        existing.status = result.status.value
+        existing.reasons = list(result.reasons)
+        existing.created_by = computed_by
+        existing.save(update_fields=["status", "reasons", "created_by"])
+        StageDecision.objects.filter(stage_result=existing).delete()
+        CompositeResult.objects.filter(stage_result=existing).delete()
+        _create_children(existing, result, singer_by_key, is_test)
+        return existing
+
+    last_version = (
+        StageResult.objects.filter(activity=activity, stage_key=stage_key).aggregate(
+            m=Max("result_version")
+        )["m"]
+        or 0
+    )
     stage = StageResult.objects.create(
         activity=activity,
         ruleset_version=version,
@@ -937,12 +974,19 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         stage_key=stage_key,
         status=result.status.value,
         reasons=list(result.reasons),
-        content_hash=result.content_hash,
+        ruleset_hash=ruleset_hash,
+        input_fingerprint=fingerprint,
         schema_version=result.schema_version,
         plan_version=result.plan_version,
-        result_version=result.result_version,
+        result_version=last_version + 1,
         is_test_data=is_test,
     )
+    _create_children(stage, result, singer_by_key, is_test)
+    return stage
+
+
+def _create_children(stage, result, singer_by_key, is_test):
+    """Bulk-create a result's decisions + composites onto a stage result."""
     StageDecision.objects.bulk_create(
         [
             StageDecision(
@@ -980,7 +1024,6 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
             if c.contestant in singer_by_key
         ]
     )
-    return stage
 
 
 @transaction.atomic

@@ -525,6 +525,25 @@ class ResolverDeterminismTests(SimpleTestCase):
         self.assertEqual(result.decisions[0].content_hash, "plan-hash")
         self.assertEqual(result.decisions[0].plan_version, 1)
 
+    def test_resolve_sets_input_fingerprint(self):
+        """§18: the raw-facts snapshot the resolver consumed is fingerprinted on the result."""
+        inputs = ResolveInput(
+            roster=("c1", "c2"),
+            round_scores=_rs({"r1": {"c1": [10], "c2": [9]}}),
+        )
+        definition = _def([{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}])
+        plain = resolve(definition, inputs)
+        self.assertTrue(plain.input_fingerprint)
+        # Deterministic: unchanged facts → the same fingerprint (idempotency key).
+        again = resolve(definition, inputs)
+        self.assertEqual(plain.input_fingerprint, again.input_fingerprint)
+        # Facts changed → a different fingerprint and therefore a new result identity.
+        changed = resolve(
+            definition,
+            ResolveInput(roster=("c1", "c2"), round_scores=_rs({"r1": {"c1": [10], "c2": [8]}})),
+        )
+        self.assertNotEqual(plain.input_fingerprint, changed.input_fingerprint)
+
 
 class ResolverUnsupportedTests(SimpleTestCase):
     def test_branch_raises(self):

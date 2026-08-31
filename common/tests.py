@@ -273,7 +273,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             created_by=self.operator,
             stage_key="院十佳",
             status=StageResult.Status.READY,
-            content_hash="abcdef",
+            ruleset_hash="abcdef",
             is_test_data=True,
         )
 
@@ -317,7 +317,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             created_by=self.operator,
             stage_key="院十佳",
             status=StageResult.Status.READY,
-            content_hash="ffff",
+            ruleset_hash="ffff",
             is_test_data=True,
         )
 

@@ -15,6 +15,7 @@ BRANCH and AWARD are not executed this stage (raise :class:`UnsupportedNodeError
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -139,6 +140,7 @@ class ResolveResult:
     composites: tuple[CompositeResult, ...] = ()
     node_values: Mapping[str, object] = field(default_factory=dict)
     content_hash: str = ""
+    input_fingerprint: str = ""
     schema_version: int = 0
     plan_version: int = 0
     result_version: int = RESULT_VERSION
@@ -151,6 +153,7 @@ class ResolveResult:
             "composites": [c.to_dict() for c in self.composites],
             "node_values": self.node_values,
             "content_hash": self.content_hash,
+            "input_fingerprint": self.input_fingerprint,
             "schema_version": self.schema_version,
             "plan_version": self.plan_version,
             "result_version": self.result_version,
@@ -165,6 +168,7 @@ class ResolveResult:
             composites=tuple(CompositeResult.from_dict(c) for c in data["composites"]),
             node_values=data["node_values"],
             content_hash=data.get("content_hash", ""),
+            input_fingerprint=data.get("input_fingerprint", ""),
             schema_version=data.get("schema_version", 0),
             plan_version=data.get("plan_version", 0),
             result_version=data.get("result_version", RESULT_VERSION),
@@ -195,6 +199,27 @@ def _value_to_jsonable(value):
     if isinstance(value, Decimal):
         return str(value)
     return value
+
+
+def inputs_fingerprint(inputs: ResolveInput) -> str:
+    """sha256 of the canonical raw-facts snapshot a :class:`ResolveInput` captures.
+
+    The identity of a result is ``(ruleset_hash, input_fingerprint)``: recomputing the
+    same ruleset over the same raw facts is idempotent (reuse), while any change to the
+    roster, round scores, vote scores, group map, or manual decisions yields a new
+    fingerprint and therefore a new versioned :class:`ResolveResult`.
+    """
+    payload = _value_to_jsonable(
+        {
+            "roster": list(inputs.roster),
+            "round_scores": dict(inputs.round_scores),
+            "vote_scores": dict(inputs.vote_scores),
+            "group_of": dict(inputs.group_of),
+            "manual": dict(inputs.manual),
+        }
+    )
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class _Stage:
@@ -585,6 +610,7 @@ def resolve(definition, inputs: ResolveInput, plan=None) -> ResolveResult:
         k: _value_to_jsonable(v) for k, v in sorted(st.values.items(), key=lambda kv: kv[0])
     }
     decisions = _build_decisions(st, st.roster, plan_hash, schema_version, plan_version)
+    fingerprint = inputs_fingerprint(inputs)
     return ResolveResult(
         status=_final_status(st),
         reasons=tuple(st.hold + st.review),
@@ -592,6 +618,7 @@ def resolve(definition, inputs: ResolveInput, plan=None) -> ResolveResult:
         composites=tuple(st.composites),
         node_values=node_values,
         content_hash=plan_hash,
+        input_fingerprint=fingerprint,
         schema_version=schema_version,
         plan_version=plan_version,
         result_version=RESULT_VERSION,
