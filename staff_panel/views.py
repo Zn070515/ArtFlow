@@ -1509,33 +1509,6 @@ def export_center(request):
 
 
 @staff_required
-def _legacy_excel_material_checklist(request, activity_id):
-    activity = get_object_or_404(Activity, pk=activity_id)
-    wb = Workbook()
-    ws = _active_worksheet(wb)
-    ws.title = "材料清单"
-    ws.append(["姓名", "项目", "状态"])
-    checks = MaterialCheck.objects.filter(
-        singer_registration__activity=activity,
-        singer_registration__is_test_data=runtime_is_test(activity),
-    )
-    for c in checks.select_related("singer_registration"):
-        ws.append(
-            [
-                c.singer_registration.name if c.singer_registration else "",
-                c.item_name,
-                c.get_status_display(),
-            ]
-        )
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    response["Content-Disposition"] = "attachment; filename=material_checklist.xlsx"
-    wb.save(response)
-    return response
-
-
-@staff_required
 def excel_material_checklist(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     wb = Workbook()
