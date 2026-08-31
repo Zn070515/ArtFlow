@@ -86,6 +86,14 @@ class ContestRuleset(models.Model):
         blank=True,
         help_text="Handcard blocks: list of {label, outcome_codes} for the result board.",
     )
+    announcement_blocks_by_checkpoint = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Checkpoint-specific handcard blocks: {checkpoint_key: [{label, "
+            "outcome_codes}, ...]}. Overrides announcement_blocks for that stage."
+        ),
+    )
     vote_keys = models.JSONField(
         default=dict,
         blank=True,

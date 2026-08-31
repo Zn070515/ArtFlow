@@ -4417,18 +4417,47 @@ class ResultBoardTests(TestCase):
         self.assertContains(response, "直接晋级")
 
     def test_stage_result_confirm_flips_to_confirmed(self):
-        """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state."""
+        """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state.
+
+        The stage is built through the real resolver (M1-R6 finality): the frozen version
+        records its binding so confirm can recompute the current input fingerprint, and
+        the consumed round is locked so finality checks hold.
+        """
+        from ruleset.models import RulesetVersion
+        from singer_contest.models import ContestRound, Judge, ScoreRecord
+        from singer_contest.services import run_ruleset
+
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         self.activity.save(update_fields=["phase"])
-        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-conf")
-        StageDecision.objects.create(
-            stage_result=ready,
-            singer=self._singer(7),
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("91.00"),
-            is_test_data=False,
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="初赛",
         )
+        judge = Judge.objects.create(activity=self.activity, name="评委甲")
+        singer = self._singer(7)
+        ScoreRecord.objects.create(
+            round=contest_round, singer=singer, judge=judge, score=Decimal("91.00")
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self._DEFINITION,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "院十佳", "round_keys": {"r1": contest_round.pk}},
+        )
+        contest_round.is_locked = True
+        contest_round.status = ContestRound.Status.LOCKED
+        contest_round.save(update_fields=["is_locked", "status"])
+        ready = run_ruleset(
+            version,
+            self.activity,
+            stage_key="院十佳",
+            computed_by=self.staff,
+            round_keys={"r1": contest_round},
+        )
+        self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
         response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))
         ready.refresh_from_db()
@@ -4450,6 +4479,29 @@ class ResultBoardTests(TestCase):
         hold.refresh_from_db()
         self.assertEqual(hold.status, StageResult.Status.HOLD)
         self.assertIsNone(hold.confirmed_by)
+
+    def test_stage_result_unlock_requires_admin_and_reverts(self):
+        """§38: only an admin may unlock a confirmed stage; it reverts to READY."""
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        confirmed = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-unlock")
+        # A non-admin staff member is denied and the lock is preserved.
+        self.client.post(reverse("staff:stage_result_unlock", args=[confirmed.pk]), {"note": "x"})
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        # An admin can unlock (with the step-up admin verification), reverting the marker.
+        admin = User.objects.create_user(
+            username="result-unlock-admin", password="pass", role=User.Role.ADMIN
+        )
+        login_admin(self.client, admin)
+        response = self.client.post(
+            reverse("staff:stage_result_unlock", args=[confirmed.pk]), {"note": "核对录错了"}
+        )
+        self.assertRedirects(response, reverse("staff:stage_result_detail", args=[confirmed.pk]))
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertIsNone(confirmed.confirmed_by)
+        self.assertIsNone(confirmed.confirmed_at)
 
     def test_board_shows_ready_to_confirm_banner(self):
         """§36-37: a machine-computed (not yet 核定) stage shows 待核定, not 可抄手卡."""
@@ -4918,6 +4970,9 @@ class RulesetEditorTests(TestCase):
                 "vote_keys": json.dumps({"audience": vote.pk}),
                 "group_keys": json.dumps({"initial_group": round_.pk}),
                 "announcement_blocks": json.dumps([{"label": "晋级", "outcome_codes": ["direct"]}]),
+                "announcement_blocks_by_checkpoint": json.dumps(
+                    {"stage2": [{"label": "赛段专属", "outcome_codes": ["advanced"]}]}
+                ),
             },
         )
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
@@ -4929,6 +4984,10 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(
             self.ruleset.announcement_blocks,
             [{"label": "晋级", "outcome_codes": ["direct"]}],
+        )
+        self.assertEqual(
+            self.ruleset.announcement_blocks_by_checkpoint,
+            {"stage2": [{"label": "赛段专属", "outcome_codes": ["advanced"]}]},
         )
 
     def test_ruleset_editor_bind_form_prerenders_json(self):

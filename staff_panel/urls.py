@@ -115,6 +115,11 @@ urlpatterns = [
         views.stage_result_confirm,
         name="stage_result_confirm",
     ),
+    path(
+        "stage-results/<int:pk>/unlock/",
+        views.stage_result_unlock,
+        name="stage_result_unlock",
+    ),
     path("ruleset-templates/", views.ruleset_template_list, name="ruleset_template_list"),
     path(
         "ruleset-templates/<int:pk>/",

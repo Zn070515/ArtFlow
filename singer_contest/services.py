@@ -17,7 +17,15 @@ from django.db import transaction
 from django.db.models import Max, QuerySet
 from django.utils import timezone
 from ruleset.compiler import ExecutionPlan, compile_version
-from ruleset.resolver import ResolveInput, ResolverState, resolve, resolve_to_checkpoint
+from ruleset.resolver import (
+    ResolveInput,
+    ResolverState,
+    checkpoint_inputs_fingerprint,
+    inputs_fingerprint,
+    resolve,
+    resolve_to_checkpoint,
+    stage_consumed_scopes,
+)
 
 from .models import (
     CompositeResult,
@@ -725,6 +733,9 @@ def _version_binding(version) -> dict:
                 "vote_keys": dict(ruleset.vote_keys or {}),
                 "group_keys": dict(ruleset.group_keys or {}),
                 "announcement_blocks": list(ruleset.announcement_blocks or []),
+                "announcement_blocks_by_checkpoint": dict(
+                    ruleset.announcement_blocks_by_checkpoint or {}
+                ),
             }
     return binding
 
@@ -1190,6 +1201,85 @@ def _create_children(stage, result, singer_by_key, is_test):
     )
 
 
+def _definition_checkpoint_keys(definition) -> set[str]:
+    obj = definition if isinstance(definition, dict) else json.loads(definition)
+    return {c["key"] for c in (obj.get("checkpoints") or ())}
+
+
+def _stage_is_checkpoint(version, stage_key: str) -> bool:
+    """True when ``stage_key`` names a declared checkpoint in the frozen definition."""
+    return stage_key in _definition_checkpoint_keys(version.definition)
+
+
+def _bound_inputs(version, activity) -> tuple[ResolveInput, dict]:
+    """Rebuild the current :class:`ResolveInput` from the frozen version's binding.
+
+    This is the authority reference for staleness re-checking: it re-reads the raw
+    facts (round scores, vote counts, group map, manual picks) exactly as the runtime
+    would today. The version's frozen binding drives which rounds/votes/groups are read,
+    so a binding-only change already alters the recomputed fingerprint.
+    """
+    binding = _version_binding(version)
+    raw_keys = binding.get("round_keys") or {}
+    round_ids = list(raw_keys.values())
+    rounds = {r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=activity)}
+    bound = {key: rounds[rid] for key, rid in raw_keys.items()}
+    inputs = bind_resolve_input(
+        version,
+        activity,
+        round_keys=bound,
+        vote_scores=_source_vote_scores(activity, binding),
+        group_of=_source_group_of(activity, binding),
+        manual=_source_manual(version, activity),
+    )
+    return inputs, binding
+
+
+def _current_input_fingerprint(version, activity, stage_key: str) -> str:
+    """The input fingerprint the current raw facts would produce for this stage.
+
+    Checkpoint stages scope the projection to the closure's consumed keys (so future
+    stages never shift an earlier stage's identity); full (non-checkpoint) stages use
+    the whole-input fingerprint. A mismatch against a stored ``input_fingerprint`` means
+    the result is stale.
+    """
+    inputs, _ = _bound_inputs(version, activity)
+    if _stage_is_checkpoint(version, stage_key):
+        return checkpoint_inputs_fingerprint(version.definition, inputs, stage_key)
+    return inputs_fingerprint(inputs)
+
+
+def _ensure_stage_dependencies_final(version, activity, stage_key: str) -> None:
+    """Require the raw facts a stage consumed to be at rest before it can be frozen.
+
+    A CONFIRMED stage is the point of no return, so the scores it read must already be
+    locked. Round sources require the bound :class:`ContestRound` to be locked; vote
+    sources require the bound :class:`VoteSession` to be locked. Group maps are a view
+    over a round, so their round lock is covered above.
+    """
+    from voting.models import VoteSession
+
+    binding = _version_binding(version)
+    checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
+    round_keys, vote_keys, _, _ = stage_consumed_scopes(version.definition, checkpoint)
+    bound_round_ids = [
+        rid for k, rid in (binding.get("round_keys") or {}).items() if k in round_keys
+    ]
+    if bound_round_ids:
+        open_rounds = ContestRound.objects.filter(
+            pk__in=bound_round_ids, activity=activity
+        ).exclude(is_locked=True)
+        if open_rounds.exists():
+            raise ValidationError("该赛段依赖的淘汰轮次尚未锁定，请先锁定轮次后再核定。")
+    bound_vote_ids = [vid for k, vid in (binding.get("vote_keys") or {}).items() if k in vote_keys]
+    if bound_vote_ids:
+        open_votes = VoteSession.objects.filter(pk__in=bound_vote_ids, activity=activity).exclude(
+            is_locked=True
+        )
+        if open_votes.exists():
+            raise ValidationError("该赛段依赖的投票时段尚未锁定，请先锁定后再核定。")
+
+
 @transaction.atomic
 def confirm_stage_result(stage: StageResult, *, confirmed_by):
     """核定并锁定 a resolved stage result into its final handcard state (§36-37).
@@ -1197,18 +1287,68 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     A resolver ``READY_TO_CONFIRM`` result is machine-computed but still mutable —
     another score edit would recompute it. The staff 核定 action is the point of no
     return: once CONFIRMED the result (and its decisions/composites) is immutable so
-    a host can safely copy the handcard. Idempotent (re-confirm returns the row as-is)
-    and rejects HOLD/REVIEW stages that were never fully resolved.
+    a host can safely copy the handcard.
+
+    M0 lock order and finality (M1-R6): lock the Activity first (the authoritative
+    serialization point), then re-read the StageResult (never trust a pre-lock stale
+    object), confirm it is the stage's *current* candidate, recompute the current input
+    fingerprint and require it to match (no stale results frozen over changed facts), and
+    require the consumed raw facts to be at rest (rounds/votes locked). Idempotent: a
+    re-confirm of an already-locked row returns it as-is.
     """
+    locked_activity = lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
+    if locked.activity_id != locked_activity.pk:
+        raise ValidationError("赛段结果不属于当前活动。")
     if locked.status == StageResult.Status.CONFIRMED:
         return locked
     if locked.status != StageResult.Status.READY_TO_CONFIRM:
         raise ValidationError("仅可核定已解析到“待核定”状态的赛段结果。")
+    latest = StageResult.objects.filter(
+        activity=locked.activity, stage_key=locked.stage_key
+    ).aggregate(m=Max("result_version"))["m"]
+    if locked.result_version != latest:
+        raise ValidationError("该赛段存在更新的结果版本，请核定最新结果。")
+    try:
+        current_fingerprint = _current_input_fingerprint(
+            locked.ruleset_version, locked.activity, locked.stage_key
+        )
+    except ValueError as error:
+        raise ValidationError(str(error))
+    if current_fingerprint != locked.input_fingerprint:
+        raise ValidationError("该结果已过期（原始分数/票数已变化），请重新计算后核定。")
+    _ensure_stage_dependencies_final(locked.ruleset_version, locked.activity, locked.stage_key)
     locked.status = StageResult.Status.CONFIRMED
     locked.confirmed_by = confirmed_by
     locked.confirmed_at = timezone.now()
     locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+    return locked
+
+
+@transaction.atomic
+def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> StageResult:
+    """Admin unlock a CONFIRMED stage result so its raw facts can be corrected (§38).
+
+    Reverting to ``READY_TO_CONFIRM`` releases the finality that freezing the result
+    imposed: the round / vote / manual edits that the result consumed are editable again,
+    and the stage can be re-resolved and re-confirmed. Audits the change.
+    """
+    lock_activity_for_action(stage.activity)
+    locked = StageResult.objects.select_for_update().get(pk=stage.pk)
+    if locked.status != StageResult.Status.CONFIRMED:
+        raise PermissionDenied("仅可解锁已核定并锁定的赛段结果。")
+    locked.confirmed_by = None
+    locked.confirmed_at = None
+    locked.status = StageResult.Status.READY_TO_CONFIRM
+    locked.save(update_fields=["confirmed_by", "confirmed_at", "status"], _bypass_confirmed=True)
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
+        target=f"StageResult:{locked.pk}",
+        old_value=StageResult.Status.CONFIRMED,
+        new_value=StageResult.Status.READY_TO_CONFIRM,
+        note=note,
+    )
     return locked
 
 
@@ -1275,9 +1415,9 @@ def recompute_activity_result(
     from ruleset.models import ContestRuleset, RulesetVersion
 
     if ruleset is None:
-        candidates = ContestRuleset.objects.filter(
-            activity=activity, stage_key__gt=""
-        ).order_by("pk")
+        candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by(
+            "pk"
+        )
         # §16/§32: one activity owns exactly one contest ruleset; versions hold the history.
         # A stray duplicate is a data error, so fail loudly instead of silently picking the
         # newest and revealing an ambiguous authority.
@@ -1338,7 +1478,13 @@ def stage_decisions_by_blocks(stage_result: StageResult) -> list[dict]:
     """
     decisions = list(stage_result.decisions.select_related("singer").order_by("rank", "pk"))
     version = stage_result.ruleset_version
-    blocks_config = (_version_binding(version).get("announcement_blocks") or []) if version else []
+    binding = _version_binding(version) if version else {}
+    # A checkpoint stage prefers its own blocks; a global set is the legacy fallback.
+    blocks_config = (binding.get("announcement_blocks") or []) if binding else []
+    if binding and _stage_is_checkpoint(version, stage_result.stage_key):
+        blocks_config = (binding.get("announcement_blocks_by_checkpoint") or {}).get(
+            stage_result.stage_key
+        ) or blocks_config
     by_code: dict[str, list[StageDecision]] = {}
     for decision in decisions:
         by_code.setdefault(decision.outcome_code, []).append(decision)

@@ -318,6 +318,49 @@ def _scoped_inputs_fingerprint(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def stage_consumed_scopes(
+    definition, checkpoint: str | None
+) -> tuple[set[str], set[str], set[str], set[str]]:
+    """The raw-fact binding keys a stage consumes (rounds, votes, groups, manual).
+
+    With a ``checkpoint`` the closure is the checkpoint's dependency subgraph; without
+    one (a full resolve) the whole definition is consumed. Used by the services layer to
+    scope staleness re-checks and dependency-finality checks to exactly what the stage
+    actually read — future-stage facts never block an earlier stage.
+    """
+    parsed = parse_definition(definition)
+    nodes = parsed["nodes"]
+    by_key = {n["key"]: n for n in nodes}
+    if checkpoint:
+        checkpoints = parsed.get("checkpoints") or ()
+        cp = next((c for c in checkpoints if c["key"] == checkpoint), None)
+        if cp is None:
+            raise ValueError(f"定义未声明检查点 {checkpoint}。")
+        closure = _dependency_closure(cp["output"], by_key)
+    else:
+        closure = {n["key"] for n in nodes}
+    return _consumed_scopes(nodes, closure)
+
+
+def checkpoint_inputs_fingerprint(definition, inputs: ResolveInput, checkpoint: str) -> str:
+    """Recompute the scoped input fingerprint a named checkpoint would consume.
+
+    Mirrors :func:`resolve_to_checkpoint`'s input-projection so the caller can compare a
+    stored result's ``input_fingerprint`` against the *current* raw facts without being
+    forced to re-execute the whole closure. Returns the same value the stage persisted.
+    """
+    parsed = parse_definition(definition)
+    nodes = parsed["nodes"]
+    checkpoints = parsed.get("checkpoints") or ()
+    by_key = {n["key"]: n for n in nodes}
+    cp = next((c for c in checkpoints if c["key"] == checkpoint), None)
+    if cp is None:
+        raise ValueError(f"定义未声明检查点 {checkpoint}。")
+    closure = _dependency_closure(cp["output"], by_key)
+    round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
+    return _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
+
+
 class _Stage:
     """Mutable driver state; frozen into a :class:`ResolveResult` at the end."""
 
@@ -734,17 +777,52 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
         raise UnsupportedNodeError(f"Node {node['key']}: unknown type {ntype}.")
 
 
+def _member_set(value) -> set[str]:
+    """Flatten a node value (list or group map) into the set of contestants it holds."""
+    if not value:
+        return set()
+    if isinstance(value, dict):
+        members: set[str] = set()
+        for cs in value.values():
+            members.update(cs)
+        return members
+    return set(value)
+
+
 def _build_decisions(
     st: _Stage,
     roster: tuple[str, ...],
     content_hash: str,
     schema_version: int,
     plan_version: int,
+    *,
+    output_node: str | None = None,
+    decisions_spec: tuple[dict, ...] = (),
 ) -> tuple:
+    # A checkpoint declares its official per-stage decision mapping (§6/P0-4). A SELECT
+    # node must NOT carry a prior stage's label forward (the Stage2-Top5-shows-Top10 bug:
+    # once a contestant is DIRECT in a replayed stage1 Top10, the narrower Top5 cannot
+    # demote them). Here the checkpoint's own output/decisions decide, not st.outcome.
+    if decisions_spec or output_node is not None:
+        spec_outcome = {d["source"]: OutcomeCode(d["outcome"]) for d in decisions_spec}
+
+        def label(c: str) -> tuple[OutcomeCode, str]:
+            if decisions_spec:
+                for d in decisions_spec:
+                    if c in _member_set(st.values.get(d["source"])):
+                        return spec_outcome[d["source"]], d["source"]
+                return OutcomeCode.ELIMINATED, ""
+            if c in _member_set(st.values.get(output_node)):
+                return OutcomeCode.DIRECT, output_node
+            return OutcomeCode.ELIMINATED, ""
+
     out = []
     for c in roster:
-        code = st.outcome.get(c, OutcomeCode.ELIMINATED)
-        source_node = st.source_node.get(c, "")
+        if decisions_spec or output_node is not None:
+            code, source_node = label(c)
+        else:
+            code = st.outcome.get(c, OutcomeCode.ELIMINATED)
+            source_node = st.source_node.get(c, "")
         rank = None
         score = None
         for nkey in reversed(st.rank_pos):
@@ -772,8 +850,14 @@ def _build_decisions(
     return tuple(out)
 
 
-def _assemble_result(st: _Stage, obj, parsed: dict, plan, fingerprint: str) -> ResolveResult:
-    """Freeze stage state into a :class:`ResolveResult` with binding metadata."""
+def _assemble_result(
+    st: _Stage, obj, parsed: dict, plan, fingerprint: str, *, cp: dict | None = None
+) -> ResolveResult:
+    """Freeze stage state into a :class:`ResolveResult` with binding metadata.
+
+    When ``cp`` (a checkpoint dict) is supplied, the per-stage official decisions come
+    from its declared ``output``/``decisions`` mapping, not from SELECT side-effects.
+    """
     if plan is not None:
         plan_hash = plan.content_hash
         schema_version = plan.schema_version
@@ -785,7 +869,15 @@ def _assemble_result(st: _Stage, obj, parsed: dict, plan, fingerprint: str) -> R
     node_values = {
         k: _value_to_jsonable(v) for k, v in sorted(st.values.items(), key=lambda kv: kv[0])
     }
-    decisions = _build_decisions(st, st.roster, plan_hash, schema_version, plan_version)
+    decisions = _build_decisions(
+        st,
+        st.roster,
+        plan_hash,
+        schema_version,
+        plan_version,
+        output_node=cp["output"] if cp is not None else None,
+        decisions_spec=cp.get("decisions") or () if cp is not None else (),
+    )
     return ResolveResult(
         status=_final_status(st),
         reasons=tuple(st.hold + st.review),
@@ -849,4 +941,4 @@ def resolve_to_checkpoint(
 
     round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
     fingerprint = _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
-    return _assemble_result(st, obj, parsed, plan, fingerprint)
+    return _assemble_result(st, obj, parsed, plan, fingerprint, cp=cp)

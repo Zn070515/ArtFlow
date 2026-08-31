@@ -127,6 +127,10 @@
                 <label class="block text-xs text-gray-500 mb-0.5">announcement_blocks（公告分块，JSON）</label>
                 <textarea name="announcement_blocks" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks|default:"[]" }}</textarea>
             </div>
+            <div class="sm:col-span-2">
+                <label class="block text-xs text-gray-500 mb-0.5">announcement_blocks_by_checkpoint（按赛段公告分块，JSON）</label>
+                <textarea name="announcement_blocks_by_checkpoint" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks_by_checkpoint|default:"{}" }}</textarea>
+            </div>
         </div>
         <div class="px-4 pb-3">
             <button class="bg-gray-900 text-white px-4 py-2 rounded text-sm">保存绑定</button>

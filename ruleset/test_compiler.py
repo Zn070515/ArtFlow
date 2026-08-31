@@ -910,6 +910,7 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
                 "vote_keys": {},
                 "group_keys": {},
                 "announcement_blocks": [{"label": "晋级", "outcome_codes": ["direct"]}],
+                "announcement_blocks_by_checkpoint": {},
             },
         )
 
@@ -1100,13 +1101,29 @@ class BindingValidationTests(_RulesetModelBase):
                 "vote_keys": {"audience1": str(vote.pk)},
                 "group_keys": {"by1": str(round_.pk)},
                 "announcement_blocks": [],
+                "announcement_blocks_by_checkpoint": {
+                    "stage2": [{"label": "直接晋级", "outcome_codes": ["advanced"]}]
+                },
             },
         )
         self.assertEqual(normalized["round_keys"], {"r1": round_.pk})
         self.assertEqual(normalized["vote_keys"], {"audience1": vote.pk})
         self.assertEqual(normalized["group_keys"], {"by1": round_.pk})
+        self.assertEqual(
+            normalized["announcement_blocks_by_checkpoint"]["stage2"],
+            [{"label": "直接晋级", "outcome_codes": ["advanced"]}],
+        )
         self.assertIsInstance(normalized["round_keys"]["r1"], int)
         self.assertIsInstance(normalized["vote_keys"]["audience1"], int)
+
+    def test_rejects_bad_checkpoint_blocks(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaises(ValidationError):
+            validate_binding(ruleset, {"announcement_blocks_by_checkpoint": "not-a-map"})
+        with self.assertRaises(ValidationError):
+            validate_binding(
+                ruleset, {"announcement_blocks_by_checkpoint": {"stage2": "not-a-list"}}
+            )
 
     def test_rejects_foreign_round(self):
         ruleset = self.make_ruleset()

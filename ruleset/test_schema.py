@@ -478,7 +478,69 @@ class SchemaCheckpointTests(SimpleTestCase):
 
     def test_valid_checkpoints_parsed(self):
         parsed = parse_definition(self._def([{"key": "stage1", "output": "winners"}]))
-        self.assertEqual(parsed["checkpoints"], ({"key": "stage1", "output": "winners"},))
+        # A checkpoint without an explicit decisions mapping defaults to membership-in-
+        # output == DIRECT, everyone else ELIMINATED; it carries only order metadata.
+        self.assertEqual(
+            parsed["checkpoints"],
+            ({"key": "stage1", "output": "winners", "decisions": ()},),
+        )
+
+    def test_checkpoint_decisions_normalized(self):
+        parsed = parse_definition(
+            self._def(
+                [
+                    {
+                        "key": "stage1",
+                        "output": "winners",
+                        "decisions": [
+                            {"source": "winners", "outcome": "direct"},
+                            {"source": "ranked", "outcome": "repechage"},
+                        ],
+                    }
+                ]
+            )
+        )
+        self.assertEqual(
+            parsed["checkpoints"],
+            (
+                {
+                    "key": "stage1",
+                    "output": "winners",
+                    "decisions": (
+                        {"source": "winners", "outcome": "direct"},
+                        {"source": "ranked", "outcome": "repechage"},
+                    ),
+                },
+            ),
+        )
+
+    def test_checkpoint_decisions_source_must_be_real_node(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(
+                self._def(
+                    [
+                        {
+                            "key": "stage1",
+                            "output": "winners",
+                            "decisions": [{"source": "nope", "outcome": "direct"}],
+                        }
+                    ]
+                )
+            )
+
+    def test_checkpoint_decisions_invalid_outcome_rejected(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(
+                self._def(
+                    [
+                        {
+                            "key": "stage1",
+                            "output": "winners",
+                            "decisions": [{"source": "winners", "outcome": "champion"}],
+                        }
+                    ]
+                )
+            )
 
     def test_absent_checkpoints_default_empty(self):
         parsed = parse_definition(weighted_composite_topn())

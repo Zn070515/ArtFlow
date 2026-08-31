@@ -210,8 +210,9 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     # test activity legitimately holds READY test results, so demote them first.
     demo = StageResult.objects.filter(activity=locked_activity, is_test_data=True)
     for stage in demo:
+        # A CONFIRMED test result is immutable, so demote via the bypass flag.
         stage.status = StageResult.Status.HOLD
-        stage.save(update_fields=["status"])
+        stage.save(update_fields=["status"], _bypass_confirmed=True)
     StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()
     # ManualDecision FK's to the frozen RulesetVersion; delete before it is demoted.
     ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()

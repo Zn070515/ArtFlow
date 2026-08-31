@@ -62,6 +62,7 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
         "vote_keys": dict(ruleset.vote_keys or {}),
         "group_keys": dict(ruleset.group_keys or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
+        "announcement_blocks_by_checkpoint": dict(ruleset.announcement_blocks_by_checkpoint or {}),
     }
 
 
@@ -79,6 +80,9 @@ def _binding_signature(ruleset: ContestRuleset) -> str:
             "vote_keys": dict(ruleset.vote_keys or {}),
             "group_keys": dict(ruleset.group_keys or {}),
             "announcement_blocks": list(ruleset.announcement_blocks or []),
+            "announcement_blocks_by_checkpoint": dict(
+                ruleset.announcement_blocks_by_checkpoint or {}
+            ),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -147,6 +151,14 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
         raise ValidationError("announcement_blocks 必须是列表。")
+    blocks_by_checkpoint = binding.get("announcement_blocks_by_checkpoint") or {}
+    if not isinstance(blocks_by_checkpoint, dict):
+        raise ValidationError(
+            "announcement_blocks_by_checkpoint 必须是 {checkpoint: [blocks]} 映射。"
+        )
+    for cp_key, cp_blocks in blocks_by_checkpoint.items():
+        if not isinstance(cp_blocks, list):
+            raise ValidationError(f"announcement_blocks_by_checkpoint['{cp_key}'] 必须是列表。")
 
     from singer_contest.models import ContestRound
     from voting.models import VoteSession
@@ -181,6 +193,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         "vote_keys": vote_keys,
         "group_keys": group_keys,
         "announcement_blocks": announcement_blocks,
+        "announcement_blocks_by_checkpoint": dict(blocks_by_checkpoint),
     }
 
 
@@ -241,6 +254,7 @@ def update_ruleset_binding(
     locked.vote_keys = normalized["vote_keys"]
     locked.group_keys = normalized["group_keys"]
     locked.announcement_blocks = normalized["announcement_blocks"]
+    locked.announcement_blocks_by_checkpoint = normalized["announcement_blocks_by_checkpoint"]
     locked.save(
         update_fields=[
             "stage_key",
@@ -248,6 +262,7 @@ def update_ruleset_binding(
             "vote_keys",
             "group_keys",
             "announcement_blocks",
+            "announcement_blocks_by_checkpoint",
             "updated_at",
         ]
     )

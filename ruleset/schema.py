@@ -492,13 +492,27 @@ def _validate_nodes(nodes: list) -> tuple[list[dict], dict[str, OutputType]]:
     return validated, emitted
 
 
+_VALID_OUTCOME_CODES = (
+    "direct",
+    "advanced",
+    "repechage",
+    "pending",
+    "eliminated",
+    "wildcard",
+    "finalist",
+)
+
+
 def _validate_checkpoints(checkpoints, node_keys: set[str]) -> tuple[dict, ...]:
     """Validate the optional top-level ``checkpoints`` list.
 
-    A checkpoint is ``{key, output}``: a named progressive-publication boundary that
-    resolves only the dependency closure of ``output`` (so future-stage inputs never
+    A checkpoint is ``{key, output, decisions?}``: a named progressive-publication boundary
+    that resolves only the dependency closure of ``output`` (so future-stage inputs never
     force a HOLD). ``key`` is the stage identifier (becomes the ``StageResult.stage_key``);
-    ``output`` must reference a real node. Absent ``checkpoints`` returns ``()``.
+    ``output`` must reference a real node; optional ``decisions`` is an ordered ``[{source,
+    outcome}]`` map declaring which node set becomes which official per-stage StageDecision
+    (contestants matching no source are ELIMINATED). Absent ``decisions``, membership in
+    ``output`` is DIRECT and everyone else ELIMINATED.
     """
     if checkpoints is None:
         return ()
@@ -520,7 +534,26 @@ def _validate_checkpoints(checkpoints, node_keys: set[str]) -> tuple[dict, ...]:
             raise ValidationError(f"Checkpoint {key}: missing a non-empty 'output'.")
         if output not in node_keys:
             raise ValidationError(f"Checkpoint {key}: output {output!r} is not a defined node.")
-        out.append({"key": key, "output": output})
+        decisions_raw = cp.get("decisions") or ()
+        if not isinstance(decisions_raw, (list, tuple)):
+            raise ValidationError(f"Checkpoint {key}: 'decisions' 必须是列表。")
+        decisions: list[dict] = []
+        for d in decisions_raw:
+            if not isinstance(d, dict):
+                raise ValidationError(f"Checkpoint {key}: each decisions entry must be an object.")
+            src = d.get("source")
+            if not isinstance(src, str) or src not in node_keys:
+                raise ValidationError(
+                    f"Checkpoint {key}: decisions source {src!r} is not a defined node."
+                )
+            oc = d.get("outcome")
+            if oc not in _VALID_OUTCOME_CODES:
+                raise ValidationError(
+                    f"Checkpoint {key}: decisions outcome {oc!r} must be one of "
+                    f"{', '.join(_VALID_OUTCOME_CODES)}."
+                )
+            decisions.append({"source": src, "outcome": oc})
+        out.append({"key": key, "output": output, "decisions": tuple(decisions)})
     return tuple(out)
 
 

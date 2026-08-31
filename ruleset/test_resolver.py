@@ -1068,6 +1068,13 @@ class ResolverCheckpointTests(SimpleTestCase):
         result = resolve_to_checkpoint(self._def(), self._inputs(with_r3=True), "stage2")
         self.assertEqual(result.status, ResolverState.READY)
         self.assertEqual(result.node_values["top5"], [f"c{i}" for i in range(1, 6)])
+        # §6/P0-4: the Stage2 checkpoint's official decisions reflect the CURRENT stage
+        # (Top5), not the replayed Stage1's Top10 — so Top10-minus-Top5 are ELIMINATED.
+        by = {d.contestant: d for d in result.decisions}
+        for c in (f"c{i}" for i in range(1, 6)):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.DIRECT)
+        for c in (f"c{i}" for i in range(6, 16)):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.ELIMINATED)
 
     def test_stage3_checkpoint_holds_when_final_stage_facts_missing(self):
         # R3 present but R4/Audience4 missing -> the final stage cannot yet resolve.
@@ -1081,6 +1088,11 @@ class ResolverCheckpointTests(SimpleTestCase):
         )
         self.assertEqual(result.status, ResolverState.READY)
         self.assertEqual(result.node_values["top3"], ["c1", "c2", "c3"])
+        by = {d.contestant: d for d in result.decisions}
+        for c in ("c1", "c2", "c3"):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.DIRECT)
+        for c in (f"c{i}" for i in range(4, 16)):
+            self.assertEqual(by[c].outcome_code, OutcomeCode.ELIMINATED)
 
     def test_checkpoint_input_fingerprint_stable_across_later_stage_data(self):
         # Stage1 identity must not change when r3/r4/a4 (inputs stage1 does not read) arrive.

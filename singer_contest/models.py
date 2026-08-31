@@ -619,13 +619,53 @@ class StageResult(models.Model):
             )
         ]
 
+    _immutable_fields = (
+        "activity_id",
+        "ruleset_version_id",
+        "created_by_id",
+        "stage_key",
+        "status",
+        "reasons",
+        "ruleset_hash",
+        "input_fingerprint",
+        "schema_version",
+        "plan_version",
+        "result_version",
+        "computed_at",
+        "confirmed_by_id",
+        "confirmed_at",
+        "is_test_data",
+    )
+
+    def _stored(self, fields):
+        if self._state.adding or not self.pk:
+            return None
+        return type(self)._base_manager.filter(pk=self.pk).values(*fields).first()
+
     def clean(self):
         if self.activity_id and bool(self.is_test_data) != runtime_is_test(self.activity):
             raise ValidationError("A stage result's test marker must match its activity lifecycle.")
 
     def save(self, *args, **kwargs):
         self.clean()
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        if not bypass:
+            stored = self._stored(self._immutable_fields)
+            if stored and stored["status"] == self.Status.CONFIRMED:
+                modified = [f for f in self._immutable_fields if getattr(self, f) != stored[f]]
+                if modified:
+                    raise ValidationError(
+                        f"A confirmed stage result is immutable (cannot change {modified})."
+                    )
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        if not bypass:
+            stored = self._stored(["status"])
+            if stored and stored["status"] == self.Status.CONFIRMED:
+                raise ValidationError("A confirmed stage result is immutable.")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.activity.title} — {self.stage_key} ({self.get_status_display()})"
@@ -692,9 +732,28 @@ class StageDecision(models.Model):
             if singer and singer.activity_id != result.activity_id:
                 raise ValidationError("A stage decision singer must belong to the result activity.")
 
+    def _parent_confirmed(self):
+        if self._state.adding or not self.pk:
+            return None
+        return (
+            type(self)
+            ._base_manager.filter(pk=self.pk)
+            .values_list("stage_result__status", flat=True)
+            .first()
+        )
+
     def save(self, *args, **kwargs):
         self.clean()
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+            raise ValidationError("Decisions of a confirmed stage result are immutable.")
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+            raise ValidationError("Decisions of a confirmed stage result are immutable.")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name} — {self.outcome_code}"
@@ -757,9 +816,28 @@ class CompositeResult(models.Model):
             if singer and singer.activity_id != result.activity_id:
                 raise ValidationError("A composite singer must belong to the result activity.")
 
+    def _parent_confirmed(self):
+        if self._state.adding or not self.pk:
+            return None
+        return (
+            type(self)
+            ._base_manager.filter(pk=self.pk)
+            .values_list("stage_result__status", flat=True)
+            .first()
+        )
+
     def save(self, *args, **kwargs):
         self.clean()
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+            raise ValidationError("Composites of a confirmed stage result are immutable.")
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+            raise ValidationError("Composites of a confirmed stage result are immutable.")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name} — {self.node_key}: {self.value}"

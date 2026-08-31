@@ -94,6 +94,7 @@ from singer_contest.services import (
     reset_round_to_draft,
     stage_decisions_by_blocks,
     unlock_round,
+    unlock_stage_result,
 )
 from voting.models import VoteOption, VoteRecord, VoteSession
 from voting.services import (
@@ -1122,6 +1123,21 @@ def stage_result_confirm(request, pk):
             f"StageResult:{stage.pk}",
             new_value=f"{stage.stage_key} — {stage.get_status_display()}",
         )
+    return redirect("staff:stage_result_detail", pk=pk)
+
+
+@admin_required
+@require_POST
+def stage_result_unlock(request, pk):
+    """Admin-only: unlock a confirmed stage result so its raw facts can be corrected."""
+    _require_admin(request.user)
+    stage = get_object_or_404(StageResult, pk=pk)
+    try:
+        unlock_stage_result(stage, operator=request.user, note=request.POST.get("note", "").strip())
+    except ValidationError as error:
+        messages.error(request, "；".join(error.messages))
+    else:
+        messages.success(request, "已解锁该赛段结果，可修正原始数据后重新核定。")
     return redirect("staff:stage_result_detail", pk=pk)
 
 
@@ -2345,6 +2361,10 @@ def ruleset_edit(request, pk):
                 "announcement_blocks": json.dumps(
                     ruleset.announcement_blocks or [], ensure_ascii=False
                 ),
+                "announcement_blocks_by_checkpoint": json.dumps(
+                    ruleset.announcement_blocks_by_checkpoint or {},
+                    ensure_ascii=False,
+                ),
             },
             "binding_signature": _binding_signature(ruleset),
         },
@@ -2381,6 +2401,9 @@ def ruleset_bind(request, pk):
                 "vote_keys": _parse_json("vote_keys", {}),
                 "group_keys": _parse_json("group_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),
+                "announcement_blocks_by_checkpoint": _parse_json(
+                    "announcement_blocks_by_checkpoint", {}
+                ),
             },
             operator=request.user,
             base_binding=request.POST.get("base_binding") or None,

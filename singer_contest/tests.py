@@ -2537,17 +2537,37 @@ class StageResolverBindingTests(TestCase):
         self.assertNotEqual(stage.status, StageResult.Status.CONFIRMED)
 
     def test_confirm_stage_result_locks_and_is_idempotent(self):
-        """§36-37: 核定 locks a resolved result; re-confirm reuses the same locked row."""
+        """§36-37/§38: 核定 locks a resolved result; re-confirm reuses the locked row.
+
+        M1-R6 finality: confirm re-locks the Activity (the authoritative serialization
+        point), refuses a stale result over changed facts, and requires the consumed
+        round to already be locked. The frozen version records its own binding so the
+        service can recompute the current input fingerprint as the authority reference.
+        """
         from .services import confirm_stage_result, run_ruleset
 
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["is_locked", "status"])
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
         stage = run_ruleset(
-            self.version,
+            version,
             self.activity,
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(stage.ruleset_version, version)
         confirmed = confirm_stage_result(stage, confirmed_by=self.user)
         self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
         self.assertEqual(confirmed.confirmed_by, self.user)
@@ -2558,7 +2578,7 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(again.confirmed_at, confirmed.confirmed_at)
         # A CONFIRMED result is immutable: recomputing identical facts returns it as-is.
         refreshed = run_ruleset(
-            self.version,
+            version,
             self.activity,
             stage_key="选拔",
             computed_by=self.user,
@@ -2571,6 +2591,8 @@ class StageResolverBindingTests(TestCase):
         """§36-37: only a READY_TO_CONFIRM result may be 核定."""
         from .services import confirm_stage_result
 
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
         stage = StageResult.objects.create(
             activity=self.activity,
             ruleset_version=self.version,
@@ -2584,6 +2606,209 @@ class StageResolverBindingTests(TestCase):
             confirm_stage_result(stage, confirmed_by=self.user)
         stage.refresh_from_db()
         self.assertEqual(stage.status, StageResult.Status.HOLD)
+
+    def test_confirm_rejects_stale_result_over_changed_scores(self):
+        """§38: a result whose raw facts changed after computation is no longer current."""
+        from .services import confirm_stage_result, run_ruleset
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["is_locked", "status"])
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        # A correct score edit changes the current input fingerprint.
+        rec = ScoreRecord.objects.filter(round=self.round).first()
+        rec.score += Decimal("0.25")
+        rec.save(update_fields=["score"])
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(stage, confirmed_by=self.user)
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_confirm_requires_consumed_round_locked(self):
+        """§38: a stage whose source round is unlocked cannot be frozen."""
+        from .services import confirm_stage_result, run_ruleset
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(stage, confirmed_by=self.user)
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_unlock_stage_result_reverts_confirmed(self):
+        """§38: an admin unlock reverts a CONFIRMED result to READY_TO_CONFIRM."""
+        from .services import confirm_stage_result, run_ruleset, unlock_stage_result
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["is_locked", "status"])
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        confirm_stage_result(stage, confirmed_by=self.user)
+        unlocked = unlock_stage_result(stage, operator=self.user, note="核对录错了")
+        self.assertEqual(unlocked.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertIsNone(unlocked.confirmed_by)
+        self.assertIsNone(unlocked.confirmed_at)
+        # Unlocked results are editable again: a score edit recomputes a new version.
+        rec = ScoreRecord.objects.filter(round=self.round).first()
+        rec.score += Decimal("0.50")
+        rec.save(update_fields=["score"])
+        second = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertNotEqual(second.pk, stage.pk)
+        self.assertEqual(second.result_version, 2)
+
+    def test_confirm_rejects_when_newer_version_exists(self):
+        """§38: a result that is no longer the stage's latest candidate cannot be frozen."""
+        from .services import confirm_stage_result, run_ruleset
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["is_locked", "status"])
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
+        first = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        rec = ScoreRecord.objects.filter(round=self.round).first()
+        rec.score += Decimal("0.25")
+        rec.save(update_fields=["score"])
+        second = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(second.result_version, 2)
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(first, confirmed_by=self.user)
+        first.refresh_from_db()
+        self.assertEqual(first.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_stage_decisions_blocks_prefer_checkpoint_override(self):
+        """§十七/P1: a checkpoint stage's handcard uses its own blocks, not the global set."""
+        from .services import stage_decisions_by_blocks
+
+        definition = json.dumps(
+            {
+                "schema_version": 1,
+                "checkpoints": [{"key": "stage2", "output": "ranked"}],
+                "nodes": [
+                    {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+                    {"key": "ranked", "type": "RANK", "source": "assess", "descending": True},
+                ],
+            }
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={
+                "stage_key": "院十佳",
+                "round_keys": {"r1": self.round.pk},
+                "announcement_blocks": [{"label": "全局", "outcome_codes": ["direct"]}],
+                "announcement_blocks_by_checkpoint": {
+                    "stage2": [{"label": "赛段专属", "outcome_codes": ["advanced"]}]
+                },
+            },
+        )
+        stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.user,
+            stage_key="stage2",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            is_test_data=True,
+        )
+        StageDecision.objects.create(
+            stage_result=stage,
+            singer=self.singers[0],
+            outcome_code="advanced",
+            rank=1,
+            is_test_data=True,
+        )
+        StageDecision.objects.create(
+            stage_result=stage,
+            singer=self.singers[1],
+            outcome_code="direct",
+            rank=2,
+            is_test_data=True,
+        )
+        blocks = stage_decisions_by_blocks(stage)
+        labels = [b["label"] for b in blocks]
+        self.assertIn("赛段专属", labels)
+        self.assertNotIn("全局", labels)
+        self.assertIn("其他", labels)
+        self.assertEqual([d.outcome_code for d in blocks[0]["decisions"]], ["advanced"])
 
 
 def _schidui_definition():
