@@ -581,7 +581,16 @@ class StageResult(models.Model):
     )
     status = models.CharField(max_length=16, choices=Status, default=Status.HOLD)
     reasons = models.JSONField(default=list, blank=True)
-    content_hash = models.CharField(max_length=64, blank=True)
+    ruleset_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="sha256 of the frozen ruleset definition (ExecutionPlan).",
+    )
+    input_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="sha256 of the raw-facts snapshot the resolver consumed.",
+    )
     schema_version = models.PositiveIntegerField(default=1)
     plan_version = models.PositiveIntegerField(default=0)
     result_version = models.PositiveIntegerField(default=1)
@@ -594,8 +603,8 @@ class StageResult(models.Model):
         ordering = ["-computed_at", "pk"]
         constraints = [
             models.UniqueConstraint(
-                fields=["activity", "stage_key", "content_hash"],
-                name="stage_result_unique_per_activity_stage_hash",
+                fields=["activity", "stage_key", "ruleset_hash", "input_fingerprint"],
+                name="stage_result_unique_identity",
             )
         ]
 

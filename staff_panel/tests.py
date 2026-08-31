@@ -4287,7 +4287,7 @@ class ResultBoardTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
 
-    def _stage(self, *, status, content_hash, reasons=None, stage_key="院十佳"):
+    def _stage(self, *, status, ruleset_hash, reasons=None, stage_key="院十佳"):
         return StageResult.objects.create(
             activity=self.activity,
             ruleset_version=self.version,
@@ -4295,17 +4295,17 @@ class ResultBoardTests(TestCase):
             stage_key=stage_key,
             status=status,
             reasons=reasons or [],
-            content_hash=content_hash,
+            ruleset_hash=ruleset_hash,
             is_test_data=False,
         )
 
     def test_board_lists_latest_stage_per_stage_key(self):
         self._stage(
             status=StageResult.Status.REVIEW,
-            content_hash="hash-1",
+            ruleset_hash="hash-1",
             reasons=["缺少第三轮"],
         )
-        ready = self._stage(status=StageResult.Status.READY, content_hash="hash-2")
+        ready = self._stage(status=StageResult.Status.READY, ruleset_hash="hash-2")
         StageDecision.objects.create(
             stage_result=ready,
             singer=self._singer(1),
@@ -4324,7 +4324,7 @@ class ResultBoardTests(TestCase):
     def test_board_shows_status_and_reasons_for_hold(self):
         self._stage(
             status=StageResult.Status.HOLD,
-            content_hash="hash-h",
+            ruleset_hash="hash-h",
             reasons=["缺少第五轮评分"],
         )
         response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
@@ -4333,7 +4333,7 @@ class ResultBoardTests(TestCase):
         self.assertContains(response, "缺少第五轮评分")
 
     def test_detail_groups_by_announcement_blocks_in_order(self):
-        ready = self._stage(status=StageResult.Status.READY, content_hash="hash-d")
+        ready = self._stage(status=StageResult.Status.READY, ruleset_hash="hash-d")
         direct = self._singer(2)
         repechage = self._singer(3)
         eliminated = self._singer(4)
@@ -4395,7 +4395,7 @@ class ResultBoardTests(TestCase):
             stage_key="无分组",
             status=StageResult.Status.READY,
             reasons=[],
-            content_hash="hash-fb",
+            ruleset_hash="hash-fb",
             is_test_data=False,
         )
         singer = self._singer(5)
@@ -4412,7 +4412,7 @@ class ResultBoardTests(TestCase):
         self.assertContains(response, "直接晋级")
 
     def test_stage_decisions_by_blocks_helper(self):
-        ready = self._stage(status=StageResult.Status.READY, content_hash="hash-helper")
+        ready = self._stage(status=StageResult.Status.READY, ruleset_hash="hash-helper")
         singer = self._singer(6)
         StageDecision.objects.create(
             stage_result=ready,
