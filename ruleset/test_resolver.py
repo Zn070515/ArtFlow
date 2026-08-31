@@ -473,6 +473,196 @@ class ResolverFillToQuotaTests(SimpleTestCase):
         self.assertEqual(by["c2"].outcome_code, OutcomeCode.FINALIST)
 
 
+class ResolverFillGlobalSemanticsTests(SimpleTestCase):
+    """§19-§22: FILL_TO_QUOTA 'global' fills until the TOTAL reaches `quota`,
+    ordered by a ranking_source (not per-group / not roster order)."""
+
+    def _def(self):
+        return _def(
+            [
+                {"key": "assess", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "rank", "type": "RANK", "source": "assess", "descending": True},
+                {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "class"},
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "groups",
+                    "groups": 2,
+                    "quota": 2,
+                },
+                {
+                    "key": "filled",
+                    "type": "FILL_TO_QUOTA",
+                    "from": ENTRY_KEY,
+                    "into": "manual",
+                    "quota": 5,
+                    "ranking_source": "rank",
+                },
+            ]
+        )
+
+    @staticmethod
+    def _group_of():
+        return {
+            "class": {
+                **{f"c{i}": "G1" for i in range(1, 5)},
+                **{f"c{i}": "G2" for i in range(5, 9)},
+            }
+        }
+
+    def test_global_fill_reaches_total_across_groups_by_score(self):
+        inputs = ResolveInput(
+            roster=tuple(f"c{i}" for i in range(1, 9)),
+            round_scores=_rs({"r1": {f"c{i}": (100 - i,) for i in range(1, 9)}}),
+            group_of=self._group_of(),
+            manual={"manual": {"G1": ("c1",), "G2": ("c5",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        total = {c for g in filled.values() for c in g}
+        # Top-5 globally by score: c1..c5 (c1,c5 manual; c2,c3,c4 filled). Not per-group.
+        self.assertEqual(len(total), 5)
+        self.assertEqual(total, {"c1", "c2", "c3", "c4", "c5"})
+
+    def test_global_fill_orders_by_ranking_source_not_roster(self):
+        # Scores reverse roster order: c8 is best, c1 worst. Ranking must pick c8/c7/c6.
+        inputs = ResolveInput(
+            roster=tuple(f"c{i}" for i in range(1, 9)),
+            round_scores=_rs({"r1": {f"c{i}": (i,) for i in range(1, 9)}}),
+            group_of=self._group_of(),
+            manual={"manual": {"G1": ("c1",), "G2": ("c5",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        total = {c for g in filled.values() for c in g}
+        # RANK desc -> c8,c7,c6,c5,c4,c3,c2,c1; minus manual {c1,c5} -> fills c8,c7,c6.
+        self.assertEqual(total, {"c1", "c5", "c8", "c7", "c6"})
+
+    def test_each_group_mode_fills_every_group_independently(self):
+        definition = _def(
+            [
+                {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "class"},
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "groups",
+                    "groups": 2,
+                    "quota": 2,
+                },
+                {
+                    "key": "filled",
+                    "type": "FILL_TO_QUOTA",
+                    "from": ENTRY_KEY,
+                    "into": "manual",
+                    "quota": 2,
+                    "mode": "each_group",
+                },
+            ]
+        )
+        inputs = ResolveInput(
+            roster=tuple(f"c{i}" for i in range(1, 7)),
+            group_of={
+                "class": {
+                    **{f"c{i}": "A" for i in range(1, 4)},
+                    **{f"c{i}": "B" for i in range(4, 7)},
+                }
+            },
+            manual={"manual": {"A": ("c1",), "B": ("c4",)}},
+        )
+        result = resolve(definition, inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        filled = result.node_values["filled"]
+        # each_group tops each group to its own quota (2 each => 4 total), not global 2.
+        self.assertEqual(filled, {"A": ["c1", "c2"], "B": ["c4", "c3"]})
+
+
+class ResolverManualSelectValidationTests(SimpleTestCase):
+    """§25-§26: MANUAL_SELECT must reject over-quota, cross-group, unknown-key,
+    and duplicated contestants rather than silently accepting them."""
+
+    def _def(self, quota=2, groups=2):
+        return _def(
+            [
+                {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "class"},
+                {
+                    "key": "m",
+                    "type": "MANUAL_SELECT",
+                    "source": "groups",
+                    "groups": groups,
+                    "quota": quota,
+                },
+            ]
+        )
+
+    @staticmethod
+    def _group_of():
+        return {"class": {"c1": "A", "c2": "A", "c3": "B", "c4": "B"}}
+
+    def test_not_supplied_hold(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            group_of=self._group_of(),
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertIn("当前已选 0", " ".join(result.reasons))
+
+    def test_over_quota_hold(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            group_of=self._group_of(),
+            manual={"m": {"A": ("c1", "c2")}},
+        )
+        result = resolve(self._def(quota=1), inputs)
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertIn("超过上限", " ".join(result.reasons))
+
+    def test_cross_group_selection_hold(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            group_of=self._group_of(),
+            manual={"m": {"A": ("c3",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertIn("不属于该组", " ".join(result.reasons))
+
+    def test_unknown_group_key_hold(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            group_of=self._group_of(),
+            manual={"m": {"A": ("c1",), "C": ("c2",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertIn("不存在的组", " ".join(result.reasons))
+
+    def test_duplicate_across_groups_hold(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            group_of=self._group_of(),
+            manual={"m": {"A": ("c1",), "B": ("c1",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertIn("同时选入", " ".join(result.reasons))
+
+    def test_valid_grouped_selection_ready(self):
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3", "c4"),
+            group_of=self._group_of(),
+            manual={"m": {"A": ("c1",), "B": ("c3",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.READY)
+        by = {d.contestant: d for d in result.decisions}
+        self.assertEqual(by["c1"].outcome_code, OutcomeCode.WILDCARD)
+        self.assertEqual(by["c3"].outcome_code, OutcomeCode.WILDCARD)
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.ELIMINATED)
+
+
 class ResolverDeterminismTests(SimpleTestCase):
     def test_idempotent_to_dict(self):
         roster = tuple(f"c{i}" for i in range(1, 13))

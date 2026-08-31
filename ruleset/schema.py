@@ -35,6 +35,9 @@ TIE_POLICIES = frozenset({"auto_break", "extra_round", "manual", "score_fallback
 ODD_POLICIES = frozenset({"bye", "wildcard", "manual", "reject"})
 VOTE_PURPOSES = frozenset({"POPULARITY", "SCORE_COMPONENT", "SELECTION", "OTHER"})
 CONVERSION_METHODS = frozenset({"factor", "minmax", "rank"})
+# FILL_TO_QUOTA distribution mode: "global" fills until the TOTAL across the target
+# group map reaches `quota`; "each_group" fills EVERY target group up to `quota`.
+FILL_MODES = frozenset({"global", "each_group"})
 
 # The seed node. Every definition begins by referencing ``entry`` (a Roster); it is the
 # only pre-declared output and cannot be claimed by a user node.
@@ -80,6 +83,8 @@ _SCOREMAP = frozenset({OutputType.SCOREMAP})
 _RANKED_ROSTER = frozenset({OutputType.RANKED_ROSTER})
 _GROUP_MAP = frozenset({OutputType.GROUP_MAP})
 _ROSTER_OR_GROUP_MAP = frozenset({OutputType.ROSTER, OutputType.GROUP_MAP})
+# An ordered roster (RANK output or a plain Roster/SELECT) may serve as a ranking order.
+_ORDERED_ROSTER = frozenset({OutputType.ROSTER, OutputType.RANKED_ROSTER})
 
 
 def _require_bool(name: str, node: dict, field: str) -> None:
@@ -124,6 +129,13 @@ def _require_optional_non_empty_str(name: str, node: dict, field: str) -> None:
 def _validate_manual_select(name: str, node: dict) -> None:
     _require_non_negative_int(name, node, "groups")
     _require_non_negative_int(name, node, "quota")
+
+
+def _validate_fill(name: str, node: dict) -> None:
+    _require_non_negative_int(name, node, "quota")
+    _require_one_of(name, node, "mode", FILL_MODES)
+    _require_bool(name, node, "exclude_selected")
+    _require_optional_non_empty_str(name, node, "ranking_source")
 
 
 def _require_one_of(name: str, node: dict, field: str, allowed: frozenset[str]) -> None:
@@ -353,9 +365,14 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.FILL_TO_QUOTA,
             OutputType.GROUP_MAP,
             required=("from", "into", "quota"),
-            source_refs=("from", "into"),
-            expects={"from": _ROSTER, "into": _GROUP_MAP},
-            validate=lambda n, d: _require_non_negative_int(n, d, "quota"),
+            optional=("ranking_source", "mode", "exclude_selected"),
+            source_refs=("from", "into", "ranking_source"),
+            expects={
+                "from": _ROSTER,
+                "into": _GROUP_MAP,
+                "ranking_source": _ORDERED_ROSTER,
+            },
+            validate=_validate_fill,
         ),
         _spec(
             NodeType.MANUAL_SELECT,

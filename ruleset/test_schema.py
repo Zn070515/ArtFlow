@@ -169,6 +169,7 @@ def xiaofeng_chain():
                 "from": "merged",
                 "into": "manual",
                 "quota": 2,
+                "mode": "each_group",
             },
         ]
     )
