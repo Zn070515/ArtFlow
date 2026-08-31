@@ -585,11 +585,28 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
 
 _META_SHEET_NAME = "ArtFlowMeta"
 _SCORE_WORKBOOK_SCHEMA_VERSION = "1"
+# §35: when the ArtFlowMeta sheet is present, every field is mandatory. A missing
+# field means the metadata was damaged or hand-edited — the importer must reject
+# rather than fail-open into the legacy name parser and import the wrong rows.
+_META_REQUIRED_KEYS = (
+    "schema_version",
+    "activity_id",
+    "round_id",
+    "entry_ids",
+    "judge_ids",
+    "snapshot_fingerprint",
+)
 
 
-def _read_artflow_meta(workbook) -> dict[str, str]:
+def _read_artflow_meta(workbook) -> dict[str, str] | None:
+    """Return the meta sheet as a dict, or ``None`` when the sheet is entirely absent.
+
+    ``None`` (no ArtFlowMeta sheet) is the only signal that lets a workbook take the
+    explicit legacy name-based import path. A present-but-empty sheet yields ``{}``
+    so the caller treats it as metadata present but incomplete → reject.
+    """
     if _META_SHEET_NAME not in workbook.sheetnames:
-        return {}
+        return None
     meta_worksheet = workbook[_META_SHEET_NAME]
     data: dict[str, str] = {}
     for row in meta_worksheet.iter_rows(values_only=True):
@@ -855,8 +872,19 @@ def parse_score_workbook(uploaded_file, contest_round: ContestRound):
         return {}, ["评分表第一列必须是选手姓名。"]
 
     meta = _read_artflow_meta(workbook)
-    if meta.get("round_id"):
+    if meta is not None:
+        # ArtFlowMeta present → the id-authority path is mandatory, not a choice.
+        # Any missing field (incl. round_id) previously downgraded to the name parser;
+        # §35 demands a hard reject instead so a tampered sheet can never import wrong rows.
+        missing = [key for key in _META_REQUIRED_KEYS if not meta.get(key)]
+        if missing:
+            return {}, [
+                "评分表 ArtFlowMeta 缺失必需字段: "
+                + ", ".join(missing)
+                + "（拒绝降级为姓名导入）。"
+            ]
         return _parse_id_authority_workbook(rows, headers, meta, contest_round)
+    # No ArtFlowMeta sheet → explicit legacy name-based import (unchanged).
     return _parse_name_based_workbook(rows, headers, contest_round)
 
 

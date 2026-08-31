@@ -921,6 +921,38 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(scores, {})
         self.assertTrue(any("schema_version" in error for error in errors))
 
+    def test_parse_score_workbook_rejects_meta_missing_round_id(self):
+        # §35: an ArtFlowMeta sheet without round_id used to downgrade to the legacy
+        # name parser (fail-open). It must now reject instead of importing wrong rows.
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "round_id", "")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(any("缺失必需字段" in error and "round_id" in error for error in errors))
+
+    def test_parse_score_workbook_rejects_meta_missing_fingerprint(self):
+        prepare_round(self.round, self.user)
+        wb = build_score_template_workbook(self.round)
+        self._set_meta(wb, "snapshot_fingerprint", "")
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {})
+        self.assertTrue(
+            any("缺失必需字段" in error and "snapshot_fingerprint" in error for error in errors)
+        )
+
+    def test_parse_score_workbook_legacy_path_without_meta_sheet(self):
+        # A workbook with no ArtFlowMeta sheet still takes the explicit name-based path.
+        prepare_round(self.round, self.user)
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.append(["选手\\评委", self.judge.name])
+        ws.append([self.singer.name, 95])
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(scores, {(self.singer.pk, self.judge.pk): Decimal("95")})
+        self.assertEqual(errors, [])
+
 
 class SingerUploadViewTests(TestCase):
     def setUp(self):
