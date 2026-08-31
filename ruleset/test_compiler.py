@@ -977,8 +977,10 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
         self.assertEqual(successor.version, 2)
         self.assertEqual(successor.definition, frozen.definition)
         self.assertEqual(successor.binding, frozen.binding)
-        self.assertFalse(frozen.is_current)
-        self.assertTrue(successor.is_current)
+        # is_current = current official authority: issuing a Draft editor never demotes
+        # the running FROZEN authority (M1-R8 gate #1).
+        self.assertTrue(frozen.is_current)
+        self.assertFalse(successor.is_current)
         self.assertEqual(
             RulesetVersion._base_manager.filter(ruleset=ruleset, is_current=True).count(), 1
         )
@@ -999,8 +1001,31 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
         second.refresh_from_db()
         self.assertEqual(first.version, 1)
         self.assertEqual(second.version, 2)
-        self.assertTrue(second.is_current)
+        # A DRAFT is never the official authority (M1-R8): two DRAFTs leave no current
+        # version, and a running FROZEN authority would not be demoted by either.
+        self.assertFalse(second.is_current)
         self.assertFalse(first.is_current)
+        self.assertEqual(
+            RulesetVersion._base_manager.filter(ruleset=ruleset, is_current=True).count(), 0
+        )
+
+    def test_supersede_keeps_frozen_authority_until_next_freeze(self):
+        """M1-R8 gate #1: issuing a Draft editor never demotes the running FROZEN
+        authority; authority flips atomically only when the successor is itself frozen."""
+        ruleset, round_ = self._ruleset_with_binding()
+        admin = self._admin()
+        v1 = freeze_ruleset_version(self._draft_on(ruleset, version=1), admin)
+        v1.refresh_from_db()
+        self.assertTrue(v1.is_current)  # v1 is the official authority
+        successor = supersede_ruleset_version(v1, created_by=admin)
+        v1.refresh_from_db()
+        self.assertTrue(v1.is_current)  # drafts never demote a running authority
+        self.assertFalse(successor.is_current)
+        v2 = freeze_ruleset_version(successor, admin)
+        v1.refresh_from_db()
+        v2.refresh_from_db()
+        self.assertFalse(v1.is_current)  # authority flipped on freeze
+        self.assertTrue(v2.is_current)
         self.assertEqual(
             RulesetVersion._base_manager.filter(ruleset=ruleset, is_current=True).count(), 1
         )

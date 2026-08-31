@@ -1364,6 +1364,7 @@ def run_ruleset(
     group_of=None,
     manual=None,
     checkpoint=None,
+    preview: bool = False,
 ) -> StageResult:
     """Single generic entry: bind -> resolve -> persist. Returns the StageResult.
 
@@ -1371,6 +1372,11 @@ def run_ruleset(
     only the checkpoint's dependency closure is resolved (future-stage inputs no longer
     force a HOLD) and ``stage_key`` should be the checkpoint's key, so each stage persists
     as its own progressive :class:`StageResult`.
+
+    ``preview`` (M1-R8) marks the call as a staff comparison, not a FORMAL publication: the
+    formal path (default, used by :func:`recompute_activity_result`) only executes the
+    *current* FROZEN authority, so a superseded frozen version can never produce a formal
+    StageResult; a preview may run any frozen version side-by-side for staff to compare.
     """
     from ruleset.models import RulesetVersion
 
@@ -1378,6 +1384,8 @@ def run_ruleset(
         raise ValidationError("Ruleset version must belong to the result activity.")
     if version.status != RulesetVersion.Status.FROZEN:
         raise ValidationError("Only a frozen ruleset version may be executed.")
+    if not version.is_current and not preview:
+        raise ValidationError("Only the current frozen ruleset version produces a formal result.")
     inputs = bind_resolve_input(
         version,
         activity,

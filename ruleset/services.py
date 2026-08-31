@@ -434,10 +434,11 @@ def supersede_ruleset_version(
 ) -> RulesetVersion:
     """Create the next DRAFT version that supersedes a FROZEN one (the editing target).
 
-    The successor copies the frozen definition and binding, is numbered ``max(version)+1``,
-    and becomes the single ``is_current`` version (the prior FROZEN current is demoted
-    through the base manager so the one-current partial unique constraint holds). Freezing
-    the successor later re-promotes it to current FROZEN.
+    §M1-R8: ``is_current`` means *current official authority*, so issuing a Draft editor
+    never demotes the running FROZEN authority — the prior FROZEN stays ``is_current``
+    until the successor is itself frozen (at which point :func:`freeze_ruleset_version`
+    atomically flips authority). The editor finds this successor by ``status=DRAFT``, not
+    by ``is_current``. Freezing the successor later re-promotes it to current FROZEN.
     """
     lock_activity_for_action(version.ruleset.activity)
     ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
@@ -450,15 +451,12 @@ def supersede_ruleset_version(
         raise ValidationError("只有已冻结的赛制版本可以被继任覆盖。")
     last = locked.ruleset.versions.order_by("-version").values_list("version", flat=True).first()
     next_version = (last or 0) + 1
-    RulesetVersion._base_manager.filter(ruleset_id=locked.ruleset_id, is_current=True).update(
-        is_current=False
-    )
     return RulesetVersion.objects.create(
         ruleset=locked.ruleset,
         version=next_version,
         definition=definition if definition is not None else locked.definition,
         binding=locked.binding,
-        is_current=True,
+        is_current=False,
         status=RulesetVersion.Status.DRAFT,
         created_by=created_by,
     )
@@ -470,23 +468,22 @@ def create_ruleset_version(
 ) -> RulesetVersion:
     """Create the next version on a ruleset, preserving the one-current invariant.
 
-    Used by ruleset creation and template clones. The new DRAFT becomes the single
-    ``is_current`` version (any prior current is demoted through the base manager), and
-    numbering uses ``max(version)+1`` to avoid the unique ``(ruleset, version)``
-    collision when a ruleset — or an activity's ruleset — is cloned repeatedly.
+    §M1-R8: ``is_current`` means *current official authority (FROZEN)*, so a new DRAFT is
+    never issued as current and never demotes a running FROZEN authority. An activity with
+    only DRAFTs has no current authority until one is frozen (``freeze_ruleset_version``
+    then flips authority). Used by ruleset creation and template clones; numbering uses
+    ``max(version)+1`` to avoid the unique ``(ruleset, version)`` collision when a ruleset
+    — or an activity's ruleset — is cloned repeatedly.
     """
     lock_activity_for_action(ruleset.activity)
     locked = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
     last = locked.versions.order_by("-version").values_list("version", flat=True).first()
     next_version = (last or 0) + 1
-    RulesetVersion._base_manager.filter(ruleset_id=locked.pk, is_current=True).update(
-        is_current=False
-    )
     return RulesetVersion.objects.create(
         ruleset=locked,
         version=next_version,
         definition=definition,
         binding=dict(binding or {}),
-        is_current=True,
+        is_current=False,
         created_by=created_by,
     )

@@ -2398,6 +2398,41 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(stage.ruleset_version, self.version)
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
+    def test_run_ruleset_rejects_superseded_frozen_unless_preview(self):
+        """M1-R8 gate #2: a frozen version that is no longer current cannot produce a
+        formal StageResult; only an explicit staff comparison (preview) may run it."""
+        from .services import run_ruleset
+        from ruleset.models import RulesetVersion
+
+        # self.version is the current frozen v1; simulate a version that was frozen then
+        # superseded by a newer authority (non-current, still FROZEN).
+        stopped = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
+        with self.assertRaises(ValidationError):
+            run_ruleset(
+                stopped,
+                self.activity,
+                stage_key="选拔",
+                computed_by=self.user,
+                round_keys={"r1": self.round},
+            )
+        # A preview may still run it for a staff side-by-side comparison.
+        stage = run_ruleset(
+            stopped,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+            preview=True,
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+
     def test_persist_idempotent_same_input_reuses_stage(self):
         """§18: identical ruleset + input → idempotent reuse, no duplicate/version bump."""
         from .services import run_ruleset
@@ -2565,6 +2600,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.ruleset_version, version)
@@ -2583,6 +2619,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         self.assertEqual(refreshed.pk, stage.pk)
         self.assertEqual(refreshed.status, StageResult.Status.CONFIRMED)
@@ -2630,6 +2667,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         # A correct score edit changes the current input fingerprint.
@@ -2661,6 +2699,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         with self.assertRaises(ValidationError):
@@ -2691,6 +2730,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         confirm_stage_result(stage, confirmed_by=self.user)
         unlocked = unlock_stage_result(stage, operator=self.user, note="核对录错了")
@@ -2707,6 +2747,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         self.assertNotEqual(second.pk, stage.pk)
         self.assertEqual(second.result_version, 2)
@@ -2734,6 +2775,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         rec = ScoreRecord.objects.filter(round=self.round).first()
         rec.score += Decimal("0.25")
@@ -2744,6 +2786,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
+            preview=True,
         )
         self.assertEqual(second.result_version, 2)
         with self.assertRaises(ValidationError):

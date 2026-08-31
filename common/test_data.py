@@ -293,6 +293,12 @@ def _promote_retained_config(activity: Any, *, operator: Any) -> dict[str, int]:
             is_current=True, status=RulesetVersion.Status.FROZEN
         ).first()
         if retire is not None:
+            # §M1-R8: ``is_current`` = current official authority. The retiring TEST
+            # frozen must not become the FORMAL authority, and a DRAFT successor is never
+            # current, so demote the TEST frozen through the base manager (bypassing the
+            # frozen-immutability guard on is_current) — no authority exists until staff
+            # re-bind and re-freeze the FORMAL successor.
+            RulesetVersion._base_manager.filter(pk=retire.pk).update(is_current=False)
             create_ruleset_version(
                 ruleset,
                 definition=retire.definition,

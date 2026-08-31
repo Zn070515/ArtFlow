@@ -386,7 +386,16 @@ class M1StageResultTestDataCleanupTests(TestCase):
         self.assertFalse(
             retained.versions.filter(status=RulesetVersion.Status.FROZEN, is_current=True).exists()
         )
-        successor = retained.versions.filter(is_current=True).get()
+        # is_current = current official authority (M1-R8): a DRAFT successor is never
+        # current, and the retired TEST frozen was demoted, so there is no authority until
+        # staff re-bind and re-freeze the FORMAL successor.
+        self.assertFalse(retained.versions.filter(is_current=True).exists())
+        successor = (
+            retained.versions.filter(status=RulesetVersion.Status.DRAFT)
+            .order_by("-version")
+            .first()
+        )
+        self.assertIsNotNone(successor)
         self.assertEqual(successor.status, RulesetVersion.Status.DRAFT)
         # The successor carries the definition but a clean binding: staff re-binds the
         # (now-formal) runtime round/vote/group IDs, so no test-only pks are inherited.

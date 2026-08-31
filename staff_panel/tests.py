@@ -4456,6 +4456,7 @@ class ResultBoardTests(TestCase):
             stage_key="院十佳",
             computed_by=self.staff,
             round_keys={"r1": contest_round},
+            preview=True,
         )
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
         response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))
@@ -4627,10 +4628,12 @@ class RulesetTemplateLibraryTests(TestCase):
         versions = list(RulesetVersion.objects.filter(ruleset=ruleset).order_by("version"))
         self.assertEqual(len(versions), 2)
         self.assertEqual([v.version for v in versions], [1, 2])
-        self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset, is_current=True).count(), 1)
+        # A cloned DRAFT is an editing target, never the official authority (M1-R8),
+        # so repeated clones never claim is_current until a successor is frozen.
+        self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset, is_current=True).count(), 0)
         latest = versions[-1]
         latest.refresh_from_db()
-        self.assertTrue(latest.is_current)
+        self.assertFalse(latest.is_current)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[latest.pk]))
 
     def test_clone_last_year_picks_golden_template_by_name(self):
