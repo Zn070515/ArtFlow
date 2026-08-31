@@ -24,12 +24,14 @@ from django.db import (
 from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
+from django.utils import timezone
 from exports.services import build_score_template_workbook
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from files.services import review_material_check, store_submission_file
 from openpyxl import Workbook
 from ruleset.models import ContestRuleset, RulesetVersion
 from staff_panel.views import activity_material_requirements
+from voting.models import VoteSession
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .models import (
@@ -2401,8 +2403,9 @@ class StageResolverBindingTests(TestCase):
     def test_run_ruleset_rejects_superseded_frozen_unless_preview(self):
         """M1-R8 gate #2: a frozen version that is no longer current cannot produce a
         formal StageResult; only an explicit staff comparison (preview) may run it."""
-        from .services import run_ruleset
         from ruleset.models import RulesetVersion
+
+        from .services import run_ruleset
 
         # self.version is the current frozen v1; simulate a version that was frozen then
         # superseded by a newer authority (non-current, still FROZEN).
@@ -3742,5 +3745,192 @@ class ManualDecisionModelTests(TestCase):
                 manual_key="manual",
                 group="G1",
                 chosen=[],
+                is_test_data=True,
+            )
+
+
+class ConfirmedDependencyClosureTests(TestCase):
+    """M1-R8 Commit 3: a CONFIRMED stage result pins its raw facts (round/vote/manual).
+
+    Once a stage is 核定, the upstream round scores, vote counts, and manual picks it
+    read are no longer subject to un-wind. ``unlock_round`` / ``reset_round_to_draft`` /
+    ``unlock_vote_session`` / ``ManualDecision`` mutation must refuse while any
+    CONFIRMED stage of the same activity/version consumed the raw fact. Only unlocking
+    the stage result first (reverting to READY_TO_CONFIRM) releases finality.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="closure-admin", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="闭环节",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="闭环规则", is_test_data=True
+        )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="初赛",
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="评委甲")
+        self.singers = [self._make_singer(i) for i in range(1, 4)]
+        self.vs = VoteSession.objects.create(
+            activity=self.activity,
+            name="大众投票",
+            passcode="0000",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(hours=1),
+            is_test_data=True,
+        )
+
+    def _make_singer(self, index):
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"closure-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"close{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        ScoreRecord.objects.create(
+            round=self.round,
+            singer=singer,
+            judge=self.judge,
+            score=Decimal(80 + index),
+            is_test_data=True,
+        )
+        return singer
+
+    def _frozen_version(self, definition, binding):
+        return RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=json.dumps(definition, ensure_ascii=False),
+            version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding=binding,
+        )
+
+    def _confirm_stage(self, definition, binding, lock_round=False, lock_vote=False):
+        from .services import confirm_stage_result, run_ruleset
+
+        version = self._frozen_version(definition, binding)
+        kwargs = {"stage_key": "选拔", "computed_by": self.user, "round_keys": {"r1": self.round}}
+        if lock_round:
+            self.round.is_locked = True
+            self.round.status = ContestRound.Status.LOCKED
+            self.round.save(update_fields=["is_locked", "status"])
+        if lock_vote:
+            self.vs.is_locked = True
+            self.vs.save(update_fields=["is_locked"])
+        stage = run_ruleset(version, self.activity, **kwargs, preview=True)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        return confirm_stage_result(stage, confirmed_by=self.user)
+
+    def test_confirmed_stage_blocks_unlock_and_reset_round(self):
+        from .services import reset_round_to_draft, unlock_round, unlock_stage_result
+
+        definition = {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {"key": "ranked", "type": "RANK", "source": "assess", "descending": True},
+            ],
+        }
+        stage = self._confirm_stage(
+            definition, {"stage_key": "选拔", "round_keys": {"r1": self.round.pk}}, lock_round=True
+        )
+        self.assertEqual(stage.status, StageResult.Status.CONFIRMED)
+        with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
+            unlock_round(self.round, self.user)
+        with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
+            reset_round_to_draft(self.round, self.user, reason="admin unwind")
+        # Unlocking the stage result releases finality so the round is editable again.
+        unlock_stage_result(StageResult.objects.get(pk=stage.pk), operator=self.user)
+        unlocked = unlock_round(self.round, self.user)
+        self.assertFalse(unlocked.is_locked)
+        self.assertEqual(unlocked.status, ContestRound.Status.SCORING)
+
+    def test_confirmed_vote_sourced_stage_blocks_unlock_vote_session(self):
+        from voting.services import unlock_vote_session
+
+        from .services import ensure_vote_not_consumed_by_confirmed_stage
+
+        self.vs.is_locked = True
+        self.vs.save(update_fields=["is_locked"])
+        definition = {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "agg", "type": "ASSESS", "source": "entry", "vote_source": "audience"},
+                {"key": "ranked", "type": "RANK", "source": "agg", "descending": True},
+            ],
+        }
+        version = self._frozen_version(
+            definition, {"stage_key": "选拔", "vote_keys": {"audience": self.vs.pk}}
+        )
+        StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.user,
+            stage_key="选拔",
+            status=StageResult.Status.CONFIRMED,
+            input_fingerprint="x",
+            result_version=1,
+            is_test_data=True,
+            confirmed_by=self.user,
+            confirmed_at=timezone.now(),
+        )
+        with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
+            ensure_vote_not_consumed_by_confirmed_stage(self.vs)
+        with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
+            unlock_vote_session(self.vs, self.user)
+
+    def test_confirmed_stage_blocks_manual_decision_mutation(self):
+        from .models import ManualDecision
+        from .services import ensure_manual_not_consumed_by_confirmed_stage
+
+        definition = {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "roster", "type": "ROSTER"},
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "roster",
+                    "groups": 1,
+                    "quota": 2,
+                },
+            ],
+        }
+        version = self._frozen_version(definition, {"stage_key": "选拔"})
+        StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.user,
+            stage_key="选拔",
+            status=StageResult.Status.CONFIRMED,
+            input_fingerprint="x",
+            result_version=1,
+            is_test_data=True,
+            confirmed_by=self.user,
+            confirmed_at=timezone.now(),
+        )
+        with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
+            ensure_manual_not_consumed_by_confirmed_stage(version, "manual")
+        with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
+            ManualDecision.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(self.singers[0].pk)],
                 is_test_data=True,
             )

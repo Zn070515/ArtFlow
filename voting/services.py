@@ -162,6 +162,9 @@ def unlock_vote_session(vote_session, operator, *, note: str = ""):
         locked = _locked_vote_session(vote_session)
         if not locked.is_locked:
             return locked
+        from singer_contest.services import ensure_vote_not_consumed_by_confirmed_stage
+
+        ensure_vote_not_consumed_by_confirmed_stage(locked)
         locked.is_locked = False
         locked.save(update_fields=["is_locked"])
         _audit_vote_state(

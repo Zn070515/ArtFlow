@@ -893,7 +893,16 @@ class ManualDecision(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        from .services import ensure_manual_not_consumed_by_confirmed_stage
+
+        ensure_manual_not_consumed_by_confirmed_stage(self.ruleset_version, self.manual_key)
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        from .services import ensure_manual_not_consumed_by_confirmed_stage
+
+        ensure_manual_not_consumed_by_confirmed_stage(self.ruleset_version, self.manual_key)
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.manual_key} — {self.group or '(整体)'}"

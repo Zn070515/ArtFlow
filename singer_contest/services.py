@@ -244,6 +244,7 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
         raise PermissionDenied("活动结果已锁定，无法重置轮次。")
     if locked_round.status == ContestRound.Status.DRAFT:
         return locked_round
+    ensure_round_not_consumed_by_confirmed_stage(locked_round)
     round_order = {
         ContestRound.RoundType.PRELIMINARY: 0,
         ContestRound.RoundType.SEMI_FINAL: 1,
@@ -621,6 +622,7 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
     )
     if locked_round.status != ContestRound.Status.LOCKED or not locked_round.is_locked:
         raise PermissionDenied("该比赛轮次未锁定。")
+    ensure_round_not_consumed_by_confirmed_stage(locked_round)
     for other in (
         ContestRound.objects.select_for_update()
         .filter(activity=locked_round.activity, pk__in=downstream_rounds(locked_round))
@@ -1278,6 +1280,67 @@ def _ensure_stage_dependencies_final(version, activity, stage_key: str) -> None:
         )
         if open_votes.exists():
             raise ValidationError("该赛段依赖的投票时段尚未锁定，请先锁定后再核定。")
+
+
+_CONSUMED_BY_CONFIRMED_MSG = "该原始数据已被已核定赛段结果使用，请先由管理员解锁赛段结果。"
+
+
+def _stage_consumed_facts(stage) -> dict[str, set]:
+    """The raw pks a confirmed stage consumed, read back from its binding snapshot.
+
+    This is the inverse of :func:`_ensure_stage_dependencies_final`: where that freeze
+    gate requires the facts a stage *will* read to be at rest, this gate refuses to
+    *un-wind* a round/vote/manual that a CONFIRMED stage already read. Both map the
+    stage's closure keys (``round_keys``/``vote_keys``/``group_keys``/``manual_keys``)
+    onto physical pks via the frozen version's binding.
+    """
+    version = stage.ruleset_version
+    binding = _version_binding(version)
+    checkpoint = stage.stage_key if _stage_is_checkpoint(version, stage.stage_key) else None
+    round_keys, vote_keys, group_keys, manual_keys = stage_consumed_scopes(
+        version.definition, checkpoint
+    )
+    round_map = binding.get("round_keys") or {}
+    group_map = binding.get("group_keys") or {}
+    vote_map = binding.get("vote_keys") or {}
+    round_pks = {round_map.get(k) for k in round_keys} | {group_map.get(k) for k in group_keys}
+    round_pks.discard(None)
+    vote_pks = {vote_map.get(k) for k in vote_keys}
+    vote_pks.discard(None)
+    return {"rounds": round_pks, "votes": vote_pks, "manual": set(manual_keys)}
+
+
+def ensure_round_not_consumed_by_confirmed_stage(contest_round) -> None:
+    """Reject un-winding a round that a CONFIRMED stage of its activity already read."""
+    consumed = StageResult.objects.filter(
+        activity_id=contest_round.activity_id, status=StageResult.Status.CONFIRMED
+    ).values("pk")
+    for stage_pk in consumed:
+        stage = StageResult.objects.get(pk=stage_pk["pk"])
+        if contest_round.pk in _stage_consumed_facts(stage)["rounds"]:
+            raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+
+
+def ensure_vote_not_consumed_by_confirmed_stage(vote_session) -> None:
+    """Reject un-winding a VoteSession that a CONFIRMED stage of its activity already read."""
+    consumed = StageResult.objects.filter(
+        activity_id=vote_session.activity_id, status=StageResult.Status.CONFIRMED
+    ).values("pk")
+    for stage_pk in consumed:
+        stage = StageResult.objects.get(pk=stage_pk["pk"])
+        if vote_session.pk in _stage_consumed_facts(stage)["votes"]:
+            raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+
+
+def ensure_manual_not_consumed_by_confirmed_stage(version, manual_key) -> None:
+    """Reject mutating a manual pick that a CONFIRMED stage of the same version already read."""
+    consumed = StageResult.objects.filter(
+        ruleset_version_id=version.pk, status=StageResult.Status.CONFIRMED
+    ).values("pk")
+    for stage_pk in consumed:
+        stage = StageResult.objects.get(pk=stage_pk["pk"])
+        if manual_key in _stage_consumed_facts(stage)["manual"]:
+            raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
 
 
 @transaction.atomic
