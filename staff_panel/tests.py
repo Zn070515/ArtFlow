@@ -3719,6 +3719,94 @@ class PublicPostMoveLockTests(TestCase):
         self.assertEqual(post.related_activity_id, self.activity.pk)
 
 
+class PublicPostOptimisticConcurrencyTests(TestCase):
+    """§17 P1 — a stale post-edit form must never silently overwrite a co-editor.
+
+    The existing select_for_update only guards reparent races; a field-level
+    stale form (A saves, then B's untouched form submits) would overwrite A's
+    content. The version snapshot makes that an explicit "已过期" rejection.
+    """
+
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username="optimistic-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = Activity.objects.create(
+            title="A",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        self.post = PublicPost.objects.create(
+            title="Post", related_activity=self.activity, created_by=self.staff
+        )
+
+    def _payload(self, *, title="Post", base_version=None, status=None):
+        payload = {
+            "title": title,
+            "subtitle": "",
+            "content": "",
+            "post_type": PublicPost.PostType.NORMAL_ARTICLE,
+            "status": status or PublicPost.Status.DRAFT,
+            "sort_order": "0",
+            "related_activity_id": str(self.activity.pk),
+        }
+        if base_version is not None:
+            payload["base_version"] = str(base_version)
+        return payload
+
+    def test_edit_with_current_version_bumps_and_saves(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_edit", args=[self.post.pk]),
+            self._payload(title="Current", base_version=self.post.version),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.title, "Current")
+        self.assertEqual(self.post.version, 1)
+
+    def test_edit_with_stale_version_is_rejected_without_overwrite(self):
+        self.client.force_login(self.staff)
+        # First save moves the post to version 1.
+        first = self.client.post(
+            reverse("staff:post_edit", args=[self.post.pk]),
+            self._payload(title="Co-author's save", base_version=0),
+        )
+        self.assertEqual(first.status_code, 302)
+        # A second staff still holds the stale base_version=0 form.
+        stale = self.client.post(
+            reverse("staff:post_edit", args=[self.post.pk]),
+            self._payload(title="Stale overwrite attempt", base_version=0),
+        )
+        self.assertEqual(stale.status_code, 200)
+        self.assertContains(stale, "已被其他人更新")
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.title, "Co-author's save")
+        self.assertEqual(self.post.version, 1)
+
+    def test_edit_without_base_version_is_accepted_for_legacy_clients(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_edit", args=[self.post.pk]),
+            self._payload(title="Legacy save"),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.title, "Legacy save")
+        self.assertEqual(self.post.version, 1)
+
+    def test_create_initializes_version_to_zero(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_create"),
+            self._payload(title="Created"),
+        )
+        self.assertEqual(response.status_code, 302)
+        created = PublicPost.objects.get(title="Created")
+        self.assertEqual(created.version, 0)
+
+
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
 class PublicPostReparentConcurrencyTests(TransactionTestCase):
     """M0-X: a stale reparent must never bypass the current parent's authority."""

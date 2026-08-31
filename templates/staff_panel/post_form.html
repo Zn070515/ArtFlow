@@ -7,6 +7,8 @@
     <h1 class="text-2xl font-bold text-gray-900 mb-6">{% if post %}编辑内容{% else %}新增公开内容{% endif %}</h1>
     <form method="post" enctype="multipart/form-data" class="space-y-4">
         {% csrf_token %}
+        {% if error %}<div class="rounded border border-red-300 bg-red-50 text-red-800 px-4 py-3 text-sm">{{ error }}</div>{% endif %}
+        {% if post %}<input type="hidden" name="base_version" value="{{ post.version }}">{% endif %}
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">标题</label>
             <input type="text" name="title" value="{{ post.title|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">

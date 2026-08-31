@@ -354,6 +354,23 @@ def post_edit(request, pk):
         locked_post = PublicPost.objects.select_for_update().get(pk=post.pk)
         if locked_post.related_activity_id != old_hint_activity_id:
             raise PermissionDenied("页面内容已发生并发修改，请刷新后重新编辑。")
+        # Optimistic concurrency: if the client's base_version is behind the
+        # current one, another staff member already saved changes. Refuse to
+        # silently overwrite them; render the stale form back with an explicit
+        # outdated notice so the staff can refresh and re-apply their intent.
+        base_version = data.get("base_version")
+        if base_version is not None and locked_post.version != base_version:
+            return render(
+                request,
+                "staff_panel/post_form.html",
+                {
+                    "error": "该内容已被其他人更新，请刷新后重新编辑。",
+                    "post": post,
+                    "post_types": _choices(PublicPost.PostType),
+                    "statuses": _choices(PublicPost.Status),
+                    "activities": Activity.objects.all(),
+                },
+            )
         old_locked = locked_by_pk.get(old_hint_activity_id) if old_hint_activity_id else None
         new_locked = locked_by_pk.get(new_activity_id) if new_activity_id else None
         # A move from a locked activity to an unlocked one must still be blocked;
@@ -372,6 +389,7 @@ def post_edit(request, pk):
         locked_post.is_pinned = data["is_pinned"]
         locked_post.related_activity_id = data["related_activity_id"]
         locked_post.updated_by = request.user
+        locked_post.version += 1
         if request.FILES.get("cover_image"):
             locked_post.cover_image = request.FILES["cover_image"]
         if data["status"] == PublicPost.Status.PUBLISHED and not locked_post.published_at:

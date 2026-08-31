@@ -96,6 +96,10 @@ class PublicPostForm(forms.Form):
     is_pinned = forms.BooleanField(required=False)
     sort_order = forms.IntegerField(required=False, initial=0)
     related_activity_id = forms.IntegerField(required=False)
+    # Client snapshot version for stale-edit detection. Absent/None means the
+    # form came from a legacy client (or a create) and is passed through; a
+    # non-matching value rejects the save as outdated.
+    base_version = forms.IntegerField(required=False)
 
     def clean_sort_order(self):
         return self.cleaned_data.get("sort_order") or 0
