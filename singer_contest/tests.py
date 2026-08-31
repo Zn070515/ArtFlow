@@ -2817,3 +2817,55 @@ class RapidEntryServiceTests(TestCase):
         self.assertEqual(stage.decisions.count(), 1)
         decision = stage.decisions.get()
         self.assertEqual(decision.outcome_code, "direct")
+
+    def test_frozen_binding_authoritative_over_ruleset_mutation(self):
+        """M1-R1: after freeze, editing the ContestRuleset binding does not change the result.
+
+        A frozen version carries its binding snapshot; the runtime reads it from the
+        version, never the still-mutable ContestRuleset round_keys / stage_key.
+        """
+        import json
+
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        from .services import apply_scores, recompute_activity_result
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="权威规则",
+            is_test_data=True,
+            stage_key="院十佳",
+            round_keys={"r1": self.round.pk},
+        )
+        version = RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=json.dumps(
+                {
+                    "schema_version": 1,
+                    "nodes": [
+                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                    ],
+                }
+            ),
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+            binding={
+                "stage_key": "院十佳",
+                "round_keys": {"r1": self.round.pk},
+                "announcement_blocks": [],
+            },
+        )
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
+
+        # The frozen version is authoritative: rewriting the ruleset binding must be inert.
+        ruleset.stage_key = "篡改赛段"
+        ruleset.round_keys = {}
+        ruleset.save()
+
+        stage = recompute_activity_result(self.activity, self.admin, ruleset=ruleset)
+        self.assertEqual(stage.stage_key, "院十佳")
+        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.ruleset_version, version)
+        self.assertEqual(stage.decisions.count(), 1)

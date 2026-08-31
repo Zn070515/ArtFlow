@@ -61,7 +61,11 @@ from ruleset import editor as ruleset_editor
 from ruleset.compiler import compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
-from ruleset.services import RulesetInvalidError, freeze_ruleset_version
+from ruleset.services import (
+    RulesetInvalidError,
+    create_ruleset_version,
+    freeze_ruleset_version,
+)
 from singer_contest.models import (
     Award,
     ContestRound,
@@ -2218,11 +2222,7 @@ def contest_ruleset_create(request):
             is_test_data=runtime_is_test(activity),
             created_by=request.user,
         )
-        version = RulesetVersion.objects.create(
-            ruleset=ruleset,
-            definition=definition,
-            created_by=request.user,
-        )
+        version = create_ruleset_version(ruleset, definition=definition, created_by=request.user)
         messages.success(request, "赛制已创建，进入编辑。")
         return redirect("staff:ruleset_edit", pk=version.pk)
     activities = Activity.objects.all().order_by("-created_at")
@@ -2348,10 +2348,8 @@ def ruleset_clone_from_template(request, template_pk):
     ruleset.source_template = template
     ruleset.is_test_data = runtime_is_test(activity)
     ruleset.save()
-    version = RulesetVersion.objects.create(
-        ruleset=ruleset,
-        definition=template.definition,
-        created_by=request.user,
+    version = create_ruleset_version(
+        ruleset, definition=template.definition, created_by=request.user
     )
     messages.success(request, f"已从「{template.name}」克隆到活动，进入编辑。")
     return redirect("staff:ruleset_edit", pk=version.pk)

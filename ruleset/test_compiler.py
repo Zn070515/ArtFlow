@@ -22,9 +22,14 @@ from ruleset.compiler import (
     ExecutionPlan,
     compile_definition,
 )
-from ruleset.models import RulesetVersion
+from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.schema import ENTRY_KEY, content_hash
-from ruleset.services import RulesetInvalidError, freeze_ruleset_version
+from ruleset.services import (
+    RulesetInvalidError,
+    create_ruleset_version,
+    freeze_ruleset_version,
+    supersede_ruleset_version,
+)
 from ruleset.test_schema import (
     DEF,
     _def,
@@ -686,3 +691,161 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         self.assertFalse(
             AuditLog.objects.filter(action_type=AuditLog.ActionType.FINALIZE_RULESET).exists()
         )
+
+
+class RulesetFrozenAuthorityTests(_RulesetModelBase):
+    """M1-R1: a frozen version is self-authoritative (definition + binding + hash).
+
+    The binding snapshot (stage_key / round_keys / announcement_blocks) is captured at
+    freeze, the runtime reads it from the version (never the still-mutable ContestRuleset
+    fields), and superseding / cloning preserve the one-current invariant.
+    """
+
+    def _admin(self):
+        user = self.make_user("r1-admin")
+        user.role = User.Role.ADMIN
+        user.save()
+        return user
+
+    def _ruleset_with_binding(self):
+        ruleset = self.make_ruleset()
+        from core.models import Activity
+        from singer_contest.models import ContestRound
+
+        assert ruleset.activity.activity_type == Activity.Type.SINGER_CONTEST
+        round_ = ContestRound.objects.create(
+            activity=ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=10,
+        )
+        ruleset.stage_key = "院十佳"
+        ruleset.round_keys = {"r1": round_.pk}
+        ruleset.announcement_blocks = [{"label": "晋级", "outcome_codes": ["direct"]}]
+        ruleset.save()
+        return ruleset, round_
+
+    def _draft_on(self, ruleset, *, version=1, is_current=True, status=RulesetVersion.Status.DRAFT):
+        return RulesetVersion.objects.create(
+            ruleset=ruleset,
+            version=version,
+            definition=DEF,
+            is_current=is_current,
+            status=status,
+        )
+
+    def test_freeze_snapshots_binding_from_ruleset(self):
+        ruleset, round_ = self._ruleset_with_binding()
+        admin = self._admin()
+        version = self._draft_on(ruleset)
+        frozen = freeze_ruleset_version(version, admin)
+        frozen.refresh_from_db()
+        self.assertEqual(
+            frozen.binding,
+            {
+                "stage_key": "院十佳",
+                "round_keys": {"r1": round_.pk},
+                "announcement_blocks": [{"label": "晋级", "outcome_codes": ["direct"]}],
+            },
+        )
+
+    def test_freeze_accepts_explicit_binding(self):
+        from singer_contest.models import ContestRound
+
+        ruleset = self.make_ruleset()
+        round_ = ContestRound.objects.create(
+            activity=ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=10,
+        )
+        admin = self._admin()
+        version = self._draft_on(ruleset)
+        frozen = freeze_ruleset_version(
+            version,
+            admin,
+            binding={
+                "stage_key": "快速赛段",
+                "round_keys": {"r1": round_.pk},
+                "announcement_blocks": [],
+            },
+        )
+        frozen.refresh_from_db()
+        self.assertEqual(frozen.binding["stage_key"], "快速赛段")
+        self.assertEqual(frozen.binding["round_keys"], {"r1": round_.pk})
+
+    def test_freeze_rejects_binding_with_foreign_round(self):
+        from singer_contest.models import ContestRound
+
+        ruleset = self.make_ruleset()
+        other_activity_ruleset = self.make_ruleset()
+        foreign_round = ContestRound.objects.create(
+            activity=other_activity_ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=5,
+        )
+        admin = self._admin()
+        version = self._draft_on(ruleset)
+        with self.assertRaises(ValidationError):
+            freeze_ruleset_version(
+                version,
+                admin,
+                binding={"stage_key": "院十佳", "round_keys": {"r1": foreign_round.pk}},
+            )
+
+    def test_frozen_binding_is_immutable(self):
+        ruleset, round_ = self._ruleset_with_binding()
+        admin = self._admin()
+        version = self._draft_on(ruleset)
+        frozen = freeze_ruleset_version(version, admin)
+        frozen.binding = {"stage_key": "改", "round_keys": {}, "announcement_blocks": []}
+        with self.assertRaises(ValidationError):
+            frozen.save()
+
+    def test_supersede_creates_next_draft(self):
+        ruleset, round_ = self._ruleset_with_binding()
+        admin = self._admin()
+        version = self._draft_on(ruleset)
+        frozen = freeze_ruleset_version(version, admin)
+        successor = supersede_ruleset_version(frozen, created_by=admin)
+        frozen.refresh_from_db()
+        self.assertEqual(successor.status, RulesetVersion.Status.DRAFT)
+        self.assertEqual(successor.version, 2)
+        self.assertEqual(successor.definition, frozen.definition)
+        self.assertEqual(successor.binding, frozen.binding)
+        self.assertFalse(frozen.is_current)
+        self.assertTrue(successor.is_current)
+        self.assertEqual(
+            RulesetVersion._base_manager.filter(ruleset=ruleset, is_current=True).count(), 1
+        )
+
+    def test_supersede_rejects_draft(self):
+        admin = self._admin()
+        ruleset = self.make_ruleset()
+        version = self._draft_on(ruleset, version=1)
+        with self.assertRaises(ValidationError):
+            supersede_ruleset_version(version, created_by=admin)
+
+    def test_create_ruleset_version_avoids_collision(self):
+        ruleset = self.make_ruleset()
+        admin = self._admin()
+        first = create_ruleset_version(ruleset, definition=DEF, created_by=admin)
+        second = create_ruleset_version(ruleset, definition=DEF, created_by=admin)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.version, 1)
+        self.assertEqual(second.version, 2)
+        self.assertTrue(second.is_current)
+        self.assertFalse(first.is_current)
+        self.assertEqual(
+            RulesetVersion._base_manager.filter(ruleset=ruleset, is_current=True).count(), 1
+        )
+
+    def test_contestruleset_rejects_non_singer_activity(self):
+        from core.models import Activity
+
+        farewell = Activity.objects.create(
+            title="毕晚",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            is_test_mode=True,
+        )
+        with self.assertRaises(ValidationError):
+            ContestRuleset.objects.create(activity=farewell, name="规则", is_test_data=True)
