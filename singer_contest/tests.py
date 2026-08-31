@@ -3596,7 +3596,7 @@ class BindingSourceHelperTests(TestCase):
             is_test_data=True,
         )
 
-    def test_source_vote_scores_normalizes_to_10_scale(self):
+    def test_source_vote_scores_returns_raw_counts(self):
         from voting.models import VoteOption, VoteRecord
 
         from .services import _source_vote_scores
@@ -3606,7 +3606,7 @@ class BindingSourceHelperTests(TestCase):
             VoteOption.objects.create(vote_session=vs, singer=s, is_test_data=True)
             for s in self.singers
         ]
-        # 2 + 1 + 1 votes across the three singers -> total 4.
+        # 2 + 1 + 1 votes across the three singers: raw counts, never a normalized score.
         for key, opt in (("a", opts[0]), ("b", opts[0]), ("c", opts[1]), ("d", opts[2])):
             VoteRecord.objects.create(
                 vote_session=vs,
@@ -3616,9 +3616,9 @@ class BindingSourceHelperTests(TestCase):
                 is_test_data=True,
             )
         out = _source_vote_scores(self.activity, {"vote_keys": {"audience": vs.pk}})
-        self.assertEqual(out["audience"][str(self.singers[0].pk)], Decimal("5.00"))
-        self.assertEqual(out["audience"][str(self.singers[1].pk)], Decimal("2.50"))
-        self.assertEqual(out["audience"][str(self.singers[2].pk)], Decimal("2.50"))
+        self.assertEqual(out["audience"][str(self.singers[0].pk)], Decimal("2"))
+        self.assertEqual(out["audience"][str(self.singers[1].pk)], Decimal("1"))
+        self.assertEqual(out["audience"][str(self.singers[2].pk)], Decimal("1"))
 
     def test_source_vote_scores_empty_session_skips(self):
 

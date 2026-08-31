@@ -1025,9 +1025,10 @@ def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
 def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     """Source the ``vote_scores`` ResolveInput from the binding's ``vote_keys``.
 
-    Each ``vote_source`` key resolves to a VoteSession. Per-singer vote share is
-    scaled to a 0-10 audience score (§16.9 "10分制 audience score"): ``10 * n / total``.
-    An empty session is left unbound so the resolver holds rather than fabricates.
+    Each ``vote_source`` key resolves to a VoteSession; per-singer RAW vote count is
+    returned (an authoritative fact). The loader never fabricates a normalized 0-10/100
+    score from votes — converting votes to points belongs to an explicit VoteScoringRule,
+    not the data loader. An empty session is left unbound so the resolver holds.
     """
     from voting.models import VoteRecord
 
@@ -1038,20 +1039,15 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     out: dict[str, dict[str, Decimal]] = {}
     for source, vs_pk in vote_keys.items():
         counts: dict[str, int] = {}
-        total = 0
         records = VoteRecord.objects.filter(
             vote_session_id=vs_pk, is_test_data=test_flag
         ).select_related("vote_option")
         for rec in records:
             sid = str(rec.vote_option.singer_id)
             counts[sid] = counts.get(sid, 0) + 1
-            total += 1
-        if not total:
+        if not counts:
             continue
-        out[source] = {
-            sid: (Decimal(10) * Decimal(n) / Decimal(total)).quantize(Decimal("0.01"))
-            for sid, n in counts.items()
-        }
+        out[source] = {sid: Decimal(n) for sid, n in counts.items()}
     return out
 
 
