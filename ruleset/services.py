@@ -17,6 +17,7 @@ to be an effective admin. Every freeze writes a :class:`~common.models.AuditLog`
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 from common.models import AuditLog
@@ -26,8 +27,9 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .compiler import ExecutionPlan, ValidationReport, compile_definition, compile_version
+from .compiler import ExecutionPlan, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
+from .schema import content_hash, parse_definition
 
 
 class RulesetInvalidError(Exception):
@@ -61,6 +63,56 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
         "group_keys": dict(ruleset.group_keys or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
     }
+
+
+def _binding_signature(ruleset: ContestRuleset) -> str:
+    """Canonical signature of a ruleset's editable binding surface.
+
+    Used for stale-write detection in :func:`update_ruleset_binding`: a staff member's
+    form carries the signature they loaded; if the committed surface changed since, the
+    save is refused as a concurrent-edit conflict rather than silently overwriting.
+    """
+    return json.dumps(
+        {
+            "stage_key": ruleset.stage_key or "",
+            "round_keys": dict(ruleset.round_keys or {}),
+            "vote_keys": dict(ruleset.vote_keys or {}),
+            "group_keys": dict(ruleset.group_keys or {}),
+            "announcement_blocks": list(ruleset.announcement_blocks or []),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _authority_hash(version: RulesetVersion) -> str:
+    """Digest of the full authoritative surface (definition + frozen binding + plan).
+
+    Unlike :func:`ruleset.schema.content_hash` (definition-only), this captures the
+    freeze-time binding snapshot too, so two versions with identical definitions but
+    different bindings hash differently. The StageResult audit identity uses it.
+    """
+    if version.execution_plan:
+        try:
+            plan_version = json.loads(version.execution_plan).get("plan_version", 0)
+        except ValueError:
+            plan_version = 0
+    else:
+        plan_version = 0
+    digest = (
+        content_hash(version.definition)
+        + "|"
+        + json.dumps(
+            version.binding or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "|"
+        + str(plan_version)
+    )
+    return hashlib.sha256(digest.encode("utf-8")).hexdigest()
 
 
 def _normalize_pk_map(raw, *, label):
@@ -132,48 +184,195 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     }
 
 
+def _lock_version_for_write(version: RulesetVersion) -> RulesetVersion:
+    """Activity → ContestRuleset → RulesetVersion, re-reading the child under the lock.
+
+    M0 lock-order: a child write must lock the Activity first, then re-read the owned
+    aggregates, so a concurrent edit cannot operate over a stale in-memory object.
+    """
+    lock_activity_for_action(version.ruleset.activity)
+    ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
+    return (
+        RulesetVersion.objects.select_for_update()
+        .select_related("ruleset__activity")
+        .get(pk=version.pk)
+    )
+
+
+@transaction.atomic
+def update_ruleset_definition(
+    version: RulesetVersion, *, definition: str, operator, base_content_hash: str | None = None
+) -> RulesetVersion:
+    """Persist a Draft definition edit under the Activity-first lock.
+
+    Re-reads the version after locking (a second staff member's concurrent save cannot be
+    silently overwritten), refuses a write to a FROZEN version, and — when
+    ``base_content_hash`` is supplied — rejects a save whose editor started from a stale
+    definition (the 409-contract for concurrent editing). Returns the locked version.
+    """
+    locked = _lock_version_for_write(version)
+    if locked.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    if base_content_hash is not None and locked.content_hash != base_content_hash:
+        raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
+    parse_definition(definition)
+    locked.definition = definition
+    locked.save(update_fields=["definition"])
+    return locked
+
+
+@transaction.atomic
+def update_ruleset_binding(
+    ruleset: ContestRuleset, *, binding: dict, operator, base_binding: str | None = None
+) -> ContestRuleset:
+    """Persist a ContestRuleset binding edit under the Activity-first lock.
+
+    Re-reads the ruleset after locking, validates/normalizes the binding, and rejects a
+    save whose editor started from a stale binding surface (``base_binding`` signature).
+    Does not touch the version: the snapshot runs at freeze time.
+    """
+    lock_activity_for_action(ruleset.activity)
+    locked = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
+    if base_binding is not None and _binding_signature(locked) != base_binding:
+        raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
+    normalized = validate_binding(locked, binding)
+    locked.stage_key = normalized["stage_key"]
+    locked.round_keys = normalized["round_keys"]
+    locked.vote_keys = normalized["vote_keys"]
+    locked.group_keys = normalized["group_keys"]
+    locked.announcement_blocks = normalized["announcement_blocks"]
+    locked.save(
+        update_fields=[
+            "stage_key",
+            "round_keys",
+            "vote_keys",
+            "group_keys",
+            "announcement_blocks",
+            "updated_at",
+        ]
+    )
+    return locked
+
+
+def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
+    """Construct the §39 bound freeze context from the DB for a ContestRuleset.
+
+    Unlike a template (which legitimately has no real entities and may WARN), a bound
+    activity freeze must prove every verifiable fact or fail. ``entry_size`` is the
+    scoped approved-singer count; each bound round contributes its real ``judge_count``,
+    a ``scope`` ("full" when the round's RoundEntries cover the entry roster, else
+    "subset"), and a ``scale`` derived from its rubric's highest criterion max_score;
+    each vote source contributes ``result_ready``/``scale``/``normalization``; each group
+    partition contributes per-group ``capacity``. Facts the DB cannot supply are left
+    unset so the bound compiler escalates the corresponding "unverifiable" WARN to a
+    hard ERROR and refuses the freeze instead of inventing a value.
+    """
+    from singer_contest.models import ContestRound
+
+    activity = version.ruleset.activity
+    round_keys = binding.get("round_keys") or {}
+    entry_size = _scoped_entry_count(activity)
+
+    round_ctx: dict[str, dict] = {}
+    for rkey, rpk in round_keys.items():
+        contest_round = ContestRound.objects.filter(pk=rpk, activity=activity).first()
+        if contest_round is None:
+            continue
+        judge_count = contest_round.round_judges.count()
+        entry_count = contest_round.entries.count()
+        scope = "full" if entry_count and entry_size and entry_count >= entry_size else "subset"
+        item: dict = {"judge_count": judge_count, "scope": scope}
+        scale = _round_scale(contest_round)
+        if scale:
+            item["scale"] = scale
+        round_ctx[rkey] = item
+
+    votes = {
+        source: _vote_binding(vs_pk) for source, vs_pk in (binding.get("vote_keys") or {}).items()
+    }
+
+    groups = {}
+    for by, rpk in (binding.get("group_keys") or {}).items():
+        caps = list(_annotated_capacity(rpk, activity))
+        if caps:
+            groups[by] = {"capacity": caps}
+
+    return {"entry_size": entry_size, "rounds": round_ctx, "votes": votes, "groups": groups}
+
+
+def _scoped_entry_count(activity) -> int:
+    from singer_contest.models import SingerRegistration
+
+    return SingerRegistration.objects.filter(
+        activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
+    ).count()
+
+
+def _round_scale(contest_round) -> str | None:
+    rubric_id = getattr(contest_round, "rubric_id", None)
+    if rubric_id is None:
+        return None
+    from django.db.models import Max
+    from singer_contest.models import ScoringRubric
+
+    top = ScoringRubric.objects.filter(pk=rubric_id).aggregate(m=Max("criteria__max_score"))["m"]
+    if top is None:
+        return None
+    return "hundred" if top >= 90 else "ten"
+
+
+def _vote_binding(vs_pk) -> dict:
+    from voting.models import VoteRecord, VoteSession
+
+    vs = VoteSession.objects.filter(pk=vs_pk).first()
+    if vs is None:
+        return {}
+    ready = VoteRecord.objects.filter(vote_session=vs).exists()
+    return {"result_ready": ready, "scale": "ten", "normalization": True}
+
+
+def _annotated_capacity(rpk, activity):
+    from django.db.models import Count
+    from singer_contest.models import PerformanceGroup
+
+    return (
+        PerformanceGroup.objects.filter(round_id=rpk, activity=activity)
+        .annotate(n=Count("performances"))
+        .values_list("n", flat=True)
+    )
+
+
 @transaction.atomic
 def freeze_ruleset_version(
     version: RulesetVersion,
     operator,
     *,
     binding: dict | None = None,
-    bound_context: dict | None = None,
 ) -> RulesetVersion:
-    """Freeze a DRAFT ruleset version, snapshotting its binding. Returns the locked, frozen version.
+    """Freeze a DRAFT ContestRuleset version, always at the *bound* activity level.
 
-    ``binding`` is optional: when omitted, the ruleset's current binding fields are
-    snapshotted verbatim (the default for an existing editor flow). When provided, it is
-    validated and becomes the snapshot. ``bound_context`` (optional, §39) supplies the real
-    round/judge/entry facts so the definition is compiled at the *bound activity freeze*
-    level — anything the compiler could otherwise only WARN about as unverifiable becomes
-    an ERROR and aborts the freeze. Without it the compile stays template-level (WARNs
-    allowed). Raises :class:`PermissionDenied` if the operator is not an effective admin
-    or the activity is locked; :class:`ValidationError` if the version is already frozen
-    or the binding is invalid; :class:`RulesetInvalidError` if compilation reports any ERROR.
+    ``binding`` (optional) supplies the editable input surface; when omitted it is
+    snapshotted verbatim from the ruleset. Unlike a template freeze (bound=False), a
+    ContestRuleset freeze builds the real context from the DB via :func:`build_bound_context`
+    and compiles with ``bound=True``, so any fact the compiler could only WARN about as
+    "unverifiable until bound" becomes an ERROR and aborts the freeze. Raises
+    :class:`PermissionDenied` if the operator is not an effective admin or the activity is
+    locked; :class:`ValidationError` if the version is already frozen or the binding is
+    invalid; :class:`RulesetInvalidError` if compilation reports any ERROR.
     """
-    lock_activity_for_action(version.ruleset.activity)
-    ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
-    locked = (
-        RulesetVersion.objects.select_for_update()
-        .select_related("ruleset__activity")
-        .get(pk=version.pk)
-    )
+    locked = _lock_version_for_write(version)
     current_operator = get_user_model().objects.get(pk=operator.pk)
     if not current_operator.is_active or not current_operator.is_admin:
         raise PermissionDenied("只有管理员可以核定冻结赛制。")
     if locked.status == RulesetVersion.Status.FROZEN:
         raise ValidationError("该赛制版本已冻结。")
 
-    if bound_context is not None:
-        report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
-    else:
-        report, plan = compile_version(locked)
-    if not report.passes():
-        raise RulesetInvalidError(report, plan)
-
     freeze_binding = _snapshot_binding(locked.ruleset) if binding is None else binding
     normalized_binding = validate_binding(locked.ruleset, freeze_binding)
+    bound_context = build_bound_context(locked, normalized_binding)
+    report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
+    if not report.passes():
+        raise RulesetInvalidError(report, plan)
 
     old_status = "draft"
     _demote_prior_current(locked)
@@ -183,6 +382,7 @@ def freeze_ruleset_version(
     locked.is_current = True
     locked.execution_plan = json.dumps(plan.to_dict(), ensure_ascii=False)
     locked.binding = normalized_binding
+    locked.authority_hash = _authority_hash(locked)
     locked.save(
         update_fields=[
             "status",
@@ -191,6 +391,7 @@ def freeze_ruleset_version(
             "is_current",
             "execution_plan",
             "binding",
+            "authority_hash",
         ]
     )
     AuditLog.objects.create(
@@ -202,6 +403,7 @@ def freeze_ruleset_version(
             {
                 "status": RulesetVersion.Status.FROZEN,
                 "content_hash": locked.content_hash,
+                "authority_hash": locked.authority_hash,
                 "binding": normalized_binding,
                 "error_count": 0,
             },

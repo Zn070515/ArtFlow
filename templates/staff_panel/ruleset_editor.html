@@ -39,6 +39,8 @@
 
     <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
         {% csrf_token %}
+        <input type="hidden" name="action" value="save">
+        <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
         <input type="hidden" name="node_order"
                value="{% for card in cards %}node_{{ card.index }}{% if not forloop.last %},{% endif %}{% endfor %}">
         {% for card in cards %}
@@ -102,6 +104,7 @@
 
     <form method="post" action="{% url 'staff:ruleset_bind' version.pk %}" class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
         {% csrf_token %}
+        <input type="hidden" name="base_binding" value="{{ binding_signature }}">
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">生产绑定</div>
         <div class="px-4 py-3 grid sm:grid-cols-2 gap-3">
             <div>

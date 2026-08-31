@@ -91,18 +91,14 @@ class ArchiveInvariantCharacterizationTests(_CharacterizationBase):
         ArchivePackage.objects.create(activity=activity, version=1, is_current=True)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                ArchivePackage.objects.create(
-                    activity=activity, version=1, is_current=False
-                )
+                ArchivePackage.objects.create(activity=activity, version=1, is_current=False)
 
     def test_second_current_for_activity_rejected(self):
         activity = self.make_activity()
         ArchivePackage.objects.create(activity=activity, version=1, is_current=True)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                ArchivePackage.objects.create(
-                    activity=activity, version=2, is_current=True
-                )
+                ArchivePackage.objects.create(activity=activity, version=2, is_current=True)
 
     def test_sequential_versions_single_current_ok(self):
         activity = self.make_activity()
@@ -164,9 +160,7 @@ class ScoreRecordCharacterizationTests(_CharacterizationBase):
         singer = self.make_singer(activity, username="s1", student_id="1")
         judge = Judge.objects.create(activity=activity, name="Judge A")
         contest_round = self.make_round(activity)
-        ScoreRecord.objects.create(
-            round=contest_round, singer=singer, judge=judge, score=95
-        )
+        ScoreRecord.objects.create(round=contest_round, singer=singer, judge=judge, score=95)
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 ScoreRecord.objects.create(
@@ -203,9 +197,7 @@ class VoteCharacterizationTests(_CharacterizationBase):
             is_test_data=False,
         )
         with self.assertRaises(ValidationError):
-            VoteOption.objects.create(
-                vote_session=session, singer=other_singer, is_test_data=False
-            )
+            VoteOption.objects.create(vote_session=session, singer=other_singer, is_test_data=False)
 
 
 class MaterialCharacterizationTests(_CharacterizationBase):
@@ -294,12 +286,14 @@ class RuntimeIsolationCharacterizationTests(_CharacterizationBase):
             is_test_data=False,
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        self.assertIn(test_singer, scope_runtime(
-            SingerRegistration.objects.filter(activity=test_activity), test_activity
-        ))
-        self.assertNotIn(formal_singer, scope_runtime(
-            SingerRegistration.objects.filter(activity=test_activity), test_activity
-        ))
+        self.assertIn(
+            test_singer,
+            scope_runtime(SingerRegistration.objects.filter(activity=test_activity), test_activity),
+        )
+        self.assertNotIn(
+            formal_singer,
+            scope_runtime(SingerRegistration.objects.filter(activity=test_activity), test_activity),
+        )
 
     def test_runtime_approved_singers_matches_lifecycle(self):
         test_activity = self.make_activity(is_test_mode=True)

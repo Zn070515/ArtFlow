@@ -818,36 +818,39 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             freeze_ruleset_version(version, admin)
         version.refresh_from_db()
         self.assertEqual(version.status, RulesetVersion.Status.DRAFT)
-        self.assertEqual(ctx.exception.report.counts().get("error", 0), 1)
+        # Bound freeze also escalates SCALE_UNDECLARED / SCORE_DEPENDENCY_UNVERIFIABLE
+        # from WARN to ERROR, so the error count is >= the un-normalized weight error.
+        self.assertGreaterEqual(ctx.exception.report.counts().get("error", 0), 1)
         self.assertFalse(
             AuditLog.objects.filter(action_type=AuditLog.ActionType.FINALIZE_RULESET).exists()
         )
 
-    def test_bound_freeze_refuses_unverifiable_context(self):
+    def test_bound_freeze_refuses_unverifiable_quota(self):
+        # A rule needing 5 candidates cannot freeze while only 1 singer is approved:
+        # the DB-derived entry_size turns QUOTA_EXCEEDED into a hard error.
         admin = self._admin()
-        version = self._draft()
+        too_big = json.dumps(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                    {"key": "r", "type": "RANK", "source": "a"},
+                    {"key": "s", "type": "SELECT", "source": "r", "count": 5},
+                ]
+            ),
+            ensure_ascii=False,
+        )
+        version = self._draft(definition=too_big)
         with self.assertRaises(RulesetInvalidError):
-            freeze_ruleset_version(
-                version,
-                admin,
-                bound_context={
-                    "rounds": {"r1": {"judge_count": 3, "scale": "hundred", "scope": "full"}}
-                },
-            )
+            freeze_ruleset_version(version, admin)
         version.refresh_from_db()
         self.assertEqual(version.status, RulesetVersion.Status.DRAFT)
 
-    def test_bound_freeze_passes_with_full_context(self):
+    def test_bound_freeze_passes_with_adequate_context(self):
+        # A bound freeze of an adequate rule succeeds once the activity has an approved
+        # entry so the compiler can verify the quota instead of escalating to ERROR.
         admin = self._admin()
         version = self._draft()
-        frozen = freeze_ruleset_version(
-            version,
-            admin,
-            bound_context={
-                "entry_size": 5,
-                "rounds": {"r1": {"judge_count": 3, "scale": "hundred", "scope": "full"}},
-            },
-        )
+        frozen = freeze_ruleset_version(version, admin)
         frozen.refresh_from_db()
         self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
         self.assertTrue(frozen.execution_plan)
@@ -1000,6 +1003,52 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
         self.assertEqual(
             RulesetVersion._base_manager.filter(ruleset=ruleset, is_current=True).count(), 1
         )
+
+    def test_freeze_sets_authority_hash_bound_aware(self):
+        # R5-3: the authority hash captures definition + frozen binding, so it differs
+        # from the definition-only content_hash when a binding surface is present.
+        ruleset, round_ = self._ruleset_with_binding()
+        admin = self._admin()
+        version = self._draft_on(ruleset)
+        frozen = freeze_ruleset_version(version, admin)
+        frozen.refresh_from_db()
+        self.assertTrue(frozen.authority_hash)
+        self.assertNotEqual(frozen.authority_hash, frozen.content_hash)
+
+    def test_authority_hash_distinguishes_binding_change(self):
+        # R5-3: two frozen versions with the identical definition but different binding
+        # must hash differently (this is what formerly collided in the StageResult
+        # identity before R5-4 moved it to the immutable RulesetVersion).
+        admin = self._admin()
+        ruleset = self.make_ruleset()
+        from singer_contest.models import ContestRound
+
+        round_ = ContestRound.objects.create(
+            activity=ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            advance_count=10,
+        )
+        v1 = self._draft_on(ruleset, version=1)
+        f1 = freeze_ruleset_version(
+            v1,
+            admin,
+            binding={
+                "stage_key": "院十佳",
+                "round_keys": {"r1": round_.pk},
+                "announcement_blocks": [],
+            },
+        )
+        v2 = supersede_ruleset_version(f1, created_by=admin)
+        f2 = freeze_ruleset_version(
+            v2,
+            admin,
+            binding={
+                "stage_key": "院十佳",
+                "round_keys": {"r1": round_.pk},
+                "announcement_blocks": [{"label": "晋级", "outcome_codes": ["direct"]}],
+            },
+        )
+        self.assertNotEqual(f1.authority_hash, f2.authority_hash)
 
     def test_contestruleset_rejects_non_singer_activity(self):
         from core.models import Activity

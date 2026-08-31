@@ -160,6 +160,7 @@ class RulesetVersion(models.Model):
         "definition",
         "schema_version",
         "content_hash",
+        "authority_hash",
         "status",
         "is_current",
         "binding",
@@ -172,6 +173,11 @@ class RulesetVersion(models.Model):
     )
     definition = models.TextField(help_text="JSON ruleset definition (typed node graph).")
     content_hash = models.CharField(max_length=64, blank=True)
+    authority_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="sha256 of definition + frozen binding + plan version; the authority digest.",
+    )
     binding = models.JSONField(
         default=dict,
         blank=True,

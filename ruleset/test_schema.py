@@ -13,6 +13,7 @@ from common.test_characterization import _CharacterizationBase
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase
+from singer_contest.models import SingerRegistration
 
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import (
@@ -513,8 +514,19 @@ class SchemaCheckpointTests(SimpleTestCase):
 
 class _RulesetModelBase(_CharacterizationBase):
     def make_ruleset(self, *, is_test_mode=False):
+        activity = self.make_activity(is_test_mode=is_test_mode)
+        # A bound activity freeze (§39) must prove its entry roster: an unverifiable
+        # candidate-pool size is escalated to a hard ERROR. Give the activity one approved
+        # singer so ruleset freezes in these tests can actually pass bound validation.
+        self.make_singer(
+            activity,
+            username=f"entry-{activity.pk}",
+            student_id=f"{activity.pk}0",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=is_test_mode,
+        )
         return ContestRuleset.objects.create(
-            activity=self.make_activity(is_test_mode=is_test_mode),
+            activity=activity,
             name="RS",
             is_test_data=is_test_mode,
         )

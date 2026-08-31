@@ -22,7 +22,6 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
     from farewell_show.models import Program
     from files.models import SubmissionFile
     from incidents.models import IncidentRecord
-    from ruleset.models import ContestRuleset
     from singer_contest.models import (
         Award,
         CompositeResult,
@@ -75,9 +74,6 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         ).count(),
         "performances": Performance.objects.filter(activity=activity, is_test_data=True).count(),
         "manual_decisions": ManualDecision.objects.filter(
-            activity=activity, is_test_data=True
-        ).count(),
-        "contest_rulesets": ContestRuleset.objects.filter(
             activity=activity, is_test_data=True
         ).count(),
         "incidents": IncidentRecord.objects.filter(activity=activity, is_test=True).count(),
@@ -161,7 +157,6 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from files.models import SubmissionFile
     from files.services import delete_storage_object, delete_submission_file
     from incidents.models import IncidentRecord
-    from ruleset.models import ContestRuleset
     from singer_contest.models import (
         Award,
         ContestRound,
@@ -206,19 +201,20 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         if stored_name:
             transaction.on_commit(partial(delete_storage_object, storage, stored_name))
     Award.objects.filter(activity=locked_activity, is_test_data=True).delete()
-    # StageResult.ruleset_version is PROTECT-ed by RulesetVersion, so results must
-    # go before the ruleset (which cascades to its versions). Singers are deleted
-    # later, and their stage decisions cascade only when the results are gone. The
-    # StageResult/StageDecision querysets refuse to delete READY rows — but a test
-    # activity legitimately holds READY test results, so demote them first.
+    # StageResult.ruleset_version is PROTECT-ed by RulesetVersion — but a ContestRuleset
+    # is *config*, not runtime residue (§7, P0-8): a test rehearsal must leave its
+    # ruleset structure behind for the FORMAL successor. So results go first, then manual
+    # decisions, and the ContestRuleset (and its versions) is retained and later promoted.
+    # Singers are deleted later, and their stage decisions cascade once the results are
+    # gone. The StageResult/StageDecision querysets refuse to delete READY rows — but a
+    # test activity legitimately holds READY test results, so demote them first.
     demo = StageResult.objects.filter(activity=locked_activity, is_test_data=True)
     for stage in demo:
         stage.status = StageResult.Status.HOLD
         stage.save(update_fields=["status"])
     StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()
-    # ManualDecision FK's to the frozen RulesetVersion; delete before the ruleset.
+    # ManualDecision FK's to the frozen RulesetVersion; delete before it is demoted.
     ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()
-    ContestRuleset.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     VoteRecord.objects.filter(
@@ -249,20 +245,23 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     return counts
 
 
-def _promote_retained_config(activity: Any) -> dict[str, int]:
+def _promote_retained_config(activity: Any, *, operator: Any) -> dict[str, int]:
     """Flip retained M1 config markers to a formal activity's lifecycle.
 
-    §7: a test rehearsal leaves *configuration* behind (rubrics, criteria, performance
-    groups) that is never deleted with runtime facts. When the activity leaves test
-    mode those markers must be promoted to ``is_test_data=False`` so a FORMAL activity
-    never holds config whose marker contradicts its lifecycle. Runtime facts (stage
-    results/decisions, criterion scores, performances, and ContestRuleset — which R0
-    counts and clears) are handled separately and never promoted.
+    §7/P0-8: a test rehearsal leaves *configuration* behind (rubrics, criteria,
+    performance groups, material slots, and the ContestRuleset) that is never deleted
+    with runtime facts. When the activity leaves test mode those markers must be promoted
+    to ``is_test_data=False`` so a FORMAL activity never holds config whose marker
+    contradicts its lifecycle. Runtime facts (stage results/decisions, criterion scores,
+    performances, manual decisions) are handled separately and never promoted.
     """
+    from django.utils import timezone
     from files.models import MaterialSlot
+    from ruleset.models import ContestRuleset, RulesetVersion
+    from ruleset.services import create_ruleset_version
     from singer_contest.models import PerformanceGroup, RubricCriterion, ScoringRubric
 
-    return {
+    promoted = {
         "scoring_rubrics": ScoringRubric.objects.filter(
             activity=activity, is_test_data=True
         ).update(is_test_data=False),
@@ -276,6 +275,37 @@ def _promote_retained_config(activity: Any) -> dict[str, int]:
             is_test_data=False
         ),
     }
+    rulesets = ContestRuleset.objects.filter(activity=activity, is_test_data=True)
+    promoted["rulesets"] = rulesets.count()
+    promoted["successor_versions"] = 0
+    for ruleset in rulesets:
+        # The test ruleset is config: flip its marker (via update() to bypass clean(),
+        # which would reject a False marker while the activity is still in test mode).
+        ContestRuleset.objects.filter(pk=ruleset.pk).update(
+            is_test_data=False, updated_at=timezone.now()
+        )
+        # The frozen TEST authority must never become the FORMAL authority (§16/P0-8):
+        # retire it by demoting is_current, then hand the staff a clean DRAFT successor to
+        # re-bind to the (now-formal) runtime and re-validate before re-freezing. If the
+        # test config never froze, its current DRAFT is already the FORMAL editing target.
+        retire = ruleset.versions.filter(
+            is_current=True, status=RulesetVersion.Status.FROZEN
+        ).first()
+        if retire is not None:
+            create_ruleset_version(
+                ruleset,
+                definition=retire.definition,
+                created_by=operator,
+                binding={
+                    "stage_key": ruleset.stage_key or "",
+                    "round_keys": {},
+                    "vote_keys": {},
+                    "group_keys": {},
+                    "announcement_blocks": list(ruleset.announcement_blocks or []),
+                },
+            )
+            promoted["successor_versions"] += 1
+    return promoted
 
 
 @transaction.atomic
@@ -296,7 +326,7 @@ def leave_test_mode(
         if not reason.strip():
             raise PermissionDenied("清理并退出测试模式必须填写原因。")
         clear_activity_test_data(locked_activity, operator=operator)
-    promoted = _promote_retained_config(locked_activity)
+    promoted = _promote_retained_config(locked_activity, operator=operator)
     _restore_test_related_posts_to_draft(locked_activity, operator=operator)
     locked_activity.is_test_mode = False
     locked_activity.data_lifecycle = Activity.DataLifecycle.FORMAL

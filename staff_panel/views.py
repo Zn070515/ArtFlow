@@ -63,9 +63,12 @@ from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
 from ruleset.services import (
     RulesetInvalidError,
+    _binding_signature,
     create_ruleset_version,
     freeze_ruleset_version,
-    validate_binding,
+    supersede_ruleset_version,
+    update_ruleset_binding,
+    update_ruleset_definition,
 )
 from singer_contest.models import (
     Award,
@@ -2231,6 +2234,45 @@ def contest_ruleset_create(request):
         template_pk = request.POST.get("template")
         if template_pk:
             template = get_object_or_404(RulesetTemplate, pk=template_pk)
+        # One activity owns one ContestRuleset (versions live on RulesetVersion). If a
+        # ruleset already exists, reuse it instead of creating a competing authority that
+        # would make recompute_activity_result's single-authority assumption ambiguous.
+        existing = ContestRuleset.objects.filter(activity=activity).first()
+        if existing is not None:
+            if template is not None:
+                existing.source_template = template
+                existing.name = name or existing.name
+                existing.is_test_data = runtime_is_test(activity)
+                existing.save()
+                version = create_ruleset_version(
+                    existing, definition=template.definition, created_by=request.user
+                )
+                messages.success(request, f"已将「{template.name}」克隆到该活动，进入编辑。")
+            else:
+                # Reuse the single authority: edit the latest DRAFT, or supersede a frozen
+                # current into a fresh editing DRAFT — never redirect into a frozen version.
+                version = (
+                    existing.versions.filter(status=RulesetVersion.Status.DRAFT)
+                    .order_by("-version")
+                    .first()
+                )
+                if version is None:
+                    frozen = (
+                        existing.versions.filter(status=RulesetVersion.Status.FROZEN)
+                        .order_by("-version")
+                        .first()
+                    )
+                    version = (
+                        supersede_ruleset_version(frozen, created_by=request.user)
+                        if frozen is not None
+                        else create_ruleset_version(
+                            existing,
+                            definition=_starter_definition(),
+                            created_by=request.user,
+                        )
+                    )
+                messages.info(request, "该活动已有赛制，进入现有赛制编辑。")
+            return redirect("staff:ruleset_edit", pk=version.pk)
         definition = template.definition if template else _starter_definition()
         ruleset = ContestRuleset.objects.create(
             activity=activity,
@@ -2258,7 +2300,6 @@ def ruleset_edit(request, pk):
     if version.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
     if request.method == "POST":
-        lock_activity_for_action(version.ruleset.activity)
         try:
             current = parse_definition(version.definition)["nodes"]
             definition = _edit_nodes(request.POST, current)
@@ -2266,8 +2307,16 @@ def ruleset_edit(request, pk):
         except (ValueError, ValidationError) as exc:
             messages.error(request, f"保存失败：{exc}")
             return redirect("staff:ruleset_edit", pk=pk)
-        version.definition = json.dumps(definition, ensure_ascii=False)
-        version.save()
+        try:
+            update_ruleset_definition(
+                version,
+                definition=json.dumps(definition, ensure_ascii=False),
+                operator=request.user,
+                base_content_hash=request.POST.get("base_content_hash") or None,
+            )
+        except ValidationError as exc:
+            messages.error(request, str(exc))
+            return redirect("staff:ruleset_edit", pk=pk)
         messages.success(request, "赛制已保存。")
         return redirect("staff:ruleset_edit", pk=pk)
     try:
@@ -2297,6 +2346,7 @@ def ruleset_edit(request, pk):
                     ruleset.announcement_blocks or [], ensure_ascii=False
                 ),
             },
+            "binding_signature": _binding_signature(ruleset),
         },
     )
 
@@ -2323,36 +2373,24 @@ def ruleset_bind(request, pk):
             raise ValidationError(f"{name} 不是合法 JSON。")
 
     try:
-        binding = validate_binding(
+        update_ruleset_binding(
             version.ruleset,
-            {
+            binding={
                 "stage_key": request.POST.get("stage_key"),
                 "round_keys": _parse_json("round_keys", {}),
                 "vote_keys": _parse_json("vote_keys", {}),
                 "group_keys": _parse_json("group_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),
             },
+            operator=request.user,
+            base_binding=request.POST.get("base_binding") or None,
         )
     except ValidationError as exc:
         messages.error(request, "；".join(exc.messages))
         return redirect("staff:ruleset_edit", pk=pk)
-
-    ruleset = version.ruleset
-    ruleset.stage_key = binding["stage_key"]
-    ruleset.round_keys = binding["round_keys"]
-    ruleset.vote_keys = binding["vote_keys"]
-    ruleset.group_keys = binding["group_keys"]
-    ruleset.announcement_blocks = binding["announcement_blocks"]
-    ruleset.save(
-        update_fields=[
-            "stage_key",
-            "round_keys",
-            "vote_keys",
-            "group_keys",
-            "announcement_blocks",
-            "updated_at",
-        ]
-    )
+    except PermissionDenied as exc:
+        messages.error(request, str(exc))
+        return redirect("staff:ruleset_edit", pk=pk)
     messages.success(request, "生产绑定已保存。")
     return redirect("staff:ruleset_edit", pk=pk)
 

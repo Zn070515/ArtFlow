@@ -240,7 +240,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             title="R0 Test Activity", activity_type=Activity.Type.SINGER_CONTEST
         )
 
-    def test_clear_removes_ready_stage_result_and_ruleset(self):
+    def test_clear_removes_ready_stage_result_but_retains_ruleset(self):
         import json
 
         from ruleset.models import ContestRuleset, RulesetVersion
@@ -280,9 +280,11 @@ class M1StageResultTestDataCleanupTests(TestCase):
         counts = clear_activity_test_data(self.activity, operator=self.operator)
 
         self.assertEqual(counts["stage_results"], 1)
-        self.assertEqual(counts["contest_rulesets"], 1)
+        # §7/P0-8: the ContestRuleset is retained *config*, not runtime residue, so a
+        # rehearsal's ruleset structure survives cleanup (its marker stays test until the
+        # TEST→FORMAL promotion in leave_test_mode).
         self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
-        self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
+        self.assertTrue(ContestRuleset.objects.filter(activity=self.activity).exists())
 
     def test_clear_removes_manual_decision_and_counts_it(self):
         import json
@@ -370,11 +372,26 @@ class M1StageResultTestDataCleanupTests(TestCase):
 
         leave_test_mode(self.activity, operator=self.operator, clear=True, reason="R0 cleanup")
 
+        from ruleset.models import RulesetVersion
+
         self.activity.refresh_from_db()
         self.assertFalse(self.activity.is_test_mode)
         self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
-        self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
+        # §7/P0-8: TEST→FORMAL retains the ruleset *config* but retires the frozen TEST
+        # authority — the FORMAL authority is a freshly seeded DRAFT successor that staff
+        # must re-bind and re-freeze. The old FROZEN version is demoted to non-current.
+        retained = ContestRuleset.objects.get(activity=self.activity)
+        self.assertFalse(retained.is_test_data)
+        self.assertFalse(
+            retained.versions.filter(status=RulesetVersion.Status.FROZEN, is_current=True).exists()
+        )
+        successor = retained.versions.filter(is_current=True).get()
+        self.assertEqual(successor.status, RulesetVersion.Status.DRAFT)
+        # The successor carries the definition but a clean binding: staff re-binds the
+        # (now-formal) runtime round/vote/group IDs, so no test-only pks are inherited.
+        self.assertEqual(successor.binding.get("round_keys"), {})
+        self.assertEqual(successor.binding.get("vote_keys"), {})
 
     def test_leave_test_mode_promotes_retained_m1_config(self):
         # §7: rubrics/criteria/performance-groups/material-slots are retained config,

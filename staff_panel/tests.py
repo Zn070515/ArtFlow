@@ -4298,6 +4298,9 @@ class ResultBoardTests(TestCase):
             status=status,
             reasons=reasons or [],
             ruleset_hash=ruleset_hash,
+            # Identity is (ruleset_version, input_fingerprint): every distinct result
+            # needs its own fingerprint so one version can publish multiple rows.
+            input_fingerprint=f"fp-{ruleset_hash}",
             is_test_data=False,
         )
 
@@ -4651,6 +4654,46 @@ def _acceptance_definition_json():
     )
 
 
+def _seed_bound_acceptance(activity, ruleset):
+    """Lay down the DB facts the acceptance walkthrough needs to bound-compile.
+
+    Always-bound freeze (P0-2) derives entry_size / round scales from the DB, so the
+    walkthrough must have enough approved singers and each referenced round bound with a
+    rubric whose highest criterion max_score is >= 90 (→ hundred scale). No judges are
+    needed because the walkthrough uses mean mode.
+    """
+    from singer_contest.models import (
+        ContestRound,
+        RubricCriterion,
+        ScoringRubric,
+        SingerRegistration,
+    )
+
+    for i in range(12):
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username=f"ab-entry-{i}", password="pass"),
+            name=f"Entry{i}",
+            student_id=f"{i:04d}",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+    bound = {}
+    for key in ("r1", "r2", "r3"):
+        rubric = ScoringRubric.objects.create(
+            activity=activity, name=f"{key}评分", is_test_data=True
+        )
+        RubricCriterion.objects.create(rubric=rubric, name="总分", max_score=100, is_test_data=True)
+        round_ = ContestRound.objects.create(
+            activity=activity, round_type=ContestRound.RoundType.PRELIMINARY, name=key
+        )
+        round_.rubric = rubric
+        round_.save(update_fields=["rubric"])
+        bound[key] = round_.pk
+    ruleset.round_keys = bound
+    ruleset.save(update_fields=["round_keys"])
+
+
 def _invalid_definition_json():
     """Parse-valid but compiles with an ERROR (AGGREGATE weights sum to 0.9)."""
     import json
@@ -4717,17 +4760,20 @@ class RulesetEditorTests(TestCase):
         self.version.refresh_from_db()
         return json.loads(self.version.definition)["nodes"]
 
-    def test_contest_ruleset_create_creates_version_and_redirects(self):
-        from ruleset.models import ContestRuleset, RulesetVersion
+    def test_contest_ruleset_create_reuses_single_activity_authority(self):
+        from ruleset.models import ContestRuleset
 
+        # §16: one activity owns exactly one ContestRuleset; versions hold the history.
+        # Re-creating a ruleset for an activity that already has one must reuse that single
+        # authority (editing its DRAFT) instead of building a competing one.
         response = self.client.post(
             reverse("staff:contest_ruleset_create"),
             {"activity": self.activity.pk, "name": "新赛制2026"},
         )
-        created = RulesetVersion.objects.get(ruleset__name="新赛制2026")
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[created.pk]))
-        self.assertEqual(ContestRuleset.objects.filter(name="新赛制2026").count(), 1)
-        self.assertEqual(created.status, "draft")
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.assertEqual(ContestRuleset.objects.filter(activity=self.activity).count(), 1)
+        self.assertTrue(ContestRuleset.objects.filter(name="院十佳2026规则").exists())
+        self.assertFalse(ContestRuleset.objects.filter(name="新赛制2026").exists())
 
     def test_contest_ruleset_create_requires_unlocked_activity(self):
         """R0: ruleset creation must re-validate the activity lock (DRAFT/FORMAL)."""
@@ -4830,6 +4876,9 @@ class RulesetEditorTests(TestCase):
         invalid.refresh_from_db()
         self.assertEqual(invalid.status, "draft")
 
+        # Always-bound freeze (P0-2) only passes once the activity carries the facts the
+        # walkthrough references: enough approved singers + each round bound with a scale.
+        _seed_bound_acceptance(self.activity, self.ruleset)
         response = self.client.post(reverse("staff:ruleset_freeze", args=[self.version.pk]))
         self.assertEqual(response.status_code, 302)
         self.version.refresh_from_db()

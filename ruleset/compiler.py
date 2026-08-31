@@ -258,7 +258,15 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
             p["size"] = (
                 sizes[0] if sizes and all(s == sizes[0] and s is not None for s in sizes) else None
             )
-            p["scale"] = node.get("conversion", {}).get("to") if node.get("conversion") else None
+            # An aggregate's output scale is its components' scale: propagate it so a
+            # downstream aggregate can verify quantity without a spurious SCALE_MIXED
+            # (aggregate-of-aggregate scale was None, tripping the checker).
+            if node.get("conversion"):
+                p["scale"] = node["conversion"].get("to")
+            else:
+                comp_scales = {prov[c["source"]]["scale"] for c in comps}
+                known = [s for s in comp_scales if s not in (None, "unknown")]
+                p["scale"] = known[0] if len(comp_scales) == 1 and known else None
     elif ntype == "RANK":
         src = prov[node["source"]]
         p.update(pool_sig=src["pool_sig"], pool_relation=src["pool_relation"], size=src["size"])

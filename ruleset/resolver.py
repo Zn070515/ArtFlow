@@ -204,10 +204,11 @@ def _value_to_jsonable(value):
 def inputs_fingerprint(inputs: ResolveInput) -> str:
     """sha256 of the canonical raw-facts snapshot a :class:`ResolveInput` captures.
 
-    The identity of a result is ``(ruleset_hash, input_fingerprint)``: recomputing the
-    same ruleset over the same raw facts is idempotent (reuse), while any change to the
-    roster, round scores, vote scores, group map, or manual decisions yields a new
-    fingerprint and therefore a new versioned :class:`ResolveResult`.
+    Combined with the immutable ``RulesetVersion``, the identity of a result is
+    ``(ruleset_version, input_fingerprint)``: recomputing the same ruleset over the same
+    raw facts is idempotent (reuse), while any change to the roster, round scores, vote
+    scores, group map, or manual decisions yields a new fingerprint and therefore a new
+    versioned :class:`ResolveResult`.
     """
     payload = _value_to_jsonable(
         {

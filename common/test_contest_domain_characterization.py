@@ -37,9 +37,7 @@ class ContestRoundGenericSchemaCharacterizationTests(_CharacterizationBase):
     def test_activity_can_hold_multiple_rounds_of_same_type(self):
         activity = self.make_activity()
         for i in range(1, 5):
-            contest_round = self.make_round(
-                activity, round_type=ContestRound.RoundType.SEMI_FINAL
-            )
+            contest_round = self.make_round(activity, round_type=ContestRound.RoundType.SEMI_FINAL)
             contest_round.sequence = i
             contest_round.save(update_fields=["sequence"])
         sequences = list(
@@ -105,9 +103,7 @@ class PerformanceFactModelCharacterizationTests(_CharacterizationBase):
         singer = self.make_singer(activity, username="s1", student_id="1")
         rounds = []
         for i in range(1, 5):
-            contest_round = self.make_round(
-                activity, round_type=ContestRound.RoundType.SEMI_FINAL
-            )
+            contest_round = self.make_round(activity, round_type=ContestRound.RoundType.SEMI_FINAL)
             contest_round.sequence = i
             contest_round.save(update_fields=["sequence"])
             rounds.append(contest_round)
@@ -251,9 +247,7 @@ class MaterialSlotCharacterizationTests(_CharacterizationBase):
                 sequence=i,
             )
         self.assertEqual(MaterialSlot.objects.filter(activity=activity).count(), 4)
-        labels = set(
-            MaterialSlot.objects.filter(activity=activity).values_list("label", flat=True)
-        )
+        labels = set(MaterialSlot.objects.filter(activity=activity).values_list("label", flat=True))
         self.assertEqual(labels, {"R1 伴奏", "R2 伴奏", "R3 伴奏", "R4 伴奏"})
 
     def test_slot_round_must_belong_to_activity(self):

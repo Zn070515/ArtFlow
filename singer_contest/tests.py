@@ -2457,6 +2457,46 @@ class StageResolverBindingTests(TestCase):
         ).exists()
         self.assertTrue(first_still_resolved)
 
+    def test_persist_identity_uses_ruleset_version_not_hash(self):
+        """R5-4: two frozen versions with an identical definition (same content_hash)
+        but a different binding no longer collide in the StageResult identity.
+
+        The old identity was ``(activity, stage_key, ruleset_hash, input_fingerprint)``;
+        since ``ruleset_hash`` is definition-only, a binding-only change between versions
+        would silently reuse the prior result. The identity now keys on the immutable
+        ``ruleset_version``, so both rows coexist.
+        """
+        from ruleset.resolver import resolve
+
+        from .services import bind_resolve_input, persist_stage_result
+
+        v2 = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        self.assertEqual(v2.content_hash, self.version.content_hash)
+
+        inputs = bind_resolve_input(self.version, self.activity, round_keys={"r1": self.round})
+        result = resolve(self.version.definition, inputs)
+        stage1 = persist_stage_result(
+            self.version, self.activity, result, stage_key="选拔", computed_by=self.user
+        )
+        stage2 = persist_stage_result(
+            v2, self.activity, result, stage_key="选拔", computed_by=self.user
+        )
+        self.assertNotEqual(stage1.pk, stage2.pk)
+        self.assertEqual(stage1.ruleset_version, self.version)
+        self.assertEqual(stage2.ruleset_version, v2)
+        # Same definition hash + same input_fingerprint → the old identity collides; the
+        # new one (keyed on ruleset_version) keeps both rows.
+        self.assertEqual(stage1.ruleset_hash, stage2.ruleset_hash)
+        self.assertEqual(
+            StageResult.objects.filter(activity=self.activity, stage_key="选拔").count(), 2
+        )
+
     def test_persist_ready_same_input_returned_unchanged(self):
         """§18: recomputing an already-resolved result over identical facts reuses it."""
         from .services import run_ruleset

@@ -614,7 +614,7 @@ class StageResult(models.Model):
         ordering = ["-computed_at", "pk"]
         constraints = [
             models.UniqueConstraint(
-                fields=["activity", "stage_key", "ruleset_hash", "input_fingerprint"],
+                fields=["activity", "stage_key", "ruleset_version", "input_fingerprint"],
                 name="stage_result_unique_identity",
             )
         ]

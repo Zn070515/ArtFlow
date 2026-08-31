@@ -1079,10 +1079,12 @@ _RESOLVER_STATUS = {
 def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     """Write a :class:`ResolveResult` into StageResult + decisions + composites.
 
-    Idempotency + versioning: the identity is ``(ruleset_hash, input_fingerprint)``.
-    Recomputing the same frozen ruleset over the same raw facts reuses the existing
-    StageResult (a CONFIRMED one is returned as-is since it is immutable); any input
-    change produces a new input_fingerprint and therefore a new versioned StageResult
+    Idempotency + versioning: the identity is ``(ruleset_version, input_fingerprint)``
+    (the immutable authority, so two versions with the same definition but different
+    binding never collide). Recomputing the same frozen ruleset over the same raw facts
+    reuses the existing StageResult (a CONFIRMED one is returned as-is since it is
+    immutable); any input change produces a new input_fingerprint and therefore a new
+    versioned StageResult
     whose ``result_version`` is one past the stage's latest. This is what makes repeated
     recompute safe (no IntegrityError, no silent overwrite of a published result).
     """
@@ -1094,7 +1096,10 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     if missing:
         raise ValidationError(f"无法将结果写回选手：{missing}")
 
-    ruleset_hash = result.content_hash
+    # Identity is the immutable RulesetVersion (not the definition-only content_hash):
+    # two versions with the same definition but different binding no longer collide
+    # (P0-3). The authority_hash is retained for audit / external alignment.
+    authority_hash = getattr(version, "authority_hash", "") or result.content_hash
     fingerprint = result.input_fingerprint
     status = _RESOLVER_STATUS.get(result.status)
     if status is None:
@@ -1102,7 +1107,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     existing = StageResult.objects.filter(
         activity=activity,
         stage_key=stage_key,
-        ruleset_hash=ruleset_hash,
+        ruleset_version=version,
         input_fingerprint=fingerprint,
     ).first()
     if existing is not None:
@@ -1133,7 +1138,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         stage_key=stage_key,
         status=status,
         reasons=list(result.reasons),
-        ruleset_hash=ruleset_hash,
+        ruleset_hash=authority_hash,
         input_fingerprint=fingerprint,
         schema_version=result.schema_version,
         plan_version=result.plan_version,
@@ -1269,9 +1274,16 @@ def recompute_activity_result(
     """
     from ruleset.models import ContestRuleset, RulesetVersion
 
-    ruleset = ruleset or (
-        ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by("-pk").first()
-    )
+    if ruleset is None:
+        candidates = ContestRuleset.objects.filter(
+            activity=activity, stage_key__gt=""
+        ).order_by("pk")
+        # §16/§32: one activity owns exactly one contest ruleset; versions hold the history.
+        # A stray duplicate is a data error, so fail loudly instead of silently picking the
+        # newest and revealing an ambiguous authority.
+        if candidates.count() > 1:
+            raise ValidationError("该活动存在多个自动重算赛制，请先清理重复。")
+        ruleset = candidates.first()
     if ruleset is None:
         raise ValidationError("该活动尚未绑定可自动重算的赛制。")
     version = (
