@@ -4795,6 +4795,26 @@ class RulesetEditorTests(TestCase):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
         self.assertEqual(response.status_code, 403)
 
+    def test_editor_hides_unsupported_runtime_node_types(self):
+        # §28 capability matrix: BRANCH/AWARD are compile-rejected
+        # (NODE_UNSUPPORTED_RUNTIME), so the editor must not offer them in the
+        # add-node dropdown.
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.assertEqual(response.status_code, 200)
+        node_types = list(response.context["node_types"])
+        self.assertNotIn("BRANCH", node_types)
+        self.assertNotIn("AWARD", node_types)
+
+    def test_editor_add_action_rejects_unsupported_runtime_node(self):
+        before = len(self._nodes())
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "add", "new_type": "BRANCH"},
+        )
+        # ValueError in _edit_nodes -> messages.error + redirect, no mutation.
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(self._nodes()), before)
+
     def test_freeze_refuses_invalid_and_accepts_valid(self):
         from ruleset.models import RulesetVersion
 

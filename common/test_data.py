@@ -259,6 +259,7 @@ def _promote_retained_config(activity: Any) -> dict[str, int]:
     results/decisions, criterion scores, performances, and ContestRuleset — which R0
     counts and clears) are handled separately and never promoted.
     """
+    from files.models import MaterialSlot
     from singer_contest.models import PerformanceGroup, RubricCriterion, ScoringRubric
 
     return {
@@ -271,6 +272,9 @@ def _promote_retained_config(activity: Any) -> dict[str, int]:
         "performance_groups": PerformanceGroup.objects.filter(
             activity=activity, is_test_data=True
         ).update(is_test_data=False),
+        "material_slots": MaterialSlot.objects.filter(activity=activity, is_test_data=True).update(
+            is_test_data=False
+        ),
     }
 
 

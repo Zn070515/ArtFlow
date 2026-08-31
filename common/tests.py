@@ -377,9 +377,11 @@ class M1StageResultTestDataCleanupTests(TestCase):
         self.assertFalse(ContestRuleset.objects.filter(activity=self.activity).exists())
 
     def test_leave_test_mode_promotes_retained_m1_config(self):
-        # §7: rubrics/criteria/performance-groups are retained config, so a test rehearsal
-        # leaves them behind. On leaving test mode their is_test_data marker must be
-        # promoted to False — never left contradicting the now-FORMAL lifecycle.
+        # §7: rubrics/criteria/performance-groups/material-slots are retained config,
+        # so a test rehearsal leaves them behind. On leaving test mode their
+        # is_test_data marker must be promoted to False — never left contradicting
+        # the now-FORMAL lifecycle.
+        from files.models import MaterialSlot
         from singer_contest.models import PerformanceGroup, RubricCriterion, ScoringRubric
 
         rubric = ScoringRubric.objects.create(activity=self.activity, name="R", is_test_data=True)
@@ -392,16 +394,24 @@ class M1StageResultTestDataCleanupTests(TestCase):
         group = PerformanceGroup.objects.create(
             activity=self.activity, round=contest_round, name="G", is_test_data=True
         )
+        slot = MaterialSlot.objects.create(
+            activity=self.activity,
+            category=MaterialSlot.Category.ACCOMPANIMENT,
+            label="伴奏",
+            is_test_data=True,
+        )
 
         leave_test_mode(self.activity, operator=self.operator)
 
         rubric.refresh_from_db()
         criterion.refresh_from_db()
         group.refresh_from_db()
+        slot.refresh_from_db()
         self.activity.refresh_from_db()
         self.assertFalse(rubric.is_test_data)
         self.assertFalse(criterion.is_test_data)
         self.assertFalse(group.is_test_data)
+        self.assertFalse(slot.is_test_data)
         self.assertFalse(self.activity.is_test_mode)
         self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
 

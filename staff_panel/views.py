@@ -2102,7 +2102,10 @@ def _swap_nodes(nodes, key, delta):
 def _edit_nodes(post, nodes):
     action = post.get("action")
     if action == "add":
-        nodes = nodes + [_default_node(post.get("new_type", "ASSESS"), nodes)]
+        new_type = post.get("new_type", "ASSESS")
+        if new_type in ("BRANCH", "AWARD"):
+            raise ValueError(f"node type {new_type!r} is not supported at runtime")
+        nodes = nodes + [_default_node(new_type, nodes)]
     elif action == "delete":
         key = post.get("key")
         nodes = [n for n in nodes if n["key"] != key]
@@ -2283,7 +2286,9 @@ def ruleset_edit(request, pk):
             "version": version,
             "ruleset": ruleset,
             "cards": cards,
-            "node_types": sorted(NODE_TYPE_SPEC.keys()),
+            # §28 capability matrix: BRANCH/AWARD are rejected at compile
+            # (NODE_UNSUPPORTED_RUNTIME) and must not be offered in the editor.
+            "node_types": sorted(t for t in NODE_TYPE_SPEC if t not in ("BRANCH", "AWARD")),
             "binding_json": {
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),
