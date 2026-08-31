@@ -84,6 +84,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
+            ActivityAction.PUBLISH_RESULT,
         }
     ),
     "results_pending": frozenset(
@@ -93,12 +94,14 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
             ActivityAction.ARCHIVE,
+            ActivityAction.PUBLISH_RESULT,
         }
     ),
     "results_published": frozenset(
         {
             ActivityAction.MANAGE_AWARD,
             ActivityAction.ARCHIVE,
+            ActivityAction.PUBLISH_RESULT,
         }
     ),
     "archived": frozenset(),

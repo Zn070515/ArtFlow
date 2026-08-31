@@ -533,11 +533,11 @@ class CriterionScore(models.Model):
 
 
 class StageResultQuerySet(models.QuerySet):
-    """Guard: a READY (locked/announced) stage result is immutable."""
+    """Guard: a CONFIRMED (核定并锁定) stage result is immutable."""
 
     def _ensure_mutable(self):
-        if self.filter(status=StageResult.Status.READY).exists():
-            raise ValidationError("A READY stage result is immutable.")
+        if self.filter(status=StageResult.Status.CONFIRMED).exists():
+            raise ValidationError("A confirmed stage result is immutable.")
 
     def update(self, **kwargs):
         self._ensure_mutable()
@@ -561,7 +561,8 @@ class StageResult(models.Model):
     class Status(models.TextChoices):
         HOLD = ResolverState.HOLD.value, "待齐数据"
         REVIEW = ResolverState.REVIEW.value, "待人工核定"
-        READY = ResolverState.READY.value, "可发布"
+        READY_TO_CONFIRM = "ready_to_confirm", "待核定"
+        CONFIRMED = "confirmed", "已核定"
 
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="stage_results"
@@ -575,6 +576,13 @@ class StageResult(models.Model):
         null=True,
         blank=True,
         related_name="stage_results",
+    )
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="confirmed_stage_results",
     )
     stage_key = models.CharField(
         max_length=100, help_text="Bindable stage identifier, e.g. '院十佳'."
@@ -595,6 +603,9 @@ class StageResult(models.Model):
     plan_version = models.PositiveIntegerField(default=0)
     result_version = models.PositiveIntegerField(default=1)
     computed_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(
+        null=True, blank=True, help_text="When a staff member 核定并锁定 the result."
+    )
     is_test_data = models.BooleanField(default=False)
 
     objects = StageResultManager()
@@ -621,11 +632,11 @@ class StageResult(models.Model):
 
 
 class StageDecisionQuerySet(models.QuerySet):
-    """Guard: decisions of a READY (locked) stage result are immutable."""
+    """Guard: decisions of a CONFIRMED (locked) stage result are immutable."""
 
     def _ensure_mutable(self):
-        if self.filter(stage_result__status=StageResult.Status.READY).exists():
-            raise ValidationError("Decisions of a READY stage result are immutable.")
+        if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
+            raise ValidationError("Decisions of a confirmed stage result are immutable.")
 
     def update(self, **kwargs):
         self._ensure_mutable()
@@ -690,11 +701,11 @@ class StageDecision(models.Model):
 
 
 class CompositeResultQuerySet(models.QuerySet):
-    """Guard: composites of a READY (locked) stage result are immutable."""
+    """Guard: composites of a CONFIRMED (locked) stage result are immutable."""
 
     def _ensure_mutable(self):
-        if self.filter(stage_result__status=StageResult.Status.READY).exists():
-            raise ValidationError("Composites of a READY stage result are immutable.")
+        if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
+            raise ValidationError("Composites of a confirmed stage result are immutable.")
 
     def update(self, **kwargs):
         self._ensure_mutable()

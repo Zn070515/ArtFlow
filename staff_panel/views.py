@@ -81,6 +81,7 @@ from singer_contest.services import (
     _eligible_singers,
     apply_scores,
     apply_scores_if_version,
+    confirm_stage_result,
     finalize_advancement,
     lock_round,
     missing_score_cells,
@@ -1018,9 +1019,7 @@ def round_scores_api(request, pk):
     # ``apply_scores_if_version`` owns the Activity→Round transaction and its locks;
     # the view holds no row lock itself (M0 canonical order, §13.2 stale-guard).
     try:
-        result = apply_scores_if_version(
-            contest_round.pk, base_version, score_values, request.user
-        )
+        result = apply_scores_if_version(contest_round.pk, base_version, score_values, request.user)
     except StaleScoreVersionError:
         contest_round.refresh_from_db()
         return JsonResponse({**_round_grid_payload(contest_round), "conflict": True}, status=409)
@@ -1099,6 +1098,27 @@ def stage_result_detail(request, pk):
             "blocks": stage_decisions_by_blocks(stage),
         },
     )
+
+
+@staff_required
+@require_POST
+def stage_result_confirm(request, pk):
+    """核定并锁定 a stage result into its final handcard state (M1-H §36-37)."""
+    stage = get_object_or_404(StageResult, pk=pk)
+    ensure_activity_action_allowed(stage.activity, ActivityAction.PUBLISH_RESULT)
+    try:
+        confirm_stage_result(stage, confirmed_by=request.user)
+    except ValidationError as error:
+        messages.error(request, "；".join(error.messages))
+    else:
+        messages.success(request, "已核定并锁定该赛段结果，可抄主持手卡。")
+        log_action(
+            request,
+            AuditLog.ActionType.CONFIRM_STAGE_RESULT,
+            f"StageResult:{stage.pk}",
+            new_value=f"{stage.stage_key} — {stage.get_status_display()}",
+        )
+    return redirect("staff:stage_result_detail", pk=pk)
 
 
 @staff_required

@@ -116,6 +116,23 @@ class ActivityPhasePolicyTests(TestCase):
         activity = self._activity(Activity.Phase.LIVE)
         ensure_activity_action_allowed(activity, ActivityAction.SCORE)
 
+    def test_publish_result_criven_in_live_and_results_pending(self):
+        """§36-37: 核定并锁定 stage result is authorized during the show and after compute."""
+        self.assertIn(
+            ActivityAction.PUBLISH_RESULT, allowed_actions(self._activity(Activity.Phase.LIVE))
+        )
+        self.assertIn(
+            ActivityAction.PUBLISH_RESULT,
+            allowed_actions(self._activity(Activity.Phase.RESULTS_PENDING)),
+        )
+        # Not allowed before scoring or once archived.
+        self.assertNotIn(
+            ActivityAction.PUBLISH_RESULT, allowed_actions(self._activity(Activity.Phase.DRAFT))
+        )
+        self.assertNotIn(
+            ActivityAction.PUBLISH_RESULT, allowed_actions(self._activity(Activity.Phase.ARCHIVED))
+        )
+
 
 class ActivityPhaseTransitionTests(TestCase):
     def setUp(self):

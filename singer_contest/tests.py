@@ -2209,7 +2209,7 @@ class StageResultModelTests(TestCase):
         )
         self.assertEqual(result.decisions.get(pk=decision.pk).stage_result, result)
         self.assertEqual(result.composites.get(pk=composite.pk).singer, self.singer)
-        self.assertEqual(StageResult.Status.READY, StageResult.Status.READY)
+        self.assertEqual(StageResult.Status.CONFIRMED.value, StageResult.Status.CONFIRMED.value)
 
     def test_test_marker_mismatch_rejected(self):
         with self.assertRaises(ValidationError):
@@ -2227,9 +2227,9 @@ class StageResultModelTests(TestCase):
 
     def test_reads_immutable_after_ready(self):
         result = self._result()
-        # A HOLD result can still be updated to READY.
-        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.READY)
-        # Once READY, further update/delete is blocked.
+        # A HOLD result can still be updated to CONFIRMED.
+        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.CONFIRMED)
+        # Once CONFIRMED, further update/delete is blocked.
         with self.assertRaises(ValidationError):
             StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.HOLD)
         with self.assertRaises(ValidationError):
@@ -2245,7 +2245,7 @@ class StageResultModelTests(TestCase):
             score=Decimal("92.46"),
             is_test_data=True,
         )
-        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.READY)
+        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.CONFIRMED)
         with self.assertRaises(ValidationError):
             StageDecision.objects.filter(pk=decision.pk).update(rank=2)
 
@@ -2334,7 +2334,7 @@ class StageResolverBindingTests(TestCase):
             computed_by=self.user,
             round_keys={"r1": self.round},
         )
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.stage_key, "选拔")
         self.assertEqual(stage.ruleset_version, self.version)
         self.assertTrue(stage.ruleset_hash)
@@ -2396,7 +2396,7 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
         )
         self.assertEqual(stage.ruleset_version, self.version)
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
     def test_persist_idempotent_same_input_reuses_stage(self):
         """§18: identical ruleset + input → idempotent reuse, no duplicate/version bump."""
@@ -2450,14 +2450,15 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(
             StageResult.objects.filter(activity=self.activity, stage_key="选拔").count(), 2
         )
-        # The first (READY) result stays immutable; the new one is also READY here.
-        immutable_ready = StageResult.objects.filter(
-            pk=first.pk, status=StageResult.Status.READY
+        # The first result keeps its resolved-but-unconfirmed state; the new one is
+        # a separate version, so the old one is never silently overwritten.
+        first_still_resolved = StageResult.objects.filter(
+            pk=first.pk, status=StageResult.Status.READY_TO_CONFIRM
         ).exists()
-        self.assertTrue(immutable_ready)
+        self.assertTrue(first_still_resolved)
 
     def test_persist_ready_same_input_returned_unchanged(self):
-        """§16: recomputing an already-READY result over identical facts returns it as-is."""
+        """§18: recomputing an already-resolved result over identical facts reuses it."""
         from .services import run_ruleset
 
         first = run_ruleset(
@@ -2475,10 +2476,74 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
         )
         self.assertEqual(refreshed.pk, first.pk)
-        self.assertEqual(refreshed.status, StageResult.Status.READY)
+        self.assertEqual(refreshed.status, StageResult.Status.READY_TO_CONFIRM)
         stage_count = StageResult.objects.filter(activity=self.activity, stage_key="选拔").count()
         self.assertEqual(stage_count, 1)
         self.assertEqual(first.decisions.count(), 3)
+
+    def test_persist_maps_resolver_ready_to_ready_to_confirm(self):
+        """§36-37: the resolver's "ready" persists as READY_TO_CONFIRM, never CONFIRMED."""
+        from ruleset.resolver import resolve
+
+        from .services import bind_resolve_input, persist_stage_result
+
+        inputs = bind_resolve_input(self.version, self.activity, round_keys={"r1": self.round})
+        result = resolve(self.version.definition, inputs)
+        self.assertEqual(result.status.value, "ready")
+        stage = persist_stage_result(
+            self.version, self.activity, result, stage_key="选拔", computed_by=self.user
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertNotEqual(stage.status, StageResult.Status.CONFIRMED)
+
+    def test_confirm_stage_result_locks_and_is_idempotent(self):
+        """§36-37: 核定 locks a resolved result; re-confirm reuses the same locked row."""
+        from .services import confirm_stage_result, run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        confirmed = confirm_stage_result(stage, confirmed_by=self.user)
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        self.assertEqual(confirmed.confirmed_by, self.user)
+        self.assertIsNotNone(confirmed.confirmed_at)
+        again = confirm_stage_result(StageResult.objects.get(pk=stage.pk), confirmed_by=self.user)
+        self.assertEqual(again.pk, stage.pk)
+        self.assertEqual(again.status, StageResult.Status.CONFIRMED)
+        self.assertEqual(again.confirmed_at, confirmed.confirmed_at)
+        # A CONFIRMED result is immutable: recomputing identical facts returns it as-is.
+        refreshed = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+        )
+        self.assertEqual(refreshed.pk, stage.pk)
+        self.assertEqual(refreshed.status, StageResult.Status.CONFIRMED)
+
+    def test_confirm_stage_result_rejects_unresolved(self):
+        """§36-37: only a READY_TO_CONFIRM result may be 核定."""
+        from .services import confirm_stage_result
+
+        stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=self.version,
+            created_by=self.user,
+            stage_key="选拔",
+            status=StageResult.Status.HOLD,
+            reasons=["缺分数"],
+            is_test_data=True,
+        )
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(stage, confirmed_by=self.user)
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.HOLD)
 
 
 def _schidui_definition():
@@ -2590,7 +2655,7 @@ class GoldenSchiduiDbTests(TestCase):
             round_keys=self._round_keys(),
             vote_scores=self._vote_scores(),
         )
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.stage_key, "院十佳")
         self.assertEqual(stage.ruleset_version, self.version)
         self.assertEqual(stage.plan_version, 1)
@@ -2628,7 +2693,7 @@ class GoldenSchiduiDbTests(TestCase):
             vote_scores={"audience1": audience1},
             checkpoint="stage1",
         )
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.stage_key, "stage1")
         self.assertEqual(stage.ruleset_version, self.version)
         self.assertEqual(stage.decisions.count(), 15)
@@ -2658,7 +2723,7 @@ class GoldenSchiduiDbTests(TestCase):
         )
         first = run_ruleset(**kwargs)
         second = run_ruleset(**kwargs)
-        self.assertEqual(first.status, StageResult.Status.READY)
+        self.assertEqual(first.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(first.pk, second.pk)
         self.assertEqual(first.result_version, second.result_version)
 
@@ -2827,7 +2892,7 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
             group_of=self._group_of(),
             manual=self._manual(),
         )
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.stage_key, "校十佳屏峰")
         self.assertEqual(stage.ruleset_version, self.version)
         self.assertEqual(stage.plan_version, 1)
@@ -2860,7 +2925,7 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
             group_of=self._group_of(),
             manual=self._manual(),
         )
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
         # Re-resolve to inspect the fill GROUP_MAP: F3 was short one and must be topped
         # up from the merged pool (c13). Finalists are read from node_values['filled'].
@@ -2978,7 +3043,7 @@ class RapidEntryServiceTests(TestCase):
 
         stage = recompute_activity_result(self.activity, self.admin, ruleset=ruleset)
         self.assertEqual(stage.stage_key, "院十佳")
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.decisions.count(), 1)
         decision = stage.decisions.get()
@@ -3032,7 +3097,7 @@ class RapidEntryServiceTests(TestCase):
 
         stage = recompute_activity_result(self.activity, self.admin, ruleset=ruleset)
         self.assertEqual(stage.stage_key, "院十佳")
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.decisions.count(), 1)
 
@@ -3073,7 +3138,7 @@ class RapidEntryServiceTests(TestCase):
             self.activity, self.admin, ruleset=ruleset, checkpoint="stage1"
         )
         self.assertEqual(stage.stage_key, "stage1")
-        self.assertEqual(stage.status, StageResult.Status.READY)
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.decisions.count(), 1)
         self.assertEqual(stage.decisions.get().outcome_code, "direct")

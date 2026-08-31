@@ -110,6 +110,11 @@ urlpatterns = [
         name="activity_result_board",
     ),
     path("stage-results/<int:pk>/", views.stage_result_detail, name="stage_result_detail"),
+    path(
+        "stage-results/<int:pk>/confirm/",
+        views.stage_result_confirm,
+        name="stage_result_confirm",
+    ),
     path("ruleset-templates/", views.ruleset_template_list, name="ruleset_template_list"),
     path(
         "ruleset-templates/<int:pk>/",

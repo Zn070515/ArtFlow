@@ -11,8 +11,10 @@
     </p>
     <div class="flex items-center justify-between gap-4 mb-2">
         <h1 class="text-2xl font-bold text-gray-900">{{ stage.stage_key }}</h1>
-        {% if stage.status == "ready" %}
-        <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1 rounded font-medium">可发布</span>
+        {% if stage.status == "confirmed" %}
+        <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1 rounded font-medium">可抄手卡</span>
+        {% elif stage.status == "ready_to_confirm" %}
+        <span class="text-xs bg-sky-50 border border-sky-300 text-sky-800 px-3 py-1 rounded font-medium">待核定</span>
         {% elif stage.status == "review" %}
         <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-3 py-1 rounded font-medium">待人工核定</span>
         {% else %}
@@ -31,6 +33,21 @@
             {% for reason in stage.reasons %}<li>{{ reason }}</li>{% endfor %}
         </ul>
     </div>
+    {% endif %}
+
+    {% if stage.status == "ready_to_confirm" %}
+    <form method="post" action="{% url 'staff:stage_result_confirm' stage.pk %}" class="mb-6 flex items-center gap-3">
+        {% csrf_token %}
+        <span class="text-sm text-gray-500">机器已算完该赛段，核定并锁定后方可用于抄写主持手卡。</span>
+        <button type="submit" class="shrink-0 bg-emerald-600 text-white px-4 py-2 rounded text-sm hover:bg-emerald-700">
+            核定并锁定
+        </button>
+    </form>
+    {% elif stage.status == "confirmed" %}
+    <p class="mb-6 text-sm text-emerald-700">
+        已于 {% if stage.confirmed_at %}{{ stage.confirmed_at|date:"Y-m-d H:i" }}{% else %}——{% endif %}
+        核定并锁定，结果不可再更动。
+    </p>
     {% endif %}
 
     {% for block in blocks %}

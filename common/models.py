@@ -20,6 +20,7 @@ class AuditLog(models.Model):
         PHASE_TRANSITION = "phase_transition", "阶段变更"
         FINALIZE_ADVANCEMENT = "finalize_advancement", "核定晋级名单"
         FINALIZE_RULESET = "finalize_ruleset", "核定冻结赛制"
+        CONFIRM_STAGE_RESULT = "confirm_stage_result", "核定并锁定赛段结果"
         UPDATE_PERMISSION = "update_permission", "修改用户权限"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
         UNARCHIVE_ACTIVITY = "unarchive_activity", "解归档活动"

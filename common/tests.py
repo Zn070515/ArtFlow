@@ -272,7 +272,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             ruleset_version=version,
             created_by=self.operator,
             stage_key="院十佳",
-            status=StageResult.Status.READY,
+            status=StageResult.Status.READY_TO_CONFIRM,
             ruleset_hash="abcdef",
             is_test_data=True,
         )
@@ -316,7 +316,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             ruleset_version=version,
             created_by=self.operator,
             stage_key="院十佳",
-            status=StageResult.Status.READY,
+            status=StageResult.Status.READY_TO_CONFIRM,
             ruleset_hash="ffff",
             is_test_data=True,
         )

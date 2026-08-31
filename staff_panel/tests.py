@@ -4225,8 +4225,10 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["matrix_complete"])
-        self.assertEqual(data["resolved_status"], "ready")
-        self.assertTrue(StageResult.objects.filter(stage_key="快速赛段", status="ready").exists())
+        self.assertEqual(data["resolved_status"], "ready_to_confirm")
+        self.assertTrue(
+            StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
+        )
 
 
 class ResultBoardTests(TestCase):
@@ -4305,7 +4307,7 @@ class ResultBoardTests(TestCase):
             ruleset_hash="hash-1",
             reasons=["缺少第三轮"],
         )
-        ready = self._stage(status=StageResult.Status.READY, ruleset_hash="hash-2")
+        ready = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-2")
         StageDecision.objects.create(
             stage_result=ready,
             singer=self._singer(1),
@@ -4317,7 +4319,7 @@ class ResultBoardTests(TestCase):
         response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "院十佳")
-        self.assertContains(response, "可发布")
+        self.assertContains(response, "可抄手卡")
         self.assertNotContains(response, "待人工核定")
         self.assertNotContains(response, "缺少第三轮")
 
@@ -4333,7 +4335,7 @@ class ResultBoardTests(TestCase):
         self.assertContains(response, "缺少第五轮评分")
 
     def test_detail_groups_by_announcement_blocks_in_order(self):
-        ready = self._stage(status=StageResult.Status.READY, ruleset_hash="hash-d")
+        ready = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-d")
         direct = self._singer(2)
         repechage = self._singer(3)
         eliminated = self._singer(4)
@@ -4393,7 +4395,7 @@ class ResultBoardTests(TestCase):
             ruleset_version=version_b,
             created_by=self.staff,
             stage_key="无分组",
-            status=StageResult.Status.READY,
+            status=StageResult.Status.CONFIRMED,
             reasons=[],
             ruleset_hash="hash-fb",
             is_test_data=False,
@@ -4411,8 +4413,51 @@ class ResultBoardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "直接晋级")
 
+    def test_stage_result_confirm_flips_to_confirmed(self):
+        """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state."""
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-conf")
+        StageDecision.objects.create(
+            stage_result=ready,
+            singer=self._singer(7),
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("91.00"),
+            is_test_data=False,
+        )
+        response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))
+        self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))
+        ready.refresh_from_db()
+        self.assertEqual(ready.status, StageResult.Status.CONFIRMED)
+        self.assertEqual(ready.confirmed_by, self.staff)
+        self.assertIsNotNone(ready.confirmed_at)
+
+    def test_stage_result_confirm_rejects_unresolved(self):
+        """§36-37: 核定 a HOLD stage is refused and leaves it unchanged."""
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        hold = self._stage(
+            status=StageResult.Status.HOLD,
+            ruleset_hash="hash-chold",
+            reasons=["缺评分"],
+        )
+        response = self.client.post(reverse("staff:stage_result_confirm", args=[hold.pk]))
+        self.assertRedirects(response, reverse("staff:stage_result_detail", args=[hold.pk]))
+        hold.refresh_from_db()
+        self.assertEqual(hold.status, StageResult.Status.HOLD)
+        self.assertIsNone(hold.confirmed_by)
+
+    def test_board_shows_ready_to_confirm_banner(self):
+        """§36-37: a machine-computed (not yet 核定) stage shows 待核定, not 可抄手卡."""
+        self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-rtc")
+        response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "待核定")
+        self.assertNotContains(response, "可抄手卡")
+
     def test_stage_decisions_by_blocks_helper(self):
-        ready = self._stage(status=StageResult.Status.READY, ruleset_hash="hash-helper")
+        ready = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-helper")
         singer = self._singer(6)
         StageDecision.objects.create(
             stage_result=ready,

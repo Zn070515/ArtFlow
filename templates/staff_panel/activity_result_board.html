@@ -19,8 +19,10 @@
             <div class="min-w-0">
                 <div class="flex items-center gap-3">
                     <span class="font-semibold text-gray-900">{{ stage.stage_key }}</span>
-                    {% if stage.status == "ready" %}
-                    <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-2 py-0.5 rounded font-medium">可发布</span>
+                    {% if stage.status == "confirmed" %}
+                    <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-2 py-0.5 rounded font-medium">可抄手卡</span>
+                    {% elif stage.status == "ready_to_confirm" %}
+                    <span class="text-xs bg-sky-50 border border-sky-300 text-sky-800 px-2 py-0.5 rounded font-medium">待核定</span>
                     {% elif stage.status == "review" %}
                     <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2 py-0.5 rounded font-medium">待人工核定</span>
                     {% else %}

@@ -15,8 +15,9 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Max, QuerySet
+from django.utils import timezone
 from ruleset.compiler import ExecutionPlan, compile_version
-from ruleset.resolver import ResolveInput, resolve, resolve_to_checkpoint
+from ruleset.resolver import ResolveInput, ResolverState, resolve, resolve_to_checkpoint
 
 from .models import (
     CompositeResult,
@@ -995,15 +996,24 @@ def _plan_from_version(version) -> ExecutionPlan:
     return plan
 
 
+# The resolver is a pure "machine computed" verdict. A resolved result is only
+# "ready to confirm" (§36-37); it becomes final/locked when a staff member 核定.
+_RESOLVER_STATUS = {
+    ResolverState.HOLD: StageResult.Status.HOLD,
+    ResolverState.REVIEW: StageResult.Status.REVIEW,
+    ResolverState.READY: StageResult.Status.READY_TO_CONFIRM,
+}
+
+
 @transaction.atomic
 def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     """Write a :class:`ResolveResult` into StageResult + decisions + composites.
 
     Idempotency + versioning: the identity is ``(ruleset_hash, input_fingerprint)``.
     Recomputing the same frozen ruleset over the same raw facts reuses the existing
-    StageResult (a READY one is returned as-is since it is immutable); any input change
-    produces a new input_fingerprint and therefore a new versioned StageResult whose
-    ``result_version`` is one past the stage's latest. This is what makes repeated
+    StageResult (a CONFIRMED one is returned as-is since it is immutable); any input
+    change produces a new input_fingerprint and therefore a new versioned StageResult
+    whose ``result_version`` is one past the stage's latest. This is what makes repeated
     recompute safe (no IntegrityError, no silent overwrite of a published result).
     """
     if version.ruleset.activity_id != activity.pk:
@@ -1016,6 +1026,9 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
 
     ruleset_hash = result.content_hash
     fingerprint = result.input_fingerprint
+    status = _RESOLVER_STATUS.get(result.status)
+    if status is None:
+        raise ValidationError(f"无法映射解析器状态：{result.status}")
     existing = StageResult.objects.filter(
         activity=activity,
         stage_key=stage_key,
@@ -1023,12 +1036,12 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         input_fingerprint=fingerprint,
     ).first()
     if existing is not None:
-        if existing.status == StageResult.Status.READY:
+        if existing.status == StageResult.Status.CONFIRMED:
             return existing
-        # Identical facts over a still-mutable (HOLD/REVIEW) row: refresh in place.
-        # A READY stage is immutable and protected by the queryset guard, so it is
-        # never reached here (identical input implies the same status).
-        existing.status = result.status.value
+        # Identical facts over a still-mutable (HOLD/REVIEW/READY_TO_CONFIRM) row:
+        # refresh in place. A CONFIRMED stage is immutable and protected by the
+        # queryset guard, so it is never reached here (identical input → same status).
+        existing.status = status
         existing.reasons = list(result.reasons)
         existing.created_by = computed_by
         existing.save(update_fields=["status", "reasons", "created_by"])
@@ -1048,7 +1061,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         ruleset_version=version,
         created_by=computed_by,
         stage_key=stage_key,
-        status=result.status.value,
+        status=status,
         reasons=list(result.reasons),
         ruleset_hash=ruleset_hash,
         input_fingerprint=fingerprint,
@@ -1100,6 +1113,28 @@ def _create_children(stage, result, singer_by_key, is_test):
             if c.contestant in singer_by_key
         ]
     )
+
+
+@transaction.atomic
+def confirm_stage_result(stage: StageResult, *, confirmed_by):
+    """核定并锁定 a resolved stage result into its final handcard state (§36-37).
+
+    A resolver ``READY_TO_CONFIRM`` result is machine-computed but still mutable —
+    another score edit would recompute it. The staff 核定 action is the point of no
+    return: once CONFIRMED the result (and its decisions/composites) is immutable so
+    a host can safely copy the handcard. Idempotent (re-confirm returns the row as-is)
+    and rejects HOLD/REVIEW stages that were never fully resolved.
+    """
+    locked = StageResult.objects.select_for_update().get(pk=stage.pk)
+    if locked.status == StageResult.Status.CONFIRMED:
+        return locked
+    if locked.status != StageResult.Status.READY_TO_CONFIRM:
+        raise ValidationError("仅可核定已解析到“待核定”状态的赛段结果。")
+    locked.status = StageResult.Status.CONFIRMED
+    locked.confirmed_by = confirmed_by
+    locked.confirmed_at = timezone.now()
+    locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+    return locked
 
 
 @transaction.atomic
