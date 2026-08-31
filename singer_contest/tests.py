@@ -97,6 +97,9 @@ def _promote_version_to_current(version):
         pk=version.pk
     ).update(is_current=False)
     RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
+    # The queryset update above leaves the in-memory object stale; run_ruleset reads
+    # ``version.is_current`` directly, so refresh it or the is_current gate misfires.
+    version.refresh_from_db()
 
 
 class ScoringServiceTests(TestCase):
@@ -2458,7 +2461,11 @@ class StageResolverBindingTests(TestCase):
                 computed_by=self.user,
                 round_keys={"r1": self.round},
             )
-        # A preview may still run it for a staff side-by-side comparison.
+        # A preview may still run it for a staff side-by-side comparison, but it is
+        # ISOLATED (M1-R9 §七): it returns the in-memory ResolveResult and never writes
+        # a formal StageResult, so a historical version can't pollute the result board.
+        from ruleset.resolver import ResolverState
+
         stage = run_ruleset(
             stopped,
             self.activity,
@@ -2467,7 +2474,11 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
             preview=True,
         )
-        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(stage.status, ResolverState.READY)
+        self.assertEqual(
+            StageResult.objects.filter(activity=self.activity, ruleset_version=stopped).count(),
+            0,
+        )
 
     def test_persist_idempotent_same_input_reuses_stage(self):
         """§18: identical ruleset + input → idempotent reuse, no duplicate/version bump."""
@@ -2639,7 +2650,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.ruleset_version, version)
@@ -2658,7 +2669,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         self.assertEqual(refreshed.pk, stage.pk)
         self.assertEqual(refreshed.status, StageResult.Status.CONFIRMED)
@@ -2709,7 +2720,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         # A correct score edit changes the current input fingerprint.
@@ -2744,7 +2755,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         with self.assertRaises(ValidationError):
@@ -2778,7 +2789,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         confirm_stage_result(stage, confirmed_by=self.user)
         unlocked = unlock_stage_result(stage, operator=self.user, note="核对录错了")
@@ -2795,7 +2806,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         self.assertNotEqual(second.pk, stage.pk)
         self.assertEqual(second.result_version, 2)
@@ -2817,13 +2828,16 @@ class StageResolverBindingTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
         )
+        # 核定 (R9-5) finalizes only a result on the current FROZEN authority, so make
+        # this frozen version the single current runner before persisting (M1-R9 §七).
+        _promote_version_to_current(version)
         first = run_ruleset(
             version,
             self.activity,
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         rec = ScoreRecord.objects.filter(round=self.round).first()
         rec.score += Decimal("0.25")
@@ -2834,7 +2848,7 @@ class StageResolverBindingTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         self.assertEqual(second.result_version, 2)
         with self.assertRaises(ValidationError):
@@ -2846,7 +2860,7 @@ class StageResolverBindingTests(TestCase):
         """M1-R9 (§五): 核定 only finalizes a result grounded in the *current* FROZEN
         authority. A result on a demoted (non-current) frozen version is rejected so a host
         cannot copy a handcard that no longer matches what the activity publishes."""
-        from .services import confirm_stage_result, run_ruleset
+        from .services import confirm_stage_result
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         self.activity.save(update_fields=["phase"])
@@ -2861,15 +2875,19 @@ class StageResolverBindingTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
         )
-        stage = run_ruleset(
-            version,
-            self.activity,
+        # M1-R9 §七 isolates a preview (in-memory, no persist), so a demoted version's
+        # only persisted result is one written BEFORE it was demoted. Simulate exactly
+        # that historical row: it is READY_TO_CONFIRM but grounded on a non-current
+        # authority, which 核定 must reject.
+        stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.user,
             stage_key="选拔",
-            computed_by=self.user,
-            round_keys={"r1": self.round},
-            preview=True,
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            is_test_data=True,
         )
-        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         with self.assertRaises(ValidationError):
             confirm_stage_result(stage, confirmed_by=self.user)
         stage.refresh_from_db()
@@ -4382,7 +4400,7 @@ class ConfirmedDependencyClosureTests(TestCase):
         if lock_vote:
             self.vs.is_locked = True
             self.vs.save(update_fields=["is_locked"])
-        stage = run_ruleset(version, self.activity, **kwargs, preview=True)
+        stage = run_ruleset(version, self.activity, **kwargs, preview=False)
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         return confirm_stage_result(stage, confirmed_by=self.user)
 
@@ -4435,7 +4453,7 @@ class ConfirmedDependencyClosureTests(TestCase):
             stage_key="选拔",
             computed_by=self.user,
             round_keys={"r1": self.round},
-            preview=True,
+            preview=False,
         )
         confirmed = confirm_stage_result(stage, confirmed_by=self.user)
         audit = AuditLog.objects.get(

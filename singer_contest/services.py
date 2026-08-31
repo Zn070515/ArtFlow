@@ -20,6 +20,7 @@ from django.utils import timezone
 from ruleset.compiler import ExecutionPlan, compile_version
 from ruleset.resolver import (
     ResolveInput,
+    ResolveResult,
     ResolverState,
     checkpoint_inputs_fingerprint,
     inputs_fingerprint,
@@ -1580,18 +1581,23 @@ def run_ruleset(
     manual=None,
     checkpoint=None,
     preview: bool = False,
-) -> StageResult:
+) -> "StageResult | ResolveResult":
     """Single generic entry: bind -> resolve -> persist. Returns the StageResult.
+
+    For a non-preview (formal) call this is the persisted :class:`StageResult`; for a
+    ``preview`` it is the in-memory :class:`ResolveResult` and nothing is persisted.
 
     ``checkpoint`` (§11-15) is an optional named boundary in the definition. When given,
     only the checkpoint's dependency closure is resolved (future-stage inputs no longer
     force a HOLD) and ``stage_key`` should be the checkpoint's key, so each stage persists
     as its own progressive :class:`StageResult`.
 
-    ``preview`` (M1-R8) marks the call as a staff comparison, not a FORMAL publication: the
-    formal path (default, used by :func:`recompute_activity_result`) only executes the
-    *current* FROZEN authority, so a superseded frozen version can never produce a formal
-    StageResult; a preview may run any frozen version side-by-side for staff to compare.
+    ``preview`` (M1-R9 §七) marks the call as a staff comparison, not a FORMAL
+    publication: the formal path (default, used by :func:`recompute_activity_result`) only
+    executes the *current* FROZEN authority and persists a :class:`StageResult`; a preview
+    may run a historical (superseded) frozen version side-by-side for staff to compare, but
+    it is ISOLATED — it returns the in-memory :class:`ResolveResult` and never writes a
+    StageResult, so a comparison can never pollute the result board.
     """
     from ruleset.models import RulesetVersion
 
@@ -1614,6 +1620,8 @@ def run_ruleset(
         result = resolve_to_checkpoint(version.definition, inputs, checkpoint, plan=plan)
     else:
         result = resolve(version.definition, inputs, plan=plan)
+    if preview:
+        return result
     return persist_stage_result(
         version, activity, result, stage_key=stage_key, computed_by=computed_by
     )
