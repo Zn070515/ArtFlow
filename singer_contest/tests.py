@@ -85,6 +85,20 @@ def _manual_write_ctx():
         _authorize_manual_write(prior)
 
 
+def _promote_version_to_current(version):
+    """Demote any prior current RulesetVersion, then mark ``version`` the single current.
+
+    核定 (R9-5 §五) finalizes only a result grounded in the *current* FROZEN authority, so a
+    test that confirms must first make its frozen version the one current runner. Uses
+    ``_base_manager`` (same as the production freeze demotion) to bypass the frozen
+    immutability guard when demoting a prior current version.
+    """
+    RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id).exclude(
+        pk=version.pk
+    ).update(is_current=False)
+    RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
+
+
 class ScoringServiceTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="singer", password="pass")
@@ -2616,6 +2630,9 @@ class StageResolverBindingTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
         )
+        # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
+        # make this frozen version the single current runner before confirming.
+        _promote_version_to_current(version)
         stage = run_ruleset(
             version,
             self.activity,
@@ -2683,6 +2700,9 @@ class StageResolverBindingTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
         )
+        # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
+        # make this frozen version the single current runner before confirming.
+        _promote_version_to_current(version)
         stage = run_ruleset(
             version,
             self.activity,
@@ -2715,6 +2735,9 @@ class StageResolverBindingTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
         )
+        # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
+        # make this frozen version the single current runner before confirming.
+        _promote_version_to_current(version)
         stage = run_ruleset(
             version,
             self.activity,
@@ -2746,6 +2769,9 @@ class StageResolverBindingTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
         )
+        # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
+        # make this frozen version the single current runner before confirming.
+        _promote_version_to_current(version)
         stage = run_ruleset(
             version,
             self.activity,
@@ -2815,6 +2841,39 @@ class StageResolverBindingTests(TestCase):
             confirm_stage_result(first, confirmed_by=self.user)
         first.refresh_from_db()
         self.assertEqual(first.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_confirm_rejects_result_on_superseded_version(self):
+        """M1-R9 (§五): 核定 only finalizes a result grounded in the *current* FROZEN
+        authority. A result on a demoted (non-current) frozen version is rejected so a host
+        cannot copy a handcard that no longer matches what the activity publishes."""
+        from .services import confirm_stage_result, run_ruleset
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        self.activity.save(update_fields=["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        self.round.save(update_fields=["is_locked", "status"])
+        version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            definition=self.version.definition,
+            version=2,
+            is_current=False,
+            status=RulesetVersion.Status.FROZEN,
+            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+        )
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={"r1": self.round},
+            preview=True,
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(stage, confirmed_by=self.user)
+        stage.refresh_from_db()
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
     def test_stage_decisions_blocks_prefer_checkpoint_override(self):
         """§十七/P1: a checkpoint stage's handcard uses its own blocks, not the global set."""
@@ -4298,7 +4357,7 @@ class ConfirmedDependencyClosureTests(TestCase):
         return singer
 
     def _frozen_version(self, definition, binding):
-        return RulesetVersion.objects.create(
+        version = RulesetVersion.objects.create(
             ruleset=self.ruleset,
             definition=json.dumps(definition, ensure_ascii=False),
             version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
@@ -4306,6 +4365,10 @@ class ConfirmedDependencyClosureTests(TestCase):
             status=RulesetVersion.Status.FROZEN,
             binding=binding,
         )
+        # 核定 (R9-5) finalizes only a result on the current FROZEN authority, so make the
+        # version we confirm the single current runner.
+        _promote_version_to_current(version)
+        return version
 
     def _confirm_stage(self, definition, binding, lock_round=False, lock_vote=False):
         from .services import confirm_stage_result, run_ruleset

@@ -1491,20 +1491,28 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
         return locked
     if locked.status != StageResult.Status.READY_TO_CONFIRM:
         raise ValidationError("仅可核定已解析到“待核定”状态的赛段结果。")
+    # M1-R9 (§五): 核定 only finalizes a result grounded in the *current* FROZEN
+    # authority. A superseded (demoted) or draft version is not the running authority —
+    # finalizing against it would let a host copy a handcard that no longer matches what
+    # the activity publishes. Re-read with FOR UPDATE so the currency decision is taken
+    # under the Activity serialization lock held above.
+    from ruleset.models import RulesetVersion
+
+    version = RulesetVersion.objects.select_for_update().get(pk=locked.ruleset_version_id)
+    if version.status != RulesetVersion.Status.FROZEN or not version.is_current:
+        raise ValidationError("只能核定基于当前冻结赛制版本生成的结果。")
     latest = StageResult.objects.filter(
         activity=locked.activity, stage_key=locked.stage_key
     ).aggregate(m=Max("result_version"))["m"]
     if locked.result_version != latest:
         raise ValidationError("该赛段存在更新的结果版本，请核定最新结果。")
     try:
-        current_fingerprint = _current_input_fingerprint(
-            locked.ruleset_version, locked.activity, locked.stage_key
-        )
+        current_fingerprint = _current_input_fingerprint(version, locked.activity, locked.stage_key)
     except ValueError as error:
         raise ValidationError(str(error))
     if current_fingerprint != locked.input_fingerprint:
         raise ValidationError("该结果已过期（原始分数/票数已变化），请重新计算后核定。")
-    _ensure_stage_dependencies_final(locked.ruleset_version, locked.activity, locked.stage_key)
+    _ensure_stage_dependencies_final(version, locked.activity, locked.stage_key)
     locked.status = StageResult.Status.CONFIRMED
     locked.confirmed_by = confirmed_by
     locked.confirmed_at = timezone.now()
@@ -1519,8 +1527,8 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
                 "status": StageResult.Status.CONFIRMED,
                 "stage_key": locked.stage_key,
                 "result_version": locked.result_version,
-                "ruleset_version": locked.ruleset_version_id,
-                "authority_hash": locked.ruleset_version.authority_hash,
+                "ruleset_version": version.pk,
+                "authority_hash": version.authority_hash,
                 "input_fingerprint": locked.input_fingerprint,
                 "confirmed_by": confirmed_by.pk,
                 "plan_version": locked.plan_version,

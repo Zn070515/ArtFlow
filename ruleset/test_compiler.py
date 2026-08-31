@@ -879,6 +879,33 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             1,
         )
 
+    def test_freeze_rejects_when_current_has_confirmed_result(self):
+        """M1-R9 (§五): a normal successor Freeze demotes the running FROZEN authority. That
+        is illegal once a result grounded in it is CONFIRMED — the confirmed handcard must
+        stay attributable to the authority it was frozen under."""
+        from singer_contest.models import StageResult
+
+        admin = self._admin()
+        ruleset = self.make_ruleset(is_test_mode=True)
+        prior = self._draft(
+            ruleset=ruleset,
+            version=1,
+            status=RulesetVersion.Status.FROZEN,
+            is_current=True,
+        )
+        StageResult.objects.create(
+            activity=ruleset.activity,
+            ruleset_version=prior,
+            created_by=admin,
+            stage_key="选拔",
+            status=StageResult.Status.CONFIRMED,
+            reasons=[],
+            is_test_data=True,
+        )
+        successor = self._draft(ruleset=ruleset, version=2, is_current=False)
+        with self.assertRaises(ValidationError):
+            freeze_ruleset_version(successor, admin)
+
     def test_freeze_rejects_already_frozen(self):
         admin = self._admin()
         version = self._draft()

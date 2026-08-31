@@ -400,6 +400,25 @@ def freeze_ruleset_version(
     if locked.status == RulesetVersion.Status.FROZEN:
         raise ValidationError("该赛制版本已冻结。")
 
+    # M1-R9 (§五): a normal successor Freeze demotes the running FROZEN authority. That is
+    # only legal while no result grounded in it is CONFIRMED — finality means a confirmed
+    # handcard must stay attributable to the authority it was frozen under. If the current
+    # version already has a CONFIRMED StageResult, reject the re-freeze (the operator must
+    # first unlock the result via :func:`unlock_stage_result` to release finality).
+    from singer_contest.models import StageResult
+
+    prior = (
+        RulesetVersion._base_manager.filter(ruleset_id=locked.ruleset_id)
+        .exclude(pk=locked.pk)
+        .filter(is_current=True, status=RulesetVersion.Status.FROZEN)
+        .first()
+    )
+    if (
+        prior is not None
+        and prior.stage_results.filter(status=StageResult.Status.CONFIRMED).exists()
+    ):
+        raise ValidationError("当前冻结赛制已核定赛段结果，不可生成后继赛制版本。")
+
     freeze_binding = _snapshot_binding(locked.ruleset) if binding is None else binding
     normalized_binding = validate_binding(locked.ruleset, freeze_binding)
     bound_context = build_bound_context(locked, normalized_binding)
