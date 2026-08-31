@@ -520,22 +520,26 @@ def _rank(node: dict, st: _Stage, by_key: dict) -> tuple:
     return ordered
 
 
-def _boundary_tie_resolved(node: dict, st: _Stage, tied: list[str], scores: dict) -> bool:
-    """Whether a declared tie_break_source resolves a genuine primary-score cutoff tie.
+def _boundary_tie_resolved(node: dict, st: _Stage, ranked: list[str] | tuple, count: int) -> bool:
+    """Whether a declared tie_break_source resolves the SPECIFIC cutoff tie.
 
-    A real source must provide a distinct secondary for EVERY tied boundary
-    contestant (none may be missing). If any is absent, or the secondaries are
-    identical, the tie is genuinely unresolved and must NOT be silently broken by
-    roster order — return False so the caller holds it for human confirmation.
+    The deciding pair is ``ranked[count-1]`` (in) vs ``ranked[count]`` (out): they
+    must differ on the real tie_break axis. If only roster index separates them, the
+    tie is unresolved and must be held — a tie_break that separates OTHER tied
+    contestants but leaves this exact pair equal does NOT resolve it (§M1-R8: check
+    the cutoff on both sides of the full sort key).
     """
     tie_break = node.get("tie_break_source")
     if not tie_break:
         return False
+    if count <= 0 or count >= len(ranked):
+        return True  # no boundary pair to separate
     tb = st.values.get(tie_break, {})
-    secondaries = [tb.get(c) for c in tied]
-    if any(s is None for s in secondaries):
+    a = tb.get(ranked[count - 1])
+    b = tb.get(ranked[count])
+    if a is None or b is None:
         return False
-    return len(set(secondaries)) > 1
+    return a != b
 
 
 def _hold_cutoff_tie(
@@ -562,9 +566,10 @@ def _hold_cutoff_tie(
     if boundary is None or following is None or boundary != following:
         return set()
     tied = [c for c in ranked if scores.get(c) == boundary]
-    if policy == "auto_break" and _boundary_tie_resolved(node, st, tied, scores):
-        # A declared tie_break_source separated these candidates in _rank; the
-        # cutoff is deterministic and transparent. Trust it rather than hold.
+    if policy == "auto_break" and _boundary_tie_resolved(node, st, ranked, count):
+        # A declared tie_break_source separates the pair on either side of the
+        # cutoff; the cutoff is deterministic and transparent. Trust it rather than
+        # hold.
         return set()
     st.review.append(
         f"SELECT {node['key']}"
@@ -577,6 +582,54 @@ def _hold_cutoff_tie(
             del st.source_node[c]
         st.outcome[c] = OutcomeCode.PENDING
         st.source_node[c] = node["key"]
+    return set(tied)
+
+
+def _hold_fill_cutoff_tie(
+    node: dict,
+    st: _Stage,
+    ranked: list[str] | tuple,
+    need: int,
+    by_key: dict[str, dict],
+) -> set[str]:
+    """Hold contestants tied at the FILL_TO_QUOTA cutoff as PENDING (§M1-R9).
+
+    The fill hand-picks the top ``need`` unselected contestants in ranking_source
+    order. When that boundary falls on a genuine score tie and the ranking's own
+    tie_break_source does not separate the pair, roster order would otherwise
+    silently decide who gets filled. Hold them all for human review instead.
+    """
+    ranking_source = node.get("ranking_source")
+    if not ranking_source:
+        return set()
+    rank_node = by_key.get(ranking_source)
+    if not rank_node:
+        return set()
+    score_key = rank_node.get("source")
+    score_value = st.values.get(score_key) if score_key else None
+    # A ranking_source that is a SELECT/ROSTER resolves `source` to another roster
+    # (a tuple), not a score map; without a direct ScoreMap there is no score to tie
+    # on. Keep it conservative and skip tie detection rather than score-invent.
+    if not isinstance(score_value, dict):
+        return set()
+    scores: dict = score_value
+    if need <= 0 or need >= len(ranked):
+        return set()
+    boundary = scores.get(ranked[need - 1])
+    following = scores.get(ranked[need])
+    if boundary is None or following is None or boundary != following:
+        return set()
+    tied = [c for c in ranked if scores.get(c) == boundary]
+    if _boundary_tie_resolved(rank_node, st, ranked, need):
+        return set()
+    st.review.append(
+        f"FILL_TO_QUOTA {node['key']} 在补满临界名次 {need} 处同分，"
+        f"需人工核定（不按名单序静默补齐）。"
+    )
+    for c in tied:
+        if c not in st.outcome:
+            st.outcome[c] = OutcomeCode.PENDING
+            st.source_node[c] = node["key"]
     return set(tied)
 
 
@@ -656,7 +709,7 @@ def _by_ranking(remaining: list[str], node: dict, st: _Stage) -> list[str]:
     return sorted(remaining, key=lambda c: (pos.get(c, len(ordered)), st.idx[c]))
 
 
-def _fill(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
+def _fill(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, dict]) -> dict:
     into: dict = st.values[node["into"]]
     pool: tuple = st.values[node["from"]]
     quota = node["quota"]
@@ -699,11 +752,14 @@ def _fill(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
         return {g: tuple(cs) for g, cs in result.items()}
     remaining = [c for c in pool if not exclude or c not in selected]
     ranked = _by_ranking(remaining, node, st)
-    take = ranked[:need]
-    if len(take) < need:
+    # A score tie at the fill cutoff is undecidable without a real tie_break on the
+    # ranking source; do NOT silently pick by roster order (§M1-R9).
+    tied = _hold_fill_cutoff_tie(node, st, ranked, need, by_key)
+    take = [c for c in ranked[:need] if c not in tied]
+    if len(ranked) < need:
         st.hold.append(
             f"FILL_TO_QUOTA {node['key']} 来源池不足：需要补足 {need} 人，"
-            f"仅剩 {len(take)} 名候选（不静默少补）。"
+            f"仅剩 {len(ranked)} 名候选（不静默少补）。"
         )
     groups = list(into.keys())
     for i, c in enumerate(take):
@@ -819,7 +875,7 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
     elif ntype == "MERGE":
         st.values[node["key"]] = _merge(node, st)
     elif ntype == "FILL_TO_QUOTA":
-        st.values[node["key"]] = _fill(node, st, inputs)
+        st.values[node["key"]] = _fill(node, st, inputs, by_key)
     elif ntype == "MANUAL_SELECT":
         st.values[node["key"]] = _manual(node, st, inputs)
     elif ntype in ("BRANCH", "AWARD"):

@@ -486,6 +486,47 @@ class ResolverReviewTests(SimpleTestCase):
         self.assertEqual(by["c2"].outcome_code, OutcomeCode.DIRECT)
         self.assertEqual(by["c1"].outcome_code, OutcomeCode.ELIMINATED)
 
+    def test_boundary_tie_partial_secondary_still_holds_pair(self):
+        # c1 (secondary 8) is clearly above, but c2/c3 are score-tied on BOTH primary
+        # and secondary, exactly at the cutoff. A tie_break that separates OTHER tied
+        # contestants but leaves the boundary pair equal must NOT resolve the cutoff —
+        # roster order would otherwise hand c2 the slot over c3 (§M1-R8 both sides).
+        definition = _def(
+            [
+                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "tb", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                {
+                    "key": "r",
+                    "type": "RANK",
+                    "source": "a",
+                    "descending": True,
+                    "tie_break_source": "tb",
+                },
+                {
+                    "key": "s",
+                    "type": "SELECT",
+                    "source": "r",
+                    "count": 2,
+                    "tie_policy": "auto_break",
+                    "tie_break_source": "tb",
+                },
+            ]
+        )
+        inputs = ResolveInput(
+            roster=("c1", "c2", "c3"),
+            round_scores=_rs(
+                {
+                    "r1": {"c1": [10], "c2": [10], "c3": [10]},
+                    "r2": {"c1": [8], "c2": [5], "c3": [5]},
+                }
+            ),
+        )
+        result = resolve(definition, inputs)
+        self.assertEqual(result.status, ResolverState.REVIEW)
+        by = {d.contestant: d for d in result.decisions}
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.PENDING)
+        self.assertEqual(by["c3"].outcome_code, OutcomeCode.PENDING)
+
 
 class ResolverManualSelectTests(SimpleTestCase):
     def _def(self):
@@ -606,6 +647,39 @@ class ResolverFillGlobalSemanticsTests(SimpleTestCase):
         total = {c for g in filled.values() for c in g}
         # RANK desc -> c8,c7,c6,c5,c4,c3,c2,c1; minus manual {c1,c5} -> fills c8,c7,c6.
         self.assertEqual(total, {"c1", "c5", "c8", "c7", "c6"})
+
+    def test_global_fill_cutoff_tie_holds_not_roster_order(self):
+        # A genuine score tie exactly at the fill cutoff must NOT let roster order
+        # silently decide who fills the last slot; the tied pair is held for review
+        # (§M1-R9). Deterministic fills c2/c3 still advance.
+        inputs = ResolveInput(
+            roster=tuple(f"c{i}" for i in range(1, 9)),
+            round_scores=_rs(
+                {
+                    "r1": {
+                        "c1": [110],
+                        "c2": [100],
+                        "c3": [90],
+                        "c4": [80],
+                        "c5": [120],
+                        "c6": [80],
+                        "c7": [70],
+                        "c8": [60],
+                    }
+                }
+            ),
+            group_of=self._group_of(),
+            manual={"manual": {"G1": ("c1",), "G2": ("c5",)}},
+        )
+        result = resolve(self._def(), inputs)
+        self.assertEqual(result.status, ResolverState.REVIEW)
+        by = {d.contestant: d for d in result.decisions}
+        # c4/c6 are score-tied at the fill boundary (need 3); both are PENDING rather
+        # than roster-ordered. Deterministic fills c2/c3 become FINALIST.
+        self.assertEqual(by["c4"].outcome_code, OutcomeCode.PENDING)
+        self.assertEqual(by["c6"].outcome_code, OutcomeCode.PENDING)
+        self.assertEqual(by["c2"].outcome_code, OutcomeCode.FINALIST)
+        self.assertEqual(by["c3"].outcome_code, OutcomeCode.FINALIST)
 
     def test_each_group_mode_fills_every_group_independently(self):
         definition = _def(
