@@ -407,6 +407,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             .first()
         )
         self.assertIsNotNone(successor)
+        assert successor is not None
         self.assertEqual(successor.status, RulesetVersion.Status.DRAFT)
         # The successor carries the definition but a clean binding: staff re-binds the
         # (now-formal) runtime round/vote/group IDs, so no test-only pks are inherited.

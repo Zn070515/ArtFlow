@@ -425,6 +425,7 @@ def freeze_ruleset_version(
     report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
     if not report.passes():
         raise RulesetInvalidError(report, plan)
+    assert plan is not None
 
     old_status = "draft"
     _demote_prior_current(locked)

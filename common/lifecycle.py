@@ -6,7 +6,7 @@ from django.db.models import Model, Q, QuerySet
 
 if TYPE_CHECKING:
     from core.models import Activity
-    from singer_contest.models import SingerRegistration
+    from singer_contest.models import Performance, SingerRegistration
 
 TEST_VALUE = "test"
 FORMAL_VALUE = "formal"
@@ -60,7 +60,7 @@ def runtime_approved_singers(activity: Activity) -> QuerySet[SingerRegistration]
     )
 
 
-def runtime_performances(activity: Activity) -> QuerySet:
+def runtime_performances(activity: Activity) -> QuerySet[Performance]:
     """Performances whose test marker matches the activity's lifecycle.
 
     The generic contest fact model (M1-B) stores a per-round performance per

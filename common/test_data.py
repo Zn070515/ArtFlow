@@ -215,8 +215,8 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         stage.status = StageResult.Status.HOLD
         stage.confirmed_at = None
         stage.confirmed_by = None
-        stage.save(update_fields=["status", "confirmed_at", "confirmed_by"], _bypass_confirmed=True)
-    StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()
+        stage.save(update_fields=["status", "confirmed_at", "confirmed_by"], _bypass_confirmed=True)  # type: ignore[no-untyped-call]
+    StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     # ManualDecision FK's to the frozen RulesetVersion; delete before it is demoted.
     ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()

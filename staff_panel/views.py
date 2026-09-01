@@ -2138,7 +2138,9 @@ def _node_field_entries(node, index, sources):
     labels = ruleset_editor.field_labels()
     allowed = ruleset_editor.field_allowed()
     spec = NODE_TYPE_SPEC.get(node.get("type"))
-    fields = []
+    fields: list[dict] = []
+    if spec is None:
+        return fields
     for field in list(spec.required) + list(spec.optional):
         label = labels.get(field, field)
         base = f"node_{index}_{field}"
@@ -2261,12 +2263,12 @@ def contest_ruleset_create(request):
             else:
                 # Reuse the single authority: edit the latest DRAFT, or supersede a frozen
                 # current into a fresh editing DRAFT — never redirect into a frozen version.
-                version = (
+                draft = (
                     existing.versions.filter(status=RulesetVersion.Status.DRAFT)
                     .order_by("-version")
                     .first()
                 )
-                if version is None:
+                if draft is None:
                     frozen = (
                         existing.versions.filter(status=RulesetVersion.Status.FROZEN)
                         .order_by("-version")
@@ -2281,6 +2283,8 @@ def contest_ruleset_create(request):
                             created_by=request.user,
                         )
                     )
+                else:
+                    version = draft
                 messages.info(request, "该活动已有赛制，进入现有赛制编辑。")
             return redirect("staff:ruleset_edit", pk=version.pk)
         definition = template.definition if template else _starter_definition()

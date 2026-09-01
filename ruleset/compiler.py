@@ -258,7 +258,12 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
         # node-declared scale is only an "expected" hint (used for template validation when
         # no entity is bound). Prefer the bound actual so a 50-mark sheet is never misread
         # as hundred inside an AGGREGATE.
-        p["scale"] = vote_scale or _round_scale(ctx, rnd) or node.get("scale") or "unknown"
+        p["scale"] = (
+            vote_scale
+            or (_round_scale(ctx, rnd) if isinstance(rnd, str) else None)
+            or node.get("scale")
+            or "unknown"
+        )
     elif ntype == "AGGREGATE":
         comps = node["aggregate"]["components"]
         if comps:
@@ -412,7 +417,7 @@ def _check_judges(node: dict, prov: dict, ctx: dict, issues: list[ReportIssue]) 
         return
     trims = int(node.get("trim_high") or 0) + int(node.get("trim_low") or 0)
     rnd = node.get("round")
-    judges = _round_judges(ctx, rnd)
+    judges = _round_judges(ctx, rnd) if isinstance(rnd, str) else None
     if judges is None:
         issues.append(
             ReportIssue(
@@ -497,7 +502,7 @@ def _check_quota(
         by = _partition_by(by_key, node.get("source"))
         capacity = ((ctx.get("groups") or {}).get(by) or {}).get("capacity") if by else None
         if isinstance(capacity, list) and capacity:
-            if node.get("groups") > len(capacity):
+            if (node.get("groups") or 0) > len(capacity):
                 issues.append(
                     ReportIssue(
                         "GROUP_QUOTA_EXCEEDED",
@@ -765,8 +770,8 @@ def _check_scale_binding(node: dict, ctx: dict, issues: list[ReportIssue]) -> No
     actual = None
     if node.get("vote_source"):
         actual = (ctx.get("votes") or {}).get(node["vote_source"], {}).get("scale")
-    elif node.get("round"):
-        actual = _round_scale(ctx, node.get("round"))
+    elif node.get("round") and isinstance(node.get("round"), str):
+        actual = _round_scale(ctx, node["round"])
     if actual and actual != "unknown" and declared != actual:
         issues.append(
             ReportIssue(

@@ -336,7 +336,7 @@ class ResolverReadyTests(SimpleTestCase):
         definition = _def([{"key": "p", "type": "PAIR", "source": ENTRY_KEY}])
         result = resolve(definition, ResolveInput(roster=("a", "b", "c", "d")))
         self.assertEqual(result.status, ResolverState.READY)
-        self.assertEqual(len(result.node_values["p"]), 2)
+        self.assertEqual(len(result.node_values["p"]), 2)  # type: ignore[arg-type]
 
 
 class ResolverHoldTests(SimpleTestCase):
@@ -628,7 +628,7 @@ class ResolverFillGlobalSemanticsTests(SimpleTestCase):
         result = resolve(self._def(), inputs)
         self.assertEqual(result.status, ResolverState.READY)
         filled = result.node_values["filled"]
-        total = {c for g in filled.values() for c in g}
+        total = {c for g in filled.values() for c in g}  # type: ignore[attr-defined]
         # Top-5 globally by score: c1..c5 (c1,c5 manual; c2,c3,c4 filled). Not per-group.
         self.assertEqual(len(total), 5)
         self.assertEqual(total, {"c1", "c2", "c3", "c4", "c5"})
@@ -644,7 +644,7 @@ class ResolverFillGlobalSemanticsTests(SimpleTestCase):
         result = resolve(self._def(), inputs)
         self.assertEqual(result.status, ResolverState.READY)
         filled = result.node_values["filled"]
-        total = {c for g in filled.values() for c in g}
+        total = {c for g in filled.values() for c in g}  # type: ignore[attr-defined]
         # RANK desc -> c8,c7,c6,c5,c4,c3,c2,c1; minus manual {c1,c5} -> fills c8,c7,c6.
         self.assertEqual(total, {"c1", "c5", "c8", "c7", "c6"})
 
@@ -740,7 +740,7 @@ class ResolverFillGlobalSemanticsTests(SimpleTestCase):
         result = resolve(synthetic_fill_to_quota_demo(), inputs)
         self.assertEqual(result.status, ResolverState.READY)
         filled = result.node_values["filled"]
-        total = {c for g in filled.values() for c in g}
+        total = {c for g in filled.values() for c in g}  # type: ignore[attr-defined]
         # global total 4: {c1,c4} manual + {c6,c5} as the top two remaining by score.
         self.assertEqual(len(total), 4)
         self.assertEqual(total, {"c1", "c4", "c6", "c5"})

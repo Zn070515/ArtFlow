@@ -20,9 +20,8 @@ def _get_vote_session_for_public_request(request, pk):
     forged direct POST cannot reach submit_ballot.
     """
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
-    if (
-        vote_session.activity.data_lifecycle != Activity.DataLifecycle.FORMAL
-        and (not request.user.is_authenticated or not request.user.is_staff_or_admin)
+    if vote_session.activity.data_lifecycle != Activity.DataLifecycle.FORMAL and (
+        not request.user.is_authenticated or not request.user.is_staff_or_admin
     ):
         raise Http404("Vote session not found.")
     return vote_session

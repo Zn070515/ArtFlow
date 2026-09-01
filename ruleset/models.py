@@ -1,3 +1,5 @@
+from typing import cast
+
 from common.lifecycle import runtime_is_test
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -153,7 +155,7 @@ class RulesetVersionQuerySet(models.QuerySet):
 
     def create(self, **kwargs):
         allow_freeze = kwargs.pop("_allow_freeze", False)
-        obj = self.model(**kwargs)
+        obj = cast(RulesetVersion, self.model(**kwargs))
         obj.save(force_insert=True, using=self.db, _allow_freeze=allow_freeze)
         return obj
 

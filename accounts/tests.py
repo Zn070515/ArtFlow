@@ -136,7 +136,7 @@ class AdminVerificationTTLTests(TestCase):
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
     def test_mark_admin_verified_sets_marker_and_timestamp(self):
-        session = {}
+        session: dict = {}
         mark_admin_verified(session)
         self.assertTrue(session["artflow_admin_verified"])
         self.assertIsNotNone(session["artflow_admin_verified_at"])
@@ -155,9 +155,9 @@ class AdminVerificationTTLTests(TestCase):
             mock_now.return_value = datetime(2026, 8, 29, 12, 0, 0, tzinfo=dt_timezone.utc)
             mark_admin_verified(session)
             mid = mock_now.return_value
-            mock_now.return_value = mid + timezone.timedelta(seconds=1800)
+            mock_now.return_value = mid + timezone.timedelta(seconds=1800)  # type: ignore[attr-defined]
             self.assertTrue(admin_verification_is_valid(session))
-            mock_now.return_value = mid + timezone.timedelta(seconds=3601)
+            mock_now.return_value = mid + timezone.timedelta(seconds=3601)  # type: ignore[attr-defined]
             self.assertFalse(admin_verification_is_valid(session))
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)

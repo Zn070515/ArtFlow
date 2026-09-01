@@ -14,6 +14,7 @@ MYPY_FILES = [
     "files",
     "incidents",
     "public_portal",
+    "ruleset",
     "singer_contest",
     "staff_panel",
     "voting",
@@ -41,7 +42,16 @@ STRICT_CHECKS = {
     "strict_equality": True,
     "extra_checks": True,
 }
-GRADUAL_MODULES = {"common.views", "common.tests", "config.tests"}
+GRADUAL_MODULES = {
+    "common.views",
+    "common.tests",
+    # Legacy black-box characterization suites (mirrors the documented relaxation in
+    # pyproject.toml): they introspect runtime behaviour, so strict untyped-call/def
+    # enforcement churns them without adding safety.
+    "common.test_characterization",
+    "common.test_contest_domain_characterization",
+    "config.tests",
+}
 GRADUAL_CHECKS = {
     "disallow_incomplete_defs": False,
     "disallow_untyped_calls": False,

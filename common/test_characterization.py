@@ -178,7 +178,7 @@ class VoteCharacterizationTests(_CharacterizationBase):
                     name="Pop",
                     passcode="1234",
                     start_time=timezone.now(),
-                    end_time=timezone.now() + timezone.timedelta(minutes=5),
+                    end_time=timezone.now() + timezone.timedelta(minutes=5),  # type: ignore[attr-defined]
                     is_open=True,
                     is_locked=True,
                     is_test_data=False,
@@ -193,7 +193,7 @@ class VoteCharacterizationTests(_CharacterizationBase):
             name="Pop",
             passcode="1234",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(minutes=5),
+            end_time=timezone.now() + timezone.timedelta(minutes=5),  # type: ignore[attr-defined]
             is_test_data=False,
         )
         with self.assertRaises(ValidationError):

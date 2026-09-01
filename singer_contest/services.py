@@ -1022,7 +1022,11 @@ def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
         perfs = Performance.objects.filter(round_id=round_pk, group__isnull=False).select_related(
             "group"
         )
-        out[by] = {str(p.singer_id): p.group.name for p in perfs}
+        entry: dict[str, str] = {}
+        for p in perfs:
+            assert p.group is not None
+            entry[str(p.singer_id)] = p.group.name
+        out[by] = entry
     return out
 
 
@@ -1081,6 +1085,7 @@ def _plan_from_version(version) -> ExecutionPlan:
     report, plan = compile_version(version)
     if not report.passes():
         raise ValidationError("无法解析无效赛制版本。")
+    assert plan is not None
     return plan
 
 
@@ -1697,7 +1702,7 @@ def recompute_activity_result(
         raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     bound = {key: rounds[rid] for key, rid in raw_keys.items()}
     stage_key = checkpoint or binding.get("stage_key") or ruleset.stage_key or ""
-    return run_ruleset(
+    result = run_ruleset(
         version,
         activity,
         stage_key=stage_key,
@@ -1708,6 +1713,8 @@ def recompute_activity_result(
         manual=_source_manual(version, activity),
         checkpoint=checkpoint,
     )
+    assert isinstance(result, StageResult)
+    return result
 
 
 _OUTCOME_LABELS = {

@@ -88,6 +88,21 @@ _ROSTER_OR_GROUP_MAP = frozenset({OutputType.ROSTER, OutputType.GROUP_MAP})
 _ORDERED_ROSTER = frozenset({OutputType.ROSTER, OutputType.RANKED_ROSTER})
 
 
+def _run_validators(*validators: Callable[[str, dict], None]) -> Callable[[str, dict], None]:
+    """Compose validators that raise on failure.
+
+    The validators annotate ``-> None`` (they raise or pass), so composing them with
+    ``a() or b()`` trips mypy's ``[func-returns-value]``. A validator's return value is
+    never consumed at the call site, so this just runs each in order.
+    """
+
+    def run(name: str, node: dict) -> None:
+        for validator in validators:
+            validator(name, node)
+
+    return run
+
+
 def _require_bool(name: str, node: dict, field: str) -> None:
     value = node.get(field)
     if value is not None and not isinstance(value, bool):
@@ -332,7 +347,7 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             optional=("descending", "tie_policy", "tie_break_source"),
             source_refs=("source", "tie_break_source"),
             expects={"source": _SCOREMAP, "tie_break_source": _SCOREMAP},
-            validate=lambda n, d: _require_bool(n, d, "descending") or _validate_tie(n, d),
+            validate=_run_validators(lambda n, d: _require_bool(n, d, "descending"), _validate_tie),
         ),
         _spec(
             NodeType.SELECT,
@@ -341,7 +356,9 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             optional=("tie_policy", "by", "tie_break_source"),
             source_refs=("source", "by", "tie_break_source"),
             expects={"source": _RANKED_ROSTER, "by": _GROUP_MAP, "tie_break_source": _SCOREMAP},
-            validate=lambda n, d: _require_non_negative_int(n, d, "count") or _validate_tie(n, d),
+            validate=_run_validators(
+                lambda n, d: _require_non_negative_int(n, d, "count"), _validate_tie
+            ),
         ),
         _spec(
             NodeType.BRANCH,
@@ -392,7 +409,9 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             required=("source", "award"),
             optional=("vote_source", "vote_purpose"),
             source_refs=("source",),
-            validate=lambda n, d: _require_non_empty_str(n, d, "award") or _validate_vote(n, d),
+            validate=_run_validators(
+                lambda n, d: _require_non_empty_str(n, d, "award"), _validate_vote
+            ),
         ),
     ]
 }

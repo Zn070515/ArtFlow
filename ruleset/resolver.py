@@ -23,7 +23,7 @@ import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
-from typing import Mapping
+from typing import Any, Mapping
 
 from .schema import ENTRY_KEY, content_hash, parse_definition
 
@@ -370,7 +370,9 @@ class _Stage:
     def __init__(self, roster: tuple[str, ...]):
         self.roster = _order(roster)
         self.idx = {c: i for i, c in enumerate(self.roster)}
-        self.values: dict[str, object] = {ENTRY_KEY: self.roster}
+        # values always holds a heterogeneous tuple (roster, partition, pair, aggregate rows);
+        # element types differ per node, so a bare Any models "we don't care about the contents".
+        self.values: dict[str, Any] = {ENTRY_KEY: self.roster}
         self.outcome: dict[str, OutcomeCode] = {}
         self.source_node: dict[str, str] = {}
         self.origin: dict[str, set[str]] = {c: {"entry"} for c in self.roster}
@@ -418,24 +420,24 @@ def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
         st.hold.append(f"ASSESS {node['key']} 未声明 round/vote_source，无法取分。")
         return out
     if node.get("vote_source"):
-        table = inputs.vote_scores.get(src)
-        if not table:
+        vtable = inputs.vote_scores.get(src)
+        if not vtable:
             st.hold.append(f"投票 {src} 尚无可用结果。")
             return out
         for c in pool:
-            v = table.get(c)
+            v = vtable.get(c)
             if v is None:
                 st.hold.append(f"投票 {src} 缺失 {c} 结果。")
                 continue
             out[c] = _as_dec(v)
     else:
-        table = inputs.round_scores.get(src)
-        if not table:
+        rtable = inputs.round_scores.get(src)
+        if not rtable:
             st.hold.append(f"轮次 {src} 没有评分。")
             return out
         trims = int(node.get("trim_high") or 0) + int(node.get("trim_low") or 0)
         for c in pool:
-            scores = table.get(c)
+            scores = rtable.get(c)
             if not scores:
                 st.hold.append(f"轮次 {src} 缺失 {c} 评分。")
                 continue
@@ -638,7 +640,7 @@ def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
     count = node["count"]
     score_node = by_key[node["source"]].get("source")
     scores: dict = st.values.get(score_node, {}) if score_node else {}
-    policy = node.get("tie_policy")
+    policy = node.get("tie_policy") or ""
     by = node.get("by")
     if by:
         # Group-scoped: pick top-count within each group of the partition, flattened
@@ -816,7 +818,7 @@ def _manual(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
             return {}
         result: dict[str, tuple[str, ...]] = {}
         for g, cs in src.items():
-            chosen = tuple(_order(c for c in decisions.get(g, ()) if c in cs))
+            chosen = tuple(_order(tuple(c for c in decisions.get(g, ()) if c in cs)))
             for c in chosen:
                 mark_wildcard(c)
             result[g] = chosen
@@ -837,7 +839,7 @@ def _manual(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
             valid = False
     if not valid:
         return {}
-    chosen = tuple(_order(c for c in raw if c in pool_set))
+    chosen = tuple(_order(tuple(c for c in raw if c in pool_set)))
     for c in chosen:
         mark_wildcard(c)
     return {"": chosen}
@@ -921,8 +923,10 @@ def _build_decisions(
                     if c in _member_set(st.values.get(d["source"])):
                         return spec_outcome[d["source"]], d["source"]
                 return OutcomeCode.ELIMINATED, ""
-            if c in _member_set(st.values.get(output_node)):
-                return OutcomeCode.DIRECT, output_node
+            out_node = output_node
+            assert out_node is not None
+            if c in _member_set(st.values.get(out_node)):
+                return OutcomeCode.DIRECT, out_node
             return OutcomeCode.ELIMINATED, ""
 
     out = []

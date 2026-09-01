@@ -3499,8 +3499,8 @@ class SensitiveExportAuditSweepTests(TestCase):
             .first()
         )
         self.assertIsNotNone(log)
-        self.assertIn(expected_export_type, log.note)
-        self.assertIn(f'"activity_id": {self.activity.pk}', log.note)
+        self.assertIn(expected_export_type, log.note)  # type: ignore[union-attr]
+        self.assertIn(f'"activity_id": {self.activity.pk}', log.note)  # type: ignore[union-attr]
 
     def test_registrations_export_records_typed_audit(self):
         self.client.get(reverse("staff:export_registrations"), {"activity_id": self.activity.pk})
@@ -4503,26 +4503,26 @@ class ResultBoardTests(TestCase):
             round_keys={"r1": contest_round},
         )
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
-        response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))
-        self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))
-        ready.refresh_from_db()
+        response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))  # type: ignore[union-attr]
+        self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))  # type: ignore[union-attr]
+        ready.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(ready.status, StageResult.Status.CONFIRMED)
-        self.assertEqual(ready.confirmed_by, self.staff)
-        self.assertIsNotNone(ready.confirmed_at)
+        self.assertEqual(ready.confirmed_by, self.staff)  # type: ignore[union-attr]
+        self.assertIsNotNone(ready.confirmed_at)  # type: ignore[union-attr]
         # M1-R8 Commit 4: the CONFIRM audit is recorded once by the service (rich payload),
         # not duplicated by the view with a stale READY_TO_CONFIRM status.
         from common.models import AuditLog
 
         audits = AuditLog.objects.filter(
             action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
-            target=f"StageResult:{ready.pk}",
+            target=f"StageResult:{ready.pk}",  # type: ignore[union-attr]
         )
         self.assertEqual(audits.count(), 1)
         payload = json.loads(audits.get().new_value)
         self.assertEqual(payload["status"], StageResult.Status.CONFIRMED)
         self.assertEqual(payload["stage_key"], "院十佳")
         self.assertEqual(payload["result_version"], ready.result_version)
-        self.assertEqual(payload["ruleset_version"], ready.ruleset_version_id)
+        self.assertEqual(payload["ruleset_version"], ready.ruleset_version_id)  # type: ignore[union-attr]
         self.assertEqual(payload["input_fingerprint"], ready.input_fingerprint)
 
     def test_stage_result_confirm_rejects_unresolved(self):
@@ -4704,7 +4704,7 @@ class RulesetTemplateLibraryTests(TestCase):
             {"activity": activity.pk, "name": "校十佳2026"},
         )
         ruleset = ContestRuleset.objects.get(activity=activity)
-        self.assertEqual(ruleset.source_template.name, "院十佳")
+        self.assertEqual(ruleset.source_template.name, "院十佳")  # type: ignore[union-attr]
         version = RulesetVersion.objects.get(ruleset=ruleset)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 

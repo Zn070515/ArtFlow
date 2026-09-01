@@ -141,9 +141,7 @@ ARTFLOW_VIDEO_UPLOAD_MAX_MB = get_int(os.environ, "ARTFLOW_VIDEO_UPLOAD_MAX_MB",
 
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.
-ADMIN_VERIFICATION_TTL_SECONDS = get_int(
-    os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 8 * 60 * 60
-)
+ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 8 * 60 * 60)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from datetime import timezone as dt_timezone
+
 from common.models import AuditLog
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -32,11 +35,11 @@ def admin_verification_is_valid(session) -> bool:
     if not marker:
         return False
     try:
-        verified_at = timezone.datetime.fromisoformat(marker)
+        verified_at = datetime.fromisoformat(marker)
     except (TypeError, ValueError):
         return False
     if timezone.is_naive(verified_at):
-        verified_at = timezone.make_aware(verified_at, timezone.utc)
+        verified_at = timezone.make_aware(verified_at, dt_timezone.utc)
     elapsed = (timezone.now() - verified_at).total_seconds()
     return elapsed <= _verification_ttl_seconds()
 

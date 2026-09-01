@@ -1,5 +1,5 @@
 import threading
-from typing import Any
+from typing import Any, cast
 
 from common.lifecycle import runtime_is_test
 from django.conf import settings
@@ -558,7 +558,7 @@ class StageResultQuerySet(models.QuerySet):
 
     def create(self, **kwargs):
         bypass = kwargs.pop("_bypass_confirmed", False)
-        obj = self.model(**kwargs)
+        obj = cast(StageResult, self.model(**kwargs))
         obj.save(force_insert=True, using=self.db, _bypass_confirmed=bypass)
         return obj
 

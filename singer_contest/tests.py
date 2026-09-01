@@ -2267,7 +2267,7 @@ class StageResultModelTests(TestCase):
     def test_reads_immutable_after_ready(self):
         result = self._result()
         # A HOLD result can still be updated to CONFIRMED (with its confirming trail).
-        StageResult.objects.filter(pk=result.pk).update(
+        StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
             status=StageResult.Status.CONFIRMED,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
@@ -2289,7 +2289,7 @@ class StageResultModelTests(TestCase):
             score=Decimal("92.46"),
             is_test_data=True,
         )
-        StageResult.objects.filter(pk=result.pk).update(
+        StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
             status=StageResult.Status.CONFIRMED,
             confirmed_at=timezone.now(),
             confirmed_by=self.user,
@@ -2385,15 +2385,15 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
-        self.assertEqual(stage.stage_key, "选拔")
-        self.assertEqual(stage.ruleset_version, self.version)
-        self.assertTrue(stage.ruleset_hash)
+        self.assertEqual(stage.stage_key, "选拔")  # type: ignore[union-attr]
+        self.assertEqual(stage.ruleset_version, self.version)  # type: ignore[union-attr]
+        self.assertTrue(stage.ruleset_hash)  # type: ignore[union-attr]
         self.assertTrue(stage.input_fingerprint)
         self.assertEqual(stage.plan_version, 1)
         self.assertEqual(stage.result_version, 1)
-        self.assertEqual(stage.decisions.count(), 3)
-        self.assertEqual(stage.composites.count(), 0)
-        for decision in stage.decisions.all():
+        self.assertEqual(stage.decisions.count(), 3)  # type: ignore[call-arg]
+        self.assertEqual(stage.composites.count(), 0)  # type: ignore[call-arg]
+        for decision in stage.decisions.all():  # type: ignore[union-attr]
             self.assertEqual(decision.outcome_code, "eliminated")
             self.assertIsNotNone(decision.score)
 
@@ -2445,7 +2445,7 @@ class StageResolverBindingTests(TestCase):
             computed_by=self.user,
             round_keys={"r1": self.round},
         )
-        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.ruleset_version, self.version)  # type: ignore[union-attr]
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
     def test_run_ruleset_rejects_superseded_frozen_unless_preview(self):
@@ -2511,11 +2511,11 @@ class StageResolverBindingTests(TestCase):
             computed_by=self.user,
             round_keys={"r1": self.round},
         )
-        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(first.pk, second.pk)  # type: ignore[union-attr]
         self.assertEqual(second.result_version, 1)
         stage_count = StageResult.objects.filter(activity=self.activity, stage_key="选拔").count()
         self.assertEqual(stage_count, 1)
-        self.assertEqual(second.decisions.count(), 3)
+        self.assertEqual(second.decisions.count(), 3)  # type: ignore[call-arg]
 
     def test_persist_changed_input_bumps_result_version(self):
         """§18: an input change yields a new input_fingerprint and a new versioned result."""
@@ -2531,8 +2531,8 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(first.result_version, 1)
         # Correct a single score (the §16 scenario): the raw facts change.
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.50")
-        rec.save()
+        rec.score += Decimal("0.50")  # type: ignore[union-attr]
+        rec.save()  # type: ignore[union-attr]
         second = run_ruleset(
             self.version,
             self.activity,
@@ -2540,7 +2540,7 @@ class StageResolverBindingTests(TestCase):
             computed_by=self.user,
             round_keys={"r1": self.round},
         )
-        self.assertNotEqual(first.pk, second.pk)
+        self.assertNotEqual(first.pk, second.pk)  # type: ignore[union-attr]
         self.assertEqual(second.result_version, 2)
         self.assertEqual(
             StageResult.objects.filter(activity=self.activity, stage_key="选拔").count(), 2
@@ -2548,7 +2548,8 @@ class StageResolverBindingTests(TestCase):
         # The first result keeps its resolved-but-unconfirmed state; the new one is
         # a separate version, so the old one is never silently overwritten.
         first_still_resolved = StageResult.objects.filter(
-            pk=first.pk, status=StageResult.Status.READY_TO_CONFIRM
+            pk=first.pk,  # type: ignore[union-attr]
+            status=StageResult.Status.READY_TO_CONFIRM,
         ).exists()
         self.assertTrue(first_still_resolved)
 
@@ -2611,11 +2612,11 @@ class StageResolverBindingTests(TestCase):
             computed_by=self.user,
             round_keys={"r1": self.round},
         )
-        self.assertEqual(refreshed.pk, first.pk)
+        self.assertEqual(refreshed.pk, first.pk)  # type: ignore[union-attr]
         self.assertEqual(refreshed.status, StageResult.Status.READY_TO_CONFIRM)
         stage_count = StageResult.objects.filter(activity=self.activity, stage_key="选拔").count()
         self.assertEqual(stage_count, 1)
-        self.assertEqual(first.decisions.count(), 3)
+        self.assertEqual(first.decisions.count(), 3)  # type: ignore[call-arg]
 
     def test_persist_maps_resolver_ready_to_ready_to_confirm(self):
         """§36-37: the resolver's "ready" persists as READY_TO_CONFIRM, never CONFIRMED."""
@@ -2668,13 +2669,13 @@ class StageResolverBindingTests(TestCase):
             preview=False,
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
-        self.assertEqual(stage.ruleset_version, version)
-        confirmed = confirm_stage_result(stage, confirmed_by=self.user)
+        self.assertEqual(stage.ruleset_version, version)  # type: ignore[union-attr]
+        confirmed = confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
         self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
         self.assertEqual(confirmed.confirmed_by, self.user)
         self.assertIsNotNone(confirmed.confirmed_at)
-        again = confirm_stage_result(StageResult.objects.get(pk=stage.pk), confirmed_by=self.user)
-        self.assertEqual(again.pk, stage.pk)
+        again = confirm_stage_result(StageResult.objects.get(pk=stage.pk), confirmed_by=self.user)  # type: ignore[union-attr]
+        self.assertEqual(again.pk, stage.pk)  # type: ignore[union-attr]
         self.assertEqual(again.status, StageResult.Status.CONFIRMED)
         self.assertEqual(again.confirmed_at, confirmed.confirmed_at)
         # A CONFIRMED result is immutable: recomputing identical facts returns it as-is.
@@ -2686,7 +2687,7 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
             preview=False,
         )
-        self.assertEqual(refreshed.pk, stage.pk)
+        self.assertEqual(refreshed.pk, stage.pk)  # type: ignore[union-attr]
         self.assertEqual(refreshed.status, StageResult.Status.CONFIRMED)
 
     def test_confirm_stage_result_rejects_unresolved(self):
@@ -2741,11 +2742,11 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         # A correct score edit changes the current input fingerprint.
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.25")
-        rec.save(update_fields=["score"])
+        rec.score += Decimal("0.25")  # type: ignore[union-attr]
+        rec.save(update_fields=["score"])  # type: ignore[union-attr]
         with self.assertRaises(ValidationError):
-            confirm_stage_result(stage, confirmed_by=self.user)
-        stage.refresh_from_db()
+            confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
+        stage.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
     def test_confirm_requires_consumed_round_locked(self):
@@ -2776,8 +2777,8 @@ class StageResolverBindingTests(TestCase):
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         with self.assertRaises(ValidationError):
-            confirm_stage_result(stage, confirmed_by=self.user)
-        stage.refresh_from_db()
+            confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
+        stage.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
 
     def test_unlock_stage_result_reverts_confirmed(self):
@@ -2809,15 +2810,15 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
             preview=False,
         )
-        confirm_stage_result(stage, confirmed_by=self.user)
-        unlocked = unlock_stage_result(stage, operator=self.user, note="核对录错了")
+        confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
+        unlocked = unlock_stage_result(stage, operator=self.user, note="核对录错了")  # type: ignore[arg-type]
         self.assertEqual(unlocked.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertIsNone(unlocked.confirmed_by)
         self.assertIsNone(unlocked.confirmed_at)
         # Unlocked results are editable again: a score edit recomputes a new version.
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.50")
-        rec.save(update_fields=["score"])
+        rec.score += Decimal("0.50")  # type: ignore[union-attr]
+        rec.save(update_fields=["score"])  # type: ignore[union-attr]
         second = run_ruleset(
             version,
             self.activity,
@@ -2826,7 +2827,7 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
             preview=False,
         )
-        self.assertNotEqual(second.pk, stage.pk)
+        self.assertNotEqual(second.pk, stage.pk)  # type: ignore[union-attr]
         self.assertEqual(second.result_version, 2)
 
     def test_confirm_rejects_when_newer_version_exists(self):
@@ -2859,8 +2860,8 @@ class StageResolverBindingTests(TestCase):
             preview=False,
         )
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.25")
-        rec.save(update_fields=["score"])
+        rec.score += Decimal("0.25")  # type: ignore[union-attr]
+        rec.save(update_fields=["score"])  # type: ignore[union-attr]
         second = run_ruleset(
             version,
             self.activity,
@@ -2871,8 +2872,8 @@ class StageResolverBindingTests(TestCase):
         )
         self.assertEqual(second.result_version, 2)
         with self.assertRaises(ValidationError):
-            confirm_stage_result(first, confirmed_by=self.user)
-        first.refresh_from_db()
+            confirm_stage_result(first, confirmed_by=self.user)  # type: ignore[arg-type]
+        first.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(first.status, StageResult.Status.READY_TO_CONFIRM)
 
     def test_confirm_rejects_result_on_superseded_version(self):
@@ -3085,19 +3086,19 @@ class GoldenSchiduiDbTests(TestCase):
             vote_scores=self._vote_scores(),
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
-        self.assertEqual(stage.stage_key, "院十佳")
-        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.stage_key, "院十佳")  # type: ignore[union-attr]
+        self.assertEqual(stage.ruleset_version, self.version)  # type: ignore[union-attr]
         self.assertEqual(stage.plan_version, 1)
-        self.assertEqual(stage.decisions.count(), 15)
+        self.assertEqual(stage.decisions.count(), 15)  # type: ignore[call-arg]
 
         # Composite scoping is roster-scoped: stage1 all 15, stage2 top-10, final top-5.
-        self.assertEqual(stage.composites.filter(node_key="stage1").count(), 15)
-        self.assertEqual(stage.composites.filter(node_key="stage2").count(), 10)
-        self.assertEqual(stage.composites.filter(node_key="final").count(), 5)
+        self.assertEqual(stage.composites.filter(node_key="stage1").count(), 15)  # type: ignore[union-attr]
+        self.assertEqual(stage.composites.filter(node_key="stage2").count(), 10)  # type: ignore[union-attr]
+        self.assertEqual(stage.composites.filter(node_key="final").count(), 5)  # type: ignore[union-attr]
 
         # Top-3 advance directly; the rest who only reached a lower roster are direct
         # too (origin tag), and those never selected are eliminated.
-        by_singer = {d.singer_id: d for d in stage.decisions.all()}
+        by_singer = {d.singer_id: d for d in stage.decisions.all()}  # type: ignore[union-attr]
         for idx in range(3):
             decision = by_singer[self.singers[idx].pk]
             self.assertEqual(decision.outcome_code, "direct")
@@ -3123,14 +3124,14 @@ class GoldenSchiduiDbTests(TestCase):
             checkpoint="stage1",
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
-        self.assertEqual(stage.stage_key, "stage1")
-        self.assertEqual(stage.ruleset_version, self.version)
-        self.assertEqual(stage.decisions.count(), 15)
+        self.assertEqual(stage.stage_key, "stage1")  # type: ignore[union-attr]
+        self.assertEqual(stage.ruleset_version, self.version)  # type: ignore[union-attr]
+        self.assertEqual(stage.decisions.count(), 15)  # type: ignore[call-arg]
         # Only the stage1 composite is emitted; stage2/final are not in the closure.
-        self.assertEqual(stage.composites.filter(node_key="stage1").count(), 15)
-        self.assertEqual(stage.composites.filter(node_key="stage2").count(), 0)
-        self.assertEqual(stage.composites.filter(node_key="final").count(), 0)
-        by_singer = {d.singer_id: d for d in stage.decisions.all()}
+        self.assertEqual(stage.composites.filter(node_key="stage1").count(), 15)  # type: ignore[union-attr]
+        self.assertEqual(stage.composites.filter(node_key="stage2").count(), 0)  # type: ignore[union-attr]
+        self.assertEqual(stage.composites.filter(node_key="final").count(), 0)  # type: ignore[union-attr]
+        by_singer = {d.singer_id: d for d in stage.decisions.all()}  # type: ignore[union-attr]
         for idx in range(10):
             self.assertEqual(by_singer[self.singers[idx].pk].outcome_code, "direct")
         for idx in range(10, 15):
@@ -3153,7 +3154,7 @@ class GoldenSchiduiDbTests(TestCase):
         first = run_ruleset(**kwargs)
         second = run_ruleset(**kwargs)
         self.assertEqual(first.status, StageResult.Status.READY_TO_CONFIRM)
-        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(first.pk, second.pk)  # type: ignore[union-attr]
         self.assertEqual(first.result_version, second.result_version)
 
     def _composite_map(self, stage, node_key):
@@ -3196,16 +3197,16 @@ class GoldenSchiduiDbTests(TestCase):
             round_keys=self._round_keys(),
             vote_scores=self._vote_scores(),
         )
-        self.assertTrue(stage.ruleset_hash)
+        self.assertTrue(stage.ruleset_hash)  # type: ignore[union-attr]
         self.assertTrue(stage.input_fingerprint)
         self.assertEqual(stage.schema_version, 1)
         self.assertEqual(stage.result_version, 1)
-        decision = stage.decisions.first()
-        self.assertIsNotNone(decision.singer_id)
-        self.assertIsNotNone(decision.score)
-        composite = stage.composites.filter(node_key="stage1").first()
-        self.assertEqual(len(composite.components), 3)
-        self.assertIn("source", composite.components[0])
+        decision = stage.decisions.first()  # type: ignore[union-attr]
+        self.assertIsNotNone(decision.singer_id)  # type: ignore[union-attr]
+        self.assertIsNotNone(decision.score)  # type: ignore[union-attr]
+        composite = stage.composites.filter(node_key="stage1").first()  # type: ignore[union-attr]
+        self.assertEqual(len(composite.components), 3)  # type: ignore[union-attr]
+        self.assertIn("source", composite.components[0])  # type: ignore[union-attr]
 
 
 class GoldenSchiduiXiaofengDbTests(TestCase):
@@ -3323,14 +3324,14 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
             manual=self._manual(),
         )
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
-        self.assertEqual(stage.stage_key, "校十佳屏峰")
-        self.assertEqual(stage.ruleset_version, self.version)
+        self.assertEqual(stage.stage_key, "校十佳屏峰")  # type: ignore[union-attr]
+        self.assertEqual(stage.ruleset_version, self.version)  # type: ignore[union-attr]
         self.assertEqual(stage.plan_version, 1)
-        self.assertEqual(stage.decisions.count(), 20)
+        self.assertEqual(stage.decisions.count(), 20)  # type: ignore[call-arg]
 
-        by_singer = {d.singer_id: d for d in stage.decisions.all()}
+        by_singer = {d.singer_id: d for d in stage.decisions.all()}  # type: ignore[union-attr]
         # 5 direct (top1/group), 12 repechage, 3 never-selected eliminated.
-        codes = [d.outcome_code for d in stage.decisions.all()]
+        codes = [d.outcome_code for d in stage.decisions.all()]  # type: ignore[union-attr]
         self.assertEqual(codes.count("direct"), 5)
         self.assertEqual(codes.count("repechage"), 12)
         self.assertEqual(codes.count("eliminated"), 3)
@@ -3371,7 +3372,7 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
                 "F3": [str(self.singers[8].pk), str(self.singers[12].pk)],
             },
         )
-        finalists = [c for group in result.node_values["filled"].values() for c in group]
+        finalists = [c for group in result.node_values["filled"].values() for c in group]  # type: ignore[attr-defined]
         self.assertEqual(len(finalists), 6)
         self.assertEqual(len(set(finalists)), 6)
 
@@ -3815,7 +3816,7 @@ class BindingSourceHelperTests(TestCase):
             name="大众投票",
             passcode="0000",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(hours=1),
+            end_time=timezone.now() + timezone.timedelta(hours=1),  # type: ignore[attr-defined]
             is_test_data=True,
         )
 
@@ -4382,7 +4383,7 @@ class ConfirmedDependencyClosureTests(TestCase):
             name="大众投票",
             passcode="0000",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(hours=1),
+            end_time=timezone.now() + timezone.timedelta(hours=1),  # type: ignore[attr-defined]
             is_test_data=True,
         )
 
@@ -4434,9 +4435,9 @@ class ConfirmedDependencyClosureTests(TestCase):
         if lock_vote:
             self.vs.is_locked = True
             self.vs.save(update_fields=["is_locked"])
-        stage = run_ruleset(version, self.activity, **kwargs, preview=False)
+        stage = run_ruleset(version, self.activity, **kwargs, preview=False)  # type: ignore[arg-type]
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
-        return confirm_stage_result(stage, confirmed_by=self.user)
+        return confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
 
     def test_confirmed_stage_blocks_unlock_and_reset_round(self):
         from .services import reset_round_to_draft, unlock_round, unlock_stage_result
@@ -4489,7 +4490,7 @@ class ConfirmedDependencyClosureTests(TestCase):
             round_keys={"r1": self.round},
             preview=False,
         )
-        confirmed = confirm_stage_result(stage, confirmed_by=self.user)
+        confirmed = confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
         audit = AuditLog.objects.get(
             action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
             target=f"StageResult:{confirmed.pk}",

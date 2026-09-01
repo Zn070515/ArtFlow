@@ -174,26 +174,26 @@ class CompilerValidCorpusTests(SimpleTestCase):
 
     def test_plan_summary_structures_populated(self):
         _, plan = compile_definition(self._annotated_clean())
-        self.assertIn("final_outputs", plan.summary)
-        self.assertIn("candidate_pool_sizes", plan.summary)
-        self.assertIn("missing_score_paths", plan.summary)
-        self.assertEqual(plan.summary["missing_score_paths"], [])
+        self.assertIn("final_outputs", plan.summary)  # type: ignore[union-attr]
+        self.assertIn("candidate_pool_sizes", plan.summary)  # type: ignore[union-attr]
+        self.assertIn("missing_score_paths", plan.summary)  # type: ignore[union-attr]
+        self.assertEqual(plan.summary["missing_score_paths"], [])  # type: ignore[union-attr]
 
 
 class CompilerDeterminismTests(SimpleTestCase):
     def test_round_trip_reproduces(self):
         _, plan = compile_definition(weighted_composite_topn())
-        self.assertEqual(ExecutionPlan.from_dict(plan.to_dict()).to_dict(), plan.to_dict())
+        self.assertEqual(ExecutionPlan.from_dict(plan.to_dict()).to_dict(), plan.to_dict())  # type: ignore[union-attr]
 
     def test_to_dict_stable_across_calls(self):
         _, plan = compile_definition(weighted_composite_topn())
-        self.assertEqual(plan.to_dict(), plan.to_dict())
-        self.assertEqual(plan.to_dict()["plan_version"], 1)
+        self.assertEqual(plan.to_dict(), plan.to_dict())  # type: ignore[union-attr]
+        self.assertEqual(plan.to_dict()["plan_version"], 1)  # type: ignore[union-attr]
 
     def test_plan_hash_matches_schema_content_hash(self):
         definition = weighted_composite_topn()
         _, plan = compile_definition(definition)
-        self.assertEqual(plan.content_hash, content_hash(definition))
+        self.assertEqual(plan.content_hash, content_hash(definition))  # type: ignore[union-attr]
 
     def test_report_round_trip(self):
         report, _ = compile_definition(weighted_composite_topn())
@@ -473,7 +473,7 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             )
         )
         self.assertTrue(report.passes())
-        self.assertIn("auto_break", plan.policies["tie"].values())
+        self.assertIn("auto_break", plan.policies["tie"].values())  # type: ignore[union-attr]
 
     def test_tie_select_source_mismatch_rejected(self):
         # M1-R9-Final: a SELECT auto_break's tie_break_source must equal its source RANK's.
@@ -1091,7 +1091,7 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             name="观众投票",
             passcode="0000",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(hours=1),
+            end_time=timezone.now() + timezone.timedelta(hours=1),  # type: ignore[attr-defined]
             is_test_data=True,
         )
         ruleset.round_keys = round_keys
@@ -1126,10 +1126,10 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
                     "key": "stage1",
                     "type": "AGGREGATE",
                     "within": ENTRY_KEY,
-                    "aggregate": {"type": "weighted_sum", "components": aggregate_comps},
+                    "aggregate": {"type": "weighted_sum", "components": aggregate_comps},  # type: ignore[dict-item]
                 },
-                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
-                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},  # type: ignore[dict-item]
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},  # type: ignore[dict-item]
             ]
         )
         definition = json.dumps(_def(nodes), ensure_ascii=False)
@@ -1422,7 +1422,7 @@ class BindingValidationTests(_RulesetModelBase):
             name="大众投票",
             passcode="0000",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(hours=1),
+            end_time=timezone.now() + timezone.timedelta(hours=1),  # type: ignore[attr-defined]
             is_test_data=is_test_data,
         )
 
