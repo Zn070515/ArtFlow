@@ -1,6 +1,7 @@
 import threading
 from typing import Any, cast
 
+from common.authority import STAGE_RESULT_CONFIRM, authority_authorized
 from common.lifecycle import runtime_is_test
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -557,15 +558,16 @@ class StageResultQuerySet(models.QuerySet):
             raise ValidationError("A confirmed stage result is immutable.")
 
     def create(self, **kwargs):
-        bypass = kwargs.pop("_bypass_confirmed", False)
         obj = cast(StageResult, self.model(**kwargs))
-        obj.save(force_insert=True, using=self.db, _bypass_confirmed=bypass)
+        obj.save(force_insert=True, using=self.db)
         return obj
 
     def update(self, **kwargs):
-        bypass = kwargs.pop("_bypass_confirmed", False)
         self._ensure_mutable()
-        if not bypass and kwargs.get("status") == StageResult.Status.CONFIRMED:
+        if (
+            not authority_authorized(STAGE_RESULT_CONFIRM)
+            and kwargs.get("status") == StageResult.Status.CONFIRMED
+        ):
             raise ValidationError("Only confirm_stage_result() may confirm a stage result.")
         return super().update(**kwargs)
 
@@ -702,12 +704,12 @@ class StageResult(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
-        bypass = kwargs.pop("_bypass_confirmed", False)
+        confirm_authorized = authority_authorized(STAGE_RESULT_CONFIRM)
         stored = self._stored(["status"])
         if self._state.adding:
-            if not bypass and self.status == self.Status.CONFIRMED:
+            if not confirm_authorized and self.status == self.Status.CONFIRMED:
                 raise ValidationError("只在核定服务中产生已核定赛段结果。")
-        elif not bypass:
+        elif not confirm_authorized:
             if stored and stored["status"] == self.Status.CONFIRMED:
                 modified = [f for f in self._immutable_fields if getattr(self, f) != stored[f]]
                 if modified:
@@ -723,8 +725,7 @@ class StageResult(models.Model):
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        bypass = kwargs.pop("_bypass_confirmed", False)
-        if not bypass:
+        if not authority_authorized(STAGE_RESULT_CONFIRM):
             stored = self._stored(["status"])
             if stored and stored["status"] == self.Status.CONFIRMED:
                 raise ValidationError("A confirmed stage result is immutable.")
@@ -804,25 +805,21 @@ class StageDecision(models.Model):
                 raise ValidationError("A stage decision singer must belong to the result activity.")
 
     def _parent_confirmed(self):
-        if self._state.adding or not self.pk:
+        parent_id = self.stage_result_id
+        if parent_id is None:
             return None
         return (
-            type(self)
-            ._base_manager.filter(pk=self.pk)
-            .values_list("stage_result__status", flat=True)
-            .first()
+            StageResult._base_manager.filter(pk=parent_id).values_list("status", flat=True).first()
         )
 
     def save(self, *args, **kwargs):
         self.clean()
-        bypass = kwargs.pop("_bypass_confirmed", False)
-        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+        if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        bypass = kwargs.pop("_bypass_confirmed", False)
-        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+        if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
         return super().delete(*args, **kwargs)
 
@@ -896,30 +893,61 @@ class CompositeResult(models.Model):
                 raise ValidationError("A composite singer must belong to the result activity.")
 
     def _parent_confirmed(self):
-        if self._state.adding or not self.pk:
+        parent_id = self.stage_result_id
+        if parent_id is None:
             return None
         return (
-            type(self)
-            ._base_manager.filter(pk=self.pk)
-            .values_list("stage_result__status", flat=True)
-            .first()
+            StageResult._base_manager.filter(pk=parent_id).values_list("status", flat=True).first()
         )
 
     def save(self, *args, **kwargs):
         self.clean()
-        bypass = kwargs.pop("_bypass_confirmed", False)
-        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+        if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Composites of a confirmed stage result are immutable.")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        bypass = kwargs.pop("_bypass_confirmed", False)
-        if not bypass and self._parent_confirmed() == StageResult.Status.CONFIRMED:
+        if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Composites of a confirmed stage result are immutable.")
         return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name} — {self.node_key}: {self.value}"
+
+
+class ManualDecisionQuerySet(models.QuerySet):
+    """Guard: a queryset-level bulk mutation is the same ORM bypass as a bare save().
+
+    ``set_manual_decision`` and the residue-cleanup service hold the write authority; an
+    untrusted ``.update()``/``.delete()``/``.bulk_create()``/``.bulk_update()`` is refused.
+    ``create()`` routes through :meth:`ManualDecision.save` (itself guarded), so it needs
+    no override.
+    """
+
+    def _ensure_auth(self):
+        if not _manual_write_authorized():
+            raise ValidationError(
+                "ManualDecision 只能通过正式 service 写入（set_manual_decision）。"
+            )
+
+    def update(self, **kwargs):
+        self._ensure_auth()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_auth()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._ensure_auth()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_auth()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+ManualDecisionManager = models.Manager.from_queryset(ManualDecisionQuerySet)
 
 
 class ManualDecision(models.Model):
@@ -957,6 +985,8 @@ class ManualDecision(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ManualDecisionManager()
 
     class Meta:
         unique_together = ("ruleset_version", "manual_key", "group")

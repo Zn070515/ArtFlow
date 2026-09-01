@@ -9,6 +9,7 @@ regress them. Acceptance structures are *representative* — no hardcoded 2025 v
 
 import json
 
+from common.authority import RULESET_FREEZE, authority_write
 from common.test_characterization import _CharacterizationBase
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -619,36 +620,36 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
 
     def test_second_current_for_ruleset_rejected(self):
         ruleset = self.make_ruleset()
-        RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            version=1,
-            definition=DEF,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=DEF,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                RulesetVersion.objects.create(
-                    _allow_freeze=True,
-                    ruleset=ruleset,
-                    version=2,
-                    definition=DEF,
-                    is_current=True,
-                    status=RulesetVersion.Status.FROZEN,
-                )
+                with authority_write(RULESET_FREEZE):
+                    RulesetVersion.objects.create(
+                        ruleset=ruleset,
+                        version=2,
+                        definition=DEF,
+                        is_current=True,
+                        status=RulesetVersion.Status.FROZEN,
+                    )
 
     def test_sequential_versions_single_current_ok(self):
         ruleset = self.make_ruleset()
         RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF, is_current=False)
-        RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            version=2,
-            definition=DEF,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=2,
+                definition=DEF,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset, is_current=True).count(), 1)
         self.assertEqual(RulesetVersion.objects.filter(ruleset=ruleset).count(), 2)
 
@@ -659,9 +660,10 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
         ruleset = self.make_ruleset()
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                RulesetVersion.objects.create(
-                    _allow_freeze=True, ruleset=ruleset, version=1, definition=DEF, is_current=True
-                )
+                with authority_write(RULESET_FREEZE):
+                    RulesetVersion.objects.create(
+                        ruleset=ruleset, version=1, definition=DEF, is_current=True
+                    )
 
     def test_content_hash_computed_on_save(self):
         ruleset = self.make_ruleset()
@@ -678,14 +680,14 @@ class RulesetTemplateIndependenceTests(_RulesetModelBase):
         template = RulesetTemplate.objects.create(name="T", definition=DEF)
         ruleset.source_template = template
         ruleset.save(update_fields=["source_template"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            version=1,
-            definition=DEF,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=DEF,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         template.delete()
         ruleset.refresh_from_db()
         self.assertIsNone(ruleset.source_template_id)
@@ -694,14 +696,14 @@ class RulesetTemplateIndependenceTests(_RulesetModelBase):
     def test_editing_template_does_not_alter_frozen_version(self):
         ruleset = self.make_ruleset()
         template = RulesetTemplate.objects.create(name="T", definition=DEF)
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            version=1,
-            definition=DEF,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=DEF,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         template.definition = OTHER_DEF
         template.save(update_fields=["definition"])
         version.refresh_from_db()
@@ -711,14 +713,14 @@ class RulesetTemplateIndependenceTests(_RulesetModelBase):
 class RulesetVersionImmutabilityTests(_RulesetModelBase):
     def make_frozen(self):
         ruleset = self.make_ruleset()
-        return RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            version=1,
-            definition=DEF,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            return RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=DEF,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
 
     def test_frozen_version_rejects_definition_change(self):
         version = self.make_frozen()

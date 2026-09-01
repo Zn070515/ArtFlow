@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from common.authority import RULESET_FREEZE, authority_write
 from common.models import AuditLog
 from core.services import lock_activity_for_action
 from django.contrib.auth import get_user_model
@@ -436,18 +437,18 @@ def freeze_ruleset_version(
     locked.execution_plan = json.dumps(plan.to_dict(), ensure_ascii=False)
     locked.binding = normalized_binding
     locked.authority_hash = _authority_hash(locked)
-    locked.save(
-        update_fields=[
-            "status",
-            "frozen_by",
-            "frozen_at",
-            "is_current",
-            "execution_plan",
-            "binding",
-            "authority_hash",
-        ],
-        _allow_freeze=True,
-    )
+    with authority_write(RULESET_FREEZE):
+        locked.save(
+            update_fields=[
+                "status",
+                "frozen_by",
+                "frozen_at",
+                "is_current",
+                "execution_plan",
+                "binding",
+                "authority_hash",
+            ],
+        )
     AuditLog.objects.create(
         operator=current_operator,
         action_type=AuditLog.ActionType.FINALIZE_RULESET,

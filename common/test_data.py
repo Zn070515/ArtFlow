@@ -8,6 +8,8 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
 
+from common.authority import STAGE_RESULT_CONFIRM, authority_write
+
 from .models import AuditLog
 
 
@@ -215,10 +217,16 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         stage.status = StageResult.Status.HOLD
         stage.confirmed_at = None
         stage.confirmed_by = None
-        stage.save(update_fields=["status", "confirmed_at", "confirmed_by"], _bypass_confirmed=True)  # type: ignore[no-untyped-call]
+        with authority_write(STAGE_RESULT_CONFIRM):
+            stage.save(update_fields=["status", "confirmed_at", "confirmed_by"])  # type: ignore[no-untyped-call]
     StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     # ManualDecision FK's to the frozen RulesetVersion; delete before it is demoted.
-    ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    # The bulk queryset delete is the same ORM path as a bare save(), so it is guarded too;
+    # the residue-cleanup service is an authorized mutator of ManualDecision rows.
+    from singer_contest.services import _authorized_manual_write
+
+    with _authorized_manual_write():
+        ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     VoteRecord.objects.filter(

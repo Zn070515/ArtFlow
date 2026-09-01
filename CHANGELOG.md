@@ -2,6 +2,37 @@
 
 ## 2026-09-01
 
+### Batch A — M1-CORE-CLOSE (authority closure)
+
+Sealed the remaining ORM authority leaks so an activity's ruleset and stage result only
+transition through a formal service, and made the binding migrations safe on historical dirty
+data. No new contest capability — this closes the reviewer's "6 things".
+
+- `ruleset` / `singer_contest` — the public `_allow_freeze` / `_bypass_confirmed` kwargs were
+  removed; a FROZEN/current `RulesetVersion` and a CONFIRMED `StageResult` can no longer be
+  manufactured through the ORM, only through `freeze_ruleset_version` / `confirm_stage_result`
+  (and unlock via `unlock_stage_result`), guarded by `common.authority` write scopes.
+- `StageDecision` / `CompositeResult` — creating a child on a CONFIRMED parent is blocked;
+  `ManualDecision` `QuerySet` mutations (update/delete/bulk_create/bulk_update) are sealed
+  behind the formal `set_manual_decision` service.
+- `singer_contest` — formal publication is only `recompute_activity_result()`, which always
+  reads the round mapping from the frozen version's binding (the `round_keys` override was
+  removed); a CONFIRMED `StageResult` is immutable once confirmed.
+- The binding migrations renumber duplicate `RulesetVersion`/`StageResult` version counters and
+  demote a legacy CONFIRMED row missing its confirming actor, so they apply cleanly rather than
+  failing on historical dirty data.
+
+### M1-R9-Final — formal-authority closure
+
+Closed the 6-item reviewer closure on the formal authority path: `RulesetVersion → FROZEN/current`
+and `StageResult → CONFIRMED` are sealed behind their services; `StageResult` reuses only its
+latest same-fingerprint result (any historical row is minted as a higher version); bound vote/source
+scale is authoritative over a node-declared scale; a SELECT `auto_break` tie source must equal its
+source RANK's; the 校十佳 historical fallback is within-scope-merged and deterministic; and the
+version-unique / `ContestRuleset UNIQUE(activity)` migrations renumber-first and dedupe.
+
+### CI quality gate — mypy / ruff baseline
+
 ### CI quality gate — mypy / ruff baseline
 
 Brought the repo-wide lint-and-type gates to green (the `Linux SQLite quality gate` job

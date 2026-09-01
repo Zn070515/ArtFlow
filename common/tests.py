@@ -50,6 +50,7 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.audit import client_ip
+from common.authority import RULESET_FREEZE, authority_write
 from common.management.commands.backup_artflow import (
     apply_migration_heads,
     collect_counts,
@@ -249,25 +250,25 @@ class M1StageResultTestDataCleanupTests(TestCase):
         ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="R0规则", is_test_data=True
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [
-                        {
-                            "key": "assess",
-                            "type": "ASSESS",
-                            "source": "entry",
-                            "round": "r1",
-                        },
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         StageResult.objects.create(
             activity=self.activity,
             ruleset_version=version,
@@ -312,18 +313,18 @@ class M1StageResultTestDataCleanupTests(TestCase):
         ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="R0规则", is_test_data=True
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [{"key": "roster", "type": "ROSTER"}],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [{"key": "roster", "type": "ROSTER"}],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         _authorize_manual_write(True)
         try:
             ManualDecision.objects.create(
@@ -352,25 +353,25 @@ class M1StageResultTestDataCleanupTests(TestCase):
         ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="R0规则", is_test_data=True
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [
-                        {
-                            "key": "assess",
-                            "type": "ASSESS",
-                            "source": "entry",
-                            "round": "r1",
-                        },
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         StageResult.objects.create(
             activity=self.activity,
             ruleset_version=version,

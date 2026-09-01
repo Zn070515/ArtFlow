@@ -9,8 +9,9 @@ def _dedupe_contest_rulesets(apps, schema_editor):
 
     Re-parent a duplicate ruleset's versions onto the canonical ruleset (the one owning the
     most-recent current-FROZEN version, else the lowest pk), then drop the empty duplicate.
-    A re-parent that would collide on (ruleset, version) aborts loudly — pre-production fail,
-    not silent data loss.
+    A re-parent that collides on ``(ruleset, version)`` stably renumbers the incoming version
+    to the next free slot on the canonical, so a dev DB that already holds duplicate version
+    numbers migrates cleanly instead of failing loudly.
     """
     ContestRuleset = apps.get_model("ruleset", "ContestRuleset")
     RulesetVersion = apps.get_model("ruleset", "RulesetVersion")
@@ -32,13 +33,21 @@ def _dedupe_contest_rulesets(apps, schema_editor):
         for dup in rulesets:
             if dup.pk == canonical.pk:
                 continue
+            taken = set(
+                RulesetVersion.objects.filter(ruleset_id=canonical.pk).values_list("version", flat=True)
+            )
+            next_free = max(taken, default=0)
             for version in RulesetVersion.objects.filter(ruleset_id=dup.pk).order_by("version", "pk"):
-                if RulesetVersion.objects.filter(ruleset_id=canonical.pk, version=version.version).exists():
-                    raise ValueError(
-                        f"re-parent RulesetVersion {version.pk} to ContestRuleset {canonical.pk} "
-                        f"would collide on version {version.version}"
-                    )
-                RulesetVersion._base_manager.filter(pk=version.pk).update(ruleset_id=canonical.pk)
+                target = version.version
+                if target in taken:
+                    next_free += 1
+                    while next_free in taken:
+                        next_free += 1
+                    target = next_free
+                RulesetVersion._base_manager.filter(pk=version.pk).update(
+                    ruleset_id=canonical.pk, version=target
+                )
+                taken.add(target)
             ContestRuleset._base_manager.filter(pk=dup.pk).delete()
 
 

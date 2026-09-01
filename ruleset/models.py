@@ -1,5 +1,6 @@
 from typing import cast
 
+from common.authority import RULESET_FREEZE, authority_authorized
 from common.lifecycle import runtime_is_test
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -154,15 +155,13 @@ class RulesetVersionQuerySet(models.QuerySet):
             raise ValidationError("只有冻结服务可以产生已冻结/当前赛制版本。")
 
     def create(self, **kwargs):
-        allow_freeze = kwargs.pop("_allow_freeze", False)
         obj = cast(RulesetVersion, self.model(**kwargs))
-        obj.save(force_insert=True, using=self.db, _allow_freeze=allow_freeze)
+        obj.save(force_insert=True, using=self.db)
         return obj
 
     def update(self, **kwargs):
-        allow_freeze = kwargs.pop("_allow_freeze", False)
         self._ensure_mutable()
-        if not allow_freeze:
+        if not authority_authorized(RULESET_FREEZE):
             self._forbid_terminal_transition(**kwargs)
         return super().update(**kwargs)
 
@@ -294,14 +293,14 @@ class RulesetVersion(models.Model):
         self.content_hash = content_hash(self.definition)
 
     def save(self, *args, **kwargs):
-        allow_freeze = kwargs.pop("_allow_freeze", False)
         self.clean()
+        freeze_authorized = authority_authorized(RULESET_FREEZE)
         stored = self._stored(["status"])
         if self._state.adding:
-            if not allow_freeze and (self.status == self.Status.FROZEN or self.is_current):
+            if not freeze_authorized and (self.status == self.Status.FROZEN or self.is_current):
                 raise ValidationError("只在冻结服务中产生已冻结/当前赛制版本。")
         elif (
-            not allow_freeze
+            not freeze_authorized
             and stored
             and stored["status"] != self.Status.FROZEN
             and (self.status == self.Status.FROZEN or self.is_current)

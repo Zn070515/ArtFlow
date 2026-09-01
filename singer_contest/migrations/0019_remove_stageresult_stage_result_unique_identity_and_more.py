@@ -13,10 +13,12 @@ def _normalize_confirmed_trail(apps, schema_editor):
     StageResult._base_manager.exclude(status="confirmed").exclude(
         confirmed_at__isnull=True, confirmed_by__isnull=True
     ).update(confirmed_at=None, confirmed_by=None)
-    # Confirmed rows missing the confirming timestamp: backfill from computed_at.
-    for row in StageResult._base_manager.filter(status="confirmed", confirmed_at__isnull=True):
-        row.confirmed_at = row.computed_at
-        row.save(update_fields=["confirmed_at"])
+    # A CONFIRMED row demands BOTH confirmed_at and confirmed_by. A legacy confirmed row
+    # missing the actor (null confirmed_by) is an invalid authority: demote it to HOLD with a
+    # cleared trail so the CheckConstraint applies cleanly instead of failing the migration.
+    StageResult._base_manager.filter(status="confirmed").exclude(
+        confirmed_at__isnull=False, confirmed_by__isnull=False
+    ).update(status="hold", confirmed_at=None, confirmed_by=None)
 
 
 class Migration(migrations.Migration):

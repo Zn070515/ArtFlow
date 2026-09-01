@@ -4,6 +4,27 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def _renumber_result_versions(apps, schema_editor):
+    """M1-R9-Final: the per-stage result_version becomes a formal publication number.
+
+    Re-number each (activity, stage_key) group 1..N in a stable (computed_at, pk) order
+    before the version-unique constraint is added, so a dev DB that already holds duplicate
+    result_version rows migrates cleanly instead of failing on the constraint.
+    """
+    StageResult = apps.get_model("singer_contest", "StageResult")
+    for activity_id, stage_key in StageResult.objects.values_list(
+        "activity_id", "stage_key"
+    ).distinct():
+        results = list(
+            StageResult.objects.filter(activity_id=activity_id, stage_key=stage_key).order_by(
+                "computed_at", "pk"
+            )
+        )
+        for index, row in enumerate(results, start=1):
+            if row.result_version != index:
+                StageResult._base_manager.filter(pk=row.pk).update(result_version=index)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -14,6 +35,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(_renumber_result_versions, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name='stageresult',
             constraint=models.UniqueConstraint(fields=('activity', 'stage_key', 'result_version'), name='stage_result_unique_version'),

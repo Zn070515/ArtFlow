@@ -7,6 +7,7 @@ from io import BytesIO
 from unittest import skipUnless
 
 from accounts.models import User
+from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
 from common.models import AuditLog
 from common.test_data import clear_activity_test_data
 from core.models import Activity
@@ -1978,15 +1979,15 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
                 ],
             }
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=definition,
-            version=1,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-            created_by=self.admin,
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=definition,
+                version=1,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                created_by=self.admin,
+            )
         self.template = RulesetTemplate.objects.create(
             name="院十佳", definition=definition, created_by=self.admin
         )
@@ -2268,12 +2269,12 @@ class StageResultModelTests(TestCase):
     def test_reads_immutable_after_ready(self):
         result = self._result()
         # A HOLD result can still be updated to CONFIRMED (with its confirming trail).
-        StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
-            status=StageResult.Status.CONFIRMED,
-            confirmed_at=timezone.now(),
-            confirmed_by=self.user,
-            _bypass_confirmed=True,
-        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
+                status=StageResult.Status.CONFIRMED,
+                confirmed_at=timezone.now(),
+                confirmed_by=self.user,
+            )
         # Once CONFIRMED, further update/delete is blocked.
         with self.assertRaises(ValidationError):
             StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.HOLD)
@@ -2290,12 +2291,12 @@ class StageResultModelTests(TestCase):
             score=Decimal("92.46"),
             is_test_data=True,
         )
-        StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
-            status=StageResult.Status.CONFIRMED,
-            confirmed_at=timezone.now(),
-            confirmed_by=self.user,
-            _bypass_confirmed=True,
-        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
+                status=StageResult.Status.CONFIRMED,
+                confirmed_at=timezone.now(),
+                confirmed_by=self.user,
+            )
         with self.assertRaises(ValidationError):
             StageDecision.objects.filter(pk=decision.pk).update(rank=2)
 
@@ -2330,13 +2331,13 @@ class StageResolverBindingTests(TestCase):
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="院十佳规则", is_test_data=True
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=definition,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=definition,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.round = ContestRound.objects.create(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -2458,15 +2459,15 @@ class StageResolverBindingTests(TestCase):
 
         # self.version is the current frozen v1; simulate a version that was frozen then
         # superseded by a newer authority (non-current, still FROZEN).
-        stopped = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            stopped = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         with self.assertRaises(ValidationError):
             run_ruleset(
                 stopped,
@@ -2567,14 +2568,14 @@ class StageResolverBindingTests(TestCase):
 
         from .services import bind_resolve_input, persist_stage_result
 
-        v2 = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            v2 = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.assertEqual(v2.content_hash, self.version.content_hash)
 
         inputs = bind_resolve_input(self.version, self.activity, round_keys={"r1": self.round})
@@ -2649,15 +2650,15 @@ class StageResolverBindingTests(TestCase):
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
         # make this frozen version the single current runner before confirming.
         _promote_version_to_current(version)
@@ -2720,15 +2721,15 @@ class StageResolverBindingTests(TestCase):
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
         # make this frozen version the single current runner before confirming.
         _promote_version_to_current(version)
@@ -2756,15 +2757,15 @@ class StageResolverBindingTests(TestCase):
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         self.activity.save(update_fields=["phase"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
         # make this frozen version the single current runner before confirming.
         _promote_version_to_current(version)
@@ -2791,15 +2792,15 @@ class StageResolverBindingTests(TestCase):
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         # 核定 (R9-5) finalizes only a result grounded in the *current* FROZEN authority, so
         # make this frozen version the single current runner before confirming.
         _promote_version_to_current(version)
@@ -2840,15 +2841,15 @@ class StageResolverBindingTests(TestCase):
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         # 核定 (R9-5) finalizes only a result on the current FROZEN authority, so make
         # this frozen version the single current runner before persisting (M1-R9 §七).
         _promote_version_to_current(version)
@@ -2888,15 +2889,15 @@ class StageResolverBindingTests(TestCase):
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self.version.definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
         # M1-R9 §七 isolates a preview (in-memory, no persist), so a demoted version's
         # only persisted result is one written BEFORE it was demoted. Simulate exactly
         # that historical row: it is READY_TO_CONFIRM but grounded on a non-current
@@ -2929,22 +2930,22 @@ class StageResolverBindingTests(TestCase):
                 ],
             }
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=definition,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={
-                "stage_key": "院十佳",
-                "round_keys": {"r1": self.round.pk},
-                "announcement_blocks": [{"label": "全局", "outcome_codes": ["direct"]}],
-                "announcement_blocks_by_checkpoint": {
-                    "stage2": [{"label": "赛段专属", "outcome_codes": ["advanced"]}]
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={
+                    "stage_key": "院十佳",
+                    "round_keys": {"r1": self.round.pk},
+                    "announcement_blocks": [{"label": "全局", "outcome_codes": ["direct"]}],
+                    "announcement_blocks_by_checkpoint": {
+                        "stage2": [{"label": "赛段专属", "outcome_codes": ["advanced"]}]
+                    },
                 },
-            },
-        )
+            )
         stage = StageResult.objects.create(
             activity=self.activity,
             ruleset_version=version,
@@ -3015,13 +3016,13 @@ class GoldenSchiduiDbTests(TestCase):
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="院十佳规则", is_test_data=True
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=_schidui_definition(),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=_schidui_definition(),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.judges = [
             Judge.objects.create(activity=self.activity, name=f"评委{chr(0x41 + i)}")
             for i in range(self.JUDGE_COUNT)
@@ -3235,13 +3236,13 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="校十佳屏峰规则", is_test_data=True
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=_xiaofeng_definition(),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=_xiaofeng_definition(),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.judges = [
             Judge.objects.create(activity=self.activity, name=f"评委{chr(0x41 + i)}")
             for i in range(self.JUDGE_COUNT)
@@ -3388,24 +3389,24 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
         ruleset.round_keys = {"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk}
         ruleset.save(update_fields=["round_keys"])
         RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            version=2,
-            definition=_xiaofeng_definition(),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-            binding={
-                "stage_key": "校十佳屏峰",
-                "round_keys": {"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk},
-                "vote_keys": {},
-                "group_keys": {
-                    "initial_group": self.rounds["r1"].pk,
-                    "final_group": self.rounds["r2"].pk,
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=2,
+                definition=_xiaofeng_definition(),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={
+                    "stage_key": "校十佳屏峰",
+                    "round_keys": {"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk},
+                    "vote_keys": {},
+                    "group_keys": {
+                        "initial_group": self.rounds["r1"].pk,
+                        "final_group": self.rounds["r2"].pk,
+                    },
+                    "announcement_blocks": [],
                 },
-                "announcement_blocks": [],
-            },
-        )
+            )
         # Persist the group_of facts as Performance rows keyed by the binding's group_keys.
         group_of = self._group_of()
         for key, round_ in (
@@ -3524,22 +3525,32 @@ class RapidEntryServiceTests(TestCase):
             stage_key="院十佳",
             round_keys={"r1": self.round.pk},
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [
-                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "rank1",
+                                "type": "RANK",
+                                "source": "assess_r1",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         # Seed the single cell so the composite resolves (no HOLD).
         from .services import apply_scores
 
@@ -3572,27 +3583,37 @@ class RapidEntryServiceTests(TestCase):
             stage_key="院十佳",
             round_keys={"r1": self.round.pk},
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [
-                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-            binding={
-                "stage_key": "院十佳",
-                "round_keys": {"r1": self.round.pk},
-                "announcement_blocks": [],
-            },
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "rank1",
+                                "type": "RANK",
+                                "source": "assess_r1",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={
+                    "stage_key": "院十佳",
+                    "round_keys": {"r1": self.round.pk},
+                    "announcement_blocks": [],
+                },
+            )
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
 
         # The frozen version is authoritative: rewriting the ruleset binding must be inert.
@@ -3621,23 +3642,33 @@ class RapidEntryServiceTests(TestCase):
             stage_key="院十佳",
             round_keys={"r1": self.round.pk},
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "checkpoints": [{"key": "stage1", "output": "top1"}],
-                    "nodes": [
-                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "checkpoints": [{"key": "stage1", "output": "top1"}],
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "rank1",
+                                "type": "RANK",
+                                "source": "assess_r1",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
 
         stage = recompute_activity_result(
@@ -3694,23 +3725,33 @@ class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
             stage_key="院十佳",
             round_keys={"r1": self.round.pk},
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [
-                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "院十佳", "round_keys": {"r1": self.round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "rank1",
+                                "type": "RANK",
+                                "source": "assess_r1",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "院十佳", "round_keys": {"r1": self.round.pk}},
+            )
         from .services import apply_scores
 
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.admin)
@@ -3857,13 +3898,13 @@ class BindingSourceHelperTests(TestCase):
         from .models import ManualDecision
         from .services import _source_manual
 
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         with _manual_write_ctx():
             ManualDecision.objects.create(
                 activity=self.activity,
@@ -3912,13 +3953,13 @@ class ManualDecisionModelTests(TestCase):
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="规则", is_test_data=True
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.singer = SingerRegistration.objects.create(
             activity=self.activity,
             user=User.objects.create_user(username="md-s", password="pass"),
@@ -4028,14 +4069,14 @@ class ManualDecisionServiceTests(TestCase):
         }
 
     def _frozen(self, ruleset, definition):
-        return RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(definition, ensure_ascii=False),
-            version=RulesetVersion.objects.filter(ruleset=ruleset).count() + 1,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            return RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(definition, ensure_ascii=False),
+                version=RulesetVersion.objects.filter(ruleset=ruleset).count() + 1,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
 
     def _make_singer(self, index):
         return SingerRegistration.objects.create(
@@ -4148,17 +4189,17 @@ class ManualDecisionServiceTests(TestCase):
     def test_set_rejects_undeclared_manual_key(self):
         from .services import set_manual_decision
 
-        no_manual = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=json.dumps(
-                {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
-                ensure_ascii=False,
-            ),
-            version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            no_manual = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+                    ensure_ascii=False,
+                ),
+                version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+            )
         with self.assertRaises(ValidationError):
             set_manual_decision(
                 no_manual,
@@ -4246,14 +4287,14 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="并发规则", is_test_data=True
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=json.dumps(self._manual_definition(), ensure_ascii=False),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "选拔"},
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=json.dumps(self._manual_definition(), ensure_ascii=False),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔"},
+            )
         self.singers = [self._make_singer(i) for i in range(3)]
         from .services import recompute_activity_result, set_manual_decision
 
@@ -4410,15 +4451,15 @@ class ConfirmedDependencyClosureTests(TestCase):
         return singer
 
     def _frozen_version(self, definition, binding):
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=json.dumps(definition, ensure_ascii=False),
-            version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding=binding,
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=json.dumps(definition, ensure_ascii=False),
+                version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding=binding,
+            )
         # 核定 (R9-5) finalizes only a result on the current FROZEN authority, so make the
         # version we confirm the single current runner.
         _promote_version_to_current(version)
@@ -4524,19 +4565,19 @@ class ConfirmedDependencyClosureTests(TestCase):
         version = self._frozen_version(
             definition, {"stage_key": "选拔", "vote_keys": {"audience": self.vs.pk}}
         )
-        StageResult.objects.create(
-            _bypass_confirmed=True,
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.user,
-            stage_key="选拔",
-            status=StageResult.Status.CONFIRMED,
-            input_fingerprint="x",
-            result_version=1,
-            is_test_data=True,
-            confirmed_by=self.user,
-            confirmed_at=timezone.now(),
-        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.user,
+                stage_key="选拔",
+                status=StageResult.Status.CONFIRMED,
+                input_fingerprint="x",
+                result_version=1,
+                is_test_data=True,
+                confirmed_by=self.user,
+                confirmed_at=timezone.now(),
+            )
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
             ensure_vote_not_consumed_by_confirmed_stage(self.vs)
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
@@ -4562,19 +4603,19 @@ class ConfirmedDependencyClosureTests(TestCase):
             ],
         }
         version = self._frozen_version(definition, {"stage_key": "选拔"})
-        StageResult.objects.create(
-            _bypass_confirmed=True,
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.user,
-            stage_key="选拔",
-            status=StageResult.Status.CONFIRMED,
-            input_fingerprint="x",
-            result_version=1,
-            is_test_data=True,
-            confirmed_by=self.user,
-            confirmed_at=timezone.now(),
-        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.user,
+                stage_key="选拔",
+                status=StageResult.Status.CONFIRMED,
+                input_fingerprint="x",
+                result_version=1,
+                is_test_data=True,
+                confirmed_by=self.user,
+                confirmed_at=timezone.now(),
+            )
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
             ensure_manual_not_consumed_by_confirmed_stage(version, "manual")
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):

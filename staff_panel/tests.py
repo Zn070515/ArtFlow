@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from accounts.models import User
 from archive.models import ArchivePackage
+from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from core.services import unarchive_activity
@@ -4202,22 +4203,32 @@ class RoundScoresApiTests(TestCase):
             stage_key="快速赛段",
             round_keys={"r1": self.round.pk},
         )
-        RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset,
-            definition=json.dumps(
-                {
-                    "schema_version": 1,
-                    "nodes": [
-                        {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
-                        {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                        {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
-                    ],
-                }
-            ),
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "rank1",
+                                "type": "RANK",
+                                "source": "assess_r1",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         response = self._post(
             {
                 "base_version": 0,
@@ -4270,13 +4281,13 @@ class ResultBoardTests(TestCase):
                 {"label": "本轮淘汰", "outcome_codes": ["eliminated"]},
             ],
         )
-        self.version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self._DEFINITION,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self._DEFINITION,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
         self.client.force_login(self.staff)
 
     def _singer(self, index):
@@ -4301,24 +4312,35 @@ class ResultBoardTests(TestCase):
             )["m"]
             or 0
         )
-        return StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            created_by=self.staff,
-            stage_key=stage_key,
-            status=status,
-            reasons=reasons or [],
-            ruleset_hash=ruleset_hash,
-            result_version=last + 1,
-            # Identity is (ruleset_version, input_fingerprint): every distinct result
-            # needs its own fingerprint so one version can publish multiple rows.
-            input_fingerprint=f"fp-{ruleset_hash}",
-            is_test_data=False,
-            # M1-R9-Final: a confirmed row must carry its confirming trail (DB CHECK).
-            confirmed_at=timezone.now() if status == StageResult.Status.CONFIRMED else None,
-            confirmed_by=self.staff if status == StageResult.Status.CONFIRMED else None,
-            _bypass_confirmed=(status == StageResult.Status.CONFIRMED),
-        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            return StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.staff,
+                stage_key=stage_key,
+                status=status,
+                reasons=reasons or [],
+                ruleset_hash=ruleset_hash,
+                result_version=last + 1,
+                # Identity is (ruleset_version, input_fingerprint): every distinct result
+                # needs its own fingerprint so one version can publish multiple rows.
+                input_fingerprint=f"fp-{ruleset_hash}",
+                is_test_data=False,
+                # M1-R9-Final: a confirmed row must carry its confirming trail (DB CHECK).
+                confirmed_at=timezone.now() if status == StageResult.Status.CONFIRMED else None,
+                confirmed_by=self.staff if status == StageResult.Status.CONFIRMED else None,
+            )
+
+    def _confirm(self, stage):
+        # Decisions are created while the result is non-confirmed; this flips a READY
+        # stage to CONFIRMED (with its trail) under the confirm authority, mirroring
+        # confirm_stage_result() without its finality checks (these fixtures use mock
+        # ruleset hashes).
+        with authority_write(STAGE_RESULT_CONFIRM):
+            stage.status = StageResult.Status.CONFIRMED
+            stage.confirmed_at = timezone.now()
+            stage.confirmed_by = self.staff
+            stage.save(update_fields=["status", "confirmed_at", "confirmed_by"])
 
     def test_board_lists_latest_stage_per_stage_key(self):
         self._stage(
@@ -4326,7 +4348,7 @@ class ResultBoardTests(TestCase):
             ruleset_hash="hash-1",
             reasons=["缺少第三轮"],
         )
-        ready = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-2")
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-2")
         StageDecision.objects.create(
             stage_result=ready,
             singer=self._singer(1),
@@ -4335,6 +4357,7 @@ class ResultBoardTests(TestCase):
             score=Decimal("91.00"),
             is_test_data=False,
         )
+        self._confirm(ready)
         response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "院十佳")
@@ -4354,7 +4377,7 @@ class ResultBoardTests(TestCase):
         self.assertContains(response, "缺少第五轮评分")
 
     def test_detail_groups_by_announcement_blocks_in_order(self):
-        ready = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-d")
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-d")
         direct = self._singer(2)
         repechage = self._singer(3)
         eliminated = self._singer(4)
@@ -4382,6 +4405,7 @@ class ResultBoardTests(TestCase):
             score=Decimal("70.00"),
             is_test_data=False,
         )
+        self._confirm(ready)
         response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
         self.assertEqual(response.status_code, 200)
         body = response.content.decode()
@@ -4410,26 +4434,24 @@ class ResultBoardTests(TestCase):
             is_test_data=False,
             stage_key="无分组",
         )
-        version_b = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=ruleset_b,
-            definition=self._DEFINITION,
-            is_current=True,
-            status=RulesetVersion.Status.FROZEN,
-        )
-        stage = StageResult.objects.create(
-            _bypass_confirmed=True,
-            activity=activity_b,
-            ruleset_version=version_b,
-            created_by=self.staff,
-            stage_key="无分组",
-            status=StageResult.Status.CONFIRMED,
-            reasons=[],
-            ruleset_hash="hash-fb",
-            is_test_data=False,
-            confirmed_at=timezone.now(),
-            confirmed_by=self.staff,
-        )
+        with authority_write(RULESET_FREEZE):
+            version_b = RulesetVersion.objects.create(
+                ruleset=ruleset_b,
+                definition=self._DEFINITION,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            stage = StageResult.objects.create(
+                activity=activity_b,
+                ruleset_version=version_b,
+                created_by=self.staff,
+                stage_key="无分组",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                ruleset_hash="hash-fb",
+                is_test_data=False,
+            )
         singer = SingerRegistration.objects.create(
             activity=activity_b,
             user=User.objects.create_user(username="fb-singer", password="pass"),
@@ -4448,6 +4470,7 @@ class ResultBoardTests(TestCase):
             score=Decimal("88.00"),
             is_test_data=False,
         )
+        self._confirm(stage)
         response = self.client.get(reverse("staff:stage_result_detail", args=[stage.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "直接晋级")
@@ -4475,15 +4498,15 @@ class ResultBoardTests(TestCase):
         ScoreRecord.objects.create(
             round=contest_round, singer=singer, judge=judge, score=Decimal("91.00")
         )
-        version = RulesetVersion.objects.create(
-            _allow_freeze=True,
-            ruleset=self.ruleset,
-            definition=self._DEFINITION,
-            version=2,
-            is_current=False,
-            status=RulesetVersion.Status.FROZEN,
-            binding={"stage_key": "院十佳", "round_keys": {"r1": contest_round.pk}},
-        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self._DEFINITION,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "院十佳", "round_keys": {"r1": contest_round.pk}},
+            )
         contest_round.is_locked = True
         contest_round.status = ContestRound.Status.LOCKED
         contest_round.save(update_fields=["is_locked", "status"])
@@ -4572,7 +4595,7 @@ class ResultBoardTests(TestCase):
         self.assertNotContains(response, "可抄手卡")
 
     def test_stage_decisions_by_blocks_helper(self):
-        ready = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-helper")
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-helper")
         singer = self._singer(6)
         StageDecision.objects.create(
             stage_result=ready,
@@ -4582,6 +4605,7 @@ class ResultBoardTests(TestCase):
             score=Decimal("90.00"),
             is_test_data=False,
         )
+        self._confirm(ready)
         blocks = stage_decisions_by_blocks(ready)
         self.assertEqual(blocks[0]["label"], "直接晋级第三轮")
         self.assertEqual(blocks[0]["decisions"][0].singer, singer)
@@ -4951,7 +4975,8 @@ class RulesetEditorTests(TestCase):
 
     def test_editor_refuses_frozen_version_edit(self):
         self.version.status = "frozen"
-        self.version.save(update_fields=["status"], _allow_freeze=True)
+        with authority_write(RULESET_FREEZE):
+            self.version.save(update_fields=["status"])
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
         self.assertEqual(response.status_code, 403)
 

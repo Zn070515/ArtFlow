@@ -14,6 +14,7 @@ and audits via FINALIZE_RULESET.
 import json
 
 from accounts.models import User
+from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
 from common.models import AuditLog
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase
@@ -889,14 +890,14 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         status=RulesetVersion.Status.DRAFT,
     ):
         ruleset = ruleset or self.make_ruleset()
-        return RulesetVersion.objects.create(
-            ruleset=ruleset,
-            version=version,
-            definition=definition,
-            is_current=is_current,
-            status=status,
-            _allow_freeze=(status == RulesetVersion.Status.FROZEN or is_current),
-        )
+        with authority_write(RULESET_FREEZE):
+            return RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=version,
+                definition=definition,
+                is_current=is_current,
+                status=status,
+            )
 
     def test_freeze_success(self):
         admin = self._admin()
@@ -951,18 +952,18 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             status=RulesetVersion.Status.FROZEN,
             is_current=True,
         )
-        StageResult.objects.create(
-            _bypass_confirmed=True,
-            activity=ruleset.activity,
-            ruleset_version=prior,
-            created_by=admin,
-            stage_key="选拔",
-            status=StageResult.Status.CONFIRMED,
-            reasons=[],
-            is_test_data=True,
-            confirmed_at=timezone.now(),
-            confirmed_by=admin,
-        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            StageResult.objects.create(
+                activity=ruleset.activity,
+                ruleset_version=prior,
+                created_by=admin,
+                stage_key="选拔",
+                status=StageResult.Status.CONFIRMED,
+                reasons=[],
+                is_test_data=True,
+                confirmed_at=timezone.now(),
+                confirmed_by=admin,
+            )
         successor = self._draft(ruleset=ruleset, version=2, is_current=False)
         with self.assertRaises(ValidationError):
             freeze_ruleset_version(successor, admin)

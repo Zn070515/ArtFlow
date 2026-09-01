@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
 
+from common.authority import STAGE_RESULT_CONFIRM, authority_write
 from common.business_rules import ensure_round_unlocked
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
@@ -1531,7 +1532,8 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     locked.status = StageResult.Status.CONFIRMED
     locked.confirmed_by = confirmed_by
     locked.confirmed_at = timezone.now()
-    locked.save(update_fields=["status", "confirmed_by", "confirmed_at"], _bypass_confirmed=True)
+    with authority_write(STAGE_RESULT_CONFIRM):
+        locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
     AuditLog.objects.create(
         operator=confirmed_by,
         action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
@@ -1570,7 +1572,8 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     locked.confirmed_by = None
     locked.confirmed_at = None
     locked.status = StageResult.Status.READY_TO_CONFIRM
-    locked.save(update_fields=["confirmed_by", "confirmed_at", "status"], _bypass_confirmed=True)
+    with authority_write(STAGE_RESULT_CONFIRM):
+        locked.save(update_fields=["confirmed_by", "confirmed_at", "status"])
     AuditLog.objects.create(
         operator=operator,
         action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
@@ -1647,16 +1650,16 @@ def recompute_activity_result(
     computed_by,
     *,
     ruleset=None,
-    round_keys: Mapping[str, int] | None = None,
     checkpoint=None,
 ) -> StageResult:
     """Re-resolve an activity's current ruleset against its bound rounds (M1-H).
 
     The ruleset carries the production binding: ``stage_key`` and ``round_keys``
-    (round key -> ContestRound pk). ``round_keys`` may be overridden (e.g. a test or
-    a one-off re-resolve). ``checkpoint`` (§11-15) targets a single declared stage and
-    publishes it as its own :class:`StageResult` (stage_key = the checkpoint key).
-    Returns the persisted :class:`StageResult`.
+    (round key -> ContestRound pk). The frozen version is authoritative: the round
+    mapping is always read from the version's binding snapshot, never overridden.
+    ``checkpoint`` (§11-15) targets a single declared stage and publishes it as its
+    own :class:`StageResult` (stage_key = the checkpoint key). Returns the persisted
+    :class:`StageResult`.
 
     M1-R9 (§二): this is the AUTHORITATIVE publication path. It runs inside one
     ``transaction.atomic`` block holding ``Activity FOR UPDATE`` (via
@@ -1692,9 +1695,9 @@ def recompute_activity_result(
     if version is None:
         raise ValidationError("该赛制没有可用的当前冻结版本。")
     # The frozen version is authoritative: read its binding snapshot (never the still
-    # mutable ContestRuleset rounding fields), except when round_keys is overridden.
+    # mutable ContestRuleset rounding fields, never an injected override).
     binding = _version_binding(version)
-    raw_keys = round_keys if round_keys is not None else binding.get("round_keys") or {}
+    raw_keys = binding.get("round_keys") or {}
     round_ids = list(raw_keys.values())
     rounds = {r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=activity)}
     missing = [rid for rid in round_ids if rid not in rounds]
