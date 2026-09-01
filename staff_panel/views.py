@@ -1030,8 +1030,8 @@ def round_scores_api(request, pk):
         return JsonResponse({**_round_grid_payload(contest_round), "conflict": True}, status=409)
     except ValidationError as error:
         return JsonResponse({"detail": error.messages}, status=400)
-    except PermissionDenied as error:
-        return JsonResponse({"detail": str(error)}, status=403)
+    except PermissionDenied:
+        return JsonResponse({"detail": "权限不足。"}, status=403)
 
     resolved_status = None
     if result["matrix_complete"]:
