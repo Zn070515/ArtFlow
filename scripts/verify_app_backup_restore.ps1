@@ -36,6 +36,17 @@ function Invoke-Compose {
     Invoke-Docker -Arguments (@('compose', '-p', $ComposeProjectName) + $Arguments)
 }
 
+function Get-TarExecutable {
+    param([Parameter(Mandatory = $true)][string]$ArchivePath)
+    # Git-shell tar misreads a Windows drive letter as a remote host (host:path);
+    # bsdtar (System32\tar) handles native paths. Linux CI has no drive letters.
+    if ($IsWindows -and $ArchivePath -match '^[A-Za-z]:') {
+        $candidate = Join-Path $env:SystemRoot 'System32\tar.exe'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return 'tar'
+}
+
 function Invoke-RestoreWeb {
     param([Parameter(Mandatory = $true)][string[]]$Command)
     $arguments = @(
@@ -74,7 +85,8 @@ try {
 
     $mediaExtractDir = Join-Path $outputRoot ("media-" + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Force -Path $mediaExtractDir | Out-Null
-    & tar -xzf (Join-Path $backupSetResolved 'media.tar.gz') -C $mediaExtractDir
+    $mediaArchive = Join-Path $backupSetResolved 'media.tar.gz'
+    & (Get-TarExecutable $mediaArchive) -xzf $mediaArchive -C $mediaExtractDir
     if ($LASTEXITCODE -ne 0) {
         throw 'Failed to extract the media archive.'
     }
@@ -88,7 +100,7 @@ try {
         throw 'Could not resolve the Compose web image.'
     }
 
-    Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", 'postgres:16-alpine')
+    Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", 'postgres:17-alpine')
     try {
         $ready = $false
         for ($attempt = 1; $attempt -le 30; $attempt++) {

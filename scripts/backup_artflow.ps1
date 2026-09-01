@@ -37,7 +37,9 @@ try {
     $dockerCommand = Get-Command docker -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $script:dockerExecutable = $dockerCommand.Path
     Assert-SafeIdentifier -Value $ComposeProjectName -Name 'ComposeProjectName'
-    Assert-SafeIdentifier -Value $ContainerBackupBase -Name 'ContainerBackupBase'
+    if ($ContainerBackupBase -notmatch '^/') {
+        throw 'ContainerBackupBase must be an absolute container path.'
+    }
 
     $webContainer = (& $script:dockerExecutable compose -p $ComposeProjectName ps -q web).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($webContainer)) {
@@ -75,7 +77,7 @@ try {
     }
 
     Write-Host "Backup set created at $localBackupDir"
-    Write-Host $localBackupDir
+    Write-Output $localBackupDir
 }
 finally {
     Pop-Location
