@@ -1,0 +1,4 @@
+# Container entrypoint/shell scripts must run under POSIX bash with an LF
+# shebang. Force LF regardless of the platform's core.autocrlf so a Windows
+# clone can `docker compose up --build` without the `bash\r` shebang error.
+*.sh text eol=lf

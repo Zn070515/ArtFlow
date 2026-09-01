@@ -1577,6 +1577,10 @@ class AppBackupVerificationTests(TestCase):
         problems = validate_counts({"counts": {"activities": 1}}, {"activities": 2})
         self.assertEqual(problems, ["activities: expected 1, restored 2"])
 
+    @skipUnless(
+        not settings.DATABASES["default"]["ENGINE"].endswith("postgresql"),
+        "backup_artflow requires postgresql; only assert the rejection on a non-postgres backend",
+    )
     def test_backup_artflow_requires_postgresql(self):
         self.assertFalse(settings.DATABASES["default"]["ENGINE"].endswith("postgresql"))
         with self.assertRaises(CommandError):

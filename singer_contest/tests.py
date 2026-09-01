@@ -1984,6 +1984,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
             definition=definition,
             version=1,
             is_current=True,
+            status=RulesetVersion.Status.FROZEN,
             created_by=self.admin,
         )
         self.template = RulesetTemplate.objects.create(
@@ -4276,7 +4277,7 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
                     "key": "manual",
                     "type": "MANUAL_SELECT",
                     "source": "roster",
-                    "groups": 0,
+                    "groups": 1,
                     "quota": 2,
                 },
             ],

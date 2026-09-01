@@ -188,4 +188,4 @@ jobs:
         shell: bash
         run: |
           git rev-list --all --count
-          gitleaks git --redact --log-opts="--all" .
+          gitleaks git --redact --config .gitleaks.toml --log-opts="--all" .

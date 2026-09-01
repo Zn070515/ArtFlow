@@ -1,0 +1,13 @@
+# Gitleaks config: keep the built-in rule set but allowlist a known false
+# positive. The generic-api-key rule flags the ORM kwarg shorthand
+# ``computed_by=computed_by`` (singer_contest/services.py) as a key value pair;
+# it is an internal keyword argument, not a secret.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "ORM kwarg shorthand is not a secret"
+regexes = [
+    'computed_by=computed_by',
+]
