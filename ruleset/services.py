@@ -444,7 +444,8 @@ def freeze_ruleset_version(
             "execution_plan",
             "binding",
             "authority_hash",
-        ]
+        ],
+        _allow_freeze=True,
     )
     AuditLog.objects.create(
         operator=current_operator,

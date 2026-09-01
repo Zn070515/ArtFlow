@@ -250,6 +250,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             activity=self.activity, name="R0规则", is_test_data=True
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {
@@ -312,6 +313,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             activity=self.activity, name="R0规则", is_test_data=True
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {
@@ -351,6 +353,7 @@ class M1StageResultTestDataCleanupTests(TestCase):
             activity=self.activity, name="R0规则", is_test_data=True
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {

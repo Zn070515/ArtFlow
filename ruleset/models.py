@@ -116,6 +116,11 @@ class ContestRuleset(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            # M1-R9-Final: an activity owns exactly one ContestRuleset authority (versions
+            # hold the history). The DB unique is the backstop behind the service reuse.
+            models.UniqueConstraint(fields=["activity"], name="contest_ruleset_unique_activity"),
+        ]
 
     def clean(self):
         if self.activity_id:
@@ -141,8 +146,22 @@ class RulesetVersionQuerySet(models.QuerySet):
         if self.filter(status=RulesetVersion.Status.FROZEN).exists():
             raise ValidationError("Frozen ruleset versions are immutable.")
 
+    def _forbid_terminal_transition(self, **kwargs):
+        """A DRAFT->FROZEN/current ORM transition is service-only (freeze_ruleset_version)."""
+        if kwargs.get("status") == RulesetVersion.Status.FROZEN or kwargs.get("is_current") is True:
+            raise ValidationError("只有冻结服务可以产生已冻结/当前赛制版本。")
+
+    def create(self, **kwargs):
+        allow_freeze = kwargs.pop("_allow_freeze", False)
+        obj = self.model(**kwargs)
+        obj.save(force_insert=True, using=self.db, _allow_freeze=allow_freeze)
+        return obj
+
     def update(self, **kwargs):
+        allow_freeze = kwargs.pop("_allow_freeze", False)
         self._ensure_mutable()
+        if not allow_freeze:
+            self._forbid_terminal_transition(**kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -151,7 +170,14 @@ class RulesetVersionQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
+        if "status" in fields or "is_current" in fields:
+            raise ValidationError("赛制版本最终状态跃迁是 service-only。")
         return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        if any(o.status == RulesetVersion.Status.FROZEN or o.is_current for o in objs):
+            raise ValidationError("只有冻结服务可以产生已冻结/当前赛制版本。")
+        return super().bulk_create(objs, *args, **kwargs)
 
 
 RulesetVersionManager = models.Manager.from_queryset(RulesetVersionQuerySet)
@@ -165,13 +191,19 @@ class RulesetVersion(models.Model):
         FROZEN = "frozen", "已冻结"
 
     immutable_fields = (
-        "definition",
+        "ruleset_id",
+        "version",
         "schema_version",
+        "definition",
         "content_hash",
         "authority_hash",
+        "binding",
+        "execution_plan",
         "status",
         "is_current",
-        "binding",
+        "created_by_id",
+        "frozen_by_id",
+        "frozen_at",
     )
 
     ruleset = models.ForeignKey(ContestRuleset, on_delete=models.CASCADE, related_name="versions")
@@ -260,7 +292,19 @@ class RulesetVersion(models.Model):
         self.content_hash = content_hash(self.definition)
 
     def save(self, *args, **kwargs):
+        allow_freeze = kwargs.pop("_allow_freeze", False)
         self.clean()
+        stored = self._stored(["status"])
+        if self._state.adding:
+            if not allow_freeze and (self.status == self.Status.FROZEN or self.is_current):
+                raise ValidationError("只在冻结服务中产生已冻结/当前赛制版本。")
+        elif (
+            not allow_freeze
+            and stored
+            and stored["status"] != self.Status.FROZEN
+            and (self.status == self.Status.FROZEN or self.is_current)
+        ):
+            raise ValidationError("只能通过冻结服务将赛制版本置为已冻结/当前。")
         update_fields = kwargs.get("update_fields")
         if update_fields is not None and "content_hash" not in update_fields:
             kwargs["update_fields"] = [*update_fields, "content_hash"]

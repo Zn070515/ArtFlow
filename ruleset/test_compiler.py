@@ -475,6 +475,30 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         self.assertTrue(report.passes())
         self.assertIn("auto_break", plan.policies["tie"].values())
 
+    def test_tie_select_source_mismatch_rejected(self):
+        # M1-R9-Final: a SELECT auto_break's tie_break_source must equal its source RANK's.
+        # A divergent source forms an independent tie-break that omits re-ordering, letting
+        # A(100,5)/B(100,8) both advance if the SELECT breaks on a different field.
+        self._assert_invalid(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "tb", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a", "tie_break_source": "tb"},
+                    {
+                        "key": "s",
+                        "type": "SELECT",
+                        "source": "r",
+                        "count": 5,
+                        "tie_policy": "auto_break",
+                        "tie_break_source": "a",
+                    },
+                ],
+                context={"entry_size": 20},
+            ),
+            "TIE_SELECT_SOURCE_MISMATCH",
+        )
+
     def test_branch_is_unsupported_runtime(self):
         # §27-28: BRANCH is not executable by the resolver, so the compiler must refuse
         # to validate/freeze it — otherwise a definition validates, freezes, then blows
@@ -630,6 +654,38 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "VOTE_SCORE_COMPONENT_RAW",
         )
 
+    def test_vote_purpose_required(self):
+        # M1-R9-Final (§8.1): a bound vote_source ASSESS must declare vote_purpose.
+        # Omitting it used to dodge both VOTE_PURPOSE and the raw-vote SCORE_COMPONENT
+        # rejection, letting a node-declared scale slip raw votes into a composite.
+        self._assert_invalid(
+            _def(
+                [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "vote_source": "pop"}],
+                context={"votes": {"pop": {"scale": "hundred", "normalization": True}}},
+            ),
+            "VOTE_PURPOSE_REQUIRED",
+        )
+
+    def test_assess_scale_binding_mismatch(self):
+        # M1-R9-Final: the bound actual scale is authoritative over a node-declared
+        # "expected" scale. A definition claiming ``hundred`` over a real 50-mark sheet
+        # is a hard error rather than silently mis-reading the units.
+        self._assert_invalid(
+            _def(
+                [
+                    {
+                        "key": "a",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "round": "r1",
+                        "scale": "hundred",
+                    },
+                ],
+                context={"rounds": {"r1": {"scale": "50"}}},
+            ),
+            "ASSESS_SCALE_BINDING_MISMATCH",
+        )
+
     def test_numeric_scale_mixed_rejected(self):
         # M1-R9 (§25): a 50-mark sheet and a 10-mark sheet are distinct units (score_max
         # 50 != 10), so a direct weighted sum must be a SCALE_MIXED error — the old
@@ -715,7 +771,7 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         self.assertIn(golden.context["missing_round"], ("r2", "r3"))
 
     def test_historical_xiaofeng_fallback_unresolved_rejected(self):
-        """§24.2 — the named historical 30/50/20 fallback template is NOT executable:
+        """§24.2 — the named historical 20/30/50 fallback template is NOT executable:
         its direct winners never reach R2/R3, so the validator must FAIL with
         MISSING_SCORE_DEPENDENCY rather than the resolver guessing a score."""
         report, plan = self._assert_invalid(
@@ -723,7 +779,7 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "MISSING_SCORE_DEPENDENCY",
         )
         golden = report.by_code("MISSING_SCORE_DEPENDENCY")[0]
-        self.assertIn(golden.context["missing_round"], ("r2", "r3"))
+        self.assertEqual(golden.context["missing_round"], "r2")
 
     def test_missing_score_dependency_golden(self):
         report, plan = self._assert_invalid(
@@ -839,6 +895,7 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             definition=definition,
             is_current=is_current,
             status=status,
+            _allow_freeze=(status == RulesetVersion.Status.FROZEN or is_current),
         )
 
     def test_freeze_success(self):
@@ -883,6 +940,7 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
         """M1-R9 (§五): a normal successor Freeze demotes the running FROZEN authority. That
         is illegal once a result grounded in it is CONFIRMED — the confirmed handcard must
         stay attributable to the authority it was frozen under."""
+        from django.utils import timezone
         from singer_contest.models import StageResult
 
         admin = self._admin()
@@ -894,6 +952,7 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             is_current=True,
         )
         StageResult.objects.create(
+            _bypass_confirmed=True,
             activity=ruleset.activity,
             ruleset_version=prior,
             created_by=admin,
@@ -901,6 +960,8 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             status=StageResult.Status.CONFIRMED,
             reasons=[],
             is_test_data=True,
+            confirmed_at=timezone.now(),
+            confirmed_by=admin,
         )
         successor = self._draft(ruleset=ruleset, version=2, is_current=False)
         with self.assertRaises(ValidationError):

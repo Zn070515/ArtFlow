@@ -620,6 +620,7 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
     def test_second_current_for_ruleset_rejected(self):
         ruleset = self.make_ruleset()
         RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             version=1,
             definition=DEF,
@@ -629,6 +630,7 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 RulesetVersion.objects.create(
+                    _allow_freeze=True,
                     ruleset=ruleset,
                     version=2,
                     definition=DEF,
@@ -640,6 +642,7 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
         ruleset = self.make_ruleset()
         RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF, is_current=False)
         RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             version=2,
             definition=DEF,
@@ -657,7 +660,7 @@ class RulesetVersionConstraintTests(_RulesetModelBase):
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
                 RulesetVersion.objects.create(
-                    ruleset=ruleset, version=1, definition=DEF, is_current=True
+                    _allow_freeze=True, ruleset=ruleset, version=1, definition=DEF, is_current=True
                 )
 
     def test_content_hash_computed_on_save(self):
@@ -676,6 +679,7 @@ class RulesetTemplateIndependenceTests(_RulesetModelBase):
         ruleset.source_template = template
         ruleset.save(update_fields=["source_template"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             version=1,
             definition=DEF,
@@ -691,6 +695,7 @@ class RulesetTemplateIndependenceTests(_RulesetModelBase):
         ruleset = self.make_ruleset()
         template = RulesetTemplate.objects.create(name="T", definition=DEF)
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             version=1,
             definition=DEF,
@@ -707,6 +712,7 @@ class RulesetVersionImmutabilityTests(_RulesetModelBase):
     def make_frozen(self):
         ruleset = self.make_ruleset()
         return RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             version=1,
             definition=DEF,

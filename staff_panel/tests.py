@@ -4203,6 +4203,7 @@ class RoundScoresApiTests(TestCase):
             round_keys={"r1": self.round.pk},
         )
         RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {
@@ -4270,6 +4271,7 @@ class ResultBoardTests(TestCase):
             ],
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self._DEFINITION,
             is_current=True,
@@ -4312,6 +4314,10 @@ class ResultBoardTests(TestCase):
             # needs its own fingerprint so one version can publish multiple rows.
             input_fingerprint=f"fp-{ruleset_hash}",
             is_test_data=False,
+            # M1-R9-Final: a confirmed row must carry its confirming trail (DB CHECK).
+            confirmed_at=timezone.now() if status == StageResult.Status.CONFIRMED else None,
+            confirmed_by=self.staff if status == StageResult.Status.CONFIRMED else None,
+            _bypass_confirmed=(status == StageResult.Status.CONFIRMED),
         )
 
     def test_board_lists_latest_stage_per_stage_key(self):
@@ -4391,20 +4397,29 @@ class ResultBoardTests(TestCase):
     def test_detail_fallback_groups_by_outcome_when_unset(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
+        # UNIQUE(activity): a second ContestRuleset needs its own activity.
+        activity_b = Activity.objects.create(
+            title="Fallback Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
         ruleset_b = ContestRuleset.objects.create(
-            activity=self.activity,
+            activity=activity_b,
             name="No Blocks",
             is_test_data=False,
             stage_key="无分组",
         )
         version_b = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset_b,
             definition=self._DEFINITION,
             is_current=True,
             status=RulesetVersion.Status.FROZEN,
         )
         stage = StageResult.objects.create(
-            activity=self.activity,
+            _bypass_confirmed=True,
+            activity=activity_b,
             ruleset_version=version_b,
             created_by=self.staff,
             stage_key="无分组",
@@ -4412,8 +4427,19 @@ class ResultBoardTests(TestCase):
             reasons=[],
             ruleset_hash="hash-fb",
             is_test_data=False,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.staff,
         )
-        singer = self._singer(5)
+        singer = SingerRegistration.objects.create(
+            activity=activity_b,
+            user=User.objects.create_user(username="fb-singer", password="pass"),
+            name="选手5",
+            student_id="70005",
+            college="Info",
+            class_name="CS1",
+            song_name="Song 5",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
         StageDecision.objects.create(
             stage_result=stage,
             singer=singer,
@@ -4450,6 +4476,7 @@ class ResultBoardTests(TestCase):
             round=contest_round, singer=singer, judge=judge, score=Decimal("91.00")
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self._DEFINITION,
             version=2,
@@ -4924,7 +4951,7 @@ class RulesetEditorTests(TestCase):
 
     def test_editor_refuses_frozen_version_edit(self):
         self.version.status = "frozen"
-        self.version.save(update_fields=["status"])
+        self.version.save(update_fields=["status"], _allow_freeze=True)
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
         self.assertEqual(response.status_code, 403)
 

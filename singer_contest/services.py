@@ -1034,7 +1034,7 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     score from votes — converting votes to points belongs to an explicit VoteScoringRule,
     not the data loader. An empty session is left unbound so the resolver holds.
     """
-    from voting.models import VoteRecord
+    from voting.models import VoteOption, VoteRecord
 
     vote_keys = binding.get("vote_keys") or {}
     if not vote_keys:
@@ -1042,7 +1042,12 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     test_flag = runtime_is_test(activity)
     out: dict[str, dict[str, Decimal]] = {}
     for source, vs_pk in vote_keys.items():
-        counts: dict[str, int] = {}
+        # M1-R9-Final: initialise every candidate in the session to 0 first, so a zero-vote
+        # candidate is a legal 0 rather than a "missing" result (the resolver would otherwise
+        # HOLD on an absent entry). An orphan entry cast against a deleted option still counts.
+        counts: dict[str, int] = {
+            str(o.singer_id): 0 for o in VoteOption.objects.filter(vote_session_id=vs_pk)
+        }
         records = VoteRecord.objects.filter(
             vote_session_id=vs_pk, is_test_data=test_flag
         ).select_related("vote_option")
@@ -1117,26 +1122,30 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     status = _RESOLVER_STATUS.get(result.status)
     if status is None:
         raise ValidationError(f"无法映射解析器状态：{result.status}")
-    existing = StageResult.objects.filter(
-        activity=activity,
-        stage_key=stage_key,
-        ruleset_version=version,
-        input_fingerprint=fingerprint,
-    ).first()
-    if existing is not None:
-        if existing.status == StageResult.Status.CONFIRMED:
-            return existing
-        # Identical facts over a still-mutable (HOLD/REVIEW/READY_TO_CONFIRM) row:
-        # refresh in place. A CONFIRMED stage is immutable and protected by the
-        # queryset guard, so it is never reached here (identical input → same status).
-        existing.status = status
-        existing.reasons = list(result.reasons)
-        existing.created_by = computed_by
-        existing.save(update_fields=["status", "reasons", "created_by"])
-        StageDecision.objects.filter(stage_result=existing).delete()
-        CompositeResult.objects.filter(stage_result=existing).delete()
-        _create_children(existing, result, singer_by_key, is_test)
-        return existing
+    # M1-R9-Final (current-version semantics): reuse only the *latest* StageResult, and only
+    # when it is grounded on the same ruleset version and the same input facts. An earlier
+    # same-fingerprint row (A → v1, then a corrected B → v2, then back to A) must NOT be
+    # re-adopted — the correct A is a new v3, so confirm's latest-version check still holds.
+    latest = (
+        StageResult.objects.filter(activity=activity, stage_key=stage_key)
+        .order_by("-result_version", "-pk")
+        .first()
+    )
+    if (
+        latest is not None
+        and latest.ruleset_version_id == version.pk
+        and latest.input_fingerprint == fingerprint
+    ):
+        if latest.status == StageResult.Status.CONFIRMED:
+            return latest
+        latest.status = status
+        latest.reasons = list(result.reasons)
+        latest.created_by = computed_by
+        latest.save(update_fields=["status", "reasons", "created_by"])
+        StageDecision.objects.filter(stage_result=latest).delete()
+        CompositeResult.objects.filter(stage_result=latest).delete()
+        _create_children(latest, result, singer_by_key, is_test)
+        return latest
 
     last_version = (
         StageResult.objects.filter(activity=activity, stage_key=stage_key).aggregate(
@@ -1517,7 +1526,7 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     locked.status = StageResult.Status.CONFIRMED
     locked.confirmed_by = confirmed_by
     locked.confirmed_at = timezone.now()
-    locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+    locked.save(update_fields=["status", "confirmed_by", "confirmed_at"], _bypass_confirmed=True)
     AuditLog.objects.create(
         operator=confirmed_by,
         action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,

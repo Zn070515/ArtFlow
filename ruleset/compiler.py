@@ -254,7 +254,11 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
         vote_source = node.get("vote_source")
         if vote_source:
             vote_scale = (ctx.get("votes") or {}).get(vote_source, {}).get("scale")
-        p["scale"] = node.get("scale") or vote_scale or _round_scale(ctx, rnd) or "unknown"
+        # M1-R9-Final: at a bound compile the real rubric/vote scale is the authority; a
+        # node-declared scale is only an "expected" hint (used for template validation when
+        # no entity is bound). Prefer the bound actual so a 50-mark sheet is never misread
+        # as hundred inside an AGGREGATE.
+        p["scale"] = vote_scale or _round_scale(ctx, rnd) or node.get("scale") or "unknown"
     elif ntype == "AGGREGATE":
         comps = node["aggregate"]["components"]
         if comps:
@@ -589,6 +593,24 @@ def _check_tie(
                 )
             )
             return
+        # M1-R9-Final (tie exactness): a SELECT auto_break must agree with the ordering used by
+        # its source RANK. If the SELECT breaks a tie with a *different* secondary source than
+        # the RANK ordered by, the RANK already emitted an order the SELECT cannot re-shuffle —
+        # so the cutoff would pick the wrong side. Force the two sources to be identical.
+        src = by_key.get(node.get("source"))
+        if src is not None and src.get("type") == "RANK":
+            sel, rank_tb = node.get("tie_break_source"), src.get("tie_break_source")
+            if sel != rank_tb:
+                issues.append(
+                    ReportIssue(
+                        "TIE_SELECT_SOURCE_MISMATCH",
+                        Severity.ERROR,
+                        node["key"],
+                        "tie_break_source",
+                        f"SELECT 的 tie_break_source {sel} 必须与其来源 RANK 的 {rank_tb} 一致。",
+                    )
+                )
+                return
         cutoffs.append({"node": node["key"], "count": node.get("count"), "tie_policy": policy})
         return
     if policy == "manual":
@@ -665,6 +687,19 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
             )
         )
         return
+    # M1-R9-Final (bound source truth): a vote_source ASSESS must declare its purpose.
+    # Omitting vote_purpose used to dodge both the VOTE_PURPOSE gate and the SCORE_COMPONENT
+    # raw-vote rejection, letting a node-declared scale pass raw votes into a composite.
+    if node["type"] == "ASSESS" and not node.get("vote_purpose"):
+        issues.append(
+            ReportIssue(
+                "VOTE_PURPOSE_REQUIRED",
+                Severity.ERROR,
+                node["key"],
+                "vote_purpose",
+                "投票评分节点必须声明 vote_purpose。",
+            )
+        )
     # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness. Whether
     # a VoteSession has collected ballots / is locked / has a result is a runtime
     # resolver HOLD condition — never a Ruleset Freeze gate. So no ``result_ready`` fact.
@@ -714,20 +749,54 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
         )
 
 
+def _check_scale_binding(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
+    """A bound ASSESS's declared scale must match its real bound rubric/vote scale.
+
+    At a template compile (no entity bound) the declared scale is a valid "expected" hint.
+    At a bound freeze the real scale is the authority; a definition that claims ``hundred``
+    over a real 50-mark rubric would otherwise smuggle raw votes/50-mark sheets into a
+    composite as if the units matched (§M1-R9-Final bound source truth).
+    """
+    if node["type"] != "ASSESS":
+        return
+    declared = node.get("scale")
+    if not declared:
+        return
+    actual = None
+    if node.get("vote_source"):
+        actual = (ctx.get("votes") or {}).get(node["vote_source"], {}).get("scale")
+    elif node.get("round"):
+        actual = _round_scale(ctx, node.get("round"))
+    if actual and actual != "unknown" and declared != actual:
+        issues.append(
+            ReportIssue(
+                "ASSESS_SCALE_BINDING_MISMATCH",
+                Severity.ERROR,
+                node["key"],
+                "scale",
+                f"节点声明 {declared} 与绑定实际 {actual} 不一致。",
+            )
+        )
+
+
 def _check_dependency(
     node: dict, prov: dict, ctx: dict, by_key: dict, issues: list[ReportIssue]
 ) -> None:
     if node["type"] != "AGGREGATE":
         return
-    # A within-scoped aggregate only scores the referenced advance roster, so mixing
-    # full/subset components is intentional and cannot leave a pool member without a
-    # component score (the roster is the very set that provides them).
+    comps = node["aggregate"]["components"]
+    # A within-scoped aggregate scores only the referenced advance roster, so mixing full and
+    # subset components is intentional: no member of that roster goes unscored. Skip the
+    # dependency check entirely for a within-scope.
     if node.get("within"):
         return
-    comps = node["aggregate"]["components"]
-    origins: set[str] = set()
+    # Scan component round origins in declaration order (not a set) so the reported
+    # ``missing_round`` is deterministic: R1 is a full pool, so the first subset round is R2.
+    origins: list[str] = []
     for comp in comps:
-        origins |= _origin_rounds(by_key, comp["source"], set())
+        for rnd in _origin_rounds(by_key, comp["source"], set()):
+            if rnd not in origins:
+                origins.append(rnd)
     subset_hit = None
     for rnd in origins:
         scope = _round_scope(ctx, rnd)
@@ -909,6 +978,7 @@ def compile_definition(
         _check_pair(node, prov, ctx, issues)
         _check_tie(node, prov, by_key, issues, cutoffs)
         _check_votes(node, ctx, issues)
+        _check_scale_binding(node, ctx, issues)
         _check_dependency(node, prov, ctx, by_key, issues)
         node_plans.append(_node_plan(node, prov, outputs))
         if node.get("vote_source"):

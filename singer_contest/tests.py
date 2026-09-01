@@ -1979,6 +1979,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
             }
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=definition,
             version=1,
@@ -2265,8 +2266,13 @@ class StageResultModelTests(TestCase):
 
     def test_reads_immutable_after_ready(self):
         result = self._result()
-        # A HOLD result can still be updated to CONFIRMED.
-        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.CONFIRMED)
+        # A HOLD result can still be updated to CONFIRMED (with its confirming trail).
+        StageResult.objects.filter(pk=result.pk).update(
+            status=StageResult.Status.CONFIRMED,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+            _bypass_confirmed=True,
+        )
         # Once CONFIRMED, further update/delete is blocked.
         with self.assertRaises(ValidationError):
             StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.HOLD)
@@ -2283,7 +2289,12 @@ class StageResultModelTests(TestCase):
             score=Decimal("92.46"),
             is_test_data=True,
         )
-        StageResult.objects.filter(pk=result.pk).update(status=StageResult.Status.CONFIRMED)
+        StageResult.objects.filter(pk=result.pk).update(
+            status=StageResult.Status.CONFIRMED,
+            confirmed_at=timezone.now(),
+            confirmed_by=self.user,
+            _bypass_confirmed=True,
+        )
         with self.assertRaises(ValidationError):
             StageDecision.objects.filter(pk=decision.pk).update(rank=2)
 
@@ -2319,6 +2330,7 @@ class StageResolverBindingTests(TestCase):
             activity=self.activity, name="院十佳规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=definition,
             is_current=True,
@@ -2446,6 +2458,7 @@ class StageResolverBindingTests(TestCase):
         # self.version is the current frozen v1; simulate a version that was frozen then
         # superseded by a newer authority (non-current, still FROZEN).
         stopped = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2553,6 +2566,7 @@ class StageResolverBindingTests(TestCase):
         from .services import bind_resolve_input, persist_stage_result
 
         v2 = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2634,6 +2648,7 @@ class StageResolverBindingTests(TestCase):
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2704,6 +2719,7 @@ class StageResolverBindingTests(TestCase):
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2739,6 +2755,7 @@ class StageResolverBindingTests(TestCase):
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         self.activity.save(update_fields=["phase"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2773,6 +2790,7 @@ class StageResolverBindingTests(TestCase):
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2821,6 +2839,7 @@ class StageResolverBindingTests(TestCase):
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2868,6 +2887,7 @@ class StageResolverBindingTests(TestCase):
         self.round.status = ContestRound.Status.LOCKED
         self.round.save(update_fields=["is_locked", "status"])
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=self.version.definition,
             version=2,
@@ -2908,6 +2928,7 @@ class StageResolverBindingTests(TestCase):
             }
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=definition,
             version=2,
@@ -2993,6 +3014,7 @@ class GoldenSchiduiDbTests(TestCase):
             activity=self.activity, name="院十佳规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=_schidui_definition(),
             is_current=True,
@@ -3212,6 +3234,7 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
             activity=self.activity, name="校十佳屏峰规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=_xiaofeng_definition(),
             is_current=True,
@@ -3357,15 +3380,16 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
         from .models import Performance, PerformanceGroup
         from .services import recompute_activity_result
 
-        ruleset = ContestRuleset.objects.create(
-            activity=self.activity,
-            name="校十佳屏峰自动源",
-            is_test_data=True,
-            stage_key="校十佳屏峰",
-            round_keys={"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk},
-        )
+        # Reuse the setUp ruleset (UNIQUE(activity)); demote its v1 current version so
+        # this v2 authority becomes the single current FROZEN runner for recompute.
+        ruleset = self.ruleset
+        ruleset.round_keys = {"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk}
+        ruleset.save(update_fields=["round_keys"])
+        RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
+            version=2,
             definition=_xiaofeng_definition(),
             is_current=True,
             status=RulesetVersion.Status.FROZEN,
@@ -3499,6 +3523,7 @@ class RapidEntryServiceTests(TestCase):
             round_keys={"r1": self.round.pk},
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {
@@ -3546,6 +3571,7 @@ class RapidEntryServiceTests(TestCase):
             round_keys={"r1": self.round.pk},
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {
@@ -3594,6 +3620,7 @@ class RapidEntryServiceTests(TestCase):
             round_keys={"r1": self.round.pk},
         )
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(
                 {
@@ -3666,6 +3693,7 @@ class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
             round_keys={"r1": self.round.pk},
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=json.dumps(
                 {
@@ -3828,6 +3856,7 @@ class BindingSourceHelperTests(TestCase):
         from .services import _source_manual
 
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
             is_current=True,
@@ -3882,6 +3911,7 @@ class ManualDecisionModelTests(TestCase):
             activity=self.activity, name="规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
             is_current=True,
@@ -3997,6 +4027,7 @@ class ManualDecisionServiceTests(TestCase):
 
     def _frozen(self, ruleset, definition):
         return RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=ruleset,
             definition=json.dumps(definition, ensure_ascii=False),
             version=RulesetVersion.objects.filter(ruleset=ruleset).count() + 1,
@@ -4116,6 +4147,7 @@ class ManualDecisionServiceTests(TestCase):
         from .services import set_manual_decision
 
         no_manual = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=json.dumps(
                 {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
@@ -4213,6 +4245,7 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
             activity=self.activity, name="并发规则", is_test_data=True
         )
         self.version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=json.dumps(self._manual_definition(), ensure_ascii=False),
             is_current=True,
@@ -4376,6 +4409,7 @@ class ConfirmedDependencyClosureTests(TestCase):
 
     def _frozen_version(self, definition, binding):
         version = RulesetVersion.objects.create(
+            _allow_freeze=True,
             ruleset=self.ruleset,
             definition=json.dumps(definition, ensure_ascii=False),
             version=RulesetVersion.objects.filter(ruleset=self.ruleset).count() + 1,
@@ -4489,6 +4523,7 @@ class ConfirmedDependencyClosureTests(TestCase):
             definition, {"stage_key": "选拔", "vote_keys": {"audience": self.vs.pk}}
         )
         StageResult.objects.create(
+            _bypass_confirmed=True,
             activity=self.activity,
             ruleset_version=version,
             created_by=self.user,
@@ -4526,6 +4561,7 @@ class ConfirmedDependencyClosureTests(TestCase):
         }
         version = self._frozen_version(definition, {"stage_key": "选拔"})
         StageResult.objects.create(
+            _bypass_confirmed=True,
             activity=self.activity,
             ruleset_version=version,
             created_by=self.user,

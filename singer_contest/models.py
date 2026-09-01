@@ -550,14 +550,23 @@ class CriterionScore(models.Model):
 
 
 class StageResultQuerySet(models.QuerySet):
-    """Guard: a CONFIRMED (核定并锁定) stage result is immutable."""
+    """Guard: a CONFIRMED stage result is immutable; only confirm_stage_result() confirms."""
 
     def _ensure_mutable(self):
         if self.filter(status=StageResult.Status.CONFIRMED).exists():
             raise ValidationError("A confirmed stage result is immutable.")
 
+    def create(self, **kwargs):
+        bypass = kwargs.pop("_bypass_confirmed", False)
+        obj = self.model(**kwargs)
+        obj.save(force_insert=True, using=self.db, _bypass_confirmed=bypass)
+        return obj
+
     def update(self, **kwargs):
+        bypass = kwargs.pop("_bypass_confirmed", False)
         self._ensure_mutable()
+        if not bypass and kwargs.get("status") == StageResult.Status.CONFIRMED:
+            raise ValidationError("Only confirm_stage_result() may confirm a stage result.")
         return super().update(**kwargs)
 
     def delete(self):
@@ -566,7 +575,14 @@ class StageResultQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
+        if "status" in fields:
+            raise ValidationError("StageResult status transitions are service-only.")
         return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        if any(o.status == StageResult.Status.CONFIRMED for o in objs):
+            raise ValidationError("Only confirm_stage_result() may confirm a stage result.")
+        return super().bulk_create(objs, *args, **kwargs)
 
 
 StageResultManager = models.Manager.from_queryset(StageResultQuerySet)
@@ -630,10 +646,6 @@ class StageResult(models.Model):
     class Meta:
         ordering = ["-computed_at", "pk"]
         constraints = [
-            models.UniqueConstraint(
-                fields=["activity", "stage_key", "ruleset_version", "input_fingerprint"],
-                name="stage_result_unique_identity",
-            ),
             # M1-R9 (§二 Authoritative Recompute): the per-stage result_version is a formal
             # publication number. Two concurrent recomputes of one activity must not mint
             # the same version — the Activity FOR UPDATE lock serializes them, and this DB
@@ -641,6 +653,23 @@ class StageResult(models.Model):
             models.UniqueConstraint(
                 fields=["activity", "stage_key", "result_version"],
                 name="stage_result_unique_version",
+            ),
+            # M1-R9-Final: a CONFIRMED stage result demands the confirming audit trail;
+            # a non-confirmed one must not carry it (the confirm service sets both together).
+            models.CheckConstraint(
+                condition=(
+                    (
+                        Q(status="confirmed")
+                        & Q(confirmed_at__isnull=False)
+                        & Q(confirmed_by__isnull=False)
+                    )
+                    | (
+                        ~Q(status="confirmed")
+                        & Q(confirmed_at__isnull=True)
+                        & Q(confirmed_by__isnull=True)
+                    )
+                ),
+                name="stage_result_confirmed_trail_consistent",
             ),
         ]
 
@@ -674,14 +703,23 @@ class StageResult(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         bypass = kwargs.pop("_bypass_confirmed", False)
-        if not bypass:
-            stored = self._stored(self._immutable_fields)
+        stored = self._stored(["status"])
+        if self._state.adding:
+            if not bypass and self.status == self.Status.CONFIRMED:
+                raise ValidationError("只在核定服务中产生已核定赛段结果。")
+        elif not bypass:
             if stored and stored["status"] == self.Status.CONFIRMED:
                 modified = [f for f in self._immutable_fields if getattr(self, f) != stored[f]]
                 if modified:
                     raise ValidationError(
                         f"A confirmed stage result is immutable (cannot change {modified})."
                     )
+            if (
+                stored
+                and stored["status"] != self.Status.CONFIRMED
+                and self.status == self.Status.CONFIRMED
+            ):
+                raise ValidationError("Only confirm_stage_result() may confirm a stage result.")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -714,6 +752,14 @@ class StageDecisionQuerySet(models.QuerySet):
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
         return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        parent_ids = {o.stage_result_id for o in objs if o.stage_result_id}
+        if StageResult._base_manager.filter(
+            pk__in=parent_ids, status=StageResult.Status.CONFIRMED
+        ).exists():
+            raise ValidationError("Decisions of a confirmed stage result are immutable.")
+        return super().bulk_create(objs, *args, **kwargs)
 
 
 StageDecisionManager = models.Manager.from_queryset(StageDecisionQuerySet)
@@ -802,6 +848,14 @@ class CompositeResultQuerySet(models.QuerySet):
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
         return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        parent_ids = {o.stage_result_id for o in objs if o.stage_result_id}
+        if StageResult._base_manager.filter(
+            pk__in=parent_ids, status=StageResult.Status.CONFIRMED
+        ).exists():
+            raise ValidationError("Composites of a confirmed stage result are immutable.")
+        return super().bulk_create(objs, *args, **kwargs)
 
 
 CompositeResultManager = models.Manager.from_queryset(CompositeResultQuerySet)
