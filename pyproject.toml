@@ -66,11 +66,6 @@ extend-exclude = [
     # code; formatting them just to satisfy the repo-wide gate adds churn without
     # improving anything. Mirrors the non-source excludes above.
     "docs/**",
-    # The restored copy of the reviewer's advice document is the authoritative
-    # source of truth; letting the formatter rewrite its embedded snippets would
-    # diverge it from the original. Same rationale as docs/**, so keep it out of
-    # the gate.
-    "ChatGPT.md",
 ]
 
 [tool.ruff.lint]
