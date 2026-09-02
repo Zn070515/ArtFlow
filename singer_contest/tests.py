@@ -2991,6 +2991,168 @@ def _xiaofeng_definition():
     return GOLDEN_XIAOFENG
 
 
+def _roster_bridge_definition():
+    """Two-stage forward chain: R1 picks a top-3, the final round picks a top-1."""
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {"key": "top3", "type": "SELECT", "source": "rank1", "count": 3},
+                {"key": "assess_f", "type": "ASSESS", "source": "top3", "round": "final"},
+                {"key": "rank2", "type": "RANK", "source": "assess_f", "descending": True},
+                {"key": "top1", "type": "SELECT", "source": "rank2", "count": 1},
+            ],
+            "checkpoints": [
+                {"key": "stage1", "output": "top3"},
+                {"key": "stage2", "output": "top1"},
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+class RoundEntryBridgeTests(TestCase):
+    """M1-INTEGRATION-1: StageDecision drives the next round's entry roster.
+
+    Covers the reviewer's acceptance: 复赛 TopN -> StageDecision -> automatically
+    materialise the ``RoundEntry`` of the round bound to that stage, and the final
+    ruleset's bind rosters exactly those advancers — never the whole approved list.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="roster-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="Roster Bridge",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="Roster规则", is_test_data=True
+        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=_roster_bridge_definition(),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        self.judge = Judge.objects.create(activity=self.activity, name="评委A")
+        self.singers = [self._singer(i) for i in range(1, 7)]
+        self.prelim = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="初赛",
+            sequence=1,
+        )
+        self.final = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            name="决赛",
+            sequence=2,
+            roster_source=ContestRound.RosterSource.STAGE,
+            roster_source_stage="stage1",
+        )
+        self._seed_r1()
+
+    def _singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"roster-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"9000{index:02d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def _score(self, round_, singers, scorer):
+        for idx, singer in enumerate(singers, 1):
+            ScoreRecord.objects.create(
+                round=round_,
+                singer=singer,
+                judge=self.judge,
+                score=Decimal(scorer(idx)),
+                is_test_data=True,
+            )
+
+    def _seed_r1(self):
+        # Descending scores: singer 1 (idx0) highest -> singer 3 (idx2) third.
+        self._score(self.prelim, self.singers, lambda i: 100 - i)
+
+    def _entry_ids(self, round_):
+        return list(
+            RoundEntry.objects.filter(round=round_)
+            .order_by("pk")
+            .values_list("singer_id", flat=True)
+        )
+
+    def test_stage1_bridges_next_round_entry_to_top3(self):
+        from .services import run_ruleset
+
+        stage = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage1",
+        )
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)  # type: ignore[union-attr]
+        self.assertEqual(stage.stage_key, "stage1")  # type: ignore[union-attr]
+        self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
+
+    def test_final_ruleset_entry_is_top3_not_all_approved(self):
+        from .services import bind_resolve_input, run_ruleset
+
+        run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage1",
+        )
+        inputs = bind_resolve_input(
+            self.version,
+            self.activity,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage2",
+        )
+        self.assertEqual(inputs.roster, tuple(str(s.pk) for s in self.singers[:3]))
+
+    def test_stage_round_seeds_from_roster_not_is_advanced(self):
+        from .services import prepare_round
+
+        RoundEntry.objects.bulk_create(
+            [RoundEntry(round=self.final, singer=s) for s in self.singers[:3]]
+        )
+        # A conflicting upstream is_advanced marker must NOT leak into the STAGE round.
+        ScoreSummary.objects.create(
+            round=self.prelim,
+            singer=self.singers[3],
+            average_score=Decimal("99.0"),
+            rank=1,
+            is_advanced=True,
+            is_test_data=True,
+        )
+        prepared = prepare_round(self.final, self.admin)
+        self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
+        self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
+
+    def test_stage_round_without_roster_raises(self):
+        from .services import prepare_round
+
+        with self.assertRaisesMessage(ValidationError, "尚未生成该轮晋级名单"):
+            prepare_round(self.final, self.admin)
+
+
 class GoldenSchiduiDbTests(TestCase):
     """M1-F golden 院十佳 end-to-end: 15 singers through the DB, run_ruleset, verify.
 

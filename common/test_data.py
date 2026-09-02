@@ -226,7 +226,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from singer_contest.services import _authorized_manual_write
 
     with _authorized_manual_write():
-        ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()
+        ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     VoteRecord.objects.filter(

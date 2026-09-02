@@ -16,10 +16,11 @@ from core.policies import ActivityAction
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Max, QuerySet
+from django.db.models import Max, Q, QuerySet
 from django.utils import timezone
 from ruleset.compiler import ExecutionPlan, compile_version
 from ruleset.resolver import (
+    OutcomeCode,
     ResolveInput,
     ResolveResult,
     ResolverState,
@@ -67,9 +68,10 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
 
-    if locked_round.round_type == ContestRound.RoundType.PRELIMINARY:
+    source = locked_round.effective_roster_source()
+    if source == ContestRound.RosterSource.APPROVED:
         singers = list(runtime_approved_singers(locked_round.activity).order_by("pk"))
-    else:
+    elif source == ContestRound.RosterSource.LEGACY:
         previous_round = ContestRound.objects.filter(
             activity=locked_round.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -88,6 +90,14 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
                 locked_round.activity,
             ).order_by("pk")
         )
+    else:  # STAGE: the roster is owned by the StageDecision -> RoundEntry bridge.
+        singers = list(
+            SingerRegistration.objects.filter(
+                round_entries__round=locked_round, activity=locked_round.activity
+            ).order_by("pk")
+        )
+        if not singers:
+            raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
 
     judges = list(
         Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
@@ -98,9 +108,10 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if locked_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW and len(judges) < 3:
         raise ValidationError("当前评分方式至少需要 3 名评委。")
 
-    RoundEntry.objects.bulk_create(
-        [RoundEntry(round=locked_round, singer=singer) for singer in singers]
-    )
+    if source != ContestRound.RosterSource.STAGE:
+        RoundEntry.objects.bulk_create(
+            [RoundEntry(round=locked_round, singer=singer) for singer in singers]
+        )
     RoundJudge.objects.bulk_create(
         [RoundJudge(round=locked_round, judge=judge) for judge in judges]
     )
@@ -250,19 +261,15 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
     if locked_round.status == ContestRound.Status.DRAFT:
         return locked_round
     ensure_round_not_consumed_by_confirmed_stage(locked_round)
-    round_order = {
-        ContestRound.RoundType.PRELIMINARY: 0,
-        ContestRound.RoundType.SEMI_FINAL: 1,
-    }
     for other in (
         ContestRound.objects.select_for_update()
         .filter(activity=locked_round.activity)
         .exclude(pk=locked_round.pk)
         .order_by("pk")
     ):
-        other_rank = round_order[ContestRound.RoundType(other.round_type)]
-        this_rank = round_order[ContestRound.RoundType(locked_round.round_type)]
-        if other.status != ContestRound.Status.DRAFT and other_rank > this_rank:
+        if other.status != ContestRound.Status.DRAFT and (
+            (other.sequence, other.pk) > (locked_round.sequence, locked_round.pk)
+        ):
             raise ValidationError("后续轮次仍在使用本轮结果，重置前必须先清空后续轮次。")
     return reset_round_snapshots(locked_round, actor, reason=reason)
 
@@ -270,14 +277,18 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
 def downstream_rounds(contest_round: ContestRound) -> QuerySet[ContestRound]:
     """Rounds that consume this round's advancement, if any.
 
-    Only a preliminary round currently feeds a later round.
+    ``(sequence, pk)`` is the ordering authority: any round positioned later is a
+    consumer. Use ``.first()`` on the result (both fields are defined) to pick the
+    immediate downstream round.
     """
-    if contest_round.round_type == ContestRound.RoundType.PRELIMINARY:
-        return ContestRound.objects.filter(
-            activity=contest_round.activity,
-            round_type=ContestRound.RoundType.SEMI_FINAL,
+    return (
+        ContestRound.objects.filter(activity=contest_round.activity)
+        .filter(
+            Q(sequence__gt=contest_round.sequence)
+            | Q(sequence=contest_round.sequence, pk__gt=contest_round.pk)
         )
-    return ContestRound.objects.none()
+        .order_by("sequence", "pk")
+    )
 
 
 def ensure_round_final_for_advancement(contest_round: ContestRound) -> None:
@@ -962,24 +973,43 @@ def parse_score_workbook(uploaded_file, contest_round: ContestRound):
 # --- M1-F: bind a frozen ruleset to the database, resolve, and persist. ---------
 
 
-def bind_resolve_input(
-    version,
-    activity,
-    *,
-    round_keys: Mapping[str, ContestRound],
-    vote_scores=None,
-    group_of=None,
-    manual=None,
-) -> ResolveInput:
-    """Load a :class:`ResolveInput` from the DB for a frozen ruleset.
+def _consumed_entry_round(version, activity, bound_rounds, checkpoint) -> ContestRound | None:
+    """The highest-sequence consumed bound round for a checkpoint, or None.
 
-    The roster is the activity's approved singers (runtime-scoped, canonical pk
-    order). Round scores are read raw from :class:`ScoreRecord` grouped
-    round -> singer -> judge scores, so the engine owns the scoring mode. Vote
-    scores arrive already normalized (§16.9): the caller supplies the single
-    Decimal per contestant — the binder never re-derives a raw-vote score.
+    A checkpoint's dependency closure names the round keys it reads; the round whose
+    snapshot declares the advancing roster is the last (largest ``(sequence, pk)``) of
+    those. Non-checkpoint (full) stages are not roster-scoped, so return None and let the
+    binder use the whole approved roster instead.
     """
-    roster = tuple(
+    if checkpoint is None:
+        return None
+    consumed_round_keys, _, _, _ = stage_consumed_scopes(version.definition, checkpoint)
+    candidates = [bound_rounds[k] for k in consumed_round_keys if k in bound_rounds]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda round_: (round_.sequence, round_.pk))
+    return candidates[-1]
+
+
+def _stage_entry_roster(version, activity, bound_rounds, *, checkpoint=None) -> tuple[str, ...]:
+    """The entry roster for a stage bind.
+
+    A checkpoint stage screens a round snapshot — the consumed bound round with the
+    highest ``(sequence, pk)`` — whose ``RoundEntry`` is exactly the advancing set (the
+    reviewer's "final ruleset entry must contain only the finalists"). When the stage is
+    not checkpoint-scoped, or the consumed round has no materialized entry, fall back to
+    the activity's approved singers so non-checkpoint and golden paths are unchanged.
+    """
+    entry_round = _consumed_entry_round(version, activity, bound_rounds, checkpoint)
+    if entry_round is not None:
+        entry_ids = list(
+            RoundEntry.objects.filter(round=entry_round)
+            .order_by("pk")
+            .values_list("singer_id", flat=True)
+        )
+        if entry_ids:
+            return tuple(str(pk) for pk in entry_ids)
+    return tuple(
         str(pk)
         for pk in scope_runtime(
             SingerRegistration.objects.filter(
@@ -989,6 +1019,29 @@ def bind_resolve_input(
             activity,
         ).values_list("pk", flat=True)
     )
+
+
+def bind_resolve_input(
+    version,
+    activity,
+    *,
+    round_keys: Mapping[str, ContestRound],
+    vote_scores=None,
+    group_of=None,
+    manual=None,
+    checkpoint=None,
+) -> ResolveInput:
+    """Load a :class:`ResolveInput` from the DB for a frozen ruleset.
+
+    A checkpoint stage's roster is the advancing snapshot of its consumed round (see
+    :func:`_stage_entry_roster`), so the entry reflects *who advanced*, not the whole
+    approved list. Non-checkpoint stages keep the approved singers. Round scores are
+    read raw from :class:`ScoreRecord` grouped round -> singer -> judge scores, so the
+    engine owns the scoring mode. Vote scores arrive already normalized (§16.9): the
+    caller supplies the single Decimal per contestant — the binder never re-derives a
+    raw-vote score.
+    """
+    roster = _stage_entry_roster(version, activity, round_keys, checkpoint=checkpoint)
     round_scores = {}
     for rkey, contest_round in round_keys.items():
         grouped: dict[str, list[Decimal]] = {}
@@ -1151,6 +1204,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         StageDecision.objects.filter(stage_result=latest).delete()
         CompositeResult.objects.filter(stage_result=latest).delete()
         _create_children(latest, result, singer_by_key, is_test)
+        materialize_round_entry_from_stage(latest, operator=computed_by)
         return latest
 
     last_version = (
@@ -1174,6 +1228,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         is_test_data=is_test,
     )
     _create_children(stage, result, singer_by_key, is_test)
+    materialize_round_entry_from_stage(stage, operator=computed_by)
     return stage
 
 
@@ -1218,6 +1273,81 @@ def _create_children(stage, result, singer_by_key, is_test):
     )
 
 
+# Outcome codes that carry a contestant forward into the round bound to that stage.
+# ``pending`` (tie awaiting adjudication) and ``eliminated`` are NOT advancing.
+_ADVANCING_OUTCOME_CODES = frozenset(
+    {
+        OutcomeCode.DIRECT.value,
+        OutcomeCode.ADVANCED.value,
+        OutcomeCode.WILDCARD.value,
+        OutcomeCode.FINALIST.value,
+        OutcomeCode.REPECHAGE.value,
+    }
+)
+
+
+@transaction.atomic
+def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> ContestRound | None:
+    """Auto-generate a DRAFT round's entry roster from a resolved stage.
+
+    The StageDecision table is the advancement authority (M1-INTEGRATION-1): every
+    contestant with an advancing outcome code moves into the ``STAGE`` round bound to
+    this stage (``roster_source_stage == stage.stage_key``). Only resolve on a stage
+    that has actually decided something (READY_TO_CONFIRM / CONFIRMED), so a HOLD or
+    REVIEW result never writes a partial roster. Entries are added idempotently and
+    never deleted, so re-persist / re-confirm of the same advancing set is a no-op.
+    Returns the target round, or None when no DRAFT STAGE round consumes this stage.
+    """
+    if stage.status not in {
+        StageResult.Status.READY_TO_CONFIRM,
+        StageResult.Status.CONFIRMED,
+    }:
+        return None
+    advancers = list(
+        stage.decisions.filter(outcome_code__in=_ADVANCING_OUTCOME_CODES)
+        .select_related("singer")
+        .order_by("rank", "pk")
+    )
+    if not advancers:
+        return None
+    target = (
+        ContestRound.objects.select_for_update()
+        .filter(
+            activity=stage.activity,
+            roster_source=ContestRound.RosterSource.STAGE,
+            roster_source_stage=stage.stage_key,
+            status=ContestRound.Status.DRAFT,
+        )
+        .order_by("sequence", "pk")
+        .first()
+    )
+    if target is None:
+        return None
+    existing_ids = set(RoundEntry.objects.filter(round=target).values_list("singer_id", flat=True))
+    to_create = [
+        RoundEntry(round=target, singer=decision.singer)
+        for decision in advancers
+        if decision.singer_id not in existing_ids
+    ]
+    if to_create:
+        RoundEntry.objects.bulk_create(to_create)
+        AuditLog.objects.create(
+            operator=operator,
+            action_type=AuditLog.ActionType.OTHER,
+            target=f"ContestRound:{target.pk}",
+            new_value=json.dumps(
+                {
+                    "stage_key": stage.stage_key,
+                    "added_entries": len(to_create),
+                    "advancers": len(advancers),
+                },
+                ensure_ascii=False,
+            ),
+            note="materialize_round_entry_from_stage",
+        )
+    return target
+
+
 def _definition_checkpoint_keys(definition) -> set[str]:
     obj = definition if isinstance(definition, dict) else json.loads(definition)
     return {c["key"] for c in (obj.get("checkpoints") or ())}
@@ -1228,13 +1358,14 @@ def _stage_is_checkpoint(version, stage_key: str) -> bool:
     return stage_key in _definition_checkpoint_keys(version.definition)
 
 
-def _bound_inputs(version, activity) -> tuple[ResolveInput, dict]:
+def _bound_inputs(version, activity, *, checkpoint=None) -> tuple[ResolveInput, dict]:
     """Rebuild the current :class:`ResolveInput` from the frozen version's binding.
 
     This is the authority reference for staleness re-checking: it re-reads the raw
     facts (round scores, vote counts, group map, manual picks) exactly as the runtime
     would today. The version's frozen binding drives which rounds/votes/groups are read,
-    so a binding-only change already alters the recomputed fingerprint.
+    so a binding-only change already alters the recomputed fingerprint. ``checkpoint``
+    is threaded so a checkpoint stage's roster matches the one bound at persist time.
     """
     binding = _version_binding(version)
     raw_keys = binding.get("round_keys") or {}
@@ -1248,6 +1379,7 @@ def _bound_inputs(version, activity) -> tuple[ResolveInput, dict]:
         vote_scores=_source_vote_scores(activity, binding),
         group_of=_source_group_of(activity, binding),
         manual=_source_manual(version, activity),
+        checkpoint=checkpoint,
     )
     return inputs, binding
 
@@ -1260,8 +1392,9 @@ def _current_input_fingerprint(version, activity, stage_key: str) -> str:
     the whole-input fingerprint. A mismatch against a stored ``input_fingerprint`` means
     the result is stale.
     """
-    inputs, _ = _bound_inputs(version, activity)
-    if _stage_is_checkpoint(version, stage_key):
+    checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
+    inputs, _ = _bound_inputs(version, activity, checkpoint=checkpoint)
+    if checkpoint:
         return checkpoint_inputs_fingerprint(version.definition, inputs, stage_key)
     return inputs_fingerprint(inputs)
 
@@ -1554,6 +1687,7 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
             sort_keys=True,
         ),
     )
+    materialize_round_entry_from_stage(locked, operator=confirmed_by)
     return locked
 
 
@@ -1631,6 +1765,7 @@ def run_ruleset(
         vote_scores=vote_scores,
         group_of=group_of,
         manual=manual,
+        checkpoint=checkpoint,
     )
     plan = _plan_from_version(version)
     if checkpoint:

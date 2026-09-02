@@ -211,7 +211,7 @@ class AuthorityClosureAcceptanceTests(TestCase):
 
         # The override kwarg is gone from the formal publication path.
         with self.assertRaises(TypeError):
-            recompute_activity_result(
+            recompute_activity_result(  # type: ignore[call-arg]
                 self.activity, self.user, ruleset=self.ruleset, round_keys={"r1": self.round.pk}
             )
         stage = recompute_activity_result(self.activity, self.user, ruleset=self.ruleset)

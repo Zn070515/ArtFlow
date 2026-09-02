@@ -99,6 +99,11 @@ class ContestRound(models.Model):
         PRELIMINARY = "preliminary", "初赛"
         SEMI_FINAL = "semi_final", "复赛"
 
+    class RosterSource(models.TextChoices):
+        APPROVED = "approved", "批准名单"
+        STAGE = "stage", "赛段晋级"
+        LEGACY = "legacy", "上一轮晋级"
+
     class ScoringMode(models.TextChoices):
         AVERAGE = "average", "平均分"
         DROP_HIGH_LOW = "drop_high_low", "去最高最低后平均"
@@ -133,6 +138,10 @@ class ContestRound(models.Model):
     advancement_status = models.CharField(
         max_length=16, choices=AdvancementStatus, default=AdvancementStatus.AUTO
     )
+    roster_source = models.CharField(
+        max_length=16, choices=RosterSource, default=RosterSource.APPROVED
+    )
+    roster_source_stage = models.CharField(max_length=100, blank=True, default="")
 
     class Meta:
         constraints = [
@@ -147,6 +156,24 @@ class ContestRound(models.Model):
                 name="round_advance_count_non_negative",
             ),
         ]
+
+    def effective_roster_source(self) -> str:
+        """The roster provider for this round, resolving the M1-INTEGRATION-1 source.
+
+        ``STAGE`` (advancers of a resolved stage, decided by StageDecision) is the
+        integration mode; the legacy ``ScoreSummary.is_advanced`` path stays available
+        as ``LEGACY`` for simple screening. When ``roster_source`` is unset the value is
+        derived from ``round_type`` so the old two-round behaviour is unchanged.
+        """
+        if self.roster_source == self.RosterSource.STAGE:
+            if not self.roster_source_stage:
+                raise ValidationError("赛段晋级轮次必须声明 source_stage。")
+            return self.RosterSource.STAGE
+        if self.roster_source == self.RosterSource.LEGACY:
+            return self.RosterSource.LEGACY
+        if self.round_type == self.RoundType.SEMI_FINAL:
+            return self.RosterSource.LEGACY
+        return self.RosterSource.APPROVED
 
     def __str__(self):
         return f"{self.activity.title} — {self.get_round_type_display()}"

@@ -14,6 +14,7 @@ module generalises it so RulesetVersion and StageResult share one mechanism rath
 """
 
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 # Write-authority scope identifiers.
@@ -23,7 +24,7 @@ STAGE_RESULT_CONFIRM = "stageresult.confirm"
 _scope = threading.local()
 
 
-def _active_scopes() -> frozenset:
+def _active_scopes() -> frozenset[str]:
     return frozenset(getattr(_scope, "scopes", ()))
 
 
@@ -32,12 +33,12 @@ def authority_authorized(scope: str) -> bool:
     return scope in _active_scopes()
 
 
-def _set_scope(scopes) -> None:
+def _set_scope(scopes: frozenset[str]) -> None:
     _scope.scopes = frozenset(scopes)
 
 
 @contextmanager
-def authority_write(scope: str):
+def authority_write(scope: str) -> Iterator[None]:
     """Bracket a formal write with *scope*; restores the prior authority on exit.
 
     ``authority_authorized`` is False outside any ``authority_write`` block, so a bare
