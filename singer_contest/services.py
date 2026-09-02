@@ -72,10 +72,15 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if source == ContestRound.RosterSource.APPROVED:
         singers = list(runtime_approved_singers(locked_round.activity).order_by("pk"))
     elif source == ContestRound.RosterSource.LEGACY:
-        previous_round = ContestRound.objects.filter(
-            activity=locked_round.activity,
-            round_type=ContestRound.RoundType.PRELIMINARY,
-        ).first()
+        previous_round = (
+            ContestRound.objects.filter(activity=locked_round.activity)
+            .filter(
+                Q(sequence__lt=locked_round.sequence)
+                | Q(sequence=locked_round.sequence, pk__lt=locked_round.pk)
+            )
+            .order_by("-sequence", "-pk")
+            .first()
+        )
         if previous_round is None:
             raise ValidationError("后续轮次必须先有上一轮比赛。")
         ensure_round_final_for_advancement(previous_round)
@@ -1009,6 +1014,12 @@ def _stage_entry_roster(version, activity, bound_rounds, *, checkpoint=None) -> 
         )
         if entry_ids:
             return tuple(str(pk) for pk in entry_ids)
+        # The consumed round owns a subset roster (STAGE / LEGACY) that has not been
+        # materialized yet. Refusing to widen to the whole approved list keeps the
+        # "only the finalists" guarantee. An APPROVED round legitimately rosters every
+        # approved singer regardless, so only that case falls back.
+        if entry_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
+            raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
     return tuple(
         str(pk)
         for pk in scope_runtime(
@@ -1294,9 +1305,11 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     contestant with an advancing outcome code moves into the ``STAGE`` round bound to
     this stage (``roster_source_stage == stage.stage_key``). Only resolve on a stage
     that has actually decided something (READY_TO_CONFIRM / CONFIRMED), so a HOLD or
-    REVIEW result never writes a partial roster. Entries are added idempotently and
-    never deleted, so re-persist / re-confirm of the same advancing set is a no-op.
-    Returns the target round, or None when no DRAFT STAGE round consumes this stage.
+    REVIEW result never writes a partial roster. The round entry is reconciled to the
+    *current* advancing set: a re-resolved stage (new ``result_version``) prunes
+    superseded advancers and adds new ones, so a round still in DRAFT never silently
+    retains a contestant who no longer advances. Returns the target round, or None
+    when no DRAFT STAGE round consumes this stage.
     """
     if stage.status not in {
         StageResult.Status.READY_TO_CONFIRM,
@@ -1323,14 +1336,20 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     )
     if target is None:
         return None
-    existing_ids = set(RoundEntry.objects.filter(round=target).values_list("singer_id", flat=True))
+    entry_qs = RoundEntry.objects.filter(round=target)
+    existing_ids = set(entry_qs.values_list("singer_id", flat=True))
+    target_ids = {decision.singer_id for decision in advancers}
+    removed = existing_ids - target_ids
     to_create = [
         RoundEntry(round=target, singer=decision.singer)
         for decision in advancers
         if decision.singer_id not in existing_ids
     ]
+    if removed:
+        entry_qs.filter(singer_id__in=removed).delete()
     if to_create:
         RoundEntry.objects.bulk_create(to_create)
+    if removed or to_create:
         AuditLog.objects.create(
             operator=operator,
             action_type=AuditLog.ActionType.OTHER,
@@ -1339,6 +1358,7 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
                 {
                     "stage_key": stage.stage_key,
                     "added_entries": len(to_create),
+                    "removed_entries": len(removed),
                     "advancers": len(advancers),
                 },
                 ensure_ascii=False,
@@ -1758,6 +1778,11 @@ def run_ruleset(
         raise ValidationError("Only a frozen ruleset version may be executed.")
     if not version.is_current and not preview:
         raise ValidationError("Only the current frozen ruleset version produces a formal result.")
+    # A stage_key that names a declared checkpoint must resolve *as* that checkpoint:
+    # confirm_stage_result re-derives the projection purely from stage_key, so the
+    # persisted input_fingerprint has to be computed on the same (scoped) roster.
+    if checkpoint is None and _stage_is_checkpoint(version, stage_key):
+        checkpoint = stage_key
     inputs = bind_resolve_input(
         version,
         activity,

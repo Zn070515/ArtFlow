@@ -139,7 +139,11 @@ class ContestRound(models.Model):
         max_length=16, choices=AdvancementStatus, default=AdvancementStatus.AUTO
     )
     roster_source = models.CharField(
-        max_length=16, choices=RosterSource, default=RosterSource.APPROVED
+        max_length=16,
+        choices=RosterSource,
+        default="",
+        blank=True,
+        help_text="晋级名单来源；置空时按轮次类型自动判定。",
     )
     roster_source_stage = models.CharField(max_length=100, blank=True, default="")
 
@@ -162,15 +166,14 @@ class ContestRound(models.Model):
 
         ``STAGE`` (advancers of a resolved stage, decided by StageDecision) is the
         integration mode; the legacy ``ScoreSummary.is_advanced`` path stays available
-        as ``LEGACY`` for simple screening. When ``roster_source`` is unset the value is
-        derived from ``round_type`` so the old two-round behaviour is unchanged.
+        as ``LEGACY`` for simple screening. An explicit ``roster_source`` always wins;
+        only when it is unset (the default) is the value derived from ``round_type`` so
+        the old two-round behaviour is unchanged.
         """
-        if self.roster_source == self.RosterSource.STAGE:
-            if not self.roster_source_stage:
+        if self.roster_source:
+            if self.roster_source == self.RosterSource.STAGE and not self.roster_source_stage:
                 raise ValidationError("赛段晋级轮次必须声明 source_stage。")
-            return self.RosterSource.STAGE
-        if self.roster_source == self.RosterSource.LEGACY:
-            return self.RosterSource.LEGACY
+            return self.roster_source
         if self.round_type == self.RoundType.SEMI_FINAL:
             return self.RosterSource.LEGACY
         return self.RosterSource.APPROVED

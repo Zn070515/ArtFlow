@@ -3152,6 +3152,69 @@ class RoundEntryBridgeTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "尚未生成该轮晋级名单"):
             prepare_round(self.final, self.admin)
 
+    def test_revising_stage_reconciles_round_entry(self):
+        """A re-resolved stage must prune a superseded advancer from the round entry."""
+        from .services import run_ruleset
+
+        run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage1",
+        )
+        self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
+
+        # Flip the ranking so a different trio advances (descending scores 99..94).
+        ScoreRecord.objects.filter(round=self.prelim).delete()
+        self._score(self.prelim, list(reversed(self.singers)), lambda i: 100 - i)
+        run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage1",
+        )
+        ids = set(self._entry_ids(self.final))
+        self.assertEqual(ids, {self.singers[3].pk, self.singers[4].pk, self.singers[5].pk})
+        # The original trio (s1..s3) all advanced before; none may be retained now.
+        self.assertTrue({s.pk for s in self.singers[:3]}.isdisjoint(ids))
+
+    def test_checkpoint_bind_without_materialized_subset_round_raises(self):
+        """A checkpoint over a not-yet-materialized STAGE round must not widen to all."""
+        from .services import bind_resolve_input
+
+        with self.assertRaisesMessage(ValidationError, "尚未生成该轮晋级名单"):
+            bind_resolve_input(
+                self.version,
+                self.activity,
+                round_keys={"r1": self.prelim, "final": self.final},
+                checkpoint="stage2",
+            )
+
+    def test_checkpoint_named_stage_key_persists_scoped_fingerprint(self):
+        """A checkpoint-named stage_key resolves as that checkpoint even without it."""
+        from .services import run_ruleset
+
+        no_checkpoint = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+        )
+        explicit = run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage1",
+        )
+        self.assertEqual(no_checkpoint.input_fingerprint, explicit.input_fingerprint)
+
 
 class GoldenSchiduiDbTests(TestCase):
     """M1-F golden 院十佳 end-to-end: 15 singers through the DB, run_ruleset, verify.
