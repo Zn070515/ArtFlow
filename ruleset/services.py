@@ -206,6 +206,13 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     if missing_groups:
         raise ValidationError(f"赛制绑定的分组成员轮次不属于该活动：{missing_groups}")
 
+    # A source key must not bind as both a raw-count vote and a staff-entered audience
+    # score: `_combined_vote_scores` would silently let audience overwrite the counts, and
+    # `_stage_consumed_facts` already splits them — so reject the ambiguity at freeze time.
+    overlap = set(vote_keys) & set(audience_keys)
+    if overlap:
+        raise ValidationError(f"观众分与投票键重复绑定：{sorted(overlap)}")
+
     return {
         "stage_key": str(binding.get("stage_key") or "").strip(),
         "round_keys": normalized_round_keys,

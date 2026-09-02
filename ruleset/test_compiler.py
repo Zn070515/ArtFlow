@@ -1490,3 +1490,17 @@ class BindingValidationTests(_RulesetModelBase):
         ruleset = self.make_ruleset()
         with self.assertRaises(ValidationError):
             validate_binding(ruleset, {"round_keys": ["not-a-map"]})
+
+    def test_rejects_vote_and_audience_key_overlap(self):
+        # A source_key bound as both a raw-count vote and a staff audience score would be
+        # silently overwritten in the vote channel, so the binding must reject it.
+        ruleset = self.make_ruleset()
+        vote = self._vote_session(ruleset)
+        with self.assertRaises(ValidationError):
+            validate_binding(
+                ruleset,
+                {
+                    "vote_keys": {"shared": str(vote.pk)},
+                    "audience_keys": {"shared": "stage1"},
+                },
+            )

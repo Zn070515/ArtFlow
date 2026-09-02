@@ -85,6 +85,7 @@ from singer_contest.services import (
     StaleScoreVersionError,
     _active_judges,
     _current_frozen_version,
+    _current_resolve_status,
     _eligible_singers,
     _version_binding,
     apply_scores,
@@ -1042,10 +1043,12 @@ def round_scores_api(request, pk):
     resolved_status = None
     if result["matrix_complete"]:
         try:
-            stage_keys = maybe_resolve_checkpoints(contest_round.activity, request.user)
+            maybe_resolve_checkpoints(contest_round.activity, request.user)
         except ValidationError:
-            stage_keys = []
-        resolved_status = StageResult.Status.READY_TO_CONFIRM if stage_keys else None
+            pass
+        # Report the stage's true current status (not just whether this save newly resolved
+        # it): a no-op re-save of an already-READY stage must not read as "未计算".
+        resolved_status = _current_resolve_status(contest_round.activity)
     return JsonResponse({**result, "resolved_status": resolved_status})
 
 
@@ -1060,7 +1063,10 @@ def audience_scores_api(request, activity_id):
     auto-resolves any now-satisfiable checkpoint.
     """
     activity = get_object_or_404(Activity, pk=activity_id)
-    version = _current_frozen_version(activity)
+    try:
+        version = _current_frozen_version(activity)
+    except ValidationError as error:
+        return JsonResponse({"detail": error.messages}, status=400)
     binding = _version_binding(version) if version is not None else {}
     audience_keys = binding.get("audience_keys") or {}
     if not audience_keys:
@@ -1119,6 +1125,11 @@ def audience_scores_api(request, activity_id):
         if not 0 <= score <= 100:
             errors.append(f"选手 {singer_id} 的观众分必须在 0-100 之间。")
             continue
+        # AudienceScore.score is Decimal(max_digits=8, decimal_places=2); reject more than
+        # two decimal places so SQLite (stores verbatim) and Postgres (rounds to 0.01) agree.
+        if score != score.quantize(Decimal("0.01")):
+            errors.append(f"选手 {singer_id} 的观众分最多保留两位小数。")
+            continue
         set_key = str(cell.get("set_key", "")).strip()
         stage_key = audience_keys.get(set_key)
         if not stage_key:
@@ -1129,8 +1140,13 @@ def audience_scores_api(request, activity_id):
     if errors:
         return JsonResponse({"detail": errors}, status=400)
 
+    # Hold the Activity FOR UPDATE lock across the guard + write so the check and the rows
+    # are serialized against a concurrent confirm_stage_result (which takes the same lock);
+    # otherwise a confirm could commit a stage consuming this audience set between our guard
+    # and our insert. The auto-resolve runs in its own transaction afterwards.
     try:
         with transaction.atomic():
+            lock_activity_for_action(activity)
             for stage_key in stage_keys:
                 ensure_audience_not_consumed_by_confirmed_stage(activity, stage_key)
             test_flag = runtime_is_test(activity)
@@ -1145,16 +1161,24 @@ def audience_scores_api(request, activity_id):
                         "is_test_data": test_flag,
                     },
                 )
-            resolved = maybe_resolve_checkpoints(activity, request.user)
     except ValidationError as error:
         return JsonResponse({"detail": error.messages}, status=400)
     except PermissionDenied:
         return JsonResponse({"detail": "权限不足。"}, status=403)
 
+    # Resolve after the save transaction commits so a ruleset misconfiguration (missing bound
+    # rounds, duplicate auto rulesets) reports an error without rolling back entered scores.
+    try:
+        maybe_resolve_checkpoints(activity, request.user)
+    except ValidationError:
+        pass
+    except PermissionDenied:
+        pass
+
     return JsonResponse(
         {
             "saved": len(rows),
-            "resolved_status": StageResult.Status.READY_TO_CONFIRM if resolved else None,
+            "resolved_status": _current_resolve_status(activity),
         }
     )
 
@@ -1272,7 +1296,7 @@ def round_lock(request, pk):
     lock_round(contest_round, request.user)
     try:
         maybe_resolve_checkpoints(contest_round.activity, request.user)
-    except ValidationError:
+    except (ValidationError, PermissionDenied):
         pass
     return redirect("staff:round_ranking", pk=pk)
 
@@ -1513,7 +1537,7 @@ def vote_session_lock(request, pk):
         messages.success(request, "已生成最佳人气奖。")
     try:
         maybe_resolve_checkpoints(vote_session.activity, request.user)
-    except ValidationError:
+    except (ValidationError, PermissionDenied):
         pass
     return redirect("staff:vote_session_detail", pk=pk)
 

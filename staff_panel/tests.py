@@ -4244,6 +4244,56 @@ class RoundScoresApiTests(TestCase):
             StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
         )
 
+    def test_resave_of_complete_matrix_keeps_ready_status(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Rapid Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            round_keys={"r1": self.round.pk},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "rank1",
+                                "type": "RANK",
+                                "source": "assess_r1",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        payload = {
+            "base_version": 0,
+            "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "97"}],
+        }
+        first = self._post(payload).json()
+        self.assertEqual(first["resolved_status"], "ready_to_confirm")
+        # A no-op re-save (same facts, nothing new to resolve) must still report the stage's
+        # true current status rather than reading as "未计算".
+        second = self._post({**payload, "base_version": first["version"]}).json()
+        self.assertEqual(second["resolved_status"], "ready_to_confirm")
+        self.assertEqual(
+            StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").count(), 1
+        )
+
     def test_post_audience_scores_saves_and_resolves(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
@@ -4364,6 +4414,97 @@ class RoundScoresApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(
+            AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
+        )
+
+    def test_post_audience_scores_rejects_more_than_two_decimals(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Rapid Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            }
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        response = self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(
+                {
+                    "cells": [
+                        {"singer_id": self.singer.pk, "set_key": "audience1", "score": "99.999"}
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("两位小数", response.json()["detail"][0])
+        self.assertFalse(
+            AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
+        )
+
+    def test_post_audience_scores_persists_even_if_resolve_fails(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        # A nonexistent bound round makes the auto-resolve raise, but the entered scores must
+        # still be saved (no rollback of valid staff input on an unrelated ruleset error).
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Rapid Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            round_keys={"r1": 999999},
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            }
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        response = self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(
+                {"cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}]}
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["saved"], 1)
+        self.assertTrue(
             AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
         )
 

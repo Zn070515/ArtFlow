@@ -1913,6 +1913,38 @@ def _run_ruleset_args(version, activity) -> dict:
     }
 
 
+def _current_resolve_status(activity) -> str | None:
+    """The status of the activity's most-recent target stage result, or ``None``.
+
+    The frontend shows this label after an input batch, so it must reflect the true current
+    state — not merely whether the just-run batch resolved something new. A no-op re-save of
+    an already-READY stage therefore keeps ``ready_to_confirm`` instead of reading as
+    "not computed".
+    """
+    try:
+        version = _current_frozen_version(activity)
+    except ValidationError:
+        # A read-only status label must not surface an authority ambiguity as a 500.
+        return None
+    if version is None:
+        return None
+    checkpoints = _definition_checkpoints_ordered(version)
+    if checkpoints:
+        target_keys = list(checkpoints)
+    else:
+        full_stage = (_version_binding(version).get("stage_key") or "").strip()
+        target_keys = [full_stage] if full_stage else []
+    target_keys = [k for k in target_keys if k]
+    if not target_keys:
+        return None
+    latest = (
+        StageResult.objects.filter(activity=activity, stage_key__in=target_keys)
+        .order_by("-result_version", "-pk")
+        .first()
+    )
+    return latest.status if latest else None
+
+
 @transaction.atomic
 def maybe_resolve_checkpoints(activity, operator) -> list[str]:
     """Publish a READY_TO_CONFIRM StageResult for every satisfiable stage.
