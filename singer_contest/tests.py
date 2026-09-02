@@ -5143,3 +5143,187 @@ class VoteBoundaryRegressionTests(TestCase):
         out = _source_vote_scores(self.activity, {"vote_keys": {"pop": self.vs.pk}})
         self.assertEqual(out["pop"][str(self.singers[0].pk)], Decimal("3"))
         self.assertEqual(out["pop"][str(self.singers[1].pk)], Decimal("1"))
+
+
+class ShadowRehearsalTests(TestCase):
+    """2025 院十佳 Shadow Rehearsal — the composed production acceptance chain.
+
+    Drives the M1-J front-half acceptance end-to-end on the frozen ``GOLDEN_SCHIDUI``:
+    15 approved singers → R1/R2 judge scores + onsite audience → auto-READY ``stage1`` →
+    核定 → roster-materialised R3 (Top10) → R3 scores → auto-READY ``stage2`` → 核定 →
+    roster-materialised R4 (Top5) → R4 + audience4 → auto-READY final → 核定 → result
+    board (three CONFIRMED stages) + host paper handcard (Top3). The 2025 校十佳 stress
+    path (unresolved fallback) stays a separate must-fail gate in ``ruleset/test_compiler``;
+    this class only proves the composed happy path is automatic, not hallucinated.
+    """
+
+    JUDGE_COUNT = 5
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="shadow-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="院十佳",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="院十佳规则", is_test_data=True, stage_key="院十佳"
+        )
+        self.judges = [
+            Judge.objects.create(
+                activity=self.activity, name=f"评委{chr(0x41 + i)}", is_active=True
+            )
+            for i in range(self.JUDGE_COUNT)
+        ]
+        self.singers = [self._singer(i) for i in range(1, 16)]
+        # R1/R2 is the full APPROVED field; R3/R4 draw their entry from a confirmed stage.
+        self.r1 = self._round(1, ContestRound.RosterSource.APPROVED)
+        self.r2 = self._round(2, ContestRound.RosterSource.APPROVED)
+        self.r3 = self._round(3, ContestRound.RosterSource.STAGE, roster_source_stage="stage1")
+        self.r4 = self._round(4, ContestRound.RosterSource.STAGE, roster_source_stage="stage2")
+        from ruleset.templates import GOLDEN_SCHIDUI
+
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=GOLDEN_SCHIDUI,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={
+                    "stage_key": "院十佳",
+                    "round_keys": {
+                        "r1": self.r1.pk,
+                        "r2": self.r2.pk,
+                        "r3": self.r3.pk,
+                        "r4": self.r4.pk,
+                    },
+                    "audience_keys": {"audience1": "aud1set", "audience4": "aud4set"},
+                },
+            )
+
+    def _singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"shadow-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"95{index:03d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def _round(self, sequence, roster_source, roster_source_stage=None):
+        return ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name=f"轮次{sequence}",
+            sequence=sequence,
+            roster_source=roster_source,
+            roster_source_stage=roster_source_stage or "",
+        )
+
+    def _seed_scores(self, round_, base, limit=None):
+        singers = self.singers if limit is None else self.singers[:limit]
+        for idx, singer in enumerate(singers):
+            value = Decimal(base) - idx
+            for judge in self.judges:
+                ScoreRecord.objects.create(
+                    round=round_, singer=singer, judge=judge, score=value, is_test_data=True
+                )
+
+    def _seed_audience(self, set_name, base, limit):
+        for idx, singer in enumerate(self.singers[:limit]):
+            AudienceScore.objects.create(
+                activity=self.activity,
+                stage_key=set_name,
+                singer=singer,
+                score=Decimal(base),
+                is_test_data=True,
+            )
+
+    def _lock(self, round_):
+        round_.is_locked = True
+        round_.status = ContestRound.Status.LOCKED
+        round_.save(update_fields=["is_locked", "status"])
+
+    def _entry_ids(self, round_):
+        return list(
+            RoundEntry.objects.filter(round=round_)
+            .order_by("pk")
+            .values_list("singer_id", flat=True)
+        )
+
+    def test_composed_acceptance_chain(self):
+        from .services import confirm_stage_result, maybe_resolve_checkpoints
+
+        # 1) R1 + R2 + onsite audience → stage1 auto-READY; its advancees roll into R3.
+        self._seed_scores(self.r1, 100)
+        self._seed_scores(self.r2, 90)
+        self._seed_audience("aud1set", 80, limit=15)
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage1"])
+        s1 = StageResult.objects.get(activity=self.activity, stage_key="stage1")
+        self.assertEqual(s1.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(self._entry_ids(self.r3), [s.pk for s in self.singers[:10]])
+
+        # 30/60/10 composite: a real AudienceScore (80) contributes 8.0 to a 92.0 total.
+        c1 = {c.singer_id: c for c in s1.composites.filter(node_key="stage1")}
+        comp1 = {c["source"]: c for c in c1[self.singers[0].pk].components}
+        self.assertEqual(Decimal(comp1["assess_a1"]["value"]), Decimal("80"))
+        self.assertEqual(Decimal(comp1["assess_a1"]["contribution"]), Decimal("8.0"))
+        self.assertEqual(c1[self.singers[0].pk].value, Decimal("92.0"))
+
+        # 2) 核定 stage1 → R3 (Top10) is now the locked-in entry roster for round 3.
+        self._lock(self.r1)
+        self._lock(self.r2)
+        confirmed1 = confirm_stage_result(s1, confirmed_by=self.admin)
+        self.assertEqual(confirmed1.status, StageResult.Status.CONFIRMED)
+
+        # 3) R3 scores (only the 10 advancees) → stage2 auto-READY; advancees roll into R4.
+        self._seed_scores(self.r3, 100, limit=10)
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage2"])
+        s2 = StageResult.objects.get(activity=self.activity, stage_key="stage2")
+        self.assertEqual(s2.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(self._entry_ids(self.r4), [s.pk for s in self.singers[:5]])
+
+        # 4) 核定 stage2 → R4 (Top5) is the locked-in entry roster for round 4.
+        self._lock(self.r3)
+        confirmed2 = confirm_stage_result(s2, confirmed_by=self.admin)
+        self.assertEqual(confirmed2.status, StageResult.Status.CONFIRMED)
+
+        # 5) R4 scores + audience4 (only the 5 advancees) → final auto-READY.
+        self._seed_scores(self.r4, 90, limit=5)
+        self._seed_audience("aud4set", 85, limit=5)
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage3"])
+        s3 = StageResult.objects.get(activity=self.activity, stage_key="stage3")
+        self.assertEqual(s3.status, StageResult.Status.READY_TO_CONFIRM)
+
+        # 6) 核定 final → result board shows all three CONFIRMED stages + host card Top3.
+        self._lock(self.r4)
+        confirmed3 = confirm_stage_result(s3, confirmed_by=self.admin)
+        self.assertEqual(confirmed3.status, StageResult.Status.CONFIRMED)
+        board = list(
+            StageResult.objects.filter(activity=self.activity, status=StageResult.Status.CONFIRMED)
+            .order_by("pk")
+            .values_list("stage_key", flat=True)
+        )
+        self.assertEqual(board, ["stage1", "stage2", "stage3"])
+
+        # 30/50/20 final composite: real audience4 (85) contributes 17.0 to a 92.0 total.
+        c3 = {c.singer_id: c for c in s3.composites.filter(node_key="final")}
+        comp3 = {c["source"]: c for c in c3[self.singers[0].pk].components}
+        self.assertEqual(Decimal(comp3["assess_a4"]["value"]), Decimal("85"))
+        self.assertEqual(Decimal(comp3["assess_a4"]["contribution"]), Decimal("17.0"))
+        self.assertEqual(c3[self.singers[0].pk].value, Decimal("92.0"))
+
+        # Host paper handcard: the advancing top3, read in rank order.
+        handcard = (
+            s3.decisions.filter(outcome_code="direct")
+            .order_by("rank", "pk")
+            .values_list("singer_id", flat=True)
+        )
+        self.assertEqual(list(handcard), [s.pk for s in self.singers[:3]])

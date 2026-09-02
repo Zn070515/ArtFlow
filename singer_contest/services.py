@@ -997,6 +997,15 @@ def _consumed_entry_round(version, activity, bound_rounds, checkpoint) -> Contes
     return candidates[-1]
 
 
+class StageRosterNotMaterialized(ValidationError):
+    """A checkpoint's consumed STAGE/LEGACY round has no materialised entry roster yet.
+
+    A formal resolve/confirm surfaces this as a hard error so staff confirm the upstream
+    stage first; the progressive auto-resolve trigger treats it as "not ready yet" and
+    skips the stage rather than crashing the whole probe loop.
+    """
+
+
 def _stage_entry_roster(version, activity, bound_rounds, *, checkpoint=None) -> tuple[str, ...]:
     """The entry roster for a stage bind.
 
@@ -1020,7 +1029,7 @@ def _stage_entry_roster(version, activity, bound_rounds, *, checkpoint=None) -> 
         # "only the finalists" guarantee. An APPROVED round legitimately rosters every
         # approved singer regardless, so only that case falls back.
         if entry_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
-            raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
+            raise StageRosterNotMaterialized("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
     return tuple(
         str(pk)
         for pk in scope_runtime(
@@ -1972,15 +1981,21 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
     resolved: list[str] = []
     for stage_key, checkpoint in targets:
         args = _run_ruleset_args(version, activity)
-        probe = run_ruleset(
-            version,
-            activity,
-            stage_key=stage_key,
-            computed_by=operator,
-            checkpoint=checkpoint,
-            preview=True,
-            **args,
-        )
+        try:
+            probe = run_ruleset(
+                version,
+                activity,
+                stage_key=stage_key,
+                computed_by=operator,
+                checkpoint=checkpoint,
+                preview=True,
+                **args,
+            )
+        except StageRosterNotMaterialized:
+            # The stage's consumed STAGE/LEGACY roster round has not been materialized
+            # because its upstream stage is still unresolved. That is "not ready yet",
+            # not a config error — skip and let a later input batch publish it.
+            continue
         if probe.status != ResolverState.READY:
             continue
         latest = (
