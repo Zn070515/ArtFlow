@@ -62,6 +62,7 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
         "round_keys": dict(ruleset.round_keys or {}),
         "vote_keys": dict(ruleset.vote_keys or {}),
         "group_keys": dict(ruleset.group_keys or {}),
+        "audience_keys": dict(ruleset.audience_keys or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
         "announcement_blocks_by_checkpoint": dict(ruleset.announcement_blocks_by_checkpoint or {}),
     }
@@ -80,6 +81,7 @@ def _binding_signature(ruleset: ContestRuleset) -> str:
             "round_keys": dict(ruleset.round_keys or {}),
             "vote_keys": dict(ruleset.vote_keys or {}),
             "group_keys": dict(ruleset.group_keys or {}),
+            "audience_keys": dict(ruleset.audience_keys or {}),
             "announcement_blocks": list(ruleset.announcement_blocks or []),
             "announcement_blocks_by_checkpoint": dict(
                 ruleset.announcement_blocks_by_checkpoint or {}
@@ -137,6 +139,21 @@ def _normalize_pk_map(raw, *, label):
     return out
 
 
+def _normalize_string_map(raw, *, label):
+    """Normalize a ``{str: str}`` binding map (e.g. audience_keys), rejecting empties."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{label} 必须是 {{key: value}} 映射。")
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        value = str(value).strip() if value is not None else ""
+        if not value:
+            continue
+        out[str(key)] = value
+    return out
+
+
 def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     """Normalize and validate a binding snapshot against the ruleset's activity.
 
@@ -149,6 +166,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     normalized_round_keys = _normalize_pk_map(binding.get("round_keys"), label="round_keys")
     vote_keys = _normalize_pk_map(binding.get("vote_keys"), label="vote_keys")
     group_keys = _normalize_pk_map(binding.get("group_keys"), label="group_keys")
+    audience_keys = _normalize_string_map(binding.get("audience_keys"), label="audience_keys")
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
         raise ValidationError("announcement_blocks 必须是列表。")
@@ -193,6 +211,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         "round_keys": normalized_round_keys,
         "vote_keys": vote_keys,
         "group_keys": group_keys,
+        "audience_keys": audience_keys,
         "announcement_blocks": announcement_blocks,
         "announcement_blocks_by_checkpoint": dict(blocks_by_checkpoint),
     }
@@ -254,6 +273,7 @@ def update_ruleset_binding(
     locked.round_keys = normalized["round_keys"]
     locked.vote_keys = normalized["vote_keys"]
     locked.group_keys = normalized["group_keys"]
+    locked.audience_keys = normalized["audience_keys"]
     locked.announcement_blocks = normalized["announcement_blocks"]
     locked.announcement_blocks_by_checkpoint = normalized["announcement_blocks_by_checkpoint"]
     locked.save(
@@ -262,6 +282,7 @@ def update_ruleset_binding(
             "round_keys",
             "vote_keys",
             "group_keys",
+            "audience_keys",
             "announcement_blocks",
             "announcement_blocks_by_checkpoint",
             "updated_at",
@@ -309,6 +330,10 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
         vote = _vote_binding(vs_pk)
         if vote:
             votes[source] = vote
+    for source, _set_name in (binding.get("audience_keys") or {}).items():
+        # Audience scores are staff-entered 0-100 values (not raw vote counts), so they
+        # bind at a hundred scale for the compiler's scale-truth check.
+        votes[source] = {"scale": "hundred"}
 
     groups = {}
     for by, rpk in (binding.get("group_keys") or {}).items():

@@ -1,5 +1,6 @@
 import io
 import json
+from decimal import Decimal, InvalidOperation
 
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
@@ -71,6 +72,7 @@ from ruleset.services import (
     update_ruleset_definition,
 )
 from singer_contest.models import (
+    AudienceScore,
     Award,
     ContestRound,
     Judge,
@@ -82,12 +84,16 @@ from singer_contest.models import (
 from singer_contest.services import (
     StaleScoreVersionError,
     _active_judges,
+    _current_frozen_version,
     _eligible_singers,
+    _version_binding,
     apply_scores,
     apply_scores_if_version,
     confirm_stage_result,
+    ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
     lock_round,
+    maybe_resolve_checkpoints,
     missing_score_cells,
     parse_score_workbook,
     prepare_round,
@@ -1035,14 +1041,122 @@ def round_scores_api(request, pk):
 
     resolved_status = None
     if result["matrix_complete"]:
-        from singer_contest.services import recompute_activity_result
-
         try:
-            stage = recompute_activity_result(contest_round.activity, request.user)
+            stage_keys = maybe_resolve_checkpoints(contest_round.activity, request.user)
         except ValidationError:
-            stage = None
-        resolved_status = stage.status if stage else None
+            stage_keys = []
+        resolved_status = StageResult.Status.READY_TO_CONFIRM if stage_keys else None
     return JsonResponse({**result, "resolved_status": resolved_status})
+
+
+@staff_required
+def audience_scores_api(request, activity_id):
+    """Backstage audience-score entry (M1-INTEGRATION-2).
+
+    GET returns the audience grid: one group per binding ``audience_keys`` entry, each
+    listing every activity singer plus its stored score (scale ``hundred``). POST accepts
+    sparse ``cells`` as ``[{singer_id, set_key, score}]``, maps each ``set_key`` to its
+    ``stage_key``, upserts :class:`~singer_contest.models.AudienceScore` rows, then
+    auto-resolves any now-satisfiable checkpoint.
+    """
+    activity = get_object_or_404(Activity, pk=activity_id)
+    version = _current_frozen_version(activity)
+    binding = _version_binding(version) if version is not None else {}
+    audience_keys = binding.get("audience_keys") or {}
+    if not audience_keys:
+        return JsonResponse({"detail": "该活动未绑定观众分。"}, status=400)
+
+    if request.method == "GET":
+        singers = list(SingerRegistration.objects.filter(activity=activity).order_by("pk"))
+        stored = {
+            (s.singer_id, s.stage_key): str(s.score)
+            for s in AudienceScore.objects.filter(
+                activity=activity, is_test_data=runtime_is_test(activity)
+            )
+        }
+        sets = [
+            {
+                "set_key": set_key,
+                "stage_key": stage_key,
+                "rows": [
+                    {
+                        "singer_id": singer.pk,
+                        "singer_name": singer.name,
+                        "song": singer.song_name,
+                        "score": stored.get((singer.pk, stage_key), ""),
+                    }
+                    for singer in singers
+                ],
+            }
+            for set_key, stage_key in audience_keys.items()
+        ]
+        return JsonResponse({"sets": sets})
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "请求体不是有效 JSON。"}, status=400)
+    cells = payload.get("cells", [])
+    if not cells:
+        return JsonResponse({"detail": "缺少 cells。"}, status=400)
+
+    valid_singer_ids = set(
+        SingerRegistration.objects.filter(activity=activity).values_list("pk", flat=True)
+    )
+    rows: list[tuple[int, str, Decimal]] = []
+    stage_keys: set[str] = set()
+    errors: list[str] = []
+    for cell in cells:
+        try:
+            singer_id = int(cell["singer_id"])
+            score = Decimal(str(cell.get("score", "")).strip())
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            errors.append("单元格缺少 singer_id 或 score 不是有效数字。")
+            continue
+        if singer_id not in valid_singer_ids:
+            errors.append(f"选手 {singer_id} 不属于该活动。")
+            continue
+        if not 0 <= score <= 100:
+            errors.append(f"选手 {singer_id} 的观众分必须在 0-100 之间。")
+            continue
+        set_key = str(cell.get("set_key", "")).strip()
+        stage_key = audience_keys.get(set_key)
+        if not stage_key:
+            errors.append(f"未知观众分组 {set_key}。")
+            continue
+        rows.append((singer_id, stage_key, score))
+        stage_keys.add(stage_key)
+    if errors:
+        return JsonResponse({"detail": errors}, status=400)
+
+    try:
+        with transaction.atomic():
+            for stage_key in stage_keys:
+                ensure_audience_not_consumed_by_confirmed_stage(activity, stage_key)
+            test_flag = runtime_is_test(activity)
+            for singer_id, stage_key, score in rows:
+                AudienceScore.objects.update_or_create(
+                    activity=activity,
+                    stage_key=stage_key,
+                    singer_id=singer_id,
+                    defaults={
+                        "score": score,
+                        "entered_by": request.user,
+                        "is_test_data": test_flag,
+                    },
+                )
+            resolved = maybe_resolve_checkpoints(activity, request.user)
+    except ValidationError as error:
+        return JsonResponse({"detail": error.messages}, status=400)
+    except PermissionDenied:
+        return JsonResponse({"detail": "权限不足。"}, status=403)
+
+    return JsonResponse(
+        {
+            "saved": len(rows),
+            "resolved_status": StageResult.Status.READY_TO_CONFIRM if resolved else None,
+        }
+    )
 
 
 @staff_required
@@ -1156,6 +1270,10 @@ def round_finalize_advancement(request, pk):
 def round_lock(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     lock_round(contest_round, request.user)
+    try:
+        maybe_resolve_checkpoints(contest_round.activity, request.user)
+    except ValidationError:
+        pass
     return redirect("staff:round_ranking", pk=pk)
 
 
@@ -1393,6 +1511,10 @@ def vote_session_lock(request, pk):
         messages.warning(request, "最佳人气奖存在同分，请人工核定获奖名单。")
     elif outcome["status"] == "created":
         messages.success(request, "已生成最佳人气奖。")
+    try:
+        maybe_resolve_checkpoints(vote_session.activity, request.user)
+    except ValidationError:
+        pass
     return redirect("staff:vote_session_detail", pk=pk)
 
 

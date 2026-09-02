@@ -37,6 +37,7 @@ from voting.models import VoteSession
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .models import (
+    AudienceScore,
     CompositeResult,
     ContestRound,
     Judge,
@@ -4851,3 +4852,294 @@ class ConfirmedDependencyClosureTests(TestCase):
                 chosen=[str(self.singers[0].pk)],
                 created_by=self.user,
             )
+
+
+class AutoResolveCheckpointTests(TestCase):
+    """M1-INTEGRATION-2: progressive auto-resolution publishes READY_TO_CONFIRM stages."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="auto-resolve", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="院十佳",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="院十佳规则", is_test_data=True, stage_key="院十佳"
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="评委A")
+        self.singers = [self._singer(i) for i in range(1, 16)]
+        self.rounds = {}
+        for idx in range(1, 5):
+            self.rounds[f"r{idx}"] = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name=f"轮次{idx}",
+                sequence=idx,
+                roster_source=ContestRound.RosterSource.APPROVED,
+            )
+        from ruleset.templates import GOLDEN_SCHIDUI
+
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=GOLDEN_SCHIDUI,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={
+                    "stage_key": "院十佳",
+                    "round_keys": {k: v.pk for k, v in self.rounds.items()},
+                    "audience_keys": {"audience1": "aud1set", "audience4": "aud4set"},
+                },
+            )
+
+    def _singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"auto-s{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"90{index:03d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def _round_scores(self, round_, base):
+        for idx, singer in enumerate(self.singers, 1):
+            ScoreRecord.objects.create(
+                round=round_,
+                singer=singer,
+                judge=self.judge,
+                score=Decimal(base) - idx,
+                is_test_data=True,
+            )
+
+    def _audience(self, set_name, base):
+        for singer in self.singers:
+            AudienceScore.objects.create(
+                activity=self.activity,
+                stage_key=set_name,
+                singer=singer,
+                score=Decimal(base),
+                is_test_data=True,
+            )
+
+    def test_stage1_then_stage2_then_final_resolve_progressively(self):
+        from .services import maybe_resolve_checkpoints
+
+        self._round_scores(self.rounds["r1"], 100)
+        self._round_scores(self.rounds["r2"], 90)
+        self._audience("aud1set", 50)
+
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage1"])
+        s1 = StageResult.objects.get(activity=self.activity, stage_key="stage1")
+        self.assertEqual(s1.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(StageResult.objects.filter(activity=self.activity).count(), 1)
+
+        self._round_scores(self.rounds["r3"], 100)
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage2"])
+        s2 = StageResult.objects.get(activity=self.activity, stage_key="stage2")
+        self.assertEqual(s2.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(StageResult.objects.filter(activity=self.activity).count(), 2)
+
+        self._round_scores(self.rounds["r4"], 100)
+        self._audience("aud4set", 90)
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage3"])
+        s3 = StageResult.objects.get(activity=self.activity, stage_key="stage3")
+        self.assertEqual(s3.status, StageResult.Status.READY_TO_CONFIRM)
+
+    def test_idempotent_rerun_does_not_duplicate_stage_result(self):
+        from .services import maybe_resolve_checkpoints
+
+        self._round_scores(self.rounds["r1"], 100)
+        self._round_scores(self.rounds["r2"], 90)
+        self._audience("aud1set", 50)
+
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["stage1"])
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), [])
+        self.assertEqual(
+            StageResult.objects.filter(activity=self.activity, stage_key="stage1").count(), 1
+        )
+
+
+class AudienceCompositeFlowTests(TestCase):
+    """M1-INTEGRATION-2: a staff-entered AudienceScore flows into the composite as a 0-100 value."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="aud-comp", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="院十佳",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="院十佳规则", is_test_data=True, stage_key="院十佳"
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="评委A")
+        self.singers = [self._singer(i) for i in range(1, 11)]
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="初赛",
+            sequence=1,
+            roster_source=ContestRound.RosterSource.APPROVED,
+        )
+        definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                    {
+                        "key": "assess_a1",
+                        "type": "ASSESS",
+                        "source": "entry",
+                        "vote_source": "audience1",
+                    },
+                    {
+                        "key": "composite",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "assess_r1", "weight": 0.70},
+                                {"source": "assess_a1", "weight": 0.30},
+                            ],
+                        },
+                    },
+                    {"key": "rank", "type": "RANK", "source": "composite", "descending": True},
+                    {"key": "win", "type": "SELECT", "source": "rank", "count": 10},
+                ],
+            },
+            ensure_ascii=False,
+        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=definition,
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+                binding={
+                    "stage_key": "院十佳",
+                    "round_keys": {"r1": self.round.pk},
+                    "audience_keys": {"audience1": "aud1set"},
+                },
+            )
+
+    def _singer(self, index):
+        return SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username=f"aud-comp-{index}", password="pass"),
+            name=f"选手{index}",
+            student_id=f"ac{index:03d}",
+            college="学院",
+            class_name="班级",
+            song_name="歌",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+    def test_audience_score_flows_into_composite_result(self):
+        from .services import maybe_resolve_checkpoints
+
+        for singer in self.singers:
+            ScoreRecord.objects.create(
+                round=self.round,
+                singer=singer,
+                judge=self.judge,
+                score=Decimal("100"),
+                is_test_data=True,
+            )
+            AudienceScore.objects.create(
+                activity=self.activity,
+                stage_key="aud1set",
+                singer=singer,
+                score=Decimal("90"),
+                is_test_data=True,
+            )
+
+        self.assertEqual(maybe_resolve_checkpoints(self.activity, self.admin), ["院十佳"])
+        stage = StageResult.objects.get(activity=self.activity, stage_key="院十佳")
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        composite = CompositeResult.objects.get(
+            stage_result=stage, node_key="composite", singer=self.singers[0]
+        )
+        sources = {c["source"]: c for c in composite.components}
+        self.assertEqual(Decimal(sources["assess_a1"]["value"]), Decimal("90"))
+        self.assertEqual(Decimal(sources["assess_a1"]["contribution"]), Decimal("27.0"))
+        self.assertEqual(composite.value, Decimal("97"))
+
+
+class VoteBoundaryRegressionTests(TestCase):
+    """M1-INTEGRATION-2: seal that raw vote counts never masquerade as a normalized score."""
+
+    def setUp(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+        from voting.models import VoteOption
+
+        self.activity = Activity.objects.create(
+            title="投票边界",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.singers = [
+            SingerRegistration.objects.create(
+                activity=self.activity,
+                user=User.objects.create_user(username=f"vbound-{i}", password="pass"),
+                name=f"选手{i}",
+                student_id=f"vb{i:03d}",
+                college="学院",
+                class_name="班级",
+                song_name="歌",
+                is_test_data=True,
+            )
+            for i in range(1, 3)
+        ]
+        self.vs = VoteSession.objects.create(
+            activity=self.activity,
+            name="人气奖",
+            passcode="x",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(days=1),
+            is_test_data=True,
+        )
+        self.options = {
+            singer.pk: VoteOption.objects.create(
+                vote_session=self.vs, singer=singer, is_test_data=True
+            )
+            for singer in self.singers
+        }
+
+    def test_source_vote_scores_returns_raw_counts_not_normalized(self):
+        from voting.models import VoteRecord
+
+        from .services import _source_vote_scores
+
+        for i in range(3):
+            VoteRecord.objects.create(
+                vote_session=self.vs,
+                vote_option=self.options[self.singers[0].pk],
+                browser_session_key=f"mb{i}",
+                ip_address="127.0.0.1",
+                is_test_data=True,
+            )
+        VoteRecord.objects.create(
+            vote_session=self.vs,
+            vote_option=self.options[self.singers[1].pk],
+            browser_session_key="mb-solo",
+            ip_address="127.0.0.1",
+            is_test_data=True,
+        )
+        out = _source_vote_scores(self.activity, {"vote_keys": {"pop": self.vs.pk}})
+        self.assertEqual(out["pop"][str(self.singers[0].pk)], Decimal("3"))
+        self.assertEqual(out["pop"][str(self.singers[1].pk)], Decimal("1"))

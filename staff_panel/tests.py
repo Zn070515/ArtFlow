@@ -41,6 +41,7 @@ from incidents.models import IncidentRecord
 from openpyxl import load_workbook
 from public_portal.models import PublicPost
 from singer_contest.models import (
+    AudienceScore,
     Award,
     ContestRound,
     Judge,
@@ -4241,6 +4242,129 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(data["resolved_status"], "ready_to_confirm")
         self.assertTrue(
             StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
+        )
+
+    def test_post_audience_scores_saves_and_resolves(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Rapid Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            round_keys={"r1": self.round.pk},
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            },
+                            {
+                                "key": "composite",
+                                "type": "AGGREGATE",
+                                "aggregate": {
+                                    "type": "weighted_sum",
+                                    "components": [
+                                        {"source": "assess_r1", "weight": 0.7},
+                                        {"source": "assess_a1", "weight": 0.3},
+                                    ],
+                                },
+                            },
+                            {
+                                "key": "rank",
+                                "type": "RANK",
+                                "source": "composite",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        # Seed the judge score so the composite has both inputs at resolve time.
+        ScoreRecord.objects.create(
+            round=self.round,
+            singer=self.singer,
+            judge=self.judge,
+            score=Decimal("100"),
+            is_test_data=False,
+        )
+        response = self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(
+                {"cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}]}
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["saved"], 1)
+        self.assertEqual(data["resolved_status"], "ready_to_confirm")
+        self.assertTrue(
+            AudienceScore.objects.filter(
+                activity=self.activity, stage_key="aud1set", singer=self.singer
+            ).exists()
+        )
+        self.assertTrue(
+            StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
+        )
+
+    def test_post_audience_scores_rejects_out_of_range(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Rapid Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            }
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        response = self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(
+                {"cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "150"}]}
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
         )
 
 

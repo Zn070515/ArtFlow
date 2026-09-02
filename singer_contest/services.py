@@ -755,6 +755,7 @@ def _version_binding(version) -> dict:
                 "round_keys": dict(ruleset.round_keys or {}),
                 "vote_keys": dict(ruleset.vote_keys or {}),
                 "group_keys": dict(ruleset.group_keys or {}),
+                "audience_keys": dict(ruleset.audience_keys or {}),
                 "announcement_blocks": list(ruleset.announcement_blocks or []),
                 "announcement_blocks_by_checkpoint": dict(
                     ruleset.announcement_blocks_by_checkpoint or {}
@@ -1129,6 +1130,39 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     return out
 
 
+def _source_audience_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
+    """Source the audience-scores ResolveInput from the binding's ``audience_keys``.
+
+    Each ``audience_key`` maps to an ``AudienceScore.stage_key`` grouping. Per-singer
+    scores are read as authoritative 0-100 values (scale ``hundred``) and returned under
+    the definition's vote_source key, so the resolver's aggregate can combine them with
+    judge scores by weight. An empty set is left unbound so the resolver holds.
+    """
+    from .models import AudienceScore
+
+    audience_keys = binding.get("audience_keys") or {}
+    if not audience_keys:
+        return {}
+    test_flag = runtime_is_test(activity)
+    out: dict[str, dict[str, Decimal]] = {}
+    for source_key, set_name in audience_keys.items():
+        rows = AudienceScore.objects.filter(
+            activity=activity, stage_key=set_name, is_test_data=test_flag
+        ).select_related("singer")
+        mapping: dict[str, Decimal] = {str(r.singer_id): r.score for r in rows}
+        if not mapping:
+            continue
+        out[source_key] = mapping
+    return out
+
+
+def _combined_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
+    """Merge raw vote counts and audience-scores into the resolver's vote channel."""
+    vote_scores = _source_vote_scores(activity, binding)
+    vote_scores.update(_source_audience_scores(activity, binding))
+    return vote_scores
+
+
 def _source_manual(version, activity) -> dict[str, dict[str, tuple[str, ...]]]:
     """Source the ``manual`` ResolveInput from the version's ManualDecision rows.
 
@@ -1396,7 +1430,7 @@ def _bound_inputs(version, activity, *, checkpoint=None) -> tuple[ResolveInput, 
         version,
         activity,
         round_keys=bound,
-        vote_scores=_source_vote_scores(activity, binding),
+        vote_scores=_combined_vote_scores(activity, binding),
         group_of=_source_group_of(activity, binding),
         manual=_source_manual(version, activity),
         checkpoint=checkpoint,
@@ -1471,11 +1505,22 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
     round_map = binding.get("round_keys") or {}
     group_map = binding.get("group_keys") or {}
     vote_map = binding.get("vote_keys") or {}
+    audience_map = binding.get("audience_keys") or {}
     round_pks = {round_map.get(k) for k in round_keys} | {group_map.get(k) for k in group_keys}
     round_pks.discard(None)
-    vote_pks = {vote_map.get(k) for k in vote_keys}
+    # Audience sources ride the vote channel but are keyed by audience_keys, not a
+    # VoteSession; split them out so the vote lock/finality check does not mis-read them.
+    audience_source_keys = {k for k in vote_keys if k in audience_map}
+    real_vote_keys = set(vote_keys) - audience_source_keys
+    vote_pks = {vote_map.get(k) for k in real_vote_keys}
     vote_pks.discard(None)
-    return {"rounds": round_pks, "votes": vote_pks, "manual": set(manual_keys)}
+    audience_names = {audience_map[k] for k in audience_source_keys}
+    return {
+        "rounds": round_pks,
+        "votes": vote_pks,
+        "audience": audience_names,
+        "manual": set(manual_keys),
+    }
 
 
 def ensure_round_not_consumed_by_confirmed_stage(contest_round) -> None:
@@ -1497,6 +1542,18 @@ def ensure_vote_not_consumed_by_confirmed_stage(vote_session) -> None:
     for stage_pk in consumed:
         stage = StageResult.objects.get(pk=stage_pk["pk"])
         if vote_session.pk in _stage_consumed_facts(stage)["votes"]:
+            raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+
+
+def ensure_audience_not_consumed_by_confirmed_stage(activity, stage_key: str) -> None:
+    """Reject re-entering an audience set that a CONFIRMED stage of its activity already read."""
+    activity_id = activity.pk if hasattr(activity, "pk") else int(activity)
+    consumed = StageResult.objects.filter(
+        activity_id=activity_id, status=StageResult.Status.CONFIRMED
+    ).values("pk")
+    for stage_pk in consumed:
+        stage = StageResult.objects.get(pk=stage_pk["pk"])
+        if stage_key in _stage_consumed_facts(stage)["audience"]:
             raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
 
 
@@ -1804,6 +1861,108 @@ def run_ruleset(
     )
 
 
+def _current_frozen_version(activity):
+    """The activity's single current frozen ruleset version, or ``None``.
+
+    A benign "not set up yet" state (no ruleset, or no current frozen version) returns
+    ``None`` so the auto-resolve trigger can skip silently; real ambiguity (more than one
+    auto ruleset) still fails loudly, mirroring :func:`recompute_activity_result`.
+    """
+    from ruleset.models import ContestRuleset, RulesetVersion
+
+    candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by("pk")
+    if candidates.count() > 1:
+        raise ValidationError("该活动存在多个自动重算赛制，请先清理重复。")
+    ruleset = candidates.first()
+    if ruleset is None:
+        return None
+    return (
+        ruleset.versions.filter(is_current=True, status=RulesetVersion.Status.FROZEN)
+        .order_by("-version")
+        .first()
+    )
+
+
+def _definition_checkpoints_ordered(version) -> tuple[str, ...]:
+    """Declared checkpoint keys in declaration order, or ``()`` for a non-progressive ruleset."""
+    if not version.definition:
+        return ()
+    obj = (
+        version.definition
+        if isinstance(version.definition, dict)
+        else json.loads(version.definition)
+    )
+    return tuple(c["key"] for c in (obj.get("checkpoints") or ()) if c.get("key"))
+
+
+def _run_ruleset_args(version, activity) -> dict:
+    """The bound rounds + sources a formal/preview run of the frozen version consumes."""
+    binding = _version_binding(version)
+    raw_keys = binding.get("round_keys") or {}
+    round_ids = list(raw_keys.values())
+    rounds = {r.pk: r for r in ContestRound.objects.filter(pk__in=round_ids, activity=activity)}
+    missing = [rid for rid in round_ids if rid not in rounds]
+    if missing:
+        raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
+    bound = {key: rounds[rid] for key, rid in raw_keys.items()}
+    return {
+        "round_keys": bound,
+        "vote_scores": _combined_vote_scores(activity, binding),
+        "group_of": _source_group_of(activity, binding),
+        "manual": _source_manual(version, activity),
+    }
+
+
+@transaction.atomic
+def maybe_resolve_checkpoints(activity, operator) -> list[str]:
+    """Publish a READY_TO_CONFIRM StageResult for every satisfiable stage.
+
+    Called after each onsite input batch (score entry, audience entry, vote/round lock).
+    It probes — without persisting — whether a stage's dependency closure is now complete.
+    Targets are the declared checkpoints in definition order; a ruleset with no declared
+    checkpoints falls back to its single binding ``stage_key`` (a full resolve). A probe
+    that resolves READY and whose current facts differ from the latest published result is
+    published via :func:`recompute_activity_result`; a HOLD/REVIEW (still-missing input) or
+    an already-current result is skipped so an incomplete stage never pollutes the board and
+    a re-run never duplicates.
+    """
+    lock_activity_for_action(activity)
+    version = _current_frozen_version(activity)
+    if version is None:
+        return []
+    checkpoints = _definition_checkpoints_ordered(version)
+    targets: list[tuple[str, str | None]] = []
+    if checkpoints:
+        targets = [(cp, cp) for cp in checkpoints]
+    else:
+        full_stage = (_version_binding(version).get("stage_key") or "").strip()
+        targets = [(full_stage, None)] if full_stage else []
+    resolved: list[str] = []
+    for stage_key, checkpoint in targets:
+        args = _run_ruleset_args(version, activity)
+        probe = run_ruleset(
+            version,
+            activity,
+            stage_key=stage_key,
+            computed_by=operator,
+            checkpoint=checkpoint,
+            preview=True,
+            **args,
+        )
+        if probe.status != ResolverState.READY:
+            continue
+        latest = (
+            StageResult.objects.filter(activity=activity, stage_key=stage_key)
+            .order_by("-result_version", "-pk")
+            .first()
+        )
+        if latest is not None and latest.input_fingerprint == probe.input_fingerprint:
+            continue
+        recompute_activity_result(activity, operator, checkpoint=checkpoint)
+        resolved.append(stage_key)
+    return resolved
+
+
 @transaction.atomic
 def recompute_activity_result(
     activity,
@@ -1871,7 +2030,7 @@ def recompute_activity_result(
         stage_key=stage_key,
         computed_by=computed_by,
         round_keys=bound,
-        vote_scores=_source_vote_scores(activity, binding),
+        vote_scores=_combined_vote_scores(activity, binding),
         group_of=_source_group_of(activity, binding),
         manual=_source_manual(version, activity),
         checkpoint=checkpoint,

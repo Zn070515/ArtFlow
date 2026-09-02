@@ -1223,6 +1223,7 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
                 "round_keys": {"r1": round_.pk},
                 "vote_keys": {},
                 "group_keys": {},
+                "audience_keys": {},
                 "announcement_blocks": [{"label": "晋级", "outcome_codes": ["direct"]}],
                 "announcement_blocks_by_checkpoint": {},
             },

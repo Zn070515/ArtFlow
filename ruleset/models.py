@@ -107,6 +107,14 @@ class ContestRuleset(models.Model):
         blank=True,
         help_text="Maps a group 'by' key to a ContestRound pk, e.g. {'initial_group': 3}.",
     )
+    audience_keys = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Maps a ruleset audience vote_source key to an AudienceScore stage_key "
+            "grouping, e.g. {'aud1': 'stage1'}."
+        ),
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

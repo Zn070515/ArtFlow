@@ -394,6 +394,49 @@ class ScoreSummary(models.Model):
         return f"{self.singer.name}: {self.average_score} (#{self.rank})"
 
 
+class AudienceScore(models.Model):
+    """A staff-entered per-singer audience score for a checkpoint stage (M1-INTEGRATION-2).
+
+    Unlike a raw vote count, this is a real 0-100 score (scale ``hundred``) that may be
+    combined by weight with judge scores in the resolver's aggregate. It is keyed by an
+    audience-set name (``stage_key``), which the ruleset binding's ``audience_keys`` maps
+    to the definition's vote_source key.
+    """
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="audience_scores"
+    )
+    stage_key = models.CharField(
+        max_length=100, help_text="Audience-set name grouped in the binding's audience_keys."
+    )
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="audience_scores"
+    )
+    score = models.DecimalField(max_digits=8, decimal_places=2)
+    is_test_data = models.BooleanField(default=False)
+    entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audience_scores",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["stage_key", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "stage_key", "singer"],
+                name="ux_audience_activity_stage_singer",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.singer.name}@{self.stage_key}: {self.score}"
+
+
 class Award(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="awards")
     singer = models.ForeignKey(SingerRegistration, on_delete=models.CASCADE, related_name="awards")
