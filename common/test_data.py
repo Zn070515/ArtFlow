@@ -8,7 +8,12 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
 
-from common.authority import STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    RULESET_FREEZE,
+    SCORE_SUMMARY_RECALCULATE,
+    STAGE_RESULT_CONFIRM,
+    authority_write,
+)
 
 from .models import AuditLog
 
@@ -202,7 +207,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         generated_document.delete()
         if stored_name:
             transaction.on_commit(partial(delete_storage_object, storage, stored_name))
-    Award.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    Award.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     # StageResult.ruleset_version is PROTECT-ed by RulesetVersion — but a ContestRuleset
     # is *config*, not runtime residue (§7, P0-8): a test rehearsal must leave its
     # ruleset structure behind for the FORMAL successor. So results go first, then manual
@@ -228,7 +233,8 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     with _authorized_manual_write():
         ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
-    ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     VoteRecord.objects.filter(
         vote_session__activity=locked_activity,
         vote_session__is_test_data=True,
@@ -239,7 +245,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         vote_session__is_test_data=True,
         is_test_data=True,
     ).delete()  # type: ignore[no-untyped-call]
-    VoteOption.objects.filter(
+    VoteOption.objects.filter(  # type: ignore[no-untyped-call]
         vote_session__activity=locked_activity,
         vote_session__is_test_data=True,
         is_test_data=True,
@@ -309,7 +315,8 @@ def _promote_retained_config(activity: Any, *, operator: Any) -> dict[str, int]:
             # current, so demote the TEST frozen through the base manager (bypassing the
             # frozen-immutability guard on is_current) — no authority exists until staff
             # re-bind and re-freeze the FORMAL successor.
-            RulesetVersion._base_manager.filter(pk=retire.pk).update(is_current=False)
+            with authority_write(RULESET_FREEZE):
+                RulesetVersion._base_manager.filter(pk=retire.pk).update(is_current=False)
             create_ruleset_version(
                 ruleset,
                 definition=retire.definition,

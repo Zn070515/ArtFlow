@@ -182,6 +182,8 @@ class ContestRuleset(models.Model):
 
 class RulesetVersionQuerySet(models.QuerySet):
     def _ensure_mutable(self):
+        if authority_authorized(RULESET_FREEZE):
+            return
         if self.filter(status=RulesetVersion.Status.FROZEN).exists():
             raise ValidationError("Frozen ruleset versions are immutable.")
 
@@ -290,6 +292,7 @@ class RulesetVersion(models.Model):
     objects = RulesetVersionManager()
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["-version", "pk"]
         constraints = [
             models.UniqueConstraint(

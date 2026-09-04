@@ -14,7 +14,15 @@ from unittest.mock import patch
 
 from accounts.models import User
 from archive.models import ArchivePackage
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    SCORE_SUMMARY_RECALCULATE,
+    STAGE_RESULT_CONFIRM,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.models import AuditLog
 from core.models import Activity
 from core.services import unarchive_activity
@@ -66,6 +74,32 @@ def login_admin(client, user):
     session["artflow_admin_verified"] = True
     session["artflow_admin_verified_at"] = timezone.now().isoformat()
     session.save()
+
+
+def _create_score_summary(**kwargs):
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        return ScoreSummary.objects.create(**kwargs)
+
+
+def _save_activity_state(activity, fields=None):
+    with authority_write(ACTIVITY_STATE):
+        if fields is None:
+            activity.save()
+        else:
+            activity.save(update_fields=fields)
+
+
+def _save_round_state(round_, fields=None):
+    with authority_write(CONTEST_ROUND_STATE):
+        if fields is None:
+            round_.save()
+        else:
+            round_.save(update_fields=fields)
+
+
+def _save_vote_state(vote_session, fields):
+    with authority_write(VOTE_SESSION_STATE):
+        vote_session.save(update_fields=fields)
 
 
 def _close_file_response_resources(response: Any):
@@ -804,7 +838,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         prepare_round(round_, self.staff)
         self.singer_activity.is_locked = True
-        self.singer_activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.singer_activity, ["is_locked"])
         self.client.force_login(self.staff)
         response = self.client.post(
             reverse("staff:round_scores_api", args=[round_.pk]),
@@ -827,7 +861,7 @@ class StaffPanelSmokeTests(TestCase):
 
     def test_locked_activity_blocks_award_creation(self):
         self.singer_activity.is_locked = True
-        self.singer_activity.save()
+        _save_activity_state(self.singer_activity)
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -1408,7 +1442,7 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=1,
         )
         ScoreRecord.objects.create(round=round_, singer=registration, judge=judge, score=91)
-        ScoreSummary.objects.create(
+        _create_score_summary(
             round=round_, singer=registration, average_score=91, rank=1, is_advanced=True
         )
         Award.objects.create(activity=self.singer_activity, singer=registration, name="Top Singer")
@@ -1592,13 +1626,13 @@ class StaffPanelSmokeTests(TestCase):
         )
         prepare_round(contest_round, self.staff)
         activity.phase = Activity.Phase.RESULTS_PUBLISHED
-        activity.save(update_fields=["phase"])
+        _save_activity_state(activity, ["phase"])
         locked_round = ContestRound.objects.get(pk=contest_round.pk)
         if include_scores:
             ScoreRecord.objects.create(round=locked_round, singer=singer, judge=judge, score=95)
         locked_round.status = ContestRound.Status.LOCKED
         locked_round.is_locked = True
-        locked_round.save(update_fields=["status", "is_locked"])
+        _save_round_state(locked_round, ["status", "is_locked"])
         return activity
 
     def test_execution_package_omits_archive_only_sheets(self):
@@ -1717,7 +1751,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         prepare_round(contest_round, self.staff)
         activity.phase = Activity.Phase.RESULTS_PUBLISHED
-        activity.save(update_fields=["phase"])
+        _save_activity_state(activity, ["phase"])
         with self.assertRaises(PermissionDenied):
             archive_activity(activity, self.admin)
 
@@ -2202,7 +2236,7 @@ class StaffPanelSmokeTests(TestCase):
         ScoreRecord.objects.create(round=round_, singer=singer, judge=judge, score=91)
         round_.status = ContestRound.Status.LOCKED
         round_.is_locked = True
-        round_.save(update_fields=["status", "is_locked"])
+        _save_round_state(round_, ["status", "is_locked"])
         self.client.force_login(self.staff)
 
         response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
@@ -2256,9 +2290,9 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        ScoreSummary.objects.create(round=round_, singer=singer, average_score=90, rank=1)
-        ScoreSummary.objects.create(round=round_, singer=late_singer, average_score=99, rank=1)
-        ScoreSummary.objects.create(round=round_, singer=foreign_singer, average_score=100, rank=1)
+        _create_score_summary(round=round_, singer=singer, average_score=90, rank=1)
+        _create_score_summary(round=round_, singer=late_singer, average_score=99, rank=1)
+        _create_score_summary(round=round_, singer=foreign_singer, average_score=100, rank=1)
         self.client.force_login(self.staff)
 
         response = self.client.get(reverse("staff:round_ranking", args=[round_.pk]))
@@ -2590,7 +2624,7 @@ class StaffPanelSmokeTests(TestCase):
             judge=judge,
             score=91,
         )
-        ScoreSummary.objects.create(
+        _create_score_summary(
             round=contest_round,
             singer=singer,
             average_score=91,
@@ -3160,7 +3194,7 @@ class MaterialReviewAndRequirementTests(TestCase):
 
     def test_staff_material_review_denied_when_activity_locked(self):
         self.activity.is_locked = True
-        self.activity.save()
+        _save_activity_state(self.activity)
         self.client.force_login(self.staff)
         check = self.registration.material_checks.get(item_name="伴奏文件")
         response = self.client.post(
@@ -3583,14 +3617,14 @@ class WordGenerateArchiveAuthorityTests(TestCase):
     def test_persistent_generation_rejects_archived(self):
         self.activity.phase = Activity.Phase.ARCHIVED
         self.activity.is_locked = True
-        self.activity.save(update_fields=["phase", "is_locked"])
+        _save_activity_state(self.activity, ["phase", "is_locked"])
         with self.assertRaises(PermissionDenied):
             generate_persistent_document(self.activity, self.template, self.staff)
         self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
 
     def test_persistent_generation_rejects_locked(self):
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         with self.assertRaises(PermissionDenied):
             generate_persistent_document(self.activity, self.template, self.staff)
         self.assertFalse(GeneratedDocument.objects.filter(activity=self.activity).exists())
@@ -3600,7 +3634,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
         # not grow a persistent GeneratedDocument.
         self.activity.phase = Activity.Phase.ARCHIVED
         self.activity.is_locked = True
-        self.activity.save(update_fields=["phase", "is_locked"])
+        _save_activity_state(self.activity, ["phase", "is_locked"])
         self.client.force_login(self.staff)
         response = self.client.post(
             reverse("staff:word_generate", args=[self.template.pk, self.activity.pk])
@@ -3614,7 +3648,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
 
     def test_locked_word_generate_rejects(self):
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         self.client.force_login(self.staff)
         self.client.raise_request_exception = False
         response = self.client.post(
@@ -3662,7 +3696,7 @@ class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.phase = Activity.Phase.ARCHIVED
                     activity.is_locked = True
-                    activity.save(update_fields=["phase", "is_locked"])
+                    _save_activity_state(activity, ["phase", "is_locked"])
                     hold_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -3725,7 +3759,7 @@ class PublicPostMoveLockTests(TestCase):
             is_test_mode=False,
         )
         self.activity.is_locked = True
-        self.activity.save()
+        _save_activity_state(self.activity)
         post = PublicPost.objects.create(
             title="Post", related_activity=self.activity, created_by=self.staff
         )
@@ -3799,7 +3833,7 @@ class PublicPostMoveLockTests(TestCase):
             is_test_mode=False,
         )
         target.is_locked = True
-        target.save()
+        _save_activity_state(target)
         post = PublicPost.objects.create(
             title="Post", related_activity=self.activity, created_by=self.staff
         )
@@ -4011,7 +4045,7 @@ class PublicPostReparentConcurrencyTests(TransactionTestCase):
         # After T1 A->B, B is locked. A stale T2 must not bypass B's lock to move
         # to C: it never locks B, so only the stale-parent check can refuse it.
         self.b.is_locked = True
-        self.b.save()
+        _save_activity_state(self.b)
         holder_error, t2_result = self._run_stale_reparent()
         self.assertFalse(holder_error, holder_error)
         self.post.refresh_from_db()
@@ -4138,7 +4172,7 @@ class RoundScoresApiTests(TestCase):
         RoundEntry.objects.create(round=self.round, singer=self.singer)
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status"])
+        _save_round_state(self.round, ["status"])
         self.client.force_login(self.admin)
 
     def _post(self, payload):
@@ -4757,7 +4791,7 @@ class ResultBoardTests(TestCase):
         from singer_contest.services import run_ruleset
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         contest_round = ContestRound.objects.create(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -4779,14 +4813,15 @@ class ResultBoardTests(TestCase):
             )
         contest_round.is_locked = True
         contest_round.status = ContestRound.Status.LOCKED
-        contest_round.save(update_fields=["is_locked", "status"])
+        _save_round_state(contest_round, ["is_locked", "status"])
         # R9-4/R9-5: 核定 finalizes only a result grounded on the *current* FROZEN
         # authority, so demote the setUp current version, make this frozen v2 the single
         # current runner, then persist a formal StageResult (not an isolated preview).
-        RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id).exclude(
-            pk=version.pk
-        ).update(is_current=False)
-        RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id).exclude(
+                pk=version.pk
+            ).update(is_current=False)
+            RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
         version.refresh_from_db()
         ready = run_ruleset(
             version,
@@ -4821,7 +4856,7 @@ class ResultBoardTests(TestCase):
     def test_stage_result_confirm_rejects_unresolved(self):
         """§36-37: 核定 a HOLD stage is refused and leaves it unchanged."""
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         hold = self._stage(
             status=StageResult.Status.HOLD,
             ruleset_hash="hash-chold",
@@ -4836,7 +4871,7 @@ class ResultBoardTests(TestCase):
     def test_stage_result_unlock_requires_admin_and_reverts(self):
         """§38: only an admin may unlock a confirmed stage; it reverts to READY."""
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         confirmed = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-unlock")
         # A non-admin staff member is denied and the lock is preserved.
         self.client.post(reverse("staff:stage_result_unlock", args=[confirmed.pk]), {"note": "x"})
@@ -5186,7 +5221,7 @@ class RulesetEditorTests(TestCase):
     def test_contest_ruleset_create_requires_unlocked_activity(self):
         """R0: ruleset creation must re-validate the activity lock (DRAFT/FORMAL)."""
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         response = self.client.post(
             reverse("staff:contest_ruleset_create"),
             {"activity": self.activity.pk, "name": "锁定活动禁止建赛制"},
@@ -5196,7 +5231,7 @@ class RulesetEditorTests(TestCase):
     def test_rule_edit_requires_unlocked_activity(self):
         """R0: ruleset edit must re-validate the activity lock before mutating."""
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         response = self.client.post(
             reverse("staff:ruleset_edit", args=[self.version.pk]),
             {"action": "add", "new_type": "ASSESS"},
@@ -5410,7 +5445,7 @@ class RulesetEditorTests(TestCase):
 
     def test_ruleset_bind_requires_unlocked_activity(self):
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         response = self.client.post(
             reverse("staff:ruleset_bind", args=[self.version.pk]),
             {"stage_key": "院十佳"},

@@ -1,3 +1,4 @@
+from common.authority import ACTIVITY_STATE, authority_authorized
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
@@ -5,8 +6,14 @@ from django.db import models, router, transaction
 
 class ActivityQuerySet(models.QuerySet):
     lifecycle_fields = {"is_test_mode", "data_lifecycle"}
+    state_fields = {"phase", "is_locked", "locked_at", "locked_by", "locked_by_id"}
+
+    def _ensure_state_authorized(self, fields):
+        if self.state_fields.intersection(fields) and not authority_authorized(ACTIVITY_STATE):
+            raise ValidationError("Activity state must be changed through the lifecycle service.")
 
     def update(self, **kwargs):
+        self._ensure_state_authorized(kwargs)
         if self.lifecycle_fields.intersection(kwargs):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
         return super().update(**kwargs)
@@ -16,6 +23,12 @@ class ActivityQuerySet(models.QuerySet):
             kwargs.get("update_fields", ())
         ):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
+        if (
+            kwargs.get("update_conflicts")
+            and self.state_fields.intersection(kwargs.get("update_fields", ()))
+            and not authority_authorized(ACTIVITY_STATE)
+        ):
+            raise ValidationError("Activity state must be changed through the lifecycle service.")
         objs = list(objs)
         for activity in objs:
             activity.data_lifecycle = (
@@ -26,6 +39,7 @@ class ActivityQuerySet(models.QuerySet):
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_state_authorized(fields)
         if self.lifecycle_fields.intersection(fields):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
         return super().bulk_update(objs, fields, *args, **kwargs)
@@ -111,6 +125,26 @@ class Activity(models.Model):
                     .values_list("data_lifecycle", flat=True)
                     .first()
                 )
+                persisted_state = (
+                    type(self)
+                    ._base_manager.using(using)
+                    .filter(pk=self.pk)
+                    .values("phase", "is_locked", "locked_at", "locked_by_id")
+                    .first()
+                )
+                if (
+                    persisted_state
+                    and not authority_authorized(ACTIVITY_STATE)
+                    and (
+                        persisted_state["phase"] != self.phase
+                        or persisted_state["is_locked"] != self.is_locked
+                        or persisted_state["locked_at"] != self.locked_at
+                        or persisted_state["locked_by_id"] != self.locked_by_id
+                    )
+                ):
+                    raise ValidationError(
+                        "Activity state must be changed through the lifecycle service."
+                    )
                 if persisted_lifecycle == self.DataLifecycle.FORMAL:
                     if self.is_test_mode or self.data_lifecycle == self.DataLifecycle.TEST:
                         raise ValidationError("Formal activities cannot re-enter test mode.")

@@ -16,6 +16,10 @@ WORKDIR /app
 
 RUN python -m pip install --no-cache-dir "uv==0.11.29"
 
+# Keep the project environment visible to the login shells used by the local
+# PostgreSQL acceptance harness and by CI's container smoke checks.
+RUN printf '%s\n' 'export PATH="/opt/venv/bin:${PATH}"' >> /etc/profile
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --extra production
 

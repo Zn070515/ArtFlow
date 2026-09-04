@@ -3,6 +3,7 @@ import time
 from unittest import skipUnless
 
 from accounts.models import User
+from common.authority import ACTIVITY_STATE, authority_write
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, transaction
@@ -86,7 +87,8 @@ class ProgramMaterialPurityTests(TestCase):
 
     def test_archived_activity_program_get_produces_no_material_check_mutation(self):
         self.activity.phase = Activity.Phase.ARCHIVED
-        self.activity.save(update_fields=["phase"])
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
         self.client.force_login(self.user)
         before = self.prog.material_checks.count()
         response = self.client.get(reverse("farewell_show:my_program_detail", args=[self.prog.pk]))
@@ -127,7 +129,8 @@ class ProgramLockOrderConcurrencyTests(TransactionTestCase):
                 with transaction.atomic():
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.is_locked = True
-                    activity.save(update_fields=["is_locked"])
+                    with authority_write(ACTIVITY_STATE):
+                        activity.save(update_fields=["is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only

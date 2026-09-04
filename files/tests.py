@@ -4,6 +4,7 @@ import threading
 from unittest import skipUnless
 
 from accounts.models import User
+from common.authority import ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -91,7 +92,8 @@ class SubmissionFileLifecycleTests(TestCase):
 
     def test_store_submission_file_rejects_locked_activity(self):
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["is_locked"])
 
         with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
             store_submission_file(
@@ -457,7 +459,8 @@ class MaterialCheckReconcileTests(TestCase):
 
     def test_reconcile_rejects_archived_activity(self):
         self.activity.phase = Activity.Phase.ARCHIVED
-        self.activity.save(update_fields=["phase"])
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
         with self.assertRaises(PermissionDenied):
             reconcile_singer_material_checks(self.registration)
 

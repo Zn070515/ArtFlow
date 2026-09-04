@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from common.authority import ACTIVITY_STATE, authority_write
 from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -82,7 +83,8 @@ def transition_activity_phase(
 
     old_phase = locked_activity.phase
     locked_activity.phase = target_phase
-    locked_activity.save(update_fields=["phase"])
+    with authority_write(ACTIVITY_STATE):
+        locked_activity.save(update_fields=["phase"])
     AuditLog.objects.create(
         operator=actor,
         action_type=AuditLog.ActionType.PHASE_TRANSITION,
@@ -109,7 +111,8 @@ def _enter_archived_phase_locked(
         return locked_activity
     old_phase = locked_activity.phase
     locked_activity.phase = Activity.Phase.ARCHIVED
-    locked_activity.save(update_fields=["phase"])
+    with authority_write(ACTIVITY_STATE):
+        locked_activity.save(update_fields=["phase"])
     AuditLog.objects.create(
         operator=actor,
         action_type=AuditLog.ActionType.PHASE_TRANSITION,
@@ -145,9 +148,10 @@ def unarchive_activity(activity: Activity, *, actor: Any = None, note: str = "")
     locked_activity.is_locked = False
     locked_activity.locked_at = None
     locked_activity.locked_by = None
-    locked_activity.save(
-        update_fields=["phase", "is_locked", "locked_at", "locked_by"],
-    )
+    with authority_write(ACTIVITY_STATE):
+        locked_activity.save(
+            update_fields=["phase", "is_locked", "locked_at", "locked_by"],
+        )
     AuditLog.objects.create(
         operator=actor,
         action_type=AuditLog.ActionType.UNARCHIVE_ACTIVITY,

@@ -14,7 +14,12 @@ import json
 from decimal import Decimal
 
 from accounts.models import User
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    authority_write,
+)
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -74,7 +79,8 @@ class AuthorityClosureAcceptanceTests(TestCase):
         RoundEntry.objects.create(round=self.round, singer=self.singer)
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.save(update_fields=["status"])
 
     def _confirmed(self):
         result = StageResult.objects.create(
@@ -180,7 +186,8 @@ class AuthorityClosureAcceptanceTests(TestCase):
     def test_formal_recompute_cannot_override_frozen_round_binding(self):
         # Demote the setUp current version, then re-freeze a v2 authority bound to the round
         # (an activity owns exactly one ContestRuleset, so the shared ruleset is reused).
-        RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
         self.ruleset.stage_key = "院十佳"
         self.ruleset.round_keys = {"r1": self.round.pk}
         self.ruleset.save(update_fields=["stage_key", "round_keys"])

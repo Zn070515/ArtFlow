@@ -20,6 +20,10 @@ from contextlib import contextmanager
 # Write-authority scope identifiers.
 RULESET_FREEZE = "ruleset.freeze"
 STAGE_RESULT_CONFIRM = "stageresult.confirm"
+ACTIVITY_STATE = "activity.state"
+CONTEST_ROUND_STATE = "contestround.state"
+VOTE_SESSION_STATE = "votesession.state"
+SCORE_SUMMARY_RECALCULATE = "scoresummary.recalculate"
 
 _scope = threading.local()
 
