@@ -32,6 +32,7 @@ from ruleset.resolver import (
 )
 
 from .models import (
+    Award,
     CompositeResult,
     ContestRound,
     Judge,
@@ -1308,6 +1309,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         latest.save(update_fields=["status", "reasons", "created_by"])
         StageDecision.objects.filter(stage_result=latest).delete()
         CompositeResult.objects.filter(stage_result=latest).delete()
+        Award.objects.filter(source_stage_result=latest).delete()
         _create_children(latest, result, singer_by_key, is_test)
         materialize_round_entry_from_stage(latest, operator=computed_by)
         return latest
@@ -1374,6 +1376,20 @@ def _create_children(stage, result, singer_by_key, is_test):
             )
             for c in result.composites
             if c.contestant in singer_by_key
+        ]
+    )
+    Award.objects.bulk_create(
+        [
+            Award(
+                activity=stage.activity,
+                singer=singer_by_key[award.contestant],
+                name=award.award,
+                is_test_data=is_test,
+                source_stage_result=stage,
+                source_node=award.source_node,
+            )
+            for award in result.awards
+            if award.contestant in singer_by_key
         ]
     )
 

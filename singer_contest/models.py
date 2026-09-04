@@ -471,6 +471,14 @@ class Award(models.Model):
         blank=True,
         related_name="generated_popularity_award",
     )
+    source_stage_result = models.ForeignKey(
+        "singer_contest.StageResult",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="awards",
+    )
+    source_node = models.CharField(max_length=100, blank=True)
 
     class Meta:
         ordering = ["pk"]
@@ -482,6 +490,9 @@ class Award(models.Model):
             raise ValidationError("Award singer must belong to the award activity.")
         if vote_session and self.activity_id and vote_session.activity_id != self.activity_id:
             raise ValidationError("Generated award must belong to the vote activity.")
+        if self.source_stage_result_id and self.activity_id:
+            if self.source_stage_result.activity_id != self.activity_id:
+                raise ValidationError("赛段奖项必须属于同一活动。")
 
     def save(self, *args, **kwargs):
         self.clean()
