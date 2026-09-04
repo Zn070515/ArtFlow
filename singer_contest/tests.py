@@ -570,9 +570,9 @@ class ScoringServiceTests(TestCase):
             .values_list("singer_id", "running_order")
         )
         expected = list(
-            ScoreSummary.objects.filter(round=self.round).order_by("rank", "pk").values_list(
-                "singer_id", flat=True
-            )
+            ScoreSummary.objects.filter(round=self.round)
+            .order_by("average_score", "singer_id")
+            .values_list("singer_id", flat=True)
         )
         self.assertEqual([singer_id for singer_id, _ in ordered], expected)
         self.assertEqual([order for _, order in ordered], [1, 2, 3, 4])

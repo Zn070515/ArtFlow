@@ -75,15 +75,15 @@ def _order_singers_for_round(contest_round: ContestRound, singers: list[SingerRe
     )
     if previous is None:
         raise ValidationError("按上一轮排名排序时必须存在上一轮比赛。")
-    ranks = dict(
+    scores = dict(
         ScoreSummary.objects.filter(round=previous, singer__in=singers).values_list(
-            "singer_id", "rank"
+            "singer_id", "average_score"
         )
     )
-    if any(singer.pk not in ranks or ranks[singer.pk] <= 0 for singer in singers):
-        raise ValidationError("按上一轮排名排序时，所有选手都必须有已确定的上一轮名次。")
+    if any(singer.pk not in scores for singer in singers):
+        raise ValidationError("按上一轮成绩排序时，所有选手都必须有已确定的上一轮成绩。")
     direction = 1 if policy == ContestRound.OrderPolicy.PREVIOUS_RANK_ASC else -1
-    return sorted(singers, key=lambda singer: (direction * ranks[singer.pk], singer.pk))
+    return sorted(singers, key=lambda singer: (direction * scores[singer.pk], singer.pk))
 
 
 @transaction.atomic
@@ -1430,13 +1430,23 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     )
     if target is None:
         return None
+    ordered_singers = _order_singers_for_round(
+        target, [decision.singer for decision in advancers]
+    )
+    running_order_by_singer = {
+        singer.pk: index for index, singer in enumerate(ordered_singers, start=1)
+    }
     entry_qs = RoundEntry.objects.filter(round=target)
     existing_ids = set(entry_qs.values_list("singer_id", flat=True))
     target_ids = {decision.singer_id for decision in advancers}
     removed = existing_ids - target_ids
     to_create = [
-        RoundEntry(round=target, singer=decision.singer, running_order=index)
-        for index, decision in enumerate(advancers, start=1)
+        RoundEntry(
+            round=target,
+            singer=decision.singer,
+            running_order=running_order_by_singer[decision.singer_id],
+        )
+        for decision in advancers
         if decision.singer_id not in existing_ids
     ]
     if removed:
@@ -1444,8 +1454,8 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     entry_qs.update(running_order=None)
     if to_create:
         RoundEntry.objects.bulk_create(to_create)
-    for index, decision in enumerate(advancers, start=1):
-        entry_qs.filter(singer_id=decision.singer_id).update(running_order=index)
+    for singer_id, index in running_order_by_singer.items():
+        entry_qs.filter(singer_id=singer_id).update(running_order=index)
     if removed or to_create:
         AuditLog.objects.create(
             operator=operator,
