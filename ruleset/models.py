@@ -17,6 +17,11 @@ class RulesetTemplate(models.Model):
         DRAFT = "draft", "草稿"
         FROZEN = "frozen", "已冻结"
 
+    class CapabilityStatus(models.TextChoices):
+        PRODUCTION = "production", "生产可用"
+        EXPERIMENTAL = "experimental", "实验性"
+        UNSUPPORTED = "unsupported", "不支持"
+
     name = models.CharField(max_length=100)
     schema_version = models.PositiveIntegerField(default=1)
     definition = models.TextField(help_text="JSON ruleset definition (typed node graph).")
@@ -25,6 +30,18 @@ class RulesetTemplate(models.Model):
     is_available = models.BooleanField(
         default=True,
         help_text="是否在生产模板库中可选择；撤下的内置模板保留用于历史追溯。",
+    )
+    builtin_key = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="内置模板的稳定能力标识；自定义模板留空。",
+    )
+    capability_status = models.CharField(
+        max_length=16,
+        choices=CapabilityStatus,
+        default=CapabilityStatus.EXPERIMENTAL,
+        help_text="模板实际已验证的运行能力，不代表仅凭 schema 可编译。",
     )
     content_hash = models.CharField(max_length=64, blank=True)
     created_by = models.ForeignKey(
@@ -47,6 +64,13 @@ class RulesetTemplate(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["builtin_key"],
+                condition=~Q(builtin_key=""),
+                name="ruleset_template_unique_builtin_key",
+            )
+        ]
 
     def clean(self):
         parse_definition(self.definition)

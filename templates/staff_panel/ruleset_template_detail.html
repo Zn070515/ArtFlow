@@ -16,7 +16,10 @@
     <p class="text-sm text-gray-500 mb-6">{{ template.description }}</p>
 
     <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
-        <h2 class="text-sm font-semibold text-gray-800 mb-2">克隆到活动</h2>
+        <h2 class="text-sm font-semibold text-gray-800 mb-2">能力状态：{{ template.get_capability_status_display }}</h2>
+        {% if template.capability_status != "production" %}
+        <p class="text-sm text-gray-500">该模板尚未具备完整生产操作面，当前仅供审阅。</p>
+        {% else %}
         <form method="post" action="{% url 'staff:ruleset_clone_from_template' template.pk %}" class="flex flex-wrap items-end gap-2">
             {% csrf_token %}
             <div>
@@ -31,6 +34,7 @@
             </div>
             <button class="bg-brand text-white px-4 py-1.5 rounded text-sm">克隆</button>
         </form>
+        {% endif %}
     </div>
 
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">

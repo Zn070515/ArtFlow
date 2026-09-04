@@ -6,6 +6,7 @@ from django.http import QueryDict
 from farewell_show.models import Program
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
+from ruleset.schema import parse_definition
 from singer_contest.models import ContestRound, ScoringRubric, SingerRegistration
 from voting.models import VoteSession
 
@@ -70,6 +71,11 @@ class ContestRoundForm(forms.Form):
         required=False,
         initial=ContestRound.OrderPolicy.REGISTRATION_ORDER,
     )
+    tie_order_policy = forms.ChoiceField(
+        choices=ContestRound.TieOrderPolicy.choices,
+        required=False,
+        initial=ContestRound.TieOrderPolicy.REVIEW,
+    )
     roster_source = forms.ChoiceField(
         choices=[("", "自动判定"), *ContestRound.RosterSource.choices],
         required=False,
@@ -95,6 +101,9 @@ class ContestRoundForm(forms.Form):
     def clean_order_policy(self):
         return self.cleaned_data.get("order_policy") or ContestRound.OrderPolicy.REGISTRATION_ORDER
 
+    def clean_tie_order_policy(self):
+        return self.cleaned_data.get("tie_order_policy") or ContestRound.TieOrderPolicy.REVIEW
+
     def clean_roster_source(self):
         return self.cleaned_data.get("roster_source") or ""
 
@@ -107,6 +116,58 @@ class ContestRoundForm(forms.Form):
 
     def clean_rubric(self):
         return self.cleaned_data.get("rubric") or None
+
+
+class RoundRunningOrderForm(forms.Form):
+    singer_ids = forms.CharField(
+        label="出场顺序",
+        help_text="按顺序填写选手 ID，以逗号、空格或换行分隔。",
+        widget=forms.Textarea(attrs={"rows": 4}),
+    )
+
+    def clean_singer_ids(self):
+        raw = self.cleaned_data["singer_ids"]
+        return [item for item in raw.replace(",", " ").split() if item]
+
+
+class RoundGroupsForm(forms.Form):
+    groups = forms.JSONField(
+        label="分组定义",
+        help_text='JSON 示例：[{"name":"A组","singer_ids":["1","2"]}]',
+        widget=forms.Textarea(attrs={"rows": 8}),
+    )
+
+
+class ScoringRubricProvisionForm(forms.Form):
+    name = forms.CharField(max_length=100)
+    description = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    criteria = forms.JSONField(
+        label="评分项",
+        help_text='JSON 示例：[{"name":"音准","max_score":40},{"name":"表现","max_score":60}]',
+        widget=forms.Textarea(attrs={"rows": 8}),
+    )
+
+
+class ManualDecisionForm(forms.Form):
+    manual_key = forms.ChoiceField(label="人工节点")
+    group = forms.CharField(max_length=100, required=False, initial="")
+    chosen = forms.MultipleChoiceField(
+        label="选择选手", required=False, widget=forms.CheckboxSelectMultiple
+    )
+
+    def __init__(self, *args, version, activity, **kwargs):
+        super().__init__(*args, **kwargs)
+        definition = parse_definition(version.definition)
+        manual_keys = [
+            (node["key"], node["key"])
+            for node in definition["nodes"]
+            if node["type"] == "MANUAL_SELECT"
+        ]
+        cast(forms.ChoiceField, self.fields["manual_key"]).choices = manual_keys
+        cast(forms.MultipleChoiceField, self.fields["chosen"]).choices = [
+            (str(singer.pk), f"{singer.pk} — {singer.name}")
+            for singer in SingerRegistration.objects.filter(activity=activity).order_by("pk")
+        ]
 
 
 class SingerReviewForm(forms.Form):
@@ -160,6 +221,11 @@ class VoteSessionForm(forms.Form):
         initial=VoteSession.SelectionType.SINGLE,
     )
     max_selections = forms.IntegerField(min_value=1, required=False, initial=1)
+    purpose = forms.ChoiceField(
+        choices=VoteSession.Purpose.choices,
+        required=False,
+        initial=VoteSession.Purpose.SELECTION,
+    )
 
     def _posted_singer_ids(self):
         data = cast(QueryDict, self.data)
@@ -171,6 +237,7 @@ class VoteSessionForm(forms.Form):
             cleaned = {}
         selection_type = cleaned.get("selection_type") or VoteSession.SelectionType.SINGLE
         max_selections = cleaned.get("max_selections") or 1
+        purpose = cleaned.get("purpose") or VoteSession.Purpose.SELECTION
         singer_ids = self._posted_singer_ids()
         if not singer_ids:
             raise forms.ValidationError("请至少选择一个候选选手。")
@@ -181,4 +248,5 @@ class VoteSessionForm(forms.Form):
                 raise forms.ValidationError("结束时间必须晚于开始时间。")
         cleaned["selection_type"] = selection_type
         cleaned["max_selections"] = max_selections
+        cleaned["purpose"] = purpose
         return cleaned

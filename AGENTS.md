@@ -85,3 +85,13 @@ PRs should summarize behavior changes, list migrations, note verification, and i
 
 ## Security & Configuration Tips
 Never commit `.env`, SQLite databases, generated exports, archives, or uploaded files. Use `.env.example` for required variables such as `SECRET_KEY`, `ADMIN_LOGIN_KEY`, database settings, and `ALLOWED_HOSTS`. Internal submission files must go through controlled access views; do not reintroduce direct static media serving for private files.
+
+## Authority Baseline
+Raw scoring, criterion scores, vote ballots/records, and round performance/group facts are
+authoritative inputs. After their round/session is locked, or after a confirmed stage has
+consumed them, do not mutate them through direct ORM writes; use the corresponding audited
+service and explicit unlock flow. `StageAwardDecision` is a computed candidate only;
+`Award` rows sourced from a stage may be materialized only when that stage is confirmed.
+Ruleset templates must expose `builtin_key` and capability status; only `Production`
+templates may be cloned into a production workflow. Vote sessions must declare their
+purpose, and a ruleset vote source must match that purpose at bound freeze time.

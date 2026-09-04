@@ -26,6 +26,8 @@ urlpatterns = [
     path("rounds/", views.round_list, name="round_list"),
     path("rounds/new/", views.round_create, name="round_create"),
     path("rounds/<int:pk>/prepare/", views.round_prepare, name="round_prepare"),
+    path("rounds/<int:pk>/running-order/", views.round_running_order, name="round_running_order"),
+    path("rounds/<int:pk>/groups/", views.round_groups, name="round_groups"),
     path("rounds/<int:pk>/scores/", views.round_score_entry, name="round_score_entry"),
     path("rounds/<int:pk>/scores/api/", views.round_scores_api, name="round_scores_api"),
     path(
@@ -49,6 +51,7 @@ urlpatterns = [
     path("rounds/<int:pk>/reset/", views.round_reset, name="round_reset"),
     path("judges/", views.judge_list, name="judge_list"),
     path("judges/new/", views.judge_create, name="judge_create"),
+    path("rubrics/new/", views.rubric_create, name="rubric_create"),
     path("awards/", views.award_list, name="award_list"),
     path("awards/new/", views.award_create, name="award_create"),
     path("vote-sessions/", views.vote_session_list, name="vote_session_list"),
@@ -152,6 +155,11 @@ urlpatterns = [
     path("rulesets/<int:pk>/validate/", views.ruleset_validate, name="ruleset_validate"),
     path("rulesets/<int:pk>/preview/", views.ruleset_preview, name="ruleset_preview"),
     path("rulesets/<int:pk>/freeze/", views.ruleset_freeze, name="ruleset_freeze"),
+    path(
+        "ruleset-versions/<int:pk>/manual-decisions/",
+        views.manual_decision,
+        name="manual_decision",
+    ),
     path("audit-logs/", views.audit_log_list, name="audit_log_list"),
     path("users/", views.user_list, name="user_list"),
     path("users/<int:pk>/role/", views.user_role_update, name="user_role_update"),

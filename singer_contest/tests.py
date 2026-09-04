@@ -2409,6 +2409,10 @@ class StageResolverBindingTests(TestCase):
         )
         self.judge = Judge.objects.create(activity=self.activity, name="评委甲")
         self.singers = [self._make_singer(i) for i in range(1, 4)]
+        RoundEntry.objects.bulk_create(
+            [RoundEntry(round=self.round, singer=singer) for singer in self.singers]
+        )
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
 
     def _make_singer(self, index):
         singer = SingerRegistration.objects.create(
@@ -2476,13 +2480,14 @@ class StageResolverBindingTests(TestCase):
                         "key": "pairs",
                         "type": "PAIR",
                         "source": "entry",
+                        "pairing_policy": "ADJACENT",
                         "odd_policy": "wildcard",
                     },
                     {
                         "key": "duel",
                         "type": "DUEL",
                         "source": "pairs",
-                        "decision_source": "judge_vote",
+                        "decision_source": "manual_recorded_result",
                     },
                     {"key": "winners", "type": "SELECT", "source": "duel", "count": 2},
                 ],
@@ -2869,8 +2874,13 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         # A correct score edit changes the current input fingerprint.
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.25")  # type: ignore[union-attr]
-        rec.save(update_fields=["score"])  # type: ignore[union-attr]
+        unlock_round(self.round, self.user, note="stale-result correction")
+        apply_scores(
+            self.round,
+            {(rec.singer_id, rec.judge_id): rec.score + Decimal("0.25")},  # type: ignore[union-attr]
+            self.user,
+        )
+        lock_round(self.round, self.user)
         with self.assertRaises(ValidationError):
             confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
         stage.refresh_from_db()  # type: ignore[union-attr]
@@ -2944,8 +2954,11 @@ class StageResolverBindingTests(TestCase):
         self.assertIsNone(unlocked.confirmed_at)
         # Unlocked results are editable again: a score edit recomputes a new version.
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.50")  # type: ignore[union-attr]
-        rec.save(update_fields=["score"])  # type: ignore[union-attr]
+        apply_scores(
+            self.round,
+            {(rec.singer_id, rec.judge_id): rec.score + Decimal("0.50")},  # type: ignore[union-attr]
+            self.user,
+        )
         second = run_ruleset(
             version,
             self.activity,
@@ -2987,8 +3000,13 @@ class StageResolverBindingTests(TestCase):
             preview=False,
         )
         rec = ScoreRecord.objects.filter(round=self.round).first()
-        rec.score += Decimal("0.25")  # type: ignore[union-attr]
-        rec.save(update_fields=["score"])  # type: ignore[union-attr]
+        unlock_round(self.round, self.user, note="newer-result correction")
+        apply_scores(
+            self.round,
+            {(rec.singer_id, rec.judge_id): rec.score + Decimal("0.25")},  # type: ignore[union-attr]
+            self.user,
+        )
+        lock_round(self.round, self.user)
         second = run_ruleset(
             version,
             self.activity,

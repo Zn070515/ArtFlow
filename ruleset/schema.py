@@ -34,6 +34,8 @@ SCALES = frozenset({"hundred", "ten", "raw", "ordinal", "votes"})
 ASSESS_MODES = frozenset({"mean", "trimmed_mean"})
 TIE_POLICIES = frozenset({"auto_break", "extra_round", "manual", "score_fallback"})
 ODD_POLICIES = frozenset({"bye", "wildcard", "manual", "reject"})
+PAIRING_POLICIES = frozenset({"ADJACENT", "HIGH_LOW"})
+DUEL_DECISION_SOURCES = frozenset({"manual_recorded_result"})
 VOTE_PURPOSES = frozenset({"POPULARITY", "SCORE_COMPONENT", "SELECTION", "OTHER"})
 CONVERSION_METHODS = frozenset({"factor", "minmax", "rank"})
 # FILL_TO_QUOTA distribution mode: "global" fills until the TOTAL across the target
@@ -187,6 +189,12 @@ def _validate_assess(name: str, node: dict) -> None:
 
 
 def _validate_pair(name: str, node: dict) -> None:
+    _require_one_of(name, node, "pairing_policy", PAIRING_POLICIES)
+    _require_one_of(name, node, "odd_policy", ODD_POLICIES)
+
+
+def _validate_duel(name: str, node: dict) -> None:
+    _require_one_of(name, node, "decision_source", DUEL_DECISION_SOURCES)
     _require_one_of(name, node, "odd_policy", ODD_POLICIES)
 
 
@@ -321,7 +329,7 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
         _spec(
             NodeType.PAIR,
             OutputType.PAIR_SET,
-            required=("source",),
+            required=("source", "pairing_policy"),
             optional=("odd_policy",),
             source_refs=("source",),
             expects={"source": _ROSTER},
@@ -334,7 +342,7 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             optional=("odd_policy",),
             source_refs=("source",),
             expects={"source": _PAIR_SET},
-            validate=lambda n, d: _require_non_empty_str(n, d, "decision_source"),
+            validate=_validate_duel,
         ),
         _spec(
             NodeType.ASSESS,

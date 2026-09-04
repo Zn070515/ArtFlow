@@ -12,7 +12,12 @@ from common.business_rules import (
     ensure_round_unlocked,
     ensure_same_activity,
 )
-from common.lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
+from common.lifecycle import (
+    runtime_approved_singers,
+    runtime_is_test,
+    scope_lifecycle,
+    scope_runtime,
+)
 from common.models import AuditLog
 from common.test_data import (
     clear_activity_test_data,
@@ -29,7 +34,7 @@ from core.services import (
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -76,6 +81,7 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    PerformanceGroup,
     RoundEntry,
     RubricCriterion,
     ScoreRecord,
@@ -94,6 +100,7 @@ from singer_contest.services import (
     apply_scores,
     apply_scores_if_version,
     confirm_stage_result,
+    create_scoring_rubric,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
     lock_round,
@@ -102,6 +109,9 @@ from singer_contest.services import (
     parse_score_workbook,
     prepare_round,
     reset_round_to_draft,
+    set_manual_decision,
+    set_round_groups,
+    set_round_running_order,
     stage_decisions_by_blocks,
     unlock_round,
     unlock_stage_result,
@@ -119,8 +129,12 @@ from staff_panel.forms import (
     ActivityForm,
     ContestRoundForm,
     IncidentForm,
+    ManualDecisionForm,
     ProgramReviewForm,
     PublicPostForm,
+    RoundGroupsForm,
+    RoundRunningOrderForm,
+    ScoringRubricProvisionForm,
     SingerReviewForm,
     VoteSessionForm,
 )
@@ -907,6 +921,7 @@ def round_create(request):
                     "round_types": _choices(ContestRound.RoundType),
                     "scoring_modes": _choices(ContestRound.ScoringMode),
                     "order_policies": _choices(ContestRound.OrderPolicy),
+                    "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                     "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
                     "rubrics": ScoringRubric.objects.select_related("activity").all(),
                 },
@@ -921,6 +936,7 @@ def round_create(request):
                 advance_count=form.cleaned_data["advance_count"],
                 sequence=form.cleaned_data["sequence"],
                 order_policy=form.cleaned_data["order_policy"],
+                tie_order_policy=form.cleaned_data["tie_order_policy"],
                 roster_source=form.cleaned_data["roster_source"],
                 roster_source_stage=form.cleaned_data["roster_source_stage"],
                 rubric=form.cleaned_data["rubric"],
@@ -942,6 +958,7 @@ def round_create(request):
             "round_types": _choices(ContestRound.RoundType),
             "scoring_modes": _choices(ContestRound.ScoringMode),
             "order_policies": _choices(ContestRound.OrderPolicy),
+            "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
             "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
             "rubrics": ScoringRubric.objects.select_related("activity").all(),
         },
@@ -956,6 +973,64 @@ def round_prepare(request, pk):
     ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
     prepare_round(contest_round, request.user)
     return redirect("staff:round_list")
+
+
+@staff_required
+def round_running_order(request, pk):
+    contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
+    entries = list(contest_round.entries.select_related("singer").order_by("running_order", "pk"))
+    initial_ids = " ".join(str(entry.singer_id) for entry in entries)
+    if request.method == "POST":
+        form = RoundRunningOrderForm(request.POST)
+        if form.is_valid():
+            try:
+                set_round_running_order(
+                    contest_round, form.cleaned_data["singer_ids"], request.user
+                )
+            except (PermissionDenied, ValidationError) as error:
+                form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+            else:
+                messages.success(request, "人工出场顺序已保存。")
+                return redirect("staff:round_list")
+    else:
+        form = RoundRunningOrderForm(initial={"singer_ids": initial_ids})
+    return render(
+        request,
+        "staff_panel/round_running_order.html",
+        {"round": contest_round, "form": form, "entries": entries},
+    )
+
+
+@staff_required
+def round_groups(request, pk):
+    contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
+    groups = list(
+        PerformanceGroup.objects.filter(round=contest_round)
+        .prefetch_related("performances__singer")
+        .order_by("sequence", "pk")
+    )
+    initial_groups = [
+        {"name": group.name, "singer_ids": [p.singer_id for p in group.performances.all()]}
+        for group in groups
+    ]
+    if request.method == "POST":
+        form = RoundGroupsForm(request.POST)
+        if form.is_valid():
+            try:
+                set_round_groups(contest_round, form.cleaned_data["groups"], request.user)
+            except (PermissionDenied, ValidationError) as error:
+                form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+            else:
+                messages.success(request, "分组与演出归属已保存。")
+                return redirect("staff:round_list")
+    else:
+        form = RoundGroupsForm(initial={"groups": json.dumps(initial_groups, ensure_ascii=False)})
+    singers = runtime_approved_singers(contest_round.activity).order_by("pk")
+    return render(
+        request,
+        "staff_panel/round_groups.html",
+        {"round": contest_round, "form": form, "singers": singers},
+    )
 
 
 @staff_required
@@ -1467,8 +1542,35 @@ def judge_create(request):
 
 
 @staff_required
+def rubric_create(request):
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST).order_by(
+        "-created_at"
+    )
+    form = ScoringRubricProvisionForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
+        try:
+            create_scoring_rubric(
+                activity,
+                name=form.cleaned_data["name"],
+                description=form.cleaned_data["description"],
+                criteria=form.cleaned_data["criteria"],
+                operator=request.user,
+            )
+        except (PermissionDenied, ValidationError) as error:
+            form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+        else:
+            messages.success(request, "评分标准及评分项已创建。")
+            return redirect("staff:round_create")
+    return render(request, "staff_panel/rubric_form.html", {"form": form, "activities": activities})
+
+
+@staff_required
 def award_list(request):
-    awards = Award.objects.select_related("singer", "activity")
+    awards = Award.objects.filter(
+        Q(source_stage_result__isnull=True)
+        | Q(source_stage_result__status=StageResult.Status.CONFIRMED)
+    ).select_related("singer", "activity")
     return render(request, "staff_panel/award_list.html", {"awards": awards})
 
 
@@ -1545,6 +1647,7 @@ def vote_session_create(request):
                         )
                     ),
                     "selection_types": _choices(VoteSession.SelectionType),
+                    "purposes": _choices(VoteSession.Purpose),
                 },
             )
         singer_ids = request.POST.getlist("singers")
@@ -1569,6 +1672,7 @@ def vote_session_create(request):
             end_time=form.cleaned_data["end_time"],
             selection_type=form.cleaned_data["selection_type"],
             max_selections=form.cleaned_data["max_selections"],
+            purpose=form.cleaned_data["purpose"],
             is_test_data=activity.is_test_mode,
         )
         for i, sid in enumerate(singer_ids):
@@ -1599,6 +1703,7 @@ def vote_session_create(request):
             "activities": activities,
             "singers": singers,
             "selection_types": _choices(VoteSession.SelectionType),
+            "purposes": _choices(VoteSession.Purpose),
         },
     )
 
@@ -1649,15 +1754,10 @@ def vote_session_lock(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
     ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
     lock_vote_session(vote_session, request.user)
-    outcome = _generate_popularity_award(vote_session)
-    if outcome["status"] == "tie":
-        messages.warning(request, "最佳人气奖存在同分，请人工核定获奖名单。")
-    elif outcome["status"] == "created":
-        messages.success(request, "已生成最佳人气奖。")
     try:
         maybe_resolve_checkpoints(vote_session.activity, request.user)
-    except (ValidationError, PermissionDenied):
-        pass
+    except (ValidationError, PermissionDenied) as error:
+        messages.warning(request, "投票已锁定，但自动重算未完成：" + str(error))
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -1710,41 +1810,6 @@ def _popularity_top_tie(vote_session):
         return None, []
     top_count = leaderboard[0].vote_count
     return top_count, [option for option in leaderboard if option.vote_count == top_count]
-
-
-def _generate_popularity_award(vote_session):
-    from django.db import transaction
-
-    top_count, top = _popularity_top_tie(vote_session)
-    if top_count is None:
-        return {"status": "no_votes", "count": 0, "top": []}
-    if len(top) > 1:
-        return {"status": "tie", "count": top_count, "top": top}
-    winner = top[0]
-    with transaction.atomic():
-        legacy_awards = Award.objects.filter(
-            activity=vote_session.activity,
-            name="最佳人气奖",
-            source_vote_session__isnull=True,
-        ).order_by("pk")
-        award = legacy_awards.first()
-        if award:
-            legacy_awards.exclude(pk=award.pk).delete()
-            award.source_vote_session = vote_session
-            award.singer = winner.singer
-            award.is_test_data = vote_session.is_test_data
-            award.save(update_fields=["source_vote_session", "singer", "is_test_data"])
-        else:
-            award, _ = Award.objects.update_or_create(
-                source_vote_session=vote_session,
-                defaults={
-                    "activity": vote_session.activity,
-                    "singer": winner.singer,
-                    "name": "最佳人气奖",
-                    "is_test_data": vote_session.is_test_data,
-                },
-            )
-    return {"status": "created", "count": top_count, "top": top, "award": award}
 
 
 # --- QR code center ---
@@ -2215,6 +2280,7 @@ def activity_clone(request, pk):
             advance_count=contest_round.advance_count,
             sequence=contest_round.sequence,
             order_policy=contest_round.order_policy,
+            tie_order_policy=contest_round.tie_order_policy,
             roster_source=contest_round.roster_source,
             roster_source_stage=contest_round.roster_source_stage,
             rubric=rubric_map.get(contest_round.rubric_id),
@@ -2288,7 +2354,9 @@ def user_set_active(request, pk):
 
 @staff_required
 def ruleset_template_list(request):
-    templates = RulesetTemplate.objects.filter(is_available=True)
+    # Show the catalog with explicit capability status. Only production templates
+    # expose cloning; experimental/unsupported entries must never look production-ready.
+    templates = RulesetTemplate.objects.all()
     activities = Activity.objects.all().order_by("-created_at")
     return render(
         request,
@@ -2378,6 +2446,8 @@ def _default_node(new_type, nodes):
             node["quota"] = 1
         elif field == "groups":
             node["groups"] = 1
+        elif field == "pairing_policy":
+            node["pairing_policy"] = "ADJACENT"
         elif field == "from":
             node["from"] = ENTRY_KEY
         elif field == "into":
@@ -2385,7 +2455,7 @@ def _default_node(new_type, nodes):
         elif field == "award":
             node["award"] = "默认奖项"
         elif field == "decision_source":
-            node["decision_source"] = "manual"
+            node["decision_source"] = "manual_recorded_result"
     if new_type == "ASSESS":
         node["round"] = f"r{len(nodes) + 1}"
     return node
@@ -2590,7 +2660,9 @@ def contest_ruleset_create(request):
         messages.success(request, "赛制已创建，进入编辑。")
         return redirect("staff:ruleset_edit", pk=version.pk)
     activities = Activity.objects.all().order_by("-created_at")
-    templates = RulesetTemplate.objects.filter(is_available=True).order_by("name")
+    templates = RulesetTemplate.objects.filter(
+        capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION
+    ).order_by("name")
     return render(
         request,
         "staff_panel/ruleset_create.html",
@@ -2710,6 +2782,33 @@ def ruleset_bind(request, pk):
 
 
 @staff_required
+def manual_decision(request, pk):
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
+    form = ManualDecisionForm(
+        request.POST or None, version=version, activity=version.ruleset.activity
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            set_manual_decision(
+                version,
+                manual_key=form.cleaned_data["manual_key"],
+                group=form.cleaned_data["group"],
+                chosen=form.cleaned_data["chosen"],
+                created_by=request.user,
+            )
+        except (PermissionDenied, ValidationError) as error:
+            form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+        else:
+            messages.success(request, "人工晋级选择已保存。")
+            return redirect("staff:ruleset_edit", pk=pk)
+    return render(
+        request,
+        "staff_panel/manual_decision_form.html",
+        {"form": form, "version": version, "activity": version.ruleset.activity},
+    )
+
+
+@staff_required
 def ruleset_validate(request, pk):
     version = get_object_or_404(RulesetVersion, pk=pk)
     report, plan = compile_definition(version.definition)
@@ -2767,7 +2866,11 @@ def ruleset_freeze(request, pk):
 @require_POST
 @transaction.atomic
 def ruleset_clone_from_template(request, template_pk):
-    template = get_object_or_404(RulesetTemplate, pk=template_pk, is_available=True)
+    template = get_object_or_404(
+        RulesetTemplate,
+        pk=template_pk,
+        capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
+    )
     activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
     activity = lock_activity_for_action(activity)
     name = (request.POST.get("name") or "").strip() or template.name

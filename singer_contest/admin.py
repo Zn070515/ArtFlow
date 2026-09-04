@@ -5,11 +5,14 @@ from django.db.models import Count
 from .models import (
     Award,
     ContestRound,
+    CriterionScore,
     Judge,
     RoundEntry,
     RoundJudge,
+    RubricCriterion,
     ScoreRecord,
     ScoreSummary,
+    ScoringRubric,
     SingerRegistration,
 )
 
@@ -80,6 +83,47 @@ class RoundJudgeAdmin(RoundSnapshotAdmin):
 @admin.register(ScoreRecord)
 class ScoreRecordAdmin(admin.ModelAdmin):
     list_display = ["round", "singer", "judge", "score"]
+    readonly_fields = ["round", "singer", "judge", "score", "notes", "is_test_data"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CriterionScore)
+class CriterionScoreAdmin(admin.ModelAdmin):
+    list_display = ["score_record", "criterion", "value"]
+    readonly_fields = ["score_record", "criterion", "value", "is_test_data"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class RubricCriterionInline(admin.TabularInline):
+    model = RubricCriterion
+    extra = 1
+
+
+@admin.register(ScoringRubric)
+class ScoringRubricAdmin(admin.ModelAdmin):
+    list_display = ["name", "activity", "sequence"]
+    inlines = [RubricCriterionInline]
+
+
+@admin.register(RubricCriterion)
+class RubricCriterionAdmin(admin.ModelAdmin):
+    list_display = ["name", "rubric", "max_score", "sequence"]
 
 
 @admin.register(ScoreSummary)

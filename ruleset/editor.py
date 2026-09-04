@@ -31,6 +31,7 @@ _FIELD_LABELS = {
     "quota": "名额",
     "groups": "组数",
     "odd_policy": "奇数处理",
+    "pairing_policy": "配对策略",
     "decision_source": "决策来源",
     "vote_source": "投票来源",
     "vote_purpose": "投票用途",
@@ -49,8 +50,9 @@ _FIELD_ALLOWED = {
     "mode": ["mean", "trimmed_mean"],
     "tie_policy": ["auto_break", "extra_round", "manual", "score_fallback"],
     "odd_policy": ["bye", "wildcard", "manual", "reject"],
+    "pairing_policy": ["ADJACENT", "HIGH_LOW"],
     "vote_purpose": ["POPULARITY", "SCORE_COMPONENT", "SELECTION", "OTHER"],
-    "decision_source": ["judge_vote", "manual", "audience_vote"],
+    "decision_source": ["manual_recorded_result"],
 }
 
 # Numeric node fields coerced to int when present (schema enforces non-negative int).

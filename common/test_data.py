@@ -227,18 +227,18 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
 
     with _authorized_manual_write():
         ManualDecision.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
-    ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
+    ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()
     VoteRecord.objects.filter(
         vote_session__activity=locked_activity,
         vote_session__is_test_data=True,
         is_test_data=True,
-    ).delete()
+    ).delete()  # type: ignore[no-untyped-call]
     VoteBallot.objects.filter(
         vote_session__activity=locked_activity,
         vote_session__is_test_data=True,
         is_test_data=True,
-    ).delete()
+    ).delete()  # type: ignore[no-untyped-call]
     VoteOption.objects.filter(
         vote_session__activity=locked_activity,
         vote_session__is_test_data=True,
@@ -276,13 +276,13 @@ def _promote_retained_config(activity: Any, *, operator: Any) -> dict[str, int]:
     promoted = {
         "scoring_rubrics": ScoringRubric.objects.filter(
             activity=activity, is_test_data=True
-        ).update(is_test_data=False),
+        ).update(is_test_data=False),  # type: ignore[no-untyped-call]
         "rubric_criteria": RubricCriterion.objects.filter(
             rubric__activity=activity, is_test_data=True
-        ).update(is_test_data=False),
+        ).update(is_test_data=False),  # type: ignore[no-untyped-call]
         "performance_groups": PerformanceGroup.objects.filter(
             activity=activity, is_test_data=True
-        ).update(is_test_data=False),
+        ).update(is_test_data=False),  # type: ignore[no-untyped-call]
         "material_slots": MaterialSlot.objects.filter(activity=activity, is_test_data=True).update(
             is_test_data=False
         ),

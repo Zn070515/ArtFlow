@@ -420,12 +420,18 @@ def _first_batch():
                 {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
                 {"key": "rank", "type": "RANK", "source": "assess_r1", "descending": True},
                 {"key": "seeds", "type": "SELECT", "source": "rank", "count": 8},
-                {"key": "pairs", "type": "PAIR", "source": "seeds", "odd_policy": "wildcard"},
+                {
+                    "key": "pairs",
+                    "type": "PAIR",
+                    "source": "seeds",
+                    "pairing_policy": "ADJACENT",
+                    "odd_policy": "wildcard",
+                },
                 {
                     "key": "duel",
                     "type": "DUEL",
                     "source": "pairs",
-                    "decision_source": "judge_vote",
+                    "decision_source": "manual_recorded_result",
                 },
                 {
                     "key": "win",
@@ -458,12 +464,18 @@ def _first_batch():
                 {"key": "rank", "type": "RANK", "source": "assess_r1", "descending": True},
                 {"key": "direct", "type": "SELECT", "source": "rank", "count": 5},
                 {"key": "middle", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
-                {"key": "pairs_mid", "type": "PAIR", "source": "middle", "odd_policy": "wildcard"},
+                {
+                    "key": "pairs_mid",
+                    "type": "PAIR",
+                    "source": "middle",
+                    "pairing_policy": "ADJACENT",
+                    "odd_policy": "wildcard",
+                },
                 {
                     "key": "duel_mid",
                     "type": "DUEL",
                     "source": "pairs_mid",
-                    "decision_source": "judge_vote",
+                    "decision_source": "manual_recorded_result",
                 },
                 {
                     "key": "win_mid",
@@ -561,7 +573,25 @@ FIRST_BATCH = [
     for (key, name, desc, definition) in _FIRST_BATCH_DEFINITIONS
 ]
 
-_NON_PRODUCTION_TEMPLATE_NAMES = frozenset({"校十佳屏峰_历史未决回退"})
+_PRODUCTION_TEMPLATE_NAMES = frozenset({"院十佳", "独立人气奖"})
+_UNSUPPORTED_TEMPLATE_NAMES = frozenset({"校十佳屏峰_历史未决回退"})
+_BUILTIN_KEYS_BY_NAME = {
+    "院十佳": "golden_schidui",
+    "合成_分组逐组补足演示": "synthetic_xiaofeng_group_fill",
+    "校十佳屏峰_历史控制流": "historical_xiaofeng_control_flow",
+    "校十佳屏峰_历史未决回退": "historical_xiaofeng_unresolved_fallback",
+}
+_BUILTIN_KEYS_BY_NAME.update({item["name"]: item["key"] for item in FIRST_BATCH})
+
+
+def _capability_for_template(name: str):
+    from .models import RulesetTemplate
+
+    if name in _PRODUCTION_TEMPLATE_NAMES:
+        return RulesetTemplate.CapabilityStatus.PRODUCTION
+    if name in _UNSUPPORTED_TEMPLATE_NAMES:
+        return RulesetTemplate.CapabilityStatus.UNSUPPORTED
+    return RulesetTemplate.CapabilityStatus.EXPERIMENTAL
 
 
 def _catalog():
@@ -617,7 +647,9 @@ def seed_ruleset_templates(operator=None, *, status=None):
                 "schema_version": parsed["schema_version"],
                 "description": description,
                 "status": status,
-                "is_available": name not in _NON_PRODUCTION_TEMPLATE_NAMES,
+                "builtin_key": _BUILTIN_KEYS_BY_NAME.get(name, ""),
+                "capability_status": _capability_for_template(name),
+                "is_available": name in _PRODUCTION_TEMPLATE_NAMES,
                 "content_hash": content_hash(definition),
                 "created_by": operator,
             },
@@ -625,7 +657,8 @@ def seed_ruleset_templates(operator=None, *, status=None):
         created += 1 if was_created else 0
     # Older installations may still contain a removed built-in. Retire it instead
     # of deleting a template that an existing ContestRuleset may reference.
-    RulesetTemplate.objects.filter(name__in=_NON_PRODUCTION_TEMPLATE_NAMES).update(
-        is_available=False
+    RulesetTemplate.objects.filter(name__in=_UNSUPPORTED_TEMPLATE_NAMES).update(
+        is_available=False,
+        capability_status=RulesetTemplate.CapabilityStatus.UNSUPPORTED,
     )
     return created

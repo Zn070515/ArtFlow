@@ -467,11 +467,18 @@ def _pair(node: dict, st: _Stage) -> tuple:
     if len(pool) % 2 == 1 and not node.get("odd_policy"):
         st.hold.append(f"PAIR {node['key']} 人数为奇数且无 odd_policy。")
         return ()
-    out = []
-    for i in range(0, len(pool) - 1, 2):
-        out.append(frozenset((pool[i], pool[i + 1])))
+    policy = node["pairing_policy"]
+    if policy == "ADJACENT":
+        pair_members = [(pool[i], pool[i + 1]) for i in range(0, len(pool) - 1, 2)]
+    elif policy == "HIGH_LOW":
+        pair_members = [(pool[i], pool[-1 - i]) for i in range(len(pool) // 2)]
+    else:
+        st.hold.append(f"PAIR {node['key']} 的配对策略未实现：{policy}。")
+        return ()
+    out = [frozenset(members) for members in pair_members]
     if len(pool) % 2 == 1:
-        out.append(frozenset((pool[-1],)))
+        bye_member = pool[-1] if policy == "ADJACENT" else pool[len(pool) // 2]
+        out.append(frozenset((bye_member,)))
     return tuple(out)
 
 

@@ -41,15 +41,21 @@ from .models import (
     Judge,
     ManualDecision,
     Performance,
+    PerformanceGroup,
     RoundEntry,
     RoundJudge,
+    RubricCriterion,
     ScoreRecord,
     ScoreSummary,
+    ScoringRubric,
     SingerRegistration,
+    StageAwardDecision,
     StageDecision,
     StageResult,
+    _authorize_award_materialization,
     _authorize_duel_write,
     _authorize_manual_write,
+    _award_materialization_authorized,
     _duel_write_authorized,
     _manual_write_authorized,
 )
@@ -161,7 +167,20 @@ def _order_singers_for_round(
     if any(singer.pk not in scores for singer in singers):
         raise ValidationError("按上一轮成绩排序时，所有选手都必须有已确定的上一轮成绩。")
     direction = 1 if policy == ContestRound.OrderPolicy.PREVIOUS_RANK_ASC else -1
-    return sorted(singers, key=lambda singer: (direction * scores[singer.pk], singer.pk))
+    grouped: dict[Decimal, list[SingerRegistration]] = {}
+    for singer in singers:
+        grouped.setdefault(scores[singer.pk], []).append(singer)
+    if any(len(group) > 1 for group in grouped.values()):
+        if contest_round.tie_order_policy == ContestRound.TieOrderPolicy.REVIEW:
+            raise ValidationError("上一轮成绩存在同分，必须先声明同分出场顺序。")
+        for group in grouped.values():
+            if len(group) < 2:
+                continue
+            if contest_round.tie_order_policy == ContestRound.TieOrderPolicy.DRAW:
+                secrets.SystemRandom().shuffle(group)
+            else:
+                group.sort(key=lambda singer: singer.pk)
+    return [singer for score in sorted(grouped, reverse=direction < 0) for singer in grouped[score]]
 
 
 @transaction.atomic
@@ -276,6 +295,155 @@ def set_round_running_order(contest_round, singer_ids, operator) -> ContestRound
         note="set_round_running_order",
     )
     return locked_round
+
+
+@transaction.atomic
+def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGroup]:
+    """Persist a complete, auditable group assignment for a draft round.
+
+    Group membership is an operator-supplied fact, not a resolver convenience. The
+    command therefore requires a complete partition of the round roster and writes
+    groups and performances together while the Activity is locked.
+    """
+    locked_activity = lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if locked_round.activity_id != locked_activity.pk:
+        raise PermissionDenied("轮次不属于当前活动。")
+    if locked_round.status != ContestRound.Status.DRAFT:
+        raise ValidationError("只能为草稿轮次设置分组。")
+    if not isinstance(group_specs, list) or not group_specs:
+        raise ValidationError("至少需要一个分组。")
+
+    singers = _round_source_singers(locked_round)
+    singer_by_id = {str(singer.pk): singer for singer in singers}
+    seen: set[str] = set()
+    normalized: list[tuple[str, list[SingerRegistration]]] = []
+    names: set[str] = set()
+    for index, spec in enumerate(group_specs, start=1):
+        if not isinstance(spec, dict):
+            raise ValidationError(f"第 {index} 个分组必须是对象。")
+        name = str(spec.get("name") or "").strip()
+        if not name or name in names:
+            raise ValidationError("分组名称必须非空且不能重复。")
+        raw_ids = spec.get("singer_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise ValidationError(f"分组 {name} 必须包含选手。")
+        group_singers: list[SingerRegistration] = []
+        for raw_id in raw_ids:
+            singer_id = str(raw_id)
+            if singer_id not in singer_by_id:
+                raise ValidationError(f"选手 {singer_id} 不属于当前轮次。")
+            if singer_id in seen:
+                raise ValidationError(f"选手 {singer_id} 被重复分组。")
+            seen.add(singer_id)
+            group_singers.append(singer_by_id[singer_id])
+        names.add(name)
+        normalized.append((name, group_singers))
+    if seen != set(singer_by_id):
+        missing = sorted(set(singer_by_id) - seen)
+        raise ValidationError(f"分组必须覆盖全部选手，缺少：{missing}。")
+
+    Performance.objects.filter(round=locked_round).delete()
+    PerformanceGroup.objects.filter(round=locked_round).delete()
+    created: list[PerformanceGroup] = []
+    for sequence, (name, group_singers) in enumerate(normalized, start=1):
+        group = PerformanceGroup.objects.create(
+            activity=locked_activity,
+            round=locked_round,
+            name=name,
+            sequence=sequence,
+            is_test_data=runtime_is_test(locked_activity),
+        )
+        Performance.objects.bulk_create(
+            [
+                Performance(
+                    activity=locked_activity,
+                    round=locked_round,
+                    singer=singer,
+                    group=group,
+                    sequence=offset,
+                    is_test_data=runtime_is_test(locked_activity),
+                )
+                for offset, singer in enumerate(group_singers, start=1)
+            ]
+        )
+        created.append(group)
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ContestRound:{locked_round.pk}",
+        new_value=json.dumps(
+            {
+                "groups": [
+                    {
+                        "name": group.name,
+                        "singer_ids": [p.singer_id for p in group.performances.all()],
+                    }
+                    for group in created
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        note="set_round_groups",
+    )
+    return created
+
+
+@transaction.atomic
+def create_scoring_rubric(activity, *, name, description, criteria, operator) -> ScoringRubric:
+    """Provision a scoring rubric and all criteria as one audited operator command."""
+    locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
+    name = str(name or "").strip()
+    if not name:
+        raise ValidationError("评分标准名称不能为空。")
+    if not isinstance(criteria, list) or not criteria:
+        raise ValidationError("评分标准至少需要一个评分项。")
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for index, item in enumerate(criteria, start=1):
+        if not isinstance(item, dict):
+            raise ValidationError(f"第 {index} 个评分项必须是对象。")
+        criterion_name = str(item.get("name") or "").strip()
+        if not criterion_name or criterion_name in seen:
+            raise ValidationError("评分项名称必须非空且不能重复。")
+        try:
+            max_score = Decimal(str(item.get("max_score")))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValidationError(f"评分项 {criterion_name} 的最高分无效。")
+        if max_score <= 0:
+            raise ValidationError(f"评分项 {criterion_name} 的最高分必须大于 0。")
+        seen.add(criterion_name)
+        normalized.append(
+            {
+                "name": criterion_name,
+                "max_score": max_score,
+                "description": str(item.get("description") or "").strip(),
+                "sequence": index,
+            }
+        )
+    rubric = ScoringRubric.objects.create(
+        activity=locked_activity,
+        name=name,
+        description=str(description or "").strip(),
+        is_test_data=runtime_is_test(locked_activity),
+    )
+    RubricCriterion.objects.bulk_create(
+        [RubricCriterion(rubric=rubric, **item) for item in normalized]
+    )
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ScoringRubric:{rubric.pk}",
+        new_value=json.dumps(
+            {"name": rubric.name, "criteria": normalized},
+            ensure_ascii=False,
+            default=str,
+        ),
+        note="create_scoring_rubric",
+    )
+    return rubric
 
 
 @transaction.atomic
@@ -779,6 +947,10 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
+    if locked_round.status == ContestRound.Status.SCORING and not locked_round.is_locked:
+        # Stage-result unlock may already release this input round. Treat a repeated
+        # operator click as an idempotent command rather than reporting a false failure.
+        return locked_round
     if locked_round.status != ContestRound.Status.LOCKED or not locked_round.is_locked:
         raise PermissionDenied("该比赛轮次未锁定。")
     ensure_round_not_consumed_by_confirmed_stage(locked_round)
@@ -1408,7 +1580,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         latest.save(update_fields=["status", "reasons", "created_by"])
         StageDecision.objects.filter(stage_result=latest).delete()
         CompositeResult.objects.filter(stage_result=latest).delete()
-        Award.objects.filter(source_stage_result=latest).delete()
+        StageAwardDecision.objects.filter(stage_result=latest).delete()
         _create_children(latest, result, singer_by_key, is_test)
         materialize_round_entry_from_stage(latest, operator=computed_by)
         return latest
@@ -1477,20 +1649,49 @@ def _create_children(stage, result, singer_by_key, is_test):
             if c.contestant in singer_by_key
         ]
     )
-    Award.objects.bulk_create(
+    StageAwardDecision.objects.bulk_create(
         [
-            Award(
+            StageAwardDecision(
                 activity=stage.activity,
+                stage_result=stage,
                 singer=singer_by_key[award.contestant],
                 name=award.award,
                 is_test_data=is_test,
-                source_stage_result=stage,
                 source_node=award.source_node,
             )
             for award in result.awards
             if award.contestant in singer_by_key
         ]
     )
+
+
+@transaction.atomic
+def materialize_stage_awards(stage: StageResult, *, operator) -> list[Award]:
+    """Publish computed award candidates only as part of stage confirmation."""
+    locked_stage = StageResult.objects.select_for_update().get(pk=stage.pk)
+    if locked_stage.status != StageResult.Status.CONFIRMED:
+        raise ValidationError("只有已核定赛段才能发布正式奖项。")
+    candidates = list(
+        StageAwardDecision.objects.filter(stage_result=locked_stage).select_related("singer")
+    )
+    existing = list(Award.objects.filter(source_stage_result=locked_stage))
+    if existing:
+        return existing
+    with _authorized_award_materialization():
+        return Award.objects.bulk_create(
+            [
+                Award(
+                    activity=locked_stage.activity,
+                    singer=candidate.singer,
+                    name=candidate.name,
+                    is_test_data=candidate.is_test_data,
+                    source_stage_result=locked_stage,
+                    source_award_decision=candidate,
+                    source_node=candidate.source_node,
+                )
+                for candidate in candidates
+            ]
+        )
 
 
 # Outcome codes that carry a contestant forward into the round bound to that stage.
@@ -1810,6 +2011,17 @@ def _authorized_duel_write():
         _authorize_duel_write(prior)
 
 
+@contextmanager
+def _authorized_award_materialization():
+    """Allow only the stage-confirm service to create official stage awards."""
+    prior = _award_materialization_authorized()
+    _authorize_award_materialization(True)
+    try:
+        yield
+    finally:
+        _authorize_award_materialization(prior)
+
+
 def ensure_duel_not_consumed_by_confirmed_stage(version, duel_key, pair_key=None) -> None:
     """Reject changing a DUEL input already read by a confirmed stage."""
     consumed = StageResult.objects.filter(
@@ -2088,8 +2300,60 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
             sort_keys=True,
         ),
     )
+    materialize_stage_awards(locked, operator=confirmed_by)
     materialize_round_entry_from_stage(locked, operator=confirmed_by)
     return locked
+
+
+def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
+    """Release raw facts only after their consuming stage leaves CONFIRMED.
+
+    This keeps the correction path explicit: a score/vote cannot be edited merely because
+    a caller bypassed the normal service, but an audited stage unlock re-opens its inputs.
+    Facts shared by another confirmed stage remain protected.
+    """
+    from voting.models import VoteSession
+
+    consumed = _stage_consumed_facts(stage)
+    confirmed = StageResult.objects.filter(
+        activity=stage.activity, status=StageResult.Status.CONFIRMED
+    ).exclude(pk=stage.pk)
+    for other in confirmed:
+        other_facts = _stage_consumed_facts(other)
+        if consumed["rounds"] & other_facts["rounds"]:
+            raise PermissionDenied("该轮次仍被其他已核定赛段使用，不能解锁原始评分。")
+        if consumed["votes"] & other_facts["votes"]:
+            raise PermissionDenied("该投票仍被其他已核定赛段使用，不能解锁原始记录。")
+        if consumed["audience"] & other_facts["audience"]:
+            raise PermissionDenied("该观众分仍被其他已核定赛段使用，不能解锁原始记录。")
+
+    for contest_round in ContestRound.objects.select_for_update().filter(
+        activity=stage.activity, pk__in=consumed["rounds"], is_locked=True
+    ):
+        contest_round.is_locked = False
+        contest_round.status = ContestRound.Status.SCORING
+        contest_round.save(update_fields=["is_locked", "status"])
+        AuditLog.objects.create(
+            operator=operator,
+            action_type=AuditLog.ActionType.UNLOCK_RESULT,
+            target=f"ContestRound:{contest_round.pk}",
+            old_value="locked",
+            new_value="unlocked",
+            note=f"stage_unlock:{stage.pk}",
+        )
+    for vote_session in VoteSession.objects.select_for_update().filter(
+        activity=stage.activity, pk__in=consumed["votes"], is_locked=True
+    ):
+        vote_session.is_locked = False
+        vote_session.save(update_fields=["is_locked"])
+        AuditLog.objects.create(
+            operator=operator,
+            action_type=AuditLog.ActionType.UNLOCK_RESULT,
+            target=f"VoteSession:{vote_session.pk}",
+            old_value="locked",
+            new_value="unlocked",
+            note=f"stage_unlock:{stage.pk}",
+        )
 
 
 @transaction.atomic
@@ -2121,6 +2385,7 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     locked.status = StageResult.Status.READY_TO_CONFIRM
     with authority_write(STAGE_RESULT_CONFIRM):
         locked.save(update_fields=["confirmed_by", "confirmed_at", "status"])
+    _release_stage_consumed_facts(locked, operator=operator)
     AuditLog.objects.create(
         operator=operator,
         action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
