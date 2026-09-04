@@ -6,7 +6,7 @@ from django.http import QueryDict
 from farewell_show.models import Program
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
-from singer_contest.models import ContestRound, SingerRegistration
+from singer_contest.models import ContestRound, ScoringRubric, SingerRegistration
 from voting.models import VoteSession
 
 # Accepts both browser `datetime-local` values (naive ISO) and tz-aware ISO strings
@@ -64,12 +64,41 @@ class ContestRoundForm(forms.Form):
         initial=ContestRound.ScoringMode.AVERAGE,
     )
     advance_count = forms.IntegerField(min_value=0, required=False, initial=0)
+    sequence = forms.IntegerField(min_value=1, required=False, initial=1)
+    roster_source = forms.ChoiceField(
+        choices=[("", "自动判定"), *ContestRound.RosterSource.choices],
+        required=False,
+        initial="",
+    )
+    roster_source_stage = forms.CharField(max_length=100, required=False)
+    rubric = forms.ModelChoiceField(queryset=ScoringRubric.objects.none(), required=False)
+
+    def __init__(self, *args, rubrics=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if rubrics is not None:
+            cast(forms.ModelChoiceField, self.fields["rubric"]).queryset = rubrics
 
     def clean_advance_count(self):
         return self.cleaned_data.get("advance_count") or 0
 
     def clean_scoring_mode(self):
         return self.cleaned_data.get("scoring_mode") or ContestRound.ScoringMode.AVERAGE
+
+    def clean_sequence(self):
+        return self.cleaned_data.get("sequence") or 1
+
+    def clean_roster_source(self):
+        return self.cleaned_data.get("roster_source") or ""
+
+    def clean_roster_source_stage(self):
+        stage = (self.cleaned_data.get("roster_source_stage") or "").strip()
+        source = self.cleaned_data.get("roster_source") or ""
+        if source == ContestRound.RosterSource.STAGE and not stage:
+            raise forms.ValidationError("赛段晋级轮次必须声明上游赛段。")
+        return stage
+
+    def clean_rubric(self):
+        return self.cleaned_data.get("rubric") or None
 
 
 class SingerReviewForm(forms.Form):

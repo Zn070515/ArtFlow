@@ -47,6 +47,7 @@ def golden_schidui():
                 "type": "ASSESS",
                 "source": ENTRY_KEY,
                 "vote_source": "audience1",
+                "vote_purpose": "SCORE_COMPONENT",
             },
             {
                 "key": "stage1",
@@ -84,6 +85,7 @@ def golden_schidui():
                 "type": "ASSESS",
                 "source": "top5",
                 "vote_source": "audience4",
+                "vote_purpose": "SCORE_COMPONENT",
             },
             {
                 "key": "final",

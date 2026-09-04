@@ -96,6 +96,19 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
             ).order_by("pk")
         )
     else:  # STAGE: the roster is owned by the StageDecision -> RoundEntry bridge.
+        if not locked_round.roster_source_stage:
+            raise ValidationError("STAGE 来源轮次必须配置上游赛段。")
+        upstream = (
+            StageResult.objects.filter(
+                activity=locked_round.activity,
+                stage_key=locked_round.roster_source_stage,
+                is_test_data=runtime_is_test(locked_round.activity),
+            )
+            .order_by("-pk")
+            .first()
+        )
+        if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
+            raise ValidationError("上游赛段未核定，禁止准备该轮次。")
         singers = list(
             SingerRegistration.objects.filter(
                 round_entries__round=locked_round, activity=locked_round.activity
@@ -1789,6 +1802,18 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.status != StageResult.Status.CONFIRMED:
         raise PermissionDenied("仅可解锁已核定并锁定的赛段结果。")
+    downstream_started = ContestRound.objects.filter(
+        activity=locked.activity,
+        roster_source=ContestRound.RosterSource.STAGE,
+        roster_source_stage=locked.stage_key,
+        status__in=[
+            ContestRound.Status.PREPARED,
+            ContestRound.Status.SCORING,
+            ContestRound.Status.LOCKED,
+        ],
+    ).exists()
+    if downstream_started:
+        raise PermissionDenied("已存在开始进行的下游轮次，禁止解锁上游赛段。")
     locked.confirmed_by = None
     locked.confirmed_at = None
     locked.status = StageResult.Status.READY_TO_CONFIRM

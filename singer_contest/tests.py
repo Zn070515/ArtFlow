@@ -3094,6 +3094,21 @@ class RoundEntryBridgeTests(TestCase):
             .values_list("singer_id", flat=True)
         )
 
+    def _confirm_upstream_stage1(self):
+        # Item 5 (M1-INTEGRATION-CLOSE): a STAGE round may only be prepared once the
+        # upstream stage it consumes is CONFIRMED. Resolver-authority setup (a CONFIRMED
+        # stage) belongs here; the round-bridging behaviour is the actual case under test.
+        with authority_write(STAGE_RESULT_CONFIRM):
+            return StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="stage1",
+                status=StageResult.Status.CONFIRMED,
+                confirmed_at=timezone.now(),
+                confirmed_by=self.admin,
+                is_test_data=True,
+            )
+
     def test_stage1_bridges_next_round_entry_to_top3(self):
         from .services import run_ruleset
 
@@ -3131,6 +3146,7 @@ class RoundEntryBridgeTests(TestCase):
     def test_stage_round_seeds_from_roster_not_is_advanced(self):
         from .services import prepare_round
 
+        self._confirm_upstream_stage1()
         RoundEntry.objects.bulk_create(
             [RoundEntry(round=self.final, singer=s) for s in self.singers[:3]]
         )
@@ -3150,6 +3166,8 @@ class RoundEntryBridgeTests(TestCase):
     def test_stage_round_without_roster_raises(self):
         from .services import prepare_round
 
+        # The upstream is CONFIRMED (Item 5 satisfied) but no roster has materialised.
+        self._confirm_upstream_stage1()
         with self.assertRaisesMessage(ValidationError, "尚未生成该轮晋级名单"):
             prepare_round(self.final, self.admin)
 

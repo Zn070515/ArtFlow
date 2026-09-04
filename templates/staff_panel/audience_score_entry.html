@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}观众分录入 — {{ activity.title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8" id="audience-entry" data-api-url="{{ api_url }}">
+    {% csrf_token %}
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / {{ activity.title }} 观众分</p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-4">观众分录入</h1>
+
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 text-sm text-gray-600">
+        <p>观众分是 <span class="font-medium">0-100 的成绩分</span>（不是原始票数）。保存后系统会自动尝试计算下一赛段。</p>
+    </div>
+
+    <div data-error class="hidden bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4"></div>
+    <div data-success class="hidden bg-green-50 border border-green-200 text-green-700 text-sm px-4 py-3 rounded mb-4"></div>
+
+    {% if not sets %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        <p>该活动未绑定观众分，或尚未冻结赛制。请先在赛制编辑器中配置 audience_keys。</p>
+    </div>
+    {% else %}
+    {% for set in sets %}
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6" data-audience-set>
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold flex items-center justify-between">
+            <span>观众分组 <span class="font-mono text-gray-600">{{ set.set_key }}</span></span>
+            <span class="text-xs text-gray-500">赛段 <span class="font-mono">{{ set.stage_key }}</span></span>
+        </div>
+        {% if set.rows %}
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-left px-3 py-2 font-medium w-10">#</th>
+                    <th class="text-left px-3 py-2 font-medium">选手</th>
+                    <th class="text-left px-3 py-2 font-medium">曲目</th>
+                    <th class="text-center px-2 py-2 font-medium w-24">观众分</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for row in set.rows %}
+                <tr>
+                    <td class="px-3 py-2 text-gray-400 text-xs">{{ forloop.counter }}</td>
+                    <td class="px-3 py-2">{{ row.singer_name }}</td>
+                    <td class="px-3 py-2 text-gray-500 text-xs">{{ row.song }}</td>
+                    <td class="px-1 py-2 text-center">
+                        <input type="text" inputmode="decimal" autocomplete="off"
+                               value="{{ row.score }}"
+                               data-singer-id="{{ row.singer_id }}"
+                               data-set-key="{{ set.set_key }}"
+                               class="w-24 text-center border border-gray-300 rounded px-1 py-0.5 text-xs font-mono"
+                               placeholder="0.00">
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="px-4 py-6 text-center text-gray-500 text-sm">该赛段暂无选手。</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    <button type="button" data-save class="bg-brand text-white px-5 py-2 rounded text-sm hover:bg-brand-light">保存观众分</button>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    var root = document.getElementById("audience-entry");
+    if (!root) return;
+    var apiUrl = root.getAttribute("data-api-url");
+    var csrf = root.querySelector("input[name=csrfmiddlewaretoken]").value;
+    var saveBtn = root.querySelector("[data-save]");
+    var errBox = root.querySelector("[data-error]");
+    var okBox = root.querySelector("[data-success]");
+
+    function show(el, text) {
+        el.textContent = text;
+        el.classList.remove("hidden");
+    }
+    function hide(el) { el.classList.add("hidden"); }
+
+    if (!saveBtn) return;
+
+    saveBtn.addEventListener("click", function () {
+        var cells = [];
+        root.querySelectorAll("input[data-singer-id]").forEach(function (input) {
+            var value = (input.value || "").trim();
+            if (value === "") return;
+            cells.push({
+                singer_id: input.getAttribute("data-singer-id"),
+                set_key: input.getAttribute("data-set-key"),
+                score: value,
+            });
+        });
+        hide(errBox); hide(okBox);
+        if (!cells.length) {
+            show(errBox, "还没有可保存的分数。");
+            return;
+        }
+        fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrf },
+            body: JSON.stringify({ cells: cells }),
+        })
+            .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (res) {
+                if (!res.ok) {
+                    show(errBox, Array.isArray(res.d.detail) ? res.d.detail.join("；") : (res.d.detail || "保存失败。"));
+                    return;
+                }
+                show(okBox, "已保存 " + res.d.saved + " 条观众分。");
+            })
+            .catch(function (err) { show(errBox, "网络错误：" + err.message); });
+    });
+})();
+</script>
+{% endblock %}

@@ -123,6 +123,10 @@
                 <label class="block text-xs text-gray-500 mb-0.5">group_keys（分组绑定，JSON）</label>
                 <textarea name="group_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.group_keys|default:"{}" }}</textarea>
             </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-0.5">audience_keys（观众分绑定，JSON：audience_key → stage_key）</label>
+                <textarea name="audience_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.audience_keys|default:"{}" }}</textarea>
+            </div>
             <div class="sm:col-span-2">
                 <label class="block text-xs text-gray-500 mb-0.5">announcement_blocks（公告分块，JSON）</label>
                 <textarea name="announcement_blocks" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks|default:"[]" }}</textarea>

@@ -33,6 +33,7 @@ from ruleset.services import (
     validate_binding,
 )
 from ruleset.templates import (
+    golden_schidui,
     historical_xiaofeng_fallback_unresolved,
 )
 from ruleset.test_schema import (
@@ -80,6 +81,35 @@ class CompilerValidCorpusTests(SimpleTestCase):
 
     def test_partition_subtract_repechage_merge_compiles(self):
         self._expect_green(partition_subtract_repechage_merge())
+
+    def test_golden_schidui_bound_compiles_with_audience_score(self):
+        # §11.3 院十佳 must freezable as a SCORE_COMPONENT audience composite: the two
+        # audience ASSESS nodes carry vote_purpose, and the bound context supplies a
+        # hundred-scale audience over hundred-mark judge rounds. The compiler must not
+        # report VOTE_PURPOSE_REQUIRED, SCALE_MIXED ("100" vs "hundred"), or any
+        # ASSESS_SCALE_BINDING_MISMATCH. This is the regression that proves a worker can
+        # actually freeze the 院十佳 ruleset (M1-INTEGRATION-CLOSE Item 1).
+        ctx = {
+            "entry_size": 15,
+            "rounds": {
+                "r1": {"judge_count": 5, "scope": "full", "scale": "100"},
+                "r2": {"judge_count": 5, "scope": "full", "scale": "100"},
+                "r3": {"judge_count": 5, "scope": "subset", "scale": "100"},
+                "r4": {"judge_count": 5, "scope": "subset", "scale": "100"},
+            },
+            "votes": {
+                "audience1": {"scale": "hundred"},
+                "audience4": {"scale": "hundred"},
+            },
+            "groups": {},
+        }
+        report, plan = compile_definition(golden_schidui(), context=ctx, bound=True)
+        self.assertTrue(report.passes(), report.codes())
+        self.assertIsNotNone(plan)
+        self.assertNotIn("VOTE_PURPOSE_REQUIRED", report.codes())
+        self.assertNotIn("SCALE_MIXED", report.codes())
+        self.assertNotIn("ASSESS_SCALE_BINDING_MISMATCH", report.codes())
+        self.assertNotIn("VOTE_SCORE_COMPONENT_RAW", report.codes())
 
     def test_within_scoped_composite_compiles(self):
         # Mixing a full source (a1) with a subset source (a3) would normally be a

@@ -271,16 +271,28 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
             p["pool_relation"] = POOL_FULL if all_full else POOL_SUBSET
             p["pool_sig"] = tuple(sorted(_flat_sig(prov[c["source"]]["pool_sig"]) for c in comps))
             sizes = [prov[c["source"]]["size"] for c in comps]
-            p["size"] = (
-                sizes[0] if sizes and all(s == sizes[0] and s is not None for s in sizes) else None
-            )
+            # A within-scoped aggregate scores only the named advance roster, so its pool
+            # size is that roster's size — not the (mixed) component sizes. This is what
+            # lets a bound top5/top3 SELECT verify its QUOTA (a raw mix of full+subset
+            # components otherwise yields None and trips QUOTA_UNVERIFIABLE at freeze).
+            within = node.get("within")
+            if within and within in prov:
+                p["size"] = prov[within]["size"]
+            else:
+                p["size"] = (
+                    sizes[0]
+                    if sizes and all(s == sizes[0] and s is not None for s in sizes)
+                    else None
+                )
             # An aggregate's output scale is its components' scale: propagate it so a
             # downstream aggregate can verify quantity without a spurious SCALE_MIXED
-            # (aggregate-of-aggregate scale was None, tripping the checker).
+            # (aggregate-of-aggregate scale was None, tripping the checker). Canonicalize
+            # so a round rubric-sum "100" and an audience "hundred" resolve to one bucket
+            # instead of mixing (they are the same hundred-mark magnitude).
             if node.get("conversion"):
                 p["scale"] = node["conversion"].get("to")
             else:
-                comp_scales = {prov[c["source"]]["scale"] for c in comps}
+                comp_scales = {_canonical_scale(prov[c["source"]]["scale"]) for c in comps}
                 known = [s for s in comp_scales if s not in (None, "unknown")]
                 p["scale"] = known[0] if len(comp_scales) == 1 and known else None
     elif ntype == "RANK":
@@ -374,14 +386,33 @@ def _check_conversion(node: dict, issues: list[ReportIssue]) -> None:
         )
 
 
+def _canonical_scale(value: str) -> str:
+    """Bucket scale tokens so equivalent magnitude is detected across representations.
+
+    A round's rubric-sum scale arrives as a numeric string (``"100"`` = 100-mark rubric),
+    while a bound AudienceScore arrives as the ``"hundred"`` (0-100 normalized) token.
+    Both are the same magnitude for a weighted composite; a genuinely different rubric
+    (e.g. ``"50"``) must stay distinct so a mixed-composite is still refused.
+    """
+    if value == "hundred":
+        return "hundred"
+    if value == "votes":
+        return "votes"
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return value
+    return "hundred" if n == 100 else f"scale:{n}"
+
+
 def _check_scale(
     node: dict, prov: dict, by_key: dict, ctx: dict, issues: list[ReportIssue]
 ) -> None:
     if node["type"] != "AGGREGATE":
         return
     comps = node["aggregate"]["components"]
-    scales = [prov[c["source"]]["scale"] for c in comps]
-    resolved = [s for s in scales if s != "unknown"]
+    scales = [_canonical_scale(prov[c["source"]]["scale"]) for c in comps]
+    resolved = [s for s in scales if s not in (None, "unknown")]
     if any(s == "unknown" for s in scales) and not resolved:
         _warn_scale(
             node, "SCALE_UNDECLARED", "所有分量 scale 未声明，无法校验是否混用量纲。", issues
@@ -772,7 +803,7 @@ def _check_scale_binding(node: dict, ctx: dict, issues: list[ReportIssue]) -> No
         actual = (ctx.get("votes") or {}).get(node["vote_source"], {}).get("scale")
     elif node.get("round") and isinstance(node.get("round"), str):
         actual = _round_scale(ctx, node["round"])
-    if actual and actual != "unknown" and declared != actual:
+    if actual and actual != "unknown" and _canonical_scale(declared) != _canonical_scale(actual):
         issues.append(
             ReportIssue(
                 "ASSESS_SCALE_BINDING_MISMATCH",

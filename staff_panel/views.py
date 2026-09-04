@@ -76,8 +76,11 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    RoundEntry,
+    RubricCriterion,
     ScoreRecord,
     ScoreSummary,
+    ScoringRubric,
     SingerRegistration,
     StageResult,
 )
@@ -888,8 +891,10 @@ def round_list(request):
 @staff_required
 def round_create(request):
     if request.method == "POST":
-        form = ContestRoundForm(request.POST)
         activity = get_object_or_404(Activity, pk=request.POST.get("activity_id"))
+        form = ContestRoundForm(
+            request.POST, rubrics=ScoringRubric.objects.filter(activity=activity)
+        )
         if not form.is_valid():
             return render(
                 request,
@@ -901,6 +906,8 @@ def round_create(request):
                     ),
                     "round_types": _choices(ContestRound.RoundType),
                     "scoring_modes": _choices(ContestRound.ScoringMode),
+                    "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                    "rubrics": ScoringRubric.objects.select_related("activity").all(),
                 },
             )
         with transaction.atomic():
@@ -911,6 +918,10 @@ def round_create(request):
                 scoring_mode=form.cleaned_data["scoring_mode"],
                 name=form.cleaned_data["name"],
                 advance_count=form.cleaned_data["advance_count"],
+                sequence=form.cleaned_data["sequence"],
+                roster_source=form.cleaned_data["roster_source"],
+                roster_source_stage=form.cleaned_data["roster_source_stage"],
+                rubric=form.cleaned_data["rubric"],
             )
             log_action(
                 request,
@@ -928,6 +939,8 @@ def round_create(request):
             "activities": activities,
             "round_types": _choices(ContestRound.RoundType),
             "scoring_modes": _choices(ContestRound.ScoringMode),
+            "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+            "rubrics": ScoringRubric.objects.select_related("activity").all(),
         },
     )
 
@@ -1041,15 +1054,135 @@ def round_scores_api(request, pk):
         return JsonResponse({"detail": "权限不足。"}, status=403)
 
     resolved_status = None
+    resolve_warning = None
     if result["matrix_complete"]:
         try:
             maybe_resolve_checkpoints(contest_round.activity, request.user)
-        except ValidationError:
-            pass
+        except (ValidationError, PermissionDenied) as exc:
+            # Surface a ruleset/resolve problem to the operator instead of silently
+            # dropping it (M1-INTEGRATION-CLOSE Item 7): the scores are saved but the
+            # stage that could not auto-resolve must be visible, not invisible.
+            resolve_warning = "；".join(exc.messages) if hasattr(exc, "messages") else str(exc)
         # Report the stage's true current status (not just whether this save newly resolved
         # it): a no-op re-save of an already-READY stage must not read as "未计算".
         resolved_status = _current_resolve_status(contest_round.activity)
-    return JsonResponse({**result, "resolved_status": resolved_status})
+    response = {**result, "resolved_status": resolved_status}
+    if resolve_warning:
+        response["resolve_warning"] = resolve_warning
+    return JsonResponse(response)
+
+
+def _audience_pool(activity, version, audience_key):
+    """The roster an audience score-group scores, derived from the frozen definition.
+
+    ``audience_key`` is a binding key matching an ASSESS node's ``vote_source``; that
+    node's ``source`` declares the pool: :data:`ENTRY_KEY` → the check-in pool, or the
+    name of a SELECT node → the checkpoint that outputs it, bridged to the round that
+    consumes that stage (its :class:`RoundEntry`). Falls back to the check-in pool when
+    the roster has not materialised yet, mirroring the resolver's conservative scoping
+    (its ``within`` filter is still the correctness backstop).
+    """
+    try:
+        parsed = parse_definition(version.definition)
+    except (ValidationError, TypeError, ValueError):
+        return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+    source = None
+    for node in parsed["nodes"]:
+        if node.get("vote_source") == audience_key:
+            source = node.get("source")
+            break
+    if not source or source == ENTRY_KEY:
+        return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+    checkpoint_key = None
+    for cp in parsed["checkpoints"]:
+        if cp.get("output") == source:
+            checkpoint_key = cp.get("key")
+            break
+    if checkpoint_key:
+        advance_round = (
+            ContestRound.objects.filter(
+                activity=activity,
+                roster_source=ContestRound.RosterSource.STAGE,
+                roster_source_stage=checkpoint_key,
+                status__in=[
+                    ContestRound.Status.PREPARED,
+                    ContestRound.Status.SCORING,
+                    ContestRound.Status.LOCKED,
+                ],
+            )
+            .order_by("-sequence")
+            .first()
+        )
+        if advance_round is not None:
+            singer_ids = list(
+                RoundEntry.objects.filter(round=advance_round).values_list("singer_id", flat=True)
+            )
+            return list(
+                SingerRegistration.objects.filter(pk__in=singer_ids, activity=activity).order_by(
+                    "pk"
+                )
+            )
+    return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+
+
+def _audience_sets(activity, version):
+    """Build the audience grid, scoped per stage to its real roster.
+
+    Each binding ``audience_key → set_name`` exposes the roster the stage actually scores
+    (its ``within`` pool), derived from the frozen definition via :func:`_audience_pool`.
+    This prevents a staff member from entering audience scores for singers who are no
+    longer in that stage (e.g. audience4 over all 15).
+    """
+    if version is None:
+        return []
+    binding = _version_binding(version)
+    audience_keys = binding.get("audience_keys") or {}
+    stored = {
+        (s.singer_id, s.stage_key): str(s.score)
+        for s in AudienceScore.objects.filter(
+            activity=activity, is_test_data=runtime_is_test(activity)
+        )
+    }
+    sets = []
+    for set_key, set_name in audience_keys.items():
+        singers = _audience_pool(activity, version, set_key)
+        sets.append(
+            {
+                "set_key": set_key,
+                "stage_key": set_name,
+                "rows": [
+                    {
+                        "singer_id": singer.pk,
+                        "singer_name": singer.name,
+                        "song": singer.song_name,
+                        "score": stored.get((singer.pk, set_name), ""),
+                    }
+                    for singer in singers
+                ],
+            }
+        )
+    return sets
+
+
+@staff_required
+def audience_score_entry(request, activity_id):
+    """Minimal staff page for entering backstage audience scores."""
+    activity = get_object_or_404(Activity, pk=activity_id)
+    try:
+        version = _current_frozen_version(activity)
+    except ValidationError as error:
+        messages.error(request, "；".join(error.messages))
+        return redirect("staff:audience_score_entry", activity_id=activity_id)
+    sets = _audience_sets(activity, version)
+    return render(
+        request,
+        "staff_panel/audience_score_entry.html",
+        {
+            "activity": activity,
+            "sets": sets,
+            "api_url": reverse("staff:audience_scores_api", kwargs={"activity_id": activity_id}),
+        },
+    )
 
 
 @staff_required
@@ -1073,30 +1206,7 @@ def audience_scores_api(request, activity_id):
         return JsonResponse({"detail": "该活动未绑定观众分。"}, status=400)
 
     if request.method == "GET":
-        singers = list(SingerRegistration.objects.filter(activity=activity).order_by("pk"))
-        stored = {
-            (s.singer_id, s.stage_key): str(s.score)
-            for s in AudienceScore.objects.filter(
-                activity=activity, is_test_data=runtime_is_test(activity)
-            )
-        }
-        sets = [
-            {
-                "set_key": set_key,
-                "stage_key": stage_key,
-                "rows": [
-                    {
-                        "singer_id": singer.pk,
-                        "singer_name": singer.name,
-                        "song": singer.song_name,
-                        "score": stored.get((singer.pk, stage_key), ""),
-                    }
-                    for singer in singers
-                ],
-            }
-            for set_key, stage_key in audience_keys.items()
-        ]
-        return JsonResponse({"sets": sets})
+        return JsonResponse({"sets": _audience_sets(activity, version)})
 
     try:
         payload = json.loads(request.body or "{}")
@@ -1168,19 +1278,21 @@ def audience_scores_api(request, activity_id):
 
     # Resolve after the save transaction commits so a ruleset misconfiguration (missing bound
     # rounds, duplicate auto rulesets) reports an error without rolling back entered scores.
+    # Surface it as resolve_warning (M1-INTEGRATION-CLOSE Item 7) so the operator sees that
+    # a stage could not auto-resolve, instead of it disappearing silently.
+    resolve_warning = None
     try:
         maybe_resolve_checkpoints(activity, request.user)
-    except ValidationError:
-        pass
-    except PermissionDenied:
-        pass
+    except (ValidationError, PermissionDenied) as exc:
+        resolve_warning = "；".join(exc.messages) if hasattr(exc, "messages") else str(exc)
 
-    return JsonResponse(
-        {
-            "saved": len(rows),
-            "resolved_status": _current_resolve_status(activity),
-        }
-    )
+    response = {
+        "saved": len(rows),
+        "resolved_status": _current_resolve_status(activity),
+    }
+    if resolve_warning:
+        response["resolve_warning"] = resolve_warning
+    return JsonResponse(response)
 
 
 @staff_required
@@ -2068,6 +2180,25 @@ def activity_clone(request, pk):
             name=judge.name,
             is_active=judge.is_active,
         )
+    rubric_map: dict[int | None, ScoringRubric] = {}
+    for rubric in ScoringRubric.objects.filter(activity=original):
+        new_rubric = ScoringRubric.objects.create(
+            activity=new_activity,
+            name=rubric.name,
+            description=rubric.description,
+            sequence=rubric.sequence,
+            is_test_data=rubric.is_test_data,
+        )
+        for criterion in rubric.criteria.all():
+            RubricCriterion.objects.create(
+                rubric=new_rubric,
+                name=criterion.name,
+                max_score=criterion.max_score,
+                sequence=criterion.sequence,
+                description=criterion.description,
+                is_test_data=criterion.is_test_data,
+            )
+        rubric_map[rubric.pk] = new_rubric
     for contest_round in ContestRound.objects.filter(activity=original):
         ContestRound.objects.create(
             activity=new_activity,
@@ -2075,6 +2206,10 @@ def activity_clone(request, pk):
             scoring_mode=contest_round.scoring_mode,
             name=contest_round.name,
             advance_count=contest_round.advance_count,
+            sequence=contest_round.sequence,
+            roster_source=contest_round.roster_source,
+            roster_source_stage=contest_round.roster_source_stage,
+            rubric=rubric_map.get(contest_round.rubric_id),
             is_locked=False,
         )
     # Vote sessions are runtime state (passcode, start/end window, open/locked),
@@ -2502,6 +2637,7 @@ def ruleset_edit(request, pk):
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),
                 "group_keys": json.dumps(ruleset.group_keys or {}, ensure_ascii=False),
+                "audience_keys": json.dumps(ruleset.audience_keys or {}, ensure_ascii=False),
                 "announcement_blocks": json.dumps(
                     ruleset.announcement_blocks or [], ensure_ascii=False
                 ),
@@ -2544,6 +2680,7 @@ def ruleset_bind(request, pk):
                 "round_keys": _parse_json("round_keys", {}),
                 "vote_keys": _parse_json("vote_keys", {}),
                 "group_keys": _parse_json("group_keys", {}),
+                "audience_keys": _parse_json("audience_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),
                 "announcement_blocks_by_checkpoint": _parse_json(
                     "announcement_blocks_by_checkpoint", {}

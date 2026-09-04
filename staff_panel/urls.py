@@ -29,6 +29,11 @@ urlpatterns = [
     path("rounds/<int:pk>/scores/", views.round_score_entry, name="round_score_entry"),
     path("rounds/<int:pk>/scores/api/", views.round_scores_api, name="round_scores_api"),
     path(
+        "activity/<int:activity_id>/audience-scores/",
+        views.audience_score_entry,
+        name="audience_score_entry",
+    ),
+    path(
         "activity/<int:activity_id>/audience-scores/api/",
         views.audience_scores_api,
         name="audience_scores_api",
