@@ -2053,7 +2053,11 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
                 created_by=self.admin,
             )
         self.template = RulesetTemplate.objects.create(
-            name="院十佳", definition=definition, created_by=self.admin
+            name="院十佳",
+            definition=definition,
+            created_by=self.admin,
+            builtin_key="golden_schidui",
+            capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
         )
 
     def _hold_lock(self, *, phase=None, locked=False):
