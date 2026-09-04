@@ -1062,7 +1062,9 @@ def round_scores_api(request, pk):
             # Surface a ruleset/resolve problem to the operator instead of silently
             # dropping it (M1-INTEGRATION-CLOSE Item 7): the scores are saved but the
             # stage that could not auto-resolve must be visible, not invisible.
-            resolve_warning = "；".join(getattr(exc, "messages", [])) or "该赛段无法自动核定，请人工核定。"
+            resolve_warning = "；".join(getattr(exc, "messages", []))
+            if not resolve_warning:
+                resolve_warning = "该赛段无法自动核定，请人工核定。"
         # Report the stage's true current status (not just whether this save newly resolved
         # it): a no-op re-save of an already-READY stage must not read as "未计算".
         resolved_status = _current_resolve_status(contest_round.activity)
@@ -1284,7 +1286,9 @@ def audience_scores_api(request, activity_id):
     try:
         maybe_resolve_checkpoints(activity, request.user)
     except (ValidationError, PermissionDenied) as exc:
-        resolve_warning = "；".join(getattr(exc, "messages", [])) or "该赛段无法自动核定，请人工核定。"
+        resolve_warning = "；".join(getattr(exc, "messages", []))
+        if not resolve_warning:
+            resolve_warning = "该赛段无法自动核定，请人工核定。"
 
     response = {
         "saved": len(rows),
