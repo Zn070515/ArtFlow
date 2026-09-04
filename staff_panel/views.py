@@ -2380,6 +2380,8 @@ def _default_node(new_type, nodes):
             node["into"] = _last_node_of({OutputType.GROUP_MAP}, nodes)
         elif field == "award":
             node["award"] = "默认奖项"
+        elif field == "decision_source":
+            node["decision_source"] = "manual"
     if new_type == "ASSESS":
         node["round"] = f"r{len(nodes) + 1}"
     return node
@@ -2401,7 +2403,7 @@ def _edit_nodes(post, nodes):
     action = post.get("action")
     if action == "add":
         new_type = post.get("new_type", "ASSESS")
-        if new_type in ("BRANCH", "AWARD"):
+        if new_type == "BRANCH":
             raise ValueError(f"node type {new_type!r} is not supported at runtime")
         nodes = nodes + [_default_node(new_type, nodes)]
     elif action == "delete":
@@ -2634,9 +2636,9 @@ def ruleset_edit(request, pk):
             "version": version,
             "ruleset": ruleset,
             "cards": cards,
-            # §28 capability matrix: BRANCH/AWARD are rejected at compile
-            # (NODE_UNSUPPORTED_RUNTIME) and must not be offered in the editor.
-            "node_types": sorted(t for t in NODE_TYPE_SPEC if t not in ("BRANCH", "AWARD")),
+            # §28 capability matrix: BRANCH remains unsupported at runtime and is
+            # not offered; DUEL/AWARD are executable primitives.
+            "node_types": sorted(t for t in NODE_TYPE_SPEC if t != "BRANCH"),
             "binding_json": {
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),

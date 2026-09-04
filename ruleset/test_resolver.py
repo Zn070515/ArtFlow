@@ -461,6 +461,31 @@ class ResolverHoldTests(SimpleTestCase):
         self.assertEqual(result.node_values["duel"]["winners"], ["b", "c"])
         self.assertEqual(result.node_values["duel"]["losers"], ["a"])
 
+    def test_award_is_independent_from_advancement_decisions(self):
+        definition = _def(
+            [
+                {
+                    "key": "popularity",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "vote_source": "audience",
+                    "vote_purpose": "POPULARITY",
+                },
+                {"key": "award", "type": "AWARD", "source": "popularity", "award": "人气奖"},
+            ]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b"),
+                vote_scores={"audience": {"a": Decimal("9"), "b": Decimal("10")}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.node_values["award"]["winner"], "b")
+        self.assertEqual(result.awards[0].contestant, "b")
+        self.assertTrue(all(d.outcome_code == OutcomeCode.ELIMINATED for d in result.decisions))
+
 
 class ResolverReviewTests(SimpleTestCase):
     def _tie_def(self, tie_policy=None):
@@ -994,19 +1019,6 @@ class ResolverUnsupportedTests(SimpleTestCase):
             resolve(
                 definition, ResolveInput(roster=("c1",), round_scores=_rs({"r1": {"c1": [10]}}))
             )
-
-    def test_award_raises(self):
-        definition = _def(
-            [
-                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
-                {"key": "w", "type": "AWARD", "source": "a", "award": "best"},
-            ]
-        )
-        with self.assertRaises(UnsupportedNodeError):
-            resolve(
-                definition, ResolveInput(roster=("c1",), round_scores=_rs({"r1": {"c1": [10]}}))
-            )
-
 
 class ResolverPerfTests(SimpleTestCase):
     def test_perf_soft_three_stage_composite(self):

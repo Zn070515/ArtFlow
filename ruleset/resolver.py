@@ -139,11 +139,37 @@ class CompositeResult:
 
 
 @dataclass(frozen=True)
+class AwardDecision:
+    award: str
+    contestant: str
+    score: Decimal
+    source_node: str
+
+    def to_dict(self) -> dict:
+        return {
+            "award": self.award,
+            "contestant": self.contestant,
+            "score": str(self.score),
+            "source_node": self.source_node,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AwardDecision":
+        return cls(
+            award=data["award"],
+            contestant=data["contestant"],
+            score=Decimal(data["score"]),
+            source_node=data["source_node"],
+        )
+
+
+@dataclass(frozen=True)
 class ResolveResult:
     status: ResolverState
     reasons: tuple[str, ...] = ()
     decisions: tuple[StageDecision, ...] = ()
     composites: tuple[CompositeResult, ...] = ()
+    awards: tuple[AwardDecision, ...] = ()
     node_values: Mapping[str, object] = field(default_factory=dict)
     content_hash: str = ""
     input_fingerprint: str = ""
@@ -157,6 +183,7 @@ class ResolveResult:
             "reasons": list(self.reasons),
             "decisions": [d.to_dict() for d in self.decisions],
             "composites": [c.to_dict() for c in self.composites],
+            "awards": [a.to_dict() for a in self.awards],
             "node_values": self.node_values,
             "content_hash": self.content_hash,
             "input_fingerprint": self.input_fingerprint,
@@ -172,6 +199,7 @@ class ResolveResult:
             reasons=tuple(data["reasons"]),
             decisions=tuple(StageDecision.from_dict(d) for d in data["decisions"]),
             composites=tuple(CompositeResult.from_dict(c) for c in data["composites"]),
+            awards=tuple(AwardDecision.from_dict(a) for a in data.get("awards", [])),
             node_values=data["node_values"],
             content_hash=data.get("content_hash", ""),
             input_fingerprint=data.get("input_fingerprint", ""),
@@ -383,6 +411,7 @@ class _Stage:
         self.origin: dict[str, set[str]] = {c: {"entry"} for c in self.roster}
         self.rank_pos: dict[str, dict[str, int]] = {}
         self.composites: list[CompositeResult] = []
+        self.awards: list[AwardDecision] = []
         self.hold: list[str] = []
         self.review: list[str] = []
 
@@ -482,6 +511,22 @@ def _duel(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
             st.outcome[loser] = OutcomeCode.ELIMINATED
             st.source_node[loser] = node["key"]
     return {"winners": tuple(winners), "losers": tuple(losers), "pairs": tuple(records)}
+
+
+def _award(node: dict, st: _Stage) -> dict:
+    """Produce an independent award from a complete score map."""
+    scores = st.values[node["source"]]
+    if not isinstance(scores, dict) or not scores:
+        st.hold.append(f"AWARD {node['key']} 没有可用成绩。")
+        return {"award": node["award"], "winner": None, "score": None}
+    best = max(scores.values())
+    winners = [c for c in st.roster if scores.get(c) == best]
+    if len(winners) != 1:
+        st.review.append(f"AWARD {node['key']} 存在并列第一，需人工核定。")
+        return {"award": node["award"], "winner": None, "score": best}
+    winner = winners[0]
+    st.awards.append(AwardDecision(node["award"], winner, best, node["key"]))
+    return {"award": node["award"], "winner": winner, "score": best}
 
 
 def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
@@ -959,7 +1004,9 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
         st.values[node["key"]] = _fill(node, st, inputs, by_key)
     elif ntype == "MANUAL_SELECT":
         st.values[node["key"]] = _manual(node, st, inputs)
-    elif ntype in ("BRANCH", "AWARD"):
+    elif ntype == "AWARD":
+        st.values[node["key"]] = _award(node, st)
+    elif ntype == "BRANCH":
         raise UnsupportedNodeError(
             f"Node {node['key']}: type {ntype} is not executed by the M1-E resolver."
         )
@@ -1075,6 +1122,7 @@ def _assemble_result(
         reasons=tuple(st.hold + st.review),
         decisions=decisions,
         composites=tuple(st.composites),
+        awards=tuple(st.awards),
         node_values=node_values,
         content_hash=plan_hash,
         input_fingerprint=fingerprint,

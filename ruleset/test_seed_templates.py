@@ -46,8 +46,8 @@ class TemplateLibraryTests(TestCase):
             self.assertEqual(parsed["schema_version"], 1)
             self.assertTrue(parsed["nodes"])
 
-    def test_first_batch_has_nine_unique_slots(self):
-        self.assertEqual(FIRST_BATCH.__len__(), 9)
+    def test_first_batch_has_ten_unique_slots(self):
+        self.assertEqual(FIRST_BATCH.__len__(), 10)
         keys = [t["key"] for t in FIRST_BATCH]
         self.assertEqual(len(keys), len(set(keys)))
 
@@ -69,17 +69,20 @@ class TemplateLibraryTests(TestCase):
         )
         self.assertEqual(audience_node["vote_purpose"], "SCORE_COMPONENT")
 
-    def test_independent_popularity_award_is_not_seeded_as_production_template(self):
+    def test_independent_popularity_award_is_seeded_as_production_template(self):
         seed_ruleset_templates(None)
-        self.assertFalse(RulesetTemplate.objects.filter(name="独立人气奖").exists())
+        template = RulesetTemplate.objects.get(name="独立人气奖")
+        self.assertTrue(template.is_available)
+        self.assertIn('"type": "AWARD"', template.definition)
 
     def test_removed_builtins_are_retired_and_not_cloneable(self):
         RulesetTemplate.objects.create(
             name="独立人气奖", definition=GOLDEN_SCHIDUI, is_available=True
         )
         seed_ruleset_templates(None)
-        retired = RulesetTemplate.objects.get(name="独立人气奖")
-        self.assertFalse(retired.is_available)
+        current = RulesetTemplate.objects.get(name="独立人气奖")
+        self.assertTrue(current.is_available)
+        self.assertIn('"type": "AWARD"', current.definition)
         fallback = RulesetTemplate.objects.get(name="校十佳屏峰_历史未决回退")
         self.assertFalse(fallback.is_available)
 
@@ -109,8 +112,8 @@ class TemplateLibraryTests(TestCase):
     def test_seed_is_idempotent(self):
         seed_ruleset_templates(None)
         first = RulesetTemplate.objects.count()
-        # 2 golden + 3 historical/synthetic scenarios + 9 production templates.
-        self.assertEqual(first, 14)
+        # 2 golden + 3 historical/synthetic scenarios + 10 production templates.
+        self.assertEqual(first, 15)
         seed_ruleset_templates(None)
         self.assertEqual(RulesetTemplate.objects.count(), first)
 

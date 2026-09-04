@@ -437,6 +437,20 @@ def _first_batch():
             ]
         )
 
+    def independent_popularity_award():
+        return _d(
+            [
+                {
+                    "key": "assess_a1",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "vote_source": "audience1",
+                    "vote_purpose": "POPULARITY",
+                },
+                {"key": "award", "type": "AWARD", "source": "assess_a1", "award": "独立人气奖"},
+            ]
+        )
+
     def direct_bye_middle_pk():
         return _d(
             [
@@ -517,6 +531,12 @@ def _first_batch():
             judge_audience_composite(),
         ),
         (
+            "independent_popularity_award",
+            "独立人气奖",
+            "独立观众人气奖，不参与晋级链",
+            independent_popularity_award(),
+        ),
+        (
             "group_direct_repechage",
             "分组直晋+复活",
             "组内直晋 + 复活赛补足",
@@ -542,7 +562,7 @@ FIRST_BATCH = [
 ]
 
 _NON_PRODUCTION_TEMPLATE_NAMES = frozenset(
-    {"独立人气奖", "校十佳屏峰_历史未决回退"}
+    {"校十佳屏峰_历史未决回退"}
 )
 
 

@@ -428,6 +428,7 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             required=("source", "award"),
             optional=("vote_source", "vote_purpose"),
             source_refs=("source",),
+            expects={"source": _SCOREMAP},
             validate=_run_validators(
                 lambda n, d: _require_non_empty_str(n, d, "award"), _validate_vote
             ),

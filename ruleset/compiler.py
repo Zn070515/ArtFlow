@@ -700,7 +700,9 @@ def _tie_is_supported(node: dict, policy: str) -> bool:
     return policy == "manual"
 
 
-def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
+def _check_votes(
+    node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[str, dict]
+) -> None:
     source = node.get("vote_source")
     if not source:
         return
@@ -744,10 +746,15 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
     # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness. Whether
     # a VoteSession has collected ballots / is locked / has a result is a runtime
     # resolver HOLD condition — never a Ruleset Freeze gate. So no ``result_ready`` fact.
+    is_independent_award = any(
+        consumer.get("type") == "AWARD" and consumer.get("source") == node["key"]
+        for consumer in by_key.values()
+    )
     if (
         node.get("vote_purpose")
         and node["type"] == "ASSESS"
         and node.get("vote_purpose") != "SCORE_COMPONENT"
+        and not is_independent_award
     ):
         issues.append(
             ReportIssue(
@@ -1000,7 +1007,7 @@ def compile_definition(
 
     for node in nodes:
         prov[node["key"]] = _resolve(node, prov, by_key, ctx)
-        if node["type"] in ("BRANCH", "AWARD"):
+        if node["type"] == "BRANCH":
             issues.append(
                 ReportIssue(
                     "NODE_UNSUPPORTED_RUNTIME",
@@ -1018,7 +1025,7 @@ def compile_definition(
         _check_quota(node, prov, by_key, ctx, issues)
         _check_pair(node, prov, ctx, issues)
         _check_tie(node, prov, by_key, issues, cutoffs)
-        _check_votes(node, ctx, issues)
+        _check_votes(node, ctx, issues, by_key)
         _check_scale_binding(node, ctx, issues)
         _check_dependency(node, prov, ctx, by_key, issues)
         node_plans.append(_node_plan(node, prov, outputs))

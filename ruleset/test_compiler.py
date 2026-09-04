@@ -550,17 +550,24 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "NODE_UNSUPPORTED_RUNTIME",
         )
 
-    def test_award_is_unsupported_runtime(self):
-        self._assert_invalid(
+    def test_independent_award_is_supported_runtime(self):
+        report, plan = compile_definition(
             _def(
                 [
-                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {
+                        "key": "a",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "vote_source": "pop",
+                        "vote_purpose": "POPULARITY",
+                    },
                     {"key": "w", "type": "AWARD", "source": "a", "award": "best"},
                 ],
-                context={"entry_size": 20},
-            ),
-            "NODE_UNSUPPORTED_RUNTIME",
+                context={"entry_size": 20, "votes": {"pop": {"scale": "hundred"}}},
+            )
         )
+        self.assertTrue(report.passes(), report.codes())
+        self.assertIsNotNone(plan)
 
     def test_tie_review_is_nonblocking(self):
         report, _ = compile_definition(
