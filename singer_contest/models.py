@@ -19,6 +19,8 @@ from .deletion import cascade_draft_snapshots_or_protect_prepared
 # guard is thread-local so concurrent service calls in separate threads don't leak into each other.
 _manual_writes = threading.local()
 _duel_writes = threading.local()
+_raw_fact_writes = threading.local()
+_award_materializations = threading.local()
 
 
 def _manual_write_authorized() -> bool:
@@ -35,6 +37,75 @@ def _duel_write_authorized() -> bool:
 
 def _authorize_duel_write(authorized: bool) -> None:
     _duel_writes.authorized = authorized
+
+
+def _raw_fact_write_authorized() -> bool:
+    return bool(getattr(_raw_fact_writes, "authorized", False))
+
+
+def _authorize_raw_fact_write(authorized: bool) -> None:
+    _raw_fact_writes.authorized = authorized
+
+
+def _award_materialization_authorized() -> bool:
+    return bool(getattr(_award_materializations, "authorized", False))
+
+
+def _authorize_award_materialization(authorized: bool) -> None:
+    _award_materializations.authorized = authorized
+
+
+def _ensure_round_raw_fact_mutable(round_id: int | None) -> None:
+    """Keep raw score facts immutable once the round/result authority is closed."""
+    if not round_id or _raw_fact_write_authorized():
+        return
+    round_status = (
+        ContestRound._base_manager.filter(pk=round_id).values("status", "is_locked").first()
+    )
+    if not round_status:
+        return
+    if round_status["status"] == ContestRound.Status.LOCKED or round_status["is_locked"]:
+        raise ValidationError("该轮次已锁定，原始评分事实不可直接修改。")
+    from .services import ensure_round_not_consumed_by_confirmed_stage
+
+    ensure_round_not_consumed_by_confirmed_stage(ContestRound._base_manager.get(pk=round_id))
+
+
+def _ensure_round_queryset_mutable(queryset) -> None:
+    if _raw_fact_write_authorized():
+        return
+    if queryset.filter(
+        Q(round__status=ContestRound.Status.LOCKED) | Q(round__is_locked=True)
+    ).exists():
+        raise ValidationError("该轮次已锁定，原始评分事实不可直接修改。")
+    for round_id in queryset.values_list("round_id", flat=True).distinct():
+        _ensure_round_raw_fact_mutable(round_id)
+
+
+def _ensure_round_setup_fact_mutable(round_id: int | None) -> None:
+    """Prevent roster/group setup facts changing after a round snapshot is prepared."""
+    if not round_id or _raw_fact_write_authorized():
+        return
+    status = ContestRound._base_manager.filter(pk=round_id).values_list("status", flat=True).first()
+    if status is not None and status != ContestRound.Status.DRAFT:
+        raise ValidationError("轮次已准备，表演/分组事实不可直接修改。")
+    from .services import ensure_round_not_consumed_by_confirmed_stage
+
+    ensure_round_not_consumed_by_confirmed_stage(ContestRound._base_manager.get(pk=round_id))
+
+
+def _ensure_rubric_mutable(rubric_id: int | None) -> None:
+    if not rubric_id or _raw_fact_write_authorized():
+        return
+    if ScoringRubric._base_manager.filter(
+        pk=rubric_id,
+        rounds__status__in=[
+            ContestRound.Status.PREPARED,
+            ContestRound.Status.SCORING,
+            ContestRound.Status.LOCKED,
+        ],
+    ).exists():
+        raise ValidationError("已被准备轮次使用的评分标准不可直接修改。")
 
 
 class SingerRegistration(models.Model):
@@ -124,6 +195,11 @@ class ContestRound(models.Model):
         PREVIOUS_RANK_ASC = "previous_rank_asc", "上一轮排名升序"
         PREVIOUS_RANK_DESC = "previous_rank_desc", "上一轮排名降序"
 
+    class TieOrderPolicy(models.TextChoices):
+        REVIEW = "review", "同分待人工决定"
+        REGISTRATION_ORDER = "registration_order", "同分按报名序"
+        DRAW = "draw", "同分抽签"
+
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
         PREPARED = "prepared", "已准备"
@@ -145,6 +221,12 @@ class ContestRound(models.Model):
         choices=OrderPolicy,
         default=OrderPolicy.REGISTRATION_ORDER,
         help_text="准备轮次时冻结的出场顺序规则。",
+    )
+    tie_order_policy = models.CharField(
+        max_length=24,
+        choices=TieOrderPolicy,
+        default=TieOrderPolicy.REVIEW,
+        help_text="上一轮成绩同分时的显式处理规则。",
     )
     scheduled_at = models.DateTimeField(null=True, blank=True)
     venue = models.CharField(max_length=200, blank=True)
@@ -381,6 +463,36 @@ class RoundJudge(RoundSnapshotMixin, models.Model):
         return super().save(*args, **kwargs)
 
 
+class ScoreRecordQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        _ensure_round_queryset_mutable(self)
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            _ensure_round_raw_fact_mutable(obj.round_id)
+            obj.clean()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            _ensure_round_raw_fact_mutable(obj.round_id)
+            obj.clean()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+ScoreRecordManager = models.Manager.from_queryset(ScoreRecordQuerySet)
+
+
 class ScoreRecord(models.Model):
     round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="scores")
     singer = models.ForeignKey(SingerRegistration, on_delete=models.CASCADE, related_name="scores")
@@ -388,6 +500,8 @@ class ScoreRecord(models.Model):
     score = models.DecimalField(max_digits=5, decimal_places=2)
     notes = models.CharField(max_length=200, blank=True)
     is_test_data = models.BooleanField(default=False)
+
+    objects = ScoreRecordManager()
 
     class Meta:
         unique_together = [("round", "singer", "judge")]
@@ -403,7 +517,12 @@ class ScoreRecord(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_round_raw_fact_mutable(self.round_id)
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _ensure_round_raw_fact_mutable(self.round_id)
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
@@ -425,6 +544,44 @@ class ScoreSummary(models.Model):
 
     def __str__(self):
         return f"{self.singer.name}: {self.average_score} (#{self.rank})"
+
+
+class AudienceScoreQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        if _raw_fact_write_authorized():
+            return
+        from .services import ensure_audience_not_consumed_by_confirmed_stage
+
+        for activity_id, stage_key in self.values_list("activity_id", "stage_key").distinct():
+            ensure_audience_not_consumed_by_confirmed_stage(activity_id, stage_key)
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            if not _raw_fact_write_authorized():
+                from .services import ensure_audience_not_consumed_by_confirmed_stage
+
+                ensure_audience_not_consumed_by_confirmed_stage(obj.activity_id, obj.stage_key)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+AudienceScoreManager = models.Manager.from_queryset(AudienceScoreQuerySet)
 
 
 class AudienceScore(models.Model):
@@ -457,6 +614,8 @@ class AudienceScore(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = AudienceScoreManager()
+
     class Meta:
         ordering = ["stage_key", "pk"]
         constraints = [
@@ -468,6 +627,60 @@ class AudienceScore(models.Model):
 
     def __str__(self):
         return f"{self.singer.name}@{self.stage_key}: {self.score}"
+
+    def clean(self):
+        singer = self.singer if self.singer_id else None
+        if singer and self.activity_id and singer.activity_id != self.activity_id:
+            raise ValidationError("观众分选手必须属于同一活动。")
+        if singer and bool(self.is_test_data) != bool(singer.is_test_data):
+            raise ValidationError("观众分的测试标记必须与选手一致。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        if not _raw_fact_write_authorized():
+            from .services import ensure_audience_not_consumed_by_confirmed_stage
+
+            ensure_audience_not_consumed_by_confirmed_stage(self.activity_id, self.stage_key)
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not _raw_fact_write_authorized():
+            from .services import ensure_audience_not_consumed_by_confirmed_stage
+
+            ensure_audience_not_consumed_by_confirmed_stage(self.activity_id, self.stage_key)
+        return super().delete(*args, **kwargs)
+
+
+class AwardQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        if self.filter(source_stage_result__status=StageResult.Status.CONFIRMED).exists():
+            raise ValidationError("已核定赛段的正式奖项不可直接修改。")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        if (
+            any(obj.source_stage_result_id for obj in objs)
+            and not _award_materialization_authorized()
+        ):
+            raise ValidationError("赛段正式奖项只能由核定服务生成。")
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+AwardManager = models.Manager.from_queryset(AwardQuerySet)
 
 
 class Award(models.Model):
@@ -489,6 +702,13 @@ class Award(models.Model):
         blank=True,
         related_name="awards",
     )
+    source_award_decision = models.OneToOneField(
+        "singer_contest.StageAwardDecision",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="official_award",
+    )
     source_node = models.CharField(max_length=100, blank=True)
 
     class Meta:
@@ -508,10 +728,137 @@ class Award(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        if self.source_stage_result_id and not _award_materialization_authorized():
+            raise ValidationError("赛段正式奖项只能由核定服务生成。")
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.source_stage_result_id and not _award_materialization_authorized():
+            source_status = (
+                StageResult._base_manager.filter(pk=self.source_stage_result_id)
+                .values_list("status", flat=True)
+                .first()
+            )
+            if source_status == StageResult.Status.CONFIRMED:
+                raise ValidationError("已核定赛段的正式奖项不可直接删除。")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name}: {self.name}"
+
+
+class RoundSetupFactQuerySet(models.QuerySet):
+    round_lookup = "round"
+
+    def _ensure_mutable(self):
+        for round_id in self.values_list(f"{self.round_lookup}_id", flat=True).distinct():
+            _ensure_round_setup_fact_mutable(round_id)
+
+    def update(self, **kwargs):
+        relation_fields = {self.round_lookup, f"{self.round_lookup}_id"}
+        if relation_fields.intersection(kwargs):
+            raise ValidationError("轮次事实的轮次关系必须通过正式对象/服务修改。")
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            _ensure_round_setup_fact_mutable(getattr(obj, f"{self.round_lookup}_id"))
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            _ensure_round_setup_fact_mutable(getattr(obj, f"{self.round_lookup}_id"))
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+RoundSetupFactManager = models.Manager.from_queryset(RoundSetupFactQuerySet)
+
+
+class ScoringRubricQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        if _raw_fact_write_authorized():
+            return
+        if self.filter(
+            rounds__status__in=[
+                ContestRound.Status.PREPARED,
+                ContestRound.Status.SCORING,
+                ContestRound.Status.LOCKED,
+            ]
+        ).exists():
+            raise ValidationError("已被准备轮次使用的评分标准不可直接修改。")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+ScoringRubricManager = models.Manager.from_queryset(ScoringRubricQuerySet)
+
+
+class RubricCriterionQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        if _raw_fact_write_authorized():
+            return
+        if self.filter(
+            rubric__rounds__status__in=[
+                ContestRound.Status.PREPARED,
+                ContestRound.Status.SCORING,
+                ContestRound.Status.LOCKED,
+            ]
+        ).exists():
+            raise ValidationError("已被准备轮次使用的评分标准不可直接修改。")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            _ensure_rubric_mutable(obj.rubric_id)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            _ensure_rubric_mutable(obj.rubric_id)
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+RubricCriterionManager = models.Manager.from_queryset(RubricCriterionQuerySet)
 
 
 class PerformanceGroup(models.Model):
@@ -523,6 +870,8 @@ class PerformanceGroup(models.Model):
     sequence = models.PositiveIntegerField(default=1)
     is_test_data = models.BooleanField(default=False)
 
+    objects = RoundSetupFactManager()
+
     class Meta:
         ordering = ["sequence", "pk"]
 
@@ -533,7 +882,12 @@ class PerformanceGroup(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_round_setup_fact_mutable(self.round_id)
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _ensure_round_setup_fact_mutable(self.round_id)
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.round.get_round_type_display()} — {self.name}"
@@ -561,6 +915,8 @@ class Performance(models.Model):
     notes = models.TextField(blank=True)
     is_test_data = models.BooleanField(default=False)
 
+    objects = RoundSetupFactManager()
+
     class Meta:
         ordering = ["sequence", "pk"]
         constraints = [
@@ -585,7 +941,12 @@ class Performance(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_round_setup_fact_mutable(self.round_id)
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        _ensure_round_setup_fact_mutable(self.round_id)
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.singer.name} — {self.song_title or self.round.name or self.round}"
@@ -598,8 +959,24 @@ class ScoringRubric(models.Model):
     sequence = models.PositiveIntegerField(default=1)
     is_test_data = models.BooleanField(default=False)
 
+    objects = ScoringRubricManager()
+
     class Meta:
         ordering = ["sequence", "pk"]
+
+    def save(self, *args, **kwargs):
+        if not _raw_fact_write_authorized() and self.pk:
+            if self.rounds.exclude(status=ContestRound.Status.DRAFT).exists():
+                raise ValidationError("已被准备轮次使用的评分标准不可直接修改。")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if (
+            not _raw_fact_write_authorized()
+            and self.rounds.exclude(status=ContestRound.Status.DRAFT).exists()
+        ):
+            raise ValidationError("已被准备轮次使用的评分标准不可直接删除。")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return self.name
@@ -612,6 +989,8 @@ class RubricCriterion(models.Model):
     sequence = models.PositiveIntegerField(default=1)
     description = models.TextField(blank=True)
     is_test_data = models.BooleanField(default=False)
+
+    objects = RubricCriterionManager()
 
     class Meta:
         ordering = ["sequence", "pk"]
@@ -628,10 +1007,57 @@ class RubricCriterion(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        if not _raw_fact_write_authorized() and self.rubric_id:
+            if self.rubric.rounds.exclude(status=ContestRound.Status.DRAFT).exists():
+                raise ValidationError("已被准备轮次使用的评分标准不可直接修改。")
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not _raw_fact_write_authorized() and self.rubric_id:
+            if self.rubric.rounds.exclude(status=ContestRound.Status.DRAFT).exists():
+                raise ValidationError("已被准备轮次使用的评分标准不可直接删除。")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} ({self.max_score})"
+
+
+class CriterionScoreQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        if _raw_fact_write_authorized():
+            return
+        for round_id in self.values_list("score_record__round_id", flat=True).distinct():
+            _ensure_round_raw_fact_mutable(round_id)
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            _ensure_round_raw_fact_mutable(
+                getattr(obj.score_record, "round_id", None) if obj.score_record_id else None
+            )
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            _ensure_round_raw_fact_mutable(
+                getattr(obj.score_record, "round_id", None) if obj.score_record_id else None
+            )
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+CriterionScoreManager = models.Manager.from_queryset(CriterionScoreQuerySet)
 
 
 class CriterionScore(models.Model):
@@ -641,6 +1067,8 @@ class CriterionScore(models.Model):
     criterion = models.ForeignKey(RubricCriterion, on_delete=models.CASCADE, related_name="scores")
     value = models.DecimalField(max_digits=5, decimal_places=2)
     is_test_data = models.BooleanField(default=False)
+
+    objects = CriterionScoreManager()
 
     class Meta:
         constraints = [
@@ -662,7 +1090,14 @@ class CriterionScore(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        round_id = self.score_record.round_id if self.score_record_id else None
+        _ensure_round_raw_fact_mutable(round_id)
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        round_id = self.score_record.round_id if self.score_record_id else None
+        _ensure_round_raw_fact_mutable(round_id)
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.criterion.name}: {self.value}"
@@ -700,6 +1135,9 @@ class StageResultQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
         if any(o.status == StageResult.Status.CONFIRMED for o in objs):
             raise ValidationError("Only confirm_stage_result() may confirm a stage result.")
         return super().bulk_create(objs, *args, **kwargs)
@@ -870,9 +1308,22 @@ class StageDecisionQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            if (
+                obj.stage_result_id
+                and StageResult._base_manager.filter(
+                    pk=obj.stage_result_id, status=StageResult.Status.CONFIRMED
+                ).exists()
+            ):
+                raise ValidationError("Decisions of a confirmed stage result are immutable.")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
         parent_ids = {o.stage_result_id for o in objs if o.stage_result_id}
         if StageResult._base_manager.filter(
             pk__in=parent_ids, status=StageResult.Status.CONFIRMED
@@ -945,6 +1396,112 @@ class StageDecision(models.Model):
         return f"{self.singer.name} — {self.outcome_code}"
 
 
+class StageAwardDecisionQuerySet(models.QuerySet):
+    def _ensure_mutable(self):
+        if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
+            raise ValidationError("已核定赛段的奖项候选不可修改。")
+
+    def update(self, **kwargs):
+        self._ensure_mutable()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_mutable()
+        return super().delete()
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            if (
+                obj.stage_result_id
+                and StageResult._base_manager.filter(
+                    pk=obj.stage_result_id, status=StageResult.Status.CONFIRMED
+                ).exists()
+            ):
+                raise ValidationError("已核定赛段的奖项候选不可修改。")
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        parent_ids = {o.stage_result_id for o in objs if o.stage_result_id}
+        if StageResult._base_manager.filter(
+            pk__in=parent_ids, status=StageResult.Status.CONFIRMED
+        ).exists():
+            raise ValidationError("已核定赛段的奖项候选不可修改。")
+        return super().bulk_create(objs, *args, **kwargs)
+
+
+StageAwardDecisionManager = models.Manager.from_queryset(StageAwardDecisionQuerySet)
+
+
+class StageAwardDecision(models.Model):
+    """A computed award candidate; only confirmation materializes :class:`Award`."""
+
+    stage_result = models.ForeignKey(
+        StageResult, on_delete=models.CASCADE, related_name="award_decisions"
+    )
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="stage_award_decisions"
+    )
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="stage_award_decisions"
+    )
+    name = models.CharField(max_length=100)
+    source_node = models.CharField(max_length=100, blank=True)
+
+    is_test_data = models.BooleanField(default=False)
+
+    objects = StageAwardDecisionManager()
+
+    class Meta:
+        ordering = ["stage_result", "name", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stage_result", "singer", "name"],
+                name="stage_award_decision_unique_candidate",
+            )
+        ]
+
+    def clean(self):
+        result = self.stage_result if self.stage_result_id else None
+        singer = self.singer if self.singer_id else None
+        if result:
+            if result.activity_id != self.activity_id:
+                raise ValidationError("奖项候选必须属于结果所在活动。")
+            if bool(self.is_test_data) != bool(result.is_test_data):
+                raise ValidationError("奖项候选的测试标记必须匹配赛段结果。")
+        if singer and singer.activity_id != self.activity_id:
+            raise ValidationError("奖项候选选手必须属于同一活动。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        if (
+            self.stage_result_id
+            and StageResult._base_manager.filter(
+                pk=self.stage_result_id, status=StageResult.Status.CONFIRMED
+            ).exists()
+        ):
+            raise ValidationError("已核定赛段的奖项候选不可修改。")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if (
+            self.stage_result_id
+            and StageResult._base_manager.filter(
+                pk=self.stage_result_id, status=StageResult.Status.CONFIRMED
+            ).exists()
+        ):
+            raise ValidationError("已核定赛段的奖项候选不可删除。")
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name}: {self.singer.name}"
+
+
 class CompositeResultQuerySet(models.QuerySet):
     """Guard: composites of a CONFIRMED (locked) stage result are immutable."""
 
@@ -962,9 +1519,22 @@ class CompositeResultQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+            if (
+                obj.stage_result_id
+                and StageResult._base_manager.filter(
+                    pk=obj.stage_result_id, status=StageResult.Status.CONFIRMED
+                ).exists()
+            ):
+                raise ValidationError("Composites of a confirmed stage result are immutable.")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
         parent_ids = {o.stage_result_id for o in objs if o.stage_result_id}
         if StageResult._base_manager.filter(
             pk__in=parent_ids, status=StageResult.Status.CONFIRMED

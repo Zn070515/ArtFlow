@@ -437,7 +437,15 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
     def test_odd_no_policy(self):
         self._assert_invalid(
             _def(
-                [{"key": "pair", "type": "PAIR", "source": ENTRY_KEY}], context={"entry_size": 21}
+                [
+                    {
+                        "key": "pair",
+                        "type": "PAIR",
+                        "source": ENTRY_KEY,
+                        "pairing_policy": "ADJACENT",
+                    }
+                ],
+                context={"entry_size": 21},
             ),
             "ODD_NO_POLICY",
         )
@@ -628,6 +636,26 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                 context={"votes": {"pop": {"scale": "hundred"}}},
             ),
             "VOTE_PURPOSE",
+        )
+
+    def test_bound_vote_session_purpose_must_match_award_purpose(self):
+        self._assert_invalid(
+            _def(
+                [
+                    {
+                        "key": "a",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "vote_source": "pop",
+                        "vote_purpose": "POPULARITY",
+                    },
+                    {"key": "w", "type": "AWARD", "source": "a", "award": "best"},
+                ],
+                context={
+                    "votes": {"pop": {"scale": "votes", "purpose": "selection"}},
+                },
+            ),
+            "VOTE_PURPOSE_MISMATCH",
         )
 
     def test_vote_no_norm(self):

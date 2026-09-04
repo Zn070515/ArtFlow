@@ -1565,7 +1565,7 @@ class StaffPanelSmokeTests(TestCase):
                 b"storage document",
             )
 
-    def _make_finalized_round_activity(self):
+    def _make_finalized_round_activity(self, *, include_scores=True):
         activity = Activity.objects.create(
             title="Archive Ready Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -1594,7 +1594,8 @@ class StaffPanelSmokeTests(TestCase):
         activity.phase = Activity.Phase.RESULTS_PUBLISHED
         activity.save(update_fields=["phase"])
         locked_round = ContestRound.objects.get(pk=contest_round.pk)
-        ScoreRecord.objects.create(round=locked_round, singer=singer, judge=judge, score=95)
+        if include_scores:
+            ScoreRecord.objects.create(round=locked_round, singer=singer, judge=judge, score=95)
         locked_round.status = ContestRound.Status.LOCKED
         locked_round.is_locked = True
         locked_round.save(update_fields=["status", "is_locked"])
@@ -1721,8 +1722,7 @@ class StaffPanelSmokeTests(TestCase):
             archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_missing_scores(self):
-        activity = self._make_finalized_round_activity()
-        ScoreRecord.objects.all().delete()
+        activity = self._make_finalized_round_activity(include_scores=False)
         with self.assertRaises(PermissionDenied):
             archive_activity(activity, self.admin)
 
@@ -1886,8 +1886,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(second_package.is_current)
 
     def test_failed_archive_leaves_no_orphan_row_or_file(self):
-        activity = self._make_finalized_round_activity()
-        ScoreRecord.objects.all().delete()
+        activity = self._make_finalized_round_activity(include_scores=False)
         with self.assertRaises(PermissionDenied):
             archive_activity(activity, self.admin)
         self.assertFalse(ArchivePackage.objects.filter(activity=activity).exists())
@@ -1960,7 +1959,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(document.is_test_data)
         self.assertTrue(document.file.storage.exists(document.file.name or ""))
 
-    def test_locking_vote_session_generates_popularity_award(self):
+    def test_locking_vote_session_does_not_generate_popularity_award(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -1990,7 +1989,7 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         response = self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(
+        self.assertFalse(
             Award.objects.filter(
                 activity=self.singer_activity, singer=registration, name="最佳人气奖"
             ).exists()
@@ -2056,17 +2055,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         self.client.post(reverse("staff:vote_session_lock", args=[vote_session.pk]))
 
-        self.assertFalse(
-            Award.objects.filter(
-                activity=self.singer_activity, singer=first, name="最佳人气奖"
-            ).exists()
-        )
-        self.assertEqual(
-            Award.objects.filter(
-                activity=self.singer_activity, singer=second, name="最佳人气奖"
-            ).count(),
-            1,
-        )
+        self.assertFalse(Award.objects.filter(activity=self.singer_activity).exists())
 
     def _make_popularity_tie_session(self):
         second_user = User.objects.create_user(username="participant-second", password="pass")

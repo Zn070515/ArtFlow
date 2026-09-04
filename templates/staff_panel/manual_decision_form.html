@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}人工晋级选择 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900">人工晋级选择</h1>
+    <p class="text-sm text-gray-500 mt-1">{{ activity.title }} / 赛制 v{{ version.version }}</p>
+    <div class="mt-5 bg-amber-50 border border-amber-200 text-amber-900 rounded p-3 text-sm">
+        只允许写入冻结赛制声明的 MANUAL_SELECT 节点；保存会生成审计记录，已被核定赛段消费的选择不可修改。
+    </div>
+    {% if form.non_field_errors %}<div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{{ form.non_field_errors }}</div>{% endif %}
+    <form method="post" class="mt-5 space-y-4">
+        {% csrf_token %}
+        {{ form.manual_key.label_tag }}{{ form.manual_key }}
+        {{ form.group.label_tag }}{{ form.group }}
+        <fieldset>
+            <legend class="block text-sm font-medium text-gray-700 mb-2">选手</legend>
+            {{ form.chosen }}
+        </fieldset>
+        <button class="bg-brand text-white px-4 py-2 rounded text-sm">保存人工选择</button>
+    </form>
+</div>
+{% endblock %}

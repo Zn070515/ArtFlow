@@ -394,7 +394,7 @@ def _vote_binding(vs_pk) -> dict:
     # unit ``votes`` (VOTE_SCORE_COMPONENT_RAW) until an explicit conversion rule exists.
     # Runtime vote readiness (ballots cast / locked / result ready) remains a resolver HOLD
     # condition, never a Freeze gate — so no ``result_ready`` fact is produced here.
-    return {"scale": "votes"}
+    return {"scale": "votes", "purpose": vs.purpose}
 
 
 def _annotated_capacity(rpk, activity):

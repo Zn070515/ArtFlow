@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}轮次分组 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900">轮次分组与演出归属</h1>
+    <p class="text-sm text-gray-500 mt-1">{{ round.activity.title }} / {{ round.name|default:round.get_round_type_display }}</p>
+    <div class="mt-5 bg-amber-50 border border-amber-200 text-amber-900 rounded p-3 text-sm">
+        这是正式操作输入。必须为当前轮次的全部选手建立唯一分组；保存后将在准备轮次前作为分组事实使用。
+    </div>
+    {% if form.non_field_errors %}<div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{{ form.non_field_errors }}</div>{% endif %}
+    <form method="post" class="mt-5 space-y-4">
+        {% csrf_token %}
+        {{ form.groups.label_tag }}
+        {{ form.groups }}
+        <p class="text-xs text-gray-500">可用选手：{% for singer in singers %}{{ singer.pk }}={{ singer.name }}{% if not forloop.last %}，{% endif %}{% empty %}暂无已审核选手{% endfor %}</p>
+        <button class="bg-brand text-white px-4 py-2 rounded text-sm">保存分组</button>
+    </form>
+</div>
+{% endblock %}

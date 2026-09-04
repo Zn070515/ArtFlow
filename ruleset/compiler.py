@@ -741,6 +741,28 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[
                 "投票评分节点必须声明 vote_purpose。",
             )
         )
+    vote_purpose = node.get("vote_purpose")
+    if not isinstance(vote_purpose, str):
+        vote_purpose = ""
+    expected_session_purpose = {
+        "POPULARITY": "popularity",
+        "SELECTION": "selection",
+    }.get(vote_purpose)
+    actual_session_purpose = vote.get("purpose")
+    if (
+        expected_session_purpose
+        and actual_session_purpose
+        and (actual_session_purpose != expected_session_purpose)
+    ):
+        issues.append(
+            ReportIssue(
+                "VOTE_PURPOSE_MISMATCH",
+                Severity.ERROR,
+                node["key"],
+                "vote_purpose",
+                f"投票 {source} 的用途为 {actual_session_purpose}，与节点声明的用途不匹配。",
+            )
+        )
     # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness. Whether
     # a VoteSession has collected ballots / is locked / has a result is a runtime
     # resolver HOLD condition — never a Ruleset Freeze gate. So no ``result_ready`` fact.

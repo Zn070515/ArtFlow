@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}人工出场顺序 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900">人工出场顺序</h1>
+    <p class="text-sm text-gray-500 mt-1">{{ round.activity.title }} / {{ round.name|default:round.get_round_type_display }}</p>
+    <div class="mt-5 bg-blue-50 border border-blue-200 text-blue-800 rounded p-3 text-sm">
+        仅当轮次的出场顺序策略为“人工顺序”时生效。请按选手 ID 顺序填写，系统会要求完整覆盖且不重复。
+    </div>
+    {% if form.non_field_errors %}<div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{{ form.non_field_errors }}</div>{% endif %}
+    <form method="post" class="mt-5 space-y-4">
+        {% csrf_token %}
+        {{ form.singer_ids.label_tag }}
+        {{ form.singer_ids }}
+        <p class="text-xs text-gray-500">当前快照：{% for entry in entries %}{{ entry.singer_id }}{% if not forloop.last %} → {% endif %}{% empty %}尚未准备{% endfor %}</p>
+        <button class="bg-brand text-white px-4 py-2 rounded text-sm">保存顺序</button>
+    </form>
+    <div class="mt-6 text-sm text-gray-600">
+        {% for entry in entries %}<div>{{ entry.singer_id }} — {{ entry.singer.name }}</div>{% endfor %}
+    </div>
+</div>
+{% endblock %}

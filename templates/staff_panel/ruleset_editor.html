@@ -28,6 +28,7 @@
               onsubmit="return confirm('确认冻结该赛制？冻结后不可编辑。');">
             {% csrf_token %}<button class="bg-brand text-white px-3 py-1.5 rounded text-sm">冻结</button>
         </form>
+        <a href="{% url 'staff:manual_decision' version.pk %}" class="border border-gray-300 px-3 py-1.5 rounded text-sm">人工选择</a>
     </div>
 
     {% for message in messages %}

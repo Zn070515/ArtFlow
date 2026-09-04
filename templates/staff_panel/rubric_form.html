@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}新增评分标准 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900">新增评分标准</h1>
+    <p class="text-sm text-gray-500 mt-1">一次性配置评分标准与全部评分项，供轮次绑定。</p>
+    {% if form.non_field_errors %}<div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{{ form.non_field_errors }}</div>{% endif %}
+    <form method="post" class="mt-5 space-y-4">
+        {% csrf_token %}
+        <label class="block text-sm font-medium text-gray-700">活动
+            <select name="activity_id" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for activity in activities %}<option value="{{ activity.pk }}">{{ activity.title }}</option>{% endfor %}
+            </select>
+        </label>
+        {{ form.as_p }}
+        <button class="bg-brand text-white px-4 py-2 rounded text-sm">创建评分标准</button>
+    </form>
+</div>
+{% endblock %}

@@ -334,7 +334,9 @@ class ResolverReadyTests(SimpleTestCase):
         self.assertEqual(result.decisions[0].score, Decimal("8.5"))
 
     def test_pair_even_ok(self):
-        definition = _def([{"key": "p", "type": "PAIR", "source": ENTRY_KEY}])
+        definition = _def(
+            [{"key": "p", "type": "PAIR", "source": ENTRY_KEY, "pairing_policy": "ADJACENT"}]
+        )
         result = resolve(definition, ResolveInput(roster=("a", "b", "c", "d")))
         self.assertEqual(result.status, ResolverState.READY)
         self.assertEqual(len(result.node_values["p"]), 2)  # type: ignore[arg-type]
@@ -384,19 +386,26 @@ class ResolverHoldTests(SimpleTestCase):
         self.assertIn("c2", " ".join(result.reasons))
 
     def test_pair_odd_no_policy_hold(self):
-        definition = _def([{"key": "p", "type": "PAIR", "source": ENTRY_KEY}])
+        definition = _def(
+            [{"key": "p", "type": "PAIR", "source": ENTRY_KEY, "pairing_policy": "ADJACENT"}]
+        )
         result = resolve(definition, ResolveInput(roster=("a", "b", "c")))
         self.assertEqual(result.status, ResolverState.HOLD)
 
     def test_duel_consumes_pair_decisions_and_exposes_winners_and_losers(self):
         definition = _def(
             [
-                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "pairs",
+                    "type": "PAIR",
+                    "source": ENTRY_KEY,
+                    "pairing_policy": "ADJACENT",
+                },
                 {
                     "key": "duel",
                     "type": "DUEL",
                     "source": "pairs",
-                    "decision_source": "judge_vote",
+                    "decision_source": "manual_recorded_result",
                 },
                 {"key": "winners", "type": "SELECT", "source": "duel", "count": 2},
             ]
@@ -417,12 +426,17 @@ class ResolverHoldTests(SimpleTestCase):
     def test_duel_missing_or_invalid_decision_holds(self):
         definition = _def(
             [
-                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "pairs",
+                    "type": "PAIR",
+                    "source": ENTRY_KEY,
+                    "pairing_policy": "ADJACENT",
+                },
                 {
                     "key": "duel",
                     "type": "DUEL",
                     "source": "pairs",
-                    "decision_source": "manual",
+                    "decision_source": "manual_recorded_result",
                 },
             ]
         )
@@ -443,12 +457,18 @@ class ResolverHoldTests(SimpleTestCase):
     def test_duel_wildcard_is_a_winner_without_a_hidden_opponent(self):
         definition = _def(
             [
-                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY, "odd_policy": "wildcard"},
+                {
+                    "key": "pairs",
+                    "type": "PAIR",
+                    "source": ENTRY_KEY,
+                    "pairing_policy": "ADJACENT",
+                    "odd_policy": "wildcard",
+                },
                 {
                     "key": "duel",
                     "type": "DUEL",
                     "source": "pairs",
-                    "decision_source": "manual",
+                    "decision_source": "manual_recorded_result",
                 },
             ]
         )
@@ -1342,20 +1362,30 @@ class ResolverCheckpointTests(SimpleTestCase):
     def test_checkpoint_fingerprint_scopes_duel_decisions_to_its_closure(self):
         definition = _def(
             [
-                {"key": "pairs1", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "pairs1",
+                    "type": "PAIR",
+                    "source": ENTRY_KEY,
+                    "pairing_policy": "ADJACENT",
+                },
                 {
                     "key": "duel1",
                     "type": "DUEL",
                     "source": "pairs1",
-                    "decision_source": "judge_vote",
+                    "decision_source": "manual_recorded_result",
                 },
                 {"key": "winner1", "type": "SELECT", "source": "duel1", "count": 2},
-                {"key": "pairs2", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "pairs2",
+                    "type": "PAIR",
+                    "source": ENTRY_KEY,
+                    "pairing_policy": "ADJACENT",
+                },
                 {
                     "key": "duel2",
                     "type": "DUEL",
                     "source": "pairs2",
-                    "decision_source": "judge_vote",
+                    "decision_source": "manual_recorded_result",
                 },
                 {"key": "winner2", "type": "SELECT", "source": "duel2", "count": 2},
             ]

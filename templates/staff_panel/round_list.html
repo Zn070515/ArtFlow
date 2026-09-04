@@ -42,6 +42,8 @@
                     <td class="px-4 py-2.5 space-x-2">
                         <a href="{% url 'staff:activity_result_board' r.activity_id %}" class="text-gray-500 hover:underline text-xs">公示板</a>
                         {% if r.status == "draft" %}
+                        <a href="{% url 'staff:round_groups' r.pk %}" class="text-gray-500 hover:underline text-xs">分组</a>
+                        {% if r.order_policy == "manual" %}<a href="{% url 'staff:round_running_order' r.pk %}" class="text-gray-500 hover:underline text-xs">人工顺序</a>{% endif %}
                         <form method="post" action="{% url 'staff:round_prepare' r.pk %}" class="inline">
                             {% csrf_token %}
                             <button type="submit" class="text-brand hover:underline text-xs">准备轮次</button>
