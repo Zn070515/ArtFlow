@@ -57,6 +57,9 @@ class ResolveInput:
     vote_scores: Mapping[str, Mapping[str, Decimal]] = field(default_factory=dict)
     group_of: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     manual: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
+    # Node key -> canonical pair key -> selected winner. Pair keys are the two
+    # contestant ids in entry-roster order joined with ``|``.
+    duel_decisions: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -220,6 +223,7 @@ def inputs_fingerprint(inputs: ResolveInput) -> str:
             "vote_scores": dict(inputs.vote_scores),
             "group_of": dict(inputs.group_of),
             "manual": dict(inputs.manual),
+            "duel_decisions": dict(inputs.duel_decisions),
         }
     )
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -315,6 +319,7 @@ def _scoped_inputs_fingerprint(
             "vote_scores": {k: v for k, v in inputs.vote_scores.items() if k in vote_keys},
             "group_of": {k: v for k, v in inputs.group_of.items() if k in group_keys},
             "manual": {k: v for k, v in inputs.manual.items() if k in manual_keys},
+            "duel_decisions": dict(inputs.duel_decisions),
         }
     )
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -410,6 +415,73 @@ def _pair(node: dict, st: _Stage) -> tuple:
     if len(pool) % 2 == 1:
         out.append(frozenset((pool[-1],)))
     return tuple(out)
+
+
+def _pair_key(members: tuple[str, ...]) -> str:
+    """Return the stable external key for one pair decision."""
+    return "|".join(members)
+
+
+def _duel(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
+    """Resolve every pair from an explicit winner decision map.
+
+    A winner is never inferred from roster order or score. A singleton produced by
+    an explicit PAIR odd policy is handled as a bye/wildcard; every two-person pair
+    must have exactly one declared winner.
+    """
+    pairs = st.values[node["source"]]
+    decisions = inputs.duel_decisions.get(node["key"], {})
+    if not isinstance(decisions, Mapping):
+        st.hold.append(f"DUEL {node['key']} 决策不是合法映射。")
+        return {"winners": (), "losers": (), "pairs": ()}
+
+    expected: set[str] = set()
+    records: list[dict] = []
+    winners: list[str] = []
+    losers: list[str] = []
+    invalid = False
+    for raw_pair in pairs:
+        members = tuple(sorted(raw_pair, key=lambda c: st.idx[c]))
+        key = _pair_key(members)
+        expected.add(key)
+        if len(members) == 1:
+            outcome = "wildcard" if node.get("odd_policy") == "wildcard" else "bye"
+            winner = members[0]
+            winners.append(winner)
+            records.append(
+                {"pair": members, "key": key, "winner": winner, "loser": None, "outcome": outcome}
+            )
+            continue
+        winner = decisions.get(key)
+        if winner not in members:
+            st.hold.append(f"DUEL {node['key']} 缺少或无效的 {key} 胜者决定。")
+            invalid = True
+            continue
+        loser = members[0] if winner == members[1] else members[1]
+        winners.append(winner)
+        losers.append(loser)
+        records.append(
+            {"pair": members, "key": key, "winner": winner, "loser": loser, "outcome": "decided"}
+        )
+
+    extras = set(decisions) - expected
+    if extras:
+        st.hold.append(f"DUEL {node['key']} 含有不存在的 pair 决定：{sorted(extras)}。")
+        invalid = True
+    if invalid:
+        return {"winners": (), "losers": (), "pairs": tuple(records)}
+
+    for record in records:
+        winner = record["winner"]
+        st.outcome[winner] = (
+            OutcomeCode.WILDCARD if record["outcome"] == "wildcard" else OutcomeCode.DIRECT
+        )
+        st.source_node[winner] = node["key"]
+        loser = record["loser"]
+        if loser is not None:
+            st.outcome[loser] = OutcomeCode.ELIMINATED
+            st.source_node[loser] = node["key"]
+    return {"winners": tuple(winners), "losers": tuple(losers), "pairs": tuple(records)}
 
 
 def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
@@ -636,9 +708,14 @@ def _hold_fill_cutoff_tie(
 
 
 def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
-    ranked: tuple = st.values[node["source"]]
+    source_value = st.values[node["source"]]
+    source_node = by_key[node["source"]]
+    if source_node["type"] == "DUEL":
+        ranked = tuple(source_value.get(node.get("outcome", "winners"), ()))
+    else:
+        ranked = source_value
     count = node["count"]
-    score_node = by_key[node["source"]].get("source")
+    score_node = source_node.get("source") if source_node["type"] == "RANK" else None
     scores: dict = st.values.get(score_node, {}) if score_node else {}
     policy = node.get("tie_policy") or ""
     by = node.get("by")
@@ -862,6 +939,8 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
         st.values[node["key"]] = _part(node, st, inputs)
     elif ntype == "PAIR":
         st.values[node["key"]] = _pair(node, st)
+    elif ntype == "DUEL":
+        st.values[node["key"]] = _duel(node, st, inputs)
     elif ntype == "ASSESS":
         st.values[node["key"]] = _assess(node, st, inputs)
     elif ntype == "AGGREGATE":

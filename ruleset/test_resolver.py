@@ -387,6 +387,80 @@ class ResolverHoldTests(SimpleTestCase):
         result = resolve(definition, ResolveInput(roster=("a", "b", "c")))
         self.assertEqual(result.status, ResolverState.HOLD)
 
+    def test_duel_consumes_pair_decisions_and_exposes_winners_and_losers(self):
+        definition = _def(
+            [
+                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "judge_vote",
+                },
+                {"key": "winners", "type": "SELECT", "source": "duel", "count": 2},
+            ]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b", "c", "d"),
+                duel_decisions={"duel": {"a|b": "a", "c|d": "d"}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.node_values["duel"]["winners"], ["a", "d"])
+        self.assertEqual(result.node_values["duel"]["losers"], ["b", "c"])
+        self.assertEqual(result.node_values["winners"], ["a", "d"])
+
+    def test_duel_missing_or_invalid_decision_holds(self):
+        definition = _def(
+            [
+                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "manual",
+                },
+            ]
+        )
+        missing = resolve(
+            definition,
+            ResolveInput(roster=("a", "b", "c", "d"), duel_decisions={"duel": {"a|b": "a"}}),
+        )
+        self.assertEqual(missing.status, ResolverState.HOLD)
+        invalid = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b", "c", "d"),
+                duel_decisions={"duel": {"a|b": "x", "c|d": "c"}},
+            ),
+        )
+        self.assertEqual(invalid.status, ResolverState.HOLD)
+
+    def test_duel_wildcard_is_a_winner_without_a_hidden_opponent(self):
+        definition = _def(
+            [
+                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY, "odd_policy": "wildcard"},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "manual",
+                },
+            ]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b", "c"),
+                duel_decisions={"duel": {"a|b": "b"}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.node_values["duel"]["winners"], ["b", "c"])
+        self.assertEqual(result.node_values["duel"]["losers"], ["a"])
+
 
 class ResolverReviewTests(SimpleTestCase):
     def _tie_def(self, tie_policy=None):

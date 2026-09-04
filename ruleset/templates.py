@@ -421,9 +421,19 @@ def _first_batch():
                 {"key": "rank", "type": "RANK", "source": "assess_r1", "descending": True},
                 {"key": "seeds", "type": "SELECT", "source": "rank", "count": 8},
                 {"key": "pairs", "type": "PAIR", "source": "seeds", "odd_policy": "wildcard"},
-                {"key": "assess_pk", "type": "ASSESS", "source": "seeds", "round": "r1"},
-                {"key": "rank_pk", "type": "RANK", "source": "assess_pk", "descending": True},
-                {"key": "win", "type": "SELECT", "source": "rank_pk", "count": 4},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "judge_vote",
+                },
+                {
+                    "key": "win",
+                    "type": "SELECT",
+                    "source": "duel",
+                    "outcome": "winners",
+                    "count": 4,
+                },
             ]
         )
 
@@ -434,9 +444,20 @@ def _first_batch():
                 {"key": "rank", "type": "RANK", "source": "assess_r1", "descending": True},
                 {"key": "direct", "type": "SELECT", "source": "rank", "count": 5},
                 {"key": "middle", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
-                {"key": "assess_mid", "type": "ASSESS", "source": "middle", "round": "r1"},
-                {"key": "rank_mid", "type": "RANK", "source": "assess_mid", "descending": True},
-                {"key": "win_mid", "type": "SELECT", "source": "rank_mid", "count": 4},
+                {"key": "pairs_mid", "type": "PAIR", "source": "middle", "odd_policy": "wildcard"},
+                {
+                    "key": "duel_mid",
+                    "type": "DUEL",
+                    "source": "pairs_mid",
+                    "decision_source": "judge_vote",
+                },
+                {
+                    "key": "win_mid",
+                    "type": "SELECT",
+                    "source": "duel_mid",
+                    "outcome": "winners",
+                    "count": 4,
+                },
                 {"key": "merged", "type": "MERGE", "sources": ["direct", "win_mid"]},
             ]
         )

@@ -243,6 +243,9 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
     elif ntype == "PAIR":
         src = prov[node["source"]]
         p.update(pool_sig=src["pool_sig"], pool_relation=src["pool_relation"], size=src["size"])
+    elif ntype == "DUEL":
+        src = prov[node["source"]]
+        p.update(pool_sig=src["pool_sig"], pool_relation=src["pool_relation"], size=src["size"])
     elif ntype == "ASSESS":
         src = prov[node["source"]]
         rnd = node.get("round")
@@ -595,6 +598,8 @@ def _check_tie(
     node: dict, prov: dict, by_key: dict, issues: list[ReportIssue], cutoffs: list[dict]
 ) -> None:
     if node["type"] not in ("SELECT", "RANK"):
+        return
+    if node["type"] == "SELECT" and by_key.get(node.get("source"), {}).get("type") == "DUEL":
         return
     decisive = node["type"] == "SELECT" or _feeds_decisive(by_key, node["key"])
     if not decisive:

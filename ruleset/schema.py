@@ -63,6 +63,7 @@ class NodeType(StrEnum):
     ROSTER = "ROSTER"
     PARTITION = "PARTITION"
     PAIR = "PAIR"
+    DUEL = "DUEL"
     ASSESS = "ASSESS"
     AGGREGATE = "AGGREGATE"
     RANK = "RANK"
@@ -83,6 +84,8 @@ _ROSTER = frozenset({OutputType.ROSTER})
 _SCOREMAP = frozenset({OutputType.SCOREMAP})
 _RANKED_ROSTER = frozenset({OutputType.RANKED_ROSTER})
 _GROUP_MAP = frozenset({OutputType.GROUP_MAP})
+_PAIR_SET = frozenset({OutputType.PAIR_SET})
+_DECISION_SET = frozenset({OutputType.DECISION_SET})
 _ROSTER_OR_GROUP_MAP = frozenset({OutputType.ROSTER, OutputType.GROUP_MAP})
 # An ordered roster (RANK output or a plain Roster/SELECT) may serve as a ranking order.
 _ORDERED_ROSTER = frozenset({OutputType.ROSTER, OutputType.RANKED_ROSTER})
@@ -145,6 +148,11 @@ def _require_optional_non_empty_str(name: str, node: dict, field: str) -> None:
 def _validate_manual_select(name: str, node: dict) -> None:
     _require_non_negative_int(name, node, "groups")
     _require_non_negative_int(name, node, "quota")
+
+
+def _validate_select(name: str, node: dict) -> None:
+    _require_non_negative_int(name, node, "count")
+    _require_one_of(name, node, "outcome", frozenset({"winners", "losers"}))
 
 
 def _validate_fill(name: str, node: dict) -> None:
@@ -314,6 +322,15 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             validate=_validate_pair,
         ),
         _spec(
+            NodeType.DUEL,
+            OutputType.DECISION_SET,
+            required=("source", "decision_source"),
+            optional=("odd_policy",),
+            source_refs=("source",),
+            expects={"source": _PAIR_SET},
+            validate=lambda n, d: _require_non_empty_str(n, d, "decision_source"),
+        ),
+        _spec(
             NodeType.ASSESS,
             OutputType.SCOREMAP,
             required=("source",),
@@ -353,12 +370,14 @@ NODE_TYPE_SPEC: dict[str, NodeSpec] = {
             NodeType.SELECT,
             OutputType.ROSTER,
             required=("source", "count"),
-            optional=("tie_policy", "by", "tie_break_source"),
+            optional=("tie_policy", "by", "tie_break_source", "outcome"),
             source_refs=("source", "by", "tie_break_source"),
-            expects={"source": _RANKED_ROSTER, "by": _GROUP_MAP, "tie_break_source": _SCOREMAP},
-            validate=_run_validators(
-                lambda n, d: _require_non_negative_int(n, d, "count"), _validate_tie
-            ),
+            expects={
+                "source": _RANKED_ROSTER | _DECISION_SET,
+                "by": _GROUP_MAP,
+                "tie_break_source": _SCOREMAP,
+            },
+            validate=_run_validators(_validate_select, _validate_tie),
         ),
         _spec(
             NodeType.BRANCH,
