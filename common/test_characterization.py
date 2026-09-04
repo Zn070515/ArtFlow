@@ -30,6 +30,7 @@ from singer_contest.models import (
 )
 from voting.models import VoteOption, VoteSession
 
+from common.authority import CONTEST_ROUND_STATE, authority_write
 from common.lifecycle import runtime_approved_singers, scope_runtime
 from common.test_data import get_test_data_counts
 
@@ -118,7 +119,8 @@ class RoundSnapshotCharacterizationTests(_CharacterizationBase):
         singer = self.make_singer(activity, username="s1", student_id="1")
         contest_round = self.make_round(activity)
         contest_round.status = ContestRound.Status.SCORING
-        contest_round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
         with self.assertRaises(ValidationError):
             RoundEntry.objects.create(round=contest_round, singer=singer)
 
@@ -128,7 +130,8 @@ class RoundSnapshotCharacterizationTests(_CharacterizationBase):
         contest_round = self.make_round(activity)
         entry = RoundEntry.objects.create(round=contest_round, singer=singer)
         contest_round.status = ContestRound.Status.PREPARED
-        contest_round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
         with self.assertRaises(ValidationError):
             entry.delete()
 
@@ -138,7 +141,8 @@ class RoundSnapshotCharacterizationTests(_CharacterizationBase):
         contest_round = self.make_round(activity)
         assignment = RoundJudge.objects.create(round=contest_round, judge=judge)
         contest_round.status = ContestRound.Status.PREPARED
-        contest_round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
         with self.assertRaises(ValidationError):
             assignment.delete()
 

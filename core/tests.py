@@ -1,3 +1,4 @@
+from common.authority import ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -200,7 +201,8 @@ class ActivityPhaseTransitionTests(TestCase):
         )
 
     def test_locked_activity_cannot_transition(self):
-        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
         with self.assertRaises(PermissionDenied):
             transition_activity_phase(
                 self.activity, Activity.Phase.REGISTRATION_OPEN, actor=self.user
@@ -269,7 +271,8 @@ class ActivityUnarchiveTests(TestCase):
 
     def test_unarchive_rejects_non_archived_activity(self):
         self.activity.phase = Activity.Phase.RESULTS_PUBLISHED
-        self.activity.save(update_fields=["phase"])
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
         with self.assertRaises(PermissionDenied):
             unarchive_activity(self.activity, actor=self.admin)
 

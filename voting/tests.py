@@ -4,6 +4,7 @@ from datetime import timedelta
 from unittest import skipUnless
 
 from accounts.models import User
+from common.authority import ACTIVITY_STATE, VOTE_SESSION_STATE, authority_write
 from common.models import AuditLog
 from common.test_data import clear_activity_test_data
 from core.models import Activity
@@ -240,7 +241,8 @@ class VoteBallotTests(TestCase):
 
     def test_submit_ballot_revalidates_state_after_lock(self):
         stale_session = self.session  # in-memory copy still reports open
-        VoteSession.objects.filter(pk=self.session.pk).update(is_locked=True, is_open=False)
+        with authority_write(VOTE_SESSION_STATE):
+            VoteSession.objects.filter(pk=self.session.pk).update(is_locked=True, is_open=False)
 
         with self.assertRaises(ValidationError):
             submit_ballot(
@@ -299,7 +301,8 @@ class VoteActivityLockOverlayTests(TestCase):
         )
 
     def test_activity_locked_while_session_open_rejects_ballot(self):
-        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
 
         response = self._cast_ballot()
 
@@ -308,11 +311,13 @@ class VoteActivityLockOverlayTests(TestCase):
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
 
     def test_activity_unlock_resumes_voting_on_open_session(self):
-        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
         self._cast_ballot()
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
 
-        Activity.objects.filter(pk=self.activity.pk).update(is_locked=False)
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(is_locked=False)
         response = self._cast_ballot()
 
         self.assertEqual(response.status_code, 302)
@@ -377,7 +382,8 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
                 with transaction.atomic():
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.is_locked = True
-                    activity.save(update_fields=["is_locked"])
+                    with authority_write(ACTIVITY_STATE):
+                        activity.save(update_fields=["is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -493,7 +499,8 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
                     session = VoteSession.objects.select_for_update().get(pk=self.session.pk)
                     session.is_open = False
                     session.is_locked = True
-                    session.save(update_fields=["is_open", "is_locked"])
+                    with authority_write(VOTE_SESSION_STATE):
+                        session.save(update_fields=["is_open", "is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -605,7 +612,8 @@ class VoteStateServiceTests(TestCase):
             open_vote_session(self.session, self.operator)
 
     def test_activity_lock_blocks_child_state_mutations(self):
-        Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
         for action in (
             open_vote_session,
             close_vote_session,

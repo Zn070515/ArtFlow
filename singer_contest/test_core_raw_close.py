@@ -1,7 +1,13 @@
 from decimal import Decimal
 
 from accounts.models import User
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -58,9 +64,10 @@ class CoreRawAuthorityTests(TestCase):
         )
 
     def _lock_round(self):
-        ContestRound._base_manager.filter(pk=self.round.pk).update(
-            status=ContestRound.Status.LOCKED, is_locked=True
-        )
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound._base_manager.filter(pk=self.round.pk).update(
+                status=ContestRound.Status.LOCKED, is_locked=True
+            )
         self.round.refresh_from_db()
 
     def test_score_record_cannot_be_changed_after_round_lock(self):
@@ -113,7 +120,8 @@ class CoreRawAuthorityTests(TestCase):
         )
         session.is_locked = True
         session.is_open = False
-        session.save(update_fields=["is_locked", "is_open"])
+        with authority_write(VOTE_SESSION_STATE):
+            session.save(update_fields=["is_locked", "is_open"])
         ballot.ip_address = "127.0.0.2"
         with self.assertRaises(ValidationError):
             ballot.save()
@@ -151,9 +159,10 @@ class CoreRawAuthorityTests(TestCase):
         rubric = ScoringRubric.objects.create(activity=self.activity, name="Frozen rubric")
         self.round.rubric = rubric
         self.round.save(update_fields=["rubric"])
-        ContestRound._base_manager.filter(pk=self.round.pk).update(
-            status=ContestRound.Status.PREPARED
-        )
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound._base_manager.filter(pk=self.round.pk).update(
+                status=ContestRound.Status.PREPARED
+            )
         with self.assertRaises(ValidationError):
             ScoringRubric.objects.filter(pk=rubric.pk).update(name="Changed")
 

@@ -26,7 +26,25 @@ class SingerRegistrationAdmin(admin.ModelAdmin):
 
 @admin.register(ContestRound)
 class ContestRoundAdmin(admin.ModelAdmin):
-    readonly_fields = ["status", "is_locked"]
+    readonly_fields = [
+        "activity",
+        "round_type",
+        "scoring_mode",
+        "name",
+        "sequence",
+        "order_policy",
+        "tie_order_policy",
+        "scheduled_at",
+        "venue",
+        "rubric",
+        "advance_count",
+        "roster_source",
+        "roster_source_stage",
+        "status",
+        "is_locked",
+        "score_version",
+        "advancement_status",
+    ]
     list_display = [
         "name",
         "activity",
@@ -129,8 +147,31 @@ class RubricCriterionAdmin(admin.ModelAdmin):
 @admin.register(ScoreSummary)
 class ScoreSummaryAdmin(admin.ModelAdmin):
     list_display = ["round", "singer", "average_score", "rank", "is_advanced"]
+    readonly_fields = [
+        "round",
+        "singer",
+        "average_score",
+        "rank",
+        "is_advanced",
+        "is_test_data",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Award)
 class AwardAdmin(admin.ModelAdmin):
     list_display = ["name", "singer", "activity"]
+    readonly_fields = [
+        "source_vote_session",
+        "source_stage_result",
+        "source_award_decision",
+        "source_node",
+    ]

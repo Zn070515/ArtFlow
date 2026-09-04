@@ -50,7 +50,7 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.audit import client_ip
-from common.authority import RULESET_FREEZE, authority_write
+from common.authority import CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
 from common.management.commands.backup_artflow import (
     apply_migration_heads,
     collect_counts,
@@ -220,7 +220,8 @@ class GeneratedDocumentTestDataCleanupTests(TestCase):
         RoundEntry.objects.create(round=contest_round, singer=singer)
         RoundJudge.objects.create(round=contest_round, judge=judge)
         contest_round.status = ContestRound.Status.PREPARED
-        contest_round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
 
         counts = clear_activity_test_data(self.activity, operator=self.operator)
 
@@ -1419,7 +1420,8 @@ class DemoSeedCommandTests(TestCase):
         contest_round = ContestRound.objects.get(name="Demo Preliminary Round")
         _participant = User.objects.get(username="demo-participant")
         contest_round.status = ContestRound.Status.DRAFT
-        contest_round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
         unowned_user = User.objects.create_user(username="unowned-snapshot", password="pass")
         unowned_singer = SingerRegistration.objects.create(
             activity=contest_round.activity,
@@ -1435,7 +1437,8 @@ class DemoSeedCommandTests(TestCase):
         )
         snapshot = RoundEntry.objects.create(round=contest_round, singer=unowned_singer)
         contest_round.status = ContestRound.Status.PREPARED
-        contest_round.save(update_fields=["status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
         runtime_counts = {
             "scores": ScoreRecord.objects.count(),
             "summaries": ScoreSummary.objects.count(),

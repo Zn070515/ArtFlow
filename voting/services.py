@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from common.authority import VOTE_SESSION_STATE, authority_write
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from core.policies import ActivityAction, ensure_activity_action_allowed
@@ -120,7 +121,8 @@ def open_vote_session(vote_session, operator):
         if locked.is_open:
             return locked
         locked.is_open = True
-        locked.save(update_fields=["is_open"])
+        with authority_write(VOTE_SESSION_STATE):
+            locked.save(update_fields=["is_open"])
         _audit_vote_state(
             locked, operator, AuditLog.ActionType.VOTE_MANAGE, "is_open=false", "is_open=true"
         )
@@ -134,7 +136,8 @@ def close_vote_session(vote_session, operator):
         if not locked.is_open:
             return locked
         locked.is_open = False
-        locked.save(update_fields=["is_open"])
+        with authority_write(VOTE_SESSION_STATE):
+            locked.save(update_fields=["is_open"])
         _audit_vote_state(
             locked, operator, AuditLog.ActionType.VOTE_MANAGE, "is_open=true", "is_open=false"
         )
@@ -149,7 +152,8 @@ def lock_vote_session(vote_session, operator):
             return locked
         locked.is_locked = True
         locked.is_open = False
-        locked.save(update_fields=["is_locked", "is_open"])
+        with authority_write(VOTE_SESSION_STATE):
+            locked.save(update_fields=["is_locked", "is_open"])
         _audit_vote_state(
             locked, operator, AuditLog.ActionType.RELOCK_RESULT, "is_locked=false", "is_locked=true"
         )
@@ -166,7 +170,8 @@ def unlock_vote_session(vote_session, operator, *, note: str = ""):
 
         ensure_vote_not_consumed_by_confirmed_stage(locked)
         locked.is_locked = False
-        locked.save(update_fields=["is_locked"])
+        with authority_write(VOTE_SESSION_STATE):
+            locked.save(update_fields=["is_locked"])
         _audit_vote_state(
             locked,
             operator,

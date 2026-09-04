@@ -7,7 +7,15 @@ from io import BytesIO
 from unittest import skipUnless
 
 from accounts.models import User
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    SCORE_SUMMARY_RECALCULATE,
+    STAGE_RESULT_CONFIRM,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.models import AuditLog
 from common.test_data import clear_activity_test_data
 from core.models import Activity
@@ -93,16 +101,43 @@ def _promote_version_to_current(version):
 
     核定 (R9-5 §五) finalizes only a result grounded in the *current* FROZEN authority, so a
     test that confirms must first make its frozen version the one current runner. Uses
-    ``_base_manager`` (same as the production freeze demotion) to bypass the frozen
-    immutability guard when demoting a prior current version.
+    ``_base_manager`` (same as the production freeze demotion) inside the explicit freeze
+    authority scope so the guarded base manager cannot become an ambient escape hatch.
     """
-    RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id).exclude(
-        pk=version.pk
-    ).update(is_current=False)
-    RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
+    with authority_write(RULESET_FREEZE):
+        RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id).exclude(
+            pk=version.pk
+        ).update(is_current=False)
+        RulesetVersion._base_manager.filter(pk=version.pk).update(is_current=True)
     # The queryset update above leaves the in-memory object stale; run_ruleset reads
     # ``version.is_current`` directly, so refresh it or the is_current gate misfires.
     version.refresh_from_db()
+
+
+def _save_round_state(round_, fields=None):
+    with authority_write(CONTEST_ROUND_STATE):
+        if fields is None:
+            round_.save()
+        else:
+            round_.save(update_fields=fields)
+
+
+def _save_activity_state(activity, fields=None):
+    with authority_write(ACTIVITY_STATE):
+        if fields is None:
+            activity.save()
+        else:
+            activity.save(update_fields=fields)
+
+
+def _save_vote_state(vote_session, fields):
+    with authority_write(VOTE_SESSION_STATE):
+        vote_session.save(update_fields=fields)
+
+
+def _create_score_summary(**kwargs):
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        return ScoreSummary.objects.create(**kwargs)
 
 
 class ScoringServiceTests(TestCase):
@@ -177,7 +212,7 @@ class ScoringServiceTests(TestCase):
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
         round_admin = ContestRoundAdmin(ContestRound, admin.site)
 
@@ -209,7 +244,7 @@ class ScoringServiceTests(TestCase):
         RoundEntry.objects.create(round=self.round, singer=self.singer)
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status"])
+        _save_round_state(self.round, ["status"])
 
         with self.assertRaisesMessage(
             ValidationError, "Test round reset requires explicit test-only opt-in."
@@ -228,7 +263,7 @@ class ScoringServiceTests(TestCase):
 
     def test_prepared_round_rejects_snapshot_creates(self):
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
         singer = self.make_singer(activity=self.activity, student_id="prepared-create")
         judge = Judge.objects.create(activity=self.activity, name="Prepared Create Judge")
 
@@ -241,7 +276,7 @@ class ScoringServiceTests(TestCase):
         entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
         round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
         entry.singer = self.make_singer(activity=self.activity, student_id="prepared-update")
         round_judge.judge = Judge.objects.create(
             activity=self.activity, name="Prepared Update Judge"
@@ -256,7 +291,7 @@ class ScoringServiceTests(TestCase):
         entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
         round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
 
         with self.assertRaises(ValidationError):
             entry.delete()
@@ -270,7 +305,7 @@ class ScoringServiceTests(TestCase):
         entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
         round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
         request = RequestFactory().post("/admin/")
 
         with self.assertRaises(ValidationError):
@@ -289,7 +324,7 @@ class ScoringServiceTests(TestCase):
         entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
         round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
 
         with self.assertRaises(ValidationError):
             RoundEntry.objects.filter(pk=entry.pk).delete()
@@ -300,7 +335,7 @@ class ScoringServiceTests(TestCase):
         entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
         round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
         singer = self.make_singer(activity=self.activity, student_id="prepared-qset-update")
         judge = Judge.objects.create(activity=self.activity, name="Prepared Queryset Update Judge")
 
@@ -311,7 +346,7 @@ class ScoringServiceTests(TestCase):
 
     def test_prepared_round_rejects_snapshot_bulk_creates(self):
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
         singer = self.make_singer(activity=self.activity, student_id="prepared-bulk-create")
         judge = Judge.objects.create(activity=self.activity, name="Prepared Bulk Create Judge")
 
@@ -324,7 +359,7 @@ class ScoringServiceTests(TestCase):
         RoundEntry.objects.create(round=self.round, singer=self.singer)
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
 
         with self.assertRaises(ProtectedError):
             self.round.delete()
@@ -358,7 +393,7 @@ class ScoringServiceTests(TestCase):
         entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
         round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save()
+        _save_round_state(self.round)
         singer = self.make_singer(activity=self.activity, student_id="prepared-base-mgr")
         judge = Judge.objects.create(activity=self.activity, name="Prepared Base Manager Judge")
 
@@ -451,7 +486,7 @@ class ScoringServiceTests(TestCase):
         )
         round.status = ContestRound.Status.LOCKED
         round.is_locked = True
-        round.save(update_fields=["status", "is_locked"])
+        _save_round_state(round, ["status", "is_locked"])
 
     def _prepare_boundary_tie_round(self, advance_count=2):
         """Score a round where the last passing score ties the first failing one."""
@@ -481,7 +516,7 @@ class ScoringServiceTests(TestCase):
 
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
         semifinal = ContestRound.objects.create(
             activity=self.activity, round_type=ContestRound.RoundType.SEMI_FINAL
         )
@@ -517,14 +552,14 @@ class ScoringServiceTests(TestCase):
         self._prepare_boundary_tie_round()
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
         with self.assertRaises(PermissionDenied):
             finalize_advancement(self.round, [self.singer.pk], self.user)
 
     def test_finalize_advancement_rejects_locked_activity(self):
         self._prepare_boundary_tie_round()
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         with self.assertRaises(PermissionDenied):
             finalize_advancement(self.round, [self.singer.pk], self.user)
 
@@ -616,7 +651,7 @@ class ScoringServiceTests(TestCase):
         self._lock_scored_round(self.round, singer_count=5, advance_count=0)
         self.round.status = ContestRound.Status.SCORING
         self.round.is_locked = False
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
         semifinal = ContestRound.objects.create(
             activity=self.activity,
@@ -632,7 +667,7 @@ class ScoringServiceTests(TestCase):
     def test_ensure_round_final_rejects_empty_score_matrix(self):
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
         with self.assertRaisesMessage(ValidationError, "上游轮次没有可用的评分矩阵。"):
             ensure_round_final_for_advancement(self.round)
@@ -664,7 +699,7 @@ class ScoringServiceTests(TestCase):
 
     def test_prepare_round_rejects_drop_high_low_with_fewer_than_three_judges(self):
         self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
-        self.round.save()
+        _save_round_state(self.round)
         Judge.objects.create(activity=self.activity, name="Second Judge")
 
         with self.assertRaises(ValidationError):
@@ -674,7 +709,7 @@ class ScoringServiceTests(TestCase):
 
     def test_prepare_round_allows_drop_high_low_with_three_judges(self):
         self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
-        self.round.save()
+        _save_round_state(self.round)
         Judge.objects.create(activity=self.activity, name="Second Judge")
         Judge.objects.create(activity=self.activity, name="Third Judge")
 
@@ -810,7 +845,7 @@ class ScoringServiceTests(TestCase):
         prepare_round(self.round, self.user)
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
         with self.assertRaisesMessage(ValidationError, "该比赛轮次已锁定"):
             apply_scores(
@@ -1173,7 +1208,7 @@ class RoundResetServiceTests(TestCase):
             score=Decimal("90.00"),
             is_test_data=True,
         )
-        ScoreSummary.objects.create(
+        _create_score_summary(
             round=self.round,
             singer=self.singer,
             average_score=Decimal("90.000"),
@@ -1182,7 +1217,7 @@ class RoundResetServiceTests(TestCase):
             is_test_data=True,
         )
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
     def test_reset_round_snapshots_returns_test_round_to_draft(self):
         self._prepare_round_with_scores()
@@ -1333,7 +1368,7 @@ class ParticipantRegistrationFlowTests(TestCase):
     def test_archived_activity_get_produces_no_material_check_mutation(self):
         registration = self.make_registration()
         self.activity.phase = Activity.Phase.ARCHIVED
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.client.force_login(self.user)
         before = registration.material_checks.count()
         response = self.client.get(
@@ -1362,7 +1397,7 @@ class ParticipantRegistrationFlowTests(TestCase):
 
     def test_participant_cannot_edit_when_phase_is_live(self):
         self.activity.phase = Activity.Phase.LIVE
-        self.activity.save()
+        _save_activity_state(self.activity)
         registration = self.make_registration()
         self.client.force_login(self.user)
         response = self.client.post(
@@ -1376,7 +1411,7 @@ class ParticipantRegistrationFlowTests(TestCase):
 
     def test_participant_cannot_edit_a_locked_activity(self):
         self.activity.is_locked = True
-        self.activity.save()
+        _save_activity_state(self.activity)
         registration = self.make_registration()
         self.client.force_login(self.user)
         response = self.client.post(
@@ -1389,7 +1424,7 @@ class ParticipantRegistrationFlowTests(TestCase):
 
     def test_apply_rejects_locked_activity(self):
         self.activity.is_locked = True
-        self.activity.save()
+        _save_activity_state(self.activity)
         self.client.force_login(self.user)
         response = self.client.post(
             reverse("singer_contest:apply"),
@@ -1408,7 +1443,7 @@ class ParticipantRegistrationFlowTests(TestCase):
 
     def test_apply_rejects_activity_not_in_registration_open(self):
         self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.client.force_login(self.user)
         response = self.client.post(
             reverse("singer_contest:apply"),
@@ -1445,14 +1480,14 @@ class LockActivityForActionTests(TestCase):
 
     def test_rejects_locked_activity(self):
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         with transaction.atomic():
             with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
                 lock_activity_for_action(self.activity)
 
     def test_rejects_action_not_allowed_in_phase(self):
         self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         with transaction.atomic():
             with self.assertRaises(PermissionDenied):
                 lock_activity_for_action(self.activity, ActivityAction.SUBMIT_REGISTRATION)
@@ -1491,11 +1526,11 @@ class RoundLockTOCTOUTests(TestCase):
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): 90}, self.user)
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
     def test_prepare_round_rejects_locked_activity(self):
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
             prepare_round(self.round, self.user)
         self.round.refresh_from_db()
@@ -1505,7 +1540,7 @@ class RoundLockTOCTOUTests(TestCase):
         # M0-W: prepare_round must be its own authority — it re-checks the SCORE
         # action policy after acquiring the Activity lock, not before.
         self.activity.phase = Activity.Phase.DRAFT
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         with self.assertRaises(PermissionDenied):
             prepare_round(self.round, self.user)
         self.round.refresh_from_db()
@@ -1521,9 +1556,9 @@ class RoundLockTOCTOUTests(TestCase):
 
     def test_reset_round_to_draft_rejects_locked_activity(self):
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status"])
+        _save_round_state(self.round, ["status"])
         self.activity.is_locked = True
-        self.activity.save(update_fields=["is_locked"])
+        _save_activity_state(self.activity, ["is_locked"])
         with self.assertRaisesMessage(PermissionDenied, "活动结果已锁定，无法重置轮次。"):
             reset_round_to_draft(self.round, self.user, reason="admin unwind")
         self.round.refresh_from_db()
@@ -1532,7 +1567,7 @@ class RoundLockTOCTOUTests(TestCase):
     def test_lock_round_rejects_already_locked_round(self):
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
         with self.assertRaisesMessage(PermissionDenied, "该比赛轮次已锁定。"):
             lock_round(self.round, self.user)
 
@@ -1610,7 +1645,7 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
         apply_scores(self.round, {(self.singer.pk, self.judge.pk): 90}, self.user)
         self.round.status = ContestRound.Status.LOCKED
         self.round.is_locked = True
-        self.round.save(update_fields=["status", "is_locked"])
+        _save_round_state(self.round, ["status", "is_locked"])
 
     def test_concurrent_unlock_and_downstream_prepare_never_leave_orphan(self):
         self._lock_round()
@@ -1699,7 +1734,7 @@ class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
                 with transaction.atomic():
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.phase = Activity.Phase.REVIEWING
-                    activity.save(update_fields=["phase"])
+                    _save_activity_state(activity, ["phase"])
                     phased_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -1785,7 +1820,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
                 with transaction.atomic():
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.is_locked = True
-                    activity.save(update_fields=["is_locked"])
+                    _save_activity_state(activity, ["is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -1840,7 +1875,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
                 with transaction.atomic():
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.is_locked = True
-                    activity.save(update_fields=["is_locked"])
+                    _save_activity_state(activity, ["is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -1895,7 +1930,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
                 with transaction.atomic():
                     activity = Activity.objects.select_for_update().get(pk=self.activity.pk)
                     activity.is_locked = True
-                    activity.save(update_fields=["is_locked"])
+                    _save_activity_state(activity, ["is_locked"])
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -2076,7 +2111,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
                     if locked:
                         act.is_locked = True
                         updated.append("is_locked")
-                    act.save(update_fields=updated)
+                    _save_activity_state(act, updated)
                     lock_held.set()
                     release_lock.wait(timeout=10)
             except Exception as error:  # pragma: no cover - diagnostic only
@@ -2780,10 +2815,10 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result, run_ruleset
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["is_locked", "status"])
+        _save_round_state(self.round, ["is_locked", "status"])
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
@@ -2831,7 +2866,7 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         stage = StageResult.objects.create(
             activity=self.activity,
             ruleset_version=self.version,
@@ -2851,10 +2886,10 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result, run_ruleset
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["is_locked", "status"])
+        _save_round_state(self.round, ["is_locked", "status"])
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
@@ -2895,7 +2930,7 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result, run_ruleset
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
@@ -2927,10 +2962,10 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result, run_ruleset, unlock_stage_result
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["is_locked", "status"])
+        _save_round_state(self.round, ["is_locked", "status"])
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
@@ -2979,10 +3014,10 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result, run_ruleset
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["is_locked", "status"])
+        _save_round_state(self.round, ["is_locked", "status"])
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
@@ -3032,10 +3067,10 @@ class StageResolverBindingTests(TestCase):
         from .services import confirm_stage_result
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
-        self.activity.save(update_fields=["phase"])
+        _save_activity_state(self.activity, ["phase"])
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["is_locked", "status"])
+        _save_round_state(self.round, ["is_locked", "status"])
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
@@ -3297,7 +3332,7 @@ class RoundEntryBridgeTests(TestCase):
             [RoundEntry(round=self.final, singer=s) for s in self.singers[:3]]
         )
         # A conflicting upstream is_advanced marker must NOT leak into the STAGE round.
-        ScoreSummary.objects.create(
+        _create_score_summary(
             round=self.prelim,
             singer=self.singers[3],
             average_score=Decimal("99.0"),
@@ -3778,7 +3813,8 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
         ruleset = self.ruleset
         ruleset.round_keys = {"r1": self.rounds["r1"].pk, "r2": self.rounds["r2"].pk}
         ruleset.save(update_fields=["round_keys"])
-        RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
         with authority_write(RULESET_FREEZE):
             version = RulesetVersion.objects.create(
                 ruleset=ruleset,
@@ -3874,7 +3910,7 @@ class RapidEntryServiceTests(TestCase):
         RoundEntry.objects.create(round=self.round, singer=self.singer)
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status"])
+        _save_round_state(self.round, ["status"])
 
     def _make_singer(self, index):
         return SingerRegistration.objects.create(
@@ -4107,7 +4143,7 @@ class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
         RoundEntry.objects.create(round=self.round, singer=self.singer)
         RoundJudge.objects.create(round=self.round, judge=self.judge)
         self.round.status = ContestRound.Status.PREPARED
-        self.round.save(update_fields=["status"])
+        _save_round_state(self.round, ["status"])
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity,
             name="并发规则",
@@ -4863,10 +4899,10 @@ class ConfirmedDependencyClosureTests(TestCase):
         if lock_round:
             self.round.is_locked = True
             self.round.status = ContestRound.Status.LOCKED
-            self.round.save(update_fields=["is_locked", "status"])
+            _save_round_state(self.round, ["is_locked", "status"])
         if lock_vote:
             self.vs.is_locked = True
-            self.vs.save(update_fields=["is_locked"])
+            _save_vote_state(self.vs, ["is_locked"])
         stage = run_ruleset(version, self.activity, **kwargs, preview=False)  # type: ignore[arg-type]
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         return confirm_stage_result(stage, confirmed_by=self.user)  # type: ignore[arg-type]
@@ -4913,7 +4949,7 @@ class ConfirmedDependencyClosureTests(TestCase):
         )
         self.round.is_locked = True
         self.round.status = ContestRound.Status.LOCKED
-        self.round.save(update_fields=["is_locked", "status"])
+        _save_round_state(self.round, ["is_locked", "status"])
         stage = run_ruleset(
             version,
             self.activity,
@@ -4944,7 +4980,7 @@ class ConfirmedDependencyClosureTests(TestCase):
         from .services import ensure_vote_not_consumed_by_confirmed_stage
 
         self.vs.is_locked = True
-        self.vs.save(update_fields=["is_locked"])
+        _save_vote_state(self.vs, ["is_locked"])
         definition = {
             "schema_version": 1,
             "nodes": [
@@ -5413,7 +5449,7 @@ class ShadowRehearsalTests(TestCase):
     def _lock(self, round_):
         round_.is_locked = True
         round_.status = ContestRound.Status.LOCKED
-        round_.save(update_fields=["is_locked", "status"])
+        _save_round_state(round_, ["is_locked", "status"])
 
     def _entry_ids(self, round_):
         return list(

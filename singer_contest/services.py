@@ -8,7 +8,13 @@ from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
 
-from common.authority import STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    CONTEST_ROUND_STATE,
+    SCORE_SUMMARY_RECALCULATE,
+    STAGE_RESULT_CONFIRM,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.business_rules import ensure_round_unlocked
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
@@ -233,7 +239,8 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     )
     locked_round.status = ContestRound.Status.PREPARED
     locked_round.is_locked = False
-    locked_round.save(update_fields=["status", "is_locked"])
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(update_fields=["status", "is_locked"])
     AuditLog.objects.create(
         operator=operator,
         action_type=AuditLog.ActionType.UPDATE_STATUS,
@@ -485,7 +492,8 @@ def reset_test_round_snapshots(
     )
     locked_round.status = ContestRound.Status.DRAFT
     locked_round.is_locked = False
-    locked_round.save(update_fields=["status", "is_locked"])
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(update_fields=["status", "is_locked"])
     RoundEntry.objects.filter(round=locked_round).delete()
     RoundJudge.objects.filter(round=locked_round).delete()
     AuditLog.objects.create(
@@ -535,9 +543,11 @@ def reset_round_snapshots(
     )
     locked_round.status = ContestRound.Status.DRAFT
     locked_round.is_locked = False
-    locked_round.save(update_fields=["status", "is_locked"])
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(update_fields=["status", "is_locked"])
     ScoreRecord.objects.filter(round=locked_round).delete()
-    ScoreSummary.objects.filter(round=locked_round).delete()
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        ScoreSummary.objects.filter(round=locked_round).delete()
     RoundEntry.objects.filter(round=locked_round).delete()
     RoundJudge.objects.filter(round=locked_round).delete()
     AuditLog.objects.create(
@@ -674,12 +684,18 @@ def ensure_score_records_belong_to_round(
 
 
 def recalculate_round(contest_round: ContestRound) -> None:
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        _recalculate_round(contest_round)
+
+
+def _recalculate_round(contest_round: ContestRound) -> None:
     missing = missing_score_cells(contest_round)
     if missing:
         ScoreSummary.objects.filter(round=contest_round).delete()
         if contest_round.advancement_status != ContestRound.AdvancementStatus.AUTO:
             contest_round.advancement_status = ContestRound.AdvancementStatus.AUTO
-            contest_round.save(update_fields=["advancement_status"])
+            with authority_write(CONTEST_ROUND_STATE):
+                contest_round.save(update_fields=["advancement_status"])
         return
 
     singers = _eligible_singers(contest_round)
@@ -728,7 +744,8 @@ def recalculate_round(contest_round: ContestRound) -> None:
     )
     if contest_round.advancement_status != new_status:
         contest_round.advancement_status = new_status
-        contest_round.save(update_fields=["advancement_status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["advancement_status"])
 
 
 @transaction.atomic
@@ -776,10 +793,14 @@ def finalize_advancement(
     ):
         return locked_round
 
-    ScoreSummary.objects.filter(round=locked_round).update(is_advanced=False)
-    ScoreSummary.objects.filter(round=locked_round, singer_id__in=selected).update(is_advanced=True)
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        ScoreSummary.objects.filter(round=locked_round).update(is_advanced=False)
+        ScoreSummary.objects.filter(round=locked_round, singer_id__in=selected).update(
+            is_advanced=True
+        )
     locked_round.advancement_status = ContestRound.AdvancementStatus.FINALIZED
-    locked_round.save(update_fields=["advancement_status"])
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(update_fields=["advancement_status"])
     AuditLog.objects.create(
         operator=actor,
         action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
@@ -848,7 +869,8 @@ def apply_scores(
         if locked_round.status == ContestRound.Status.PREPARED:
             locked_round.status = ContestRound.Status.SCORING
         locked_round.score_version += 1
-        locked_round.save(update_fields=["status", "score_version"])
+        with authority_write(CONTEST_ROUND_STATE):
+            locked_round.save(update_fields=["status", "score_version"])
         AuditLog.objects.create(
             operator=operator,
             action_type=AuditLog.ActionType.ENTER_SCORE,
@@ -929,7 +951,8 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
         raise PermissionDenied("晋级线存在同分，请先人工核定晋级名单。")
     locked_round.is_locked = True
     locked_round.status = ContestRound.Status.LOCKED
-    locked_round.save(update_fields=["is_locked", "status"])
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(update_fields=["is_locked", "status"])
     AuditLog.objects.create(
         operator=operator,
         action_type=AuditLog.ActionType.RELOCK_RESULT,
@@ -963,7 +986,8 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
             raise PermissionDenied("后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。")
     locked_round.is_locked = False
     locked_round.status = ContestRound.Status.SCORING
-    locked_round.save(update_fields=["is_locked", "status"])
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(update_fields=["is_locked", "status"])
     AuditLog.objects.create(
         operator=actor,
         action_type=AuditLog.ActionType.UNLOCK_RESULT,
@@ -2332,7 +2356,8 @@ def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
     ):
         contest_round.is_locked = False
         contest_round.status = ContestRound.Status.SCORING
-        contest_round.save(update_fields=["is_locked", "status"])
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["is_locked", "status"])
         AuditLog.objects.create(
             operator=operator,
             action_type=AuditLog.ActionType.UNLOCK_RESULT,
@@ -2345,7 +2370,8 @@ def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
         activity=stage.activity, pk__in=consumed["votes"], is_locked=True
     ):
         vote_session.is_locked = False
-        vote_session.save(update_fields=["is_locked"])
+        with authority_write(VOTE_SESSION_STATE):
+            vote_session.save(update_fields=["is_locked"])
         AuditLog.objects.create(
             operator=operator,
             action_type=AuditLog.ActionType.UNLOCK_RESULT,

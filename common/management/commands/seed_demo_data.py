@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -26,6 +27,11 @@ from singer_contest.models import (
 from singer_contest.services import prepare_round, reset_test_round_snapshots
 from voting.models import VoteOption, VoteRecord, VoteSession
 
+from common.authority import (
+    CONTEST_ROUND_STATE,
+    SCORE_SUMMARY_RECALCULATE,
+    authority_write,
+)
 from common.lifecycle import runtime_is_test
 from common.models import SeedRecord
 
@@ -540,8 +546,9 @@ class Command(BaseCommand):
                 transaction.set_rollback(True)
                 return False
 
-            for candidate in candidates:
-                candidate.delete()
+            with authority_write(SCORE_SUMMARY_RECALCULATE):
+                for candidate in candidates:
+                    candidate.delete()
         return True
 
     def _demo_round_candidates_are_owned(
@@ -697,7 +704,15 @@ class Command(BaseCommand):
             if prepare_create:
                 prepare_create(target)
             try:
-                target.save()
+                save_context = (
+                    authority_write(SCORE_SUMMARY_RECALCULATE)
+                    if model is ScoreSummary
+                    else authority_write(CONTEST_ROUND_STATE)
+                    if model is ContestRound
+                    else nullcontext()
+                )
+                with save_context:
+                    target.save()
             except IntegrityError as error:
                 raise CommandError(
                     f"Cannot seed {key}: an unowned record conflicts with this built-in fixture."
@@ -716,5 +731,13 @@ class Command(BaseCommand):
 
         for field_name, value in defaults.items():
             setattr(target, field_name, value)
-        target.save(update_fields=list(defaults))
+        save_context = (
+            authority_write(SCORE_SUMMARY_RECALCULATE)
+            if model is ScoreSummary
+            else authority_write(CONTEST_ROUND_STATE)
+            if model is ContestRound
+            else nullcontext()
+        )
+        with save_context:
+            target.save(update_fields=list(defaults))
         return target

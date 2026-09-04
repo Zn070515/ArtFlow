@@ -461,7 +461,8 @@ def freeze_ruleset_version(
     assert plan is not None
 
     old_status = "draft"
-    _demote_prior_current(locked)
+    with authority_write(RULESET_FREEZE):
+        _demote_prior_current(locked)
     locked.status = RulesetVersion.Status.FROZEN
     locked.frozen_by = current_operator
     locked.frozen_at = timezone.now()

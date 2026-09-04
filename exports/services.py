@@ -6,6 +6,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Any
 
+from common.authority import ACTIVITY_STATE, authority_write
 from common.business_rules import ensure_activity_unlocked
 from common.lifecycle import runtime_is_test, scope_runtime
 from common.models import AuditLog
@@ -758,7 +759,8 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         locked_activity.is_locked = True
         locked_activity.locked_at = timezone.now()
         locked_activity.locked_by = actor
-        locked_activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
+        with authority_write(ACTIVITY_STATE):
+            locked_activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
 
         AuditLog.objects.create(
             operator=actor,

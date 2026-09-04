@@ -6,6 +6,7 @@ from accounts.decorators import admin_required, staff_required
 from accounts.models import User
 from accounts.services import change_user_role, set_user_active
 from common.audit import audit_export, log_action
+from common.authority import ACTIVITY_STATE, authority_write
 from common.business_rules import (
     ensure_activity_unlocked,
     ensure_lifecycle_consistent,
@@ -2182,7 +2183,8 @@ def activity_lock(request, pk):
     activity.is_locked = True
     activity.locked_at = timezone.now()
     activity.locked_by = request.user
-    activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
+    with authority_write(ACTIVITY_STATE):
+        activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
     log_action(
         request, AuditLog.ActionType.RELOCK_RESULT, f"Activity:{activity.pk}", new_value="locked"
     )
@@ -2201,7 +2203,8 @@ def activity_unlock(request, pk):
     activity.is_locked = False
     activity.locked_at = None
     activity.locked_by = None
-    activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
+    with authority_write(ACTIVITY_STATE):
+        activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
     log_action(
         request,
         AuditLog.ActionType.UNLOCK_RESULT,
