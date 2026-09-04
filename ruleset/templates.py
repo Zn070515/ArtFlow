@@ -317,11 +317,11 @@ def synthetic_fill_to_quota_demo():
     )
 
 
-# --- §14.2 first batch: 10 templates ---------------------------------------
+# --- §14.2 first batch: 9 production templates -----------------------------
 
 
 def _first_batch():
-    """Ten first-batch templates, each schema-valid and forward-only."""
+    """Production first-batch templates, each schema-valid and forward-only."""
 
     def simple_screening():
         return _d(
@@ -371,6 +371,7 @@ def _first_batch():
                     "type": "ASSESS",
                     "source": ENTRY_KEY,
                     "vote_source": "audience1",
+                    "vote_purpose": "SCORE_COMPONENT",
                 },
                 {
                     "key": "composite",
@@ -385,21 +386,6 @@ def _first_batch():
                 },
                 {"key": "rank", "type": "RANK", "source": "composite", "descending": True},
                 {"key": "win", "type": "SELECT", "source": "rank", "count": 10},
-            ]
-        )
-
-    def independent_popularity_award():
-        return _d(
-            [
-                {
-                    "key": "assess_a1",
-                    "type": "ASSESS",
-                    "source": ENTRY_KEY,
-                    "vote_source": "audience1",
-                    "vote_purpose": "POPULARITY",
-                },
-                {"key": "rank", "type": "RANK", "source": "assess_a1", "descending": True},
-                {"key": "win", "type": "SELECT", "source": "rank", "count": 1},
             ]
         )
 
@@ -508,12 +494,6 @@ def _first_batch():
             "评委+观众合成",
             "评委分与观众票按权重合成",
             judge_audience_composite(),
-        ),
-        (
-            "independent_popularity_award",
-            "独立人气奖",
-            "仅按观众票取人气奖",
-            independent_popularity_award(),
         ),
         (
             "group_direct_repechage",
