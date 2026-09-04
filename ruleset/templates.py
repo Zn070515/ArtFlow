@@ -541,6 +541,10 @@ FIRST_BATCH = [
     for (key, name, desc, definition) in _FIRST_BATCH_DEFINITIONS
 ]
 
+_NON_PRODUCTION_TEMPLATE_NAMES = frozenset(
+    {"独立人气奖", "校十佳屏峰_历史未决回退"}
+)
+
 
 def _catalog():
     catalog = [
@@ -584,8 +588,9 @@ def seed_ruleset_templates(operator=None, *, status=None):
     if status is None:
         status = RulesetTemplate.Status.DRAFT
 
+    catalog = _catalog()
     created = 0
-    for name, definition, description in _catalog():
+    for name, definition, description in catalog:
         parsed = parse_definition(definition)
         _, was_created = RulesetTemplate.objects.update_or_create(
             name=name,
@@ -594,9 +599,15 @@ def seed_ruleset_templates(operator=None, *, status=None):
                 "schema_version": parsed["schema_version"],
                 "description": description,
                 "status": status,
+                "is_available": name not in _NON_PRODUCTION_TEMPLATE_NAMES,
                 "content_hash": content_hash(definition),
                 "created_by": operator,
             },
         )
         created += 1 if was_created else 0
+    # Older installations may still contain a removed built-in. Retire it instead
+    # of deleting a template that an existing ContestRuleset may reference.
+    RulesetTemplate.objects.filter(name__in=_NON_PRODUCTION_TEMPLATE_NAMES).update(
+        is_available=False
+    )
     return created

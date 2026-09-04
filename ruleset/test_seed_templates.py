@@ -1,7 +1,10 @@
+from decimal import Decimal
+
 from django.test import TestCase
 
 from ruleset.compiler import compile_definition
 from ruleset.models import RulesetTemplate
+from ruleset.resolver import ResolveInput, ResolverState, resolve
 from ruleset.schema import parse_definition
 from ruleset.templates import (
     FIRST_BATCH,
@@ -69,6 +72,34 @@ class TemplateLibraryTests(TestCase):
     def test_independent_popularity_award_is_not_seeded_as_production_template(self):
         seed_ruleset_templates(None)
         self.assertFalse(RulesetTemplate.objects.filter(name="独立人气奖").exists())
+
+    def test_removed_builtins_are_retired_and_not_cloneable(self):
+        RulesetTemplate.objects.create(
+            name="独立人气奖", definition=GOLDEN_SCHIDUI, is_available=True
+        )
+        seed_ruleset_templates(None)
+        retired = RulesetTemplate.objects.get(name="独立人气奖")
+        self.assertFalse(retired.is_available)
+        fallback = RulesetTemplate.objects.get(name="校十佳屏峰_历史未决回退")
+        self.assertFalse(fallback.is_available)
+
+    def test_seeded_pk_template_resolves_pair_winners(self):
+        template = next(t for t in FIRST_BATCH if t["key"] == "seeded_pk_wildcard")
+        scores = {
+            str(i): (Decimal(str(100 - i)),) for i in range(1, 9)
+        }
+        result = resolve(
+            template["definition"],
+            ResolveInput(
+                roster=tuple(str(i) for i in range(1, 9)),
+                round_scores={"r1": scores},
+                duel_decisions={
+                    "duel": {"1|2": "1", "3|4": "4", "5|6": "5", "7|8": "8"}
+                },
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.node_values["duel"]["winners"], ["1", "4", "5", "8"])
 
     def test_first_batch_elements_are_schema_valid(self):
         for t in FIRST_BATCH:

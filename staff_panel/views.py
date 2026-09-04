@@ -2284,7 +2284,7 @@ def user_set_active(request, pk):
 
 @staff_required
 def ruleset_template_list(request):
-    templates = RulesetTemplate.objects.all()
+    templates = RulesetTemplate.objects.filter(is_available=True)
     activities = Activity.objects.all().order_by("-created_at")
     return render(
         request,
@@ -2584,7 +2584,7 @@ def contest_ruleset_create(request):
         messages.success(request, "赛制已创建，进入编辑。")
         return redirect("staff:ruleset_edit", pk=version.pk)
     activities = Activity.objects.all().order_by("-created_at")
-    templates = RulesetTemplate.objects.all().order_by("name")
+    templates = RulesetTemplate.objects.filter(is_available=True).order_by("name")
     return render(
         request,
         "staff_panel/ruleset_create.html",
@@ -2761,7 +2761,7 @@ def ruleset_freeze(request, pk):
 @require_POST
 @transaction.atomic
 def ruleset_clone_from_template(request, template_pk):
-    template = get_object_or_404(RulesetTemplate, pk=template_pk)
+    template = get_object_or_404(RulesetTemplate, pk=template_pk, is_available=True)
     activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
     activity = lock_activity_for_action(activity)
     name = (request.POST.get("name") or "").strip() or template.name
