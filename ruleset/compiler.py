@@ -243,6 +243,9 @@ def _resolve(node: dict, prov: dict, by_key: dict, ctx: dict) -> dict:
     elif ntype == "PAIR":
         src = prov[node["source"]]
         p.update(pool_sig=src["pool_sig"], pool_relation=src["pool_relation"], size=src["size"])
+    elif ntype == "DUEL":
+        src = prov[node["source"]]
+        p.update(pool_sig=src["pool_sig"], pool_relation=src["pool_relation"], size=src["size"])
     elif ntype == "ASSESS":
         src = prov[node["source"]]
         rnd = node.get("round")
@@ -596,6 +599,8 @@ def _check_tie(
 ) -> None:
     if node["type"] not in ("SELECT", "RANK"):
         return
+    if node["type"] == "SELECT" and by_key.get(node.get("source"), {}).get("type") == "DUEL":
+        return
     decisive = node["type"] == "SELECT" or _feeds_decisive(by_key, node["key"])
     if not decisive:
         return
@@ -695,7 +700,7 @@ def _tie_is_supported(node: dict, policy: str) -> bool:
     return policy == "manual"
 
 
-def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
+def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[str, dict]) -> None:
     source = node.get("vote_source")
     if not source:
         return
@@ -739,10 +744,15 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
     # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness. Whether
     # a VoteSession has collected ballots / is locked / has a result is a runtime
     # resolver HOLD condition — never a Ruleset Freeze gate. So no ``result_ready`` fact.
+    consumers = [consumer for consumer in by_key.values() if consumer.get("source") == node["key"]]
+    is_independent_award = bool(consumers) and all(
+        consumer.get("type") == "AWARD" for consumer in consumers
+    )
     if (
         node.get("vote_purpose")
         and node["type"] == "ASSESS"
         and node.get("vote_purpose") != "SCORE_COMPONENT"
+        and not is_independent_award
     ):
         issues.append(
             ReportIssue(
@@ -995,7 +1005,7 @@ def compile_definition(
 
     for node in nodes:
         prov[node["key"]] = _resolve(node, prov, by_key, ctx)
-        if node["type"] in ("BRANCH", "AWARD"):
+        if node["type"] == "BRANCH":
             issues.append(
                 ReportIssue(
                     "NODE_UNSUPPORTED_RUNTIME",
@@ -1013,7 +1023,7 @@ def compile_definition(
         _check_quota(node, prov, by_key, ctx, issues)
         _check_pair(node, prov, ctx, issues)
         _check_tie(node, prov, by_key, issues, cutoffs)
-        _check_votes(node, ctx, issues)
+        _check_votes(node, ctx, issues, by_key)
         _check_scale_binding(node, ctx, issues)
         _check_dependency(node, prov, ctx, by_key, issues)
         node_plans.append(_node_plan(node, prov, outputs))

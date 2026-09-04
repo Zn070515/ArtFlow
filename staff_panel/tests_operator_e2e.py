@@ -88,7 +88,7 @@ class OperatorEndToEndTests(TestCase):
 
     # --- helpers -----------------------------------------------------------
 
-    def _create_round(self, sequence, roster_source, roster_source_stage=""):
+    def _create_round(self, sequence, roster_source, roster_source_stage="", order_policy=None):
         resp = self.client.post(
             reverse("staff:round_create"),
             {
@@ -97,6 +97,7 @@ class OperatorEndToEndTests(TestCase):
                 "name": f"轮次{sequence}",
                 "scoring_mode": ContestRound.ScoringMode.AVERAGE,
                 "sequence": sequence,
+                "order_policy": order_policy or ContestRound.OrderPolicy.REGISTRATION_ORDER,
                 "roster_source": roster_source,
                 "roster_source_stage": roster_source_stage,
                 "rubric": self.rubric.pk,
@@ -202,7 +203,7 @@ class OperatorEndToEndTests(TestCase):
     def _entry_rank(self, round_):
         return list(
             RoundEntry.objects.filter(round=round_)
-            .order_by("pk")
+            .order_by("running_order", "pk")
             .values_list("singer_id", flat=True)
         )
 
@@ -213,7 +214,12 @@ class OperatorEndToEndTests(TestCase):
         r1 = self._create_round(1, ContestRound.RosterSource.APPROVED)
         r2 = self._create_round(2, ContestRound.RosterSource.APPROVED)
         r3 = self._create_round(3, ContestRound.RosterSource.STAGE, "stage1")
-        r4 = self._create_round(4, ContestRound.RosterSource.STAGE, "stage2")
+        r4 = self._create_round(
+            4,
+            ContestRound.RosterSource.STAGE,
+            "stage2",
+            ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
+        )
         for r in (r1, r2, r3, r4):
             self.assertEqual(
                 r.roster_source,
@@ -223,6 +229,7 @@ class OperatorEndToEndTests(TestCase):
             )
         self.assertEqual(r3.roster_source_stage, "stage1")
         self.assertEqual(r4.roster_source_stage, "stage2")
+        self.assertEqual(r4.order_policy, ContestRound.OrderPolicy.PREVIOUS_RANK_ASC)
         self.assertEqual(r1.rubric_id, self.rubric.pk)
 
         # 2) Instantiate golden, bind (with audience_keys), freeze — the real production paths.
@@ -293,7 +300,7 @@ class OperatorEndToEndTests(TestCase):
         self._lock(r3.pk)
         s2 = self._confirm(s2)
         self.assertEqual(s2.status, StageResult.Status.CONFIRMED)
-        self.assertEqual(self._entry_rank(r4), [s.pk for s in self.singers[:5]])
+        self.assertEqual(self._entry_rank(r4), [s.pk for s in self.singers[4::-1]])
 
         # 10) Prep R4 + score -> final holds (needs audience4).
         self._prepare(r4.pk)
@@ -316,7 +323,7 @@ class OperatorEndToEndTests(TestCase):
         comp3 = {c["source"]: c for c in final.components}
         self.assertEqual(Decimal(comp3["assess_a4"]["value"]), Decimal("85"))
         self.assertEqual(Decimal(comp3["assess_a4"]["contribution"]), Decimal("17.0"))
-        self.assertEqual(final.value, Decimal("92.0"))
+        self.assertEqual(final.value, Decimal("90.0"))
 
         # 13) Lock R4 + confirm final -> host handcard (top3) + result board (3 CONFIRMED).
         self._lock(r4.pk)
@@ -333,8 +340,27 @@ class OperatorEndToEndTests(TestCase):
             .order_by("rank", "pk")
             .values_list("singer_id", flat=True)
         )
-        self.assertEqual(handcard, [s.pk for s in self.singers[:3]])
+        self.assertEqual(handcard, [s.pk for s in self.singers[4:1:-1]])
 
         # 14) Item 6 gate: a downstream round started off stage1 -> unlock is refused.
         with self.assertRaises(PermissionDenied):
             unlock_stage_result(s1, operator=self.operator, note="e2e")
+
+    def test_http_score_entry_reports_missing_matrix_cell(self):
+        round_ = self._create_round(1, ContestRound.RosterSource.APPROVED)
+        self._prepare(round_.pk)
+        payload = self.client.get(reverse("staff:round_scores_api", args=[round_.pk])).json()
+        cells = [
+            {"singer_id": row["singer_id"], "judge_id": cell["judge_id"], "score": "90"}
+            for row in payload["grid"]
+            for cell in row["cells"]
+        ]
+        cells.pop()
+        response = self.client.post(
+            reverse("staff:round_scores_api", args=[round_.pk]),
+            data=json.dumps({"base_version": payload["version"], "cells": cells}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["matrix_complete"])
+        self.assertIsNone(response.json()["resolved_status"])

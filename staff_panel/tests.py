@@ -2568,6 +2568,13 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=2,
             name="Preliminary",
         )
+        ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=2,
+            name="Final order",
+            order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
+        )
         singer = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -2639,7 +2646,16 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(Judge.objects.filter(activity=clone, name="Judge A").exists())
         self.assertTrue(
             ContestRound.objects.filter(
-                activity=clone, round_type=ContestRound.RoundType.PRELIMINARY
+                activity=clone,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                order_policy=ContestRound.OrderPolicy.REGISTRATION_ORDER,
+            ).exists()
+        )
+        self.assertTrue(
+            ContestRound.objects.filter(
+                activity=clone,
+                name="Final order",
+                order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
             ).exists()
         )
         self.assertFalse(VoteSession.objects.filter(activity=clone, name="Popularity").exists())
@@ -5246,14 +5262,13 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_editor_hides_unsupported_runtime_node_types(self):
-        # §28 capability matrix: BRANCH/AWARD are compile-rejected
-        # (NODE_UNSUPPORTED_RUNTIME), so the editor must not offer them in the
-        # add-node dropdown.
+        # §28 capability matrix: BRANCH is compile-rejected, while AWARD is a
+        # supported independent output and must remain available to operators.
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
         self.assertEqual(response.status_code, 200)
         node_types = list(response.context["node_types"])
         self.assertNotIn("BRANCH", node_types)
-        self.assertNotIn("AWARD", node_types)
+        self.assertIn("AWARD", node_types)
 
     def test_editor_add_action_rejects_unsupported_runtime_node(self):
         before = len(self._nodes())

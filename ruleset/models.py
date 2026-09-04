@@ -22,6 +22,10 @@ class RulesetTemplate(models.Model):
     definition = models.TextField(help_text="JSON ruleset definition (typed node graph).")
     description = models.TextField(blank=True)
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
+    is_available = models.BooleanField(
+        default=True,
+        help_text="是否在生产模板库中可选择；撤下的内置模板保留用于历史追溯。",
+    )
     content_hash = models.CharField(max_length=64, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

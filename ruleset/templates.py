@@ -317,11 +317,11 @@ def synthetic_fill_to_quota_demo():
     )
 
 
-# --- §14.2 first batch: 10 templates ---------------------------------------
+# --- §14.2 first batch: 9 production templates -----------------------------
 
 
 def _first_batch():
-    """Ten first-batch templates, each schema-valid and forward-only."""
+    """Production first-batch templates, each schema-valid and forward-only."""
 
     def simple_screening():
         return _d(
@@ -371,6 +371,7 @@ def _first_batch():
                     "type": "ASSESS",
                     "source": ENTRY_KEY,
                     "vote_source": "audience1",
+                    "vote_purpose": "SCORE_COMPONENT",
                 },
                 {
                     "key": "composite",
@@ -385,21 +386,6 @@ def _first_batch():
                 },
                 {"key": "rank", "type": "RANK", "source": "composite", "descending": True},
                 {"key": "win", "type": "SELECT", "source": "rank", "count": 10},
-            ]
-        )
-
-    def independent_popularity_award():
-        return _d(
-            [
-                {
-                    "key": "assess_a1",
-                    "type": "ASSESS",
-                    "source": ENTRY_KEY,
-                    "vote_source": "audience1",
-                    "vote_purpose": "POPULARITY",
-                },
-                {"key": "rank", "type": "RANK", "source": "assess_a1", "descending": True},
-                {"key": "win", "type": "SELECT", "source": "rank", "count": 1},
             ]
         )
 
@@ -435,9 +421,33 @@ def _first_batch():
                 {"key": "rank", "type": "RANK", "source": "assess_r1", "descending": True},
                 {"key": "seeds", "type": "SELECT", "source": "rank", "count": 8},
                 {"key": "pairs", "type": "PAIR", "source": "seeds", "odd_policy": "wildcard"},
-                {"key": "assess_pk", "type": "ASSESS", "source": "seeds", "round": "r1"},
-                {"key": "rank_pk", "type": "RANK", "source": "assess_pk", "descending": True},
-                {"key": "win", "type": "SELECT", "source": "rank_pk", "count": 4},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "judge_vote",
+                },
+                {
+                    "key": "win",
+                    "type": "SELECT",
+                    "source": "duel",
+                    "outcome": "winners",
+                    "count": 4,
+                },
+            ]
+        )
+
+    def independent_popularity_award():
+        return _d(
+            [
+                {
+                    "key": "assess_a1",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "vote_source": "audience1",
+                    "vote_purpose": "POPULARITY",
+                },
+                {"key": "award", "type": "AWARD", "source": "assess_a1", "award": "独立人气奖"},
             ]
         )
 
@@ -448,9 +458,20 @@ def _first_batch():
                 {"key": "rank", "type": "RANK", "source": "assess_r1", "descending": True},
                 {"key": "direct", "type": "SELECT", "source": "rank", "count": 5},
                 {"key": "middle", "type": "SUBTRACT", "minuend": ENTRY_KEY, "subtrahend": "direct"},
-                {"key": "assess_mid", "type": "ASSESS", "source": "middle", "round": "r1"},
-                {"key": "rank_mid", "type": "RANK", "source": "assess_mid", "descending": True},
-                {"key": "win_mid", "type": "SELECT", "source": "rank_mid", "count": 4},
+                {"key": "pairs_mid", "type": "PAIR", "source": "middle", "odd_policy": "wildcard"},
+                {
+                    "key": "duel_mid",
+                    "type": "DUEL",
+                    "source": "pairs_mid",
+                    "decision_source": "judge_vote",
+                },
+                {
+                    "key": "win_mid",
+                    "type": "SELECT",
+                    "source": "duel_mid",
+                    "outcome": "winners",
+                    "count": 4,
+                },
                 {"key": "merged", "type": "MERGE", "sources": ["direct", "win_mid"]},
             ]
         )
@@ -512,7 +533,7 @@ def _first_batch():
         (
             "independent_popularity_award",
             "独立人气奖",
-            "仅按观众票取人气奖",
+            "独立观众人气奖，不参与晋级链",
             independent_popularity_award(),
         ),
         (
@@ -539,6 +560,8 @@ FIRST_BATCH = [
     {"key": key, "name": name, "description": desc, "definition": definition}
     for (key, name, desc, definition) in _FIRST_BATCH_DEFINITIONS
 ]
+
+_NON_PRODUCTION_TEMPLATE_NAMES = frozenset({"校十佳屏峰_历史未决回退"})
 
 
 def _catalog():
@@ -583,8 +606,9 @@ def seed_ruleset_templates(operator=None, *, status=None):
     if status is None:
         status = RulesetTemplate.Status.DRAFT
 
+    catalog = _catalog()
     created = 0
-    for name, definition, description in _catalog():
+    for name, definition, description in catalog:
         parsed = parse_definition(definition)
         _, was_created = RulesetTemplate.objects.update_or_create(
             name=name,
@@ -593,9 +617,15 @@ def seed_ruleset_templates(operator=None, *, status=None):
                 "schema_version": parsed["schema_version"],
                 "description": description,
                 "status": status,
+                "is_available": name not in _NON_PRODUCTION_TEMPLATE_NAMES,
                 "content_hash": content_hash(definition),
                 "created_by": operator,
             },
         )
         created += 1 if was_created else 0
+    # Older installations may still contain a removed built-in. Retire it instead
+    # of deleting a template that an existing ContestRuleset may reference.
+    RulesetTemplate.objects.filter(name__in=_NON_PRODUCTION_TEMPLATE_NAMES).update(
+        is_available=False
+    )
     return created

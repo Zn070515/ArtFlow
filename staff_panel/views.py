@@ -906,6 +906,7 @@ def round_create(request):
                     ),
                     "round_types": _choices(ContestRound.RoundType),
                     "scoring_modes": _choices(ContestRound.ScoringMode),
+                    "order_policies": _choices(ContestRound.OrderPolicy),
                     "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
                     "rubrics": ScoringRubric.objects.select_related("activity").all(),
                 },
@@ -919,6 +920,7 @@ def round_create(request):
                 name=form.cleaned_data["name"],
                 advance_count=form.cleaned_data["advance_count"],
                 sequence=form.cleaned_data["sequence"],
+                order_policy=form.cleaned_data["order_policy"],
                 roster_source=form.cleaned_data["roster_source"],
                 roster_source_stage=form.cleaned_data["roster_source_stage"],
                 rubric=form.cleaned_data["rubric"],
@@ -939,6 +941,7 @@ def round_create(request):
             "activities": activities,
             "round_types": _choices(ContestRound.RoundType),
             "scoring_modes": _choices(ContestRound.ScoringMode),
+            "order_policies": _choices(ContestRound.OrderPolicy),
             "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
             "rubrics": ScoringRubric.objects.select_related("activity").all(),
         },
@@ -2211,6 +2214,7 @@ def activity_clone(request, pk):
             name=contest_round.name,
             advance_count=contest_round.advance_count,
             sequence=contest_round.sequence,
+            order_policy=contest_round.order_policy,
             roster_source=contest_round.roster_source,
             roster_source_stage=contest_round.roster_source_stage,
             rubric=rubric_map.get(contest_round.rubric_id),
@@ -2284,7 +2288,7 @@ def user_set_active(request, pk):
 
 @staff_required
 def ruleset_template_list(request):
-    templates = RulesetTemplate.objects.all()
+    templates = RulesetTemplate.objects.filter(is_available=True)
     activities = Activity.objects.all().order_by("-created_at")
     return render(
         request,
@@ -2380,6 +2384,8 @@ def _default_node(new_type, nodes):
             node["into"] = _last_node_of({OutputType.GROUP_MAP}, nodes)
         elif field == "award":
             node["award"] = "默认奖项"
+        elif field == "decision_source":
+            node["decision_source"] = "manual"
     if new_type == "ASSESS":
         node["round"] = f"r{len(nodes) + 1}"
     return node
@@ -2401,7 +2407,7 @@ def _edit_nodes(post, nodes):
     action = post.get("action")
     if action == "add":
         new_type = post.get("new_type", "ASSESS")
-        if new_type in ("BRANCH", "AWARD"):
+        if new_type == "BRANCH":
             raise ValueError(f"node type {new_type!r} is not supported at runtime")
         nodes = nodes + [_default_node(new_type, nodes)]
     elif action == "delete":
@@ -2584,7 +2590,7 @@ def contest_ruleset_create(request):
         messages.success(request, "赛制已创建，进入编辑。")
         return redirect("staff:ruleset_edit", pk=version.pk)
     activities = Activity.objects.all().order_by("-created_at")
-    templates = RulesetTemplate.objects.all().order_by("name")
+    templates = RulesetTemplate.objects.filter(is_available=True).order_by("name")
     return render(
         request,
         "staff_panel/ruleset_create.html",
@@ -2634,9 +2640,9 @@ def ruleset_edit(request, pk):
             "version": version,
             "ruleset": ruleset,
             "cards": cards,
-            # §28 capability matrix: BRANCH/AWARD are rejected at compile
-            # (NODE_UNSUPPORTED_RUNTIME) and must not be offered in the editor.
-            "node_types": sorted(t for t in NODE_TYPE_SPEC if t not in ("BRANCH", "AWARD")),
+            # §28 capability matrix: BRANCH remains unsupported at runtime and is
+            # not offered; DUEL/AWARD are executable primitives.
+            "node_types": sorted(t for t in NODE_TYPE_SPEC if t != "BRANCH"),
             "binding_json": {
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),
@@ -2761,7 +2767,7 @@ def ruleset_freeze(request, pk):
 @require_POST
 @transaction.atomic
 def ruleset_clone_from_template(request, template_pk):
-    template = get_object_or_404(RulesetTemplate, pk=template_pk)
+    template = get_object_or_404(RulesetTemplate, pk=template_pk, is_available=True)
     activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
     activity = lock_activity_for_action(activity)
     name = (request.POST.get("name") or "").strip() or template.name

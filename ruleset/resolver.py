@@ -13,7 +13,7 @@ hidden tie-break: a genuine SELECT cutoff tie is surfaced as REVIEW/PENDING
 (held for human or explicit tie_break_source resolution), never silently
 resolved by roster order (§M1-R8).
 
-BRANCH and AWARD are not executed this stage (raise :class:`UnsupportedNodeError`).
+BRANCH is not executed this stage (it raises :class:`UnsupportedNodeError`).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ RESULT_VERSION = 1
 
 
 class UnsupportedNodeError(NotImplementedError):
-    """A node type the M1-E linear resolver does not execute (BRANCH/AWARD)."""
+    """A node type the M1-E linear resolver does not execute (currently BRANCH)."""
 
 
 class OutcomeCode(StrEnum):
@@ -57,6 +57,9 @@ class ResolveInput:
     vote_scores: Mapping[str, Mapping[str, Decimal]] = field(default_factory=dict)
     group_of: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     manual: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
+    # Node key -> canonical pair key -> selected winner. Pair keys are the two
+    # contestant ids in entry-roster order joined with ``|``.
+    duel_decisions: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -136,11 +139,37 @@ class CompositeResult:
 
 
 @dataclass(frozen=True)
+class AwardDecision:
+    award: str
+    contestant: str
+    score: Decimal
+    source_node: str
+
+    def to_dict(self) -> dict:
+        return {
+            "award": self.award,
+            "contestant": self.contestant,
+            "score": str(self.score),
+            "source_node": self.source_node,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AwardDecision":
+        return cls(
+            award=data["award"],
+            contestant=data["contestant"],
+            score=Decimal(data["score"]),
+            source_node=data["source_node"],
+        )
+
+
+@dataclass(frozen=True)
 class ResolveResult:
     status: ResolverState
     reasons: tuple[str, ...] = ()
     decisions: tuple[StageDecision, ...] = ()
     composites: tuple[CompositeResult, ...] = ()
+    awards: tuple[AwardDecision, ...] = ()
     node_values: Mapping[str, object] = field(default_factory=dict)
     content_hash: str = ""
     input_fingerprint: str = ""
@@ -154,6 +183,7 @@ class ResolveResult:
             "reasons": list(self.reasons),
             "decisions": [d.to_dict() for d in self.decisions],
             "composites": [c.to_dict() for c in self.composites],
+            "awards": [a.to_dict() for a in self.awards],
             "node_values": self.node_values,
             "content_hash": self.content_hash,
             "input_fingerprint": self.input_fingerprint,
@@ -169,6 +199,7 @@ class ResolveResult:
             reasons=tuple(data["reasons"]),
             decisions=tuple(StageDecision.from_dict(d) for d in data["decisions"]),
             composites=tuple(CompositeResult.from_dict(c) for c in data["composites"]),
+            awards=tuple(AwardDecision.from_dict(a) for a in data.get("awards", [])),
             node_values=data["node_values"],
             content_hash=data.get("content_hash", ""),
             input_fingerprint=data.get("input_fingerprint", ""),
@@ -220,6 +251,7 @@ def inputs_fingerprint(inputs: ResolveInput) -> str:
             "vote_scores": dict(inputs.vote_scores),
             "group_of": dict(inputs.group_of),
             "manual": dict(inputs.manual),
+            "duel_decisions": dict(inputs.duel_decisions),
         }
     )
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -294,12 +326,18 @@ def _consumed_scopes(nodes: list[dict], closure: set[str]) -> tuple[set, set, se
     return round_keys, vote_keys, group_keys, manual_keys
 
 
+def _consumed_duel_keys(nodes: list[dict], closure: set[str]) -> set[str]:
+    """Return DUEL node keys whose persisted decisions are read by a closure."""
+    return {node["key"] for node in nodes if node["key"] in closure and node["type"] == "DUEL"}
+
+
 def _scoped_inputs_fingerprint(
     inputs: ResolveInput,
     round_keys: set[str],
     vote_keys: set[str],
     group_keys: set[str],
     manual_keys: set[str],
+    duel_keys: set[str] | None = None,
 ) -> str:
     """sha256 over the raw facts a checkpoint closure consumes.
 
@@ -315,6 +353,11 @@ def _scoped_inputs_fingerprint(
             "vote_scores": {k: v for k, v in inputs.vote_scores.items() if k in vote_keys},
             "group_of": {k: v for k, v in inputs.group_of.items() if k in group_keys},
             "manual": {k: v for k, v in inputs.manual.items() if k in manual_keys},
+            "duel_decisions": {
+                k: v
+                for k, v in inputs.duel_decisions.items()
+                if duel_keys is None or k in duel_keys
+            },
         }
     )
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -345,6 +388,22 @@ def stage_consumed_scopes(
     return _consumed_scopes(nodes, closure)
 
 
+def stage_consumed_duel_keys(definition, checkpoint: str | None) -> set[str]:
+    """Return DUEL node keys consumed by a full definition or checkpoint closure."""
+    parsed = parse_definition(definition)
+    nodes = parsed["nodes"]
+    by_key = {n["key"]: n for n in nodes}
+    if checkpoint:
+        checkpoints = parsed.get("checkpoints") or ()
+        cp = next((c for c in checkpoints if c["key"] == checkpoint), None)
+        if cp is None:
+            raise ValueError(f"定义未声明检查点 {checkpoint}。")
+        closure = _dependency_closure(cp["output"], by_key)
+    else:
+        closure = {n["key"] for n in nodes}
+    return _consumed_duel_keys(nodes, closure)
+
+
 def checkpoint_inputs_fingerprint(definition, inputs: ResolveInput, checkpoint: str) -> str:
     """Recompute the scoped input fingerprint a named checkpoint would consume.
 
@@ -361,7 +420,10 @@ def checkpoint_inputs_fingerprint(definition, inputs: ResolveInput, checkpoint: 
         raise ValueError(f"定义未声明检查点 {checkpoint}。")
     closure = _dependency_closure(cp["output"], by_key)
     round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
-    return _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
+    duel_keys = _consumed_duel_keys(nodes, closure)
+    return _scoped_inputs_fingerprint(
+        inputs, round_keys, vote_keys, group_keys, manual_keys, duel_keys
+    )
 
 
 class _Stage:
@@ -378,6 +440,7 @@ class _Stage:
         self.origin: dict[str, set[str]] = {c: {"entry"} for c in self.roster}
         self.rank_pos: dict[str, dict[str, int]] = {}
         self.composites: list[CompositeResult] = []
+        self.awards: list[AwardDecision] = []
         self.hold: list[str] = []
         self.review: list[str] = []
 
@@ -410,6 +473,100 @@ def _pair(node: dict, st: _Stage) -> tuple:
     if len(pool) % 2 == 1:
         out.append(frozenset((pool[-1],)))
     return tuple(out)
+
+
+def _pair_key(members: tuple[str, ...]) -> str:
+    """Return the stable external key for one pair decision."""
+    return "|".join(members)
+
+
+def _duel(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
+    """Resolve every pair from an explicit winner decision map.
+
+    A winner is never inferred from roster order or score. A singleton produced by
+    an explicit PAIR odd policy is handled as a bye/wildcard; every two-person pair
+    must have exactly one declared winner.
+    """
+    pairs = st.values[node["source"]]
+    decisions = inputs.duel_decisions.get(node["key"], {})
+    if not isinstance(decisions, Mapping):
+        st.hold.append(f"DUEL {node['key']} 决策不是合法映射。")
+        return {"winners": (), "losers": (), "pairs": ()}
+
+    expected: set[str] = set()
+    records: list[dict] = []
+    winners: list[str] = []
+    losers: list[str] = []
+    invalid = False
+    for raw_pair in pairs:
+        members = tuple(sorted(raw_pair, key=lambda c: st.idx[c]))
+        key = _pair_key(members)
+        expected.add(key)
+        if len(members) == 1:
+            if key in decisions:
+                st.hold.append(f"DUEL {node['key']} 的单人 bye 不接受胜者决定。")
+                invalid = True
+                continue
+            outcome = "wildcard" if node.get("odd_policy") == "wildcard" else "bye"
+            winner = members[0]
+            winners.append(winner)
+            records.append(
+                {"pair": members, "key": key, "winner": winner, "loser": None, "outcome": outcome}
+            )
+            continue
+        winner = decisions.get(key)
+        if not isinstance(winner, str) or winner not in members:
+            st.hold.append(f"DUEL {node['key']} 缺少或无效的 {key} 胜者决定。")
+            invalid = True
+            continue
+        loser_candidates = [
+            member for member in members if isinstance(member, str) and member != winner
+        ]
+        if len(loser_candidates) != 1:
+            st.hold.append(f"DUEL {node['key']} 的 {key} 不是合法二人对决。")
+            invalid = True
+            continue
+        loser = loser_candidates[0]
+        winners.append(winner)
+        losers.append(loser)
+        records.append(
+            {"pair": members, "key": key, "winner": winner, "loser": loser, "outcome": "decided"}
+        )
+
+    extras = set(decisions) - expected
+    if extras:
+        st.hold.append(f"DUEL {node['key']} 含有不存在的 pair 决定：{sorted(extras)}。")
+        invalid = True
+    if invalid:
+        return {"winners": (), "losers": (), "pairs": tuple(records)}
+
+    for record in records:
+        winner = record["winner"]
+        st.outcome[winner] = (
+            OutcomeCode.WILDCARD if record["outcome"] == "wildcard" else OutcomeCode.DIRECT
+        )
+        st.source_node[winner] = node["key"]
+        loser = record["loser"]
+        if loser is not None:
+            st.outcome[loser] = OutcomeCode.ELIMINATED
+            st.source_node[loser] = node["key"]
+    return {"winners": tuple(winners), "losers": tuple(losers), "pairs": tuple(records)}
+
+
+def _award(node: dict, st: _Stage) -> dict:
+    """Produce an independent award from a complete score map."""
+    scores = st.values[node["source"]]
+    if not isinstance(scores, dict) or not scores:
+        st.hold.append(f"AWARD {node['key']} 没有可用成绩。")
+        return {"award": node["award"], "winner": None, "score": None}
+    best = max(scores.values())
+    winners = [c for c in st.roster if scores.get(c) == best]
+    if len(winners) != 1:
+        st.review.append(f"AWARD {node['key']} 存在并列第一，需人工核定。")
+        return {"award": node["award"], "winner": None, "score": best}
+    winner = winners[0]
+    st.awards.append(AwardDecision(node["award"], winner, best, node["key"]))
+    return {"award": node["award"], "winner": winner, "score": best}
 
 
 def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
@@ -636,9 +793,14 @@ def _hold_fill_cutoff_tie(
 
 
 def _select(node: dict, st: _Stage, by_key: dict) -> tuple:
-    ranked: tuple = st.values[node["source"]]
+    source_value = st.values[node["source"]]
+    source_node = by_key[node["source"]]
+    if source_node["type"] == "DUEL":
+        ranked = tuple(source_value.get(node.get("outcome", "winners"), ()))
+    else:
+        ranked = source_value
     count = node["count"]
-    score_node = by_key[node["source"]].get("source")
+    score_node = source_node.get("source") if source_node["type"] == "RANK" else None
     scores: dict = st.values.get(score_node, {}) if score_node else {}
     policy = node.get("tie_policy") or ""
     by = node.get("by")
@@ -862,6 +1024,8 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
         st.values[node["key"]] = _part(node, st, inputs)
     elif ntype == "PAIR":
         st.values[node["key"]] = _pair(node, st)
+    elif ntype == "DUEL":
+        st.values[node["key"]] = _duel(node, st, inputs)
     elif ntype == "ASSESS":
         st.values[node["key"]] = _assess(node, st, inputs)
     elif ntype == "AGGREGATE":
@@ -880,7 +1044,9 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
         st.values[node["key"]] = _fill(node, st, inputs, by_key)
     elif ntype == "MANUAL_SELECT":
         st.values[node["key"]] = _manual(node, st, inputs)
-    elif ntype in ("BRANCH", "AWARD"):
+    elif ntype == "AWARD":
+        st.values[node["key"]] = _award(node, st)
+    elif ntype == "BRANCH":
         raise UnsupportedNodeError(
             f"Node {node['key']}: type {ntype} is not executed by the M1-E resolver."
         )
@@ -996,6 +1162,7 @@ def _assemble_result(
         reasons=tuple(st.hold + st.review),
         decisions=decisions,
         composites=tuple(st.composites),
+        awards=tuple(st.awards),
         node_values=node_values,
         content_hash=plan_hash,
         input_fingerprint=fingerprint,
@@ -1053,5 +1220,8 @@ def resolve_to_checkpoint(
             _run_node(node, st, inputs, by_key)
 
     round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
-    fingerprint = _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
+    duel_keys = _consumed_duel_keys(nodes, closure)
+    fingerprint = _scoped_inputs_fingerprint(
+        inputs, round_keys, vote_keys, group_keys, manual_keys, duel_keys
+    )
     return _assemble_result(st, obj, parsed, plan, fingerprint, cp=cp)

@@ -1,6 +1,11 @@
+from decimal import Decimal
+from typing import cast
+
 from django.test import TestCase
 
+from ruleset.compiler import compile_definition
 from ruleset.models import RulesetTemplate
+from ruleset.resolver import ResolveInput, ResolverState, resolve
 from ruleset.schema import parse_definition
 from ruleset.templates import (
     FIRST_BATCH,
@@ -14,6 +19,22 @@ from ruleset.templates import (
 
 
 class TemplateLibraryTests(TestCase):
+    @staticmethod
+    def _bound_context():
+        return {
+            "entry_size": 20,
+            "rounds": {
+                "r1": {"judge_count": 5, "scope": "full", "scale": "100"},
+                "r2": {"judge_count": 5, "scope": "full", "scale": "100"},
+            },
+            "votes": {"audience1": {"scale": "hundred"}},
+            "groups": {
+                "groups_initial": {"capacity": [4, 4, 4, 4, 4]},
+                "tracks": {"capacity": [10, 10]},
+                "venues": {"capacity": [10, 10]},
+            },
+        }
+
     def test_golden_definitions_are_schema_valid(self):
         for definition in (
             GOLDEN_SCHIDUI,
@@ -31,6 +52,56 @@ class TemplateLibraryTests(TestCase):
         keys = [t["key"] for t in FIRST_BATCH]
         self.assertEqual(len(keys), len(set(keys)))
 
+    def test_first_batch_templates_are_bound_freeze_capable(self):
+        for template in FIRST_BATCH:
+            with self.subTest(template=template["key"]):
+                report, plan = compile_definition(
+                    template["definition"], context=self._bound_context(), bound=True
+                )
+                self.assertTrue(report.passes(), report.codes())
+                self.assertIsNotNone(plan)
+
+    def test_judge_audience_composite_declares_score_component(self):
+        template = next(t for t in FIRST_BATCH if t["key"] == "judge_audience_composite")
+        audience_node = next(
+            node
+            for node in parse_definition(template["definition"])["nodes"]
+            if node["key"] == "assess_a1"
+        )
+        self.assertEqual(audience_node["vote_purpose"], "SCORE_COMPONENT")
+
+    def test_independent_popularity_award_is_seeded_as_production_template(self):
+        seed_ruleset_templates(None)
+        template = RulesetTemplate.objects.get(name="独立人气奖")
+        self.assertTrue(template.is_available)
+        self.assertIn('"type": "AWARD"', template.definition)
+
+    def test_removed_builtins_are_retired_and_not_cloneable(self):
+        RulesetTemplate.objects.create(
+            name="独立人气奖", definition=GOLDEN_SCHIDUI, is_available=True
+        )
+        seed_ruleset_templates(None)
+        current = RulesetTemplate.objects.get(name="独立人气奖")
+        self.assertTrue(current.is_available)
+        self.assertIn('"type": "AWARD"', current.definition)
+        fallback = RulesetTemplate.objects.get(name="校十佳屏峰_历史未决回退")
+        self.assertFalse(fallback.is_available)
+
+    def test_seeded_pk_template_resolves_pair_winners(self):
+        template = next(t for t in FIRST_BATCH if t["key"] == "seeded_pk_wildcard")
+        scores = {str(i): (Decimal(str(100 - i)),) for i in range(1, 9)}
+        result = resolve(
+            template["definition"],
+            ResolveInput(
+                roster=tuple(str(i) for i in range(1, 9)),
+                round_scores={"r1": scores},
+                duel_decisions={"duel": {"1|2": "1", "3|4": "4", "5|6": "5", "7|8": "8"}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        duel = cast(dict, result.node_values["duel"])
+        self.assertEqual(duel["winners"], ["1", "4", "5", "8"])
+
     def test_first_batch_elements_are_schema_valid(self):
         for t in FIRST_BATCH:
             self.assertEqual(parse_definition(t["definition"])["schema_version"], 1)
@@ -39,7 +110,7 @@ class TemplateLibraryTests(TestCase):
     def test_seed_is_idempotent(self):
         seed_ruleset_templates(None)
         first = RulesetTemplate.objects.count()
-        # 2 golden + 3 historical/synthetic scenarios + 10 first-batch templates.
+        # 2 golden + 3 historical/synthetic scenarios + 10 production templates.
         self.assertEqual(first, 15)
         seed_ruleset_templates(None)
         self.assertEqual(RulesetTemplate.objects.count(), first)

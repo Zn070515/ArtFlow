@@ -29,6 +29,7 @@ class ContestRoundAdmin(admin.ModelAdmin):
         "activity",
         "round_type",
         "scoring_mode",
+        "order_policy",
         "status",
         "is_locked",
         "entry_count",
@@ -68,7 +69,7 @@ class RoundSnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(RoundEntry)
 class RoundEntryAdmin(RoundSnapshotAdmin):
-    list_display = ["round", "singer"]
+    list_display = ["round", "singer", "running_order"]
 
 
 @admin.register(RoundJudge)

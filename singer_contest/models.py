@@ -18,6 +18,7 @@ from .deletion import cascade_draft_snapshots_or_protect_prepared
 # bypass the lock, so they are refused unless the service is actively wrapping the write. The
 # guard is thread-local so concurrent service calls in separate threads don't leak into each other.
 _manual_writes = threading.local()
+_duel_writes = threading.local()
 
 
 def _manual_write_authorized() -> bool:
@@ -26,6 +27,14 @@ def _manual_write_authorized() -> bool:
 
 def _authorize_manual_write(authorized: bool) -> None:
     _manual_writes.authorized = authorized
+
+
+def _duel_write_authorized() -> bool:
+    return bool(getattr(_duel_writes, "authorized", False))
+
+
+def _authorize_duel_write(authorized: bool) -> None:
+    _duel_writes.authorized = authorized
 
 
 class SingerRegistration(models.Model):
@@ -108,6 +117,13 @@ class ContestRound(models.Model):
         AVERAGE = "average", "平均分"
         DROP_HIGH_LOW = "drop_high_low", "去最高最低后平均"
 
+    class OrderPolicy(models.TextChoices):
+        REGISTRATION_ORDER = "registration_order", "报名顺序"
+        DRAW = "draw", "抽签顺序"
+        MANUAL = "manual", "人工顺序"
+        PREVIOUS_RANK_ASC = "previous_rank_asc", "上一轮排名升序"
+        PREVIOUS_RANK_DESC = "previous_rank_desc", "上一轮排名降序"
+
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
         PREPARED = "prepared", "已准备"
@@ -124,6 +140,12 @@ class ContestRound(models.Model):
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
     name = models.CharField(max_length=100, blank=True)
     sequence = models.PositiveIntegerField(default=1, help_text="同一活动内的轮次顺序")
+    order_policy = models.CharField(
+        max_length=24,
+        choices=OrderPolicy,
+        default=OrderPolicy.REGISTRATION_ORDER,
+        help_text="准备轮次时冻结的出场顺序规则。",
+    )
     scheduled_at = models.DateTimeField(null=True, blank=True)
     venue = models.CharField(max_length=200, blank=True)
     rubric = models.ForeignKey(
@@ -299,11 +321,22 @@ class RoundEntry(RoundSnapshotMixin, models.Model):
         on_delete=cascade_draft_snapshots_or_protect_prepared,
         related_name="round_entries",
     )
+    running_order = models.PositiveIntegerField(
+        null=True, blank=True, help_text="准备轮次时冻结的现场出场序号。"
+    )
     objects = RoundEntryManager()
 
     class Meta:
         base_manager_name = "objects"
         unique_together = [("round", "singer")]
+        ordering = ["running_order", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["round", "running_order"],
+                condition=Q(running_order__isnull=False),
+                name="round_entry_unique_running_order",
+            )
+        ]
 
     def clean(self):
         self._ensure_round_is_draft(self._stored_round_id())
@@ -449,6 +482,14 @@ class Award(models.Model):
         blank=True,
         related_name="generated_popularity_award",
     )
+    source_stage_result = models.ForeignKey(
+        "singer_contest.StageResult",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="awards",
+    )
+    source_node = models.CharField(max_length=100, blank=True)
 
     class Meta:
         ordering = ["pk"]
@@ -460,6 +501,10 @@ class Award(models.Model):
             raise ValidationError("Award singer must belong to the award activity.")
         if vote_session and self.activity_id and vote_session.activity_id != self.activity_id:
             raise ValidationError("Generated award must belong to the vote activity.")
+        if self.source_stage_result_id and self.activity_id:
+            source_result = self.source_stage_result
+            if source_result is None or source_result.activity_id != self.activity_id:
+                raise ValidationError("赛段奖项必须属于同一活动。")
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -1094,3 +1139,104 @@ class ManualDecision(models.Model):
 
     def __str__(self):
         return f"{self.manual_key} — {self.group or '(整体)'}"
+
+
+class DuelDecisionQuerySet(models.QuerySet):
+    """Guard direct ORM mutations of persisted pairwise decisions."""
+
+    def _ensure_auth(self):
+        if not _duel_write_authorized():
+            raise ValidationError("DuelDecision 只能通过正式 service 写入（set_duel_decision）。")
+
+    def update(self, **kwargs):
+        self._ensure_auth()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_auth()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._ensure_auth()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_auth()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+DuelDecisionManager = models.Manager.from_queryset(DuelDecisionQuerySet)
+
+
+class DuelDecision(models.Model):
+    """A persisted explicit winner for one frozen ruleset DUEL pair."""
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="duel_decisions"
+    )
+    ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion", on_delete=models.CASCADE, related_name="duel_decisions"
+    )
+    duel_key = models.CharField(max_length=100)
+    pair_key = models.CharField(
+        max_length=201, help_text="两个选手 PK 按当前赛制名单顺序拼接，例如 12|34。"
+    )
+    winner = models.CharField(max_length=100)
+    is_test_data = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="duel_decisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = DuelDecisionManager()
+
+    class Meta:
+        unique_together = ("ruleset_version", "duel_key", "pair_key")
+        ordering = ["duel_key", "pair_key", "pk"]
+
+    def clean(self):
+        if self.ruleset_version_id and self.activity_id:
+            if self.ruleset_version.ruleset.activity_id != self.activity_id:
+                raise ValidationError("对决决定与赛制版本必须属于同一活动。")
+        parts = self.pair_key.split("|") if self.pair_key else []
+        if len(parts) != 2 or len(set(parts)) != 2 or not all(part.isdigit() for part in parts):
+            raise ValidationError("对决 pair_key 必须是两个不同选手 PK，以 | 分隔。")
+        if self.winner not in parts:
+            raise ValidationError("对决胜者必须属于 pair_key。")
+        singer_ids = set(
+            str(pk)
+            for pk in SingerRegistration.objects.filter(
+                activity_id=self.activity_id, pk__in=parts
+            ).values_list("pk", flat=True)
+        )
+        if singer_ids != set(parts):
+            raise ValidationError("对决选手必须属于该活动。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        if not _duel_write_authorized():
+            raise ValidationError("DuelDecision 只能通过正式 service 写入（set_duel_decision）。")
+        from .services import ensure_duel_not_consumed_by_confirmed_stage
+
+        ensure_duel_not_consumed_by_confirmed_stage(
+            self.ruleset_version, self.duel_key, self.pair_key
+        )
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not _duel_write_authorized():
+            raise ValidationError("DuelDecision 只能通过正式 service 删除。")
+        from .services import ensure_duel_not_consumed_by_confirmed_stage
+
+        ensure_duel_not_consumed_by_confirmed_stage(
+            self.ruleset_version, self.duel_key, self.pair_key
+        )
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.duel_key} — {self.pair_key}: {self.winner}"

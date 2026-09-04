@@ -40,6 +40,7 @@ from .models import (
     AudienceScore,
     CompositeResult,
     ContestRound,
+    DuelDecision,
     Judge,
     RoundEntry,
     RoundJudge,
@@ -187,6 +188,7 @@ class ScoringServiceTests(TestCase):
                 "activity",
                 "round_type",
                 "scoring_mode",
+                "order_policy",
                 "status",
                 "is_locked",
                 "entry_count",
@@ -548,6 +550,67 @@ class ScoringServiceTests(TestCase):
         prepare_round(semifinal, self.user)
 
         self.assertEqual(RoundEntry.objects.filter(round=semifinal).count(), 10)
+
+    def test_prepare_freezes_previous_rank_ascending_running_order(self):
+        self._lock_scored_round(self.round, singer_count=3, advance_count=2)
+        next_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=2,
+            order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
+            roster_source=ContestRound.RosterSource.APPROVED,
+        )
+
+        prepare_round(next_round, self.user)
+
+        ordered = list(
+            RoundEntry.objects.filter(round=next_round)
+            .order_by("running_order")
+            .values_list("singer_id", "running_order")
+        )
+        expected = list(
+            ScoreSummary.objects.filter(round=self.round)
+            .order_by("average_score", "singer_id")
+            .values_list("singer_id", flat=True)
+        )
+        self.assertEqual([singer_id for singer_id, _ in ordered], expected)
+        self.assertEqual([order for _, order in ordered], [1, 2, 3, 4])
+
+    def test_prepare_supports_manual_and_draw_running_order_snapshots(self):
+        from .services import set_round_running_order
+
+        singers = list(SingerRegistration.objects.filter(activity=self.activity).order_by("pk"))
+        manual_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=2,
+            roster_source=ContestRound.RosterSource.APPROVED,
+            order_policy=ContestRound.OrderPolicy.MANUAL,
+        )
+        manual_ids = [str(singer.pk) for singer in reversed(singers)]
+        set_round_running_order(manual_round, manual_ids, self.user)
+        prepare_round(manual_round, self.user)
+        self.assertEqual(
+            list(
+                RoundEntry.objects.filter(round=manual_round)
+                .order_by("running_order")
+                .values_list("singer_id", flat=True)
+            ),
+            [int(singer_id) for singer_id in manual_ids],
+        )
+
+        draw_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=3,
+            roster_source=ContestRound.RosterSource.APPROVED,
+            order_policy=ContestRound.OrderPolicy.DRAW,
+        )
+        prepare_round(draw_round, self.user)
+        self.assertEqual(
+            set(RoundEntry.objects.filter(round=draw_round).values_list("singer_id", flat=True)),
+            {singer.pk for singer in singers},
+        )
 
     def test_prepare_semifinal_rejects_when_upstream_not_locked(self):
         self._lock_scored_round(self.round, singer_count=5, advance_count=0)
@@ -2399,6 +2462,67 @@ class StageResolverBindingTests(TestCase):
         for decision in stage.decisions.all():  # type: ignore[union-attr]
             self.assertEqual(decision.outcome_code, "eliminated")
             self.assertIsNotNone(decision.score)
+
+    def test_run_ruleset_sources_persisted_duel_decisions(self):
+        from ruleset.resolver import ResolveResult, ResolverState
+
+        from .services import run_ruleset, set_duel_decision
+
+        definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {
+                        "key": "pairs",
+                        "type": "PAIR",
+                        "source": "entry",
+                        "odd_policy": "wildcard",
+                    },
+                    {
+                        "key": "duel",
+                        "type": "DUEL",
+                        "source": "pairs",
+                        "decision_source": "judge_vote",
+                    },
+                    {"key": "winners", "type": "SELECT", "source": "duel", "count": 2},
+                ],
+            }
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        pair_key = f"{self.singers[0].pk}|{self.singers[1].pk}"
+        set_duel_decision(
+            version,
+            duel_key="duel",
+            pair_key=pair_key,
+            winner=str(self.singers[1].pk),
+            created_by=self.user,
+        )
+        with self.assertRaises(ValidationError):
+            DuelDecision.objects.filter(ruleset_version=version).update(
+                winner=str(self.singers[0].pk)
+            )
+        result = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=self.user,
+            round_keys={},
+            preview=True,
+        )
+        if not isinstance(result, ResolveResult):
+            self.fail("preview should return a pure ResolveResult")
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(
+            result.node_values["winners"], [str(self.singers[1].pk), str(self.singers[2].pk)]
+        )
+        self.assertTrue(DuelDecision.objects.filter(ruleset_version=version).exists())
 
     def test_run_ruleset_rejects_version_from_other_activity(self):
         from .services import run_ruleset

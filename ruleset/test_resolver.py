@@ -8,6 +8,7 @@ pure function of ``(definition, inputs)``: no DB, no clock, no unordered queryse
 import time
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import cast
 
 from django.test import SimpleTestCase
 
@@ -386,6 +387,108 @@ class ResolverHoldTests(SimpleTestCase):
         definition = _def([{"key": "p", "type": "PAIR", "source": ENTRY_KEY}])
         result = resolve(definition, ResolveInput(roster=("a", "b", "c")))
         self.assertEqual(result.status, ResolverState.HOLD)
+
+    def test_duel_consumes_pair_decisions_and_exposes_winners_and_losers(self):
+        definition = _def(
+            [
+                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "judge_vote",
+                },
+                {"key": "winners", "type": "SELECT", "source": "duel", "count": 2},
+            ]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b", "c", "d"),
+                duel_decisions={"duel": {"a|b": "a", "c|d": "d"}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        duel = cast(dict, result.node_values["duel"])
+        self.assertEqual(duel["winners"], ["a", "d"])
+        self.assertEqual(duel["losers"], ["b", "c"])
+        self.assertEqual(result.node_values["winners"], ["a", "d"])
+
+    def test_duel_missing_or_invalid_decision_holds(self):
+        definition = _def(
+            [
+                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "manual",
+                },
+            ]
+        )
+        missing = resolve(
+            definition,
+            ResolveInput(roster=("a", "b", "c", "d"), duel_decisions={"duel": {"a|b": "a"}}),
+        )
+        self.assertEqual(missing.status, ResolverState.HOLD)
+        invalid = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b", "c", "d"),
+                duel_decisions={"duel": {"a|b": "x", "c|d": "c"}},
+            ),
+        )
+        self.assertEqual(invalid.status, ResolverState.HOLD)
+
+    def test_duel_wildcard_is_a_winner_without_a_hidden_opponent(self):
+        definition = _def(
+            [
+                {"key": "pairs", "type": "PAIR", "source": ENTRY_KEY, "odd_policy": "wildcard"},
+                {
+                    "key": "duel",
+                    "type": "DUEL",
+                    "source": "pairs",
+                    "decision_source": "manual",
+                },
+            ]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b", "c"),
+                duel_decisions={"duel": {"a|b": "b"}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        duel = cast(dict, result.node_values["duel"])
+        self.assertEqual(duel["winners"], ["b", "c"])
+        self.assertEqual(duel["losers"], ["a"])
+
+    def test_award_is_independent_from_advancement_decisions(self):
+        definition = _def(
+            [
+                {
+                    "key": "popularity",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "vote_source": "audience",
+                    "vote_purpose": "POPULARITY",
+                },
+                {"key": "award", "type": "AWARD", "source": "popularity", "award": "人气奖"},
+            ]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("a", "b"),
+                vote_scores={"audience": {"a": Decimal("9"), "b": Decimal("10")}},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        award = cast(dict, result.node_values["award"])
+        self.assertEqual(award["winner"], "b")
+        self.assertEqual(result.awards[0].contestant, "b")
+        self.assertTrue(all(d.outcome_code == OutcomeCode.ELIMINATED for d in result.decisions))
 
 
 class ResolverReviewTests(SimpleTestCase):
@@ -921,18 +1024,6 @@ class ResolverUnsupportedTests(SimpleTestCase):
                 definition, ResolveInput(roster=("c1",), round_scores=_rs({"r1": {"c1": [10]}}))
             )
 
-    def test_award_raises(self):
-        definition = _def(
-            [
-                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
-                {"key": "w", "type": "AWARD", "source": "a", "award": "best"},
-            ]
-        )
-        with self.assertRaises(UnsupportedNodeError):
-            resolve(
-                definition, ResolveInput(roster=("c1",), round_scores=_rs({"r1": {"c1": [10]}}))
-            )
-
 
 class ResolverPerfTests(SimpleTestCase):
     def test_perf_soft_three_stage_composite(self):
@@ -1243,6 +1334,47 @@ class ResolverCheckpointTests(SimpleTestCase):
         before = resolve_to_checkpoint(self._def(), self._inputs(), "stage1")
         after = resolve_to_checkpoint(
             self._def(), self._inputs(with_r3=True, with_r4=True, with_a4=True), "stage1"
+        )
+        self.assertEqual(before.status, ResolverState.READY)
+        self.assertEqual(after.status, ResolverState.READY)
+        self.assertEqual(before.input_fingerprint, after.input_fingerprint)
+
+    def test_checkpoint_fingerprint_scopes_duel_decisions_to_its_closure(self):
+        definition = _def(
+            [
+                {"key": "pairs1", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel1",
+                    "type": "DUEL",
+                    "source": "pairs1",
+                    "decision_source": "judge_vote",
+                },
+                {"key": "winner1", "type": "SELECT", "source": "duel1", "count": 2},
+                {"key": "pairs2", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel2",
+                    "type": "DUEL",
+                    "source": "pairs2",
+                    "decision_source": "judge_vote",
+                },
+                {"key": "winner2", "type": "SELECT", "source": "duel2", "count": 2},
+            ]
+        )
+        definition["checkpoints"] = [{"key": "first", "output": "winner1"}]
+        inputs = ResolveInput(
+            roster=("a", "b", "c", "d"),
+            duel_decisions={
+                "duel1": {"a|b": "a", "c|d": "c"},
+                "duel2": {"a|b": "b", "c|d": "d"},
+            },
+        )
+        before = resolve_to_checkpoint(definition, inputs, "first")
+        changed_duels = dict(inputs.duel_decisions)
+        changed_duels["duel2"] = {"a|b": "a", "c|d": "d"}
+        after = resolve_to_checkpoint(
+            definition,
+            ResolveInput(roster=inputs.roster, duel_decisions=changed_duels),
+            "first",
         )
         self.assertEqual(before.status, ResolverState.READY)
         self.assertEqual(after.status, ResolverState.READY)
