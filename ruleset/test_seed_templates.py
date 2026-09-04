@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import cast
 
 from django.test import TestCase
 
@@ -88,21 +89,18 @@ class TemplateLibraryTests(TestCase):
 
     def test_seeded_pk_template_resolves_pair_winners(self):
         template = next(t for t in FIRST_BATCH if t["key"] == "seeded_pk_wildcard")
-        scores = {
-            str(i): (Decimal(str(100 - i)),) for i in range(1, 9)
-        }
+        scores = {str(i): (Decimal(str(100 - i)),) for i in range(1, 9)}
         result = resolve(
             template["definition"],
             ResolveInput(
                 roster=tuple(str(i) for i in range(1, 9)),
                 round_scores={"r1": scores},
-                duel_decisions={
-                    "duel": {"1|2": "1", "3|4": "4", "5|6": "5", "7|8": "8"}
-                },
+                duel_decisions={"duel": {"1|2": "1", "3|4": "4", "5|6": "5", "7|8": "8"}},
             ),
         )
         self.assertEqual(result.status, ResolverState.READY)
-        self.assertEqual(result.node_values["duel"]["winners"], ["1", "4", "5", "8"])
+        duel = cast(dict, result.node_values["duel"])
+        self.assertEqual(duel["winners"], ["1", "4", "5", "8"])
 
     def test_first_batch_elements_are_schema_valid(self):
         for t in FIRST_BATCH:

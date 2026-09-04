@@ -700,9 +700,7 @@ def _tie_is_supported(node: dict, policy: str) -> bool:
     return policy == "manual"
 
 
-def _check_votes(
-    node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[str, dict]
-) -> None:
+def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[str, dict]) -> None:
     source = node.get("vote_source")
     if not source:
         return
@@ -746,9 +744,9 @@ def _check_votes(
     # M1-R8 (P0-2): a bound freeze validates vote CONFIG, not runtime readiness. Whether
     # a VoteSession has collected ballots / is locked / has a result is a runtime
     # resolver HOLD condition — never a Ruleset Freeze gate. So no ``result_ready`` fact.
-    is_independent_award = any(
-        consumer.get("type") == "AWARD" and consumer.get("source") == node["key"]
-        for consumer in by_key.values()
+    consumers = [consumer for consumer in by_key.values() if consumer.get("source") == node["key"]]
+    is_independent_award = bool(consumers) and all(
+        consumer.get("type") == "AWARD" for consumer in consumers
     )
     if (
         node.get("vote_purpose")

@@ -88,9 +88,7 @@ class OperatorEndToEndTests(TestCase):
 
     # --- helpers -----------------------------------------------------------
 
-    def _create_round(
-        self, sequence, roster_source, roster_source_stage="", order_policy=None
-    ):
+    def _create_round(self, sequence, roster_source, roster_source_stage="", order_policy=None):
         resp = self.client.post(
             reverse("staff:round_create"),
             {

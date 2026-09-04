@@ -8,6 +8,7 @@ pure function of ``(definition, inputs)``: no DB, no clock, no unordered queryse
 import time
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import cast
 
 from django.test import SimpleTestCase
 
@@ -408,8 +409,9 @@ class ResolverHoldTests(SimpleTestCase):
             ),
         )
         self.assertEqual(result.status, ResolverState.READY)
-        self.assertEqual(result.node_values["duel"]["winners"], ["a", "d"])
-        self.assertEqual(result.node_values["duel"]["losers"], ["b", "c"])
+        duel = cast(dict, result.node_values["duel"])
+        self.assertEqual(duel["winners"], ["a", "d"])
+        self.assertEqual(duel["losers"], ["b", "c"])
         self.assertEqual(result.node_values["winners"], ["a", "d"])
 
     def test_duel_missing_or_invalid_decision_holds(self):
@@ -458,8 +460,9 @@ class ResolverHoldTests(SimpleTestCase):
             ),
         )
         self.assertEqual(result.status, ResolverState.READY)
-        self.assertEqual(result.node_values["duel"]["winners"], ["b", "c"])
-        self.assertEqual(result.node_values["duel"]["losers"], ["a"])
+        duel = cast(dict, result.node_values["duel"])
+        self.assertEqual(duel["winners"], ["b", "c"])
+        self.assertEqual(duel["losers"], ["a"])
 
     def test_award_is_independent_from_advancement_decisions(self):
         definition = _def(
@@ -482,7 +485,8 @@ class ResolverHoldTests(SimpleTestCase):
             ),
         )
         self.assertEqual(result.status, ResolverState.READY)
-        self.assertEqual(result.node_values["award"]["winner"], "b")
+        award = cast(dict, result.node_values["award"])
+        self.assertEqual(award["winner"], "b")
         self.assertEqual(result.awards[0].contestant, "b")
         self.assertTrue(all(d.outcome_code == OutcomeCode.ELIMINATED for d in result.decisions))
 
@@ -1020,6 +1024,7 @@ class ResolverUnsupportedTests(SimpleTestCase):
                 definition, ResolveInput(roster=("c1",), round_scores=_rs({"r1": {"c1": [10]}}))
             )
 
+
 class ResolverPerfTests(SimpleTestCase):
     def test_perf_soft_three_stage_composite(self):
         roster = tuple(f"c{i}" for i in range(1, 101))
@@ -1329,6 +1334,47 @@ class ResolverCheckpointTests(SimpleTestCase):
         before = resolve_to_checkpoint(self._def(), self._inputs(), "stage1")
         after = resolve_to_checkpoint(
             self._def(), self._inputs(with_r3=True, with_r4=True, with_a4=True), "stage1"
+        )
+        self.assertEqual(before.status, ResolverState.READY)
+        self.assertEqual(after.status, ResolverState.READY)
+        self.assertEqual(before.input_fingerprint, after.input_fingerprint)
+
+    def test_checkpoint_fingerprint_scopes_duel_decisions_to_its_closure(self):
+        definition = _def(
+            [
+                {"key": "pairs1", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel1",
+                    "type": "DUEL",
+                    "source": "pairs1",
+                    "decision_source": "judge_vote",
+                },
+                {"key": "winner1", "type": "SELECT", "source": "duel1", "count": 2},
+                {"key": "pairs2", "type": "PAIR", "source": ENTRY_KEY},
+                {
+                    "key": "duel2",
+                    "type": "DUEL",
+                    "source": "pairs2",
+                    "decision_source": "judge_vote",
+                },
+                {"key": "winner2", "type": "SELECT", "source": "duel2", "count": 2},
+            ]
+        )
+        definition["checkpoints"] = [{"key": "first", "output": "winner1"}]
+        inputs = ResolveInput(
+            roster=("a", "b", "c", "d"),
+            duel_decisions={
+                "duel1": {"a|b": "a", "c|d": "c"},
+                "duel2": {"a|b": "b", "c|d": "d"},
+            },
+        )
+        before = resolve_to_checkpoint(definition, inputs, "first")
+        changed_duels = dict(inputs.duel_decisions)
+        changed_duels["duel2"] = {"a|b": "a", "c|d": "d"}
+        after = resolve_to_checkpoint(
+            definition,
+            ResolveInput(roster=inputs.roster, duel_decisions=changed_duels),
+            "first",
         )
         self.assertEqual(before.status, ResolverState.READY)
         self.assertEqual(after.status, ResolverState.READY)

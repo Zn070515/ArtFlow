@@ -13,7 +13,7 @@ hidden tie-break: a genuine SELECT cutoff tie is surfaced as REVIEW/PENDING
 (held for human or explicit tie_break_source resolution), never silently
 resolved by roster order (§M1-R8).
 
-BRANCH and AWARD are not executed this stage (raise :class:`UnsupportedNodeError`).
+BRANCH is not executed this stage (it raises :class:`UnsupportedNodeError`).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ RESULT_VERSION = 1
 
 
 class UnsupportedNodeError(NotImplementedError):
-    """A node type the M1-E linear resolver does not execute (BRANCH/AWARD)."""
+    """A node type the M1-E linear resolver does not execute (currently BRANCH)."""
 
 
 class OutcomeCode(StrEnum):
@@ -326,12 +326,18 @@ def _consumed_scopes(nodes: list[dict], closure: set[str]) -> tuple[set, set, se
     return round_keys, vote_keys, group_keys, manual_keys
 
 
+def _consumed_duel_keys(nodes: list[dict], closure: set[str]) -> set[str]:
+    """Return DUEL node keys whose persisted decisions are read by a closure."""
+    return {node["key"] for node in nodes if node["key"] in closure and node["type"] == "DUEL"}
+
+
 def _scoped_inputs_fingerprint(
     inputs: ResolveInput,
     round_keys: set[str],
     vote_keys: set[str],
     group_keys: set[str],
     manual_keys: set[str],
+    duel_keys: set[str] | None = None,
 ) -> str:
     """sha256 over the raw facts a checkpoint closure consumes.
 
@@ -347,7 +353,11 @@ def _scoped_inputs_fingerprint(
             "vote_scores": {k: v for k, v in inputs.vote_scores.items() if k in vote_keys},
             "group_of": {k: v for k, v in inputs.group_of.items() if k in group_keys},
             "manual": {k: v for k, v in inputs.manual.items() if k in manual_keys},
-            "duel_decisions": dict(inputs.duel_decisions),
+            "duel_decisions": {
+                k: v
+                for k, v in inputs.duel_decisions.items()
+                if duel_keys is None or k in duel_keys
+            },
         }
     )
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -378,6 +388,22 @@ def stage_consumed_scopes(
     return _consumed_scopes(nodes, closure)
 
 
+def stage_consumed_duel_keys(definition, checkpoint: str | None) -> set[str]:
+    """Return DUEL node keys consumed by a full definition or checkpoint closure."""
+    parsed = parse_definition(definition)
+    nodes = parsed["nodes"]
+    by_key = {n["key"]: n for n in nodes}
+    if checkpoint:
+        checkpoints = parsed.get("checkpoints") or ()
+        cp = next((c for c in checkpoints if c["key"] == checkpoint), None)
+        if cp is None:
+            raise ValueError(f"定义未声明检查点 {checkpoint}。")
+        closure = _dependency_closure(cp["output"], by_key)
+    else:
+        closure = {n["key"] for n in nodes}
+    return _consumed_duel_keys(nodes, closure)
+
+
 def checkpoint_inputs_fingerprint(definition, inputs: ResolveInput, checkpoint: str) -> str:
     """Recompute the scoped input fingerprint a named checkpoint would consume.
 
@@ -394,7 +420,10 @@ def checkpoint_inputs_fingerprint(definition, inputs: ResolveInput, checkpoint: 
         raise ValueError(f"定义未声明检查点 {checkpoint}。")
     closure = _dependency_closure(cp["output"], by_key)
     round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
-    return _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
+    duel_keys = _consumed_duel_keys(nodes, closure)
+    return _scoped_inputs_fingerprint(
+        inputs, round_keys, vote_keys, group_keys, manual_keys, duel_keys
+    )
 
 
 class _Stage:
@@ -474,6 +503,10 @@ def _duel(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
         key = _pair_key(members)
         expected.add(key)
         if len(members) == 1:
+            if key in decisions:
+                st.hold.append(f"DUEL {node['key']} 的单人 bye 不接受胜者决定。")
+                invalid = True
+                continue
             outcome = "wildcard" if node.get("odd_policy") == "wildcard" else "bye"
             winner = members[0]
             winners.append(winner)
@@ -482,11 +515,18 @@ def _duel(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
             )
             continue
         winner = decisions.get(key)
-        if winner not in members:
+        if not isinstance(winner, str) or winner not in members:
             st.hold.append(f"DUEL {node['key']} 缺少或无效的 {key} 胜者决定。")
             invalid = True
             continue
-        loser = members[0] if winner == members[1] else members[1]
+        loser_candidates = [
+            member for member in members if isinstance(member, str) and member != winner
+        ]
+        if len(loser_candidates) != 1:
+            st.hold.append(f"DUEL {node['key']} 的 {key} 不是合法二人对决。")
+            invalid = True
+            continue
+        loser = loser_candidates[0]
         winners.append(winner)
         losers.append(loser)
         records.append(
@@ -1180,5 +1220,8 @@ def resolve_to_checkpoint(
             _run_node(node, st, inputs, by_key)
 
     round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
-    fingerprint = _scoped_inputs_fingerprint(inputs, round_keys, vote_keys, group_keys, manual_keys)
+    duel_keys = _consumed_duel_keys(nodes, closure)
+    fingerprint = _scoped_inputs_fingerprint(
+        inputs, round_keys, vote_keys, group_keys, manual_keys, duel_keys
+    )
     return _assemble_result(st, obj, parsed, plan, fingerprint, cp=cp)

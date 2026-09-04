@@ -561,9 +561,7 @@ FIRST_BATCH = [
     for (key, name, desc, definition) in _FIRST_BATCH_DEFINITIONS
 ]
 
-_NON_PRODUCTION_TEMPLATE_NAMES = frozenset(
-    {"校十佳屏峰_历史未决回退"}
-)
+_NON_PRODUCTION_TEMPLATE_NAMES = frozenset({"校十佳屏峰_历史未决回退"})
 
 
 def _catalog():

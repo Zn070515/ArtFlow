@@ -153,6 +153,12 @@ def _validate_manual_select(name: str, node: dict) -> None:
 def _validate_select(name: str, node: dict) -> None:
     _require_non_negative_int(name, node, "count")
     _require_one_of(name, node, "outcome", frozenset({"winners", "losers"}))
+    if "outcome" in node and any(
+        field in node for field in ("tie_policy", "tie_break_source", "by")
+    ):
+        raise ValidationError(
+            f"Node {name}: DUEL outcome selection cannot declare tie/group rules."
+        )
 
 
 def _validate_fill(name: str, node: dict) -> None:
@@ -529,6 +535,13 @@ def _validate_nodes(nodes: list) -> tuple[list[dict], dict[str, OutputType]]:
                         f"Node {key}: source {ref_key!r} has type {emitted[ref_key].value}, "
                         f"expected one of {sorted(t.value for t in expected)}."
                     )
+        if node_type == NodeType.SELECT and "outcome" in node:
+            source_key = node.get("source")
+            source_type = emitted.get(source_key) if isinstance(source_key, str) else None
+            if source_type != OutputType.DECISION_SET:
+                raise ValidationError(
+                    f"Node {key}: outcome selection requires a DUEL decision set source."
+                )
         spec.validate(key, node)
         emitted[key] = spec.output_type
         validated.append(node)

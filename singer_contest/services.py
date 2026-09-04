@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
@@ -28,6 +29,7 @@ from ruleset.resolver import (
     inputs_fingerprint,
     resolve,
     resolve_to_checkpoint,
+    stage_consumed_duel_keys,
     stage_consumed_scopes,
 )
 
@@ -35,6 +37,7 @@ from .models import (
     Award,
     CompositeResult,
     ContestRound,
+    DuelDecision,
     Judge,
     ManualDecision,
     Performance,
@@ -45,7 +48,9 @@ from .models import (
     SingerRegistration,
     StageDecision,
     StageResult,
+    _authorize_duel_write,
     _authorize_manual_write,
+    _duel_write_authorized,
     _manual_write_authorized,
 )
 
@@ -60,11 +65,83 @@ def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     return Judge.objects.filter(round_assignments__round=contest_round).order_by("pk")
 
 
-def _order_singers_for_round(contest_round: ContestRound, singers: list[SingerRegistration]):
+def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistration]:
+    source = contest_round.effective_roster_source()
+    if source == ContestRound.RosterSource.APPROVED:
+        return list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    if source == ContestRound.RosterSource.LEGACY:
+        previous_round = (
+            ContestRound.objects.filter(activity=contest_round.activity)
+            .filter(
+                Q(sequence__lt=contest_round.sequence)
+                | Q(sequence=contest_round.sequence, pk__lt=contest_round.pk)
+            )
+            .order_by("-sequence", "-pk")
+            .first()
+        )
+        if previous_round is None:
+            raise ValidationError("后续轮次必须先有上一轮比赛。")
+        ensure_round_final_for_advancement(previous_round)
+        return list(
+            scope_runtime(
+                SingerRegistration.objects.filter(
+                    activity=contest_round.activity,
+                    summaries__round=previous_round,
+                    summaries__is_advanced=True,
+                    summaries__is_test_data=runtime_is_test(contest_round.activity),
+                ),
+                contest_round.activity,
+            ).order_by("pk")
+        )
+    if not contest_round.roster_source_stage:
+        raise ValidationError("STAGE 来源轮次必须配置上游赛段。")
+    upstream = (
+        StageResult.objects.filter(
+            activity=contest_round.activity,
+            stage_key=contest_round.roster_source_stage,
+            is_test_data=runtime_is_test(contest_round.activity),
+        )
+        .order_by("-pk")
+        .first()
+    )
+    if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
+        raise ValidationError("上游赛段未核定，禁止准备该轮次。")
+    singers = list(
+        SingerRegistration.objects.filter(
+            round_entries__round=contest_round, activity=contest_round.activity
+        ).order_by("pk")
+    )
+    if not singers:
+        raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
+    return singers
+
+
+def _order_singers_for_round(
+    contest_round: ContestRound,
+    singers: list[SingerRegistration],
+    *,
+    allow_unordered_manual=False,
+):
     """Apply the declared order policy before the entry snapshot is frozen."""
     policy = contest_round.order_policy
     if policy == ContestRound.OrderPolicy.REGISTRATION_ORDER:
         return sorted(singers, key=lambda singer: singer.pk)
+    if policy in (ContestRound.OrderPolicy.DRAW, ContestRound.OrderPolicy.MANUAL):
+        existing = dict(
+            RoundEntry.objects.filter(round=contest_round, singer__in=singers).values_list(
+                "singer_id", "running_order"
+            )
+        )
+        if set(existing) == {singer.pk for singer in singers} and all(
+            order is not None for order in existing.values()
+        ):
+            return sorted(singers, key=lambda singer: (existing[singer.pk], singer.pk))
+        if policy == ContestRound.OrderPolicy.MANUAL and not allow_unordered_manual:
+            raise ValidationError("人工顺序轮次必须先通过正式服务设置完整出场顺序。")
+        ordered = list(singers)
+        if policy == ContestRound.OrderPolicy.DRAW:
+            secrets.SystemRandom().shuffle(ordered)
+        return ordered
     previous = (
         ContestRound.objects.filter(activity=contest_round.activity)
         .filter(
@@ -99,53 +176,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
 
     source = locked_round.effective_roster_source()
-    if source == ContestRound.RosterSource.APPROVED:
-        singers = list(runtime_approved_singers(locked_round.activity).order_by("pk"))
-    elif source == ContestRound.RosterSource.LEGACY:
-        previous_round = (
-            ContestRound.objects.filter(activity=locked_round.activity)
-            .filter(
-                Q(sequence__lt=locked_round.sequence)
-                | Q(sequence=locked_round.sequence, pk__lt=locked_round.pk)
-            )
-            .order_by("-sequence", "-pk")
-            .first()
-        )
-        if previous_round is None:
-            raise ValidationError("后续轮次必须先有上一轮比赛。")
-        ensure_round_final_for_advancement(previous_round)
-        singers = list(
-            scope_runtime(
-                SingerRegistration.objects.filter(
-                    activity=locked_round.activity,
-                    summaries__round=previous_round,
-                    summaries__is_advanced=True,
-                    summaries__is_test_data=runtime_is_test(locked_round.activity),
-                ),
-                locked_round.activity,
-            ).order_by("pk")
-        )
-    else:  # STAGE: the roster is owned by the StageDecision -> RoundEntry bridge.
-        if not locked_round.roster_source_stage:
-            raise ValidationError("STAGE 来源轮次必须配置上游赛段。")
-        upstream = (
-            StageResult.objects.filter(
-                activity=locked_round.activity,
-                stage_key=locked_round.roster_source_stage,
-                is_test_data=runtime_is_test(locked_round.activity),
-            )
-            .order_by("-pk")
-            .first()
-        )
-        if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
-            raise ValidationError("上游赛段未核定，禁止准备该轮次。")
-        singers = list(
-            SingerRegistration.objects.filter(
-                round_entries__round=locked_round, activity=locked_round.activity
-            ).order_by("pk")
-        )
-        if not singers:
-            raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
+    singers = _round_source_singers(locked_round)
 
     judges = list(
         Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
@@ -157,7 +188,16 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if locked_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW and len(judges) < 3:
         raise ValidationError("当前评分方式至少需要 3 名评委。")
 
-    if source != ContestRound.RosterSource.STAGE:
+    existing_entries = list(
+        RoundEntry.objects.filter(round=locked_round).values_list("singer_id", "running_order")
+    )
+    manual_snapshot = locked_round.order_policy == ContestRound.OrderPolicy.MANUAL and (
+        {singer_id for singer_id, _ in existing_entries} == {singer.pk for singer in singers}
+        and all(order is not None for _, order in existing_entries)
+    )
+    if source != ContestRound.RosterSource.STAGE and not manual_snapshot:
+        if existing_entries:
+            RoundEntry.objects.filter(round=locked_round).delete()
         RoundEntry.objects.bulk_create(
             [
                 RoundEntry(round=locked_round, singer=singer, running_order=index)
@@ -188,6 +228,52 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
             },
             ensure_ascii=False,
         ),
+    )
+    return locked_round
+
+
+@transaction.atomic
+def set_round_running_order(contest_round, singer_ids, operator) -> ContestRound:
+    """Persist a complete manual running-order snapshot on a draft round."""
+    locked_activity = lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
+    locked_round = (
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
+    )
+    if locked_round.activity_id != locked_activity.pk:
+        raise PermissionDenied("轮次不属于当前活动。")
+    if locked_round.status != ContestRound.Status.DRAFT:
+        raise ValidationError("只能为草稿轮次设置人工出场顺序。")
+    if locked_round.order_policy != ContestRound.OrderPolicy.MANUAL:
+        raise ValidationError("只有人工顺序轮次可以设置人工出场顺序。")
+    singers = _round_source_singers(locked_round)
+    ordered_ids = [str(singer_id) for singer_id in singer_ids]
+    expected_ids = [str(singer.pk) for singer in singers]
+    if len(ordered_ids) != len(set(ordered_ids)) or set(ordered_ids) != set(expected_ids):
+        raise ValidationError("人工出场顺序必须完整覆盖该轮次的全部选手，且不能重复。")
+    singer_by_id = {str(singer.pk): singer for singer in singers}
+    ordered_pk_ids = [int(singer_id) for singer_id in ordered_ids]
+    entries = RoundEntry.objects.filter(round=locked_round)
+    entries.exclude(singer_id__in=ordered_pk_ids).delete()
+    entries.update(running_order=None)
+    existing_ids = set(entries.values_list("singer_id", flat=True))
+    RoundEntry.objects.bulk_create(
+        [
+            RoundEntry(round=locked_round, singer=singer_by_id[singer_id], running_order=index)
+            for index, singer_id in enumerate(ordered_ids, start=1)
+            if singer_by_id[singer_id].pk not in existing_ids
+        ]
+    )
+    for index, singer_id in enumerate(ordered_ids, start=1):
+        entries.filter(singer_id=singer_by_id[singer_id].pk).update(running_order=index)
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.UPDATE_STATUS,
+        target=f"ContestRound:{locked_round.pk}",
+        new_value=json.dumps(
+            {"order_policy": locked_round.order_policy, "running_order": ordered_ids},
+            ensure_ascii=False,
+        ),
+        note="set_round_running_order",
     )
     return locked_round
 
@@ -1102,6 +1188,7 @@ def bind_resolve_input(
     vote_scores=None,
     group_of=None,
     manual=None,
+    duel_decisions=None,
     checkpoint=None,
 ) -> ResolveInput:
     """Load a :class:`ResolveInput` from the DB for a frozen ruleset.
@@ -1132,6 +1219,7 @@ def bind_resolve_input(
         vote_scores=vote_scores or {},
         group_of=group_of or {},
         manual=manual or {},
+        duel_decisions=duel_decisions or {},
     )
 
 
@@ -1236,6 +1324,17 @@ def _source_manual(version, activity) -> dict[str, dict[str, tuple[str, ...]]]:
     out: dict[str, dict[str, tuple[str, ...]]] = {}
     for d in decisions:
         out.setdefault(d.manual_key, {})[d.group] = tuple(str(c) for c in (d.chosen or []))
+    return out
+
+
+def _source_duel_decisions(version, activity) -> dict[str, dict[str, str]]:
+    """Source persisted pairwise winners for the frozen ruleset version."""
+    decisions = DuelDecision.objects.filter(ruleset_version=version, activity=activity).order_by(
+        "duel_key", "pair_key", "pk"
+    )
+    out: dict[str, dict[str, str]] = {}
+    for decision in decisions:
+        out.setdefault(decision.duel_key, {})[decision.pair_key] = decision.winner
     return out
 
 
@@ -1446,12 +1545,24 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     )
     if target is None:
         return None
-    ordered_singers = _order_singers_for_round(
-        target, [decision.singer for decision in advancers]
+    target_singers = [decision.singer for decision in advancers]
+    existing_orders = dict(
+        RoundEntry.objects.filter(round=target, singer__in=target_singers).values_list(
+            "singer_id", "running_order"
+        )
     )
-    running_order_by_singer = {
-        singer.pk: index for index, singer in enumerate(ordered_singers, start=1)
-    }
+    manual_unordered = target.order_policy == ContestRound.OrderPolicy.MANUAL and not (
+        set(existing_orders) == {singer.pk for singer in target_singers}
+        and all(order is not None for order in existing_orders.values())
+    )
+    ordered_singers = _order_singers_for_round(
+        target, target_singers, allow_unordered_manual=manual_unordered
+    )
+    running_order_by_singer = (
+        {}
+        if manual_unordered
+        else {singer.pk: index for index, singer in enumerate(ordered_singers, start=1)}
+    )
     entry_qs = RoundEntry.objects.filter(round=target)
     existing_ids = set(entry_qs.values_list("singer_id", flat=True))
     target_ids = {decision.singer_id for decision in advancers}
@@ -1460,14 +1571,15 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
         RoundEntry(
             round=target,
             singer=decision.singer,
-            running_order=running_order_by_singer[decision.singer_id],
+            running_order=running_order_by_singer.get(decision.singer_id),
         )
         for decision in advancers
         if decision.singer_id not in existing_ids
     ]
     if removed:
         entry_qs.filter(singer_id__in=removed).delete()
-    entry_qs.update(running_order=None)
+    if running_order_by_singer:
+        entry_qs.update(running_order=None)
     if to_create:
         RoundEntry.objects.bulk_create(to_create)
     for singer_id, index in running_order_by_singer.items():
@@ -1522,6 +1634,7 @@ def _bound_inputs(version, activity, *, checkpoint=None) -> tuple[ResolveInput, 
         vote_scores=_combined_vote_scores(activity, binding),
         group_of=_source_group_of(activity, binding),
         manual=_source_manual(version, activity),
+        duel_decisions=_source_duel_decisions(version, activity),
         checkpoint=checkpoint,
     )
     return inputs, binding
@@ -1591,6 +1704,7 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
     round_keys, vote_keys, group_keys, manual_keys = stage_consumed_scopes(
         version.definition, checkpoint
     )
+    duel_keys = stage_consumed_duel_keys(version.definition, checkpoint)
     round_map = binding.get("round_keys") or {}
     group_map = binding.get("group_keys") or {}
     vote_map = binding.get("vote_keys") or {}
@@ -1609,6 +1723,7 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
         "votes": vote_pks,
         "audience": audience_names,
         "manual": set(manual_keys),
+        "duels": set(duel_keys),
     }
 
 
@@ -1662,6 +1777,11 @@ def _manual_node_keys(version) -> frozenset[str]:
     return frozenset(stage_consumed_scopes(version.definition, None)[3])
 
 
+def _duel_node_keys(version) -> frozenset[str]:
+    """All DUEL node keys declared in the frozen definition."""
+    return frozenset(stage_consumed_duel_keys(version.definition, None))
+
+
 @contextmanager
 def _authorized_manual_write():
     """Bracket a ManualDecision write with the production write-authorization guard.
@@ -1677,6 +1797,121 @@ def _authorized_manual_write():
         yield
     finally:
         _authorize_manual_write(prior)
+
+
+@contextmanager
+def _authorized_duel_write():
+    """Bracket a DuelDecision write with its formal service authority guard."""
+    prior = _duel_write_authorized()
+    _authorize_duel_write(True)
+    try:
+        yield
+    finally:
+        _authorize_duel_write(prior)
+
+
+def ensure_duel_not_consumed_by_confirmed_stage(version, duel_key, pair_key=None) -> None:
+    """Reject changing a DUEL input already read by a confirmed stage."""
+    consumed = StageResult.objects.filter(
+        ruleset_version_id=version.pk, status=StageResult.Status.CONFIRMED
+    ).values("pk")
+    for stage_pk in consumed:
+        stage = StageResult.objects.get(pk=stage_pk["pk"])
+        if duel_key in _stage_consumed_facts(stage)["duels"]:
+            raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+
+
+@transaction.atomic
+def set_duel_decision(
+    version, *, duel_key, pair_key, winner, created_by, activity=None
+) -> DuelDecision:
+    """Upsert one explicit DUEL winner for a frozen ruleset version."""
+    from ruleset.models import RulesetVersion
+
+    activity = activity or version.ruleset.activity
+    locked_activity = lock_activity_for_action(activity)
+    locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
+    if locked.ruleset.activity_id != locked_activity.pk:
+        raise ValidationError("赛制版本不属于当前活动。")
+    if locked.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("仅可更新已冻结赛制版本的对决决定。")
+    if duel_key not in _duel_node_keys(locked):
+        raise ValidationError(f"赛制未声明 DUEL 节点：{duel_key}。")
+    pair_key = str(pair_key or "")
+    winner = str(winner or "")
+    existing = DuelDecision.objects.filter(
+        ruleset_version=locked, duel_key=duel_key, pair_key=pair_key
+    ).first()
+    with _authorized_duel_write():
+        decision, _created = DuelDecision.objects.update_or_create(
+            ruleset_version=locked,
+            duel_key=duel_key,
+            pair_key=pair_key,
+            defaults={
+                "activity": locked_activity,
+                "winner": winner,
+                "created_by": created_by,
+                "is_test_data": runtime_is_test(locked_activity),
+            },
+        )
+    AuditLog.objects.create(
+        operator=created_by,
+        action_type=AuditLog.ActionType.DUEL_DECISION,
+        target=f"RulesetVersion:{locked.pk}",
+        old_value=json.dumps(
+            {
+                "duel_key": duel_key,
+                "pair_key": pair_key,
+                "winner": existing.winner if existing else None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        new_value=json.dumps(
+            {"duel_key": duel_key, "pair_key": pair_key, "winner": winner},
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+    )
+    return decision
+
+
+@transaction.atomic
+def delete_duel_decision(
+    version, *, duel_key, pair_key, activity=None, deleted_by=None
+) -> DuelDecision | None:
+    """Remove one explicit DUEL winner through the formal authority service."""
+    from ruleset.models import RulesetVersion
+
+    activity = activity or version.ruleset.activity
+    locked_activity = lock_activity_for_action(activity)
+    locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
+    if locked.ruleset.activity_id != locked_activity.pk:
+        raise ValidationError("赛制版本不属于当前活动。")
+    if locked.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("仅可删除已冻结赛制版本的对决决定。")
+    if duel_key not in _duel_node_keys(locked):
+        raise ValidationError(f"赛制未声明 DUEL 节点：{duel_key}。")
+    decision = DuelDecision.objects.filter(
+        ruleset_version=locked, duel_key=duel_key, pair_key=str(pair_key or "")
+    ).first()
+    if decision is None:
+        return None
+    old_value = {
+        "duel_key": decision.duel_key,
+        "pair_key": decision.pair_key,
+        "winner": decision.winner,
+    }
+    with _authorized_duel_write():
+        decision.delete()
+    AuditLog.objects.create(
+        operator=deleted_by,
+        action_type=AuditLog.ActionType.DUEL_DECISION,
+        target=f"RulesetVersion:{locked.pk}",
+        old_value=json.dumps(old_value, ensure_ascii=False, sort_keys=True),
+        new_value="",
+    )
+    return decision
 
 
 @transaction.atomic
@@ -1908,6 +2143,7 @@ def run_ruleset(
     vote_scores=None,
     group_of=None,
     manual=None,
+    duel_decisions=None,
     checkpoint=None,
     preview: bool = False,
 ) -> "StageResult | ResolveResult":
@@ -1941,6 +2177,8 @@ def run_ruleset(
     # persisted input_fingerprint has to be computed on the same (scoped) roster.
     if checkpoint is None and _stage_is_checkpoint(version, stage_key):
         checkpoint = stage_key
+    if duel_decisions is None:
+        duel_decisions = _source_duel_decisions(version, activity)
     inputs = bind_resolve_input(
         version,
         activity,
@@ -1948,6 +2186,7 @@ def run_ruleset(
         vote_scores=vote_scores,
         group_of=group_of,
         manual=manual,
+        duel_decisions=duel_decisions,
         checkpoint=checkpoint,
     )
     plan = _plan_from_version(version)
@@ -2011,6 +2250,7 @@ def _run_ruleset_args(version, activity) -> dict:
         "vote_scores": _combined_vote_scores(activity, binding),
         "group_of": _source_group_of(activity, binding),
         "manual": _source_manual(version, activity),
+        "duel_decisions": _source_duel_decisions(version, activity),
     }
 
 
@@ -2172,6 +2412,7 @@ def recompute_activity_result(
         vote_scores=_combined_vote_scores(activity, binding),
         group_of=_source_group_of(activity, binding),
         manual=_source_manual(version, activity),
+        duel_decisions=_source_duel_decisions(version, activity),
         checkpoint=checkpoint,
     )
     assert isinstance(result, StageResult)

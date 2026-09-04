@@ -1,0 +1,43 @@
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies = [
+        ("common", "0008_alter_auditlog_action_type"),
+    ]
+
+    operations = [
+        migrations.AlterField(
+            model_name="auditlog",
+            name="action_type",
+            field=models.CharField(
+                choices=[
+                    ("login", "用户登录"),
+                    ("update_registration", "修改报名"),
+                    ("update_status", "修改状态"),
+                    ("review_material", "审核材料"),
+                    ("upload_file", "上传文件"),
+                    ("delete_file", "删除文件"),
+                    ("enter_score", "录入/修改分数"),
+                    ("export", "导出文件"),
+                    ("vote_manage", "创建/修改投票"),
+                    ("publish_post", "发布/隐藏公开内容"),
+                    ("unlock_result", "解锁结果"),
+                    ("relock_result", "重新锁定结果"),
+                    ("phase_transition", "阶段变更"),
+                    ("finalize_advancement", "核定晋级名单"),
+                    ("finalize_ruleset", "核定冻结赛制"),
+                    ("confirm_stage_result", "核定并锁定赛段结果"),
+                    ("unlock_stage_result", "解锁赛段结果"),
+                    ("manual_decision", "更新人工选择"),
+                    ("duel_decision", "更新对决决定"),
+                    ("update_permission", "修改用户权限"),
+                    ("archive_activity", "归档活动"),
+                    ("unarchive_activity", "解归档活动"),
+                    ("other", "其他"),
+                ],
+                default="other",
+                max_length=22,
+            ),
+        ),
+    ]

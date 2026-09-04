@@ -14,6 +14,8 @@ class Migration(migrations.Migration):
             field=models.CharField(
                 choices=[
                     ("registration_order", "报名顺序"),
+                    ("draw", "抽签顺序"),
+                    ("manual", "人工顺序"),
                     ("previous_rank_asc", "上一轮排名升序"),
                     ("previous_rank_desc", "上一轮排名降序"),
                 ],
