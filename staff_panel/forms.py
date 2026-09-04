@@ -65,6 +65,11 @@ class ContestRoundForm(forms.Form):
     )
     advance_count = forms.IntegerField(min_value=0, required=False, initial=0)
     sequence = forms.IntegerField(min_value=1, required=False, initial=1)
+    order_policy = forms.ChoiceField(
+        choices=ContestRound.OrderPolicy.choices,
+        required=False,
+        initial=ContestRound.OrderPolicy.REGISTRATION_ORDER,
+    )
     roster_source = forms.ChoiceField(
         choices=[("", "自动判定"), *ContestRound.RosterSource.choices],
         required=False,
@@ -86,6 +91,9 @@ class ContestRoundForm(forms.Form):
 
     def clean_sequence(self):
         return self.cleaned_data.get("sequence") or 1
+
+    def clean_order_policy(self):
+        return self.cleaned_data.get("order_policy") or ContestRound.OrderPolicy.REGISTRATION_ORDER
 
     def clean_roster_source(self):
         return self.cleaned_data.get("roster_source") or ""

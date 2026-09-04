@@ -549,6 +549,34 @@ class ScoringServiceTests(TestCase):
 
         self.assertEqual(RoundEntry.objects.filter(round=semifinal).count(), 10)
 
+    def test_prepare_freezes_previous_rank_ascending_running_order(self):
+        self._lock_scored_round(self.round, singer_count=3, advance_count=2)
+        singers = list(
+            SingerRegistration.objects.filter(activity=self.activity).order_by("pk")
+        )
+        next_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=2,
+            order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
+            roster_source=ContestRound.RosterSource.APPROVED,
+        )
+
+        prepare_round(next_round, self.user)
+
+        ordered = list(
+            RoundEntry.objects.filter(round=next_round)
+            .order_by("running_order")
+            .values_list("singer_id", "running_order")
+        )
+        expected = list(
+            ScoreSummary.objects.filter(round=self.round).order_by("rank", "pk").values_list(
+                "singer_id", flat=True
+            )
+        )
+        self.assertEqual([singer_id for singer_id, _ in ordered], expected)
+        self.assertEqual([order for _, order in ordered], [1, 2, 3, 4])
+
     def test_prepare_semifinal_rejects_when_upstream_not_locked(self):
         self._lock_scored_round(self.round, singer_count=5, advance_count=0)
         self.round.status = ContestRound.Status.SCORING

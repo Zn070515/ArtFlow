@@ -108,6 +108,11 @@ class ContestRound(models.Model):
         AVERAGE = "average", "平均分"
         DROP_HIGH_LOW = "drop_high_low", "去最高最低后平均"
 
+    class OrderPolicy(models.TextChoices):
+        REGISTRATION_ORDER = "registration_order", "报名顺序"
+        PREVIOUS_RANK_ASC = "previous_rank_asc", "上一轮排名升序"
+        PREVIOUS_RANK_DESC = "previous_rank_desc", "上一轮排名降序"
+
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
         PREPARED = "prepared", "已准备"
@@ -124,6 +129,12 @@ class ContestRound(models.Model):
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
     name = models.CharField(max_length=100, blank=True)
     sequence = models.PositiveIntegerField(default=1, help_text="同一活动内的轮次顺序")
+    order_policy = models.CharField(
+        max_length=24,
+        choices=OrderPolicy,
+        default=OrderPolicy.REGISTRATION_ORDER,
+        help_text="准备轮次时冻结的出场顺序规则。",
+    )
     scheduled_at = models.DateTimeField(null=True, blank=True)
     venue = models.CharField(max_length=200, blank=True)
     rubric = models.ForeignKey(
@@ -299,11 +310,22 @@ class RoundEntry(RoundSnapshotMixin, models.Model):
         on_delete=cascade_draft_snapshots_or_protect_prepared,
         related_name="round_entries",
     )
+    running_order = models.PositiveIntegerField(
+        null=True, blank=True, help_text="准备轮次时冻结的现场出场序号。"
+    )
     objects = RoundEntryManager()
 
     class Meta:
         base_manager_name = "objects"
         unique_together = [("round", "singer")]
+        ordering = ["running_order", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["round", "running_order"],
+                condition=Q(running_order__isnull=False),
+                name="round_entry_unique_running_order",
+            )
+        ]
 
     def clean(self):
         self._ensure_round_is_draft(self._stored_round_id())

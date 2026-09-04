@@ -50,11 +50,40 @@ from .models import (
 
 
 def _eligible_singers(contest_round: ContestRound) -> QuerySet[SingerRegistration]:
-    return SingerRegistration.objects.filter(round_entries__round=contest_round).order_by("pk")
+    return SingerRegistration.objects.filter(round_entries__round=contest_round).order_by(
+        "round_entries__running_order", "pk"
+    )
 
 
 def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     return Judge.objects.filter(round_assignments__round=contest_round).order_by("pk")
+
+
+def _order_singers_for_round(contest_round: ContestRound, singers: list[SingerRegistration]):
+    """Apply the declared order policy before the entry snapshot is frozen."""
+    policy = contest_round.order_policy
+    if policy == ContestRound.OrderPolicy.REGISTRATION_ORDER:
+        return sorted(singers, key=lambda singer: singer.pk)
+    previous = (
+        ContestRound.objects.filter(activity=contest_round.activity)
+        .filter(
+            Q(sequence__lt=contest_round.sequence)
+            | Q(sequence=contest_round.sequence, pk__lt=contest_round.pk)
+        )
+        .order_by("-sequence", "-pk")
+        .first()
+    )
+    if previous is None:
+        raise ValidationError("按上一轮排名排序时必须存在上一轮比赛。")
+    ranks = dict(
+        ScoreSummary.objects.filter(round=previous, singer__in=singers).values_list(
+            "singer_id", "rank"
+        )
+    )
+    if any(singer.pk not in ranks or ranks[singer.pk] <= 0 for singer in singers):
+        raise ValidationError("按上一轮排名排序时，所有选手都必须有已确定的上一轮名次。")
+    direction = 1 if policy == ContestRound.OrderPolicy.PREVIOUS_RANK_ASC else -1
+    return sorted(singers, key=lambda singer: (direction * ranks[singer.pk], singer.pk))
 
 
 @transaction.atomic
@@ -120,6 +149,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     judges = list(
         Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
     )
+    singers = _order_singers_for_round(locked_round, singers)
     if not singers or not judges:
         raise ValidationError("准备比赛轮次需要至少一名选手和一名活跃评委。")
 
@@ -128,8 +158,16 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
 
     if source != ContestRound.RosterSource.STAGE:
         RoundEntry.objects.bulk_create(
-            [RoundEntry(round=locked_round, singer=singer) for singer in singers]
+            [
+                RoundEntry(round=locked_round, singer=singer, running_order=index)
+                for index, singer in enumerate(singers, start=1)
+            ]
         )
+    else:
+        entries = RoundEntry.objects.filter(round=locked_round)
+        entries.update(running_order=None)
+        for index, singer in enumerate(singers, start=1):
+            entries.filter(singer=singer).update(running_order=index)
     RoundJudge.objects.bulk_create(
         [RoundJudge(round=locked_round, judge=judge) for judge in judges]
     )
@@ -1397,14 +1435,17 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     target_ids = {decision.singer_id for decision in advancers}
     removed = existing_ids - target_ids
     to_create = [
-        RoundEntry(round=target, singer=decision.singer)
-        for decision in advancers
+        RoundEntry(round=target, singer=decision.singer, running_order=index)
+        for index, decision in enumerate(advancers, start=1)
         if decision.singer_id not in existing_ids
     ]
     if removed:
         entry_qs.filter(singer_id__in=removed).delete()
+    entry_qs.update(running_order=None)
     if to_create:
         RoundEntry.objects.bulk_create(to_create)
+    for index, decision in enumerate(advancers, start=1):
+        entry_qs.filter(singer_id=decision.singer_id).update(running_order=index)
     if removed or to_create:
         AuditLog.objects.create(
             operator=operator,

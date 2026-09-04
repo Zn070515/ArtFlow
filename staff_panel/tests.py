@@ -2568,6 +2568,13 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=2,
             name="Preliminary",
         )
+        ContestRound.objects.create(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=2,
+            name="Final order",
+            order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
+        )
         singer = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -2639,7 +2646,16 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(Judge.objects.filter(activity=clone, name="Judge A").exists())
         self.assertTrue(
             ContestRound.objects.filter(
-                activity=clone, round_type=ContestRound.RoundType.PRELIMINARY
+                activity=clone,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                order_policy=ContestRound.OrderPolicy.REGISTRATION_ORDER,
+            ).exists()
+        )
+        self.assertTrue(
+            ContestRound.objects.filter(
+                activity=clone,
+                name="Final order",
+                order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
             ).exists()
         )
         self.assertFalse(VoteSession.objects.filter(activity=clone, name="Popularity").exists())
