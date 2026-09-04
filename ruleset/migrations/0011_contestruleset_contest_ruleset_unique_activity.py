@@ -52,6 +52,12 @@ def _dedupe_contest_rulesets(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # PostgreSQL runs FK rules as deferred triggers; the RunPython above leaves pending
+    # trigger events and the same-transaction AddConstraint then ALTERs the table, which
+    # PG rejects ("cannot ALTER TABLE ... because it has pending trigger events"). Run this
+    # migration non-atomically so the dedupe commits per-statement and the unique constraint
+    # is added in a clean transaction. SQLite (table-rebuild ADD CONSTRAINT) is unaffected.
+    atomic = False
 
     dependencies = [
         ('core', '0004_alter_activity_options'),
