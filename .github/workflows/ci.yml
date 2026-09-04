@@ -80,7 +80,8 @@ jobs:
   windows:
     name: Windows Python ${{ matrix.python-version }} application gate
     runs-on: windows-latest
-    timeout-minutes: 20
+    # The full suite runs once per supported Windows interpreter.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
