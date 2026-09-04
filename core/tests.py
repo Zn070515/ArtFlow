@@ -1,8 +1,9 @@
 from common.authority import ACTIVITY_STATE, authority_write
 from common.models import AuditLog
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 
 from .models import Activity, ActivityPhase, QRCodeLink
 from .policies import ActivityAction, allowed_actions, ensure_activity_action_allowed
@@ -68,13 +69,121 @@ class CoreModelTests(TestCase):
         self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
 
 
+class ActivityCreationAuthorityTests(TestCase):
+    def test_activity_creation_rejects_non_initial_state_through_both_managers(self):
+        for manager, title in (
+            (Activity.objects, "Default manager live"),
+            (Activity._base_manager, "Base manager live"),
+        ):
+            with self.subTest(manager=manager.name):
+                with self.assertRaises(ValidationError):
+                    manager.create(
+                        title=title,
+                        activity_type=Activity.Type.SINGER_CONTEST,
+                        phase=Activity.Phase.LIVE,
+                    )
+                self.assertFalse(Activity.objects.filter(title=title).exists())
+
+    def test_activity_bulk_create_rejects_archived_initial_state_through_both_managers(self):
+        for manager, title in (
+            (Activity.objects, "Default bulk archived"),
+            (Activity._base_manager, "Base bulk archived"),
+        ):
+            with self.subTest(manager=manager.name):
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            Activity(
+                                title=title,
+                                activity_type=Activity.Type.SINGER_CONTEST,
+                                phase=Activity.Phase.ARCHIVED,
+                            )
+                        ]
+                    )
+                self.assertFalse(Activity.objects.filter(title=title).exists())
+
+    def test_activity_bulk_create_update_conflicts_rejects_state_change(self):
+        activity = Activity.objects.create(
+            title="Conflict target", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+        with self.assertRaises(ValidationError):
+            Activity.objects.bulk_create(
+                [
+                    Activity(
+                        pk=activity.pk,
+                        title=activity.title,
+                        activity_type=activity.activity_type,
+                        phase=Activity.Phase.LIVE,
+                    )
+                ],
+                update_conflicts=True,
+                update_fields=["phase"],
+                unique_fields=["pk"],
+            )
+
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.DRAFT)
+
+
+class ActivityDeletionAuthorityTests(TestCase):
+    def _activity(self, title, **kwargs):
+        return Activity.objects.create(
+            title=title,
+            activity_type=Activity.Type.SINGER_CONTEST,
+            **kwargs,
+        )
+
+    def test_activity_delete_rejects_formal_locked_and_non_draft_parents(self):
+        formal = self._activity("Formal", is_test_mode=False)
+        locked = self._activity("Locked")
+        non_draft = self._activity("Live")
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=locked.pk).update(is_locked=True)
+            Activity.objects.filter(pk=non_draft.pk).update(phase=Activity.Phase.LIVE)
+
+        with self.assertRaises(ValidationError):
+            non_draft.delete()
+        with self.assertRaises(ValidationError):
+            Activity.objects.filter(pk=formal.pk).delete()
+        with self.assertRaises(ValidationError):
+            Activity._base_manager.filter(pk=locked.pk).delete()
+
+        self.assertEqual(Activity.objects.filter(pk__in=[formal.pk, locked.pk, non_draft.pk]).count(), 3)
+
+    def test_activity_delete_allows_only_explicit_test_draft_cleanup_scope(self):
+        activity = self._activity("Cleanup")
+
+        with self.assertRaises(ValidationError):
+            activity.delete()
+        with authority_write("test_data.cleanup"):
+            activity.delete()
+
+        self.assertFalse(Activity.objects.filter(pk=activity.pk).exists())
+
+    def test_formal_activity_admin_disables_delete(self):
+        from .admin import ActivityAdmin
+
+        activity = self._activity("Formal admin", is_test_mode=False)
+        request = RequestFactory().get("/admin/core/activity/")
+        request.user = User.objects.create_superuser("activity-delete-admin", "admin@example.com", "pass")
+
+        self.assertFalse(ActivityAdmin(Activity, admin.site).has_delete_permission(request, activity))
+
+
 class ActivityPhasePolicyTests(TestCase):
     def _activity(self, phase=None):
-        return Activity.objects.create(
+        activity = Activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             **({"phase": phase} if phase is not None else {}),
         )
+        if activity.phase != Activity.Phase.DRAFT:
+            with authority_write(ACTIVITY_STATE):
+                activity.save()
+        else:
+            activity.save()
+        return activity
 
     def test_draft_does_not_allow_scoring(self):
         activity = self._activity()
@@ -159,11 +268,13 @@ class ActivityPhaseTransitionTests(TestCase):
         )
 
     def test_backward_transition_is_rejected(self):
-        live = Activity.objects.create(
+        live = Activity(
             title="Live",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.LIVE,
         )
+        with authority_write(ACTIVITY_STATE):
+            live.save()
         with self.assertRaises(PermissionDenied):
             transition_activity_phase(live, Activity.Phase.DRAFT, actor=self.user)
         live.refresh_from_db()
@@ -186,11 +297,13 @@ class ActivityPhaseTransitionTests(TestCase):
         self.assertEqual(self.activity.phase, Activity.Phase.DRAFT)
 
     def test_archived_cannot_return_to_live(self):
-        archived = Activity.objects.create(
+        archived = Activity(
             title="Archived",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.ARCHIVED,
         )
+        with authority_write(ACTIVITY_STATE):
+            archived.save()
         with self.assertRaises(PermissionDenied):
             transition_activity_phase(archived, Activity.Phase.LIVE, actor=self.user)
 
@@ -238,11 +351,13 @@ class ActivityPhaseTransitionTests(TestCase):
             ).exists()
         )
         # No generic successor set may reach ARCHIVED; only the archive service does.
-        expecting_archived = Activity.objects.create(
+        expecting_archived = Activity(
             title="Second",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PUBLISHED,
         )
+        with authority_write(ACTIVITY_STATE):
+            expecting_archived.save()
         with self.assertRaises(PermissionDenied):
             transition_activity_phase(expecting_archived, Activity.Phase.ARCHIVED, actor=self.user)
 
@@ -255,13 +370,14 @@ class ActivityUnarchiveTests(TestCase):
         self.staff = User.objects.create_user(
             username="unarchive-staff", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
-            title="Contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.ARCHIVED,
-            is_test_mode=False,
-            is_locked=True,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.ARCHIVED,
+                is_test_mode=False,
+                is_locked=True,
+            )
 
     def test_unarchive_rejects_non_admin(self):
         with self.assertRaises(PermissionDenied):

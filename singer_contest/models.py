@@ -4,6 +4,7 @@ from typing import Any, cast
 from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
+    TEST_DATA_CLEANUP,
     STAGE_RESULT_CONFIRM,
     authority_authorized,
 )
@@ -261,6 +262,37 @@ class ContestRoundQuerySet(models.QuerySet):
                 obj._ensure_authorized_mutation()
         return super().bulk_update(objs, fields, *args, **kwargs)
 
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        if kwargs.get("update_conflicts"):
+            update_fields = set(kwargs.get("update_fields", ()))
+            if (
+                _CONTEST_ROUND_STATE_FIELDS.intersection(update_fields)
+                and not authority_authorized(CONTEST_ROUND_STATE)
+            ):
+                raise ValidationError("轮次状态只能通过轮次服务变更。")
+            if (
+                _CONTEST_ROUND_CONFIGURATION_FIELDS.intersection(update_fields)
+                and not authority_authorized(CONTEST_ROUND_STATE)
+            ):
+                for contest_round in objs:
+                    lookup = {
+                        field: getattr(contest_round, field)
+                        for field in kwargs.get("unique_fields", ())
+                    }
+                    if self.model._base_manager.filter(**lookup).exclude(
+                        status=ContestRound.Status.DRAFT
+                    ).exists():
+                        raise ValidationError("轮次准备后，执行配置不可直接修改。")
+        for contest_round in objs:
+            contest_round._ensure_initial_state_authorized()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def delete(self):
+        for contest_round in self:
+            contest_round._ensure_deletion_authorized()
+        return super().delete()
+
 
 ContestRoundQuerySetManager = models.Manager.from_queryset(ContestRoundQuerySet)
 
@@ -404,9 +436,42 @@ class ContestRound(models.Model):
             ):
                 raise ValidationError("轮次准备后，执行配置不可直接修改。")
 
+    def _ensure_initial_state_authorized(self):
+        if authority_authorized(CONTEST_ROUND_STATE):
+            return
+        if (
+            self.status != self.Status.DRAFT
+            or self.is_locked
+            or self.score_version != 0
+            or self.advancement_status != self.AdvancementStatus.AUTO
+        ):
+            raise ValidationError("轮次必须以未锁定的 DRAFT 初始状态创建。")
+
+    def _ensure_deletion_authorized(self):
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("轮次删除需要显式测试数据清理权限。")
+        if self.status != self.Status.DRAFT or self.is_locked:
+            if self.entries.exists() or self.round_judges.exists():
+                from django.db.models.deletion import ProtectedError
+
+                protected = list(self.entries.all()) + list(self.round_judges.all())
+                raise ProtectedError("Prepared round snapshots are protected.", protected)
+            raise ValidationError("只有未锁定的 DRAFT 轮次可以删除。")
+        if not self.activity.is_test_mode:
+            raise ValidationError("只有测试活动中的轮次可以删除。")
+        from .services import ensure_round_not_consumed_by_confirmed_stage
+
+        ensure_round_not_consumed_by_confirmed_stage(self)
+
     def save(self, *args, **kwargs):
+        if self._state.adding:
+            self._ensure_initial_state_authorized()
         self._ensure_authorized_mutation()
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_deletion_authorized()
+        return super().delete(*args, **kwargs)
 
     def effective_roster_source(self) -> str:
         """The roster provider for this round, resolving the M1-INTEGRATION-1 source.

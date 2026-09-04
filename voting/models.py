@@ -1,4 +1,4 @@
-from common.authority import VOTE_SESSION_STATE, authority_authorized
+from common.authority import TEST_DATA_CLEANUP, VOTE_SESSION_STATE, authority_authorized
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
@@ -97,6 +97,28 @@ class VoteSessionQuerySet(models.QuerySet):
                     raise ValidationError("投票锁定后，投票配置不可直接修改。")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        if kwargs.get("update_conflicts"):
+            update_fields = set(kwargs.get("update_fields", ()))
+            self._ensure_state_authorized(update_fields)
+            if self.configuration_fields.intersection(update_fields):
+                for vote_session in objs:
+                    lookup = {
+                        field: getattr(vote_session, field)
+                        for field in kwargs.get("unique_fields", ())
+                    }
+                    if self.model._base_manager.filter(**lookup, is_locked=True).exists():
+                        raise ValidationError("投票锁定后，投票配置不可直接修改。")
+        for vote_session in objs:
+            vote_session._ensure_initial_state_authorized()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def delete(self):
+        for vote_session in self:
+            vote_session._ensure_deletion_authorized()
+        return super().delete()
+
 
 VoteSessionManager = models.Manager.from_queryset(VoteSessionQuerySet)
 
@@ -155,8 +177,25 @@ class VoteSession(models.Model):
     def __str__(self):
         return self.name
 
+    def _ensure_initial_state_authorized(self):
+        if authority_authorized(VOTE_SESSION_STATE):
+            return
+        if self.is_open or self.is_locked:
+            raise ValidationError("投票必须以关闭且未锁定的初始状态创建。")
+
+    def _ensure_deletion_authorized(self):
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("投票删除需要显式测试数据清理权限。")
+        if not self.is_test_data or not self.activity.is_test_mode or self.is_open or self.is_locked:
+            raise ValidationError("只有关闭且未锁定的测试投票可以删除。")
+        from singer_contest.services import ensure_vote_not_consumed_by_confirmed_stage
+
+        ensure_vote_not_consumed_by_confirmed_stage(self)
+
     def save(self, *args, **kwargs):
-        if not self._state.adding and self.pk:
+        if self._state.adding:
+            self._ensure_initial_state_authorized()
+        elif self.pk:
             update_fields = kwargs.get("update_fields")
             compared_configuration_fields = (
                 self._configuration_fields
@@ -187,6 +226,11 @@ class VoteSession(models.Model):
             ):
                 raise ValidationError("投票锁定后，投票配置不可直接修改。")
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_deletion_authorized()
+        return super().delete(*args, **kwargs)
+
 
 
 class VoteBallotQuerySet(models.QuerySet):

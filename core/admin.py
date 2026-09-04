@@ -25,6 +25,9 @@ class ActivityAdmin(admin.ModelAdmin):
         "locked_by",
     ]
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(ActivityPhase)
 class ActivityPhaseAdmin(admin.ModelAdmin):

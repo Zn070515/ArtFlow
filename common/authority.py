@@ -24,6 +24,7 @@ ACTIVITY_STATE = "activity.state"
 CONTEST_ROUND_STATE = "contestround.state"
 VOTE_SESSION_STATE = "votesession.state"
 SCORE_SUMMARY_RECALCULATE = "scoresummary.recalculate"
+TEST_DATA_CLEANUP = "test_data.cleanup"
 
 _scope = threading.local()
 

@@ -75,6 +75,9 @@ class ContestRoundAdmin(admin.ModelAdmin):
     def judge_count(self, contest_round):
         return getattr(contest_round, "judge_count_value", contest_round.round_judges.count())
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(Judge)
 class JudgeAdmin(admin.ModelAdmin):

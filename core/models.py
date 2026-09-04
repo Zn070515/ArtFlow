@@ -1,4 +1,4 @@
-from common.authority import ACTIVITY_STATE, authority_authorized
+from common.authority import ACTIVITY_STATE, TEST_DATA_CLEANUP, authority_authorized
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
@@ -19,6 +19,7 @@ class ActivityQuerySet(models.QuerySet):
         return super().update(**kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
         if kwargs.get("update_conflicts") and self.lifecycle_fields.intersection(
             kwargs.get("update_fields", ())
         ):
@@ -29,8 +30,8 @@ class ActivityQuerySet(models.QuerySet):
             and not authority_authorized(ACTIVITY_STATE)
         ):
             raise ValidationError("Activity state must be changed through the lifecycle service.")
-        objs = list(objs)
         for activity in objs:
+            activity._ensure_initial_state_authorized()
             activity.data_lifecycle = (
                 activity.DataLifecycle.TEST
                 if activity.is_test_mode
@@ -43,6 +44,11 @@ class ActivityQuerySet(models.QuerySet):
         if self.lifecycle_fields.intersection(fields):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
         return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def delete(self):
+        for activity in self:
+            activity._ensure_deletion_authorized()
+        return super().delete()
 
 
 ActivityManager = models.Manager.from_queryset(ActivityQuerySet)
@@ -103,9 +109,38 @@ class Activity(models.Model):
     def __str__(self):
         return self.title
 
+    def _ensure_initial_state_authorized(self):
+        if authority_authorized(ACTIVITY_STATE):
+            return
+        if self.phase != self.Phase.DRAFT or self.is_locked:
+            raise ValidationError("Activity must be created in the unlocked DRAFT phase.")
+
+    def _ensure_deletion_authorized(self):
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("Activity deletion requires the explicit test-data cleanup authority.")
+        if (
+            not self.is_test_mode
+            or self.data_lifecycle != self.DataLifecycle.TEST
+            or self.phase != self.Phase.DRAFT
+            or self.is_locked
+        ):
+            raise ValidationError("Only unlocked TEST activities in DRAFT may be deleted.")
+        if (
+            self.archive_packages.exists()
+            or self.stage_results.exists()
+            or self.rounds.exists()
+            or self.vote_sessions.exists()
+        ):
+            raise ValidationError("Activities with archive, result, or runtime data cannot be deleted.")
+
+    def delete(self, *args, **kwargs):
+        self._ensure_deletion_authorized()
+        return super().delete(*args, **kwargs)
+
     def save(self, *args, **kwargs):
         allow_transition = kwargs.pop("_allow_lifecycle_transition", False)
         if self._state.adding:
+            self._ensure_initial_state_authorized()
             self.data_lifecycle = (
                 self.DataLifecycle.TEST if self.is_test_mode else self.DataLifecycle.FORMAL
             )
