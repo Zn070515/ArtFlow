@@ -47,7 +47,7 @@ class ActivityQuerySet(models.QuerySet):
 
     def delete(self):
         for activity in self:
-            activity._ensure_deletion_authorized()
+            activity._ensure_deletion_authorized()  # type: ignore[attr-defined]
         return super().delete()
 
 
@@ -130,7 +130,9 @@ class Activity(models.Model):
 
     def _ensure_deletion_authorized(self):
         if not authority_authorized(TEST_DATA_CLEANUP):
-            raise ValidationError("Activity deletion requires the explicit test-data cleanup authority.")
+            raise ValidationError(
+                "Activity deletion requires the explicit test-data cleanup authority."
+            )
         if (
             not self.is_test_mode
             or self.data_lifecycle != self.DataLifecycle.TEST

@@ -11,40 +11,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from accounts.admin import CustomUserAdmin
 from accounts.models import User
 from accounts.services import change_user_role
-from common.authority import (
-    ACCOUNT_AUTHORITY,
-    ACTIVITY_STATE,
-    CONTEST_ROUND_STATE,
-    RULESET_FREEZE,
-    SCORE_SUMMARY_RECALCULATE,
-    STAGE_RESULT_CONFIRM,
-    VOTE_SESSION_STATE,
-    authority_write,
-)
 from core.admin import ActivityAdmin
 from core.models import Activity
+from core.services import transition_activity_phase
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
-from django.test import RequestFactory
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
-from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.admin import RulesetVersionAdmin
+from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import create_ruleset_version, freeze_ruleset_version
 from singer_contest.admin import (
     AwardAdmin,
     ContestRoundAdmin,
     CriterionScoreAdmin,
     JudgeAdmin,
+    RubricCriterionAdmin,
     ScoreRecordAdmin,
     ScoreSummaryAdmin,
     ScoringRubricAdmin,
-    RubricCriterionAdmin,
     SingerRegistrationAdmin,
 )
 from singer_contest.models import (
@@ -73,11 +63,20 @@ from singer_contest.services import (
     prepare_round,
     run_ruleset,
 )
-from common.models import AuditLog
-from core.services import transition_activity_phase
-from voting.services import lock_vote_session
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
+from voting.services import lock_vote_session
 
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    SCORE_SUMMARY_RECALCULATE,
+    STAGE_RESULT_CONFIRM,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
+from common.models import AuditLog
 
 Rejects = (ValidationError, PermissionDenied)
 
@@ -428,11 +427,28 @@ class AuthorityMutationMatrixTests(TestCase):
         self.assertEqual(
             {descriptor.name for descriptor in MODEL_MATRIX},
             {
-                "User", "Activity", "ContestRound", "VoteSession", "ScoreRecord",
-                "ScoreSummary", "AudienceScore", "VoteOption", "VoteBallot", "VoteRecord",
-                "PerformanceGroup", "Performance", "RubricCriterion", "CriterionScore",
-                "StageResult", "StageDecision", "StageAwardDecision", "CompositeResult",
-                "Award", "SingerRegistration", "Judge", "RulesetVersion",
+                "User",
+                "Activity",
+                "ContestRound",
+                "VoteSession",
+                "ScoreRecord",
+                "ScoreSummary",
+                "AudienceScore",
+                "VoteOption",
+                "VoteBallot",
+                "VoteRecord",
+                "PerformanceGroup",
+                "Performance",
+                "RubricCriterion",
+                "CriterionScore",
+                "StageResult",
+                "StageDecision",
+                "StageAwardDecision",
+                "CompositeResult",
+                "Award",
+                "SingerRegistration",
+                "Judge",
+                "RulesetVersion",
             },
         )
 
@@ -461,15 +477,19 @@ class AuthorityMutationMatrixTests(TestCase):
         ):
             with self.subTest(model=model.__name__, direction="protected-to-unprotected"):
                 self._assert_rejects(
-                    lambda model=model, protected=protected, field=field: model._base_manager.filter(
-                        pk=protected.pk
-                    ).update(**{field: self.alternate_round.pk})
+                    lambda model=model, protected=protected, field=field: (
+                        model._base_manager.filter(pk=protected.pk).update(
+                            **{field: self.alternate_round.pk}
+                        )
+                    )
                 )
             with self.subTest(model=model.__name__, direction="unprotected-to-protected"):
                 self._assert_rejects(
-                    lambda model=model, unprotected=unprotected, field=field: model._base_manager.filter(
-                        pk=unprotected.pk
-                    ).update(**{field: self.round.pk})
+                    lambda model=model, unprotected=unprotected, field=field: (
+                        model._base_manager.filter(pk=unprotected.pk).update(
+                            **{field: self.round.pk}
+                        )
+                    )
                 )
 
         self._assert_rejects(
@@ -506,67 +526,75 @@ class AuthorityMutationMatrixTests(TestCase):
             )
 
         self._confirm_stage()
-        for model, protected, unprotected in (
+        for stage_model, stage_protected, stage_unprotected in (
             (StageDecision, self.decision, self.alternate_decision),
             (StageAwardDecision, self.award_decision, self.alternate_award_decision),
             (CompositeResult, self.composite, self.alternate_composite),
         ):
-            with self.subTest(model=model.__name__, direction="protected-to-unprotected"):
+            with self.subTest(model=stage_model.__name__, direction="protected-to-unprotected"):
                 self._assert_rejects(
-                    lambda model=model, protected=protected: model._base_manager.filter(
-                        pk=protected.pk
-                    ).update(stage_result_id=self.alternate_stage.pk)
+                    lambda stage_model=stage_model, stage_protected=stage_protected: (
+                        stage_model._base_manager.filter(pk=stage_protected.pk).update(
+                            stage_result_id=self.alternate_stage.pk
+                        )
+                    )
                 )
-            with self.subTest(model=model.__name__, direction="unprotected-to-protected"):
+            with self.subTest(model=stage_model.__name__, direction="unprotected-to-protected"):
                 self._assert_rejects(
-                    lambda model=model, unprotected=unprotected: model._base_manager.filter(
-                        pk=unprotected.pk
-                    ).update(stage_result_id=self.stage.pk)
+                    lambda stage_model=stage_model, stage_unprotected=stage_unprotected: (
+                        stage_model._base_manager.filter(pk=stage_unprotected.pk).update(
+                            stage_result_id=self.stage.pk
+                        )
+                    )
                 )
 
     def test_admin_canonical_boundaries(self):
-        self.assertFalse(ActivityAdmin(Activity, admin.site).has_delete_permission(None, self.activity))
+        request = RequestFactory().get("/admin/")
+        request.user = self.admin_user
+        self.assertFalse(
+            ActivityAdmin(Activity, admin.site).has_delete_permission(None, self.activity)
+        )
         self.assertEqual(
             CustomUserAdmin(User, admin.site).get_readonly_fields(None, self.admin_user),
             ("role", "is_active", "is_superuser", "is_staff"),
         )
         self.assertEqual(
-            SingerRegistrationAdmin(SingerRegistration, admin.site).get_readonly_fields(None, self.singer),
+            SingerRegistrationAdmin(SingerRegistration, admin.site).get_readonly_fields(
+                None, self.singer
+            ),
             ("activity", "user"),
         )
         self.assertEqual(
             JudgeAdmin(Judge, admin.site).get_readonly_fields(None, self.judge), ("activity",)
         )
-        self.assertFalse(ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(None, self.round))
-        for admin_class, model, instance in (
+        self.assertFalse(
+            ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(None, self.round)
+        )
+        for readonly_admin_class, readonly_model, instance in (
             (ScoreRecordAdmin, ScoreRecord, self.score),
             (CriterionScoreAdmin, CriterionScore, self.criterion_score),
             (ScoreSummaryAdmin, ScoreSummary, None),
             (AwardAdmin, Award, self.award),
             (RulesetVersionAdmin, RulesetVersion, self.version),
         ):
-            model_admin = admin_class(model, admin.site)
-            with self.subTest(model=model.__name__):
+            model_admin = readonly_admin_class(readonly_model, admin.site)
+            with self.subTest(model=readonly_model.__name__):
                 self.assertFalse(model_admin.has_add_permission(None))
                 self.assertFalse(model_admin.has_change_permission(None, instance))
                 self.assertFalse(model_admin.has_delete_permission(None, instance))
-        for admin_class, model, fixture_name, readonly_fields in ADMIN_CANONICAL_MATRIX:
-            model_admin = admin_class(model, admin.site)
+        for admin_class, canonical_model, fixture_name, readonly_fields in ADMIN_CANONICAL_MATRIX:
+            canonical_admin = admin_class(canonical_model, admin.site)
             instance = getattr(self, fixture_name)
-            request = RequestFactory().get("/admin/")
-            request.user = self.admin_user
-            with self.subTest(model=model.__name__):
+            with self.subTest(model=canonical_model.__name__):
                 self.assertEqual(
-                    model_admin.get_readonly_fields(None, instance), readonly_fields
+                    canonical_admin.get_readonly_fields(request, instance), readonly_fields
                 )
-                self.assertTrue(model_admin.has_add_permission(request))
-                self.assertTrue(model_admin.has_change_permission(request, instance))
-                self.assertTrue(model_admin.has_delete_permission(request, instance))
+                self.assertTrue(canonical_admin.has_add_permission(request))
+                self.assertTrue(canonical_admin.has_change_permission(request, instance))
+                self.assertTrue(canonical_admin.has_delete_permission(request, instance))
 
     def test_documented_authority_services_succeed(self):
-        change_user_role(
-            target=self.operator, new_role=User.Role.STAFF, actor=self.admin_user
-        )
+        change_user_role(target=self.operator, new_role=User.Role.STAFF, actor=self.admin_user)
         self.operator.refresh_from_db()
         self.assertEqual(self.operator.role, User.Role.STAFF)
         transitioned = transition_activity_phase(
@@ -576,7 +604,10 @@ class AuthorityMutationMatrixTests(TestCase):
         prepared_round = prepare_round(self.round, self.admin_user)
         self.assertEqual(prepared_round.status, ContestRound.Status.PREPARED)
         changes = apply_scores(
-            self.round, {(self.singer.pk, self.judge.pk): Decimal("91")}, self.admin_user, note="matrix"
+            self.round,
+            {(self.singer.pk, self.judge.pk): Decimal("91")},
+            self.admin_user,
+            note="matrix",
         )
         self.assertEqual(len(changes), 1)
         locked_round = lock_round(self.round, self.admin_user)
@@ -592,7 +623,9 @@ class AuthorityMutationMatrixTests(TestCase):
         frozen_version = freeze_ruleset_version(draft_version, self.admin_user, binding={})
         self.assertEqual(frozen_version.status, RulesetVersion.Status.FROZEN)
         with authority_write(ACTIVITY_STATE):
-            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.RESULTS_PENDING)
+            Activity.objects.filter(pk=self.activity.pk).update(
+                phase=Activity.Phase.RESULTS_PENDING
+            )
         resolved_stage = run_ruleset(
             frozen_version,
             self.activity,
@@ -601,6 +634,8 @@ class AuthorityMutationMatrixTests(TestCase):
             round_keys={},
             preview=False,
         )
+        self.assertIsInstance(resolved_stage, StageResult)
+        resolved_stage = cast(StageResult, resolved_stage)
         self.assertEqual(resolved_stage.status, StageResult.Status.READY_TO_CONFIRM)
         confirmed_stage = confirm_stage_result(resolved_stage, confirmed_by=self.admin_user)
         self.assertEqual(confirmed_stage.status, StageResult.Status.CONFIRMED)
@@ -611,7 +646,8 @@ class AuthorityMutationMatrixTests(TestCase):
         )
         self.assertTrue(
             AuditLog.objects.filter(
-                target=f"VoteSession:{self.vote_session.pk}", action_type=AuditLog.ActionType.RELOCK_RESULT
+                target=f"VoteSession:{self.vote_session.pk}",
+                action_type=AuditLog.ActionType.RELOCK_RESULT,
             ).exists()
         )
         self.assertTrue(
@@ -631,15 +667,23 @@ class AuthorityMutationMatrixTests(TestCase):
 def _user_row(case):
     case.admin_user.role = User.Role.PARTICIPANT
     case._assert_rejects(lambda: case.admin_user.save(update_fields=["role"]))
-    case._assert_rejects(lambda: User.objects.filter(pk=case.admin_user.pk).update(role=User.Role.PARTICIPANT))
-    case._assert_rejects(lambda: User._base_manager.filter(pk=case.admin_user.pk).update(role=User.Role.PARTICIPANT))
+    case._assert_rejects(
+        lambda: User.objects.filter(pk=case.admin_user.pk).update(role=User.Role.PARTICIPANT)
+    )
+    case._assert_rejects(
+        lambda: User._base_manager.filter(pk=case.admin_user.pk).update(role=User.Role.PARTICIPANT)
+    )
     case.admin_user.role = User.Role.PARTICIPANT
     case._assert_rejects(lambda: User.objects.bulk_update([case.admin_user], ["role"]))
 
 
 def _activity_row(case):
-    case._assert_rejects(lambda: Activity.objects.filter(pk=case.activity.pk).update(phase=Activity.Phase.LIVE))
-    case._assert_rejects(lambda: Activity._base_manager.filter(pk=case.activity.pk).update(phase=Activity.Phase.LIVE))
+    case._assert_rejects(
+        lambda: Activity.objects.filter(pk=case.activity.pk).update(phase=Activity.Phase.LIVE)
+    )
+    case._assert_rejects(
+        lambda: Activity._base_manager.filter(pk=case.activity.pk).update(phase=Activity.Phase.LIVE)
+    )
     case.activity.phase = Activity.Phase.LIVE
     case._assert_rejects(lambda: case.activity.save(update_fields=["phase"]))
     case.activity.phase = Activity.Phase.LIVE
@@ -647,8 +691,16 @@ def _activity_row(case):
 
 
 def _round_row(case):
-    case._assert_rejects(lambda: ContestRound.objects.filter(pk=case.round.pk).update(status=ContestRound.Status.LOCKED))
-    case._assert_rejects(lambda: ContestRound._base_manager.filter(pk=case.round.pk).update(status=ContestRound.Status.LOCKED))
+    case._assert_rejects(
+        lambda: ContestRound.objects.filter(pk=case.round.pk).update(
+            status=ContestRound.Status.LOCKED
+        )
+    )
+    case._assert_rejects(
+        lambda: ContestRound._base_manager.filter(pk=case.round.pk).update(
+            status=ContestRound.Status.LOCKED
+        )
+    )
     case.round.status = ContestRound.Status.LOCKED
     case._assert_rejects(lambda: case.round.save(update_fields=["status"]))
     case.round.status = ContestRound.Status.LOCKED
@@ -656,8 +708,12 @@ def _round_row(case):
 
 
 def _vote_session_row(case):
-    case._assert_rejects(lambda: VoteSession.objects.filter(pk=case.vote_session.pk).update(is_open=True))
-    case._assert_rejects(lambda: VoteSession._base_manager.filter(pk=case.vote_session.pk).update(is_open=True))
+    case._assert_rejects(
+        lambda: VoteSession.objects.filter(pk=case.vote_session.pk).update(is_open=True)
+    )
+    case._assert_rejects(
+        lambda: VoteSession._base_manager.filter(pk=case.vote_session.pk).update(is_open=True)
+    )
     case.vote_session.is_open = True
     case._assert_rejects(lambda: case.vote_session.save(update_fields=["is_open"]))
     case.vote_session.is_open = True
@@ -786,8 +842,12 @@ def _criterion_score(case):
 
 def _stage_result(case):
     case._confirm_stage()
-    case._assert_rejects(lambda: StageResult.objects.filter(pk=case.stage.pk).update(stage_key="changed"))
-    case._assert_rejects(lambda: StageResult._base_manager.filter(pk=case.stage.pk).update(stage_key="changed"))
+    case._assert_rejects(
+        lambda: StageResult.objects.filter(pk=case.stage.pk).update(stage_key="changed")
+    )
+    case._assert_rejects(
+        lambda: StageResult._base_manager.filter(pk=case.stage.pk).update(stage_key="changed")
+    )
     case.stage.stage_key = "changed"
     case._assert_rejects(lambda: case.stage.save(update_fields=["stage_key"]))
     case._assert_rejects(lambda: StageResult.objects.bulk_update([case.stage], ["stage_key"]))
@@ -811,7 +871,9 @@ def _award(case):
     case.award.source_stage_result = case.stage
     case._assert_rejects(lambda: case.award.save(update_fields=["source_stage_result"]))
     case._assert_rejects(
-        lambda: Award._base_manager.filter(pk=case.award.pk).update(source_stage_result_id=case.stage.pk)
+        lambda: Award._base_manager.filter(pk=case.award.pk).update(
+            source_stage_result_id=case.stage.pk
+        )
     )
 
 
@@ -826,8 +888,14 @@ def _judge(case):
 
 
 def _ruleset_version(case):
-    case._assert_rejects(lambda: RulesetVersion.objects.filter(pk=case.version.pk).update(definition='{"schema_version": 1, "nodes": []}'))
-    case._assert_rejects(lambda: RulesetVersion._base_manager.filter(pk=case.version.pk).update(version=2))
+    case._assert_rejects(
+        lambda: RulesetVersion.objects.filter(pk=case.version.pk).update(
+            definition='{"schema_version": 1, "nodes": []}'
+        )
+    )
+    case._assert_rejects(
+        lambda: RulesetVersion._base_manager.filter(pk=case.version.pk).update(version=2)
+    )
     case.version.version = 2
     case._assert_rejects(lambda: case.version.save(update_fields=["version"]))
     case._assert_rejects(lambda: RulesetVersion.objects.bulk_update([case.version], ["version"]))
@@ -948,7 +1016,11 @@ def _option_bulk_and_delete(case):
     case._lock_vote()
     case._assert_rejects(
         lambda: VoteOption.objects.bulk_create(
-            [VoteOption(vote_session=case.vote_session, singer=case.spare_singer, is_test_data=True)]
+            [
+                VoteOption(
+                    vote_session=case.vote_session, singer=case.spare_singer, is_test_data=True
+                )
+            ]
         )
     )
     case._assert_rejects(lambda: VoteOption.objects.filter(pk=case.option.pk).delete())
@@ -994,7 +1066,11 @@ def _group_bulk_and_delete(case):
     case._lock_round()
     case._assert_rejects(
         lambda: PerformanceGroup.objects.bulk_create(
-            [PerformanceGroup(activity=case.activity, round=case.round, name="bulk", is_test_data=True)]
+            [
+                PerformanceGroup(
+                    activity=case.activity, round=case.round, name="bulk", is_test_data=True
+                )
+            ]
         )
     )
     case._assert_rejects(lambda: PerformanceGroup.objects.filter(pk=case.group.pk).delete())
@@ -1217,28 +1293,160 @@ def _descriptor(
 
 
 MODEL_MATRIX = (
-    _descriptor("User", User, "accounts.change_user_role", "admin_user", _mutation("protected instance/queryset/base-manager/bulk", _user_row)),
-    _descriptor("Activity", Activity, "core activity lifecycle", "activity", _mutation("protected instance/queryset/base-manager/bulk", _activity_row)),
-    _descriptor("ContestRound", ContestRound, "round lifecycle", "round", _mutation("protected instance/queryset/base-manager/bulk", _round_row)),
-    _descriptor("VoteSession", VoteSession, "vote session lifecycle", "vote_session", _mutation("protected instance/queryset/base-manager/bulk", _vote_session_row)),
-    _descriptor("ScoreRecord", ScoreRecord, "raw score authority", "score", _mutation("protected instance/queryset/base-manager/bulk/FK", _score_record)),
-    _descriptor("ScoreSummary", ScoreSummary, "score recalculation", "score", _mutation("protected instance/queryset/base-manager/bulk/delete", _score_summary)),
-    _descriptor("AudienceScore", AudienceScore, "unconsumed audience fact", "audience", _mutation("protected instance/queryset/base-manager/bulk/delete", _audience_score)),
-    _descriptor("VoteOption", VoteOption, "unlocked vote session", "option", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_option)),
-    _descriptor("VoteBallot", VoteBallot, "unlocked vote session", "ballot", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_ballot)),
-    _descriptor("VoteRecord", VoteRecord, "unlocked vote session", "record", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_record)),
-    _descriptor("PerformanceGroup", PerformanceGroup, "round configuration", "group", _mutation("protected instance/queryset/base-manager/bulk/delete", _performance_group)),
-    _descriptor("Performance", Performance, "round configuration", "performance", _mutation("protected instance/queryset/base-manager/bulk/delete", _performance)),
-    _descriptor("RubricCriterion", RubricCriterion, "rubric configuration", "criterion", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _criterion)),
-    _descriptor("CriterionScore", CriterionScore, "raw score authority", "criterion_score", _mutation("protected instance/queryset/base-manager/bulk/delete", _criterion_score)),
-    _descriptor("StageResult", StageResult, "stage confirmation", "stage", _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_result)),
-    _descriptor("StageDecision", StageDecision, "stage result authority", "decision", _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_decision)),
-    _descriptor("StageAwardDecision", StageAwardDecision, "stage result authority", "award_decision", _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_award_decision)),
-    _descriptor("CompositeResult", CompositeResult, "stage result authority", "composite", _mutation("protected instance/queryset/base-manager/bulk/delete", _composite)),
-    _descriptor("Award", Award, "award materialization", "award", _mutation("provenance instance/queryset", _award)),
-    _descriptor("SingerRegistration", SingerRegistration, "identity ownership", "singer", _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _singer)),
-    _descriptor("Judge", Judge, "identity ownership", "judge", _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _judge)),
-    _descriptor("RulesetVersion", RulesetVersion, "ruleset freeze", "version", _mutation("protected instance/queryset/base-manager/bulk/delete", _ruleset_version)),
+    _descriptor(
+        "User",
+        User,
+        "accounts.change_user_role",
+        "admin_user",
+        _mutation("protected instance/queryset/base-manager/bulk", _user_row),
+    ),
+    _descriptor(
+        "Activity",
+        Activity,
+        "core activity lifecycle",
+        "activity",
+        _mutation("protected instance/queryset/base-manager/bulk", _activity_row),
+    ),
+    _descriptor(
+        "ContestRound",
+        ContestRound,
+        "round lifecycle",
+        "round",
+        _mutation("protected instance/queryset/base-manager/bulk", _round_row),
+    ),
+    _descriptor(
+        "VoteSession",
+        VoteSession,
+        "vote session lifecycle",
+        "vote_session",
+        _mutation("protected instance/queryset/base-manager/bulk", _vote_session_row),
+    ),
+    _descriptor(
+        "ScoreRecord",
+        ScoreRecord,
+        "raw score authority",
+        "score",
+        _mutation("protected instance/queryset/base-manager/bulk/FK", _score_record),
+    ),
+    _descriptor(
+        "ScoreSummary",
+        ScoreSummary,
+        "score recalculation",
+        "score",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _score_summary),
+    ),
+    _descriptor(
+        "AudienceScore",
+        AudienceScore,
+        "unconsumed audience fact",
+        "audience",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _audience_score),
+    ),
+    _descriptor(
+        "VoteOption",
+        VoteOption,
+        "unlocked vote session",
+        "option",
+        _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_option),
+    ),
+    _descriptor(
+        "VoteBallot",
+        VoteBallot,
+        "unlocked vote session",
+        "ballot",
+        _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_ballot),
+    ),
+    _descriptor(
+        "VoteRecord",
+        VoteRecord,
+        "unlocked vote session",
+        "record",
+        _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_record),
+    ),
+    _descriptor(
+        "PerformanceGroup",
+        PerformanceGroup,
+        "round configuration",
+        "group",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _performance_group),
+    ),
+    _descriptor(
+        "Performance",
+        Performance,
+        "round configuration",
+        "performance",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _performance),
+    ),
+    _descriptor(
+        "RubricCriterion",
+        RubricCriterion,
+        "rubric configuration",
+        "criterion",
+        _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _criterion),
+    ),
+    _descriptor(
+        "CriterionScore",
+        CriterionScore,
+        "raw score authority",
+        "criterion_score",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _criterion_score),
+    ),
+    _descriptor(
+        "StageResult",
+        StageResult,
+        "stage confirmation",
+        "stage",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_result),
+    ),
+    _descriptor(
+        "StageDecision",
+        StageDecision,
+        "stage result authority",
+        "decision",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_decision),
+    ),
+    _descriptor(
+        "StageAwardDecision",
+        StageAwardDecision,
+        "stage result authority",
+        "award_decision",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_award_decision),
+    ),
+    _descriptor(
+        "CompositeResult",
+        CompositeResult,
+        "stage result authority",
+        "composite",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _composite),
+    ),
+    _descriptor(
+        "Award",
+        Award,
+        "award materialization",
+        "award",
+        _mutation("provenance instance/queryset", _award),
+    ),
+    _descriptor(
+        "SingerRegistration",
+        SingerRegistration,
+        "identity ownership",
+        "singer",
+        _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _singer),
+    ),
+    _descriptor(
+        "Judge",
+        Judge,
+        "identity ownership",
+        "judge",
+        _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _judge),
+    ),
+    _descriptor(
+        "RulesetVersion",
+        RulesetVersion,
+        "ruleset freeze",
+        "version",
+        _mutation("protected instance/queryset/base-manager/bulk/delete", _ruleset_version),
+    ),
 )
 
 

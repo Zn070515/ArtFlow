@@ -20,7 +20,7 @@ class UserAuthorityQuerySet(models.QuerySet):
             return
         for user in users:
             if (
-                user.role != self.model.Role.PARTICIPANT
+                user.role != self.model.Role.PARTICIPANT  # type: ignore[attr-defined]
                 or not user.is_active
                 or user.is_superuser
                 or user.is_staff
@@ -44,7 +44,10 @@ class UserAuthorityQuerySet(models.QuerySet):
         for index, user in enumerate(users):
             lookup = {field_name: getattr(user, field_name) for field_name in field_names}
             if (
-                self.model._base_manager.using(self.db).select_for_update().filter(**lookup).exists()
+                self.model._base_manager.using(self.db)
+                .select_for_update()
+                .filter(**lookup)
+                .exists()
             ):
                 matching_indexes.add(index)
         return matching_indexes
@@ -72,10 +75,9 @@ class UserAuthorityQuerySet(models.QuerySet):
         else:
             update_fields = list(update_fields or ())
             self._ensure_authorized(update_fields)
-            if (
-                {"role", "is_superuser"}.intersection(update_fields)
-                and "is_staff" not in update_fields
-            ):
+            if {"role", "is_superuser"}.intersection(
+                update_fields
+            ) and "is_staff" not in update_fields:
                 update_fields.append("is_staff")
             with transaction.atomic(using=self.db):
                 conflict_indexes = self._conflict_update_indexes(objs, unique_fields)
@@ -84,8 +86,8 @@ class UserAuthorityQuerySet(models.QuerySet):
                 )
                 for user in objs:
                     user.is_staff = user.is_superuser or user.role in (
-                        self.model.Role.STAFF,
-                        self.model.Role.ADMIN,
+                        self.model.Role.STAFF,  # type: ignore[attr-defined]
+                        self.model.Role.ADMIN,  # type: ignore[attr-defined]
                     )
                 return super().bulk_create(
                     objs,
@@ -97,8 +99,8 @@ class UserAuthorityQuerySet(models.QuerySet):
                 )
         for user in objs:
             user.is_staff = user.is_superuser or user.role in (
-                self.model.Role.STAFF,
-                self.model.Role.ADMIN,
+                self.model.Role.STAFF,  # type: ignore[attr-defined]
+                self.model.Role.ADMIN,  # type: ignore[attr-defined]
             )
         return super().bulk_create(
             objs,
@@ -110,7 +112,7 @@ class UserAuthorityQuerySet(models.QuerySet):
         )
 
 
-class UserAuthorityManager(UserManager.from_queryset(UserAuthorityQuerySet)):
+class UserAuthorityManager(UserManager.from_queryset(UserAuthorityQuerySet)):  # type: ignore[misc]
     def create_superuser(self, username, email=None, password=None, **extra_fields):
         """Keep Django's technical superuser bootstrap on the explicit authority path."""
         with authority_write(ACCOUNT_AUTHORITY):
@@ -124,7 +126,7 @@ class User(AbstractUser):
         PARTICIPANT = "participant", "选手"
 
     role = models.CharField(max_length=16, choices=Role, default=Role.PARTICIPANT)
-    objects = UserAuthorityManager()
+    objects = UserAuthorityManager()  # type: ignore[misc]
 
     class Meta:
         base_manager_name = "objects"
@@ -155,7 +157,9 @@ class User(AbstractUser):
             .values("role", "is_active", "is_superuser")
             .first()
         )
-        if stored and any(stored[field] != getattr(self, field) for field in stored):
+        if stored and any(
+            stored[field] != getattr(self, field) for field in ("role", "is_active", "is_superuser")
+        ):
             raise ValidationError("账户权限只能通过授权账户服务修改。")
 
     def save(self, *args, **kwargs):

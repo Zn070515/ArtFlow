@@ -50,7 +50,7 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.audit import client_ip
-from common.authority import CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
+from common.authority import ACTIVITY_STATE, CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
 from common.management.commands.backup_artflow import (
     apply_migration_heads,
     collect_counts,
@@ -1223,12 +1223,13 @@ class DemoSeedCommandTests(TestCase):
             username="formal-participant",
             password="safe-password",
         )
-        formal_activity = Activity.objects.create(
-            title="Formal singer contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACTIVITY_STATE):
+            formal_activity = Activity.objects.create(
+                title="Formal singer contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         formal_registration = SingerRegistration.objects.create(
             activity=formal_activity,
             user=formal_user,
@@ -1259,12 +1260,13 @@ class DemoSeedCommandTests(TestCase):
             action_type=AuditLog.ActionType.OTHER,
             target="Formal audit trail",
         )
-        unrelated_test_activity = Activity.objects.create(
-            title="Unrelated test activity",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.TESTING,
-            is_test_mode=True,
-        )
+        with authority_write(ACTIVITY_STATE):
+            unrelated_test_activity = Activity.objects.create(
+                title="Unrelated test activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.TESTING,
+                is_test_mode=True,
+            )
         unrelated_test_registration = SingerRegistration.objects.create(
             activity=unrelated_test_activity,
             user=formal_user,

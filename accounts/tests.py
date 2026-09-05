@@ -1,6 +1,6 @@
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from io import StringIO
 from unittest import skipUnless
@@ -163,9 +163,9 @@ class AdminVerificationTTLTests(TestCase):
             mock_now.return_value = datetime(2026, 8, 29, 12, 0, 0, tzinfo=dt_timezone.utc)
             mark_admin_verified(session)
             mid = mock_now.return_value
-            mock_now.return_value = mid + timezone.timedelta(seconds=1800)  # type: ignore[attr-defined]
+            mock_now.return_value = mid + timedelta(seconds=1800)
             self.assertTrue(admin_verification_is_valid(session))
-            mock_now.return_value = mid + timezone.timedelta(seconds=3601)  # type: ignore[attr-defined]
+            mock_now.return_value = mid + timedelta(seconds=3601)
             self.assertFalse(admin_verification_is_valid(session))
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
@@ -274,15 +274,15 @@ class DatabaseRateLimitTests(TransactionTestCase):
         for index in range(3):
             RateLimitBucket.objects.create(
                 key=f"{index:064x}",
-                window_started_at=now - timezone.timedelta(minutes=10),
+                window_started_at=now - timedelta(minutes=10),
                 count=1,
-                expires_at=now - timezone.timedelta(seconds=1),
+                expires_at=now - timedelta(seconds=1),
             )
         active_bucket = RateLimitBucket.objects.create(
             key="f" * 64,
             window_started_at=now,
             count=1,
-            expires_at=now + timezone.timedelta(minutes=5),
+            expires_at=now + timedelta(minutes=5),
         )
 
         with patch.object(rate_limit, "_CLEANUP_BATCH_SIZE", 2):
@@ -300,9 +300,9 @@ class DatabaseRateLimitTests(TransactionTestCase):
         now = timezone.now()
         expired_bucket = RateLimitBucket.objects.create(
             key="e" * 64,
-            window_started_at=now - timezone.timedelta(minutes=10),
+            window_started_at=now - timedelta(minutes=10),
             count=1,
-            expires_at=now - timezone.timedelta(seconds=1),
+            expires_at=now - timedelta(seconds=1),
         )
         quoted_table = connection.ops.quote_name(RateLimitBucket._meta.db_table)
 
@@ -313,9 +313,7 @@ class DatabaseRateLimitTests(TransactionTestCase):
 
         with transaction.atomic():
             with connection.execute_wrapper(fail_cleanup_delete):
-                decision = rate_limit.allow(
-                    "successful-public-key", limit=1, window_seconds=300
-                )
+                decision = rate_limit.allow("successful-public-key", limit=1, window_seconds=300)
 
             allowed_bucket = RateLimitBucket.objects.exclude(pk=expired_bucket.pk).get()
             self.assertEqual(allowed_bucket.count, 1)
@@ -348,9 +346,7 @@ class DatabaseRateLimitTests(TransactionTestCase):
         from common.models import RateLimitBucket
 
         rate_limit.allow("expired-window-key", limit=1, window_seconds=300)
-        RateLimitBucket.objects.all().update(
-            expires_at=timezone.now() - timezone.timedelta(seconds=1)
-        )
+        RateLimitBucket.objects.all().update(expires_at=timezone.now() - timedelta(seconds=1))
 
         decision = rate_limit.allow("expired-window-key", limit=1, window_seconds=300)
         bucket = RateLimitBucket.objects.get()

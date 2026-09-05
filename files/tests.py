@@ -26,13 +26,18 @@ from .services import (
 )
 
 
+def _create_activity(**kwargs):
+    with authority_write(ACTIVITY_STATE):
+        return Activity.objects.create(**kwargs)
+
+
 class SubmissionFileLifecycleTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
         self.user = User.objects.create_user(username="participant", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -168,7 +173,7 @@ class MaterialCheckReviewTests(TestCase):
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
         self.user = User.objects.create_user(username="participant", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -289,7 +294,7 @@ class VideoDirectUploadGateTests(TestCase):
         return SimpleUploadedFile("clip.mp4", b"x" * size, content_type="video/mp4")
 
     def test_formal_activity_rejects_oversize_video(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -302,7 +307,7 @@ class VideoDirectUploadGateTests(TestCase):
             validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
 
     def test_formal_activity_accepts_small_video_under_cap(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -313,7 +318,7 @@ class VideoDirectUploadGateTests(TestCase):
         validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
 
     def test_test_mode_activity_keeps_full_video_cap(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -325,7 +330,7 @@ class VideoDirectUploadGateTests(TestCase):
         validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
 
     def test_zero_cap_bans_any_video_for_formal_activity(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -338,13 +343,13 @@ class VideoDirectUploadGateTests(TestCase):
                 validate_upload(upload, SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity=activity)
 
     def test_large_video_upload_allowed_flips_with_lifecycle(self):
-        formal = Activity.objects.create(
+        formal = _create_activity(
             title="Formal",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        test = Activity.objects.create(
+        test = _create_activity(
             title="Test",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -355,7 +360,7 @@ class VideoDirectUploadGateTests(TestCase):
         self.assertTrue(large_video_upload_allowed(test))
 
     def test_store_submission_file_blocks_formal_video_upload(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -385,7 +390,7 @@ class VideoDirectUploadGateTests(TestCase):
 class MaterialCheckReconcileTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="participant", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -481,7 +486,7 @@ class MaterialCheckReconcileConcurrencyTests(TransactionTestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="concurrent-participant", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Concurrent Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,

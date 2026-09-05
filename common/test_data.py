@@ -187,7 +187,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     # Do this before deleting raw vote rows, whose model guards correctly refuse to
     # mutate a locked session during ordinary operation.
     with authority_write(VOTE_SESSION_STATE):
-        VoteSession.objects.filter(activity=locked_activity, is_test_data=True).update(
+        VoteSession.objects.filter(activity=locked_activity, is_test_data=True).update(  # type: ignore[no-untyped-call]
             is_open=False,
             is_locked=False,
         )
@@ -261,7 +261,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         is_test_data=True,
     ).delete()
     with authority_write(TEST_DATA_CLEANUP):
-        VoteSession.objects.filter(activity=locked_activity, is_test_data=True).delete()
+        VoteSession.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     Program.objects.filter(activity=locked_activity, is_test_data=True).delete()
     SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=locked_activity, is_test=True).delete()

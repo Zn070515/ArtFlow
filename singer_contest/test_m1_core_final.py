@@ -272,6 +272,7 @@ class AdminAuthoritySurfaceTests(TestCase):
     def assert_observation_only(self, model):
         model_admin = admin.site._registry.get(model)
         self.assertIsNotNone(model_admin, f"{model.__name__} must be observable in Admin")
+        assert model_admin is not None
         self.assertTrue(model_admin.has_view_permission(self.request))
         self.assertFalse(model_admin.has_add_permission(self.request))
         self.assertFalse(model_admin.has_change_permission(self.request))
@@ -343,9 +344,9 @@ class AdminAuthoritySurfaceTests(TestCase):
         for model in (SubmissionFile, MaterialCheck):
             with self.subTest(model=model.__name__):
                 self.assert_observation_only(model)
-        for model in (StaffNote, MaterialRequirement):
-            with self.subTest(model=model.__name__):
-                self.assert_editable_metadata(model)
+        for metadata_model in (StaffNote, MaterialRequirement):
+            with self.subTest(model=metadata_model.__name__):
+                self.assert_editable_metadata(metadata_model)
 
 
 class ContestRoundCreationAuthorityTests(TestCase):
@@ -516,8 +517,12 @@ class ContestRoundDeletionAuthorityTests(TestCase):
             )
         contest_round.refresh_from_db()
         request = RequestFactory().get("/admin/singer_contest/contestround/")
-        request.user = User.objects.create_superuser("round-delete-admin", "admin@example.com", "pass")
+        request.user = User.objects.create_superuser(
+            "round-delete-admin", "admin@example.com", "pass"
+        )
 
         self.assertFalse(
-            ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(request, contest_round)
+            ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(
+                request, contest_round
+            )
         )

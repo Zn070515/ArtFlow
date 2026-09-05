@@ -702,7 +702,11 @@ class VoteSessionCreationAuthorityTests(TestCase):
 
         with self.assertRaises(ValidationError):
             VoteSession.objects.bulk_create(
-                [VoteSession(**self._session_kwargs("Conflict target", pk=session.pk, is_locked=True))],
+                [
+                    VoteSession(
+                        **self._session_kwargs("Conflict target", pk=session.pk, is_locked=True)
+                    )
+                ],
                 update_conflicts=True,
                 update_fields=["is_locked"],
                 unique_fields=["pk"],

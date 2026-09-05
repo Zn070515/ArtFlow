@@ -50,24 +50,18 @@ def test_production_readiness_describes_complete_award_authority_behaviors():
     assert "AWARD → StageAwardDecision → CONFIRM → Award" in readiness
     assert (
         "`StageResult` 此时只能是候选状态（通常为 `READY_TO_CONFIRM`）。候选不得进入正式 "
-        "Award 列表或导出。"
-        in readiness
+        "Award 列表或导出。" in readiness
     )
     assert "重复核定必须幂等，不能产生重复 Award。" in readiness
-    assert (
-        "`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority。"
-        in readiness
-    )
+    assert "`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority。" in readiness
     assert (
         "Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 "
-        "`source_stage_result.status == CONFIRMED` 的 Award。"
-        in readiness
+        "`source_stage_result.status == CONFIRMED` 的 Award。" in readiness
     )
     assert "`VoteSession` 锁定本身不会创建 `Award`。" in readiness
     assert (
         "当 AWARD 节点确实消费投票时，该 VoteSession 只是核定前必须静止的原始输入，且其 "
-        "`purpose` 必须与冻结绑定一致； 不依赖投票的 AWARD 不需要 VoteSession。"
-        in readiness
+        "`purpose` 必须与冻结绑定一致； 不依赖投票的 AWARD 不需要 VoteSession。" in readiness
     )
     assert "不得恢复“锁投票即颁奖”的旧流程。" in readiness
     assert (
@@ -80,13 +74,11 @@ def test_production_readiness_describes_complete_award_authority_behaviors():
         in readiness
     )
     assert (
-        "`Award.source_vote_session` 仅作为历史行可能仍需的 legacy provenance 保留。"
-        in readiness
+        "`Award.source_vote_session` 仅作为历史行可能仍需的 legacy provenance 保留。" in readiness
     )
     assert (
         "它不再 授权 Award 创建、重算或替换；删除该字段或清理历史值前，必须先审计真实历史数据并 "
-        "通过显式迁移处理。"
-        in readiness
+        "通过显式迁移处理。" in readiness
     )
 
 
@@ -105,8 +97,7 @@ def test_production_rehearsal_runbook_describes_complete_award_authority_behavio
     )
     assert (
         "`Award.source_vote_session` 只解释可能存在的历史行，不是当前 Award authority。"
-        "删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。"
-        in runbook
+        "删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。" in runbook
     )
 
 

@@ -1,3 +1,5 @@
+from typing import Any
+
 from common.authority import TEST_DATA_CLEANUP, VOTE_SESSION_STATE, authority_authorized
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -116,7 +118,7 @@ class VoteSessionQuerySet(models.QuerySet):
 
     def delete(self):
         for vote_session in self:
-            vote_session._ensure_deletion_authorized()
+            vote_session._ensure_deletion_authorized()  # type: ignore[attr-defined]
         return super().delete()
 
 
@@ -186,13 +188,18 @@ class VoteSession(models.Model):
     def _ensure_deletion_authorized(self):
         if not authority_authorized(TEST_DATA_CLEANUP):
             raise ValidationError("投票删除需要显式测试数据清理权限。")
-        if not self.is_test_data or not self.activity.is_test_mode or self.is_open or self.is_locked:
+        if (
+            not self.is_test_data
+            or not self.activity.is_test_mode
+            or self.is_open
+            or self.is_locked
+        ):
             raise ValidationError("只有关闭且未锁定的测试投票可以删除。")
         from singer_contest.services import ensure_vote_not_consumed_by_confirmed_stage
 
         ensure_vote_not_consumed_by_confirmed_stage(self)
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
         if self._state.adding:
             self._ensure_initial_state_authorized()
         elif self.pk:
@@ -225,12 +232,11 @@ class VoteSession(models.Model):
                 )
             ):
                 raise ValidationError("投票锁定后，投票配置不可直接修改。")
-        return super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         self._ensure_deletion_authorized()
         return super().delete(*args, **kwargs)
-
 
 
 class VoteBallotQuerySet(models.QuerySet):

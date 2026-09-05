@@ -4353,9 +4353,7 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
 
     def test_post_rejects_malformed_command_id_with_stable_invalid_request_payload(self):
-        response = self._post(
-            {"command_id": "x" * 65, "base_version": 0, "cells": []}
-        )
+        response = self._post({"command_id": "x" * 65, "base_version": 0, "cells": []})
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(set(response.json()), {"detail", "reason_code"})
@@ -5534,8 +5532,6 @@ class RulesetEditorTests(TestCase):
         )
 
     def _bind_vote(self):
-        from voting.models import VoteSession
-
         return _create_vote_session(
             activity=self.activity,
             name="大众投票",

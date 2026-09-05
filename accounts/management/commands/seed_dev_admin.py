@@ -2,10 +2,10 @@ import getpass
 import os
 from typing import Any
 
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 from django.core.management.base import BaseCommand, CommandError
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, authority_write
 
 
 class Command(BaseCommand):
@@ -31,7 +31,7 @@ class Command(BaseCommand):
         user.is_superuser = True
         user.set_password(password)
         with authority_write(ACCOUNT_AUTHORITY):
-            user.save()  # type: ignore[no-untyped-call]
+            user.save()
 
         action = "Created" if created else "Updated"
         self.stdout.write(self.style.SUCCESS(f"{action} development admin: {username}"))

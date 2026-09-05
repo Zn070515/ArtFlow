@@ -62,6 +62,7 @@ from .models import (
     StageResult,
 )
 from .services import (
+    IdempotencyConflictError,
     apply_scores,
     apply_scores_if_version,
     downstream_rounds,
@@ -1924,9 +1925,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
         self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
         self.round.refresh_from_db()
         other_round.refresh_from_db()
-        self.assertEqual(
-            sorted([self.round.score_version, other_round.score_version]), [0, 1]
-        )
+        self.assertEqual(sorted([self.round.score_version, other_round.score_version]), [0, 1])
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

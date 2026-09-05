@@ -932,9 +932,12 @@ def round_create(request):
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
             sequence = form.cleaned_data["sequence"]
-            if sequence is not None and ContestRound.objects.filter(
-                activity=locked_activity, sequence=sequence
-            ).exists():
+            if (
+                sequence is not None
+                and ContestRound.objects.filter(
+                    activity=locked_activity, sequence=sequence
+                ).exists()
+            ):
                 form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
                 return render(
                     request,

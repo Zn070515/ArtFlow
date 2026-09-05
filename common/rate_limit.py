@@ -37,9 +37,7 @@ def _decision(*, count: int, expires_at: datetime, limit: int, now: datetime) ->
     return RateLimitDecision(allowed=False, retry_after_seconds=retry_after_seconds)
 
 
-def _allow_locmem(
-    key: str, *, limit: int, window_seconds: int, now: datetime
-) -> RateLimitDecision:
+def _allow_locmem(key: str, *, limit: int, window_seconds: int, now: datetime) -> RateLimitDecision:
     cache_key = f"rate-limit:{key}"
     expires_at = now + timedelta(seconds=window_seconds)
     if cache.add(cache_key, 1, timeout=window_seconds):
@@ -93,9 +91,7 @@ def _allow_postgresql(
     return _decision(count=count, expires_at=actual_expiry, limit=limit, now=now)
 
 
-def _allow_sqlite(
-    key: str, *, limit: int, window_seconds: int, now: datetime
-) -> RateLimitDecision:
+def _allow_sqlite(key: str, *, limit: int, window_seconds: int, now: datetime) -> RateLimitDecision:
     expires_at = now + timedelta(seconds=window_seconds)
     for _ in range(2):
         with transaction.atomic():

@@ -13,4 +13,10 @@ class CustomUserAdmin(UserAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj is None:
             return super().get_readonly_fields(request, obj)
-        return (*super().get_readonly_fields(request, obj), "role", "is_active", "is_superuser", "is_staff")
+        return (
+            *super().get_readonly_fields(request, obj),
+            "role",
+            "is_active",
+            "is_superuser",
+            "is_staff",
+        )

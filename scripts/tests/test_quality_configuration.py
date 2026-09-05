@@ -50,6 +50,7 @@ GRADUAL_MODULES = {
     # enforcement churns them without adding safety.
     "common.test_characterization",
     "common.test_contest_domain_characterization",
+    "common.test_authority_matrix",
     "config.tests",
 }
 GRADUAL_CHECKS = {

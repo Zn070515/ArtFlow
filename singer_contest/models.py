@@ -172,11 +172,11 @@ class JudgeQuerySet(IdentityOwnershipQuerySet):
     ownership_fields = frozenset({"activity_id"})
 
 
-class SingerRegistrationManager(models.Manager.from_queryset(SingerRegistrationQuerySet)):
+class SingerRegistrationManager(models.Manager.from_queryset(SingerRegistrationQuerySet)):  # type: ignore[misc]
     pass
 
 
-class JudgeManager(models.Manager.from_queryset(JudgeQuerySet)):
+class JudgeManager(models.Manager.from_queryset(JudgeQuerySet)):  # type: ignore[misc]
     pass
 
 
@@ -351,7 +351,7 @@ class ContestRoundQuerySet(models.QuerySet):
 
     def delete(self):
         for contest_round in self:
-            contest_round._ensure_deletion_authorized()
+            contest_round._ensure_deletion_authorized()  # type: ignore[attr-defined]
         return super().delete()
 
 
@@ -521,7 +521,9 @@ class ContestRound(models.Model):
             if self.entries.exists() or self.round_judges.exists():
                 from django.db.models.deletion import ProtectedError
 
-                protected = list(self.entries.all()) + list(self.round_judges.all())
+                protected: set[models.Model] = set()
+                protected.update(self.entries.all())
+                protected.update(self.round_judges.all())
                 raise ProtectedError("Prepared round snapshots are protected.", protected)
             raise ValidationError("只有未锁定的 DRAFT 轮次可以删除。")
         if not self.activity.is_test_mode:
@@ -833,9 +835,7 @@ class ScoreWriteReceipt(models.Model):
     """
 
     RESULT_PAYLOAD_MAX_BYTES = 256
-    RESULT_PAYLOAD_KEYS = frozenset(
-        {"status", "reason_code", "version", "matrix_complete"}
-    )
+    RESULT_PAYLOAD_KEYS = frozenset({"status", "reason_code", "version", "matrix_complete"})
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

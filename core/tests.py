@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from django.contrib import admin
@@ -236,7 +238,9 @@ class ActivityDeletionAuthorityTests(TestCase):
         with self.assertRaises(ValidationError):
             Activity._base_manager.filter(pk=locked.pk).delete()
 
-        self.assertEqual(Activity.objects.filter(pk__in=[formal.pk, locked.pk, non_draft.pk]).count(), 3)
+        self.assertEqual(
+            Activity.objects.filter(pk__in=[formal.pk, locked.pk, non_draft.pk]).count(), 3
+        )
 
     def test_activity_delete_allows_only_explicit_test_draft_cleanup_scope(self):
         activity = self._activity("Cleanup")
@@ -270,7 +274,9 @@ class ActivityDeletionAuthorityTests(TestCase):
                 activity.delete()
 
         self.assertTrue(Activity.objects.filter(pk=activity.pk).exists())
-        self.assertTrue(SingerRegistration.objects.filter(pk=singer.pk, is_test_data=False).exists())
+        self.assertTrue(
+            SingerRegistration.objects.filter(pk=singer.pk, is_test_data=False).exists()
+        )
 
     def test_activity_delete_rejects_formal_award_and_preserves_it(self):
         from singer_contest.models import Award, SingerRegistration
@@ -337,7 +343,7 @@ class ActivityDeletionAuthorityTests(TestCase):
             name="Test vote",
             passcode="test-passcode",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1),
             is_test_data=True,
         )
         option = VoteOption.objects.create(
@@ -362,7 +368,7 @@ class ActivityDeletionAuthorityTests(TestCase):
             name="Test vote",
             passcode="test-passcode",
             start_time=timezone.now(),
-            end_time=timezone.now() + timezone.timedelta(hours=1),
+            end_time=timezone.now() + timedelta(hours=1),
             is_test_data=True,
         )
 
@@ -379,9 +385,13 @@ class ActivityDeletionAuthorityTests(TestCase):
 
         activity = self._activity("Formal admin", is_test_mode=False)
         request = RequestFactory().get("/admin/core/activity/")
-        request.user = User.objects.create_superuser("activity-delete-admin", "admin@example.com", "pass")
+        request.user = User.objects.create_superuser(
+            "activity-delete-admin", "admin@example.com", "pass"
+        )
 
-        self.assertFalse(ActivityAdmin(Activity, admin.site).has_delete_permission(request, activity))
+        self.assertFalse(
+            ActivityAdmin(Activity, admin.site).has_delete_permission(request, activity)
+        )
 
 
 class ActivityPhasePolicyTests(TestCase):

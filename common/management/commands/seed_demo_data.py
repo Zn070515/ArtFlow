@@ -1,4 +1,4 @@
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -28,8 +28,12 @@ from singer_contest.services import prepare_round, reset_test_round_snapshots
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
+    TEST_DATA_CLEANUP,
+    VOTE_SESSION_STATE,
     authority_write,
 )
 from common.lifecycle import runtime_is_test
@@ -546,9 +550,17 @@ class Command(BaseCommand):
                 transaction.set_rollback(True)
                 return False
 
-            with authority_write(SCORE_SUMMARY_RECALCULATE):
+            with authority_write(VOTE_SESSION_STATE):
                 for candidate in candidates:
-                    candidate.delete()
+                    if isinstance(candidate, VoteSession):
+                        candidate.is_open = False
+                        candidate.is_locked = False
+                        candidate.save(update_fields=["is_open", "is_locked"])
+
+            with authority_write(SCORE_SUMMARY_RECALCULATE):
+                with authority_write(TEST_DATA_CLEANUP):
+                    for candidate in candidates:
+                        candidate.delete()
         return True
 
     def _demo_round_candidates_are_owned(
@@ -704,13 +716,7 @@ class Command(BaseCommand):
             if prepare_create:
                 prepare_create(target)
             try:
-                save_context = (
-                    authority_write(SCORE_SUMMARY_RECALCULATE)
-                    if model is ScoreSummary
-                    else authority_write(CONTEST_ROUND_STATE)
-                    if model is ContestRound
-                    else nullcontext()
-                )
+                save_context = self._upsert_authority_context(model)
                 with save_context:
                     target.save()
             except IntegrityError as error:
@@ -731,13 +737,21 @@ class Command(BaseCommand):
 
         for field_name, value in defaults.items():
             setattr(target, field_name, value)
-        save_context = (
-            authority_write(SCORE_SUMMARY_RECALCULATE)
-            if model is ScoreSummary
-            else authority_write(CONTEST_ROUND_STATE)
-            if model is ContestRound
-            else nullcontext()
-        )
+        save_context = self._upsert_authority_context(model)
         with save_context:
             target.save(update_fields=list(defaults))
         return target
+
+    @staticmethod
+    def _upsert_authority_context(model: Any) -> AbstractContextManager[None]:
+        if model is User:
+            return authority_write(ACCOUNT_AUTHORITY)
+        if model is Activity:
+            return authority_write(ACTIVITY_STATE)
+        if model is ContestRound:
+            return authority_write(CONTEST_ROUND_STATE)
+        if model is ScoreSummary:
+            return authority_write(SCORE_SUMMARY_RECALCULATE)
+        if model is VoteSession:
+            return authority_write(VOTE_SESSION_STATE)
+        return nullcontext()
