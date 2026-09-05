@@ -110,3 +110,22 @@ git diff --check
 ```
 
 The optional Caddy adaptation regression was skipped because `caddy:2-alpine` was not present locally; no image pull or service startup was performed. Self-review confirms the root development Compose file and application authority code were not changed, and the final diff is limited to the production manifest, production env/docs, regression test, and this report.
+
+## Final fix verification rerun
+
+Rechecked the actual production manifest and env/documentation files, without invoking the broad `scripts/verify.ps1` gate:
+
+```text
+python -m pytest tests/test_production_compose_config.py tests/test_postgres_acceptance_script.py tests/test_check_docs.py -q
+21 passed, 1 skipped
+docker compose -f deploy/compose.production.yml config --quiet
+[exit 0]
+python manage.py check --deploy --fail-level WARNING
+System check identified no issues (0 silenced).
+pwsh -NoProfile -File scripts/check_docs.ps1
+Documentation validation passed for 11 user-facing Markdown file(s); docs/superpowers was skipped.
+git diff --check
+[exit 0]
+```
+
+The Caddy image-dependent adaptation check remains skipped only because `caddy:2-alpine` is not locally available. The production file contains the escaped `{$$CADDY_SITE_ADDRESS}` interpolation, while the env template and runbook document manifest-fixed `TRUST_X_FORWARDED_FOR=true` and `POSTGRES_HOST=db`.
