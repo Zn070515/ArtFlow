@@ -31,8 +31,10 @@ from core.models import Activity
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
+from django.test import RequestFactory
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
+from ruleset.admin import RulesetVersionAdmin
 from ruleset.services import create_ruleset_version, freeze_ruleset_version
 from singer_contest.admin import (
     AwardAdmin,
@@ -41,6 +43,8 @@ from singer_contest.admin import (
     JudgeAdmin,
     ScoreRecordAdmin,
     ScoreSummaryAdmin,
+    ScoringRubricAdmin,
+    RubricCriterionAdmin,
     SingerRegistrationAdmin,
 )
 from singer_contest.models import (
@@ -55,12 +59,14 @@ from singer_contest.models import (
     RubricCriterion,
     ScoreRecord,
     ScoreSummary,
+    ScoringRubric,
     SingerRegistration,
     StageAwardDecision,
     StageDecision,
     StageResult,
 )
 from singer_contest.services import (
+    _authorized_award_materialization,
     apply_scores,
     confirm_stage_result,
     lock_round,
@@ -114,6 +120,8 @@ class AuthorityMutationMatrixTests(TestCase):
             self.admin_user = User.objects.create_user(
                 username="matrix-admin", password="pass", role=User.Role.ADMIN
             )
+            User.objects.filter(pk=self.admin_user.pk).update(is_superuser=True, is_staff=True)
+        self.admin_user.refresh_from_db()
         self.activity = Activity.objects.create(
             title="matrix", activity_type=Activity.Type.SINGER_CONTEST, is_test_mode=True
         )
@@ -544,6 +552,18 @@ class AuthorityMutationMatrixTests(TestCase):
             AwardAdmin(Award, admin.site).get_readonly_fields(None, self.award),
             ["source_vote_session", "source_stage_result", "source_award_decision", "source_node"],
         )
+        for admin_class, model, fixture_name, readonly_fields in ADMIN_CANONICAL_MATRIX:
+            model_admin = admin_class(model, admin.site)
+            instance = getattr(self, fixture_name)
+            request = RequestFactory().get("/admin/")
+            request.user = self.admin_user
+            with self.subTest(model=model.__name__):
+                self.assertEqual(
+                    model_admin.get_readonly_fields(None, instance), readonly_fields
+                )
+                self.assertTrue(model_admin.has_add_permission(request))
+                self.assertTrue(model_admin.has_change_permission(request, instance))
+                self.assertTrue(model_admin.has_delete_permission(request, instance))
 
     def test_documented_authority_services_succeed(self):
         change_user_role(
@@ -1124,6 +1144,31 @@ def _ruleset_bulk_and_delete(case):
     case._assert_rejects(lambda: RulesetVersion.objects.filter(pk=case.version.pk).delete())
 
 
+def _award_bulk_and_delete(case):
+    with _authorized_award_materialization():
+        sourced = Award.objects.create(
+            activity=case.activity,
+            singer=case.singer,
+            name="Sourced matrix award",
+            source_stage_result=case.stage,
+            is_test_data=True,
+        )
+    case._assert_rejects(
+        lambda: Award.objects.bulk_create(
+            [
+                Award(
+                    activity=case.activity,
+                    singer=case.singer,
+                    name="Unauthorized sourced award",
+                    source_stage_result=case.stage,
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: Award.objects.filter(pk=sourced.pk).delete())
+
+
 BULK_DELETE_MATRIX = (
     BulkDeleteDescriptor("Activity", Activity, _activity_bulk_and_delete),
     BulkDeleteDescriptor("ContestRound", ContestRound, _round_bulk_and_delete),
@@ -1143,6 +1188,7 @@ BULK_DELETE_MATRIX = (
     BulkDeleteDescriptor("StageAwardDecision", StageAwardDecision, _stage_award_bulk_and_delete),
     BulkDeleteDescriptor("CompositeResult", CompositeResult, _composite_bulk_and_delete),
     BulkDeleteDescriptor("RulesetVersion", RulesetVersion, _ruleset_bulk_and_delete),
+    BulkDeleteDescriptor("Award", Award, _award_bulk_and_delete),
 )
 
 
@@ -1195,4 +1241,11 @@ MODEL_MATRIX = (
     _descriptor("SingerRegistration", SingerRegistration, "identity ownership", "singer", _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _singer)),
     _descriptor("Judge", Judge, "identity ownership", "judge", _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _judge)),
     _descriptor("RulesetVersion", RulesetVersion, "ruleset freeze", "version", _mutation("protected instance/queryset/base-manager/bulk/delete", _ruleset_version)),
+)
+
+
+ADMIN_CANONICAL_MATRIX = (
+    (RubricCriterionAdmin, RubricCriterion, "criterion", ()),
+    (ScoringRubricAdmin, ScoringRubric, "rubric", ()),
+    (RulesetVersionAdmin, RulesetVersion, "version", ("execution_plan",)),
 )
