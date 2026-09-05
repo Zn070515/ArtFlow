@@ -57,20 +57,28 @@ class UserAuthorityQuerySet(models.QuerySet):
         self._ensure_authorized(fields)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
-    def bulk_create(self, objs, *args, **kwargs):
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
         objs = list(objs)
-        if not kwargs.get("update_conflicts"):
+        if not update_conflicts:
             self._ensure_initial_authority_authorized(objs)
         else:
-            update_fields = list(kwargs.get("update_fields", ()))
+            update_fields = list(update_fields or ())
             self._ensure_authorized(update_fields)
             if (
                 {"role", "is_superuser"}.intersection(update_fields)
                 and "is_staff" not in update_fields
             ):
-                kwargs = {**kwargs, "update_fields": [*update_fields, "is_staff"]}
+                update_fields.append("is_staff")
             with transaction.atomic(using=self.db):
-                conflict_indexes = self._conflict_update_indexes(objs, kwargs.get("unique_fields"))
+                conflict_indexes = self._conflict_update_indexes(objs, unique_fields)
                 self._ensure_initial_authority_authorized(
                     user for index, user in enumerate(objs) if index not in conflict_indexes
                 )
@@ -79,13 +87,27 @@ class UserAuthorityQuerySet(models.QuerySet):
                         self.model.Role.STAFF,
                         self.model.Role.ADMIN,
                     )
-                return super().bulk_create(objs, *args, **kwargs)
+                return super().bulk_create(
+                    objs,
+                    batch_size=batch_size,
+                    ignore_conflicts=ignore_conflicts,
+                    update_conflicts=update_conflicts,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
         for user in objs:
             user.is_staff = user.is_superuser or user.role in (
                 self.model.Role.STAFF,
                 self.model.Role.ADMIN,
             )
-        return super().bulk_create(objs, *args, **kwargs)
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_conflicts=update_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
 
 
 class UserAuthorityManager(UserManager.from_queryset(UserAuthorityQuerySet)):

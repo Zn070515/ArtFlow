@@ -574,6 +574,87 @@ class AccountAuthorityCreationTests(TestCase):
         self.assertEqual(existing.role, User.Role.STAFF)
         self.assertTrue(existing.is_staff)
 
+    def test_positional_conflict_profile_update_allows_existing_admin_authority_values(self):
+        existing = create_provisioned_user(
+            username="positional-conflict-existing-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        existing.email = "positional-updated@example.com"
+
+        User.objects.bulk_create(
+            [existing],
+            None,
+            False,
+            True,
+            ["email"],
+            ["username"],
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.email, "positional-updated@example.com")
+        self.assertEqual(existing.role, User.Role.ADMIN)
+        self.assertTrue(existing.is_staff)
+
+    def test_positional_conflict_update_rejects_protected_authority_field(self):
+        existing = User.objects.create_user(
+            username="positional-conflict-existing-participant",
+            password="pass12345",
+        )
+
+        with self.assertRaises(ValidationError):
+            User.objects.bulk_create(
+                [existing],
+                None,
+                False,
+                True,
+                ["role"],
+                ["username"],
+            )
+
+    def test_positional_conflict_upsert_allows_existing_admin_and_ordinary_insert(self):
+        existing = create_provisioned_user(
+            username="positional-mixed-existing-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        existing.email = "mixed-updated@example.com"
+        new_user = User(username="positional-mixed-new-participant", email="new@example.com")
+
+        User.objects.bulk_create(
+            [existing, new_user],
+            None,
+            False,
+            True,
+            ["email"],
+            ["username"],
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.email, "mixed-updated@example.com")
+        self.assertTrue(User.objects.filter(username=new_user.username).exists())
+
+    def test_authorized_positional_conflict_role_update_derives_staff_flag(self):
+        existing = User.objects.create_user(
+            username="positional-conflict-role-participant",
+            password="pass12345",
+        )
+        replacement = User(username=existing.username, role=User.Role.STAFF)
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            User.objects.bulk_create(
+                [replacement],
+                None,
+                False,
+                True,
+                ["role"],
+                ["username"],
+            )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.role, User.Role.STAFF)
+        self.assertTrue(existing.is_staff)
+
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
 class AdminAuthorityConcurrencyTests(TransactionTestCase):
