@@ -39,29 +39,75 @@ def run_checker(repository_root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_award_rehearsal_docs_describe_confirmed_stage_authority():
-    readiness = (PROJECT_ROOT / "docs" / "production-readiness.md").read_text(encoding="utf-8")
-    runbook = (PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md").read_text(
-        encoding="utf-8"
-    )
-    combined = " ".join(f"{readiness}\n{runbook}".split())
+def normalized_document(name: str) -> str:
+    document = (PROJECT_ROOT / "docs" / name).read_text(encoding="utf-8")
+    return " ".join(document.split())
 
-    assert "AWARD → StageAwardDecision → CONFIRM → Award" in combined
-    assert "`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority" in combined
+
+def test_production_readiness_describes_complete_award_authority_behaviors():
+    readiness = normalized_document("production-readiness.md")
+
+    assert "AWARD → StageAwardDecision → CONFIRM → Award" in readiness
+    assert (
+        "`StageResult` 此时只能是候选状态（通常为 `READY_TO_CONFIRM`）。候选不得进入正式 "
+        "Award 列表或导出。"
+        in readiness
+    )
+    assert "重复核定必须幂等，不能产生重复 Award。" in readiness
+    assert (
+        "`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority。"
+        in readiness
+    )
     assert (
         "Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 "
-        "`source_stage_result.status == CONFIRMED` 的 Award"
-        in combined
+        "`source_stage_result.status == CONFIRMED` 的 Award。"
+        in readiness
     )
-    assert "VoteSession 锁定本身不会创建 Award" in combined
-    assert "不依赖投票的 AWARD 不需要 VoteSession" in combined
-    assert "READY_TO_CONFIRM" in combined
-    assert "重复核定" in combined
-    assert "stale" in combined
-    assert "解锁" in combined
-    assert "legacy provenance" in combined
-    assert "A 锁定获奖" not in combined
-    assert "解锁 → B 获胜 → 重新锁定" not in combined
+    assert "`VoteSession` 锁定本身不会创建 `Award`。" in readiness
+    assert (
+        "当 AWARD 节点确实消费投票时，该 VoteSession 只是核定前必须静止的原始输入，且其 "
+        "`purpose` 必须与冻结绑定一致； 不依赖投票的 AWARD 不需要 VoteSession。"
+        in readiness
+    )
+    assert "不得恢复“锁投票即颁奖”的旧流程。" in readiness
+    assert (
+        "输入或最新结果版本变化后，旧候选必须拒绝核定， 先重新 resolve 再核定；解锁已核定 "
+        "StageResult 后，其已物化 Award 因来源赛段不再 `CONFIRMED` 而退出正式列表/导出。"
+        in readiness
+    )
+    assert (
+        "修正输入产生的新候选必须重新核定，旧候选和旧 Award 只保留可追溯性，不能冒充当前正式奖项。"
+        in readiness
+    )
+    assert (
+        "`Award.source_vote_session` 仅作为历史行可能仍需的 legacy provenance 保留。"
+        in readiness
+    )
+    assert (
+        "它不再 授权 Award 创建、重算或替换；删除该字段或清理历史值前，必须先审计真实历史数据并 "
+        "通过显式迁移处理。"
+        in readiness
+    )
+
+
+def test_production_rehearsal_runbook_describes_complete_award_authority_behaviors():
+    runbook = normalized_document("production-rehearsal-runbook.md")
+
+    assert (
+        "正式链路严格为 `AWARD → StageAwardDecision → CONFIRM → Award`。"
+        "`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority；"
+        "Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 "
+        "`source_stage_result.status == CONFIRMED` 的 Award。"
+        "`VoteSession 锁定本身不会创建 Award`；首次核定只物化一份来源完整的 Award，"
+        "重复核定不重复；input fingerprint 或 result version 已变化的 stale 候选不能物化；"
+        "解锁后旧来源赛段不再 `CONFIRMED`，所以旧 Award 不进入正式列表/导出，新候选必须重新核定。"
+        in runbook
+    )
+    assert (
+        "`Award.source_vote_session` 只解释可能存在的历史行，不是当前 Award authority。"
+        "删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。"
+        in runbook
+    )
 
 
 def remove_link_without_following(path: Path) -> None:
