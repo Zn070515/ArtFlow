@@ -1163,7 +1163,9 @@ def round_scores_api(request, pk):
             status=409,
         )
     except ValidationError as error:
-        return JsonResponse({"detail": error.messages}, status=400)
+        return JsonResponse(
+            {"detail": error.messages, "reason_code": "INVALID_REQUEST"}, status=400
+        )
     except PermissionDenied:
         return JsonResponse({"detail": "权限不足。"}, status=403)
 

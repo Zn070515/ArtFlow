@@ -4266,6 +4266,48 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
 
+    def test_post_rejects_malformed_command_id_with_stable_invalid_request_payload(self):
+        response = self._post(
+            {"command_id": "x" * 65, "base_version": 0, "cells": []}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(set(response.json()), {"detail", "reason_code"})
+        self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
+
+    def test_post_rejects_other_activity_cell_with_stable_invalid_request_payload(self):
+        other_activity = Activity.objects.create(
+            title="Other Rapid Entry Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=other_activity.pk).update(
+                phase=Activity.Phase.REGISTRATION_OPEN
+            )
+        other_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=User.objects.create_user(username="rapid-api-other-s", password="pass"),
+            name="Other Singer",
+            student_id="2026rapid02",
+            college="Info",
+            class_name="CS2",
+            phone="13800000001",
+            song_name="Other Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": other_singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(set(response.json()), {"detail", "reason_code"})
+        self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
+
     def test_post_stale_base_version_is_conflict(self):
         self._post(
             {
@@ -4282,6 +4324,10 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(response.json()["conflict"])
         self.assertEqual(response.json()["reason_code"], "STALE_SCORE_VERSION")
+        self.assertEqual(
+            set(response.json()),
+            {"version", "matrix_complete", "grid", "judges", "conflict", "reason_code"},
+        )
         # No silent overwrite: the stored value is unchanged.
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
 

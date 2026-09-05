@@ -5,6 +5,8 @@
   if (!container) return;
 
   var apiUrl = container.dataset.apiUrl;
+  var activityId = parseInt(container.dataset.activityId, 10);
+  var roundId = parseInt(container.dataset.roundId, 10);
   var locked = container.dataset.locked === "true";
   var csrf = document.querySelector('[name="csrfmiddlewaretoken"]');
   var csrfToken = csrf ? csrf.value : "";
@@ -18,6 +20,11 @@
   var versionEl = container.querySelector("[data-version]");
   var resolvedEl = container.querySelector("[data-resolved]");
   var errorBox = container.querySelector("[data-error]");
+  var retryButton = container.querySelector("[data-retry]");
+  var pendingCountEl = container.querySelector("[data-pending-count]");
+  var savedCountEl = container.querySelector("[data-saved-count]");
+  var conflictsEl = container.querySelector("[data-conflicts]");
+  var pendingStorageKey = "artflow:rapid-score:pending:" + activityId + ":" + roundId + ":" + apiUrl;
 
   var state = {
     version: initial.version || 0,
@@ -26,6 +33,9 @@
     total: 0,
     filled: 0,
     locked: locked,
+    draftCommandId: null,
+    draftBaseVersion: null,
+    conflicts: {},
   };
 
   function key(singerId, judgeId) {
@@ -62,6 +72,11 @@
     var pct = state.total ? Math.round((state.filled / state.total) * 100) : 0;
     if (progressFill) progressFill.style.width = pct + "%";
     if (progressText) progressText.textContent = state.filled + " / " + state.total;
+    if (savedCountEl) savedCountEl.textContent = String(state.filled);
+  }
+
+  function updatePendingCount() {
+    if (pendingCountEl) pendingCountEl.textContent = String(Object.keys(state.dirty).length);
   }
 
   function setVersion(v) {
@@ -83,6 +98,23 @@
     if (!errorBox) return;
     errorBox.textContent = "";
     errorBox.classList.add("hidden");
+  }
+
+  function renderConflicts() {
+    var keys = Object.keys(state.conflicts);
+    if (!conflictsEl) return;
+    if (!keys.length) {
+      conflictsEl.textContent = "";
+      conflictsEl.classList.add("hidden");
+      return;
+    }
+    conflictsEl.textContent = keys.map(function (k) {
+      var conflict = state.conflicts[k];
+      return "选手 " + conflict.singer_id + "、评委 " + conflict.judge_id +
+        "：服务器为 " + conflict.server + "，本机草稿为 " + conflict.local +
+        "。请修改该单元格后再重试保存，以明确选择。";
+    }).join(" ");
+    conflictsEl.classList.remove("hidden");
   }
 
   var SCORE_RE = /^\s*\d{1,3}(\.\d{1,2})?\s*$/;
@@ -114,16 +146,138 @@
     var k = key(input.dataset.singerId, input.dataset.judgeId);
     if (s === "empty") {
       delete state.dirty[k];
+      delete state.conflicts[k];
+      persistDraft();
+      updatePendingCount();
+      renderConflicts();
       scheduleSave();
       return;
     }
     state.dirty[k] = value.trim();
+    delete state.conflicts[k];
+    state.draftCommandId = newCommandId();
+    state.draftBaseVersion = state.version;
+    persistDraft();
+    updatePendingCount();
+    renderConflicts();
     scheduleSave();
   }
 
   var saveTimer = null;
+  var retryTimer = null;
+  var retryAttempt = 0;
   var saveInflight = false;
-  var queued = null;
+
+  function newCommandId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return "rapid-" + window.crypto.randomUUID();
+    }
+    return "rapid-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 14);
+  }
+
+  function localStorageOrNull() {
+    try {
+      return window.localStorage || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function cellsFromDirty() {
+    return Object.keys(state.dirty).sort().map(function (k) {
+      var p = k.split(":");
+      return {
+        singer_id: parseInt(p[0], 10),
+        judge_id: parseInt(p[1], 10),
+        score: state.dirty[k],
+      };
+    });
+  }
+
+  function validPendingCells(cells) {
+    return Array.isArray(cells) && cells.length > 0 && cells.every(function (cell) {
+      return cell && Number.isInteger(cell.singer_id) && cell.singer_id > 0 &&
+        Number.isInteger(cell.judge_id) && cell.judge_id > 0 &&
+        typeof cell.score === "string" && scoreState(cell.score) === "valid";
+    });
+  }
+
+  function pendingRecord(commandId) {
+    var cells = cellsFromDirty();
+    if (!validPendingCells(cells)) return null;
+    var baseVersion = state.draftBaseVersion;
+    if (!Number.isInteger(baseVersion) || baseVersion < 0) baseVersion = state.version;
+    commandId = commandId || state.draftCommandId || newCommandId();
+    if (typeof commandId !== "string" || !commandId || commandId.length > 64) return null;
+    state.draftCommandId = commandId;
+    state.draftBaseVersion = baseVersion;
+    return {
+      activity: activityId,
+      round: roundId,
+      endpoint: apiUrl,
+      base_version: baseVersion,
+      cells: cells,
+      command_id: commandId,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function persistDraft(commandId) {
+    var storage = localStorageOrNull();
+    var record = pendingRecord(commandId);
+    if (!storage) return record;
+    try {
+      if (record) storage.setItem(pendingStorageKey, JSON.stringify(record));
+      else if (!Object.keys(state.dirty).length) storage.removeItem(pendingStorageKey);
+    } catch (error) {
+      // Storage is a convenience for a client draft; quota/privacy failures do not block scoring.
+    }
+    return record;
+  }
+
+  function clearPendingAfterAck(commandId) {
+    var storage = localStorageOrNull();
+    if (!storage) return;
+    try {
+      var saved = JSON.parse(storage.getItem(pendingStorageKey) || "null");
+      if (saved && saved.command_id === commandId && !Object.keys(state.dirty).length) {
+        storage.removeItem(pendingStorageKey);
+      }
+    } catch (error) {
+      // A malformed browser draft is never authoritative and is ignored.
+    }
+  }
+
+  function validPendingRecord(record) {
+    return record && record.activity === activityId && record.round === roundId &&
+      record.endpoint === apiUrl && Number.isInteger(record.base_version) && record.base_version >= 0 &&
+      typeof record.command_id === "string" && record.command_id.length > 0 &&
+      record.command_id.length <= 64 && typeof record.updated_at === "string" &&
+      validPendingCells(record.cells);
+  }
+
+  function restorePendingDraft() {
+    var storage = localStorageOrNull();
+    if (!storage) return;
+    try {
+      var record = JSON.parse(storage.getItem(pendingStorageKey) || "null");
+      if (!validPendingRecord(record)) return;
+      state.draftCommandId = record.command_id;
+      state.draftBaseVersion = record.base_version;
+      record.cells.forEach(function (cell) {
+        var k = key(cell.singer_id, cell.judge_id);
+        if (!(k in state.cells)) return;
+        state.dirty[k] = cell.score;
+        var input = inputFor(cell.singer_id, cell.judge_id);
+        if (input) {
+          input.value = cell.score;
+          setVisual(input, false);
+        }
+      });
+    } catch (error) {
+      // Ignore an untrusted or malformed local draft instead of inventing score facts.
+    }
+  }
 
   function scheduleSave() {
     if (state.locked) return;
@@ -137,22 +291,40 @@
       saveTimer = null;
     }
     if (state.locked) return;
-    var keys = Object.keys(state.dirty);
-    if (!keys.length) return;
-    var cells = keys.map(function (k) {
-      var p = k.split(":");
-      return { singer_id: parseInt(p[0], 10), judge_id: parseInt(p[1], 10), score: state.dirty[k] };
-    });
-    savePending(cells);
+    if (!Object.keys(state.dirty).length) return;
+    if (Object.keys(state.conflicts).length) {
+      showError("存在同一单元格的并发冲突；请先修改冲突单元格后再保存。");
+      return;
+    }
+    var record = persistDraft();
+    if (!record) return;
+    if (navigator.onLine === false) {
+      showError("当前离线，评分草稿已保留，联网后将重试。");
+      return;
+    }
+    savePending(record);
   }
 
-  function savePending(cells) {
+  function scheduleRetry(commandId) {
+    retryAttempt = Math.min(retryAttempt + 1, 4);
+    var delay = Math.min(1000 * Math.pow(2, retryAttempt - 1), 8000);
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = setTimeout(function () {
+      retryTimer = null;
+      if (navigator.onLine !== false && state.draftCommandId === commandId) flushSave();
+    }, delay);
+  }
+
+  function savePending(record) {
     if (saveInflight) {
-      queued = cells;
       return;
     }
     saveInflight = true;
-    var payload = JSON.stringify({ base_version: state.version, cells: cells });
+    var payload = JSON.stringify({
+      command_id: record.command_id,
+      base_version: record.base_version,
+      cells: record.cells,
+    });
     fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
@@ -166,29 +338,35 @@
       .then(function (r) {
         if (r.status === 200) {
           setVersion(r.data.version);
-          cells.forEach(function (c) {
+          record.cells.forEach(function (c) {
             var k = key(c.singer_id, c.judge_id);
             state.cells[k] = c.score;
-            delete state.dirty[k];
+            if (state.dirty[k] === c.score) delete state.dirty[k];
+            delete state.conflicts[k];
           });
+          retryAttempt = 0;
+          if (!Object.keys(state.dirty).length) {
+            state.draftCommandId = null;
+            state.draftBaseVersion = null;
+          }
+          clearPendingAfterAck(record.command_id);
+          persistDraft();
           clearError();
           updateProgress();
+          updatePendingCount();
+          renderConflicts();
           if (r.data.matrix_complete) setResolved(r.data.resolved_status);
         } else if (r.status === 409) {
-          showError("数据已过期（他人已更新），已刷新到最新。");
-          refreshFromServer();
+          if (r.data.reason_code === "IDEMPOTENCY_CONFLICT") {
+            showError("本次保存请求冲突；请刷新后重试。");
+          } else {
+            showError("数据已过期（他人已更新）；本机草稿已与最新数据比较。");
+            refreshFromServer();
+          }
         } else if (r.status === 400) {
           showError(flattenDetail(r.data.detail));
-          cells.forEach(function (c) {
-            var k = key(c.singer_id, c.judge_id);
-            var inp = inputFor(c.singer_id, c.judge_id);
-            if (inp) {
-              inp.value = state.cells[k] || "";
-              setVisual(inp, false);
-            }
-            delete state.dirty[k];
-          });
-          updateProgress();
+          // A validation response is not an acknowledgement. Keep the client draft
+          // visible and retryable so a changed roster or a corrected value is not lost.
         } else if (r.status === 403) {
           showError("无权限：" + flattenDetail(r.data.detail));
         } else {
@@ -197,13 +375,12 @@
       })
       .catch(function () {
         showError("网络错误，保存失败，请稍后重试。");
+        scheduleRetry(record.command_id);
       })
       .finally(function () {
         saveInflight = false;
-        if (queued) {
-          var next = queued;
-          queued = null;
-          savePending(next);
+        if (state.draftCommandId && state.draftCommandId !== record.command_id) {
+          flushSave();
         }
       });
   }
@@ -221,9 +398,14 @@
         return resp.json();
       })
       .then(function (data) {
+        var beforeRefresh = {};
+        var localDraft = {};
+        for (var dirtyKey in state.dirty) {
+          beforeRefresh[dirtyKey] = state.cells[dirtyKey] || "";
+          localDraft[dirtyKey] = state.dirty[dirtyKey];
+        }
         setVersion(data.version);
         initCells(data.grid);
-        state.dirty = {};
         (data.grid || []).forEach(function (row) {
           row.cells.forEach(function (cell) {
             var inp = inputFor(row.singer_id, cell.judge_id);
@@ -233,8 +415,36 @@
             }
           });
         });
+        state.conflicts = {};
+        for (var k in localDraft) {
+          var parts = k.split(":");
+          var serverValue = state.cells[k] || "";
+          var localValue = localDraft[k];
+          var input = inputFor(parts[0], parts[1]);
+          if (serverValue !== beforeRefresh[k] && serverValue !== localValue) {
+            state.conflicts[k] = {
+              singer_id: parts[0],
+              judge_id: parts[1],
+              server: serverValue,
+              local: localValue,
+            };
+          }
+          if (input) {
+            input.value = localValue;
+            setVisual(input, false);
+          }
+        }
+        if (Object.keys(localDraft).length) {
+          state.draftBaseVersion = data.version;
+          persistDraft(state.draftCommandId);
+        }
         updateProgress();
+        updatePendingCount();
+        renderConflicts();
         setResolved(data.matrix_complete ? data.resolved_status : null);
+      })
+      .catch(function () {
+        showError("无法获取最新评分；本机草稿仍已保留，请稍后重试。");
       });
   }
 
@@ -278,6 +488,10 @@
       input.value = state.cells[k] || "";
       setVisual(input, false);
       delete state.dirty[k];
+      delete state.conflicts[k];
+      persistDraft();
+      updatePendingCount();
+      renderConflicts();
       input.blur();
     }
   }
@@ -327,7 +541,35 @@
     tbody.addEventListener("blur", onBlur, true);
   }
 
+  if (!state.locked && retryButton) {
+    retryButton.addEventListener("click", function () {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      flushSave();
+    });
+  }
+
+  if (!state.locked) {
+    window.addEventListener("online", function () {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      flushSave();
+    });
+    window.addEventListener("beforeunload", function (event) {
+      if (!Object.keys(state.dirty).length) return;
+      event.preventDefault();
+      event.returnValue = "仍有未保存的评分草稿。";
+      return event.returnValue;
+    });
+  }
+
   initCells(initial.grid);
+  restorePendingDraft();
   updateProgress();
+  updatePendingCount();
   setVersion(state.version);
 })();
