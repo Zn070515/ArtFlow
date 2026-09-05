@@ -112,8 +112,21 @@ class Activity(models.Model):
     def _ensure_initial_state_authorized(self):
         if authority_authorized(ACTIVITY_STATE):
             return
-        if self.phase != self.Phase.DRAFT or self.is_locked:
+        if (
+            self.phase != self.Phase.DRAFT
+            or self.is_locked
+            or self.locked_at is not None
+            or self.locked_by_id is not None
+        ):
             raise ValidationError("Activity must be created in the unlocked DRAFT phase.")
+
+    def _has_related_data(self):
+        for relation in self._meta.related_objects:
+            child_model = relation.related_model
+            children = child_model._base_manager.filter(**{relation.field.name: self.pk})
+            if children.exists():
+                return True
+        return False
 
     def _ensure_deletion_authorized(self):
         if not authority_authorized(TEST_DATA_CLEANUP):
@@ -125,13 +138,8 @@ class Activity(models.Model):
             or self.is_locked
         ):
             raise ValidationError("Only unlocked TEST activities in DRAFT may be deleted.")
-        if (
-            self.archive_packages.exists()
-            or self.stage_results.exists()
-            or self.rounds.exists()
-            or self.vote_sessions.exists()
-        ):
-            raise ValidationError("Activities with archive, result, or runtime data cannot be deleted.")
+        if self._has_related_data():
+            raise ValidationError("Activities with related data cannot be deleted.")
 
     def delete(self, *args, **kwargs):
         self._ensure_deletion_authorized()

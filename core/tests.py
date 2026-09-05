@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import RequestFactory, TestCase
+from django.utils import timezone
 
 from .models import Activity, ActivityPhase, QRCodeLink
 from .policies import ActivityAction, allowed_actions, ensure_activity_action_allowed
@@ -70,6 +71,20 @@ class CoreModelTests(TestCase):
 
 
 class ActivityCreationAuthorityTests(TestCase):
+    def test_activity_instance_creation_rejects_lock_provenance(self):
+        user = User.objects.create_user(username="activity-instance-lock-provenance")
+        activity = Activity(
+            title="Instance lock provenance",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            locked_at=timezone.now(),
+            locked_by=user,
+        )
+
+        with self.assertRaises(ValidationError):
+            activity.save()
+
+        self.assertFalse(Activity.objects.filter(title=activity.title).exists())
+
     def test_activity_creation_rejects_non_initial_state_through_both_managers(self):
         for manager, title in (
             (Activity.objects, "Default manager live"),
@@ -125,6 +140,73 @@ class ActivityCreationAuthorityTests(TestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.phase, Activity.Phase.DRAFT)
 
+    def test_activity_creation_rejects_lock_provenance_through_both_managers(self):
+        user = User.objects.create_user(username="activity-lock-provenance")
+        for manager, title, provenance in (
+            (Activity.objects, "Default locked at", {"locked_at": timezone.now()}),
+            (Activity._base_manager, "Base locked by", {"locked_by": user}),
+        ):
+            with self.subTest(manager=manager.name, title=title):
+                with self.assertRaises(ValidationError):
+                    manager.create(
+                        title=title,
+                        activity_type=Activity.Type.SINGER_CONTEST,
+                        **provenance,
+                    )
+                self.assertFalse(Activity.objects.filter(title=title).exists())
+
+    def test_activity_bulk_create_rejects_lock_provenance_through_both_managers(self):
+        user = User.objects.create_user(username="activity-bulk-lock-provenance")
+        for manager, title, provenance in (
+            (Activity.objects, "Default bulk locked at", {"locked_at": timezone.now()}),
+            (Activity._base_manager, "Base bulk locked by", {"locked_by": user}),
+        ):
+            with self.subTest(manager=manager.name, title=title):
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            Activity(
+                                title=title,
+                                activity_type=Activity.Type.SINGER_CONTEST,
+                                **provenance,
+                            )
+                        ]
+                    )
+                self.assertFalse(Activity.objects.filter(title=title).exists())
+
+    def test_activity_bulk_create_update_conflicts_rejects_lock_provenance_through_both_managers(
+        self,
+    ):
+        user = User.objects.create_user(username="activity-conflict-lock-provenance")
+        for manager, title, provenance in (
+            (Activity.objects, "Default provenance conflict target", {"locked_at": timezone.now()}),
+            (Activity._base_manager, "Base provenance conflict target", {"locked_by": user}),
+        ):
+            with self.subTest(manager=manager.name, title=title):
+                activity = Activity.objects.create(
+                    title=title, activity_type=Activity.Type.SINGER_CONTEST
+                )
+
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            Activity(
+                                pk=activity.pk,
+                                title="Provenance conflict bypass",
+                                activity_type=activity.activity_type,
+                                **provenance,
+                            )
+                        ],
+                        update_conflicts=True,
+                        update_fields=["title"],
+                        unique_fields=["pk"],
+                    )
+
+                activity.refresh_from_db()
+                self.assertEqual(activity.title, title)
+                self.assertIsNone(activity.locked_at)
+                self.assertIsNone(activity.locked_by_id)
+
 
 class ActivityDeletionAuthorityTests(TestCase):
     def _activity(self, title, **kwargs):
@@ -157,6 +239,132 @@ class ActivityDeletionAuthorityTests(TestCase):
         with self.assertRaises(ValidationError):
             activity.delete()
         with authority_write("test_data.cleanup"):
+            activity.delete()
+
+        self.assertFalse(Activity.objects.filter(pk=activity.pk).exists())
+
+    def test_activity_delete_rejects_formal_singer_registration_and_preserves_it(self):
+        from singer_contest.models import SingerRegistration
+
+        activity = self._activity("Formal registration")
+        singer = SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username="formal-registration-owner"),
+            name="Formal singer",
+            student_id="formal-registration-1",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+
+        with authority_write("test_data.cleanup"):
+            with self.assertRaises(ValidationError):
+                activity.delete()
+
+        self.assertTrue(Activity.objects.filter(pk=activity.pk).exists())
+        self.assertTrue(SingerRegistration.objects.filter(pk=singer.pk, is_test_data=False).exists())
+
+    def test_activity_delete_rejects_formal_award_and_preserves_it(self):
+        from singer_contest.models import Award, SingerRegistration
+
+        activity = self._activity("Formal award")
+        singer = SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username="formal-award-owner"),
+            name="Award singer",
+            student_id="formal-award-1",
+            college="College",
+            class_name="Class",
+            phone="13800000001",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        award = Award.objects.create(
+            activity=activity,
+            singer=singer,
+            name="Formal award",
+            is_test_data=False,
+        )
+
+        with authority_write("test_data.cleanup"):
+            with self.assertRaises(ValidationError):
+                Activity._base_manager.filter(pk=activity.pk).delete()
+
+        self.assertTrue(Activity.objects.filter(pk=activity.pk).exists())
+        self.assertTrue(Award.objects.filter(pk=award.pk, is_test_data=False).exists())
+
+    def test_activity_delete_rejects_formal_archive_package_and_preserves_it(self):
+        from archive.models import ArchivePackage
+
+        activity = self._activity("Formal archive")
+        archive_package = ArchivePackage.objects.create(activity=activity, note="Formal archive")
+
+        with authority_write("test_data.cleanup"):
+            with self.assertRaises(ValidationError):
+                activity.delete()
+
+        self.assertTrue(Activity.objects.filter(pk=activity.pk).exists())
+        self.assertTrue(ArchivePackage.objects.filter(pk=archive_package.pk).exists())
+
+    def test_activity_delete_rejects_formal_descendant_of_test_runtime_data(self):
+        from singer_contest.models import SingerRegistration
+        from voting.models import VoteOption, VoteSession
+
+        activity = self._activity("Formal nested vote option")
+        singer = SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username="nested-formal-option-owner"),
+            name="Test singer",
+            student_id="nested-formal-option-1",
+            college="College",
+            class_name="Class",
+            phone="13800000002",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        session = VoteSession.objects.create(
+            activity=activity,
+            name="Test vote",
+            passcode="test-passcode",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(hours=1),
+            is_test_data=True,
+        )
+        option = VoteOption.objects.create(
+            vote_session=session,
+            singer=singer,
+            is_test_data=False,
+        )
+
+        with authority_write("test_data.cleanup"):
+            with self.assertRaises(ValidationError):
+                activity.delete()
+
+        self.assertTrue(Activity.objects.filter(pk=activity.pk).exists())
+        self.assertTrue(VoteOption.objects.filter(pk=option.pk, is_test_data=False).exists())
+
+    def test_activity_delete_requires_explicit_removal_of_test_runtime_children(self):
+        from voting.models import VoteSession
+
+        activity = self._activity("Test runtime cleanup")
+        vote_session = VoteSession.objects.create(
+            activity=activity,
+            name="Test vote",
+            passcode="test-passcode",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timezone.timedelta(hours=1),
+            is_test_data=True,
+        )
+
+        with authority_write("test_data.cleanup"):
+            with self.assertRaises(ValidationError):
+                activity.delete()
+            vote_session.delete()
             activity.delete()
 
         self.assertFalse(Activity.objects.filter(pk=activity.pk).exists())
