@@ -1,4 +1,4 @@
-from common.authority import ACCOUNT_AUTHORITY, authority_authorized
+from common.authority import ACCOUNT_AUTHORITY, authority_authorized, authority_write
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -13,6 +13,18 @@ class UserAuthorityQuerySet(models.QuerySet):
         if self.protected_fields.intersection(fields) and not authority_authorized(ACCOUNT_AUTHORITY):
             raise ValidationError("账户权限只能通过授权账户服务修改。")
 
+    def _ensure_initial_authority_authorized(self, users) -> None:
+        if authority_authorized(ACCOUNT_AUTHORITY):
+            return
+        for user in users:
+            if (
+                user.role != self.model.Role.PARTICIPANT
+                or not user.is_active
+                or user.is_superuser
+                or user.is_staff
+            ):
+                raise ValidationError("账户权限只能通过授权账户服务修改。")
+
     def update(self, **kwargs):
         self._ensure_authorized(kwargs)
         return super().update(**kwargs)
@@ -22,13 +34,23 @@ class UserAuthorityQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        self._ensure_initial_authority_authorized(objs)
         if kwargs.get("update_conflicts"):
             self._ensure_authorized(kwargs.get("update_fields", ()))
+        for user in objs:
+            user.is_staff = user.is_superuser or user.role in (
+                self.model.Role.STAFF,
+                self.model.Role.ADMIN,
+            )
         return super().bulk_create(objs, *args, **kwargs)
 
 
 class UserAuthorityManager(UserManager.from_queryset(UserAuthorityQuerySet)):
-    pass
+    def create_superuser(self, username, email=None, password=None, **extra_fields):
+        """Keep Django's technical superuser bootstrap on the explicit authority path."""
+        with authority_write(ACCOUNT_AUTHORITY):
+            return super().create_superuser(username, email, password, **extra_fields)
 
 
 class User(AbstractUser):
@@ -52,7 +74,16 @@ class User(AbstractUser):
         return self.role in (self.Role.STAFF, self.Role.ADMIN) or self.is_superuser
 
     def _ensure_protected_values_authorized(self) -> None:
-        if self._state.adding or not self.pk or authority_authorized(ACCOUNT_AUTHORITY):
+        if authority_authorized(ACCOUNT_AUTHORITY):
+            return
+        if self._state.adding or not self.pk:
+            if (
+                self.role != self.Role.PARTICIPANT
+                or not self.is_active
+                or self.is_superuser
+                or self.is_staff
+            ):
+                raise ValidationError("账户权限只能通过授权账户服务修改。")
             return
         stored = (
             type(self)

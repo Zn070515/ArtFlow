@@ -7,6 +7,7 @@ from unittest import skipUnless
 from unittest.mock import patch
 
 from django.contrib import admin
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -29,6 +30,11 @@ from .services import (
 )
 
 
+def create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
+
+
 class LoginModeTests(TestCase):
     def setUp(self):
         self.participant = User.objects.create_user(
@@ -36,7 +42,7 @@ class LoginModeTests(TestCase):
             password="pass12345",
             role=User.Role.PARTICIPANT,
         )
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -130,7 +136,7 @@ class AdminVerificationTTLTests(TestCase):
     """§17 P1 — the elevated admin verification marker must expire (bounded TTL)."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -201,7 +207,7 @@ class AdminVerificationTTLTests(TestCase):
 class AdminLoginRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -245,12 +251,12 @@ class AdminLoginRateLimitTests(TestCase):
 
 class UserPermissionSynchronizationTests(TestCase):
     def test_service_demoting_staff_user_clears_django_staff_flag(self):
-        actor = User.objects.create_user(
+        actor = create_provisioned_user(
             username="authority-admin",
             password="pass12345",
             role=User.Role.ADMIN,
         )
-        user = User.objects.create_user(
+        user = create_provisioned_user(
             username="demoted-staff",
             password="pass12345",
             role=User.Role.STAFF,
@@ -325,7 +331,7 @@ class EffectiveAdminAuthorityTests(TestCase):
         # The superuser is an effective admin even with a participant role, so a
         # real role-based admin may be demoted without leaving zero admins. The
         # old guard only counted role == ADMIN and rejected this correctly.
-        real_admin = User.objects.create_user(
+        real_admin = create_provisioned_user(
             username="real-admin", password="pass12345", role=User.Role.ADMIN
         )
         change_user_role(target=real_admin, new_role=User.Role.PARTICIPANT, actor=self.super_admin)
@@ -344,10 +350,10 @@ class EffectiveAdminAuthorityTests(TestCase):
         # Demote the actor to participant (revoker remains admin). The actor
         # object in memory still says ADMIN; the service must reject using that
         # stale authority to mutate a third user.
-        revoker = User.objects.create_user(
+        revoker = create_provisioned_user(
             username="revoker", password="pass12345", role=User.Role.ADMIN
         )
-        actor = User.objects.create_user(
+        actor = create_provisioned_user(
             username="actor", password="pass12345", role=User.Role.ADMIN
         )
         change_user_role(target=actor, new_role=User.Role.PARTICIPANT, actor=revoker)
@@ -359,7 +365,7 @@ class EffectiveAdminAuthorityTests(TestCase):
 
     def test_last_effective_admin_cannot_be_demoted(self):
         # Only ``alone`` is effective after the service deactivates the superuser.
-        alone = User.objects.create_user(
+        alone = create_provisioned_user(
             username="only-admin", password="pass12345", role=User.Role.ADMIN
         )
         set_user_active(target=self.super_admin, is_active=False, actor=alone)
@@ -373,7 +379,7 @@ class AccountAuthorityBoundaryTests(TestCase):
     """Only audited account services may change security-bearing User fields."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="account-authority-admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -456,6 +462,61 @@ class AccountAuthorityBoundaryTests(TestCase):
         self.assertEqual(active_audit.new_value, "active=False")
 
 
+class AccountAuthorityCreationTests(TestCase):
+    """Initial account authority needs the same explicit scope as later changes."""
+
+    def test_instance_save_rejects_nondefault_authority_values_on_creation(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User(username=f"instance-create-{suffix}", **values).save()
+
+    def test_default_manager_create_rejects_nondefault_authority_values(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User.objects.create_user(username=f"manager-create-{suffix}", **values)
+
+    def test_base_manager_create_rejects_nondefault_authority_values(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User._base_manager.create(username=f"base-create-{suffix}", **values)
+
+    def test_bulk_create_rejects_nondefault_authority_values(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User.objects.bulk_create([User(username=f"bulk-create-{suffix}", **values)])
+
+    def test_default_creation_remains_valid_and_authority_scope_allows_provisioning(self):
+        ordinary = User.objects.create_user(username="ordinary-created", password="pass12345")
+        self.assertEqual(ordinary.role, User.Role.PARTICIPANT)
+        self.assertTrue(ordinary.is_active)
+        self.assertFalse(ordinary.is_superuser)
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            provisioned = User.objects.create_user(
+                username="provisioned-created",
+                password="pass12345",
+                role=User.Role.ADMIN,
+                is_superuser=True,
+            )
+        self.assertTrue(provisioned.is_admin)
+
+
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
 class AdminAuthorityConcurrencyTests(TransactionTestCase):
     """Concurrent admin mutations must never leave zero effective admins."""
@@ -468,10 +529,10 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_mutual_demotion_keeps_at_least_one_admin(self):
-        admin_a = User.objects.create_user(
+        admin_a = create_provisioned_user(
             username="admin-a", password="pass12345", role=User.Role.ADMIN
         )
-        admin_b = User.objects.create_user(
+        admin_b = create_provisioned_user(
             username="admin-b", password="pass12345", role=User.Role.ADMIN
         )
         results: dict[str, str] = {}
@@ -510,10 +571,10 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
         self.assertLessEqual(list(results.values()).count("ok"), 1)
 
     def test_concurrent_mutual_deactivation_keeps_at_least_one_admin(self):
-        admin_a = User.objects.create_user(
+        admin_a = create_provisioned_user(
             username="deact-a", password="pass12345", role=User.Role.ADMIN
         )
-        admin_b = User.objects.create_user(
+        admin_b = create_provisioned_user(
             username="deact-b", password="pass12345", role=User.Role.ADMIN
         )
         results: dict[str, str] = {}
