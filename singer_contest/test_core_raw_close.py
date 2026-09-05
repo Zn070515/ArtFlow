@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from accounts.models import User
 from common.authority import (
+    ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
@@ -39,8 +40,9 @@ class CoreRawAuthorityTests(TestCase):
         self.activity = Activity.objects.create(
             title="Raw authority",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REHEARSAL,
         )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.REHEARSAL)
         self.round = ContestRound.objects.create(activity=self.activity)
         self.singer = SingerRegistration.objects.create(
             activity=self.activity,
@@ -132,8 +134,9 @@ class CoreRawAuthorityTests(TestCase):
         other = Activity.objects.create(
             title="Other activity",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REHEARSAL,
         )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=other.pk).update(phase=Activity.Phase.REHEARSAL)
         foreign = SingerRegistration.objects.create(
             activity=other,
             user=User.objects.create_user(username="foreign-singer"),

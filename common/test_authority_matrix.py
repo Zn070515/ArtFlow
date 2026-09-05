@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import Callable
+from typing import Any, Callable
 
 from accounts.admin import CustomUserAdmin
 from accounts.models import User
@@ -33,7 +33,16 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
-from singer_contest.admin import JudgeAdmin, SingerRegistrationAdmin
+from ruleset.services import create_ruleset_version, freeze_ruleset_version
+from singer_contest.admin import (
+    AwardAdmin,
+    ContestRoundAdmin,
+    CriterionScoreAdmin,
+    JudgeAdmin,
+    ScoreRecordAdmin,
+    ScoreSummaryAdmin,
+    SingerRegistrationAdmin,
+)
 from singer_contest.models import (
     AudienceScore,
     Award,
@@ -51,6 +60,16 @@ from singer_contest.models import (
     StageDecision,
     StageResult,
 )
+from singer_contest.services import (
+    apply_scores,
+    confirm_stage_result,
+    lock_round,
+    prepare_round,
+    run_ruleset,
+)
+from common.models import AuditLog
+from core.services import transition_activity_phase
+from voting.services import lock_vote_session
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
@@ -64,7 +83,25 @@ class AuthorityDescriptor:
     name: str
     model: type
     owner: str
-    check: Callable[["AuthorityMutationMatrixTests"], None]
+    factory: Callable[["AuthorityMutationMatrixTests"], Any]
+    mutations: tuple["MutationDescriptor", ...]
+
+
+@dataclass(frozen=True)
+class MutationDescriptor:
+    """One independently named mutation path for a model row."""
+
+    path: str
+    attempt: Callable[["AuthorityMutationMatrixTests", Any], None]
+
+
+@dataclass(frozen=True)
+class BulkDeleteDescriptor:
+    """A distinct bulk-insert and queryset-delete assertion for one protected model."""
+
+    name: str
+    model: type
+    attempt: Callable[["AuthorityMutationMatrixTests"], None]
 
 
 class AuthorityMutationMatrixTests(TestCase):
@@ -92,6 +129,7 @@ class AuthorityMutationMatrixTests(TestCase):
             class_name="Class",
             phone="13000000000",
             song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=True,
         )
         self.other_singer = SingerRegistration.objects.create(
@@ -105,6 +143,17 @@ class AuthorityMutationMatrixTests(TestCase):
             song_name="Other song",
             is_test_data=True,
         )
+        self.spare_singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="matrix-spare", password="pass"),
+            name="Spare singer",
+            student_id="matrix-3",
+            college="College",
+            class_name="Class",
+            phone="13200000000",
+            song_name="Spare song",
+            is_test_data=True,
+        )
         self.judge = Judge.objects.create(activity=self.activity, name="Matrix judge")
         self.round = ContestRound.objects.create(
             activity=self.activity,
@@ -116,11 +165,26 @@ class AuthorityMutationMatrixTests(TestCase):
             round_type=ContestRound.RoundType.PRELIMINARY,
             name="Other round",
         )
+        self.alternate_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="Alternate matrix round",
+        )
+        self.alternate_judge = Judge.objects.create(
+            activity=self.activity, name="Alternate judge", is_active=False
+        )
         self.score = ScoreRecord.objects.create(
             round=self.round,
             singer=self.singer,
             judge=self.judge,
             score=Decimal("90"),
+            is_test_data=True,
+        )
+        self.alternate_score = ScoreRecord.objects.create(
+            round=self.alternate_round,
+            singer=self.spare_singer,
+            judge=self.alternate_judge,
+            score=Decimal("80"),
             is_test_data=True,
         )
         self.vote_session = VoteSession.objects.create(
@@ -184,11 +248,24 @@ class AuthorityMutationMatrixTests(TestCase):
         self.group = PerformanceGroup.objects.create(
             activity=self.activity, round=self.round, name="Matrix group", is_test_data=True
         )
+        self.alternate_group = PerformanceGroup.objects.create(
+            activity=self.activity,
+            round=self.alternate_round,
+            name="Alternate group",
+            is_test_data=True,
+        )
         self.performance = Performance.objects.create(
             activity=self.activity,
             round=self.round,
             singer=self.singer,
             group=self.group,
+            is_test_data=True,
+        )
+        self.alternate_performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.alternate_round,
+            singer=self.spare_singer,
+            group=self.alternate_group,
             is_test_data=True,
         )
         self.rubric = self.round.rubric
@@ -206,10 +283,27 @@ class AuthorityMutationMatrixTests(TestCase):
             max_score=Decimal("100"),
             is_test_data=True,
         )
+        from singer_contest.models import ScoringRubric
+
+        self.alternate_rubric = ScoringRubric.objects.create(
+            activity=self.activity, name="Alternate rubric", is_test_data=True
+        )
+        self.alternate_criterion = RubricCriterion.objects.create(
+            rubric=self.alternate_rubric,
+            name="Alternate criterion",
+            max_score=Decimal("100"),
+            is_test_data=True,
+        )
         self.criterion_score = CriterionScore.objects.create(
             score_record=self.score,
             criterion=self.criterion,
             value=Decimal("90"),
+            is_test_data=True,
+        )
+        self.alternate_criterion_score = CriterionScore.objects.create(
+            score_record=self.alternate_score,
+            criterion=self.alternate_criterion,
+            value=Decimal("80"),
             is_test_data=True,
         )
         self.ruleset = ContestRuleset.objects.create(
@@ -236,9 +330,21 @@ class AuthorityMutationMatrixTests(TestCase):
             stage_key="matrix-stage",
             is_test_data=True,
         )
+        self.alternate_stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=self.version,
+            stage_key="alternate-stage",
+            is_test_data=True,
+        )
         self.decision = StageDecision.objects.create(
             stage_result=self.stage,
             singer=self.singer,
+            outcome_code="selected",
+            is_test_data=True,
+        )
+        self.alternate_decision = StageDecision.objects.create(
+            stage_result=self.alternate_stage,
+            singer=self.spare_singer,
             outcome_code="selected",
             is_test_data=True,
         )
@@ -249,11 +355,25 @@ class AuthorityMutationMatrixTests(TestCase):
             name="Matrix award",
             is_test_data=True,
         )
+        self.alternate_award_decision = StageAwardDecision.objects.create(
+            stage_result=self.alternate_stage,
+            activity=self.activity,
+            singer=self.spare_singer,
+            name="Alternate matrix award",
+            is_test_data=True,
+        )
         self.composite = CompositeResult.objects.create(
             stage_result=self.stage,
             singer=self.singer,
             node_key="matrix-node",
             value=Decimal("90"),
+            is_test_data=True,
+        )
+        self.alternate_composite = CompositeResult.objects.create(
+            stage_result=self.alternate_stage,
+            singer=self.spare_singer,
+            node_key="alternate-node",
+            value=Decimal("80"),
             is_test_data=True,
         )
         self.audience = AudienceScore.objects.create(
@@ -310,8 +430,91 @@ class AuthorityMutationMatrixTests(TestCase):
 
     def test_unauthorized_mutation_matrix(self):
         for descriptor in MODEL_MATRIX:
-            with self.subTest(model=descriptor.name, owner=descriptor.owner):
-                descriptor.check(self)
+            instance = descriptor.factory(self)
+            self.assertIsNotNone(instance, descriptor.name)
+            self.assertTrue(descriptor.mutations, descriptor.name)
+            for mutation in descriptor.mutations:
+                with self.subTest(
+                    model=descriptor.name, owner=descriptor.owner, path=mutation.path
+                ):
+                    mutation.attempt(self, instance)
+
+    def test_bulk_create_and_queryset_delete_matrix(self):
+        for descriptor in BULK_DELETE_MATRIX:
+            with self.subTest(model=descriptor.name):
+                descriptor.attempt(self)
+
+    def test_formal_fk_mutation_matrix_checks_old_and_new_origins(self):
+        self._lock_round()
+        for model, protected, unprotected, field in (
+            (ScoreRecord, self.score, self.alternate_score, "round_id"),
+            (PerformanceGroup, self.group, self.alternate_group, "round_id"),
+            (Performance, self.performance, self.alternate_performance, "round_id"),
+        ):
+            with self.subTest(model=model.__name__, direction="protected-to-unprotected"):
+                self._assert_rejects(
+                    lambda model=model, protected=protected, field=field: model._base_manager.filter(
+                        pk=protected.pk
+                    ).update(**{field: self.alternate_round.pk})
+                )
+            with self.subTest(model=model.__name__, direction="unprotected-to-protected"):
+                self._assert_rejects(
+                    lambda model=model, unprotected=unprotected, field=field: model._base_manager.filter(
+                        pk=unprotected.pk
+                    ).update(**{field: self.round.pk})
+                )
+
+        self._assert_rejects(
+            lambda: ScoreRecord._base_manager.filter(pk=self.score.pk).update(
+                singer_id=self.spare_singer.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: ScoreRecord._base_manager.filter(pk=self.score.pk).update(
+                judge_id=self.alternate_judge.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: RubricCriterion._base_manager.filter(pk=self.criterion.pk).update(
+                rubric_id=self.alternate_rubric.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: RubricCriterion._base_manager.filter(pk=self.alternate_criterion.pk).update(
+                rubric_id=self.rubric.pk
+            )
+        )
+        with self.subTest(model="CriterionScore", direction="protected-to-unprotected"):
+            self._assert_rejects(
+                lambda: CriterionScore._base_manager.filter(pk=self.criterion_score.pk).update(
+                    score_record_id=self.alternate_score.pk
+                )
+            )
+        with self.subTest(model="CriterionScore", direction="unprotected-to-protected"):
+            self._assert_rejects(
+                lambda: CriterionScore._base_manager.filter(
+                    pk=self.alternate_criterion_score.pk
+                ).update(score_record_id=self.score.pk)
+            )
+
+        self._confirm_stage()
+        for model, protected, unprotected in (
+            (StageDecision, self.decision, self.alternate_decision),
+            (StageAwardDecision, self.award_decision, self.alternate_award_decision),
+            (CompositeResult, self.composite, self.alternate_composite),
+        ):
+            with self.subTest(model=model.__name__, direction="protected-to-unprotected"):
+                self._assert_rejects(
+                    lambda model=model, protected=protected: model._base_manager.filter(
+                        pk=protected.pk
+                    ).update(stage_result_id=self.alternate_stage.pk)
+                )
+            with self.subTest(model=model.__name__, direction="unprotected-to-protected"):
+                self._assert_rejects(
+                    lambda model=model, unprotected=unprotected: model._base_manager.filter(
+                        pk=unprotected.pk
+                    ).update(stage_result_id=self.stage.pk)
+                )
 
     def test_admin_canonical_boundaries(self):
         self.assertFalse(ActivityAdmin(Activity, admin.site).has_delete_permission(None, self.activity))
@@ -326,6 +529,21 @@ class AuthorityMutationMatrixTests(TestCase):
         self.assertEqual(
             JudgeAdmin(Judge, admin.site).get_readonly_fields(None, self.judge), ("activity",)
         )
+        self.assertFalse(ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(None, self.round))
+        for admin_class, model, instance in (
+            (ScoreRecordAdmin, ScoreRecord, self.score),
+            (CriterionScoreAdmin, CriterionScore, self.criterion_score),
+            (ScoreSummaryAdmin, ScoreSummary, None),
+        ):
+            model_admin = admin_class(model, admin.site)
+            with self.subTest(model=model.__name__):
+                self.assertFalse(model_admin.has_add_permission(None))
+                self.assertFalse(model_admin.has_change_permission(None, instance))
+                self.assertFalse(model_admin.has_delete_permission(None, instance))
+        self.assertEqual(
+            AwardAdmin(Award, admin.site).get_readonly_fields(None, self.award),
+            ["source_vote_session", "source_stage_result", "source_award_decision", "source_node"],
+        )
 
     def test_documented_authority_services_succeed(self):
         change_user_role(
@@ -333,14 +551,63 @@ class AuthorityMutationMatrixTests(TestCase):
         )
         self.operator.refresh_from_db()
         self.assertEqual(self.operator.role, User.Role.STAFF)
-        with authority_write(SCORE_SUMMARY_RECALCULATE):
-            ScoreSummary.objects.create(
-                round=self.round, singer=self.singer, average_score=Decimal("90"), is_test_data=True
-            )
+        transitioned = transition_activity_phase(
+            self.activity, Activity.Phase.TESTING, actor=self.admin_user, note="matrix"
+        )
+        self.assertEqual(transitioned.phase, Activity.Phase.TESTING)
+        prepared_round = prepare_round(self.round, self.admin_user)
+        self.assertEqual(prepared_round.status, ContestRound.Status.PREPARED)
+        changes = apply_scores(
+            self.round, {(self.singer.pk, self.judge.pk): Decimal("91")}, self.admin_user, note="matrix"
+        )
+        self.assertEqual(len(changes), 1)
+        locked_round = lock_round(self.round, self.admin_user)
+        self.assertTrue(locked_round.is_locked)
+        locked_vote = lock_vote_session(self.vote_session, self.admin_user)
+        self.assertTrue(locked_vote.is_locked)
+        draft_version = create_ruleset_version(
+            self.ruleset,
+            definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+            created_by=self.admin_user,
+            binding={},
+        )
+        frozen_version = freeze_ruleset_version(draft_version, self.admin_user, binding={})
+        self.assertEqual(frozen_version.status, RulesetVersion.Status.FROZEN)
         with authority_write(ACTIVITY_STATE):
-            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.REGISTRATION_OPEN)
-        with authority_write(VOTE_SESSION_STATE):
-            VoteSession.objects.filter(pk=self.vote_session.pk).update(is_open=True)
+            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.RESULTS_PENDING)
+        resolved_stage = run_ruleset(
+            frozen_version,
+            self.activity,
+            stage_key="matrix-service-stage",
+            computed_by=self.admin_user,
+            round_keys={},
+            preview=False,
+        )
+        self.assertEqual(resolved_stage.status, StageResult.Status.READY_TO_CONFIRM)
+        confirmed_stage = confirm_stage_result(resolved_stage, confirmed_by=self.admin_user)
+        self.assertEqual(confirmed_stage.status, StageResult.Status.CONFIRMED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target=f"ContestRound:{self.round.pk}", action_type=AuditLog.ActionType.ENTER_SCORE
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target=f"VoteSession:{self.vote_session.pk}", action_type=AuditLog.ActionType.RELOCK_RESULT
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target=f"RulesetVersion:{frozen_version.pk}",
+                action_type=AuditLog.ActionType.FINALIZE_RULESET,
+            ).exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target=f"StageResult:{confirmed_stage.pk}",
+                action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
+            ).exists()
+        )
 
 
 def _user_row(case):
@@ -549,27 +816,383 @@ def _ruleset_version(case):
     case._assert_rejects(case.version.delete)
 
 
+def _score_bulk_and_delete(case):
+    case._lock_round()
+    case._assert_rejects(
+        lambda: ScoreRecord.objects.bulk_create(
+            [
+                ScoreRecord(
+                    round=case.round,
+                    singer=case.spare_singer,
+                    judge=case.judge,
+                    score=Decimal("80"),
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: ScoreRecord.objects.filter(pk=case.score.pk).delete())
+
+
+def _activity_bulk_and_delete(case):
+    case._assert_rejects(
+        lambda: Activity.objects.bulk_create(
+            [
+                Activity(
+                    title="bulk activity",
+                    activity_type=Activity.Type.SINGER_CONTEST,
+                    phase=Activity.Phase.LIVE,
+                )
+            ]
+        )
+    )
+    with authority_write(ACTIVITY_STATE):
+        Activity.objects.filter(pk=case.other_activity.pk).update(phase=Activity.Phase.LIVE)
+    case._assert_rejects(lambda: Activity.objects.filter(pk=case.other_activity.pk).delete())
+
+
+def _round_bulk_and_delete(case):
+    case._assert_rejects(
+        lambda: ContestRound.objects.bulk_create(
+            [
+                ContestRound(
+                    activity=case.activity,
+                    round_type=ContestRound.RoundType.PRELIMINARY,
+                    status=ContestRound.Status.LOCKED,
+                    is_locked=True,
+                )
+            ]
+        )
+    )
+    case._lock_round()
+    case._assert_rejects(lambda: ContestRound.objects.filter(pk=case.round.pk).delete())
+
+
+def _vote_session_bulk_and_delete(case):
+    case._assert_rejects(
+        lambda: VoteSession.objects.bulk_create(
+            [
+                VoteSession(
+                    activity=case.activity,
+                    name="bulk vote",
+                    passcode="345678",
+                    start_time=timezone.now(),
+                    end_time=timezone.now() + timedelta(hours=1),
+                    is_locked=True,
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._lock_vote()
+    case._assert_rejects(lambda: VoteSession.objects.filter(pk=case.vote_session.pk).delete())
+
+
+def _summary_bulk_and_delete(case):
+    with authority_write(SCORE_SUMMARY_RECALCULATE):
+        summary = ScoreSummary.objects.create(
+            round=case.round, singer=case.singer, average_score=Decimal("90"), is_test_data=True
+        )
+    case._assert_rejects(
+        lambda: ScoreSummary.objects.bulk_create(
+            [
+                ScoreSummary(
+                    round=case.round,
+                    singer=case.spare_singer,
+                    average_score=Decimal("80"),
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: ScoreSummary.objects.filter(pk=summary.pk).delete())
+
+
+def _audience_bulk_and_delete(case):
+    case._confirm_stage()
+    case._assert_rejects(
+        lambda: AudienceScore.objects.bulk_create(
+            [
+                AudienceScore(
+                    activity=case.activity,
+                    stage_key="matrix-audience",
+                    singer=case.spare_singer,
+                    score=Decimal("80"),
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: AudienceScore.objects.filter(pk=case.audience.pk).delete())
+
+
+def _option_bulk_and_delete(case):
+    case._lock_vote()
+    case._assert_rejects(
+        lambda: VoteOption.objects.bulk_create(
+            [VoteOption(vote_session=case.vote_session, singer=case.spare_singer, is_test_data=True)]
+        )
+    )
+    case._assert_rejects(lambda: VoteOption.objects.filter(pk=case.option.pk).delete())
+
+
+def _ballot_bulk_and_delete(case):
+    case._lock_vote()
+    case._assert_rejects(
+        lambda: VoteBallot.objects.bulk_create(
+            [
+                VoteBallot(
+                    vote_session=case.vote_session,
+                    browser_session_key="bulk-browser",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: VoteBallot.objects.filter(pk=case.ballot.pk).delete())
+
+
+def _record_bulk_and_delete(case):
+    case._lock_vote()
+    case._assert_rejects(
+        lambda: VoteRecord.objects.bulk_create(
+            [
+                VoteRecord(
+                    ballot=case.ballot,
+                    vote_session=case.vote_session,
+                    vote_option=case.option,
+                    browser_session_key="bulk-browser",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: VoteRecord.objects.filter(pk=case.record.pk).delete())
+
+
+def _group_bulk_and_delete(case):
+    case._lock_round()
+    case._assert_rejects(
+        lambda: PerformanceGroup.objects.bulk_create(
+            [PerformanceGroup(activity=case.activity, round=case.round, name="bulk", is_test_data=True)]
+        )
+    )
+    case._assert_rejects(lambda: PerformanceGroup.objects.filter(pk=case.group.pk).delete())
+
+
+def _performance_bulk_and_delete(case):
+    case._lock_round()
+    case._assert_rejects(
+        lambda: Performance.objects.bulk_create(
+            [
+                Performance(
+                    activity=case.activity,
+                    round=case.round,
+                    singer=case.spare_singer,
+                    group=case.group,
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: Performance.objects.filter(pk=case.performance.pk).delete())
+
+
+def _criterion_bulk_and_delete(case):
+    case._lock_round()
+    case._assert_rejects(
+        lambda: RubricCriterion.objects.bulk_create(
+            [
+                RubricCriterion(
+                    rubric=case.rubric,
+                    name="Bulk criterion",
+                    max_score=Decimal("100"),
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: RubricCriterion.objects.filter(pk=case.criterion.pk).delete())
+
+
+def _criterion_score_bulk_and_delete(case):
+    case._lock_round()
+    case._assert_rejects(
+        lambda: CriterionScore.objects.bulk_create(
+            [
+                CriterionScore(
+                    score_record=case.score,
+                    criterion=case.criterion,
+                    value=Decimal("80"),
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: CriterionScore.objects.filter(pk=case.criterion_score.pk).delete())
+
+
+def _stage_bulk_and_delete(case):
+    case._confirm_stage()
+    case._assert_rejects(
+        lambda: StageResult.objects.bulk_create(
+            [
+                StageResult(
+                    activity=case.activity,
+                    ruleset_version=case.version,
+                    stage_key="bulk-stage",
+                    status=StageResult.Status.CONFIRMED,
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: StageResult.objects.filter(pk=case.stage.pk).delete())
+
+
+def _stage_decision_bulk_and_delete(case):
+    case._confirm_stage()
+    case._assert_rejects(
+        lambda: StageDecision.objects.bulk_create(
+            [
+                StageDecision(
+                    stage_result=case.stage,
+                    singer=case.spare_singer,
+                    outcome_code="selected",
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: StageDecision.objects.filter(pk=case.decision.pk).delete())
+
+
+def _stage_award_bulk_and_delete(case):
+    case._confirm_stage()
+    case._assert_rejects(
+        lambda: StageAwardDecision.objects.bulk_create(
+            [
+                StageAwardDecision(
+                    stage_result=case.stage,
+                    activity=case.activity,
+                    singer=case.spare_singer,
+                    name="Bulk award",
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(
+        lambda: StageAwardDecision.objects.filter(pk=case.award_decision.pk).delete()
+    )
+
+
+def _composite_bulk_and_delete(case):
+    case._confirm_stage()
+    case._assert_rejects(
+        lambda: CompositeResult.objects.bulk_create(
+            [
+                CompositeResult(
+                    stage_result=case.stage,
+                    singer=case.spare_singer,
+                    node_key="bulk-node",
+                    value=Decimal("80"),
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: CompositeResult.objects.filter(pk=case.composite.pk).delete())
+
+
+def _ruleset_bulk_and_delete(case):
+    case._assert_rejects(
+        lambda: RulesetVersion.objects.bulk_create(
+            [
+                RulesetVersion(
+                    ruleset=case.ruleset,
+                    version=2,
+                    definition='{"schema_version": 1, "nodes": [{"key": "r", "type": "ROSTER"}]}',
+                    status=RulesetVersion.Status.FROZEN,
+                    is_current=True,
+                )
+            ]
+        )
+    )
+    case._assert_rejects(lambda: RulesetVersion.objects.filter(pk=case.version.pk).delete())
+
+
+BULK_DELETE_MATRIX = (
+    BulkDeleteDescriptor("Activity", Activity, _activity_bulk_and_delete),
+    BulkDeleteDescriptor("ContestRound", ContestRound, _round_bulk_and_delete),
+    BulkDeleteDescriptor("VoteSession", VoteSession, _vote_session_bulk_and_delete),
+    BulkDeleteDescriptor("ScoreRecord", ScoreRecord, _score_bulk_and_delete),
+    BulkDeleteDescriptor("ScoreSummary", ScoreSummary, _summary_bulk_and_delete),
+    BulkDeleteDescriptor("AudienceScore", AudienceScore, _audience_bulk_and_delete),
+    BulkDeleteDescriptor("VoteOption", VoteOption, _option_bulk_and_delete),
+    BulkDeleteDescriptor("VoteBallot", VoteBallot, _ballot_bulk_and_delete),
+    BulkDeleteDescriptor("VoteRecord", VoteRecord, _record_bulk_and_delete),
+    BulkDeleteDescriptor("PerformanceGroup", PerformanceGroup, _group_bulk_and_delete),
+    BulkDeleteDescriptor("Performance", Performance, _performance_bulk_and_delete),
+    BulkDeleteDescriptor("RubricCriterion", RubricCriterion, _criterion_bulk_and_delete),
+    BulkDeleteDescriptor("CriterionScore", CriterionScore, _criterion_score_bulk_and_delete),
+    BulkDeleteDescriptor("StageResult", StageResult, _stage_bulk_and_delete),
+    BulkDeleteDescriptor("StageDecision", StageDecision, _stage_decision_bulk_and_delete),
+    BulkDeleteDescriptor("StageAwardDecision", StageAwardDecision, _stage_award_bulk_and_delete),
+    BulkDeleteDescriptor("CompositeResult", CompositeResult, _composite_bulk_and_delete),
+    BulkDeleteDescriptor("RulesetVersion", RulesetVersion, _ruleset_bulk_and_delete),
+)
+
+
+def _factory(fixture_name: str) -> Callable[[AuthorityMutationMatrixTests], Any]:
+    return lambda case: getattr(case, fixture_name)
+
+
+def _mutation(
+    path: str, check: Callable[[AuthorityMutationMatrixTests], None]
+) -> MutationDescriptor:
+    return MutationDescriptor(path, lambda case, _instance: check(case))
+
+
+def _descriptor(
+    name: str,
+    model: type,
+    owner: str,
+    fixture_name: str,
+    *mutations: MutationDescriptor,
+) -> AuthorityDescriptor:
+    return AuthorityDescriptor(
+        name=name,
+        model=model,
+        owner=owner,
+        factory=_factory(fixture_name),
+        mutations=mutations,
+    )
+
+
 MODEL_MATRIX = (
-    AuthorityDescriptor("User", User, "accounts.change_user_role", _user_row),
-    AuthorityDescriptor("Activity", Activity, "core activity lifecycle", _activity_row),
-    AuthorityDescriptor("ContestRound", ContestRound, "round lifecycle", _round_row),
-    AuthorityDescriptor("VoteSession", VoteSession, "vote session lifecycle", _vote_session_row),
-    AuthorityDescriptor("ScoreRecord", ScoreRecord, "raw score authority", _score_record),
-    AuthorityDescriptor("ScoreSummary", ScoreSummary, "score recalculation", _score_summary),
-    AuthorityDescriptor("AudienceScore", AudienceScore, "unconsumed audience fact", _audience_score),
-    AuthorityDescriptor("VoteOption", VoteOption, "unlocked vote session", _vote_option),
-    AuthorityDescriptor("VoteBallot", VoteBallot, "unlocked vote session", _vote_ballot),
-    AuthorityDescriptor("VoteRecord", VoteRecord, "unlocked vote session", _vote_record),
-    AuthorityDescriptor("PerformanceGroup", PerformanceGroup, "round configuration", _performance_group),
-    AuthorityDescriptor("Performance", Performance, "round configuration", _performance),
-    AuthorityDescriptor("RubricCriterion", RubricCriterion, "rubric configuration", _criterion),
-    AuthorityDescriptor("CriterionScore", CriterionScore, "raw score authority", _criterion_score),
-    AuthorityDescriptor("StageResult", StageResult, "stage confirmation", _stage_result),
-    AuthorityDescriptor("StageDecision", StageDecision, "stage result authority", _stage_decision),
-    AuthorityDescriptor("StageAwardDecision", StageAwardDecision, "stage result authority", _stage_award_decision),
-    AuthorityDescriptor("CompositeResult", CompositeResult, "stage result authority", _composite),
-    AuthorityDescriptor("Award", Award, "award materialization", _award),
-    AuthorityDescriptor("SingerRegistration", SingerRegistration, "identity ownership", _singer),
-    AuthorityDescriptor("Judge", Judge, "identity ownership", _judge),
-    AuthorityDescriptor("RulesetVersion", RulesetVersion, "ruleset freeze", _ruleset_version),
+    _descriptor("User", User, "accounts.change_user_role", "admin_user", _mutation("protected instance/queryset/base-manager/bulk", _user_row)),
+    _descriptor("Activity", Activity, "core activity lifecycle", "activity", _mutation("protected instance/queryset/base-manager/bulk", _activity_row)),
+    _descriptor("ContestRound", ContestRound, "round lifecycle", "round", _mutation("protected instance/queryset/base-manager/bulk", _round_row)),
+    _descriptor("VoteSession", VoteSession, "vote session lifecycle", "vote_session", _mutation("protected instance/queryset/base-manager/bulk", _vote_session_row)),
+    _descriptor("ScoreRecord", ScoreRecord, "raw score authority", "score", _mutation("protected instance/queryset/base-manager/bulk/FK", _score_record)),
+    _descriptor("ScoreSummary", ScoreSummary, "score recalculation", "score", _mutation("protected instance/queryset/base-manager/bulk/delete", _score_summary)),
+    _descriptor("AudienceScore", AudienceScore, "unconsumed audience fact", "audience", _mutation("protected instance/queryset/base-manager/bulk/delete", _audience_score)),
+    _descriptor("VoteOption", VoteOption, "unlocked vote session", "option", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_option)),
+    _descriptor("VoteBallot", VoteBallot, "unlocked vote session", "ballot", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_ballot)),
+    _descriptor("VoteRecord", VoteRecord, "unlocked vote session", "record", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _vote_record)),
+    _descriptor("PerformanceGroup", PerformanceGroup, "round configuration", "group", _mutation("protected instance/queryset/base-manager/bulk/delete", _performance_group)),
+    _descriptor("Performance", Performance, "round configuration", "performance", _mutation("protected instance/queryset/base-manager/bulk/delete", _performance)),
+    _descriptor("RubricCriterion", RubricCriterion, "rubric configuration", "criterion", _mutation("protected instance/queryset/base-manager/bulk/FK/delete", _criterion)),
+    _descriptor("CriterionScore", CriterionScore, "raw score authority", "criterion_score", _mutation("protected instance/queryset/base-manager/bulk/delete", _criterion_score)),
+    _descriptor("StageResult", StageResult, "stage confirmation", "stage", _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_result)),
+    _descriptor("StageDecision", StageDecision, "stage result authority", "decision", _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_decision)),
+    _descriptor("StageAwardDecision", StageAwardDecision, "stage result authority", "award_decision", _mutation("protected instance/queryset/base-manager/bulk/delete", _stage_award_decision)),
+    _descriptor("CompositeResult", CompositeResult, "stage result authority", "composite", _mutation("protected instance/queryset/base-manager/bulk/delete", _composite)),
+    _descriptor("Award", Award, "award materialization", "award", _mutation("provenance instance/queryset", _award)),
+    _descriptor("SingerRegistration", SingerRegistration, "identity ownership", "singer", _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _singer)),
+    _descriptor("Judge", Judge, "identity ownership", "judge", _mutation("immutable identity instance/queryset/base-manager/bulk/FK", _judge)),
+    _descriptor("RulesetVersion", RulesetVersion, "ruleset freeze", "version", _mutation("protected instance/queryset/base-manager/bulk/delete", _ruleset_version)),
 )

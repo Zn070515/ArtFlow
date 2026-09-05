@@ -1300,6 +1300,10 @@ class RubricCriterionQuerySet(models.QuerySet):
 
     def update(self, **kwargs):
         self._ensure_mutable()
+        if "rubric" in kwargs or "rubric_id" in kwargs:
+            _ensure_rubric_mutable(
+                _relation_pk(kwargs.get("rubric", kwargs.get("rubric_id")))
+            )
         return super().update(**kwargs)
 
     def delete(self):
