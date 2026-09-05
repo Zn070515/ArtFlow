@@ -9,7 +9,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.production.yml"
 EVENT_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.event.yml"
 REHEARSAL_RUNBOOK_PATH = PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md"
+PRODUCTION_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.production.example"
 DOCKER = shutil.which("docker")
+CONFIG_ENVIRONMENT = {
+    "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
+    "ADMIN_LOGIN_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
+    "ALLOWED_HOSTS": "artflow.internal",
+    "CSRF_TRUSTED_ORIGINS": "https://artflow.internal",
+    "POSTGRES_DB": "artflow",
+    "POSTGRES_USER": "artflow",
+    "POSTGRES_PASSWORD": "artflow-compose-config-test-database-password",
+    "CADDY_SITE_ADDRESS": "artflow.internal",
+}
 
 
 def load_compose(path: Path) -> dict[str, object]:
@@ -59,21 +70,23 @@ def test_production_rehearsal_runbook_names_the_explicit_production_manifest():
     assert "docker compose -f deploy/compose.production.yml" in runbook
 
 
+def test_production_env_example_documents_manifest_fixed_values():
+    values = {}
+    for line in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            name, value = line.split("=", 1)
+            values[name] = value
+
+    assert values["TRUST_X_FORWARDED_FOR"] == "true"
+    assert values["POSTGRES_HOST"] == "db"
+    assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+
+
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")
 def test_production_compose_config_renders_without_starting_services(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    required_environment = {
-        "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
-        "ADMIN_LOGIN_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
-        "ALLOWED_HOSTS": "artflow.internal",
-        "CSRF_TRUSTED_ORIGINS": "https://artflow.internal",
-        "POSTGRES_DB": "artflow",
-        "POSTGRES_USER": "artflow",
-        "POSTGRES_PASSWORD": "artflow-compose-config-test-database-password",
-        "CADDY_SITE_ADDRESS": "artflow.internal",
-    }
-    for name, value in required_environment.items():
+    for name, value in CONFIG_ENVIRONMENT.items():
         monkeypatch.setenv(name, value)
 
     result = subprocess.run(
@@ -87,3 +100,83 @@ def test_production_compose_config_renders_without_starting_services(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(DOCKER is None, reason="Docker is required for rendered Caddy validation")
+def test_rendered_production_compose_preserves_caddy_environment_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    for name, value in CONFIG_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+
+    result = subprocess.run(
+        [DOCKER, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stderr
+    rendered = yaml.safe_load(result.stdout)
+    caddyfile = rendered["configs"]["caddyfile"]["content"]
+    assert caddyfile.startswith("{$$CADDY_SITE_ADDRESS} {")
+    assert "{artflow.internal}" not in caddyfile
+
+
+@pytest.mark.skipif(DOCKER is None, reason="Docker is required for Caddy adaptation validation")
+def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    for name, value in CONFIG_ENVIRONMENT.items():
+        monkeypatch.setenv(name, value)
+
+    image_check = subprocess.run(
+        [DOCKER, "image", "inspect", "caddy:2-alpine"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if image_check.returncode != 0:
+        pytest.skip("caddy:2-alpine image is not available locally")
+
+    compose_result = subprocess.run(
+        [DOCKER, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    caddyfile = yaml.safe_load(compose_result.stdout)["configs"]["caddyfile"]["content"]
+    caddyfile = caddyfile.replace("$$", "$")
+    result = subprocess.run(
+        [
+            DOCKER,
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
+            "-e",
+            "CADDY_SITE_ADDRESS=artflow.internal",
+            "caddy:2-alpine",
+            "caddy",
+            "adapt",
+            "--config",
+            "/dev/stdin",
+            "--adapter",
+            "caddyfile",
+        ],
+        input=caddyfile,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert '"artflow.internal"' in result.stdout

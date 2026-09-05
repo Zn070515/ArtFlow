@@ -51,13 +51,15 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 | `CADDY_SITE_ADDRESS` | Caddy 申请 TLS 证书的单个公开 DNS 名称 |
 | `DATABASE_ENGINE` | 必须是 `postgresql` |
 | `POSTGRES_DB` / `USER` / `PASSWORD` / `HOST` / `PORT` | 生产数据库连接（口令不能是占位值） |
-| `TRUST_X_FORWARDED_FOR` | 见下一节 |
+| `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
 
 `DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
 
 ## 来源 IP 与 X-Forwarded-For
 
 应用只在 `TRUST_X_FORWARDED_FOR=true` 时读取客户端提供的 `X-Forwarded-For`。默认（`False`）一律使用 Gunicorn 看到的 `REMOTE_ADDR`。
+
+显式生产 manifest 已固定 `TRUST_X_FORWARDED_FOR=true`，因为其唯一入口 Caddy 会覆盖客户端传入的该请求头；不要把它改成透传客户端值。manifest 也固定 `POSTGRES_HOST=db`，这是其私有 Compose 网络中的数据库服务名，不是公网数据库主机名。
 
 - 若客户端能直接访问 Gunicorn，它就能伪造 `X-Forwarded-For`，导致审计、投票去重依赖的来源 IP 失真。
 - 只有在**可信反向代理会覆盖**客户端传入的 `X-Forwarded-For`（追加/重写而非透传）时，才设置 `TRUST_X_FORWARDED_FOR=true`。

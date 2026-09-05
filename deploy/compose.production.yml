@@ -93,7 +93,7 @@ networks:
 configs:
   caddyfile:
     content: |
-      {$CADDY_SITE_ADDRESS} {
+      {$$CADDY_SITE_ADDRESS} {
           reverse_proxy web:8000 {
               header_up X-Forwarded-For {remote_host}
               header_up X-Forwarded-Proto https

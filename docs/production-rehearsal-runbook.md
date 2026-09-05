@@ -11,7 +11,8 @@
 Copy-Item .env.production.example .env.production
 #    APP_ENV=production, DEBUG=False, 非占位 SECRET_KEY/ADMIN_LOGIN_KEY,
 #    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, CADDY_SITE_ADDRESS,
-#    DATABASE_ENGINE=postgresql + POSTGRES_*
+#    DATABASE_ENGINE=postgresql + POSTGRES_*（生产 manifest 固定
+#    TRUST_X_FORWARDED_FOR=true、POSTGRES_HOST=db）
 
 # 2) 只验证并启动显式生产栈（Postgres + web + Caddy proxy），等待健康检查
 docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
