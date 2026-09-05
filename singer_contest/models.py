@@ -1746,7 +1746,7 @@ class StageResult(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         confirm_authorized = authority_authorized(STAGE_RESULT_CONFIRM)
-        stored = self._stored(["status"])
+        stored = self._stored(self._immutable_fields)
         if self._state.adding:
             if not confirm_authorized and self.status == self.Status.CONFIRMED:
                 raise ValidationError("只在核定服务中产生已核定赛段结果。")
