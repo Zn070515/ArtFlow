@@ -78,6 +78,26 @@ def login_admin(client, user):
     session.save()
 
 
+def _create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
+
+
+def _create_activity(**kwargs):
+    with authority_write(ACTIVITY_STATE):
+        return Activity.objects.create(**kwargs)
+
+
+def _create_round(**kwargs):
+    with authority_write(CONTEST_ROUND_STATE):
+        return ContestRound.objects.create(**kwargs)
+
+
+def _create_vote_session(**kwargs):
+    with authority_write(VOTE_SESSION_STATE):
+        return VoteSession.objects.create(**kwargs)
+
+
 def _create_score_summary(**kwargs):
     with authority_write(SCORE_SUMMARY_RECALCULATE):
         return ScoreSummary.objects.create(**kwargs)
@@ -150,11 +170,11 @@ class PathlessStorage(Storage):
 class ContestRoundCreateHTTPTests(TestCase):
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
-            self.staff = User.objects.create_user(
+            self.staff = _create_provisioned_user(
                 username="round-staff", password="pass", role=User.Role.STAFF
             )
         with authority_write(ACTIVITY_STATE):
-            self.activity = Activity.objects.create(
+            self.activity = _create_activity(
                 title="Singer Contest",
                 activity_type=Activity.Type.SINGER_CONTEST,
                 phase=Activity.Phase.REGISTRATION_OPEN,
@@ -218,28 +238,28 @@ class StaffPanelSmokeTests(TestCase):
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="admin_user",
             password="pass",
             role=User.Role.ADMIN,
         )
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="staff_user",
             password="pass",
             role=User.Role.STAFF,
         )
-        self.participant = User.objects.create_user(
+        self.participant = _create_provisioned_user(
             username="participant",
             password="pass",
             role=User.Role.PARTICIPANT,
         )
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Singer Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        self.farewell_activity = Activity.objects.create(
+        self.farewell_activity = _create_activity(
             title="Farewell Show",
             activity_type=Activity.Type.FAREWELL_SHOW,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -330,7 +350,7 @@ class StaffPanelSmokeTests(TestCase):
             self.assertNotIn(excluded, offered)
 
     def test_activity_edit_cannot_change_lifecycle(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -352,7 +372,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(formal_activity.is_test_mode)
 
     def test_formal_activity_cannot_be_reopened_in_test_mode(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -370,7 +390,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(formal_activity.is_test_mode)
 
     def test_export_center_hides_test_controls_for_formal_activity(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -475,7 +495,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             scoring_mode=ContestRound.ScoringMode.AVERAGE,
@@ -503,7 +523,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ScoreSummary.objects.get(round=round_, singer=registration).rank, 1)
 
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
             passcode="1234",
@@ -549,7 +569,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -580,7 +600,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Ready Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -607,7 +627,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_formal_score_update_stays_formal(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal Score Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -626,7 +646,7 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=False,
         )
         judge = Judge.objects.create(activity=formal_activity, name="Formal Score Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=formal_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -659,7 +679,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Draft Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -687,7 +707,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Lockable Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -722,7 +742,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Unlockable Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -763,7 +783,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Downstream Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -772,7 +792,7 @@ class StaffPanelSmokeTests(TestCase):
         login_admin(self.client, self.admin)
         self.client.post(reverse("staff:round_lock", args=[round_.pk]))
 
-        ContestRound.objects.create(
+        _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
             status=ContestRound.Status.PREPARED,
@@ -800,7 +820,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         Judge.objects.create(activity=self.singer_activity, name="Reset Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -825,7 +845,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_round_reset_requires_reason(self):
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -848,12 +868,12 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Prepared Judge")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
         prepare_round(round_, self.staff)
-        late_user = User.objects.create_user(username="participant-late", password="pass")
+        late_user = _create_provisioned_user(username="participant-late", password="pass")
         SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=late_user,
@@ -901,7 +921,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -956,7 +976,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(Award.objects.exists())
 
     def test_activity_unlock_does_not_unlock_locked_round(self):
-        contest_round = ContestRound.objects.create(
+        contest_round = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             status=ContestRound.Status.LOCKED,
@@ -987,7 +1007,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_activity_unlock_does_not_unlock_locked_vote_session(self):
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Locked popularity",
             passcode="1234",
@@ -1017,7 +1037,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_activity_lock_does_not_destroy_child_open_state(self):
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Open popularity",
             passcode="1234",
@@ -1043,7 +1063,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_admin_can_unlock_vote_session_and_audit_is_recorded(self):
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
             passcode="1234",
@@ -1075,7 +1095,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_admin_can_unlock_vote_session_without_note(self):
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity no note",
             passcode="1234",
@@ -1098,7 +1118,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_vote_session_open_and_close_update_state(self):
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Toggleable",
             passcode="1234",
@@ -1131,7 +1151,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(self.singer_activity.is_locked)
 
     def test_round_unlock_rejects_while_activity_locked(self):
-        ContestRound.objects.create(
+        _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             status=ContestRound.Status.LOCKED,
@@ -1150,7 +1170,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_test_cleanup_cannot_delete_formal_registration(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -1165,7 +1185,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Formal Song",
             is_test_data=False,
         )
-        test_user = User.objects.create_user(username="participant-test", password="pass")
+        test_user = _create_provisioned_user(username="participant-test", password="pass")
         test_registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=test_user,
@@ -1177,7 +1197,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Test Song",
             is_test_data=True,
         )
-        VoteSession.objects.create(
+        _create_vote_session(
             activity=self.singer_activity,
             name="Formal Vote",
             passcode="1234",
@@ -1185,7 +1205,7 @@ class StaffPanelSmokeTests(TestCase):
             end_time=timezone.now() + timedelta(minutes=10),
             is_test_data=False,
         )
-        VoteSession.objects.create(
+        _create_vote_session(
             activity=self.singer_activity,
             name="Test Vote",
             passcode="1234",
@@ -1204,7 +1224,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteSession.objects.filter(name="Test Vote").exists())
 
     def test_cleanup_rejects_formal_vote_dependents_under_test_session(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -1219,7 +1239,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Test Session Song",
             is_test_data=True,
         )
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Test Vote",
             passcode="1234",
@@ -1260,7 +1280,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteRecord.objects.get(pk=record.pk).is_test_data)
 
     def test_cleanup_rejects_formal_vote_graph_referencing_test_singer(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -1275,7 +1295,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Test Singer Song",
             is_test_data=True,
         )
-        formal_session = VoteSession.objects.create(
+        formal_session = _create_vote_session(
             activity=self.singer_activity,
             name="Formal Vote For Test Singer",
             passcode="1234",
@@ -1317,7 +1337,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteRecord.objects.get(pk=formal_record.pk).is_test_data)
 
     def test_cleanup_rejects_formal_file_under_test_owner(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -1353,7 +1373,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(SubmissionFile.objects.get(pk=submission.pk).is_test_data)
 
     def test_formal_file_creation_stays_formal(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal File Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -1380,7 +1400,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(submission.is_test_data)
 
     def test_leaving_test_mode_rejects_residual_test_data(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -1407,7 +1427,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(SingerRegistration.objects.filter(pk=test_registration.pk).exists())
 
     def test_clear_test_data_removes_test_file_object(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -1455,7 +1475,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(Activity.objects.count(), 2)
 
     def test_submission_file_media_url_is_owner_or_staff_only(self):
-        other_participant = User.objects.create_user(
+        other_participant = _create_provisioned_user(
             username="other",
             password="pass",
             role=User.Role.PARTICIPANT,
@@ -1508,7 +1528,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             advance_count=1,
@@ -1518,7 +1538,7 @@ class StaffPanelSmokeTests(TestCase):
             round=round_, singer=registration, average_score=91, rank=1, is_advanced=True
         )
         Award.objects.create(activity=self.singer_activity, singer=registration, name="Top Singer")
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
             passcode="1234",
@@ -1585,7 +1605,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Formal Song",
             is_test_data=False,
         )
-        test_user = User.objects.create_user(username="participant-test", password="pass")
+        test_user = _create_provisioned_user(username="participant-test", password="pass")
         SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=test_user,
@@ -1612,7 +1632,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertNotIn("Test Singer", values)
 
     def test_formal_archive_excludes_test_generated_document(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal Singer Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -1672,7 +1692,7 @@ class StaffPanelSmokeTests(TestCase):
             )
 
     def _make_finalized_round_activity(self, *, include_scores=True):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Archive Ready Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REHEARSAL,
@@ -1691,7 +1711,7 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=False,
         )
         judge = Judge.objects.create(activity=activity, name="Judge F", is_active=True)
-        contest_round = ContestRound.objects.create(
+        contest_round = _create_round(
             activity=activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             advance_count=1,
@@ -1708,7 +1728,7 @@ class StaffPanelSmokeTests(TestCase):
         return activity
 
     def test_execution_package_omits_archive_only_sheets(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Exec Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REHEARSAL,
@@ -1727,13 +1747,13 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=False,
         )
         Judge.objects.create(activity=activity, name="Judge X", is_active=True)
-        contest_round = ContestRound.objects.create(
+        contest_round = _create_round(
             activity=activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             advance_count=1,
         )
         prepare_round(contest_round, self.staff)
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=activity,
             name="Pop",
             passcode="1234",
@@ -1766,7 +1786,7 @@ class StaffPanelSmokeTests(TestCase):
             self.assertNotIn(omitted, names)
 
     def test_archive_activity_rejects_test_activity(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PUBLISHED,
@@ -1776,7 +1796,7 @@ class StaffPanelSmokeTests(TestCase):
             archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_residual_test_data(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PUBLISHED,
@@ -1797,7 +1817,7 @@ class StaffPanelSmokeTests(TestCase):
             archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_unlocked_round(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REHEARSAL,
@@ -1816,7 +1836,7 @@ class StaffPanelSmokeTests(TestCase):
             is_test_data=False,
         )
         Judge.objects.create(activity=activity, name="Judge", is_active=True)
-        contest_round = ContestRound.objects.create(
+        contest_round = _create_round(
             activity=activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             advance_count=1,
@@ -1833,13 +1853,13 @@ class StaffPanelSmokeTests(TestCase):
             archive_activity(activity, self.admin)
 
     def test_archive_activity_rejects_unlocked_vote(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PUBLISHED,
             is_test_mode=False,
         )
-        VoteSession.objects.create(
+        _create_vote_session(
             activity=activity,
             name="Pop",
             passcode="1234",
@@ -1890,7 +1910,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(ArchivePackage.objects.filter(activity=activity).count(), 1)
 
     def _make_archived_activity(self):
-        return Activity.objects.create(
+        return _create_activity(
             title="Archived Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.ARCHIVED,
@@ -2023,7 +2043,7 @@ class StaffPanelSmokeTests(TestCase):
         )
 
     def test_formal_word_generation_creates_formal_document(self):
-        formal_activity = Activity.objects.create(
+        formal_activity = _create_activity(
             title="Formal Singer Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -2045,7 +2065,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(document.file.storage.exists(document.file.name or ""))
 
     def test_test_word_generation_creates_test_document(self):
-        self.singer_activity = Activity.objects.create(
+        self.singer_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -2077,7 +2097,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
             passcode="1234",
@@ -2113,7 +2133,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song 1",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        second_user = User.objects.create_user(username="participant-two", password="pass")
+        second_user = _create_provisioned_user(username="participant-two", password="pass")
         second = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=second_user,
@@ -2125,7 +2145,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song 2",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity Recount",
             passcode="1234",
@@ -2164,7 +2184,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(Award.objects.filter(activity=self.singer_activity).exists())
 
     def _make_popularity_tie_session(self):
-        second_user = User.objects.create_user(username="participant-second", password="pass")
+        second_user = _create_provisioned_user(username="participant-second", password="pass")
         reg1 = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=self.participant,
@@ -2187,7 +2207,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song 2",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Tie Popularity",
             passcode="1234",
@@ -2240,7 +2260,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -2266,7 +2286,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -2300,7 +2320,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -2331,12 +2351,12 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         _judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
         prepare_round(round_, self.staff)
-        late_user = User.objects.create_user(username="participant-late", password="pass")
+        late_user = _create_provisioned_user(username="participant-late", password="pass")
         late_singer = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=late_user,
@@ -2348,7 +2368,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        other_activity = Activity.objects.create(
+        other_activity = _create_activity(
             title="Other Contest", activity_type=Activity.Type.SINGER_CONTEST
         )
         foreign_singer = SingerRegistration.objects.create(
@@ -2379,7 +2399,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertNotContains(response, foreign_singer.name)
 
     def test_round_lock_get_is_rejected_without_mutating_state(self):
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -2403,7 +2423,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        extra_user = User.objects.create_user(username="participant-tie", password="pass")
+        extra_user = _create_provisioned_user(username="participant-tie", password="pass")
         extra = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=extra_user,
@@ -2416,7 +2436,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         Judge.objects.create(activity=self.singer_activity, name="Judge A", is_active=True)
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             advance_count=1,
@@ -2475,7 +2495,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        other_activity = Activity.objects.create(
+        other_activity = _create_activity(
             title="Other Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -2505,7 +2525,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        other_activity = Activity.objects.create(
+        other_activity = _create_activity(
             title="Other Vote Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -2565,7 +2585,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        second_user = User.objects.create_user(username="participant-two", password="pass")
+        second_user = _create_provisioned_user(username="participant-two", password="pass")
         second = SingerRegistration.objects.create(
             activity=self.singer_activity,
             user=second_user,
@@ -2578,7 +2598,7 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge B")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
@@ -2609,7 +2629,7 @@ class StaffPanelSmokeTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
             passcode="1234",
@@ -2656,14 +2676,14 @@ class StaffPanelSmokeTests(TestCase):
         judge = Judge.objects.create(activity=self.singer_activity, name="Judge A")
         Judge.objects.create(activity=self.singer_activity, name="Judge B")
         Judge.objects.create(activity=self.singer_activity, name="Judge C")
-        contest_round = ContestRound.objects.create(
+        contest_round = _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             scoring_mode=ContestRound.ScoringMode.DROP_HIGH_LOW,
             advance_count=2,
             name="Preliminary",
         )
-        ContestRound.objects.create(
+        _create_round(
             activity=self.singer_activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
             sequence=2,
@@ -2702,7 +2722,7 @@ class StaffPanelSmokeTests(TestCase):
             average_score=91,
             rank=1,
         )
-        vote_session = VoteSession.objects.create(
+        vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
             passcode="1234",
@@ -2780,19 +2800,19 @@ class RuntimeLifecycleMatrixTests(TestCase):
     """
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="matrix-staff", password="pass", role=User.Role.STAFF
         )
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="matrix-admin", password="pass", role=User.Role.ADMIN
         )
-        self.test_activity = Activity.objects.create(
+        self.test_activity = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=True,
         )
-        self.formal_activity = Activity.objects.create(
+        self.formal_activity = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2807,7 +2827,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
         )
 
     def _singer(self, activity, name, is_test_data, student_id):
-        user = User.objects.create_user(username=f"matrix-{student_id}", password="pass")
+        user = _create_provisioned_user(username=f"matrix-{student_id}", password="pass")
         return SingerRegistration.objects.create(
             activity=activity,
             user=user,
@@ -2837,7 +2857,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
                 self.assertNotContains(response, self.formal_mismatch.name)
 
     def test_award_create_rejects_wrong_lifecycle_singer(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Award Test",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.DRAFT,
@@ -2863,7 +2883,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
         self.assertTrue(award.is_test_data)
 
     def test_vote_session_create_rejects_wrong_lifecycle_singer(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Vote Test",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2896,7 +2916,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
         self.assertEqual(VoteOption.objects.filter(vote_session=session).count(), 1)
 
     def test_incident_create_rejects_wrong_lifecycle_singer(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Incident Test",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2926,7 +2946,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
         self.assertTrue(IncidentRecord.objects.get(resolution="good").is_test)
 
     def test_prepare_round_uses_approved_singers_scoped_to_activity(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Round Test",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2935,7 +2955,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
         test_match = self._singer(activity, "Round Test Match", True, "20260501")
         self._singer(activity, "Round Test Mismatch", False, "20260502")
         Judge.objects.create(activity=activity, name="Judge", is_active=True)
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             advance_count=1,
@@ -2949,17 +2969,17 @@ class RuntimeLifecycleMatrixTests(TestCase):
 
 class AdminAuthBoundaryTests(TestCase):
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="boundary_admin",
             password="pass",
             role=User.Role.ADMIN,
         )
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="boundary_staff",
             password="pass",
             role=User.Role.STAFF,
         )
-        self.participant = User.objects.create_user(
+        self.participant = _create_provisioned_user(
             username="boundary_participant",
             password="pass",
             role=User.Role.PARTICIPANT,
@@ -3021,14 +3041,14 @@ class AdminAuthBoundaryTests(TestCase):
 
 class ActivityPhaseEditTests(TestCase):
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="phase-admin",
             password="pass",
             role=User.Role.ADMIN,
         )
 
     def test_admin_edit_advances_phase_through_service(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.DRAFT,
@@ -3055,7 +3075,7 @@ class ActivityPhaseEditTests(TestCase):
         )
 
     def test_admin_edit_rejects_backward_phase_transition(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.LIVE,
@@ -3075,7 +3095,7 @@ class ActivityPhaseEditTests(TestCase):
         self.assertEqual(activity.phase, Activity.Phase.LIVE)
 
     def test_admin_edit_cannot_directly_archive(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PUBLISHED,
@@ -3120,12 +3140,12 @@ class ActivityPhaseEditTests(TestCase):
 
 class ActivityPhaseViewEnforcementTests(TestCase):
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="enforce-staff",
             password="pass",
             role=User.Role.STAFF,
         )
-        self.participant = User.objects.create_user(
+        self.participant = _create_provisioned_user(
             username="enforce-participant",
             password="pass",
             role=User.Role.PARTICIPANT,
@@ -3146,13 +3166,13 @@ class ActivityPhaseViewEnforcementTests(TestCase):
         )
 
     def test_draft_activity_cannot_enter_scores(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
         self._approved_registration(activity)
         Judge.objects.create(activity=activity, name="Judge A")
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             scoring_mode=ContestRound.ScoringMode.AVERAGE,
@@ -3165,7 +3185,7 @@ class ActivityPhaseViewEnforcementTests(TestCase):
         self.assertEqual(round_.round_judges.count(), 0)
 
     def test_archived_activity_cannot_review_registration(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.ARCHIVED,
@@ -3183,7 +3203,7 @@ class ActivityPhaseViewEnforcementTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_results_published_activity_cannot_change_registration_status(self):
-        activity = Activity.objects.create(
+        activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PUBLISHED,
@@ -3206,17 +3226,17 @@ class MaterialReviewAndRequirementTests(TestCase):
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="staff_user",
             password="pass",
             role=User.Role.STAFF,
         )
-        self.participant = User.objects.create_user(
+        self.participant = _create_provisioned_user(
             username="participant",
             password="pass",
             role=User.Role.PARTICIPANT,
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Singer Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REVIEWING,
@@ -3304,12 +3324,12 @@ class MaterialReviewAndRequirementTests(TestCase):
 
 class UserRoleAdministrationTests(TestCase):
     def setUp(self):
-        self.actor = User.objects.create_user(
+        self.actor = _create_provisioned_user(
             username="role-admin",
             password="pass",
             role=User.Role.ADMIN,
         )
-        self.participant = User.objects.create_user(
+        self.participant = _create_provisioned_user(
             username="role-target",
             password="pass",
             role=User.Role.PARTICIPANT,
@@ -3320,7 +3340,7 @@ class UserRoleAdministrationTests(TestCase):
         self.assertEqual(self.client.get(reverse("staff:user_list")).status_code, 403)
 
     def test_staff_gets_403_on_user_list(self):
-        staff = User.objects.create_user(
+        staff = _create_provisioned_user(
             username="role-staff",
             password="pass",
             role=User.Role.STAFF,
@@ -3340,7 +3360,7 @@ class UserRoleAdministrationTests(TestCase):
         self.assertTrue(self.participant.is_staff)
 
     def test_demoted_staff_loses_staff_endpoint_on_next_request(self):
-        staff = User.objects.create_user(
+        staff = _create_provisioned_user(
             username="role-lose",
             password="pass",
             role=User.Role.STAFF,
@@ -3432,20 +3452,20 @@ class ExportPrivacyTests(TestCase):
     """Exports that carry personal data default to activity scope, not cross-activity."""
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="staff_export", password="pass", role=User.Role.STAFF
         )
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="admin_export", password="pass", role=User.Role.ADMIN
         )
-        self.participant = User.objects.create_user(username="participant_export", password="pass")
-        self.contest = Activity.objects.create(
+        self.participant = _create_provisioned_user(username="participant_export", password="pass")
+        self.contest = _create_activity(
             title="Ten Best Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        self.other = Activity.objects.create(
+        self.other = _create_activity(
             title="Other Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3552,11 +3572,11 @@ class SensitiveExportAuditSweepTests(TestCase):
     """
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="sweep-staff", password="pass", role=User.Role.STAFF
         )
-        self.participant = User.objects.create_user(username="sweep-participant", password="pass")
-        self.activity = Activity.objects.create(
+        self.participant = _create_provisioned_user(username="sweep-participant", password="pass")
+        self.activity = _create_activity(
             title="Sweep Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3584,12 +3604,12 @@ class SensitiveExportAuditSweepTests(TestCase):
             class_name="Class",
         )
         self.judge = Judge.objects.create(activity=self.activity, name="Sweep Judge")
-        self.round_ = ContestRound.objects.create(
+        self.round_ = _create_round(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
         )
         prepare_round(self.round_, self.staff)
-        self.vote_session = VoteSession.objects.create(
+        self.vote_session = _create_vote_session(
             activity=self.activity,
             name="Sweep Vote",
             passcode="1234",
@@ -3650,7 +3670,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
     """
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="word-staff", password="pass", role=User.Role.STAFF
         )
         self.template = ArticleTemplate.objects.create(
@@ -3658,7 +3678,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
             template_type=ArticleTemplate.TemplateType.PRELIMINARY_NOTICE,
             body="{title}",
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REHEARSAL,
@@ -3742,7 +3762,7 @@ class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
     """M0-Y Case B/D: a generation racing an archive commit must not persist."""
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="arch-word-staff", password="pass", role=User.Role.STAFF
         )
         self.template = ArticleTemplate.objects.create(
@@ -3750,7 +3770,7 @@ class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
             template_type=ArticleTemplate.TemplateType.PRELIMINARY_NOTICE,
             body="{title}",
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Concurrent Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REHEARSAL,
@@ -3813,10 +3833,10 @@ class PublicPostMoveLockTests(TestCase):
     """Moving a post between activities must respect the lock of both activities."""
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="staff_post", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="A",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3824,7 +3844,7 @@ class PublicPostMoveLockTests(TestCase):
         )
 
     def test_staff_post_edit_cannot_move_from_locked_activity(self):
-        unlocked = Activity.objects.create(
+        unlocked = _create_activity(
             title="B",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3879,7 +3899,7 @@ class PublicPostMoveLockTests(TestCase):
         self.assertEqual(post.related_activity_id, self.activity.pk)
 
     def test_staff_post_edit_reparent_succeeds(self):
-        target = Activity.objects.create(
+        target = _create_activity(
             title="B",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REHEARSAL,
@@ -3898,7 +3918,7 @@ class PublicPostMoveLockTests(TestCase):
         self.assertEqual(post.related_activity_id, target.pk)
 
     def test_staff_post_edit_cannot_move_to_locked_activity(self):
-        target = Activity.objects.create(
+        target = _create_activity(
             title="B",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3929,10 +3949,10 @@ class PublicPostOptimisticConcurrencyTests(TestCase):
     """
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="optimistic-staff", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="A",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4013,22 +4033,22 @@ class PublicPostReparentConcurrencyTests(TransactionTestCase):
     """M0-X: a stale reparent must never bypass the current parent's authority."""
 
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="reparent-staff", password="pass", role=User.Role.STAFF
         )
-        self.a = Activity.objects.create(
+        self.a = _create_activity(
             title="A",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        self.b = Activity.objects.create(
+        self.b = _create_activity(
             title="B",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        self.c = Activity.objects.create(
+        self.c = _create_activity(
             title="C",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4130,16 +4150,16 @@ class PublicPostReparentConcurrencyTests(TransactionTestCase):
 
 class PublicPortalPublicationTests(TestCase):
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="pub-staff", password="pass", role=User.Role.STAFF
         )
-        self.formal = Activity.objects.create(
+        self.formal = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        self.testing = Activity.objects.create(
+        self.testing = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4207,7 +4227,7 @@ class PublicPortalPublicationTests(TestCase):
         response = self.client.get(reverse("staff:post_preview", args=[draft.pk]))
         self.assertEqual(response.status_code, 200)
         # A staff preview must not expose a non-published post on the public route.
-        self.client.force_login(User.objects.create_user(username="post-pub-anon", password="pass"))
+        self.client.force_login(_create_provisioned_user(username="post-pub-anon", password="pass"))
         self.client.raise_request_exception = False
         public_response = self.client.get(reverse("public_portal:post_detail", args=[draft.pk]))
         self.assertEqual(public_response.status_code, 404)
@@ -4218,22 +4238,22 @@ class RoundScoresApiTests(TestCase):
 
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
-            self.admin = User.objects.create_user(
+            self.admin = _create_provisioned_user(
                 username="rapid-api-admin", password="pass", role=User.Role.ADMIN
             )
         with authority_write(ACTIVITY_STATE):
-            self.activity = Activity.objects.create(
+            self.activity = _create_activity(
                 title="Rapid Entry Activity",
                 activity_type=Activity.Type.SINGER_CONTEST,
                 phase=Activity.Phase.REGISTRATION_OPEN,
                 is_test_mode=False,
             )
-        self.round = ContestRound.objects.create(
+        self.round = _create_round(
             activity=self.activity, round_type=ContestRound.RoundType.PRELIMINARY
         )
         self.singer = SingerRegistration.objects.create(
             activity=self.activity,
-            user=User.objects.create_user(username="rapid-api-s", password="pass"),
+            user=_create_provisioned_user(username="rapid-api-s", password="pass"),
             name="快速选手",
             student_id="2026rapid01",
             college="Info",
@@ -4342,7 +4362,7 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
 
     def test_post_rejects_other_activity_cell_with_stable_invalid_request_payload(self):
-        other_activity = Activity.objects.create(
+        other_activity = _create_activity(
             title="Other Rapid Entry Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
@@ -4353,7 +4373,7 @@ class RoundScoresApiTests(TestCase):
             )
         other_singer = SingerRegistration.objects.create(
             activity=other_activity,
-            user=User.objects.create_user(username="rapid-api-other-s", password="pass"),
+            user=_create_provisioned_user(username="rapid-api-other-s", password="pass"),
             name="Other Singer",
             student_id="2026rapid02",
             college="Info",
@@ -4740,10 +4760,10 @@ class ResultBoardTests(TestCase):
     def setUp(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="result-board-staff", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Board Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4772,7 +4792,7 @@ class ResultBoardTests(TestCase):
     def _singer(self, index):
         return SingerRegistration.objects.create(
             activity=self.activity,
-            user=User.objects.create_user(username=f"rb-{index}", password="pass"),
+            user=_create_provisioned_user(username=f"rb-{index}", password="pass"),
             name=f"选手{index}",
             student_id=f"7{index:05d}",
             college="Info",
@@ -4901,7 +4921,7 @@ class ResultBoardTests(TestCase):
         from ruleset.models import ContestRuleset, RulesetVersion
 
         # UNIQUE(activity): a second ContestRuleset needs its own activity.
-        activity_b = Activity.objects.create(
+        activity_b = _create_activity(
             title="Fallback Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4933,7 +4953,7 @@ class ResultBoardTests(TestCase):
             )
         singer = SingerRegistration.objects.create(
             activity=activity_b,
-            user=User.objects.create_user(username="fb-singer", password="pass"),
+            user=_create_provisioned_user(username="fb-singer", password="pass"),
             name="选手5",
             student_id="70005",
             college="Info",
@@ -4967,7 +4987,7 @@ class ResultBoardTests(TestCase):
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         _save_activity_state(self.activity, ["phase"])
-        contest_round = ContestRound.objects.create(
+        contest_round = _create_round(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             name="初赛",
@@ -5053,7 +5073,7 @@ class ResultBoardTests(TestCase):
         confirmed.refresh_from_db()
         self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
         # An admin can unlock (with the step-up admin verification), reverting the marker.
-        admin = User.objects.create_user(
+        admin = _create_provisioned_user(
             username="result-unlock-admin", password="pass", role=User.Role.ADMIN
         )
         login_admin(self.client, admin)
@@ -5093,7 +5113,7 @@ class ResultBoardTests(TestCase):
 
 class RulesetTemplateLibraryTests(TestCase):
     def setUp(self):
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="lib-staff",
             password="pass",
             role=User.Role.STAFF,
@@ -5127,7 +5147,7 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertContains(response, "节点")
 
     def _clone_activity(self, title="院十佳2026"):
-        return Activity.objects.create(
+        return _create_activity(
             title=title,
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -5290,7 +5310,7 @@ def _seed_bound_acceptance(activity, ruleset):
     for i in range(12):
         SingerRegistration.objects.create(
             activity=activity,
-            user=User.objects.create_user(username=f"ab-entry-{i}", password="pass"),
+            user=_create_provisioned_user(username=f"ab-entry-{i}", password="pass"),
             name=f"Entry{i}",
             student_id=f"{i:04d}",
             pre_status=SingerRegistration.PreStatus.APPROVED,
@@ -5302,7 +5322,7 @@ def _seed_bound_acceptance(activity, ruleset):
             activity=activity, name=f"{key}评分", is_test_data=True
         )
         RubricCriterion.objects.create(rubric=rubric, name="总分", max_score=100, is_test_data=True)
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=activity, round_type=ContestRound.RoundType.PRELIMINARY, name=key
         )
         round_.rubric = rubric
@@ -5348,12 +5368,12 @@ class RulesetEditorTests(TestCase):
     def setUp(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="editor-admin",
             password="pass",
             role=User.Role.ADMIN,
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳2026",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -5507,7 +5527,7 @@ class RulesetEditorTests(TestCase):
     def _bind_round(self):
         from singer_contest.models import ContestRound
 
-        return ContestRound.objects.create(
+        return _create_round(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             name="r1",
@@ -5516,7 +5536,7 @@ class RulesetEditorTests(TestCase):
     def _bind_vote(self):
         from voting.models import VoteSession
 
-        return VoteSession.objects.create(
+        return _create_vote_session(
             activity=self.activity,
             name="大众投票",
             passcode="0000",
@@ -5559,7 +5579,7 @@ class RulesetEditorTests(TestCase):
     def test_ruleset_editor_bind_form_prerenders_json(self):
         from singer_contest.models import ContestRound
 
-        round_ = ContestRound.objects.create(
+        round_ = _create_round(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
             name="r1",
@@ -5593,13 +5613,13 @@ class RulesetEditorTests(TestCase):
     def test_ruleset_bind_rejects_foreign_round(self):
         from singer_contest.models import ContestRound
 
-        other = Activity.objects.create(
+        other = _create_activity(
             title="其他活动",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=True,
         )
-        foreign_round = ContestRound.objects.create(
+        foreign_round = _create_round(
             activity=other,
             round_type=ContestRound.RoundType.PRELIMINARY,
             name="f",

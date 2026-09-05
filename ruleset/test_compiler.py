@@ -14,7 +14,12 @@ and audits via FINALIZE_RULESET.
 import json
 
 from accounts.models import User
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    authority_write,
+)
 from common.models import AuditLog
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -1001,7 +1006,8 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
     def _admin(self):
         user = self.make_user("ruleset-admin")
         user.role = User.Role.ADMIN
-        user.save()
+        with authority_write(ACCOUNT_AUTHORITY):
+            user.save()
         return user
 
     def _draft(
@@ -1303,7 +1309,8 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
     def _admin(self):
         user = self.make_user("r1-admin")
         user.role = User.Role.ADMIN
-        user.save()
+        with authority_write(ACCOUNT_AUTHORITY):
+            user.save()
         return user
 
     def _ruleset_with_binding(self):

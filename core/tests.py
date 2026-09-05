@@ -1,4 +1,4 @@
-from common.authority import ACTIVITY_STATE, authority_write
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from django.contrib import admin
 from django.contrib.auth import get_user_model
@@ -15,6 +15,11 @@ from .services import (
 )
 
 User = get_user_model()
+
+
+def create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
 
 
 class CoreModelTests(TestCase):
@@ -572,10 +577,10 @@ class ActivityPhaseTransitionTests(TestCase):
 
 class ActivityUnarchiveTests(TestCase):
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="unarchive-admin", password="pass", role=User.Role.ADMIN
         )
-        self.staff = User.objects.create_user(
+        self.staff = create_provisioned_user(
             username="unarchive-staff", password="pass", role=User.Role.STAFF
         )
         with authority_write(ACTIVITY_STATE):

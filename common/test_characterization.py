@@ -30,7 +30,12 @@ from singer_contest.models import (
 )
 from voting.models import VoteOption, VoteSession
 
-from common.authority import CONTEST_ROUND_STATE, authority_write
+from common.authority import (
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.lifecycle import runtime_approved_singers, scope_runtime
 from common.test_data import get_test_data_counts
 
@@ -44,7 +49,8 @@ class _CharacterizationBase(TestCase):
             is_test_mode=is_test_mode,
         )
         values.update(kwargs)
-        return Activity.objects.create(**values)
+        with authority_write(ACTIVITY_STATE):
+            return Activity.objects.create(**values)
 
     def make_user(self, username):
         return get_user_model().objects.create_user(username=username, password="pass")
@@ -177,16 +183,18 @@ class VoteCharacterizationTests(_CharacterizationBase):
         activity = self.make_activity()
         with self.assertRaises(IntegrityError):
             with transaction.atomic():
-                VoteSession.objects.create(
-                    activity=activity,
-                    name="Pop",
-                    passcode="1234",
-                    start_time=timezone.now(),
-                    end_time=timezone.now() + timezone.timedelta(minutes=5),  # type: ignore[attr-defined]
-                    is_open=True,
-                    is_locked=True,
-                    is_test_data=False,
-                )
+                with authority_write(VOTE_SESSION_STATE):
+                    VoteSession.objects.create(
+                        activity=activity,
+                        name="Pop",
+                        passcode="1234",
+                        start_time=timezone.now(),
+                        end_time=timezone.now()
+                        + timezone.timedelta(minutes=5),  # type: ignore[attr-defined]
+                        is_open=True,
+                        is_locked=True,
+                        is_test_data=False,
+                    )
 
     def test_vote_option_singer_must_belong_to_session_activity(self):
         activity = self.make_activity()

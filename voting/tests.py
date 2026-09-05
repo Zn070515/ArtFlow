@@ -4,7 +4,12 @@ from datetime import timedelta
 from unittest import skipUnless
 
 from accounts.models import User
-from common.authority import ACTIVITY_STATE, VOTE_SESSION_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.models import AuditLog
 from common.test_data import clear_activity_test_data
 from core.models import Activity
@@ -25,6 +30,11 @@ from .services import (
     submit_ballot,
     unlock_vote_session,
 )
+
+
+def create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
 
 
 def create_vote_session(**kwargs):
@@ -60,10 +70,10 @@ class VotePublicStagingBoundaryTests(TestCase):
         self.participant = User.objects.create_user(
             username="vote-participant", password="pass", role=User.Role.PARTICIPANT
         )
-        self.staff = User.objects.create_user(
+        self.staff = create_provisioned_user(
             username="vote-staff", password="pass", role=User.Role.STAFF
         )
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="vote-admin", password="pass", role=User.Role.ADMIN
         )
 
