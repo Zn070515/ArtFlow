@@ -23,6 +23,11 @@ class SingerRegistrationAdmin(admin.ModelAdmin):
     list_filter = ["pre_status", "live_status", "activity"]
     search_fields = ["name", "student_id", "song_name"]
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return super().get_readonly_fields(request, obj)
+        return (*super().get_readonly_fields(request, obj), "activity", "user")
+
 
 @admin.register(ContestRound)
 class ContestRoundAdmin(admin.ModelAdmin):
@@ -82,6 +87,11 @@ class ContestRoundAdmin(admin.ModelAdmin):
 @admin.register(Judge)
 class JudgeAdmin(admin.ModelAdmin):
     list_display = ["name", "activity", "is_active"]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return super().get_readonly_fields(request, obj)
+        return (*super().get_readonly_fields(request, obj), "activity")
 
 
 class RoundSnapshotAdmin(admin.ModelAdmin):

@@ -15,6 +15,7 @@ from decimal import Decimal
 
 from accounts.models import User
 from common.authority import (
+    ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
@@ -22,6 +23,7 @@ from common.authority import (
 )
 from core.models import Activity
 from django.core.exceptions import ValidationError
+from django.contrib import admin
 from django.test import TestCase
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
@@ -37,6 +39,7 @@ from .models import (
     StageDecision,
     StageResult,
 )
+from .admin import JudgeAdmin, SingerRegistrationAdmin
 from .services import _authorized_manual_write, apply_scores, recompute_activity_result
 
 
@@ -46,9 +49,12 @@ class AuthorityClosureAcceptanceTests(TestCase):
         self.activity = Activity.objects.create(
             title="closure",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=True,
         )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(
+                phase=Activity.Phase.REGISTRATION_OPEN
+            )
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity, name="r", is_test_data=True
         )
@@ -225,3 +231,119 @@ class AuthorityClosureAcceptanceTests(TestCase):
         self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.stage_key, "院十佳")
+
+
+class ContestIdentityOwnershipTests(TestCase):
+    """A contest identity remains owned by the activity and account that created it."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="identity-owner", password="pass")
+        self.other_user = User.objects.create_user(username="identity-other", password="pass")
+        self.activity = Activity.objects.create(
+            title="identity-primary",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        self.other_activity = Activity.objects.create(
+            title="identity-secondary",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk__in=[self.activity.pk, self.other_activity.pk]).update(
+                phase=Activity.Phase.REGISTRATION_OPEN
+            )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="原选手",
+            student_id="identity-01",
+            college="学院",
+            class_name="班级",
+            phone="13000000000",
+            song_name="原曲目",
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="原评委")
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="身份归属轮次",
+        )
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.save(update_fields=["status"])
+
+    def test_instance_save_rejects_singer_and_judge_ownership_changes(self):
+        self.singer.activity = self.other_activity
+        with self.assertRaises(ValidationError):
+            self.singer.save()
+
+        self.singer.refresh_from_db()
+        self.singer.user = self.other_user
+        with self.assertRaises(ValidationError):
+            self.singer.save()
+
+        self.judge.activity = self.other_activity
+        with self.assertRaises(ValidationError):
+            self.judge.save()
+
+    def test_queryset_update_rejects_singer_and_judge_ownership_changes(self):
+        for model, field, value in (
+            (SingerRegistration, "activity_id", self.other_activity.pk),
+            (SingerRegistration, "user_id", self.other_user.pk),
+            (Judge, "activity_id", self.other_activity.pk),
+        ):
+            with self.subTest(model=model.__name__, field=field), self.assertRaises(ValidationError):
+                model.objects.filter(
+                    pk=self.singer.pk if model is SingerRegistration else self.judge.pk
+                ).update(**{field: value})
+
+    def test_base_manager_update_rejects_singer_and_judge_ownership_changes(self):
+        for model, field, value in (
+            (SingerRegistration, "activity_id", self.other_activity.pk),
+            (SingerRegistration, "user_id", self.other_user.pk),
+            (Judge, "activity_id", self.other_activity.pk),
+        ):
+            with self.subTest(model=model.__name__, field=field), self.assertRaises(ValidationError):
+                model._base_manager.filter(
+                    pk=self.singer.pk if model is SingerRegistration else self.judge.pk
+                ).update(**{field: value})
+
+    def test_bulk_update_rejects_singer_and_judge_ownership_changes(self):
+        self.singer.activity = self.other_activity
+        with self.assertRaises(ValidationError):
+            SingerRegistration.objects.bulk_update([self.singer], ["activity"])
+
+        self.singer.refresh_from_db()
+        self.singer.user = self.other_user
+        with self.assertRaises(ValidationError):
+            SingerRegistration.objects.bulk_update([self.singer], ["user"])
+
+        self.judge.activity = self.other_activity
+        with self.assertRaises(ValidationError):
+            Judge.objects.bulk_update([self.judge], ["activity"])
+
+    def test_profile_and_judge_active_changes_remain_allowed(self):
+        self.singer.name = "更正选手"
+        self.singer.phone = "13100000000"
+        self.singer.song_name = "更正曲目"
+        self.singer.save(update_fields=["name", "phone", "song_name"])
+        self.singer.refresh_from_db()
+        self.assertEqual(self.singer.name, "更正选手")
+        self.assertEqual(self.singer.phone, "13100000000")
+        self.assertEqual(self.singer.song_name, "更正曲目")
+
+        self.judge.name = "更正评委"
+        self.judge.is_active = False
+        self.judge.save(update_fields=["name", "is_active"])
+        self.judge.refresh_from_db()
+        self.assertEqual(self.judge.name, "更正评委")
+        self.assertFalse(self.judge.is_active)
+
+    def test_existing_identity_fields_are_readonly_in_admin(self):
+        singer_admin = SingerRegistrationAdmin(SingerRegistration, admin.site)
+        judge_admin = JudgeAdmin(Judge, admin.site)
+        self.assertEqual(singer_admin.get_readonly_fields(None, self.singer), ("activity", "user"))
+        self.assertEqual(judge_admin.get_readonly_fields(None, self.judge), ("activity",))

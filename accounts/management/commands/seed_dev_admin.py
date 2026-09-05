@@ -5,6 +5,7 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 
 from accounts.models import User
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 
 
 class Command(BaseCommand):
@@ -29,7 +30,8 @@ class Command(BaseCommand):
         user.is_staff = True
         user.is_superuser = True
         user.set_password(password)
-        user.save()  # type: ignore[no-untyped-call]
+        with authority_write(ACCOUNT_AUTHORITY):
+            user.save()  # type: ignore[no-untyped-call]
 
         action = "Created" if created else "Updated"
         self.stdout.write(self.style.SUCCESS(f"{action} development admin: {username}"))

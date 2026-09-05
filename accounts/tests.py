@@ -6,6 +6,7 @@ from io import StringIO
 from unittest import skipUnless
 from unittest.mock import patch
 
+from django.contrib import admin
 from common.models import AuditLog
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -13,11 +14,12 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
 from django.db.models import Q
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from .models import User
+from .admin import CustomUserAdmin
 from .services import (
     admin_verification_is_valid,
     change_user_role,
@@ -242,7 +244,12 @@ class AdminLoginRateLimitTests(TestCase):
 
 
 class UserPermissionSynchronizationTests(TestCase):
-    def test_demoting_staff_user_clears_django_staff_flag(self):
+    def test_service_demoting_staff_user_clears_django_staff_flag(self):
+        actor = User.objects.create_user(
+            username="authority-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
         user = User.objects.create_user(
             username="demoted-staff",
             password="pass12345",
@@ -250,8 +257,7 @@ class UserPermissionSynchronizationTests(TestCase):
         )
         self.assertTrue(user.is_staff)
 
-        user.role = User.Role.PARTICIPANT
-        user.save()
+        change_user_role(target=user, new_role=User.Role.PARTICIPANT, actor=actor)
 
         user.refresh_from_db()
         self.assertFalse(user.is_staff)
@@ -352,16 +358,102 @@ class EffectiveAdminAuthorityTests(TestCase):
         self.assertEqual(self.participant.role, User.Role.PARTICIPANT)
 
     def test_last_effective_admin_cannot_be_demoted(self):
-        # Only ``alone`` is an effective admin here (the superuser is neutralized).
-        self.super_admin.is_superuser = False
-        self.super_admin.save(update_fields=["is_superuser"])
+        # Only ``alone`` is effective after the service deactivates the superuser.
         alone = User.objects.create_user(
             username="only-admin", password="pass12345", role=User.Role.ADMIN
         )
+        set_user_active(target=self.super_admin, is_active=False, actor=alone)
         with self.assertRaises(ValidationError):
             change_user_role(target=alone, new_role=User.Role.PARTICIPANT, actor=alone)
         alone.refresh_from_db()
         self.assertEqual(alone.role, User.Role.ADMIN)
+
+
+class AccountAuthorityBoundaryTests(TestCase):
+    """Only audited account services may change security-bearing User fields."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            username="account-authority-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        self.target = User.objects.create_user(
+            username="account-authority-target",
+            password="pass12345",
+            role=User.Role.PARTICIPANT,
+        )
+
+    def test_instance_save_rejects_role_active_and_superuser_changes(self):
+        self.target.role = User.Role.STAFF
+        with self.assertRaises(ValidationError):
+            self.target.save()
+
+        self.target.refresh_from_db()
+        self.target.is_active = False
+        with self.assertRaises(ValidationError):
+            self.target.save()
+
+        self.target.refresh_from_db()
+        self.target.is_superuser = True
+        with self.assertRaises(ValidationError):
+            self.target.save()
+
+    def test_queryset_update_rejects_role_active_and_superuser_changes(self):
+        for field, value in (
+            ("role", User.Role.STAFF),
+            ("is_active", False),
+            ("is_superuser", True),
+        ):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                User.objects.filter(pk=self.target.pk).update(**{field: value})
+
+    def test_base_manager_update_rejects_role_active_and_superuser_changes(self):
+        for field, value in (
+            ("role", User.Role.STAFF),
+            ("is_active", False),
+            ("is_superuser", True),
+        ):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                User._base_manager.filter(pk=self.target.pk).update(**{field: value})
+
+    def test_bulk_update_rejects_role_active_and_superuser_changes(self):
+        for field, value in (
+            ("role", User.Role.STAFF),
+            ("is_active", False),
+            ("is_superuser", True),
+        ):
+            self.target.refresh_from_db()
+            setattr(self.target, field, value)
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                User.objects.bulk_update([self.target], [field])
+
+    def test_admin_change_form_keeps_protected_account_fields_readonly(self):
+        request = RequestFactory().get("/admin/accounts/user/")
+        request.user = User.objects.create_superuser(
+            username="account-authority-superuser",
+            email="authority@example.com",
+            password="pass12345",
+        )
+        form_class = CustomUserAdmin(User, admin.site).get_form(request, self.target, change=True)
+        self.assertNotIn("role", form_class.base_fields)
+        self.assertNotIn("is_active", form_class.base_fields)
+        self.assertNotIn("is_superuser", form_class.base_fields)
+
+    def test_role_and_active_services_change_authority_fields_and_audit(self):
+        changed = change_user_role(
+            target=self.target,
+            new_role=User.Role.STAFF,
+            actor=self.admin,
+        )
+        self.assertEqual(changed.role, User.Role.STAFF)
+        role_audit = AuditLog.objects.get(target=f"User:{self.target.pk}", old_value="participant")
+        self.assertEqual(role_audit.new_value, "staff")
+
+        changed = set_user_active(target=self.target, is_active=False, actor=self.admin)
+        self.assertFalse(changed.is_active)
+        active_audit = AuditLog.objects.get(target=f"User:{self.target.pk}", old_value="active=True")
+        self.assertEqual(active_audit.new_value, "active=False")
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

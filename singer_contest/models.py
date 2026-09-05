@@ -125,6 +125,61 @@ def _stored_fk_id(instance, field: str) -> int | None:
     )
 
 
+def _ensure_identity_ownership_unchanged(instance, fields: frozenset[str]) -> None:
+    """Keep an existing contest identity bound to its original owner."""
+    if instance._state.adding or not instance.pk:
+        return
+    stored = type(instance)._base_manager.filter(pk=instance.pk).values(*fields).first()
+    if stored and any(stored[field] != getattr(instance, field) for field in fields):
+        raise ValidationError("比赛身份归属创建后不可修改。")
+
+
+class IdentityOwnershipQuerySet(models.QuerySet):
+    ownership_fields: frozenset[str] = frozenset()
+
+    def _update_ownership_fields(self) -> set[str]:
+        return {
+            field.removesuffix("_id")
+            for field in self.ownership_fields
+        } | set(self.ownership_fields)
+
+    def _ensure_ownership_update_immutable(self, fields) -> None:
+        if self._update_ownership_fields().intersection(fields):
+            raise ValidationError("比赛身份归属创建后不可修改。")
+
+    def update(self, **kwargs):
+        self._ensure_ownership_update_immutable(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        self._ensure_ownership_update_immutable(fields)
+        for obj in objs:
+            _ensure_identity_ownership_unchanged(obj, self.ownership_fields)
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        if kwargs.get("update_conflicts"):
+            self._ensure_ownership_update_immutable(kwargs.get("update_fields", ()))
+        return super().bulk_create(objs, *args, **kwargs)
+
+
+class SingerRegistrationQuerySet(IdentityOwnershipQuerySet):
+    ownership_fields = frozenset({"activity_id", "user_id"})
+
+
+class JudgeQuerySet(IdentityOwnershipQuerySet):
+    ownership_fields = frozenset({"activity_id"})
+
+
+class SingerRegistrationManager(models.Manager.from_queryset(SingerRegistrationQuerySet)):
+    pass
+
+
+class JudgeManager(models.Manager.from_queryset(JudgeQuerySet)):
+    pass
+
+
 def _relation_pk(value):
     return getattr(value, "pk", value)
 
@@ -204,8 +259,10 @@ class SingerRegistration(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = SingerRegistrationManager()
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
@@ -220,6 +277,10 @@ class SingerRegistration(models.Model):
 
     def __str__(self):
         return f"{self.name} — {self.song_name}"
+
+    def save(self, *args, **kwargs):
+        _ensure_identity_ownership_unchanged(self, frozenset({"activity_id", "user_id"}))
+        return super().save(*args, **kwargs)
 
 
 _CONTEST_ROUND_STATE_FIELDS = frozenset(
@@ -498,12 +559,18 @@ class Judge(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="judges")
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
+    objects = JudgeManager()
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["pk"]
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        _ensure_identity_ownership_unchanged(self, frozenset({"activity_id"}))
+        return super().save(*args, **kwargs)
 
 
 class RoundSnapshotMixin:
