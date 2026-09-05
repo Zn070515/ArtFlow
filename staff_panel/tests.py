@@ -31,7 +31,7 @@ from django import forms
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, connection, transaction
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Max
 from django.http import FileResponse
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
@@ -145,6 +145,72 @@ class PathlessStorage(Storage):
 
     def path(self, name: str) -> str:
         raise NotImplementedError("This storage does not expose local paths.")
+
+
+class ContestRoundCreateHTTPTests(TestCase):
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="round-staff", password="pass", role=User.Role.STAFF
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Singer Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
+        self.client.force_login(self.staff)
+
+    def _round_create_data(self, sequence=""):
+        return {
+            "activity_id": self.activity.pk,
+            "name": "Created round",
+            "round_type": ContestRound.RoundType.PRELIMINARY,
+            "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+            "sequence": sequence,
+            "order_policy": ContestRound.OrderPolicy.REGISTRATION_ORDER,
+            "tie_order_policy": ContestRound.TieOrderPolicy.REVIEW,
+            "roster_source": "",
+            "roster_source_stage": "",
+            "rubric": "",
+            "advance_count": "0",
+        }
+
+    def test_round_create_allocates_next_sequence_for_blank_sequences(self):
+        first = self.client.post(reverse("staff:round_create"), self._round_create_data())
+        second = self.client.post(reverse("staff:round_create"), self._round_create_data())
+
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(
+            list(
+                ContestRound.objects.filter(activity=self.activity)
+                .order_by("sequence")
+                .values_list("sequence", flat=True)
+            ),
+            [1, 2],
+        )
+
+    def test_round_create_reports_explicit_duplicate_sequence_as_form_error(self):
+        self.client.post(reverse("staff:round_create"), self._round_create_data(sequence="1"))
+
+        response = self.client.post(
+            reverse("staff:round_create"), self._round_create_data(sequence="1")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "轮次序号已存在")
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 1)
+
+    @patch("staff_panel.views.ContestRound.objects.create", side_effect=IntegrityError)
+    def test_round_create_reports_race_duplicate_as_form_error(self, _create):
+        response = self.client.post(
+            reverse("staff:round_create"), self._round_create_data(sequence="2")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "轮次序号已存在")
 
 
 class StaffPanelSmokeTests(TestCase):

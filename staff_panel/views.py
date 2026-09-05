@@ -34,7 +34,7 @@ from core.services import (
 )
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -931,19 +931,62 @@ def round_create(request):
             )
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
-            contest_round = ContestRound.objects.create(
-                activity=locked_activity,
-                round_type=form.cleaned_data["round_type"],
-                scoring_mode=form.cleaned_data["scoring_mode"],
-                name=form.cleaned_data["name"],
-                advance_count=form.cleaned_data["advance_count"],
-                sequence=form.cleaned_data["sequence"],
-                order_policy=form.cleaned_data["order_policy"],
-                tie_order_policy=form.cleaned_data["tie_order_policy"],
-                roster_source=form.cleaned_data["roster_source"],
-                roster_source_stage=form.cleaned_data["roster_source_stage"],
-                rubric=form.cleaned_data["rubric"],
-            )
+            sequence = form.cleaned_data["sequence"]
+            if sequence is not None and ContestRound.objects.filter(
+                activity=locked_activity, sequence=sequence
+            ).exists():
+                form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
+                return render(
+                    request,
+                    "staff_panel/round_form.html",
+                    {
+                        "error": _form_error(form),
+                        "activities": Activity.objects.filter(
+                            activity_type=Activity.Type.SINGER_CONTEST
+                        ),
+                        "round_types": _choices(ContestRound.RoundType),
+                        "scoring_modes": _choices(ContestRound.ScoringMode),
+                        "order_policies": _choices(ContestRound.OrderPolicy),
+                        "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+                        "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                    },
+                )
+            try:
+                with transaction.atomic():
+                    create_kwargs = {
+                        "activity": locked_activity,
+                        "round_type": form.cleaned_data["round_type"],
+                        "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "name": form.cleaned_data["name"],
+                        "advance_count": form.cleaned_data["advance_count"],
+                        "order_policy": form.cleaned_data["order_policy"],
+                        "tie_order_policy": form.cleaned_data["tie_order_policy"],
+                        "roster_source": form.cleaned_data["roster_source"],
+                        "roster_source_stage": form.cleaned_data["roster_source_stage"],
+                        "rubric": form.cleaned_data["rubric"],
+                    }
+                    if sequence is not None:
+                        create_kwargs["sequence"] = sequence
+                    contest_round = ContestRound.objects.create(**create_kwargs)
+            except IntegrityError:
+                form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
+                return render(
+                    request,
+                    "staff_panel/round_form.html",
+                    {
+                        "error": _form_error(form),
+                        "activities": Activity.objects.filter(
+                            activity_type=Activity.Type.SINGER_CONTEST
+                        ),
+                        "round_types": _choices(ContestRound.RoundType),
+                        "scoring_modes": _choices(ContestRound.ScoringMode),
+                        "order_policies": _choices(ContestRound.OrderPolicy),
+                        "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+                        "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                    },
+                )
             log_action(
                 request,
                 AuditLog.ActionType.OTHER,

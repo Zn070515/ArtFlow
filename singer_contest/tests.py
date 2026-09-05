@@ -194,6 +194,27 @@ class ScoringServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             RoundEntry.objects.create(round=self.round, singer=foreign)
 
+    def test_contest_round_manager_allocates_blank_sequences(self):
+        second = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=None,
+        )
+
+        self.assertEqual(second.sequence, 2)
+
+    def test_contest_round_configuration_can_change_only_while_draft(self):
+        self.round.sequence = 2
+        self.round.save(update_fields=["sequence"])
+        self.assertEqual(ContestRound.objects.get(pk=self.round.pk).sequence, 2)
+
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.is_locked = False
+        _save_round_state(self.round, ["status", "is_locked"])
+        self.round.sequence = 3
+        with self.assertRaisesMessage(ValidationError, "轮次准备后，执行配置不可直接修改。"):
+            self.round.save(update_fields=["sequence"])
+
     def test_round_judge_rejects_judge_from_another_activity(self):
         other_activity = Activity.objects.create(
             title="Other", activity_type=Activity.Type.SINGER_CONTEST

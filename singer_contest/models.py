@@ -361,14 +361,20 @@ ContestRoundQuerySetManager = models.Manager.from_queryset(ContestRoundQuerySet)
 class ContestRoundManager(ContestRoundQuerySetManager):  # type: ignore[misc]
     def create(self, **kwargs):
         activity_id = kwargs.get("activity_id") or getattr(kwargs.get("activity"), "pk", None)
-        if "sequence" not in kwargs and activity_id:
-            kwargs["sequence"] = (
-                self.filter(activity_id=activity_id)
-                .order_by("-sequence")
-                .values_list("sequence", flat=True)
-                .first()
-                or 0
-            ) + 1
+        if kwargs.get("sequence") is None and activity_id:
+            from core.models import Activity
+            from django.db import transaction
+
+            with transaction.atomic():
+                Activity.objects.select_for_update().get(pk=activity_id)
+                kwargs["sequence"] = (
+                    self.filter(activity_id=activity_id)
+                    .order_by("-sequence")
+                    .values_list("sequence", flat=True)
+                    .first()
+                    or 0
+                ) + 1
+                return super().create(**kwargs)
         return super().create(**kwargs)
 
 
