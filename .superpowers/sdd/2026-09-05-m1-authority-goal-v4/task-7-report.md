@@ -129,3 +129,41 @@ git diff --check
 ```
 
 The Caddy image-dependent adaptation check remains skipped only because `caddy:2-alpine` is not locally available. The production file contains the escaped `{$$CADDY_SITE_ADDRESS}` interpolation, while the env template and runbook document manifest-fixed `TRUST_X_FORWARDED_FOR=true` and `POSTGRES_HOST=db`.
+
+## Fix round 2 — Caddy interpolation
+
+### Changes
+
+- Replaced the interpolated inline Caddy config with the file-backed `deploy/Caddyfile` config.
+- The mounted/rendered Caddyfile now contains exactly `{$CADDY_SITE_ADDRESS}`; Compose cannot rewrite or retain a double-dollar escape in that payload.
+- Updated the regression to inspect the unmodified file-backed rendered config and pass that exact content to Caddy adaptation. The manual `$$` replacement was removed.
+- Preserved the existing production env documentation alignment and all service, network, port, volume, healthcheck, and authority constraints.
+
+### Fix-round evidence
+
+```text
+python -m pytest tests/test_production_compose_config.py tests/test_postgres_acceptance_script.py tests/test_check_docs.py -q
+21 passed, 1 skipped in 8.88s
+
+pwsh -NoProfile -File scripts/check_docs.ps1
+Documentation validation passed for 11 user-facing Markdown file(s); docs/superpowers was skipped.
+
+docker compose -f deploy/compose.production.yml config --quiet
+[exit 0; no output]
+
+python -m ruff check tests/test_production_compose_config.py
+All checks passed!
+
+git diff --check
+[exit 0; existing LF/CRLF conversion warnings only]
+```
+
+The Caddy adaptation test remains skipped because `caddy:2-alpine` is not available locally; no image pull or service startup was performed.
+
+### Self-review
+
+- `deploy/Caddyfile` is the only source for the production proxy config and has one single-dollar Caddy environment placeholder.
+- The production Compose manifest still publishes only Caddy ports `80/443`; `web` and `db` remain private on the internal network.
+- Existing env-template documentation alignment (`TRUST_X_FORWARDED_FOR=true`, `POSTGRES_HOST=db`) is unchanged.
+- No root development Compose file, application authority code, event topology, or unrelated documentation was changed.
+- Scoped diff consists only of the production config source, its regression, and this report.

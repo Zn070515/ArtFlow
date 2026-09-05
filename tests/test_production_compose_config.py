@@ -50,7 +50,10 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert "artflow-local-container-password" not in PRODUCTION_COMPOSE_PATH.read_text(
         encoding="utf-8"
     )
-    assert "reverse_proxy web:8000" in compose["configs"]["caddyfile"]["content"]
+    assert compose["configs"]["caddyfile"]["file"] == "./Caddyfile"
+    assert "reverse_proxy web:8000" in (PRODUCTION_COMPOSE_PATH.parent / "Caddyfile").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_event_compose_exposes_web_only_on_localhost():
@@ -121,8 +124,9 @@ def test_rendered_production_compose_preserves_caddy_environment_placeholder(
 
     assert result.returncode == 0, result.stderr
     rendered = yaml.safe_load(result.stdout)
-    caddyfile = rendered["configs"]["caddyfile"]["content"]
-    assert caddyfile.startswith("{$$CADDY_SITE_ADDRESS} {")
+    caddyfile_path = PRODUCTION_COMPOSE_PATH.parent / rendered["configs"]["caddyfile"]["file"]
+    caddyfile = caddyfile_path.read_text(encoding="utf-8")
+    assert caddyfile.startswith("{$CADDY_SITE_ADDRESS} {")
     assert "{artflow.internal}" not in caddyfile
 
 
@@ -150,8 +154,8 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
         text=True,
         encoding="utf-8",
     )
-    caddyfile = yaml.safe_load(compose_result.stdout)["configs"]["caddyfile"]["content"]
-    caddyfile = caddyfile.replace("$$", "$")
+    rendered = yaml.safe_load(compose_result.stdout)
+    caddyfile_path = PRODUCTION_COMPOSE_PATH.parent / rendered["configs"]["caddyfile"]["file"]
     result = subprocess.run(
         [
             DOCKER,
@@ -170,7 +174,7 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
             "--adapter",
             "caddyfile",
         ],
-        input=caddyfile,
+        input=caddyfile_path.read_text(encoding="utf-8"),
         check=False,
         capture_output=True,
         text=True,
