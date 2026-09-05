@@ -182,6 +182,15 @@ class SettingsTests(SimpleTestCase):
             settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
         )
 
+    def test_rate_limit_backend_is_locmem_outside_production_and_database_in_production(self):
+        development_backend = self.reload_settings({"APP_ENV": "development"}).RATE_LIMIT_BACKEND
+        test_backend = self.reload_settings({"APP_ENV": "test"}).RATE_LIMIT_BACKEND
+        production_backend = self.reload_settings(production_environment()).RATE_LIMIT_BACKEND
+
+        self.assertEqual(development_backend, "locmem")
+        self.assertEqual(test_backend, "locmem")
+        self.assertEqual(production_backend, "database")
+
     def test_development_rejects_malformed_debug_value(self):
         with self.assertRaises(ImproperlyConfigured):
             self.reload_settings({"APP_ENV": "development", "DEBUG": "not-a-boolean"})

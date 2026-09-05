@@ -248,6 +248,100 @@ class AdminLoginRateLimitTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("staff:dashboard"))
 
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", RATE_LIMIT_BACKEND="database")
+    def test_admin_login_uses_shared_database_throttle(self):
+        from common.models import RateLimitBucket
+
+        url = reverse("accounts:admin_login")
+        for _ in range(11):
+            self.client.post(
+                url,
+                {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+                REMOTE_ADDR="198.51.100.7",
+            )
+
+        bucket = RateLimitBucket.objects.get()
+        self.assertEqual(bucket.count, 11)
+
+
+class DatabaseRateLimitTests(TransactionTestCase):
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_database_bucket_is_shared_across_connection_boundaries(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        first = rate_limit.allow("shared-worker-key", limit=2, window_seconds=300)
+        connection.close()
+        second = rate_limit.allow("shared-worker-key", limit=2, window_seconds=300)
+        connection.close()
+        third = rate_limit.allow("shared-worker-key", limit=2, window_seconds=300)
+
+        self.assertEqual(
+            [first.allowed, second.allowed, third.allowed],
+            [True, True, False],
+        )
+        self.assertEqual(RateLimitBucket.objects.get().count, 3)
+        self.assertGreater(third.retry_after_seconds, 0)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_expired_database_bucket_restarts_its_window(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        rate_limit.allow("expired-window-key", limit=1, window_seconds=300)
+        RateLimitBucket.objects.all().update(
+            expires_at=timezone.now() - timezone.timedelta(seconds=1)
+        )
+
+        decision = rate_limit.allow("expired-window-key", limit=1, window_seconds=300)
+        bucket = RateLimitBucket.objects.get()
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(bucket.count, 1)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_rate_limit_decision_contains_only_allowance_and_retry_metadata(self):
+        from common import rate_limit
+
+        rate_limit.allow("non-sensitive-result-key", limit=1, window_seconds=300)
+        decision = rate_limit.allow("non-sensitive-result-key", limit=1, window_seconds=300)
+
+        self.assertFalse(decision.allowed)
+        self.assertGreater(decision.retry_after_seconds, 0)
+        self.assertEqual(set(vars(decision)), {"allowed", "retry_after_seconds"})
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL atomic upsert")
+class DatabaseRateLimitConcurrencyTests(TransactionTestCase):
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_concurrent_workers_allow_only_the_configured_limit(self):
+        from common import rate_limit
+
+        start = threading.Barrier(2)
+        outcomes: list[bool] = []
+        errors: list[Exception] = []
+
+        def hit_from_worker():
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                outcomes.append(
+                    rate_limit.allow("concurrent-worker-key", limit=1, window_seconds=300).allowed
+                )
+            except Exception as error:  # pragma: no cover - diagnostic assertion below
+                errors.append(error)
+            finally:
+                close_old_connections()
+
+        workers = [threading.Thread(target=hit_from_worker) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=20)
+
+        self.assertFalse(errors)
+        self.assertCountEqual(outcomes, [True, False])
+
 
 class UserPermissionSynchronizationTests(TestCase):
     def test_service_demoting_staff_user_clears_django_staff_flag(self):

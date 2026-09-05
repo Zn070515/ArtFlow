@@ -25,6 +25,10 @@ ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
 
 DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
 
+# Production workers must share throttle buckets through the primary database.
+# Development and tests deliberately keep the lightweight local cache behavior.
+RATE_LIMIT_BACKEND = "database" if APP_ENV == "production" else "locmem"
+
 ALLOWED_HOSTS = get_csv(os.environ, "ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
 CSRF_TRUSTED_ORIGINS = get_csv(os.environ, "CSRF_TRUSTED_ORIGINS")
 # Only trust X-Forwarded-For when a known reverse proxy overwrites and appends

@@ -824,3 +824,13 @@ class VoteEntryRateLimitTests(TestCase):
         )
         self.assertEqual(other_response.status_code, 200)
         self.assertContains(other_response, "口令错误")
+
+    def test_vote_passcode_uses_shared_database_throttle(self):
+        from common.models import RateLimitBucket
+
+        url = reverse("voting:vote_entry", args=[self.session.pk])
+        with self.settings(RATE_LIMIT_BACKEND="database"):
+            for _ in range(11):
+                self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="198.51.100.7")
+
+        self.assertEqual(RateLimitBucket.objects.get().count, 11)
