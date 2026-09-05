@@ -104,3 +104,29 @@ Result: **2 passed, 77 deselected**.
   focused award authority tests and shared mutation matrix pass.
 - `source_vote_session` remains in the schema until real historical rows are audited;
   this task deliberately does not guess whether data migration/removal is safe.
+
+## Fix round 1 — Activity discriminator and documentation contract
+
+### Changes
+
+- Added `activity_type` to `ActivityAdmin.readonly_fields`; title, subtitle,
+  description, and cover-image presentation metadata remain editable.
+- Strengthened the rehearsal documentation contract to require literal
+  `StageResult.status == CONFIRMED` authority for stage-sourced awards and the
+  official Staff/`award_list` export visibility rule. Existing no-VoteSession-lock,
+  retry, stale-candidate, and unlock assertions remain in place.
+- Clarified both production rehearsal documents with the existing visibility rule:
+  official views include historical awards without a stage source and stage-sourced
+  awards only while their source StageResult is `CONFIRMED`.
+- No model or business-service authority changed.
+
+### TDD and focused verification
+
+- RED: the two new regression contracts failed for the expected reasons: missing
+  `activity_type` Admin protection and missing explicit confirmed-stage/visibility
+  documentation (`2 failed`).
+- GREEN: the exact two regressions passed (`2 passed`).
+- Task 9 selector passed: `9 passed, 101 deselected, 15 subtests passed`.
+- Scoped authority regression passed: `47 passed, 85 subtests passed`.
+- Per the final handoff instruction, no additional broad tests or gates were run
+  before commit; the final `git diff --check` was run after this appendix was added.

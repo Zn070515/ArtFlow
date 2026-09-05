@@ -34,6 +34,10 @@ Award 列表或导出。只有 `confirm_stage_result()` 验证当前冻结赛制
 version、input fingerprint 和已消费输入后，才把赛段改为 `CONFIRMED` 并物化
 `Award`。重复核定必须幂等，不能产生重复 Award。
 
+`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority。Staff
+正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或
+`source_stage_result.status == CONFIRMED` 的 Award。
+
 `VoteSession` 锁定本身不会创建 `Award`。当 AWARD 节点确实消费投票时，该
 VoteSession 只是核定前必须静止的原始输入，且其 `purpose` 必须与冻结绑定一致；
 不依赖投票的 AWARD 不需要 VoteSession。不得恢复“锁投票即颁奖”的旧流程。

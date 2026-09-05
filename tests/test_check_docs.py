@@ -44,9 +44,15 @@ def test_award_rehearsal_docs_describe_confirmed_stage_authority():
     runbook = (PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md").read_text(
         encoding="utf-8"
     )
-    combined = f"{readiness}\n{runbook}"
+    combined = " ".join(f"{readiness}\n{runbook}".split())
 
     assert "AWARD → StageAwardDecision → CONFIRM → Award" in combined
+    assert "`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority" in combined
+    assert (
+        "Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 "
+        "`source_stage_result.status == CONFIRMED` 的 Award"
+        in combined
+    )
     assert "VoteSession 锁定本身不会创建 Award" in combined
     assert "不依赖投票的 AWARD 不需要 VoteSession" in combined
     assert "READY_TO_CONFIRM" in combined

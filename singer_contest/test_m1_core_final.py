@@ -314,7 +314,20 @@ class AdminAuthoritySurfaceTests(TestCase):
         self.assertFalse(activity_admin.has_delete_permission(self.request))
         self.assertEqual(
             set(activity_admin.get_readonly_fields(self.request)),
-            {"phase", "is_test_mode", "data_lifecycle", "is_locked", "locked_at", "locked_by"},
+            {
+                "activity_type",
+                "phase",
+                "is_test_mode",
+                "data_lifecycle",
+                "is_locked",
+                "locked_at",
+                "locked_by",
+            },
+        )
+        self.assertTrue(
+            {"title", "subtitle", "description", "cover_image"}.isdisjoint(
+                activity_admin.get_readonly_fields(self.request)
+            )
         )
 
     def test_vote_authority_and_raw_vote_facts_are_observation_only(self):

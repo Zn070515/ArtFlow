@@ -119,7 +119,7 @@ pwsh -NoProfile -File scripts\verify_app_backup_restore.ps1 -ComposeProjectName 
 ### 4.10 AWARD 核定、重试、stale 与解锁重算
 - **Setup**：从 Production 模板克隆并冻结包含 AWARD 节点的 RulesetVersion。若 AWARD 消费投票，绑定 purpose 一致的 VoteSession，并在核定前锁定这个被消费的原始输入；不依赖投票的 AWARD 不需要 VoteSession。
 - **Execute**：resolve 后记录 `READY_TO_CONFIRM` 的 StageResult 与其 `StageAwardDecision`；确认正式 Award 列表/导出尚无该候选。POST `staff:stage_result_confirm` 后再重复提交一次核定。随后解锁 StageResult，修改其被消费输入，尝试核定旧候选，再 resolve 并核定新候选。
-- **Expected**：正式链路严格为 `AWARD → StageAwardDecision → CONFIRM → Award`。`VoteSession 锁定本身不会创建 Award`；首次核定只物化一份来源完整的 Award，重复核定不重复；input fingerprint 或 result version 已变化的 stale 候选不能物化；解锁后旧来源赛段不再 `CONFIRMED`，所以旧 Award 不进入正式列表/导出，新候选必须重新核定。
+- **Expected**：正式链路严格为 `AWARD → StageAwardDecision → CONFIRM → Award`。`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority；Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 `source_stage_result.status == CONFIRMED` 的 Award。`VoteSession 锁定本身不会创建 Award`；首次核定只物化一份来源完整的 Award，重复核定不重复；input fingerprint 或 result version 已变化的 stale 候选不能物化；解锁后旧来源赛段不再 `CONFIRMED`，所以旧 Award 不进入正式列表/导出，新候选必须重新核定。
 - **Legacy provenance**：`Award.source_vote_session` 只解释可能存在的历史行，不是当前 Award authority。删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。
 - **[automated + manual]** 自动回归覆盖 vote lock 不颁奖、候选/核定、重复核定、stale 拒绝和解锁；人工演练核对 Staff 正式列表与导出只显示当前已核定来源。
 
