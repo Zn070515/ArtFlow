@@ -542,16 +542,14 @@ class AuthorityMutationMatrixTests(TestCase):
             (ScoreRecordAdmin, ScoreRecord, self.score),
             (CriterionScoreAdmin, CriterionScore, self.criterion_score),
             (ScoreSummaryAdmin, ScoreSummary, None),
+            (AwardAdmin, Award, self.award),
+            (RulesetVersionAdmin, RulesetVersion, self.version),
         ):
             model_admin = admin_class(model, admin.site)
             with self.subTest(model=model.__name__):
                 self.assertFalse(model_admin.has_add_permission(None))
                 self.assertFalse(model_admin.has_change_permission(None, instance))
                 self.assertFalse(model_admin.has_delete_permission(None, instance))
-        self.assertEqual(
-            AwardAdmin(Award, admin.site).get_readonly_fields(None, self.award),
-            ["source_vote_session", "source_stage_result", "source_award_decision", "source_node"],
-        )
         for admin_class, model, fixture_name, readonly_fields in ADMIN_CANONICAL_MATRIX:
             model_admin = admin_class(model, admin.site)
             instance = getattr(self, fixture_name)
@@ -1247,5 +1245,4 @@ MODEL_MATRIX = (
 ADMIN_CANONICAL_MATRIX = (
     (RubricCriterionAdmin, RubricCriterion, "criterion", ()),
     (ScoringRubricAdmin, ScoringRubric, "rubric", ()),
-    (RulesetVersionAdmin, RulesetVersion, "version", ("execution_plan",)),
 )

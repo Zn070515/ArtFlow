@@ -15,10 +15,37 @@ ArtFlow 首次正式活动前必须完成一次完整彩排，并保留验证记
 | 测试数据残留 | 测试模式创建报名、票、评分、奖项和文件后退出 | 未清理时不能退出；清理同时移除数据库行和媒体对象 |
 | 当前媒体替换 | 同一用途上传多个版本并删除当前版 | 只有一个当前版本，删除后自动恢复最近历史版 |
 | 解锁改分重锁 | 锁定、管理员带原因解锁、改分、重新锁定 | 缺分仍不能锁定，评分审计含 old/new 明细 |
-| 人气奖重算 | A 锁定获奖，解锁后 B 获胜再锁定 | 只有当前一个“最佳人气奖”，来源投票会话一致 |
+| AWARD 核定与重算 | Ruleset AWARD resolve 后检查候选、核定、重复核定，再解锁并改变输入重算 | 候选不冒充正式奖项；核定只物化一次；stale 候选被拒；解锁后的旧奖项不进入正式列表/导出 |
 | 过期评分 Excel | 导入名单/评委名单/规则版本或指纹与当前轮次不一致的工作簿 | 全表拒绝，0 partial mutation，提示“名单过期/版本过期/指纹不匹配”（§15.5） |
 | 大视频直传 | 正式活动 POST 超过 `ARTFLOW_VIDEO_UPLOAD_MAX_MB` 的演唱/背景视频 | 被拒“正式活动不支持大视频直传”，正式报名页不出现视频字段；测试活动仍可传（§15.6） |
 | PostgreSQL 恢复 | 创建备份并在隔离数据库恢复 | `pg_restore` 成功、Django check 通过，源卷未被重置 |
+
+## 奖项 authority 演练契约
+
+正式奖项链路是：
+
+```text
+AWARD → StageAwardDecision → CONFIRM → Award
+```
+
+Ruleset resolver 先把 AWARD 节点输出写成 `StageAwardDecision`，其父
+`StageResult` 此时只能是候选状态（通常为 `READY_TO_CONFIRM`）。候选不得进入正式
+Award 列表或导出。只有 `confirm_stage_result()` 验证当前冻结赛制、最新 result
+version、input fingerprint 和已消费输入后，才把赛段改为 `CONFIRMED` 并物化
+`Award`。重复核定必须幂等，不能产生重复 Award。
+
+`VoteSession` 锁定本身不会创建 `Award`。当 AWARD 节点确实消费投票时，该
+VoteSession 只是核定前必须静止的原始输入，且其 `purpose` 必须与冻结绑定一致；
+不依赖投票的 AWARD 不需要 VoteSession。不得恢复“锁投票即颁奖”的旧流程。
+
+演练还必须覆盖 stale 与解锁路径：输入或最新结果版本变化后，旧候选必须拒绝核定，
+先重新 resolve 再核定；解锁已核定 StageResult 后，其已物化 Award 因来源赛段不再
+`CONFIRMED` 而退出正式列表/导出。修正输入产生的新候选必须重新核定，旧候选和旧
+Award 只保留可追溯性，不能冒充当前正式奖项。
+
+`Award.source_vote_session` 仅作为历史行可能仍需的 legacy provenance 保留。它不再
+授权 Award 创建、重算或替换；删除该字段或清理历史值前，必须先审计真实历史数据并
+通过显式迁移处理。
 
 ## 发布门禁
 

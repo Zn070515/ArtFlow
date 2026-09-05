@@ -39,6 +39,25 @@ def run_checker(repository_root: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_award_rehearsal_docs_describe_confirmed_stage_authority():
+    readiness = (PROJECT_ROOT / "docs" / "production-readiness.md").read_text(encoding="utf-8")
+    runbook = (PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md").read_text(
+        encoding="utf-8"
+    )
+    combined = f"{readiness}\n{runbook}"
+
+    assert "AWARD → StageAwardDecision → CONFIRM → Award" in combined
+    assert "VoteSession 锁定本身不会创建 Award" in combined
+    assert "不依赖投票的 AWARD 不需要 VoteSession" in combined
+    assert "READY_TO_CONFIRM" in combined
+    assert "重复核定" in combined
+    assert "stale" in combined
+    assert "解锁" in combined
+    assert "legacy provenance" in combined
+    assert "A 锁定获奖" not in combined
+    assert "解锁 → B 获胜 → 重新锁定" not in combined
+
+
 def remove_link_without_following(path: Path) -> None:
     if path.is_symlink():
         path.unlink()

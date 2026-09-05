@@ -2,7 +2,6 @@ from datetime import timedelta
 from decimal import Decimal
 
 from accounts.models import User
-from django.contrib import admin
 from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
@@ -10,6 +9,7 @@ from common.authority import (
     authority_write,
 )
 from core.models import Activity
+from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
@@ -219,6 +219,7 @@ class M1CoreFinalAuthorityTests(TestCase):
                 round_type=ContestRound.RoundType.SEMI_FINAL,
                 sequence=self.round.sequence,
             )
+
     def test_protected_models_use_their_guarded_default_manager_as_base_manager(self):
         from ruleset.models import RulesetVersion
         from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
@@ -259,6 +260,79 @@ class M1CoreFinalAuthorityTests(TestCase):
         for model in protected_models:
             self.assertEqual(model._meta.base_manager_name, "objects")
             self.assertIs(model._base_manager.model, model)
+
+
+class AdminAuthoritySurfaceTests(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/admin/")
+        self.request.user = User.objects.create_superuser(
+            "authority-surface-admin", "authority@example.com", "pass"
+        )
+
+    def assert_observation_only(self, model):
+        model_admin = admin.site._registry.get(model)
+        self.assertIsNotNone(model_admin, f"{model.__name__} must be observable in Admin")
+        self.assertTrue(model_admin.has_view_permission(self.request))
+        self.assertFalse(model_admin.has_add_permission(self.request))
+        self.assertFalse(model_admin.has_change_permission(self.request))
+        self.assertFalse(model_admin.has_delete_permission(self.request))
+
+    def assert_editable_metadata(self, model):
+        model_admin = admin.site._registry[model]
+        self.assertTrue(model_admin.has_add_permission(self.request))
+        self.assertTrue(model_admin.has_change_permission(self.request))
+        self.assertTrue(model_admin.has_delete_permission(self.request))
+
+    def test_raw_and_derived_contest_facts_are_observation_only(self):
+        from .models import CriterionScore, RoundEntry, RoundJudge
+
+        for model in (
+            ContestRound,
+            RoundEntry,
+            RoundJudge,
+            ScoreRecord,
+            CriterionScore,
+            ScoreSummary,
+            Award,
+        ):
+            with self.subTest(model=model.__name__):
+                self.assert_observation_only(model)
+
+    def test_contest_profile_and_rubric_metadata_remain_editable(self):
+        from .models import RubricCriterion, ScoringRubric
+
+        for model in (SingerRegistration, Judge, ScoringRubric, RubricCriterion):
+            with self.subTest(model=model.__name__):
+                self.assert_editable_metadata(model)
+
+    def test_activity_authority_is_service_only_but_presentation_metadata_remains_editable(self):
+        from core.admin import ActivityAdmin
+
+        activity_admin = ActivityAdmin(Activity, admin.site)
+        self.assertFalse(activity_admin.has_add_permission(self.request))
+        self.assertTrue(activity_admin.has_change_permission(self.request))
+        self.assertFalse(activity_admin.has_delete_permission(self.request))
+        self.assertEqual(
+            set(activity_admin.get_readonly_fields(self.request)),
+            {"phase", "is_test_mode", "data_lifecycle", "is_locked", "locked_at", "locked_by"},
+        )
+
+    def test_vote_authority_and_raw_vote_facts_are_observation_only(self):
+        from voting.models import VoteRecord
+
+        for model in (VoteSession, VoteOption, VoteBallot, VoteRecord):
+            with self.subTest(model=model.__name__):
+                self.assert_observation_only(model)
+
+    def test_file_facts_are_observation_only_but_operational_metadata_remains_editable(self):
+        from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
+
+        for model in (SubmissionFile, MaterialCheck):
+            with self.subTest(model=model.__name__):
+                self.assert_observation_only(model)
+        for model in (StaffNote, MaterialRequirement):
+            with self.subTest(model=model.__name__):
+                self.assert_editable_metadata(model)
 
 
 class ContestRoundCreationAuthorityTests(TestCase):

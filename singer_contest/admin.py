@@ -1,5 +1,4 @@
 from django.contrib import admin
-from django.db import transaction
 from django.db.models import Count
 
 from .models import (
@@ -17,6 +16,19 @@ from .models import (
 )
 
 
+class ObservationOnlyAdmin(admin.ModelAdmin):
+    """Expose authoritative facts without creating a second write path."""
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(SingerRegistration)
 class SingerRegistrationAdmin(admin.ModelAdmin):
     list_display = ["name", "song_name", "activity", "pre_status", "live_status", "created_at"]
@@ -30,7 +42,7 @@ class SingerRegistrationAdmin(admin.ModelAdmin):
 
 
 @admin.register(ContestRound)
-class ContestRoundAdmin(admin.ModelAdmin):
+class ContestRoundAdmin(ObservationOnlyAdmin):
     readonly_fields = [
         "activity",
         "round_type",
@@ -80,9 +92,6 @@ class ContestRoundAdmin(admin.ModelAdmin):
     def judge_count(self, contest_round):
         return getattr(contest_round, "judge_count_value", contest_round.round_judges.count())
 
-    def has_delete_permission(self, request, obj=None):
-        return False
-
 
 @admin.register(Judge)
 class JudgeAdmin(admin.ModelAdmin):
@@ -94,11 +103,8 @@ class JudgeAdmin(admin.ModelAdmin):
         return (*super().get_readonly_fields(request, obj), "activity")
 
 
-class RoundSnapshotAdmin(admin.ModelAdmin):
-    def delete_queryset(self, request, queryset):
-        with transaction.atomic():
-            for snapshot in queryset:
-                snapshot.delete()
+class RoundSnapshotAdmin(ObservationOnlyAdmin):
+    pass
 
 
 @admin.register(RoundEntry)
@@ -112,33 +118,15 @@ class RoundJudgeAdmin(RoundSnapshotAdmin):
 
 
 @admin.register(ScoreRecord)
-class ScoreRecordAdmin(admin.ModelAdmin):
+class ScoreRecordAdmin(ObservationOnlyAdmin):
     list_display = ["round", "singer", "judge", "score"]
     readonly_fields = ["round", "singer", "judge", "score", "notes", "is_test_data"]
 
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
 
 @admin.register(CriterionScore)
-class CriterionScoreAdmin(admin.ModelAdmin):
+class CriterionScoreAdmin(ObservationOnlyAdmin):
     list_display = ["score_record", "criterion", "value"]
     readonly_fields = ["score_record", "criterion", "value", "is_test_data"]
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
 
 
 class RubricCriterionInline(admin.TabularInline):
@@ -158,7 +146,7 @@ class RubricCriterionAdmin(admin.ModelAdmin):
 
 
 @admin.register(ScoreSummary)
-class ScoreSummaryAdmin(admin.ModelAdmin):
+class ScoreSummaryAdmin(ObservationOnlyAdmin):
     list_display = ["round", "singer", "average_score", "rank", "is_advanced"]
     readonly_fields = [
         "round",
@@ -169,18 +157,9 @@ class ScoreSummaryAdmin(admin.ModelAdmin):
         "is_test_data",
     ]
 
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
 
 @admin.register(Award)
-class AwardAdmin(admin.ModelAdmin):
+class AwardAdmin(ObservationOnlyAdmin):
     list_display = ["name", "singer", "activity"]
     readonly_fields = [
         "source_vote_session",
