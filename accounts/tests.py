@@ -6,9 +6,9 @@ from io import StringIO
 from unittest import skipUnless
 from unittest.mock import patch
 
-from django.contrib import admin
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
+from django.contrib import admin
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
@@ -19,8 +19,8 @@ from django.test import RequestFactory, TestCase, TransactionTestCase, override_
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import User
 from .admin import CustomUserAdmin
+from .models import User
 from .services import (
     admin_verification_is_valid,
     change_user_role,
@@ -458,7 +458,9 @@ class AccountAuthorityBoundaryTests(TestCase):
 
         changed = set_user_active(target=self.target, is_active=False, actor=self.admin)
         self.assertFalse(changed.is_active)
-        active_audit = AuditLog.objects.get(target=f"User:{self.target.pk}", old_value="active=True")
+        active_audit = AuditLog.objects.get(
+            target=f"User:{self.target.pk}", old_value="active=True"
+        )
         self.assertEqual(active_audit.new_value, "active=False")
 
 
@@ -515,6 +517,62 @@ class AccountAuthorityCreationTests(TestCase):
                 is_superuser=True,
             )
         self.assertTrue(provisioned.is_admin)
+
+    def test_conflict_profile_update_allows_existing_admin_authority_values(self):
+        existing = create_provisioned_user(
+            username="conflict-existing-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        existing.email = "updated@example.com"
+
+        User.objects.bulk_create(
+            [existing],
+            update_conflicts=True,
+            update_fields=["email"],
+            unique_fields=["username"],
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.email, "updated@example.com")
+        self.assertEqual(existing.role, User.Role.ADMIN)
+        self.assertTrue(existing.is_staff)
+
+    def test_conflict_update_rejects_protected_authority_field(self):
+        existing = User.objects.create_user(
+            username="conflict-existing-participant",
+            password="pass12345",
+        )
+
+        with self.assertRaises(ValidationError):
+            User.objects.bulk_create(
+                [existing],
+                update_conflicts=True,
+                update_fields=["role"],
+                unique_fields=["username"],
+            )
+
+    def test_authorized_conflict_role_update_derives_staff_flag(self):
+        existing = User.objects.create_user(
+            username="conflict-role-participant",
+            password="pass12345",
+        )
+        replacement = User(
+            username=existing.username,
+            role=User.Role.STAFF,
+        )
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            User.objects.bulk_create(
+                [replacement],
+                update_conflicts=True,
+                update_fields=["role"],
+                unique_fields=["username"],
+            )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.role, User.Role.STAFF)
+        self.assertTrue(existing.is_staff)
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
