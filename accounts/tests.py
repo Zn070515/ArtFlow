@@ -266,6 +266,33 @@ class AdminLoginRateLimitTests(TestCase):
 
 class DatabaseRateLimitTests(TransactionTestCase):
     @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_database_allow_removes_only_a_bounded_expired_batch(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        now = timezone.now()
+        for index in range(3):
+            RateLimitBucket.objects.create(
+                key=f"{index:064x}",
+                window_started_at=now - timezone.timedelta(minutes=10),
+                count=1,
+                expires_at=now - timezone.timedelta(seconds=1),
+            )
+        active_bucket = RateLimitBucket.objects.create(
+            key="f" * 64,
+            window_started_at=now,
+            count=1,
+            expires_at=now + timezone.timedelta(minutes=5),
+        )
+
+        with patch.object(rate_limit, "_CLEANUP_BATCH_SIZE", 2):
+            rate_limit.allow("new-public-key", limit=1, window_seconds=300)
+
+        self.assertEqual(RateLimitBucket.objects.filter(expires_at__lte=now).count(), 1)
+        self.assertTrue(RateLimitBucket.objects.filter(pk=active_bucket.pk).exists())
+        self.assertEqual(RateLimitBucket.objects.filter(expires_at__gt=now).count(), 2)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
     def test_database_bucket_is_shared_across_connection_boundaries(self):
         from common import rate_limit
         from common.models import RateLimitBucket

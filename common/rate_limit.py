@@ -6,11 +6,13 @@ from typing import cast
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import IntegrityError, connection, transaction
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.db.models import F
 from django.utils import timezone
 
 from common.models import RateLimitBucket
+
+_CLEANUP_BATCH_SIZE = 32
 
 
 class RateLimitExceeded(Exception):
@@ -125,6 +127,17 @@ def _allow_sqlite(
     raise RuntimeError("Rate-limit bucket creation conflicted repeatedly.")
 
 
+def _cleanup_expired_buckets(*, now: datetime, exclude_key: str) -> None:
+    expired_ids = list(
+        RateLimitBucket.objects.filter(expires_at__lte=now)
+        .exclude(key=exclude_key)
+        .order_by("expires_at", "pk")
+        .values_list("pk", flat=True)[:_CLEANUP_BATCH_SIZE]
+    )
+    if expired_ids:
+        RateLimitBucket.objects.filter(pk__in=expired_ids, expires_at__lte=now).delete()
+
+
 def allow(key: str, *, limit: int, window_seconds: int) -> RateLimitDecision:
     """Record an attempt and return only its allowance and retry metadata.
 
@@ -140,13 +153,25 @@ def allow(key: str, *, limit: int, window_seconds: int) -> RateLimitDecision:
     if getattr(settings, "RATE_LIMIT_BACKEND", "locmem") == "database":
         storage_key = _storage_key(key)
         if connection.vendor == "postgresql":
-            return _allow_postgresql(
+            decision = _allow_postgresql(
                 storage_key,
                 limit=limit,
                 window_seconds=window_seconds,
                 now=now,
             )
-        return _allow_sqlite(storage_key, limit=limit, window_seconds=window_seconds, now=now)
+        else:
+            decision = _allow_sqlite(
+                storage_key,
+                limit=limit,
+                window_seconds=window_seconds,
+                now=now,
+            )
+        try:
+            _cleanup_expired_buckets(now=now, exclude_key=storage_key)
+        except DatabaseError:
+            # Cleanup is best-effort and must not change an allowance already decided.
+            pass
+        return decision
     return _allow_locmem(key, limit=limit, window_seconds=window_seconds, now=now)
 
 
