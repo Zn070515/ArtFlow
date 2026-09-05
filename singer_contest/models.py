@@ -4,8 +4,8 @@ from typing import Any, cast
 from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
-    TEST_DATA_CLEANUP,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_CLEANUP,
     authority_authorized,
 )
 from common.lifecycle import runtime_is_test
@@ -138,10 +138,9 @@ class IdentityOwnershipQuerySet(models.QuerySet):
     ownership_fields: frozenset[str] = frozenset()
 
     def _update_ownership_fields(self) -> set[str]:
-        return {
-            field.removesuffix("_id")
-            for field in self.ownership_fields
-        } | set(self.ownership_fields)
+        return {field.removesuffix("_id") for field in self.ownership_fields} | set(
+            self.ownership_fields
+        )
 
     def _ensure_ownership_update_immutable(self, fields) -> None:
         if self._update_ownership_fields().intersection(fields):
@@ -327,23 +326,23 @@ class ContestRoundQuerySet(models.QuerySet):
         objs = list(objs)
         if kwargs.get("update_conflicts"):
             update_fields = set(kwargs.get("update_fields", ()))
-            if (
-                _CONTEST_ROUND_STATE_FIELDS.intersection(update_fields)
-                and not authority_authorized(CONTEST_ROUND_STATE)
+            if _CONTEST_ROUND_STATE_FIELDS.intersection(update_fields) and not authority_authorized(
+                CONTEST_ROUND_STATE
             ):
                 raise ValidationError("轮次状态只能通过轮次服务变更。")
-            if (
-                _CONTEST_ROUND_CONFIGURATION_FIELDS.intersection(update_fields)
-                and not authority_authorized(CONTEST_ROUND_STATE)
-            ):
+            if _CONTEST_ROUND_CONFIGURATION_FIELDS.intersection(
+                update_fields
+            ) and not authority_authorized(CONTEST_ROUND_STATE):
                 for contest_round in objs:
                     lookup = {
                         field: getattr(contest_round, field)
                         for field in kwargs.get("unique_fields", ())
                     }
-                    if self.model._base_manager.filter(**lookup).exclude(
-                        status=ContestRound.Status.DRAFT
-                    ).exists():
+                    if (
+                        self.model._base_manager.filter(**lookup)
+                        .exclude(status=ContestRound.Status.DRAFT)
+                        .exists()
+                    ):
                         raise ValidationError("轮次准备后，执行配置不可直接修改。")
         for contest_round in objs:
             contest_round._ensure_initial_state_authorized()
@@ -817,6 +816,33 @@ class ScoreRecord(models.Model):
 
     def __str__(self):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
+
+
+class ScoreWriteReceipt(models.Model):
+    """Bounded idempotency record for one rapid-score command.
+
+    This is a transaction receipt, not a second score authority: the score facts remain
+    in :class:`ScoreRecord` and their change detail remains in :class:`AuditLog`.
+    """
+
+    class Status(models.TextChoices):
+        SUCCEEDED = "succeeded", "Succeeded"
+
+    command_id = models.CharField(max_length=64, unique=True)
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="score_write_receipts",
+    )
+    operation = models.CharField(max_length=64)
+    payload_hash = models.CharField(max_length=64)
+    result_version = models.PositiveIntegerField()
+    result_payload = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=Status, default=Status.SUCCEEDED)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        base_manager_name = "objects"
 
 
 class ScoreSummaryQuerySet(models.QuerySet):
@@ -1301,9 +1327,7 @@ class RubricCriterionQuerySet(models.QuerySet):
     def update(self, **kwargs):
         self._ensure_mutable()
         if "rubric" in kwargs or "rubric_id" in kwargs:
-            _ensure_rubric_mutable(
-                _relation_pk(kwargs.get("rubric", kwargs.get("rubric_id")))
-            )
+            _ensure_rubric_mutable(_relation_pk(kwargs.get("rubric", kwargs.get("rubric_id"))))
         return super().update(**kwargs)
 
     def delete(self):

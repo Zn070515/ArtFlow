@@ -21,13 +21,15 @@ from common.authority import (
     STAGE_RESULT_CONFIRM,
     authority_write,
 )
+from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import ValidationError
 from django.contrib import admin
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
 
+from .admin import JudgeAdmin, SingerRegistrationAdmin
 from .models import (
     CompositeResult,
     ContestRound,
@@ -35,12 +37,19 @@ from .models import (
     ManualDecision,
     RoundEntry,
     RoundJudge,
+    ScoreRecord,
+    ScoreWriteReceipt,
     SingerRegistration,
     StageDecision,
     StageResult,
 )
-from .admin import JudgeAdmin, SingerRegistrationAdmin
-from .services import _authorized_manual_write, apply_scores, recompute_activity_result
+from .services import (
+    IdempotencyConflictError,
+    _authorized_manual_write,
+    apply_scores,
+    apply_scores_if_version,
+    recompute_activity_result,
+)
 
 
 class AuthorityClosureAcceptanceTests(TestCase):
@@ -232,6 +241,103 @@ class AuthorityClosureAcceptanceTests(TestCase):
         self.assertEqual(stage.ruleset_version, version)
         self.assertEqual(stage.stage_key, "院十佳")
 
+    def test_rapid_score_receipt_replays_first_result_without_second_mutation(self):
+        """Removing the receipt lookup would create a second score audit/version bump."""
+        first = apply_scores_if_version(
+            self.round.pk,
+            0,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+            command_id="receipt-replay-001",
+        )
+        replay = apply_scores_if_version(
+            self.round.pk,
+            0,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+            command_id="receipt-replay-001",
+        )
+
+        self.round.refresh_from_db()
+        self.assertEqual(replay, first)
+        self.assertEqual(self.round.score_version, 1)
+        self.assertEqual(ScoreRecord.objects.filter(round=self.round).count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.ENTER_SCORE,
+                target=f"ContestRound:{self.round.pk}",
+            ).count(),
+            1,
+        )
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+
+    def test_rapid_score_receipt_rejects_same_command_with_different_payload(self):
+        """Removing the payload hash comparison would permit a command collision to overwrite."""
+        apply_scores_if_version(
+            self.round.pk,
+            0,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+            command_id="receipt-conflict-001",
+        )
+
+        with self.assertRaisesMessage(IdempotencyConflictError, "IDEMPOTENCY_CONFLICT"):
+            apply_scores_if_version(
+                self.round.pk,
+                0,
+                {(self.singer.pk, self.judge.pk): "91"},
+                self.user,
+                command_id="receipt-conflict-001",
+            )
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.score_version, 1)
+        self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("90"))
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+
+    def test_rapid_score_receipt_replays_after_activity_is_locked(self):
+        """Checking mutability before a receipt lookup would turn a safe retry into a failure."""
+        first = apply_scores_if_version(
+            self.round.pk,
+            0,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+            command_id="receipt-locked-replay-001",
+        )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(is_locked=True)
+
+        replay = apply_scores_if_version(
+            self.round.pk,
+            0,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+            command_id="receipt-locked-replay-001",
+        )
+
+        self.assertEqual(replay, first)
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+
+    def test_rapid_score_receipt_is_not_persisted_when_score_batch_is_invalid(self):
+        """Receipt creation outside the score transaction would leave a false success trace."""
+        with self.assertRaises(ValidationError):
+            apply_scores_if_version(
+                self.round.pk,
+                0,
+                {
+                    (self.singer.pk, self.judge.pk): "90",
+                    (999999, self.judge.pk): "91",
+                },
+                self.user,
+                command_id="receipt-atomic-001",
+            )
+
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round).exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ENTER_SCORE).exists()
+        )
+        self.assertFalse(ScoreWriteReceipt.objects.exists())
+
 
 class ContestIdentityOwnershipTests(TestCase):
     """A contest identity remains owned by the activity and account that created it."""
@@ -295,7 +401,10 @@ class ContestIdentityOwnershipTests(TestCase):
             (SingerRegistration, "user_id", self.other_user.pk),
             (Judge, "activity_id", self.other_activity.pk),
         ):
-            with self.subTest(model=model.__name__, field=field), self.assertRaises(ValidationError):
+            with (
+                self.subTest(model=model.__name__, field=field),
+                self.assertRaises(ValidationError),
+            ):
                 model.objects.filter(
                     pk=self.singer.pk if model is SingerRegistration else self.judge.pk
                 ).update(**{field: value})
@@ -306,7 +415,10 @@ class ContestIdentityOwnershipTests(TestCase):
             (SingerRegistration, "user_id", self.other_user.pk),
             (Judge, "activity_id", self.other_activity.pk),
         ):
-            with self.subTest(model=model.__name__, field=field), self.assertRaises(ValidationError):
+            with (
+                self.subTest(model=model.__name__, field=field),
+                self.assertRaises(ValidationError),
+            ):
                 model._base_manager.filter(
                     pk=self.singer.pk if model is SingerRegistration else self.judge.pk
                 ).update(**{field: value})

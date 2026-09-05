@@ -15,6 +15,7 @@ from unittest.mock import patch
 from accounts.models import User
 from archive.models import ArchivePackage
 from common.authority import (
+    ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
@@ -57,6 +58,7 @@ from singer_contest.models import (
     RoundJudge,
     ScoreRecord,
     ScoreSummary,
+    ScoreWriteReceipt,
     SingerRegistration,
     StageDecision,
     StageResult,
@@ -419,6 +421,7 @@ class StaffPanelSmokeTests(TestCase):
             reverse("staff:round_scores_api", args=[round_.pk]),
             data=json.dumps(
                 {
+                    "command_id": "staff-score-entry-001",
                     "base_version": 0,
                     "cells": [
                         {
@@ -844,6 +847,7 @@ class StaffPanelSmokeTests(TestCase):
             reverse("staff:round_scores_api", args=[round_.pk]),
             data=json.dumps(
                 {
+                    "command_id": "staff-locked-score-001",
                     "base_version": 0,
                     "cells": [
                         {
@@ -908,7 +912,9 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(
             self.client.post(
                 reverse("staff:round_scores_api", args=[contest_round.pk]),
-                data=json.dumps({"base_version": 0, "cells": []}),
+                data=json.dumps(
+                    {"command_id": "staff-locked-round-001", "base_version": 0, "cells": []}
+                ),
                 content_type="application/json",
             ).status_code,
             400,
@@ -4145,15 +4151,17 @@ class RoundScoresApiTests(TestCase):
     """M1-H rapid-entry API: grid, sparse cell save, stale-edit conflict, auto re-resolve."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
-            username="rapid-api-admin", password="pass", role=User.Role.ADMIN
-        )
-        self.activity = Activity.objects.create(
-            title="Rapid Entry Activity",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="rapid-api-admin", password="pass", role=User.Role.ADMIN
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Rapid Entry Activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         self.round = ContestRound.objects.create(
             activity=self.activity, round_type=ContestRound.RoundType.PRELIMINARY
         )
@@ -4174,8 +4182,13 @@ class RoundScoresApiTests(TestCase):
         self.round.status = ContestRound.Status.PREPARED
         _save_round_state(self.round, ["status"])
         self.client.force_login(self.admin)
+        self._command_number = 0
 
     def _post(self, payload):
+        payload = dict(payload)
+        if "command_id" not in payload:
+            self._command_number += 1
+            payload["command_id"] = f"rapid-api-{self._command_number}"
         return self.client.post(
             reverse("staff:round_scores_api", args=[self.round.pk]),
             data=json.dumps(payload),
@@ -4204,6 +4217,55 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(data["matrix_complete"])
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
 
+    def test_post_replays_identical_command_without_second_score_mutation(self):
+        payload = {
+            "command_id": "rapid-api-replay-001",
+            "base_version": 0,
+            "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+        }
+
+        first = self._post(payload)
+        replay = self._post(payload)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json()["version"], first.json()["version"])
+        self.assertEqual(replay.json()["reason_code"], "SCORES_APPLIED")
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.score_version, 1)
+
+    def test_post_rejects_command_reused_for_different_payload(self):
+        self._post(
+            {
+                "command_id": "rapid-api-conflict-001",
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+
+        response = self._post(
+            {
+                "command_id": "rapid-api-conflict-001",
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "92"}],
+            }
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["reason_code"], "IDEMPOTENCY_CONFLICT")
+        self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
+
+    def test_post_requires_command_id(self):
+        response = self.client.post(
+            reverse("staff:round_scores_api", args=[self.round.pk]),
+            data=json.dumps({"base_version": 0, "cells": []}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
+
     def test_post_stale_base_version_is_conflict(self):
         self._post(
             {
@@ -4219,6 +4281,7 @@ class RoundScoresApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 409)
         self.assertTrue(response.json()["conflict"])
+        self.assertEqual(response.json()["reason_code"], "STALE_SCORE_VERSION")
         # No silent overwrite: the stored value is unchanged.
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
 

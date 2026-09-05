@@ -24,6 +24,7 @@ import json
 from decimal import Decimal
 
 from accounts.models import User
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
@@ -50,18 +51,22 @@ class OperatorEndToEndTests(TestCase):
     """The production operator acceptance chain through the real staff HTTP surface."""
 
     def _make_operator(self):
-        return User.objects.create_user(username="operator", password="pass", role=User.Role.ADMIN)
+        with authority_write(ACCOUNT_AUTHORITY):
+            return User.objects.create_user(
+                username="operator", password="pass", role=User.Role.ADMIN
+            )
 
     def setUp(self):
         self.operator = self._make_operator()
         self.client.force_login(self.operator)
 
-        self.activity = Activity.objects.create(
-            title="院十佳",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.RESULTS_PENDING,
-            is_test_mode=True,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="院十佳",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.RESULTS_PENDING,
+                is_test_mode=True,
+            )
         self.rubric = ScoringRubric.objects.create(activity=self.activity, name="100 分制")
         RubricCriterion.objects.create(rubric=self.rubric, name="演唱", max_score=Decimal("100"))
         self.judges = [
@@ -164,7 +169,13 @@ class OperatorEndToEndTests(TestCase):
                 )
         resp = self.client.post(
             reverse("staff:round_scores_api", args=[round_.pk]),
-            data=json.dumps({"base_version": payload["version"], "cells": cells}),
+            data=json.dumps(
+                {
+                    "command_id": f"operator-round-{round_.pk}-{payload['version']}",
+                    "base_version": payload["version"],
+                    "cells": cells,
+                }
+            ),
             content_type="application/json",
         )
         return resp
@@ -358,7 +369,13 @@ class OperatorEndToEndTests(TestCase):
         cells.pop()
         response = self.client.post(
             reverse("staff:round_scores_api", args=[round_.pk]),
-            data=json.dumps({"base_version": payload["version"], "cells": cells}),
+            data=json.dumps(
+                {
+                    "command_id": f"operator-partial-{round_.pk}-{payload['version']}",
+                    "base_version": payload["version"],
+                    "cells": cells,
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)

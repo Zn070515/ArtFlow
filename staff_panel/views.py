@@ -92,6 +92,7 @@ from singer_contest.models import (
     StageResult,
 )
 from singer_contest.services import (
+    IdempotencyConflictError,
     StaleScoreVersionError,
     _active_judges,
     _current_frozen_version,
@@ -133,6 +134,7 @@ from staff_panel.forms import (
     ManualDecisionForm,
     ProgramReviewForm,
     PublicPostForm,
+    RapidScoreCommandForm,
     RoundGroupsForm,
     RoundRunningOrderForm,
     ScoringRubricProvisionForm,
@@ -1106,10 +1108,21 @@ def round_scores_api(request, pk):
         payload = json.loads(request.body or "{}")
     except json.JSONDecodeError:
         return JsonResponse({"detail": "请求体不是有效 JSON。"}, status=400)
-    base_version = payload.get("base_version")
+    command_form = RapidScoreCommandForm(
+        {"command_id": payload.get("command_id"), "base_version": payload.get("base_version")}
+    )
+    if not command_form.is_valid():
+        return JsonResponse(
+            {"detail": command_form.errors.get_json_data(), "reason_code": "INVALID_REQUEST"},
+            status=400,
+        )
+    base_version = command_form.cleaned_data["base_version"]
+    command_id = command_form.cleaned_data["command_id"]
     cells = payload.get("cells", [])
-    if base_version is None:
-        return JsonResponse({"detail": "缺少 base_version。"}, status=400)
+    if not isinstance(cells, list):
+        return JsonResponse(
+            {"detail": "cells 必须是列表。", "reason_code": "INVALID_REQUEST"}, status=400
+        )
 
     score_values = {}
     for cell in cells:
@@ -1123,10 +1136,32 @@ def round_scores_api(request, pk):
     # ``apply_scores_if_version`` owns the Activity→Round transaction and its locks;
     # the view holds no row lock itself (M0 canonical order, §13.2 stale-guard).
     try:
-        result = apply_scores_if_version(contest_round.pk, base_version, score_values, request.user)
+        result = apply_scores_if_version(
+            contest_round.pk,
+            base_version,
+            score_values,
+            request.user,
+            command_id=command_id,
+        )
+    except IdempotencyConflictError:
+        return JsonResponse(
+            {
+                "detail": "同一 command_id 已用于不同的评分请求。",
+                "reason_code": IdempotencyConflictError.reason_code,
+                "conflict": True,
+            },
+            status=409,
+        )
     except StaleScoreVersionError:
         contest_round.refresh_from_db()
-        return JsonResponse({**_round_grid_payload(contest_round), "conflict": True}, status=409)
+        return JsonResponse(
+            {
+                **_round_grid_payload(contest_round),
+                "conflict": True,
+                "reason_code": "STALE_SCORE_VERSION",
+            },
+            status=409,
+        )
     except ValidationError as error:
         return JsonResponse({"detail": error.messages}, status=400)
     except PermissionDenied:

@@ -118,6 +118,19 @@ class ContestRoundForm(forms.Form):
         return self.cleaned_data.get("rubric") or None
 
 
+class RapidScoreCommandForm(forms.Form):
+    """Validate the bounded idempotency envelope for a JSON rapid-score save."""
+
+    command_id = forms.CharField(max_length=64)
+    base_version = forms.IntegerField()
+
+    def clean_command_id(self):
+        command_id = self.cleaned_data["command_id"].strip()
+        if not command_id:
+            raise forms.ValidationError("缺少 command_id。")
+        return command_id
+
+
 class RoundRunningOrderForm(forms.Form):
     singer_ids = forms.CharField(
         label="出场顺序",
