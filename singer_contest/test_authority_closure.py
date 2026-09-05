@@ -338,6 +338,42 @@ class AuthorityClosureAcceptanceTests(TestCase):
         )
         self.assertFalse(ScoreWriteReceipt.objects.exists())
 
+    def test_rapid_score_receipt_rejects_replay_by_different_operator(self):
+        other_operator = User.objects.create_user(username="closure-other-operator")
+        apply_scores_if_version(
+            self.round.pk,
+            0,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.user,
+            command_id="receipt-operator-001",
+        )
+
+        with self.assertRaisesMessage(IdempotencyConflictError, "IDEMPOTENCY_CONFLICT"):
+            apply_scores_if_version(
+                self.round.pk,
+                0,
+                {(self.singer.pk, self.judge.pk): "90"},
+                other_operator,
+                command_id="receipt-operator-001",
+            )
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.score_version, 1)
+        self.assertEqual(ScoreWriteReceipt.objects.get().operator_id, self.user.pk)
+
+    def test_rapid_score_receipt_result_payload_is_bounded(self):
+        receipt = ScoreWriteReceipt(
+            command_id="receipt-bounded-001",
+            operator=self.user,
+            operation="rapid_score_apply",
+            payload_hash="0" * 64,
+            result_version=1,
+            result_payload={"unexpected": "x" * 2048},
+        )
+
+        with self.assertRaises(ValidationError):
+            receipt.full_clean()
+
 
 class ContestIdentityOwnershipTests(TestCase):
     """A contest identity remains owned by the activity and account that created it."""

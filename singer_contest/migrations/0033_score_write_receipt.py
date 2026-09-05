@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
                 ("payload_hash", models.CharField(max_length=64)),
                 ("result_version", models.PositiveIntegerField()),
                 ("result_payload", models.JSONField(default=dict)),
-                ("status", models.CharField(choices=[("succeeded", "Succeeded")], default="succeeded", max_length=16)),
+                ("status", models.CharField(choices=[("pending", "Pending"), ("succeeded", "Succeeded")], default="pending", max_length=16)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("operator", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="score_write_receipts", to=settings.AUTH_USER_MODEL)),
             ],

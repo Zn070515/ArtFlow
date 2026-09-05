@@ -22,6 +22,7 @@ from common.test_data import lock_activity_for_runtime_data
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Max, Q, QuerySet
@@ -966,6 +967,11 @@ def apply_scores_if_version(
     command_id = _validated_score_command_id(command_id)
     if not getattr(operator, "pk", None):
         raise PermissionDenied("评分操作缺少有效执行人。")
+    operator_model = get_user_model()
+    try:
+        locked_operator = operator_model.objects.select_for_update().get(pk=operator.pk)
+    except operator_model.DoesNotExist:
+        raise PermissionDenied("评分操作缺少有效执行人。") from None
     try:
         parsed_base_version = int(base_version)
     except (TypeError, ValueError):
@@ -978,10 +984,27 @@ def apply_scores_if_version(
     if locked_round.activity_id != locked_activity.pk:
         raise ValidationError("评分轮次活动上下文不一致。")
     payload_hash = _score_command_payload_hash(locked_round, parsed_base_version, score_values)
-    receipt = ScoreWriteReceipt.objects.filter(command_id=command_id).first()
-    if receipt is not None:
-        if receipt.payload_hash != payload_hash:
-            raise IdempotencyConflictError()
+    try:
+        with transaction.atomic():
+            receipt = ScoreWriteReceipt.objects.create(
+                command_id=command_id,
+                operator=locked_operator,
+                operation=RAPID_SCORE_OPERATION,
+                payload_hash=payload_hash,
+                result_version=0,
+                result_payload={},
+                status=ScoreWriteReceipt.Status.PENDING,
+            )
+    except IntegrityError:
+        receipt = ScoreWriteReceipt.objects.select_for_update().get(command_id=command_id)
+        if (
+            receipt.operator_id != locked_operator.pk
+            or receipt.payload_hash != payload_hash
+            or receipt.operation != RAPID_SCORE_OPERATION
+        ):
+            raise IdempotencyConflictError() from None
+        if receipt.status != ScoreWriteReceipt.Status.SUCCEEDED:
+            raise ValidationError("评分写入回执仍在处理中。")
         return receipt.result_payload
     ensure_activity_unlocked(locked_activity)
     ensure_activity_action_allowed(locked_activity, ActivityAction.SCORE)
@@ -989,7 +1012,7 @@ def apply_scores_if_version(
         raise ValidationError("请先准备比赛轮次后再录入评分。")
     if parsed_base_version != locked_round.score_version:
         raise StaleScoreVersionError(locked_round.score_version)
-    apply_scores(locked_round, score_values, operator, note=note)
+    apply_scores(locked_round, score_values, locked_operator, note=note)
     locked_round.refresh_from_db()
     result = {
         "status": ScoreWriteReceipt.Status.SUCCEEDED,
@@ -997,27 +1020,11 @@ def apply_scores_if_version(
         "version": locked_round.score_version,
         "matrix_complete": not missing_score_cells(locked_round),
     }
-    try:
-        with transaction.atomic():
-            ScoreWriteReceipt.objects.create(
-                command_id=command_id,
-                operator=operator,
-                operation=RAPID_SCORE_OPERATION,
-                payload_hash=payload_hash,
-                result_version=locked_round.score_version,
-                result_payload=result,
-                status=ScoreWriteReceipt.Status.SUCCEEDED,
-            )
-    except IntegrityError:
-        # A distinct round can race on the same operator/command unique key.  Re-read
-        # its committed receipt and return it only when it is the identical command;
-        # otherwise expose the stable collision code.  Do not log the payload.
-        receipt = ScoreWriteReceipt.objects.filter(command_id=command_id).first()
-        if receipt is not None:
-            if receipt.payload_hash == payload_hash:
-                return receipt.result_payload
-            raise IdempotencyConflictError() from None
-        raise
+    receipt.result_version = locked_round.score_version
+    receipt.result_payload = result
+    receipt.status = ScoreWriteReceipt.Status.SUCCEEDED
+    receipt.full_clean(validate_unique=False)
+    receipt.save(update_fields=["result_version", "result_payload", "status"])
     return result
 
 

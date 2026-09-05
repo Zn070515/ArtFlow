@@ -1,3 +1,4 @@
+import json
 import threading
 from typing import Any, cast
 
@@ -825,7 +826,13 @@ class ScoreWriteReceipt(models.Model):
     in :class:`ScoreRecord` and their change detail remains in :class:`AuditLog`.
     """
 
+    RESULT_PAYLOAD_MAX_BYTES = 256
+    RESULT_PAYLOAD_KEYS = frozenset(
+        {"status", "reason_code", "version", "matrix_complete"}
+    )
+
     class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
         SUCCEEDED = "succeeded", "Succeeded"
 
     command_id = models.CharField(max_length=64, unique=True)
@@ -838,8 +845,28 @@ class ScoreWriteReceipt(models.Model):
     payload_hash = models.CharField(max_length=64)
     result_version = models.PositiveIntegerField()
     result_payload = models.JSONField(default=dict)
-    status = models.CharField(max_length=16, choices=Status, default=Status.SUCCEEDED)
+    status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        super().clean()
+        if not isinstance(self.result_payload, dict):
+            raise ValidationError({"result_payload": "成绩写入回执结果必须是对象。"})
+        if set(self.result_payload) != self.RESULT_PAYLOAD_KEYS:
+            raise ValidationError({"result_payload": "成绩写入回执结果字段无效。"})
+        try:
+            size = len(
+                json.dumps(
+                    self.result_payload,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+        except (TypeError, ValueError):
+            raise ValidationError({"result_payload": "成绩写入回执结果不可序列化。"}) from None
+        if size > self.RESULT_PAYLOAD_MAX_BYTES:
+            raise ValidationError({"result_payload": "成绩写入回执结果过大。"})
 
     class Meta:
         base_manager_name = "objects"

@@ -1808,6 +1808,90 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
             1,
         )
 
+    def test_cross_activity_command_conflict_rolls_back_losing_score_mutation(self):
+        with authority_write(ACTIVITY_STATE):
+            other_activity = Activity.objects.create(
+                title="Receipt race other activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
+        other_round = ContestRound.objects.create(
+            activity=other_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        other_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=User.objects.create_user(username="receipt-race-other-singer", password="pass"),
+            name="Other Receipt Singer",
+            student_id="receipt-race-other-01",
+            college="College",
+            class_name="Class",
+            phone="13800000001",
+            song_name="Other Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        other_judge = Judge.objects.create(activity=other_activity, name="Other Receipt Judge")
+        RoundEntry.objects.create(round=other_round, singer=other_singer)
+        RoundJudge.objects.create(round=other_round, judge=other_judge)
+        other_round.status = ContestRound.Status.PREPARED
+        _save_round_state(other_round, ["status"])
+
+        start = threading.Barrier(2)
+        results = []
+        errors = []
+        result_lock = threading.Lock()
+
+        def apply_command(round_id, singer_id, judge_id):
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                result = apply_scores_if_version(
+                    round_id,
+                    0,
+                    {(singer_id, judge_id): "90"},
+                    self.operator,
+                    command_id="receipt-cross-activity-001",
+                )
+                with result_lock:
+                    results.append(result)
+            except BaseException as error:
+                with result_lock:
+                    errors.append(error)
+            finally:
+                close_old_connections()
+
+        workers = [
+            threading.Thread(
+                target=apply_command,
+                args=(self.round.pk, self.singer.pk, self.judge.pk),
+            ),
+            threading.Thread(
+                target=apply_command,
+                args=(other_round.pk, other_singer.pk, other_judge.pk),
+            ),
+        ]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=20)
+
+        self.assertFalse(any(worker.is_alive() for worker in workers))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], IdempotencyConflictError)
+        self.assertEqual(ScoreRecord.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ENTER_SCORE).count(), 1
+        )
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+        self.round.refresh_from_db()
+        other_round.refresh_from_db()
+        self.assertEqual(
+            sorted([self.round.score_version, other_round.score_version]), [0, 1]
+        )
+
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
 class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
