@@ -167,7 +167,8 @@ def allow(key: str, *, limit: int, window_seconds: int) -> RateLimitDecision:
                 now=now,
             )
         try:
-            _cleanup_expired_buckets(now=now, exclude_key=storage_key)
+            with transaction.atomic():
+                _cleanup_expired_buckets(now=now, exclude_key=storage_key)
         except DatabaseError:
             # Cleanup is best-effort and must not change an allowance already decided.
             pass

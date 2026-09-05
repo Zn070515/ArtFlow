@@ -13,7 +13,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import close_old_connections, connection
+from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.models import Q
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
@@ -291,6 +291,38 @@ class DatabaseRateLimitTests(TransactionTestCase):
         self.assertEqual(RateLimitBucket.objects.filter(expires_at__lte=now).count(), 1)
         self.assertTrue(RateLimitBucket.objects.filter(pk=active_bucket.pk).exists())
         self.assertEqual(RateLimitBucket.objects.filter(expires_at__gt=now).count(), 2)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_cleanup_database_error_does_not_break_outer_transaction(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        now = timezone.now()
+        expired_bucket = RateLimitBucket.objects.create(
+            key="e" * 64,
+            window_started_at=now - timezone.timedelta(minutes=10),
+            count=1,
+            expires_at=now - timezone.timedelta(seconds=1),
+        )
+        quoted_table = connection.ops.quote_name(RateLimitBucket._meta.db_table)
+
+        def fail_cleanup_delete(execute, sql, params, many, context):
+            if sql.lstrip().upper().startswith("DELETE") and quoted_table in sql:
+                raise DatabaseError("injected cleanup failure")
+            return execute(sql, params, many, context)
+
+        with transaction.atomic():
+            with connection.execute_wrapper(fail_cleanup_delete):
+                decision = rate_limit.allow(
+                    "successful-public-key", limit=1, window_seconds=300
+                )
+
+            allowed_bucket = RateLimitBucket.objects.exclude(pk=expired_bucket.pk).get()
+            self.assertEqual(allowed_bucket.count, 1)
+
+        self.assertTrue(decision.allowed)
+        self.assertTrue(RateLimitBucket.objects.filter(pk=expired_bucket.pk).exists())
+        self.assertTrue(RateLimitBucket.objects.filter(pk=allowed_bucket.pk).exists())
 
     @override_settings(RATE_LIMIT_BACKEND="database")
     def test_database_bucket_is_shared_across_connection_boundaries(self):
