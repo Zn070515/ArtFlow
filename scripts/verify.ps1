@@ -123,6 +123,39 @@ function Assert-ContainerContracts {
     Assert-ContentMatch $waitScript 'if \(\( \$# != 0 \)\); then' 'wait-script argument validation'
 }
 
+function Assert-ProductionComposeContracts {
+    $productionComposePath = Join-Path $repositoryRoot 'deploy/compose.production.yml'
+    if (-not (Test-Path -LiteralPath $productionComposePath -PathType Leaf)) {
+        throw "Production container contract violation: missing $productionComposePath."
+    }
+
+    $productionCompose = Get-Content -LiteralPath $productionComposePath -Raw
+    Assert-ContentMatch $productionCompose '(?m)^  db:\s*$' 'a production db service'
+    Assert-ContentMatch $productionCompose '(?m)^  web:\s*$' 'a production web service'
+    Assert-ContentMatch $productionCompose '(?m)^  proxy:\s*$' 'a production reverse-proxy service'
+    Assert-ContentMatch $productionCompose 'APP_ENV:\s*production' 'APP_ENV=production'
+    Assert-ContentMatch $productionCompose 'SECRET_KEY:\s*\$\{' 'an environment-injected production SECRET_KEY'
+    Assert-ContentMatch $productionCompose 'POSTGRES_PASSWORD:\s*\$\{' 'an environment-injected production database password'
+    Assert-ContentMatch $productionCompose '(?m)^  postgres_data:\s*$' 'a persistent production PostgreSQL volume'
+    Assert-ContentMatch $productionCompose '(?m)^  media_data:\s*$' 'a persistent production media volume'
+    Assert-ContentMatch $productionCompose '(?m)^  artflow_internal:\s*$' 'a private production network'
+    Assert-ContentMatch $productionCompose 'internal:\s*true' 'an internal-only production network'
+
+    if ($productionCompose -match 'artflow-local-container-password') {
+        throw 'Production container contract violation: development database password is present.'
+    }
+
+    $webService = [regex]::Match($productionCompose, '(?ms)^  web:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|^volumes:|\z)').Value
+    if ($webService -match '(?m)^    ports:\s*$') {
+        throw 'Production container contract violation: web must not publish a host port.'
+    }
+
+    $dbService = [regex]::Match($productionCompose, '(?ms)^  db:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|^volumes:|\z)').Value
+    if ($dbService -match '(?m)^    ports:\s*$') {
+        throw 'Production container contract violation: db must not publish a host port.'
+    }
+}
+
 function Assert-WorkflowContracts {
     $workflowDirectory = Join-Path $repositoryRoot '.github/workflows'
     $workflowVerifierPath = Join-Path $repositoryRoot 'scripts/verify_workflows.py'
@@ -152,6 +185,7 @@ $temporaryProductionEnvironment = [ordered]@{
     POSTGRES_PASSWORD = 'artflow-verification-database-password'
     POSTGRES_HOST = 'db.internal'
     POSTGRES_PORT = '5432'
+    CADDY_SITE_ADDRESS = 'artflow.internal'
 }
 $originalProductionEnvironment = @{}
 foreach ($name in $temporaryProductionEnvironment.Keys) {
@@ -162,6 +196,7 @@ Push-Location $repositoryRoot
 $failureMessage = $null
 try {
     Assert-ContainerContracts
+    Assert-ProductionComposeContracts
     Assert-WorkflowContracts
     Invoke-CheckedCommand docker compose config --quiet
     Invoke-Uv lock --check
@@ -177,6 +212,7 @@ try {
     foreach ($name in $temporaryProductionEnvironment.Keys) {
         [Environment]::SetEnvironmentVariable($name, $temporaryProductionEnvironment[$name], 'Process')
     }
+    Invoke-CheckedCommand docker compose -f deploy/compose.production.yml config --quiet
     Invoke-Uv run python manage.py check --deploy --fail-level WARNING
 }
 catch {

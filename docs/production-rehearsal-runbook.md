@@ -8,16 +8,18 @@
 
 ```powershell
 # 1) 复制生产环境变量清单，逐项替换为真实值（生产配置校验会拒绝占位值）
-Copy-Item .env.production.example .env
+Copy-Item .env.production.example .env.production
 #    APP_ENV=production, DEBUG=False, 非占位 SECRET_KEY/ADMIN_LOGIN_KEY,
-#    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, DATABASE_ENGINE=postgresql + POSTGRES_*
+#    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, CADDY_SITE_ADDRESS,
+#    DATABASE_ENGINE=postgresql + POSTGRES_*
 
-# 2) 启动生产类栈（Postgres + web），等待健康检查
-docker compose up --build --wait
-Invoke-WebRequest http://127.0.0.1:8000/healthz/   # 应返回 200（匿名、仅通用状态）
+# 2) 只验证并启动显式生产栈（Postgres + web + Caddy proxy），等待健康检查
+docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
+docker compose --env-file .env.production -f deploy/compose.production.yml up --build --wait
+Invoke-WebRequest https://<公开域名>/healthz/   # 应返回 200（匿名、仅通用状态）
 
 # 3) 运行时诊断（只读）
-docker compose exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok
+docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok
 ```
 
 ## 1. 发布门禁（自动化）
@@ -25,7 +27,7 @@ docker compose exec web python manage.py doctor    # Configuration/Database/Migr
 ```powershell
 pwsh -NoProfile -File scripts/verify.ps1
 ```
-涵盖：容器契约（db/web 服务、healthcheck、named volumes、Postgres 只绑 127.0.0.1、非 root 运行、.env/.git 排除）、CI workflow 契约、`docker compose config`、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。
+涵盖：根开发 Compose 容器契约、显式 `deploy/compose.production.yml` 的生产契约与 `docker compose -f deploy/compose.production.yml config --quiet`（只验证配置，不启动或销毁生产服务）、CI workflow 契约、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。
 
 ## 2. PostgreSQL 验收（自动化）
 

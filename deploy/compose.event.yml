@@ -1,0 +1,68 @@
+# Local event operation only. Do not publish this stack directly to the Internet.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the event environment}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the event environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the event environment}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - artflow_internal
+
+  web:
+    build:
+      context: ..
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the event environment}
+      ADMIN_LOGIN_KEY: ${ADMIN_LOGIN_KEY:?Set ADMIN_LOGIN_KEY in the event environment}
+      ALLOWED_HOSTS: ${EVENT_ALLOWED_HOSTS:?Set EVENT_ALLOWED_HOSTS for localhost and any tunnel hostname}
+      CSRF_TRUSTED_ORIGINS: ${EVENT_CSRF_TRUSTED_ORIGINS:-}
+      DATABASE_ENGINE: postgresql
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the event environment}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the event environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the event environment}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - artflow_internal
+
+volumes:
+  postgres_data:
+  static_data:
+  media_data:
+
+networks:
+  artflow_internal:
+    internal: true

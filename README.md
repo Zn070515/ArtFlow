@@ -29,7 +29,7 @@ uv run python manage.py runserver
 
 ## Docker PostgreSQL 启动（本地/联调）
 
-`docker-compose.yml` 是**本地/联调 Compose**，不是生产部署文件：它固定 `APP_ENV: development`、`ALLOWED_HOSTS: localhost,127.0.0.1`、一个硬编码的本地数据库口令，并把端口绑定到 `127.0.0.1:8000`。不要把它当作生产 manifest；在它之上套 `.env.production` 也不能让它变成生产配置。生产部署见 [生产部署说明](docs/deployment-production.md)。
+`docker-compose.yml` 是**本地/联调 Compose**，不是生产部署文件：它固定 `APP_ENV: development`、`ALLOWED_HOSTS: localhost,127.0.0.1`、一个硬编码的本地数据库口令，并把端口绑定到 `127.0.0.1:8000`。不要把它当作生产 manifest；在它之上套 `.env.production` 也不能让它变成生产配置。生产使用 [`deploy/compose.production.yml`](deploy/compose.production.yml)，事件本机使用 [`deploy/compose.event.yml`](deploy/compose.event.yml)；部署细节见 [生产部署说明](docs/deployment-production.md)。
 
 本地启动：
 
@@ -53,6 +53,14 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 从 `.env.example` 创建本地 `.env` 并替换其中的占位值。模板包含 `APP_ENV`、`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`DEV_ADMIN_USERNAME`、`DEV_ADMIN_PASSWORD`、`DEBUG` 和 `DATABASE_ENGINE`；`seed_dev_admin` 使用 `DEV_ADMIN_USERNAME` 和 `DEV_ADMIN_PASSWORD`。只有选择 PostgreSQL 时才需要 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_HOST` 和 `POSTGRES_PORT`。
 
 生产环境使用 `.env.production.example` 作为字段清单：`APP_ENV=production`、`DEBUG=False`、真实的主机名和 CSRF 来源、PostgreSQL 连接配置都是必需的；`TRUST_X_FORWARDED_FOR` 只在可信反向代理覆盖客户端 `X-Forwarded-For` 时才设为 `true`。示例值仅是占位符；不得提交 `.env`、密钥、密码、数据库、媒体文件或生成的导出文件。生产拓扑见 [生产部署说明](docs/deployment-production.md)。
+
+## 事件本机运行
+
+`deploy/compose.event.yml` 是单机现场运行契约：`web` 只绑定 `127.0.0.1:8000`，PostgreSQL 不发布端口，数据库和媒体使用持久化卷。工作人员在本机用 `http://127.0.0.1:8000/` 操作；如需对外入口，可由现场人员另行配置受控公网 tunnel 或 IPv6 入口，并把入口主机名加入 `EVENT_ALLOWED_HOSTS`、HTTPS 来源加入 `EVENT_CSRF_TRUSTED_ORIGINS`。公网/云入口只是访问路径，不能成为正式 authority；比赛期间始终只有这台主机上的一个主数据库/服务器可写。PowerPoint 播放与控制仍独立于 ArtFlow。
+
+```powershell
+docker compose --env-file .env.event -f deploy/compose.event.yml up --build --wait
+```
 
 ## 常用维护命令
 
