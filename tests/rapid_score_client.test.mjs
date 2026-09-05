@@ -137,11 +137,14 @@ function boot({ storage = new FakeStorage(), online = true, fetchImpl, initialGr
     window,
     navigator: { onLine: online },
     fetch: fetchImpl ?? (async () => response(200, { version: 4, matrix_complete: false })),
-    setTimeout(callback) {
-      timers.push(callback);
-      return timers.length;
+    setTimeout(callback, delay = 0) {
+      const timer = { callback, delay, cancelled: false };
+      timers.push(timer);
+      return timer;
     },
-    clearTimeout() {},
+    clearTimeout(timer) {
+      timer.cancelled = true;
+    },
     Event: class Event { constructor(type, options) { this.type = type; Object.assign(this, options); } },
     JSON,
     Math,
@@ -162,7 +165,17 @@ function boot({ storage = new FakeStorage(), online = true, fetchImpl, initialGr
     savedCount,
     conflicts,
     runTimers() {
-      while (timers.length) timers.shift()();
+      while (timers.length) {
+        const timer = timers.shift();
+        if (!timer.cancelled) timer.callback();
+      }
+    },
+    runNextTimer() {
+      const timer = timers.shift();
+      if (timer && !timer.cancelled) timer.callback();
+    },
+    pendingTimerDelays() {
+      return timers.filter((timer) => !timer.cancelled).map((timer) => timer.delay);
     },
   };
 }
@@ -181,8 +194,10 @@ function assertPendingRecord(record, {
   score = "90.5",
   commandId = "rapid-test-command-1",
   baseVersion = 3,
+  conflicts,
 } = {}) {
-  assert.deepEqual({ ...record, updated_at: undefined }, {
+  const actual = { ...record, updated_at: undefined };
+  const expected = {
     activity: 44,
     round: 55,
     endpoint: "/staff/rounds/55/scores/api/",
@@ -190,7 +205,10 @@ function assertPendingRecord(record, {
     cells: [{ singer_id: 1, judge_id: 9, score }],
     command_id: commandId,
     updated_at: undefined,
-  });
+  };
+  if (conflicts === undefined) delete actual.conflicts;
+  else expected.conflicts = conflicts;
+  assert.deepEqual(actual, expected);
   assert.match(record.updated_at, /^\d{4}-\d{2}-\d{2}T/);
 }
 
@@ -330,5 +348,72 @@ test("a stale divergent cell retains both values as an explicit conflict", async
   assert.equal(runtime.pendingCount.textContent, "1", "409 must not clear the draft");
   assert.match(runtime.conflicts.textContent, /90/);
   assert.match(runtime.conflicts.textContent, /95/);
-  assertPendingRecord(runtime.storage.records()[0], { score: "90", baseVersion: 4 });
+  assertPendingRecord(runtime.storage.records()[0], {
+    score: "90",
+    baseVersion: 4,
+    conflicts: [{ singer_id: 1, judge_id: 9, base: "70", server: "95", local: "90" }],
+  });
+});
+
+test("a reloaded divergent draft retains both values and blocks retry until edited", async () => {
+  const storage = new FakeStorage();
+  const runtime = boot({
+    storage,
+    initialGrid: grid("70"),
+    fetchImpl: async (_url, options) => {
+      if (options.method === "POST") {
+        return response(409, { conflict: true, reason_code: "STALE_SCORE_VERSION" });
+      }
+      return response(200, { version: 4, matrix_complete: false, grid: grid("95") });
+    },
+  });
+
+  edit(runtime, "90");
+  await settle();
+  assert.deepEqual(storage.records()[0].conflicts, [{
+    singer_id: 1,
+    judge_id: 9,
+    base: "70",
+    server: "95",
+    local: "90",
+  }]);
+
+  let retryCalls = 0;
+  const reloaded = boot({
+    storage,
+    initialGrid: grid("95"),
+    fetchImpl: async () => {
+      retryCalls += 1;
+      return response(200, { version: 5, matrix_complete: false });
+    },
+  });
+  reloaded.retryButton.dispatch("click", { preventDefault() {} });
+  await settle();
+
+  assert.equal(reloaded.input.value, "90");
+  assert.match(reloaded.conflicts.textContent, /90/);
+  assert.match(reloaded.conflicts.textContent, /95/);
+  assert.equal(reloaded.pendingCount.textContent, "1");
+  assert.equal(retryCalls, 0, "reload must not turn a conflict into an overwrite");
+});
+
+test("network retries use an exponential delay capped at eight seconds", async () => {
+  let calls = 0;
+  const runtime = boot({
+    fetchImpl: async () => {
+      calls += 1;
+      throw new Error("offline");
+    },
+  });
+
+  edit(runtime);
+  await settle();
+  assert.equal(calls, 1);
+  assert.deepEqual(runtime.pendingTimerDelays(), [1000]);
+
+  for (const expectedDelay of [2000, 4000, 8000, 8000]) {
+    runtime.runNextTimer();
+    await settle();
+    assert.deepEqual(runtime.pendingTimerDelays(), [expectedDelay]);
+  }
 });

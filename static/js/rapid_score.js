@@ -202,16 +202,61 @@
     });
   }
 
+  function validScoreOrEmpty(value) {
+    return typeof value === "string" && (value === "" || scoreState(value) === "valid");
+  }
+
+  function conflictRecords(cells) {
+    var pendingByKey = {};
+    cells.forEach(function (cell) {
+      pendingByKey[key(cell.singer_id, cell.judge_id)] = cell.score;
+    });
+    return Object.keys(state.conflicts).sort().map(function (k) {
+      var conflict = state.conflicts[k];
+      return {
+        singer_id: parseInt(conflict.singer_id, 10),
+        judge_id: parseInt(conflict.judge_id, 10),
+        base: conflict.base,
+        server: conflict.server,
+        local: pendingByKey[k],
+      };
+    });
+  }
+
+  function validPendingConflicts(conflicts, cells) {
+    if (conflicts === undefined) return true;
+    if (!Array.isArray(conflicts)) return false;
+    var pendingByKey = {};
+    cells.forEach(function (cell) {
+      pendingByKey[key(cell.singer_id, cell.judge_id)] = cell.score;
+    });
+    var seen = {};
+    return conflicts.every(function (conflict) {
+      if (!conflict || !Number.isInteger(conflict.singer_id) || conflict.singer_id <= 0 ||
+        !Number.isInteger(conflict.judge_id) || conflict.judge_id <= 0 ||
+        !validScoreOrEmpty(conflict.base) || !validScoreOrEmpty(conflict.server) ||
+        typeof conflict.local !== "string" || scoreState(conflict.local) !== "valid") {
+        return false;
+      }
+      var conflictKey = key(conflict.singer_id, conflict.judge_id);
+      if (seen[conflictKey] || pendingByKey[conflictKey] !== conflict.local) return false;
+      seen[conflictKey] = true;
+      return true;
+    });
+  }
+
   function pendingRecord(commandId) {
     var cells = cellsFromDirty();
     if (!validPendingCells(cells)) return null;
+    var conflicts = conflictRecords(cells);
+    if (!validPendingConflicts(conflicts, cells)) return null;
     var baseVersion = state.draftBaseVersion;
     if (!Number.isInteger(baseVersion) || baseVersion < 0) baseVersion = state.version;
     commandId = commandId || state.draftCommandId || newCommandId();
     if (typeof commandId !== "string" || !commandId || commandId.length > 64) return null;
     state.draftCommandId = commandId;
     state.draftBaseVersion = baseVersion;
-    return {
+    var record = {
       activity: activityId,
       round: roundId,
       endpoint: apiUrl,
@@ -220,6 +265,8 @@
       command_id: commandId,
       updated_at: new Date().toISOString(),
     };
+    if (conflicts.length) record.conflicts = conflicts;
+    return record;
   }
 
   function persistDraft(commandId) {
@@ -253,7 +300,7 @@
       record.endpoint === apiUrl && Number.isInteger(record.base_version) && record.base_version >= 0 &&
       typeof record.command_id === "string" && record.command_id.length > 0 &&
       record.command_id.length <= 64 && typeof record.updated_at === "string" &&
-      validPendingCells(record.cells);
+      validPendingCells(record.cells) && validPendingConflicts(record.conflicts, record.cells);
   }
 
   function restorePendingDraft() {
@@ -273,6 +320,16 @@
           input.value = cell.score;
           setVisual(input, false);
         }
+      });
+      (record.conflicts || []).forEach(function (conflict) {
+        var conflictKey = key(conflict.singer_id, conflict.judge_id);
+        state.conflicts[conflictKey] = {
+          singer_id: conflict.singer_id,
+          judge_id: conflict.judge_id,
+          base: conflict.base,
+          server: conflict.server,
+          local: conflict.local,
+        };
       });
     } catch (error) {
       // Ignore an untrusted or malformed local draft instead of inventing score facts.
@@ -425,6 +482,7 @@
             state.conflicts[k] = {
               singer_id: parts[0],
               judge_id: parts[1],
+              base: beforeRefresh[k],
               server: serverValue,
               local: localValue,
             };
@@ -571,5 +629,6 @@
   restorePendingDraft();
   updateProgress();
   updatePendingCount();
+  renderConflicts();
   setVersion(state.version);
 })();
