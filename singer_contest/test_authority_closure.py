@@ -374,6 +374,98 @@ class AuthorityClosureAcceptanceTests(TestCase):
         with self.assertRaises(ValidationError):
             receipt.full_clean()
 
+    def test_rapid_score_receipt_rejects_unbounded_direct_orm_persistence(self):
+        invalid_payload = {"unexpected": "x" * 2048}
+        valid_payload = {
+            "status": ScoreWriteReceipt.Status.SUCCEEDED,
+            "reason_code": "SCORES_APPLIED",
+            "version": 1,
+            "matrix_complete": True,
+        }
+
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.create(
+                command_id="receipt-direct-create-001",
+                operator=self.user,
+                operation="rapid_score_apply",
+                payload_hash="0" * 64,
+                result_version=1,
+                result_payload=invalid_payload,
+                status=ScoreWriteReceipt.Status.SUCCEEDED,
+            )
+
+        receipt = ScoreWriteReceipt.objects.create(
+            command_id="receipt-direct-update-001",
+            operator=self.user,
+            operation="rapid_score_apply",
+            payload_hash="1" * 64,
+            result_version=1,
+            result_payload=valid_payload,
+            status=ScoreWriteReceipt.Status.SUCCEEDED,
+        )
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.filter(pk=receipt.pk).update(result_payload=invalid_payload)
+
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt._base_manager.filter(pk=receipt.pk).update(
+                result_payload=invalid_payload
+            )
+
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.bulk_create(
+                [
+                    ScoreWriteReceipt(
+                        command_id="receipt-direct-bulk-001",
+                        operator=self.user,
+                        operation="rapid_score_apply",
+                        payload_hash="2" * 64,
+                        result_version=1,
+                        result_payload=invalid_payload,
+                        status=ScoreWriteReceipt.Status.SUCCEEDED,
+                    )
+                ]
+            )
+        receipt.result_payload = invalid_payload
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.bulk_update([receipt], ["result_payload"])
+        self.assertFalse(
+            ScoreWriteReceipt.objects.filter(
+                command_id__in=["receipt-direct-create-001", "receipt-direct-bulk-001"]
+            ).exists()
+        )
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.result_payload, valid_payload)
+
+    def test_rapid_score_receipt_accepts_legitimate_bulk_status_transition(self):
+        valid_payload = {
+            "status": ScoreWriteReceipt.Status.SUCCEEDED,
+            "reason_code": "SCORES_APPLIED",
+            "version": 2,
+            "matrix_complete": False,
+        }
+        receipt = ScoreWriteReceipt.objects.create(
+            command_id="receipt-direct-valid-bulk-001",
+            operator=self.user,
+            operation="rapid_score_apply",
+            payload_hash="3" * 64,
+            result_version=0,
+            result_payload={},
+            status=ScoreWriteReceipt.Status.PENDING,
+        )
+
+        receipt.result_version = 2
+        receipt.result_payload = valid_payload
+        receipt.status = ScoreWriteReceipt.Status.SUCCEEDED
+        ScoreWriteReceipt.objects.bulk_update(
+            [receipt],
+            ["result_version", "result_payload", "status"],
+        )
+
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.status, ScoreWriteReceipt.Status.SUCCEEDED)
+        self.assertEqual(receipt.result_payload, valid_payload)
+        self.assertEqual(receipt.result_version, 2)
+
 
 class ContestIdentityOwnershipTests(TestCase):
     """A contest identity remains owned by the activity and account that created it."""

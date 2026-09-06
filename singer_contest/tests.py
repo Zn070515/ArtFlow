@@ -1861,7 +1861,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
             activity=other_activity,
             user=User.objects.create_user(username="receipt-race-other-singer", password="pass"),
             name="Other Receipt Singer",
-            student_id="receipt-race-other-01",
+            student_id="receipt-race-other",
             college="College",
             class_name="Class",
             phone="13800000001",

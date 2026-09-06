@@ -28,6 +28,7 @@ _manual_writes = threading.local()
 _duel_writes = threading.local()
 _raw_fact_writes = threading.local()
 _award_materializations = threading.local()
+_score_receipt_bulk_updates = threading.local()
 
 
 def _manual_write_authorized() -> bool:
@@ -60,6 +61,14 @@ def _award_materialization_authorized() -> bool:
 
 def _authorize_award_materialization(authorized: bool) -> None:
     _award_materializations.authorized = authorized
+
+
+def _score_receipt_bulk_update_authorized() -> bool:
+    return bool(getattr(_score_receipt_bulk_updates, "authorized", False))
+
+
+def _authorize_score_receipt_bulk_update(authorized: bool) -> None:
+    _score_receipt_bulk_updates.authorized = authorized
 
 
 def _ensure_round_raw_fact_mutable(round_id: int | None) -> None:
@@ -827,6 +836,41 @@ class ScoreRecord(models.Model):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
 
 
+class ScoreWriteReceiptQuerySet(models.QuerySet):
+    def _ensure_receipts_valid(self, receipts) -> None:
+        for receipt in receipts:
+            receipt.clean()
+
+    def update(self, **kwargs):
+        if _score_receipt_bulk_update_authorized():
+            return super().update(**kwargs)
+        if {"status", "result_payload"}.intersection(kwargs):
+            model = cast(Any, self.model)
+            for row in self.values("status", "result_payload"):
+                status = kwargs.get("status", row["status"])
+                result_payload = kwargs.get("result_payload", row["result_payload"])
+                model.validate_result_payload(status, result_payload)
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        self._ensure_receipts_valid(objs)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        if {"status", "result_payload"}.intersection(fields):
+            self._ensure_receipts_valid(objs)
+        _authorize_score_receipt_bulk_update(True)
+        try:
+            return super().bulk_update(objs, fields, *args, **kwargs)
+        finally:
+            _authorize_score_receipt_bulk_update(False)
+
+
+ScoreWriteReceiptManager = models.Manager.from_queryset(ScoreWriteReceiptQuerySet)
+
+
 class ScoreWriteReceipt(models.Model):
     """Bounded idempotency record for one rapid-score command.
 
@@ -853,17 +897,20 @@ class ScoreWriteReceipt(models.Model):
     result_payload = models.JSONField(default=dict)
     status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = ScoreWriteReceiptManager()
 
-    def clean(self):
-        super().clean()
-        if not isinstance(self.result_payload, dict):
+    @classmethod
+    def validate_result_payload(cls, status, result_payload) -> None:
+        if status == cls.Status.PENDING and result_payload == {}:
+            return
+        if not isinstance(result_payload, dict):
             raise ValidationError({"result_payload": "成绩写入回执结果必须是对象。"})
-        if set(self.result_payload) != self.RESULT_PAYLOAD_KEYS:
+        if set(result_payload) != cls.RESULT_PAYLOAD_KEYS:
             raise ValidationError({"result_payload": "成绩写入回执结果字段无效。"})
         try:
             size = len(
                 json.dumps(
-                    self.result_payload,
+                    result_payload,
                     ensure_ascii=True,
                     separators=(",", ":"),
                     sort_keys=True,
@@ -871,8 +918,16 @@ class ScoreWriteReceipt(models.Model):
             )
         except (TypeError, ValueError):
             raise ValidationError({"result_payload": "成绩写入回执结果不可序列化。"}) from None
-        if size > self.RESULT_PAYLOAD_MAX_BYTES:
+        if size > cls.RESULT_PAYLOAD_MAX_BYTES:
             raise ValidationError({"result_payload": "成绩写入回执结果过大。"})
+
+    def clean(self):
+        super().clean()
+        self.validate_result_payload(self.status, self.result_payload)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
     class Meta:
         base_manager_name = "objects"

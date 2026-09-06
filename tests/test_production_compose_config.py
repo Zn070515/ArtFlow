@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -23,8 +24,13 @@ CONFIG_ENVIRONMENT = {
 }
 
 
-def load_compose(path: Path) -> dict[str, object]:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+def load_compose(path: Path) -> dict[str, Any]:
+    return cast(dict[str, Any], yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+def docker_command() -> str:
+    assert DOCKER is not None
+    return DOCKER
 
 
 def test_production_compose_keeps_the_authoritative_stack_private_except_for_proxy():
@@ -91,9 +97,10 @@ def test_production_compose_config_renders_without_starting_services(
 ):
     for name, value in CONFIG_ENVIRONMENT.items():
         monkeypatch.setenv(name, value)
+    docker = docker_command()
 
     result = subprocess.run(
-        [DOCKER, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config", "--quiet"],
+        [docker, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config", "--quiet"],
         cwd=PROJECT_ROOT,
         check=False,
         capture_output=True,
@@ -111,9 +118,10 @@ def test_rendered_production_compose_preserves_caddy_environment_placeholder(
 ):
     for name, value in CONFIG_ENVIRONMENT.items():
         monkeypatch.setenv(name, value)
+    docker = docker_command()
 
     result = subprocess.run(
-        [DOCKER, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
+        [docker, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
         cwd=PROJECT_ROOT,
         check=False,
         capture_output=True,
@@ -123,7 +131,7 @@ def test_rendered_production_compose_preserves_caddy_environment_placeholder(
     )
 
     assert result.returncode == 0, result.stderr
-    rendered = yaml.safe_load(result.stdout)
+    rendered = cast(dict[str, Any], yaml.safe_load(result.stdout))
     caddyfile_path = PRODUCTION_COMPOSE_PATH.parent / rendered["configs"]["caddyfile"]["file"]
     caddyfile = caddyfile_path.read_text(encoding="utf-8")
     assert caddyfile.startswith("{$CADDY_SITE_ADDRESS} {")
@@ -136,9 +144,10 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
 ):
     for name, value in CONFIG_ENVIRONMENT.items():
         monkeypatch.setenv(name, value)
+    docker = docker_command()
 
     image_check = subprocess.run(
-        [DOCKER, "image", "inspect", "caddy:2-alpine"],
+        [docker, "image", "inspect", "caddy:2-alpine"],
         check=False,
         capture_output=True,
         text=True,
@@ -147,18 +156,18 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
         pytest.skip("caddy:2-alpine image is not available locally")
 
     compose_result = subprocess.run(
-        [DOCKER, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
+        [docker, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
         cwd=PROJECT_ROOT,
         check=True,
         capture_output=True,
         text=True,
         encoding="utf-8",
     )
-    rendered = yaml.safe_load(compose_result.stdout)
+    rendered = cast(dict[str, Any], yaml.safe_load(compose_result.stdout))
     caddyfile_path = PRODUCTION_COMPOSE_PATH.parent / rendered["configs"]["caddyfile"]["file"]
     result = subprocess.run(
         [
-            DOCKER,
+            docker,
             "run",
             "--rm",
             "-i",
