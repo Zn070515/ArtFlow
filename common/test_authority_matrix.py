@@ -548,6 +548,240 @@ class AuthorityMutationMatrixTests(TestCase):
                     )
                 )
 
+    def test_stage_children_reject_cross_activity_queryset_updates_before_confirmation(self):
+        other_ruleset = ContestRuleset.objects.create(
+            activity=self.other_activity, name="Other matrix rules", is_test_data=True
+        )
+        with authority_write(RULESET_FREEZE):
+            other_version = RulesetVersion.objects.create(
+                ruleset=other_ruleset,
+                definition='{"schema_version": 1, "nodes": [{"key": "r", "type": "ROSTER"}]}',
+                binding={},
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        other_stage = StageResult.objects.create(
+            activity=self.other_activity,
+            ruleset_version=other_version,
+            stage_key="other-stage",
+            is_test_data=True,
+        )
+
+        for model, obj in (
+            (StageDecision, self.decision),
+            (StageAwardDecision, self.award_decision),
+            (CompositeResult, self.composite),
+        ):
+            with self.subTest(model=model.__name__, field="stage_result"):
+                self._assert_rejects(
+                    lambda model=model, obj=obj: model._base_manager.filter(pk=obj.pk).update(
+                        stage_result_id=other_stage.pk
+                    )
+                )
+            with self.subTest(model=model.__name__, field="singer"):
+                self._assert_rejects(
+                    lambda model=model, obj=obj: model.objects.filter(pk=obj.pk).update(
+                        singer_id=self.other_singer.pk
+                    )
+                )
+
+        self._assert_rejects(
+            lambda: StageAwardDecision._base_manager.filter(pk=self.award_decision.pk).update(
+                activity_id=self.other_activity.pk
+            )
+        )
+
+    def test_stage_children_reject_cross_activity_save_and_bulk_update_before_confirmation(self):
+        other_ruleset = ContestRuleset.objects.create(
+            activity=self.other_activity, name="Other stage child bulk rules", is_test_data=True
+        )
+        with authority_write(RULESET_FREEZE):
+            other_version = RulesetVersion.objects.create(
+                ruleset=other_ruleset,
+                definition='{"schema_version": 1, "nodes": [{"key": "r", "type": "ROSTER"}]}',
+                binding={},
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        other_stage = StageResult.objects.create(
+            activity=self.other_activity,
+            ruleset_version=other_version,
+            stage_key="other-stage-bulk",
+            is_test_data=True,
+        )
+
+        for model, source in (
+            (StageDecision, self.decision),
+            (StageAwardDecision, self.award_decision),
+            (CompositeResult, self.composite),
+        ):
+            obj = model._base_manager.get(pk=source.pk)
+            obj.stage_result = other_stage
+            obj.singer = self.other_singer
+            if isinstance(obj, StageAwardDecision):
+                obj.activity = self.other_activity
+            with self.subTest(model=model.__name__, path="save"):
+                self._assert_rejects(lambda obj=obj: obj.save())
+            with self.subTest(model=model.__name__, path="bulk_update"):
+                fields = ["stage_result", "singer"]
+                if isinstance(obj, StageAwardDecision):
+                    fields.append("activity")
+                self._assert_rejects(
+                    lambda model=model, obj=obj, fields=fields: model.objects.bulk_update(
+                        [obj], fields
+                    )
+                )
+
+    def test_stage_children_allow_same_activity_queryset_updates_before_confirmation(self):
+        updated = StageDecision.objects.filter(pk=self.decision.pk).update(
+            stage_result_id=self.alternate_stage.pk
+        )
+        self.assertEqual(updated, 1)
+        self.decision.refresh_from_db()
+        self.assertEqual(self.decision.stage_result_id, self.alternate_stage.pk)
+
+        updated = StageAwardDecision._base_manager.filter(pk=self.award_decision.pk).update(
+            stage_result_id=self.alternate_stage.pk
+        )
+        self.assertEqual(updated, 1)
+        self.award_decision.refresh_from_db()
+        self.assertEqual(self.award_decision.stage_result_id, self.alternate_stage.pk)
+
+        updated = CompositeResult.objects.filter(pk=self.composite.pk).update(
+            singer_id=self.spare_singer.pk
+        )
+        self.assertEqual(updated, 1)
+        self.composite.refresh_from_db()
+        self.assertEqual(self.composite.singer_id, self.spare_singer.pk)
+
+    def test_vote_children_reject_cross_session_queryset_updates_before_lock(self):
+        other_option = VoteOption.objects.create(
+            vote_session=self.other_vote_session, singer=self.other_singer, is_test_data=True
+        )
+        other_ballot = VoteBallot.objects.create(
+            vote_session=self.other_vote_session,
+            browser_session_key="matrix-other-record-browser",
+            ip_address="127.0.0.1",
+            is_test_data=True,
+        )
+
+        self._assert_rejects(
+            lambda: VoteOption._base_manager.filter(pk=self.option.pk).update(
+                vote_session_id=self.other_vote_session.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: VoteOption.objects.filter(pk=self.option.pk).update(
+                singer_id=self.other_singer.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: VoteBallot._base_manager.filter(pk=self.ballot.pk).update(
+                vote_session_id=self.other_vote_session.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: VoteRecord.objects.filter(pk=self.record.pk).update(
+                vote_session_id=self.other_vote_session.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: VoteRecord._base_manager.filter(pk=self.record.pk).update(
+                ballot_id=other_ballot.pk
+            )
+        )
+        self._assert_rejects(
+            lambda: VoteRecord.objects.filter(pk=self.record.pk).update(
+                vote_option_id=other_option.pk
+            )
+        )
+
+    def test_vote_children_reject_cross_session_save_and_bulk_update_before_lock(self):
+        other_replacement_singer = SingerRegistration.objects.create(
+            activity=self.other_activity,
+            user=User.objects.create_user(
+                username="matrix-other-option-replacement", password="pass"
+            ),
+            name="Other replacement singer",
+            student_id="matrix-other-4",
+            college="College",
+            class_name="Class",
+            phone="13400000000",
+            song_name="Other replacement song",
+            is_test_data=True,
+        )
+        other_option = VoteOption.objects.create(
+            vote_session=self.other_vote_session, singer=self.other_singer, is_test_data=True
+        )
+        other_ballot = VoteBallot.objects.create(
+            vote_session=self.other_vote_session,
+            browser_session_key="matrix-other-bulk-browser",
+            ip_address="127.0.0.1",
+            is_test_data=True,
+        )
+
+        option = VoteOption._base_manager.get(pk=self.option.pk)
+        option.vote_session = self.other_vote_session
+        option.singer = other_replacement_singer
+        self._assert_rejects(lambda: option.save())
+        self._assert_rejects(
+            lambda: VoteOption.objects.bulk_update([option], ["vote_session", "singer"])
+        )
+
+        ballot = VoteBallot._base_manager.get(pk=self.ballot.pk)
+        ballot.vote_session = self.other_vote_session
+        self._assert_rejects(lambda: ballot.save())
+        self._assert_rejects(lambda: VoteBallot.objects.bulk_update([ballot], ["vote_session"]))
+
+        record = VoteRecord._base_manager.get(pk=self.record.pk)
+        record.vote_session = self.other_vote_session
+        record.ballot = other_ballot
+        record.vote_option = other_option
+        self._assert_rejects(lambda: record.save())
+        self._assert_rejects(
+            lambda: VoteRecord.objects.bulk_update(
+                [record], ["vote_session", "ballot", "vote_option"]
+            )
+        )
+
+    def test_vote_children_allow_same_session_queryset_updates_before_lock(self):
+        option_replacement_singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="matrix-option-replacement", password="pass"),
+            name="Option replacement singer",
+            student_id="matrix-4",
+            college="College",
+            class_name="Class",
+            phone="13300000000",
+            song_name="Replacement song",
+            is_test_data=True,
+        )
+        same_session_option = VoteOption.objects.create(
+            vote_session=self.vote_session, singer=self.spare_singer, is_test_data=True
+        )
+        same_session_ballot = VoteBallot.objects.create(
+            vote_session=self.vote_session,
+            browser_session_key="matrix-same-record-browser",
+            ip_address="127.0.0.1",
+            is_test_data=True,
+        )
+
+        updated = VoteOption.objects.filter(pk=self.option.pk).update(
+            singer_id=option_replacement_singer.pk
+        )
+        self.assertEqual(updated, 1)
+        self.option.refresh_from_db()
+        self.assertEqual(self.option.singer_id, option_replacement_singer.pk)
+
+        updated = VoteRecord._base_manager.filter(pk=self.record.pk).update(
+            ballot_id=same_session_ballot.pk,
+            vote_option_id=same_session_option.pk,
+        )
+        self.assertEqual(updated, 1)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.ballot_id, same_session_ballot.pk)
+        self.assertEqual(self.record.vote_option_id, same_session_option.pk)
+
     def test_admin_canonical_boundaries(self):
         request = RequestFactory().get("/admin/")
         request.user = self.admin_user

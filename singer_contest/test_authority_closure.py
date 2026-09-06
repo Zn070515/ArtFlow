@@ -466,6 +466,84 @@ class AuthorityClosureAcceptanceTests(TestCase):
         self.assertEqual(receipt.result_payload, valid_payload)
         self.assertEqual(receipt.result_version, 2)
 
+    def test_rapid_score_receipt_rejects_payload_value_semantic_drift(self):
+        valid_payload = {
+            "status": ScoreWriteReceipt.Status.SUCCEEDED,
+            "reason_code": "SCORES_APPLIED",
+            "version": 7,
+            "matrix_complete": False,
+        }
+        receipt = ScoreWriteReceipt.objects.create(
+            command_id="semantic-valid",
+            operator=self.user,
+            operation="rapid_score_apply",
+            payload_hash="d" * 64,
+            result_version=7,
+            result_payload=valid_payload,
+            status=ScoreWriteReceipt.Status.SUCCEEDED,
+        )
+
+        invalid_payloads = (
+            {**valid_payload, "status": ScoreWriteReceipt.Status.PENDING},
+            {**valid_payload, "reason_code": "STALE_SCORE_VERSION"},
+            {**valid_payload, "version": "7"},
+            {**valid_payload, "matrix_complete": "false"},
+        )
+        for index, payload in enumerate(invalid_payloads):
+            with self.subTest(payload=payload), self.assertRaises(ValidationError):
+                ScoreWriteReceipt.objects.create(
+                    command_id=f"semantic-invalid-{index}",
+                    operator=self.user,
+                    operation="rapid_score_apply",
+                    payload_hash="e" * 64,
+                    result_version=7,
+                    result_payload=payload,
+                    status=ScoreWriteReceipt.Status.SUCCEEDED,
+                )
+
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.filter(pk=receipt.pk).update(
+                result_payload={**valid_payload, "version": 8}
+            )
+
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt._base_manager.filter(pk=receipt.pk).update(
+                result_version=8,
+                result_payload=valid_payload,
+            )
+
+        receipt.result_version = 8
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.bulk_update([receipt], ["result_version"])
+
+    def test_rapid_score_receipt_rejects_succeeded_empty_payload_and_pending_result(self):
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.create(
+                command_id="semantic-empty-succeeded",
+                operator=self.user,
+                operation="rapid_score_apply",
+                payload_hash="f" * 64,
+                result_version=0,
+                result_payload={},
+                status=ScoreWriteReceipt.Status.SUCCEEDED,
+            )
+
+        with self.assertRaises(ValidationError):
+            ScoreWriteReceipt.objects.create(
+                command_id="semantic-pending-with-result",
+                operator=self.user,
+                operation="rapid_score_apply",
+                payload_hash="a" * 64,
+                result_version=7,
+                result_payload={
+                    "status": ScoreWriteReceipt.Status.SUCCEEDED,
+                    "reason_code": "SCORES_APPLIED",
+                    "version": 7,
+                    "matrix_complete": False,
+                },
+                status=ScoreWriteReceipt.Status.PENDING,
+            )
+
 
 class ContestIdentityOwnershipTests(TestCase):
     """A contest identity remains owned by the activity and account that created it."""

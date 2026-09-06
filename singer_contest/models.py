@@ -210,6 +210,106 @@ def _ensure_stage_result_origins(*stage_result_ids: int | None) -> None:
         _ensure_stage_result_mutable(stage_result_id)
 
 
+def _stage_result_activity_id(stage_result_id: int | None) -> int | None:
+    if not stage_result_id:
+        return None
+    return (
+        StageResult._base_manager.filter(pk=stage_result_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _singer_activity_id(singer_id: int | None) -> int | None:
+    if not singer_id:
+        return None
+    return (
+        SingerRegistration._base_manager.filter(pk=singer_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _ensure_same_activity_stage_child_update(
+    queryset,
+    kwargs,
+    *,
+    has_activity_field: bool = False,
+) -> None:
+    relation_fields = {"stage_result", "stage_result_id", "singer", "singer_id"}
+    if has_activity_field:
+        relation_fields |= {"activity", "activity_id"}
+    if not relation_fields.intersection(kwargs):
+        return
+    new_stage_id = _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
+    new_singer_id = _relation_pk(kwargs.get("singer", kwargs.get("singer_id")))
+    new_activity_id = _relation_pk(kwargs.get("activity", kwargs.get("activity_id")))
+    value_fields = ["stage_result_id", "singer_id"]
+    if has_activity_field:
+        value_fields.append("activity_id")
+    for row in queryset.values(*value_fields):
+        current_stage_activity_id = _stage_result_activity_id(row["stage_result_id"])
+        target_stage_activity_id = (
+            _stage_result_activity_id(new_stage_id) if new_stage_id else current_stage_activity_id
+        )
+        target_singer_activity_id = (
+            _singer_activity_id(new_singer_id)
+            if new_singer_id
+            else _singer_activity_id(row["singer_id"])
+        )
+        target_activity_id = new_activity_id if new_activity_id else row.get("activity_id")
+        if (
+            target_stage_activity_id
+            and current_stage_activity_id
+            and target_stage_activity_id != current_stage_activity_id
+        ):
+            raise ValidationError("赛段派生结果不可迁移到其它活动。")
+        if (
+            target_stage_activity_id
+            and target_singer_activity_id
+            and target_singer_activity_id != target_stage_activity_id
+        ):
+            raise ValidationError("赛段派生结果选手必须属于同一活动。")
+        if (
+            has_activity_field
+            and target_stage_activity_id
+            and target_activity_id
+            and target_activity_id != target_stage_activity_id
+        ):
+            raise ValidationError("奖项候选必须属于结果所在活动。")
+
+
+def _ensure_same_activity_stage_child_instance(
+    instance, *, has_activity_field: bool = False
+) -> None:
+    if instance._state.adding or not instance.pk:
+        return
+    stored_stage_result_id = _stored_fk_id(instance, "stage_result")
+    current_stage_activity_id = _stage_result_activity_id(stored_stage_result_id)
+    target_stage_activity_id = _stage_result_activity_id(instance.stage_result_id)
+    target_singer_activity_id = _singer_activity_id(instance.singer_id)
+    target_activity_id = instance.activity_id if has_activity_field else target_stage_activity_id
+    if (
+        target_stage_activity_id
+        and current_stage_activity_id
+        and target_stage_activity_id != current_stage_activity_id
+    ):
+        raise ValidationError("赛段派生结果不可迁移到其它活动。")
+    if (
+        target_stage_activity_id
+        and target_singer_activity_id
+        and target_singer_activity_id != target_stage_activity_id
+    ):
+        raise ValidationError("赛段派生结果选手必须属于同一活动。")
+    if (
+        has_activity_field
+        and target_stage_activity_id
+        and target_activity_id
+        and target_activity_id != target_stage_activity_id
+    ):
+        raise ValidationError("奖项候选必须属于结果所在活动。")
+
+
 def _score_record_round_id(score_record_id: int | None) -> int | None:
     if not score_record_id:
         return None
@@ -844,12 +944,13 @@ class ScoreWriteReceiptQuerySet(models.QuerySet):
     def update(self, **kwargs):
         if _score_receipt_bulk_update_authorized():
             return super().update(**kwargs)
-        if {"status", "result_payload"}.intersection(kwargs):
+        if {"status", "result_payload", "result_version"}.intersection(kwargs):
             model = cast(Any, self.model)
-            for row in self.values("status", "result_payload"):
+            for row in self.values("status", "result_payload", "result_version"):
                 status = kwargs.get("status", row["status"])
                 result_payload = kwargs.get("result_payload", row["result_payload"])
-                model.validate_result_payload(status, result_payload)
+                result_version = kwargs.get("result_version", row["result_version"])
+                model.validate_result_payload(status, result_payload, result_version)
         return super().update(**kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
@@ -859,7 +960,7 @@ class ScoreWriteReceiptQuerySet(models.QuerySet):
 
     def bulk_update(self, objs, fields, *args, **kwargs):
         objs = list(objs)
-        if {"status", "result_payload"}.intersection(fields):
+        if {"status", "result_payload", "result_version"}.intersection(fields):
             self._ensure_receipts_valid(objs)
         _authorize_score_receipt_bulk_update(True)
         try:
@@ -900,13 +1001,31 @@ class ScoreWriteReceipt(models.Model):
     objects = ScoreWriteReceiptManager()
 
     @classmethod
-    def validate_result_payload(cls, status, result_payload) -> None:
-        if status == cls.Status.PENDING and result_payload == {}:
+    def validate_result_payload(cls, status, result_payload, result_version=None) -> None:
+        if status == cls.Status.PENDING:
+            if result_payload != {}:
+                raise ValidationError({"result_payload": "待处理成绩写入回执不得包含结果。"})
+            if result_version not in {None, 0}:
+                raise ValidationError({"result_version": "待处理成绩写入回执结果版本必须为 0。"})
             return
+        if status != cls.Status.SUCCEEDED:
+            raise ValidationError({"status": "成绩写入回执状态无效。"})
         if not isinstance(result_payload, dict):
             raise ValidationError({"result_payload": "成绩写入回执结果必须是对象。"})
         if set(result_payload) != cls.RESULT_PAYLOAD_KEYS:
             raise ValidationError({"result_payload": "成绩写入回执结果字段无效。"})
+        if result_payload["status"] != cls.Status.SUCCEEDED:
+            raise ValidationError({"result_payload": "成绩写入回执结果状态无效。"})
+        if result_payload["reason_code"] != "SCORES_APPLIED":
+            raise ValidationError({"result_payload": "成绩写入回执结果原因无效。"})
+        if isinstance(result_payload["version"], bool) or not isinstance(
+            result_payload["version"], int
+        ):
+            raise ValidationError({"result_payload": "成绩写入回执结果版本必须是整数。"})
+        if not isinstance(result_payload["matrix_complete"], bool):
+            raise ValidationError({"result_payload": "成绩写入回执完成标记必须是布尔值。"})
+        if result_version is not None and result_payload["version"] != result_version:
+            raise ValidationError({"result_payload": "成绩写入回执结果版本不一致。"})
         try:
             size = len(
                 json.dumps(
@@ -923,7 +1042,7 @@ class ScoreWriteReceipt(models.Model):
 
     def clean(self):
         super().clean()
-        self.validate_result_payload(self.status, self.result_payload)
+        self.validate_result_payload(self.status, self.result_payload, self.result_version)
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -1905,6 +2024,7 @@ class StageDecisionQuerySet(models.QuerySet):
             _ensure_stage_result_mutable(
                 _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
             )
+        _ensure_same_activity_stage_child_update(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -1916,6 +2036,7 @@ class StageDecisionQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            _ensure_same_activity_stage_child_instance(obj)
             _ensure_stage_result_origins(_stored_fk_id(obj, "stage_result"), obj.stage_result_id)
             if (
                 obj.stage_result_id
@@ -1990,6 +2111,7 @@ class StageDecision(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_same_activity_stage_child_instance(self)
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
@@ -2016,6 +2138,7 @@ class StageAwardDecisionQuerySet(models.QuerySet):
             _ensure_stage_result_mutable(
                 _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
             )
+        _ensure_same_activity_stage_child_update(self, kwargs, has_activity_field=True)
         return super().update(**kwargs)
 
     def delete(self):
@@ -2027,6 +2150,7 @@ class StageAwardDecisionQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            _ensure_same_activity_stage_child_instance(obj, has_activity_field=True)
             _ensure_stage_result_origins(_stored_fk_id(obj, "stage_result"), obj.stage_result_id)
             if (
                 obj.stage_result_id
@@ -2094,6 +2218,7 @@ class StageAwardDecision(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_same_activity_stage_child_instance(self, has_activity_field=True)
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if (
             self.stage_result_id
@@ -2132,6 +2257,7 @@ class CompositeResultQuerySet(models.QuerySet):
             _ensure_stage_result_mutable(
                 _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
             )
+        _ensure_same_activity_stage_child_update(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -2143,6 +2269,7 @@ class CompositeResultQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            _ensure_same_activity_stage_child_instance(obj)
             _ensure_stage_result_origins(_stored_fk_id(obj, "stage_result"), obj.stage_result_id)
             if (
                 obj.stage_result_id
@@ -2213,6 +2340,7 @@ class CompositeResult(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_same_activity_stage_child_instance(self)
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Composites of a confirmed stage result are immutable.")

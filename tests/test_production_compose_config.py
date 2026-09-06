@@ -64,12 +64,22 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
 
 def test_event_compose_exposes_web_only_on_localhost():
     compose = load_compose(EVENT_COMPOSE_PATH)
+    web_environment = compose["services"]["web"]["environment"]
 
     assert compose["services"]["web"]["ports"] == ["127.0.0.1:8000:8000"]
     assert "ports" not in compose["services"]["db"]
+    assert web_environment["DATABASE_ENGINE"] == "postgresql"
+    assert web_environment["RATE_LIMIT_BACKEND"] == "database"
     assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
+
+
+def test_production_web_healthcheck_uses_internal_exempt_health_route():
+    compose = load_compose(PRODUCTION_COMPOSE_PATH)
+    healthcheck = compose["services"]["web"]["healthcheck"]["test"]
+
+    assert "http://127.0.0.1:8000/healthz/" in healthcheck[-1]
 
 
 def test_production_rehearsal_runbook_names_the_explicit_production_manifest():

@@ -32,6 +32,7 @@ services:
       ADMIN_LOGIN_KEY: ${ADMIN_LOGIN_KEY:?Set ADMIN_LOGIN_KEY in the event environment}
       ALLOWED_HOSTS: ${EVENT_ALLOWED_HOSTS:?Set EVENT_ALLOWED_HOSTS for localhost and any tunnel hostname}
       CSRF_TRUSTED_ORIGINS: ${EVENT_CSRF_TRUSTED_ORIGINS:-}
+      RATE_LIMIT_BACKEND: database
       DATABASE_ENGINE: postgresql
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the event environment}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the event environment}

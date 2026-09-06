@@ -87,4 +87,3 @@ SingerRegistration 的 `activity_id/user_id` 与 Judge 的 `activity_id` 创建�
 7. 人气奖新 authority 演练和统一 authority mutation matrix。
 
 最终门禁：`makemigrations --check --dry-run`、`check`、`check --deploy`、完整 Django/pytest suite、Ruff、mypy、CSS、文档检查、Docker PostgreSQL acceptance、PostgreSQL concurrency、production compose config check、backup/restore rehearsal。所有门禁完成后，对代码做两轮独立自审：第一轮核对 authority/数据流/错误语义，第二轮核对安全边界、并发、迁移、部署和 GOAL v4 不变量。
-

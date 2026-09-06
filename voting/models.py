@@ -40,6 +40,142 @@ def _session_id_for(model, pk: int | None) -> int | None:
     return model._base_manager.filter(pk=pk).values_list("vote_session_id", flat=True).first()
 
 
+def _vote_session_activity_id(vote_session_id: int | None) -> int | None:
+    if not vote_session_id:
+        return None
+    return (
+        VoteSession._base_manager.filter(pk=vote_session_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _singer_activity_id(singer_id: int | None) -> int | None:
+    if not singer_id:
+        return None
+    from singer_contest.models import SingerRegistration
+
+    return (
+        SingerRegistration._base_manager.filter(pk=singer_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _ensure_vote_option_update_consistent(queryset, kwargs) -> None:
+    if not {"vote_session", "vote_session_id", "singer", "singer_id"}.intersection(kwargs):
+        return
+    new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+    new_singer_id = _relation_pk(kwargs.get("singer", kwargs.get("singer_id")))
+    for row in queryset.values("vote_session_id", "singer_id"):
+        current_activity_id = _vote_session_activity_id(row["vote_session_id"])
+        if new_session_id and new_session_id != row["vote_session_id"]:
+            raise ValidationError("Vote option cannot move to another vote session.")
+        target_session_activity_id = (
+            _vote_session_activity_id(new_session_id) if new_session_id else current_activity_id
+        )
+        target_singer_activity_id = (
+            _singer_activity_id(new_singer_id)
+            if new_singer_id
+            else _singer_activity_id(row["singer_id"])
+        )
+        if (
+            target_session_activity_id
+            and current_activity_id
+            and target_session_activity_id != current_activity_id
+        ):
+            raise ValidationError("Vote option cannot move to another activity.")
+        if (
+            target_session_activity_id
+            and target_singer_activity_id
+            and target_singer_activity_id != target_session_activity_id
+        ):
+            raise ValidationError("Vote option singer must belong to the vote activity.")
+
+
+def _ensure_vote_ballot_update_consistent(queryset, kwargs) -> None:
+    if not {"vote_session", "vote_session_id"}.intersection(kwargs):
+        return
+    new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+    if not new_session_id:
+        return
+    for current_session_id in queryset.values_list("vote_session_id", flat=True):
+        if current_session_id != new_session_id:
+            raise ValidationError("Vote ballot cannot move to another vote session.")
+
+
+def _ensure_vote_option_instance_consistent(option) -> None:
+    if option._state.adding or not option.pk:
+        return
+    stored_session_id = _stored_relation_id(option, "vote_session")
+    if stored_session_id != option.vote_session_id:
+        raise ValidationError("Vote option cannot move to another vote session.")
+    target_session_activity_id = _vote_session_activity_id(option.vote_session_id)
+    target_singer_activity_id = _singer_activity_id(option.singer_id)
+    if (
+        target_session_activity_id
+        and target_singer_activity_id
+        and target_singer_activity_id != target_session_activity_id
+    ):
+        raise ValidationError("Vote option singer must belong to the vote activity.")
+
+
+def _ensure_vote_ballot_instance_consistent(ballot) -> None:
+    if ballot._state.adding or not ballot.pk:
+        return
+    stored_session_id = _stored_relation_id(ballot, "vote_session")
+    if stored_session_id != ballot.vote_session_id:
+        raise ValidationError("Vote ballot cannot move to another vote session.")
+
+
+def _ensure_vote_record_instance_consistent(record) -> None:
+    if record._state.adding or not record.pk:
+        return
+    stored = type(record)._base_manager.filter(pk=record.pk).values("vote_session_id").first()
+    if stored and stored["vote_session_id"] != record.vote_session_id:
+        raise ValidationError("Vote record cannot move to another vote session.")
+    if record.ballot_id and _session_id_for(VoteBallot, record.ballot_id) != record.vote_session_id:
+        raise ValidationError("Vote record ballot must belong to the vote session.")
+    if (
+        record.vote_option_id
+        and _session_id_for(VoteOption, record.vote_option_id) != record.vote_session_id
+    ):
+        raise ValidationError("Vote record option must belong to the vote session.")
+
+
+def _ensure_vote_record_update_consistent(queryset, kwargs) -> None:
+    if not {
+        "vote_session",
+        "vote_session_id",
+        "ballot",
+        "ballot_id",
+        "vote_option",
+        "vote_option_id",
+    }.intersection(kwargs):
+        return
+    new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+    new_ballot_id = _relation_pk(kwargs.get("ballot", kwargs.get("ballot_id")))
+    new_option_id = _relation_pk(kwargs.get("vote_option", kwargs.get("vote_option_id")))
+    for row in queryset.values("vote_session_id", "ballot_id", "vote_option_id"):
+        target_session_id = new_session_id or row["vote_session_id"]
+        if target_session_id != row["vote_session_id"]:
+            raise ValidationError("Vote record cannot move to another vote session.")
+        target_ballot_session_id = (
+            _session_id_for(VoteBallot, new_ballot_id)
+            if new_ballot_id
+            else _session_id_for(VoteBallot, row["ballot_id"])
+        )
+        target_option_session_id = (
+            _session_id_for(VoteOption, new_option_id)
+            if new_option_id
+            else _session_id_for(VoteOption, row["vote_option_id"])
+        )
+        if target_ballot_session_id and target_ballot_session_id != target_session_id:
+            raise ValidationError("Vote record ballot must belong to the vote session.")
+        if target_option_session_id and target_option_session_id != target_session_id:
+            raise ValidationError("Vote record option must belong to the vote session.")
+
+
 def _vote_record_session_origins(record) -> tuple[int | None, ...]:
     stored = None
     if not record._state.adding and record.pk:
@@ -251,6 +387,7 @@ class VoteBallotQuerySet(models.QuerySet):
                 *self.values_list("vote_session_id", flat=True),
                 _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id"))),
             )
+        _ensure_vote_ballot_update_consistent(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -269,6 +406,7 @@ class VoteBallotQuerySet(models.QuerySet):
             _ensure_vote_session_origins(
                 _stored_relation_id(obj, "vote_session"), obj.vote_session_id
             )
+            _ensure_vote_ballot_instance_consistent(obj)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -297,6 +435,7 @@ class VoteBallot(models.Model):
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
+        _ensure_vote_ballot_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -317,6 +456,7 @@ class VoteOptionQuerySet(models.QuerySet):
             _ensure_vote_session_mutable(
                 _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
             )
+        _ensure_vote_option_update_consistent(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -337,6 +477,7 @@ class VoteOptionQuerySet(models.QuerySet):
                 _stored_relation_id(obj, "vote_session"), obj.vote_session_id
             )
             obj.clean()
+            _ensure_vote_option_instance_consistent(obj)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -368,6 +509,7 @@ class VoteOption(models.Model):
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
+        _ensure_vote_option_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -405,6 +547,7 @@ class VoteRecordQuerySet(models.QuerySet):
                     _relation_pk(kwargs.get("vote_option", kwargs.get("vote_option_id"))),
                 )
             )
+        _ensure_vote_record_update_consistent(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -428,6 +571,7 @@ class VoteRecordQuerySet(models.QuerySet):
         for obj in objs:
             obj.clean()
             _ensure_vote_session_origins(*_vote_record_session_origins(obj))
+            _ensure_vote_record_instance_consistent(obj)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -473,6 +617,7 @@ class VoteRecord(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         _ensure_vote_session_origins(*_vote_record_session_origins(self))
+        _ensure_vote_record_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
