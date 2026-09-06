@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+from functools import partial
 from typing import Any, Callable, cast
 
 from accounts.admin import CustomUserAdmin
@@ -781,6 +782,263 @@ class AuthorityMutationMatrixTests(TestCase):
         self.record.refresh_from_db()
         self.assertEqual(self.record.ballot_id, same_session_ballot.pk)
         self.assertEqual(self.record.vote_option_id, same_session_option.pk)
+
+    def test_protected_stage_and_vote_children_reject_conflict_upsert_through_both_managers(self):
+        """Conflict-upsert is not an approved authority workflow for stored child facts."""
+
+        def attempt_conflict_upsert(manager, candidate_factory, update_fields):
+            manager.bulk_create(
+                [candidate_factory()],
+                update_conflicts=True,
+                update_fields=update_fields,
+                unique_fields=["id"],
+            )
+
+        self._confirm_stage()
+        stage_relation_upserts: tuple[
+            tuple[
+                str,
+                type[Any],
+                Callable[[], Any],
+                tuple[str, ...],
+                tuple[str, ...],
+                Callable[[], Any],
+            ],
+            ...,
+        ] = (
+            (
+                "StageDecision",
+                StageDecision,
+                lambda: StageDecision(
+                    pk=self.decision.pk,
+                    stage_result=self.alternate_stage,
+                    singer=self.singer,
+                    outcome_code="selected",
+                    is_test_data=True,
+                ),
+                ("stage_result_id", "singer_id", "outcome_code"),
+                ("stage_result_id", "singer_id", "outcome_code"),
+                lambda: StageDecision(
+                    stage_result=self.alternate_stage,
+                    singer=User.objects.create_user(
+                        username="matrix-stage-upsert-singer-user", password="pass"
+                    ).singer_registrations.create(
+                        activity=self.activity,
+                        name="Stage upsert singer",
+                        student_id="matrix-upsert-stage",
+                        college="College",
+                        class_name="Class",
+                        phone="13500000000",
+                        song_name="Stage song",
+                        is_test_data=True,
+                    ),
+                    outcome_code="selected",
+                    is_test_data=True,
+                ),
+            ),
+            (
+                "StageAwardDecision",
+                StageAwardDecision,
+                lambda: StageAwardDecision(
+                    pk=self.award_decision.pk,
+                    stage_result=self.alternate_stage,
+                    activity=self.activity,
+                    singer=self.singer,
+                    name="Matrix award",
+                    is_test_data=True,
+                ),
+                ("stage_result_id", "activity_id", "singer_id", "name"),
+                ("stage_result_id", "activity_id", "singer_id", "name"),
+                lambda: StageAwardDecision(
+                    stage_result=self.alternate_stage,
+                    activity=self.activity,
+                    singer=self.spare_singer,
+                    name="Stage upsert ordinary award",
+                    is_test_data=True,
+                ),
+            ),
+            (
+                "CompositeResult",
+                CompositeResult,
+                lambda: CompositeResult(
+                    pk=self.composite.pk,
+                    stage_result=self.alternate_stage,
+                    singer=self.singer,
+                    node_key="matrix-node",
+                    value=Decimal("91"),
+                    is_test_data=True,
+                ),
+                ("stage_result_id", "singer_id", "node_key", "value"),
+                ("stage_result_id", "singer_id", "node_key", "value"),
+                lambda: CompositeResult(
+                    stage_result=self.alternate_stage,
+                    singer=self.spare_singer,
+                    node_key="stage-upsert-ordinary-node",
+                    value=Decimal("81"),
+                    is_test_data=True,
+                ),
+            ),
+        )
+        for (
+            name,
+            model,
+            candidate_factory,
+            update_fields,
+            snapshot_fields,
+            ordinary_factory,
+        ) in stage_relation_upserts:
+            with self.subTest(model=name, path="ordinary-bulk-create"):
+                created = model.objects.bulk_create([ordinary_factory()])
+                self.assertEqual(len(created), 1)
+
+            before = model._base_manager.filter(pk=candidate_factory().pk).values(*snapshot_fields)[
+                0
+            ]
+            for manager_name in ("objects", "_base_manager"):
+                manager = getattr(model, manager_name)
+                with self.subTest(model=name, manager=manager_name):
+                    self._assert_rejects(
+                        partial(attempt_conflict_upsert, manager, candidate_factory, update_fields)
+                    )
+                    self.assertEqual(
+                        model._base_manager.filter(pk=candidate_factory().pk).values(
+                            *snapshot_fields
+                        )[0],
+                        before,
+                    )
+
+        replacement_session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Matrix vote upsert target",
+            passcode="456789",
+            start_time=timezone.now(),
+            end_time=timezone.now() + timedelta(hours=1),
+            is_test_data=True,
+        )
+        replacement_option = VoteOption.objects.create(
+            vote_session=replacement_session,
+            singer=self.singer,
+            is_test_data=True,
+        )
+        replacement_ballot = VoteBallot.objects.create(
+            vote_session=replacement_session,
+            browser_session_key="matrix-upsert-target-browser",
+            ip_address="127.0.0.1",
+            is_test_data=True,
+        )
+        self._lock_vote()
+        vote_relation_upserts: tuple[
+            tuple[
+                str,
+                type[Any],
+                Callable[[], Any],
+                tuple[str, ...],
+                tuple[str, ...],
+                Callable[[], Any],
+            ],
+            ...,
+        ] = (
+            (
+                "VoteOption",
+                VoteOption,
+                lambda: VoteOption(
+                    pk=self.option.pk,
+                    vote_session=replacement_session,
+                    singer=self.singer,
+                    sort_order=7,
+                    is_test_data=True,
+                ),
+                ("vote_session", "singer", "sort_order"),
+                ("vote_session_id", "singer_id", "sort_order"),
+                lambda: VoteOption(
+                    vote_session=replacement_session,
+                    singer=self.spare_singer,
+                    sort_order=8,
+                    is_test_data=True,
+                ),
+            ),
+            (
+                "VoteBallot",
+                VoteBallot,
+                lambda: VoteBallot(
+                    pk=self.ballot.pk,
+                    vote_session=replacement_session,
+                    browser_session_key="matrix-upsert-moved-browser",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                ),
+                ("vote_session", "browser_session_key", "ip_address"),
+                ("vote_session_id", "browser_session_key", "ip_address"),
+                lambda: VoteBallot(
+                    vote_session=replacement_session,
+                    browser_session_key="matrix-upsert-ordinary-browser",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                ),
+            ),
+            (
+                "VoteRecord",
+                VoteRecord,
+                lambda: VoteRecord(
+                    pk=self.record.pk,
+                    ballot=replacement_ballot,
+                    vote_session=replacement_session,
+                    vote_option=replacement_option,
+                    browser_session_key="matrix-upsert-moved-record",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                ),
+                (
+                    "ballot",
+                    "vote_session",
+                    "vote_option",
+                    "browser_session_key",
+                    "ip_address",
+                ),
+                (
+                    "ballot_id",
+                    "vote_session_id",
+                    "vote_option_id",
+                    "browser_session_key",
+                    "ip_address",
+                ),
+                lambda: VoteRecord(
+                    ballot=replacement_ballot,
+                    vote_session=replacement_session,
+                    vote_option=replacement_option,
+                    browser_session_key="matrix-upsert-ordinary-record",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                ),
+            ),
+        )
+        for (
+            name,
+            model,
+            candidate_factory,
+            update_fields,
+            snapshot_fields,
+            ordinary_factory,
+        ) in vote_relation_upserts:
+            with self.subTest(model=name, path="ordinary-bulk-create"):
+                created = model.objects.bulk_create([ordinary_factory()])
+                self.assertEqual(len(created), 1)
+
+            before = model._base_manager.filter(pk=candidate_factory().pk).values(*snapshot_fields)[
+                0
+            ]
+            for manager_name in ("objects", "_base_manager"):
+                manager = getattr(model, manager_name)
+                with self.subTest(model=name, manager=manager_name):
+                    self._assert_rejects(
+                        partial(attempt_conflict_upsert, manager, candidate_factory, update_fields)
+                    )
+                    self.assertEqual(
+                        model._base_manager.filter(pk=candidate_factory().pk).values(
+                            *snapshot_fields
+                        )[0],
+                        before,
+                    )
 
     def test_admin_canonical_boundaries(self):
         request = RequestFactory().get("/admin/")

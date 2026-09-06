@@ -29,6 +29,14 @@ def _relation_pk(value):
     return getattr(value, "pk", value)
 
 
+def _reject_conflict_upsert(kwargs, model_name: str) -> None:
+    if kwargs.get("update_conflicts"):
+        raise ValidationError(
+            f"{model_name} does not support bulk_create(update_conflicts=True); "
+            "use the audited authority service or ordinary bulk_create()."
+        )
+
+
 def _ensure_vote_session_origins(*session_ids: int | None) -> None:
     for session_id in dict.fromkeys(session_id for session_id in session_ids if session_id):
         _ensure_vote_session_mutable(session_id)
@@ -395,6 +403,7 @@ class VoteBallotQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             _ensure_vote_session_mutable(obj.vote_session_id)
@@ -464,6 +473,7 @@ class VoteOptionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -555,6 +565,7 @@ class VoteRecordQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()

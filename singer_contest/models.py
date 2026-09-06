@@ -144,6 +144,14 @@ def _ensure_identity_ownership_unchanged(instance, fields: frozenset[str]) -> No
         raise ValidationError("比赛身份归属创建后不可修改。")
 
 
+def _reject_conflict_upsert(kwargs, model_name: str) -> None:
+    if kwargs.get("update_conflicts"):
+        raise ValidationError(
+            f"{model_name} does not support bulk_create(update_conflicts=True); "
+            "use the audited authority service or ordinary bulk_create()."
+        )
+
+
 class IdentityOwnershipQuerySet(models.QuerySet):
     ownership_fields: frozenset[str] = frozenset()
 
@@ -168,8 +176,7 @@ class IdentityOwnershipQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
-        if kwargs.get("update_conflicts"):
-            self._ensure_ownership_update_immutable(kwargs.get("update_fields", ()))
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         return super().bulk_create(objs, *args, **kwargs)
 
 
@@ -750,6 +757,7 @@ class RoundSnapshotQuerySet(models.QuerySet):
                 raise ValidationError("Snapshot relation must belong to the round activity.")
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -872,6 +880,7 @@ class ScoreRecordQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             _ensure_round_raw_fact_mutable(obj.round_id)
@@ -954,6 +963,7 @@ class ScoreWriteReceiptQuerySet(models.QuerySet):
         return super().update(**kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         self._ensure_receipts_valid(objs)
         return super().bulk_create(objs, *args, **kwargs)
@@ -1066,6 +1076,7 @@ class ScoreSummaryQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         self._ensure_authorized()
         return super().bulk_create(objs, *args, **kwargs)
 
@@ -1137,6 +1148,7 @@ class AudienceScoreQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1302,6 +1314,7 @@ class AwardQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1455,6 +1468,7 @@ class RoundSetupFactQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1502,6 +1516,7 @@ class ScoringRubricQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1542,6 +1557,7 @@ class RubricCriterionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1755,6 +1771,7 @@ class CriterionScoreQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1854,6 +1871,7 @@ class StageResultQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -2048,6 +2066,7 @@ class StageDecisionQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -2162,6 +2181,7 @@ class StageAwardDecisionQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -2281,6 +2301,7 @@ class CompositeResultQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -2380,6 +2401,7 @@ class ManualDecisionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         self._ensure_auth()
         return super().bulk_create(objs, *args, **kwargs)
 
@@ -2481,6 +2503,7 @@ class DuelDecisionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(kwargs, self.model.__name__)
         self._ensure_auth()
         return super().bulk_create(objs, *args, **kwargs)
 
