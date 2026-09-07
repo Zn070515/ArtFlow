@@ -74,7 +74,7 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 ## CI and local gates
 
-The repository CI covers Linux SQLite quality checks, Windows application checks, PostgreSQL integration, workflow linting, dependency audit, CodeQL, and a Git-history secret scan. The PostgreSQL integration verifies migrations, `doctor`, `/healthz/`, repeated demo seeding, and the full test suite.
+The repository CI covers Linux SQLite quality checks, Windows application checks, PostgreSQL integration, the scoped `entry_access` Pyright gate, a Chromium browser runtime smoke, workflow linting, dependency audit, CodeQL, and a Git-history secret scan. The PostgreSQL integration verifies migrations, `doctor`, `/healthz/`, repeated demo seeding, the browser-reachable health endpoint, and the full test suite.
 
 Before submitting a branch, run the applicable local gates:
 
