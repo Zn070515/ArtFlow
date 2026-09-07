@@ -65,6 +65,23 @@ Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的�
 JudgeSeat、正式扫码页或业务工作区前，必须先完成 PostgreSQL 并发/恢复彩排和真实角色
 流程验证。
 
+## M2 渐进式能力门禁
+
+每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
+已经具备 Production 资格。
+
+| 能力 | 必须通过的本地/CI 门禁 | 标记 Production 前的额外场景 |
+| --- | --- | --- |
+| M2-A 临时入口基础 | `entry_access` scoped Pyright、mypy、Django/pytest、PostgreSQL 测试、Playwright runtime smoke | 真实 Staff/公共兑换彩排、撤销/重放、恢复 |
+| JudgeSeat / JudgeSession | TypeScript client check、Playwright 浏览器流程、PostgreSQL 并发测试 | 缺席评委、过期会话、`STAFF_PROXY`、纸笔 DR |
+| Ticket / Check-in | TypeScript client check、Playwright 资格流程、服务测试 | 重复票、已检票状态、投票边界、公共端失败 DR |
+| 电子直录分 | 类型化 payload/state client、Playwright 提交/重试流程、PostgreSQL 竞态测试 | ACK 丢失、重复命令、错误目标、panel 变化 HOLD |
+| Production 发布 | 以上全部门禁、彩排脚本、安全门禁、备份/恢复证据 | 真实角色现场彩排并保留报告 |
+
+门禁覆盖随能力推进扩大，不允许为了通过新能力而静默移除既有门禁。Playwright 初始
+检查只读的 `/healthz/`；进入 Judge/Ticket 流程后，测试必须使用可丢弃数据，携带 bearer
+token 的用例关闭 trace/video/screenshot，避免凭据进入测试产物。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：
@@ -72,6 +89,8 @@ JudgeSeat、正式扫码页或业务工作区前，必须先完成 PostgreSQL �
 ```powershell
 npm ci
 npm run check:css
+npm run check:client
+npm run test:client
 uv run python manage.py collectstatic --noinput --clear
 ```
 
@@ -81,10 +100,18 @@ uv run python manage.py collectstatic --noinput --clear
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
+npm run check:pyright:entry-access
 uv run python manage.py check
 uv run python manage.py makemigrations --check --dry-run
 uv run pytest -q --cov
 pwsh -NoProfile -File scripts\check_docs.ps1
+```
+
+运行时浏览器门禁要求服务已启动，并使用本地/Compose 回环地址：
+
+```powershell
+npx playwright install chromium
+npm run test:e2e
 ```
 
 PostgreSQL 验收和恢复演练：
