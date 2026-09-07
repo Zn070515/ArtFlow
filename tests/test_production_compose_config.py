@@ -60,7 +60,7 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert compose["configs"]["caddyfile"]["file"] == "./Caddyfile"
     caddyfile = (PRODUCTION_COMPOSE_PATH.parent / "Caddyfile").read_text(encoding="utf-8")
     assert "request_body" in caddyfile
-    assert "max_size 120MB" in caddyfile
+    assert "max_size 520MB" in caddyfile
     assert "header -Server" in caddyfile
     assert "reverse_proxy web:8000" in caddyfile
 
