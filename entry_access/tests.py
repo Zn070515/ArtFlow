@@ -566,6 +566,19 @@ class EntryAccessHttpTests(TestCase):
         self.assertGreaterEqual(len(payload["token"]), 43)
         self.assertNotEqual(payload["token"], grant.token_digest)
 
+    def test_issue_rejects_fractional_json_values_without_truncating(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("entry_access:grant_issue"),
+            data={"entry_point_id": 1.5, "ttl_seconds": 300.5},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
+        self.assertEqual(AccessGrant.objects.count(), 0)
+
     def test_redeem_is_explicit_post_and_does_not_put_token_in_url(self):
         issued = issue_access_grant(
             self.entry_point,

@@ -33,19 +33,24 @@ def _invalid_request(error):
     return JsonResponse({"detail": error.messages, "reason_code": "INVALID_REQUEST"}, status=400)
 
 
+def _required_json_int(payload, key):
+    value = payload[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError
+    return value
+
+
 @staff_required
 @require_POST
 def issue_grant(request):
     try:
         payload = _json_payload(request)
-        entry_point_id = int(payload["entry_point_id"])
-        ttl_seconds = payload["ttl_seconds"]
-        if isinstance(ttl_seconds, bool):
-            raise ValueError
-        ttl_seconds = int(ttl_seconds)
+        entry_point_id = _required_json_int(payload, "entry_point_id")
+        ttl_seconds = _required_json_int(payload, "ttl_seconds")
         round_id = payload.get("round_id")
         if round_id is not None:
-            round_id = int(round_id)
+            if isinstance(round_id, bool) or not isinstance(round_id, int):
+                raise ValueError
         entry_point = get_object_or_404(EntryPoint, pk=entry_point_id)
         selected_round = (
             get_object_or_404(ContestRound, pk=round_id) if round_id is not None else None
