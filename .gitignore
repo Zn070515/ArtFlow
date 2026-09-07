@@ -40,6 +40,7 @@ node_modules/
 dist/
 !static/dist/
 !static/dist/rapid_score.js
+!static/dist/*.js
 backups/
 
 logs/**
