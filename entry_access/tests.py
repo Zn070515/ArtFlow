@@ -1,4 +1,6 @@
+import hashlib
 from datetime import timedelta
+from unittest import skipUnless
 
 from common.authority import (
     ACCESS_GRANT_STATE,
@@ -13,13 +15,21 @@ from core.models import Activity
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import SimpleTestCase, TestCase
+from django.db import close_old_connections, connection
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.urls import get_resolver
 from django.utils import timezone
 from singer_contest.models import ContestRound
 
 from .models import AccessGrant, EntryPoint, EphemeralSession
-from .services import create_entry_point, deactivate_entry_point, issue_access_grant
+from .services import (
+    AccessRequestMeta,
+    authenticate_ephemeral_session,
+    create_entry_point,
+    deactivate_entry_point,
+    issue_access_grant,
+    redeem_access_grant,
+)
 
 User = get_user_model()
 
@@ -230,3 +240,188 @@ class EntryAccessIssuanceTests(TestCase):
 
         with self.assertRaises(PermissionDenied):
             issue_access_grant(self.entry_point, actor=self.staff, ttl=timedelta(minutes=5))
+
+
+class EntryAccessRedemptionTests(TestCase):
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Access redemption test", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        other_activity = Activity.objects.create(
+            title="Other activity", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        self.other_activity = other_activity
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="redemption-staff", password="pass", role=User.Role.STAFF
+            )
+        self.entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.JUDGE,
+            label="Judge bootstrap",
+            actor=self.staff,
+        )
+        self.issued = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+
+    def test_redeem_creates_separate_short_lived_session(self):
+        result = redeem_access_grant(
+            self.issued.token,
+            request_meta=AccessRequestMeta(ip_address="198.51.100.7"),
+        )
+
+        self.issued.grant.refresh_from_db()
+        self.assertIsNotNone(self.issued.grant.redeemed_at)
+        self.assertNotEqual(result.token, result.session.token_digest)
+        self.assertEqual(result.session.grant_id, self.issued.grant.pk)
+        self.assertEqual(result.session.kind, self.issued.grant.kind)
+        self.assertEqual(result.session.activity_id, self.issued.grant.activity_id)
+        self.assertLessEqual(result.session.expires_at, self.issued.grant.expires_at)
+        audit = AuditLog.objects.get(action_type=AuditLog.ActionType.ACCESS_GRANT_REDEEM)
+        self.assertIsNone(audit.operator)
+        self.assertEqual(audit.ip_address, "198.51.100.7")
+        self.assertNotIn(
+            result.token, " ".join([audit.target, audit.old_value, audit.new_value, audit.note])
+        )
+
+    def test_redeem_is_single_use(self):
+        redeem_access_grant(self.issued.token)
+
+        with self.assertRaisesMessage(ValidationError, "临时访问授权无效"):
+            redeem_access_grant(self.issued.token)
+
+        self.assertEqual(EphemeralSession.objects.count(), 1)
+
+    def test_redeem_rejects_malformed_unknown_and_expired_tokens(self):
+        for token in ("", "x" * 129, "not-a-real-token"):
+            with self.subTest(token=token), self.assertRaises(ValidationError):
+                redeem_access_grant(token)
+
+        expired_token = "expired-token"
+        with authority_write(ACCESS_GRANT_STATE):
+            AccessGrant.objects.create(
+                entry_point=self.entry_point,
+                kind=EntryPoint.Kind.JUDGE,
+                activity=self.activity,
+                token_digest=hashlib.sha256(expired_token.encode()).hexdigest(),
+                expires_at=timezone.now() - timedelta(seconds=1),
+            )
+
+        with self.assertRaisesMessage(ValidationError, "临时访问授权无效"):
+            redeem_access_grant(expired_token)
+
+    def test_redeem_rejects_revoked_grant(self):
+        with authority_write(ACCESS_GRANT_STATE):
+            self.issued.grant.revoked_at = timezone.now()
+            self.issued.grant.save(update_fields=["revoked_at"])
+
+        with self.assertRaisesMessage(ValidationError, "临时访问授权无效"):
+            redeem_access_grant(self.issued.token)
+
+    def test_session_authentication_enforces_exact_scope(self):
+        result = redeem_access_grant(self.issued.token)
+        authenticated = authenticate_ephemeral_session(
+            result.token,
+            expected_kind=EntryPoint.Kind.JUDGE,
+            activity=self.activity,
+        )
+
+        self.assertEqual(authenticated.pk, result.session.pk)
+        authenticated.refresh_from_db()
+        self.assertIsNotNone(authenticated.last_seen_at)
+
+        with self.assertRaises(ValidationError):
+            authenticate_ephemeral_session(
+                result.token,
+                expected_kind=EntryPoint.Kind.SCANNER,
+                activity=self.activity,
+            )
+        with self.assertRaises(ValidationError):
+            authenticate_ephemeral_session(
+                result.token,
+                expected_kind=EntryPoint.Kind.JUDGE,
+                activity=self.other_activity,
+            )
+
+    def test_session_authentication_rejects_expired_session(self):
+        session_token = "expired-session"
+        with authority_write(EPHEMERAL_SESSION_STATE):
+            grant = self._expired_session_grant()
+            EphemeralSession.objects.create(
+                grant=grant,
+                kind=grant.kind,
+                activity=grant.activity,
+                token_digest=hashlib.sha256(session_token.encode()).hexdigest(),
+                expires_at=timezone.now() - timedelta(seconds=1),
+            )
+
+        with self.assertRaises(ValidationError):
+            authenticate_ephemeral_session(
+                session_token,
+                expected_kind=EntryPoint.Kind.JUDGE,
+                activity=self.activity,
+            )
+
+    def _expired_session_grant(self):
+        with authority_write(ACCESS_GRANT_STATE):
+            return AccessGrant.objects.create(
+                entry_point=self.entry_point,
+                kind=EntryPoint.Kind.JUDGE,
+                activity=self.activity,
+                token_digest=hashlib.sha256(b"expired-session-grant").hexdigest(),
+                expires_at=timezone.now() + timedelta(minutes=5),
+            )
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class EntryAccessRedemptionConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Concurrent access test", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="concurrent-access-staff", password="pass", role=User.Role.STAFF
+            )
+        entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.SCANNER,
+            label="Scanner bootstrap",
+            actor=staff,
+        )
+        self.token = issue_access_grant(
+            entry_point,
+            actor=staff,
+            ttl=timedelta(minutes=5),
+        ).token
+
+    def test_concurrent_redeem_creates_one_session(self):
+        import threading
+
+        results = []
+        barrier = threading.Barrier(2)
+
+        def redeem():
+            close_old_connections()
+            try:
+                barrier.wait(timeout=10)
+                results.append(redeem_access_grant(self.token))
+            except Exception as error:  # pragma: no cover - assertion below reports it
+                results.append(error)
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=redeem) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(sum(not isinstance(result, Exception) for result in results), 1)
+        self.assertEqual(EphemeralSession.objects.count(), 1)
