@@ -8,16 +8,19 @@
 
 ```powershell
 # 1) 复制生产环境变量清单，逐项替换为真实值（生产配置校验会拒绝占位值）
-Copy-Item .env.production.example .env
+Copy-Item .env.production.example .env.production
 #    APP_ENV=production, DEBUG=False, 非占位 SECRET_KEY/ADMIN_LOGIN_KEY,
-#    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, DATABASE_ENGINE=postgresql + POSTGRES_*
+#    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, CADDY_SITE_ADDRESS,
+#    DATABASE_ENGINE=postgresql + POSTGRES_*（生产 manifest 固定
+#    TRUST_X_FORWARDED_FOR=true、POSTGRES_HOST=db）
 
-# 2) 启动生产类栈（Postgres + web），等待健康检查
-docker compose up --build --wait
-Invoke-WebRequest http://127.0.0.1:8000/healthz/   # 应返回 200（匿名、仅通用状态）
+# 2) 只验证并启动显式生产栈（Postgres + web + Caddy proxy），等待健康检查
+docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
+docker compose --env-file .env.production -f deploy/compose.production.yml up --build --wait
+Invoke-WebRequest https://<公开域名>/healthz/   # 应返回 200（匿名、仅通用状态）
 
 # 3) 运行时诊断（只读）
-docker compose exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok
+docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok
 ```
 
 ## 1. 发布门禁（自动化）
@@ -25,7 +28,7 @@ docker compose exec web python manage.py doctor    # Configuration/Database/Migr
 ```powershell
 pwsh -NoProfile -File scripts/verify.ps1
 ```
-涵盖：容器契约（db/web 服务、healthcheck、named volumes、Postgres 只绑 127.0.0.1、非 root 运行、.env/.git 排除）、CI workflow 契约、`docker compose config`、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。
+涵盖：根开发 Compose 容器契约、显式 `deploy/compose.production.yml` 的生产契约与 `docker compose -f deploy/compose.production.yml config --quiet`（只验证配置，不启动或销毁生产服务）、CI workflow 契约、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。
 
 ## 2. PostgreSQL 验收（自动化）
 
@@ -113,11 +116,12 @@ pwsh -NoProfile -File scripts\verify_app_backup_restore.ps1 -ComposeProjectName 
 - **Expected**：缺分仍不能锁定；评分审计含 old/new 明细。
 - **[automated]** 评分审计明细 + `staff_panel/tests.py` 锁/解锁回归已覆盖。
 
-### 4.10 人气奖重算
-- **Setup**：A 锁定获奖（投票会话一致）。
-- **Execute**：解锁 → B 获胜 → 重新锁定。
-- **Expected**：任何时候只有当前一个"最佳人气奖"，来源投票会话一致。
-- **[manual]** 需人工用真实投票会话驱动人气奖重算确认。
+### 4.10 AWARD 核定、重试、stale 与解锁重算
+- **Setup**：从 Production 模板克隆并冻结包含 AWARD 节点的 RulesetVersion。若 AWARD 消费投票，绑定 purpose 一致的 VoteSession，并在核定前锁定这个被消费的原始输入；不依赖投票的 AWARD 不需要 VoteSession。
+- **Execute**：resolve 后记录 `READY_TO_CONFIRM` 的 StageResult 与其 `StageAwardDecision`；确认正式 Award 列表/导出尚无该候选。POST `staff:stage_result_confirm` 后再重复提交一次核定。随后解锁 StageResult，修改其被消费输入，尝试核定旧候选，再 resolve 并核定新候选。
+- **Expected**：正式链路严格为 `AWARD → StageAwardDecision → CONFIRM → Award`。`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority；Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 `source_stage_result.status == CONFIRMED` 的 Award。`VoteSession 锁定本身不会创建 Award`；首次核定只物化一份来源完整的 Award，重复核定不重复；input fingerprint 或 result version 已变化的 stale 候选不能物化；解锁后旧来源赛段不再 `CONFIRMED`，所以旧 Award 不进入正式列表/导出，新候选必须重新核定。
+- **Legacy provenance**：`Award.source_vote_session` 只解释可能存在的历史行，不是当前 Award authority。删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。
+- **[automated + manual]** 自动回归覆盖 vote lock 不颁奖、候选/核定、重复核定、stale 拒绝和解锁；人工演练核对 Staff 正式列表与导出只显示当前已核定来源。
 
 ### 4.11 过期评分 Excel
 - **Setup**：导入的 workbook 的报名名单/评委名单/规则版本或指纹与当前轮次不一致（§15.5）。

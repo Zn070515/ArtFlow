@@ -34,7 +34,7 @@ from core.services import (
 )
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -92,6 +92,7 @@ from singer_contest.models import (
     StageResult,
 )
 from singer_contest.services import (
+    IdempotencyConflictError,
     StaleScoreVersionError,
     _active_judges,
     _current_frozen_version,
@@ -133,6 +134,7 @@ from staff_panel.forms import (
     ManualDecisionForm,
     ProgramReviewForm,
     PublicPostForm,
+    RapidScoreCommandForm,
     RoundGroupsForm,
     RoundRunningOrderForm,
     ScoringRubricProvisionForm,
@@ -929,19 +931,65 @@ def round_create(request):
             )
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
-            contest_round = ContestRound.objects.create(
-                activity=locked_activity,
-                round_type=form.cleaned_data["round_type"],
-                scoring_mode=form.cleaned_data["scoring_mode"],
-                name=form.cleaned_data["name"],
-                advance_count=form.cleaned_data["advance_count"],
-                sequence=form.cleaned_data["sequence"],
-                order_policy=form.cleaned_data["order_policy"],
-                tie_order_policy=form.cleaned_data["tie_order_policy"],
-                roster_source=form.cleaned_data["roster_source"],
-                roster_source_stage=form.cleaned_data["roster_source_stage"],
-                rubric=form.cleaned_data["rubric"],
-            )
+            sequence = form.cleaned_data["sequence"]
+            if (
+                sequence is not None
+                and ContestRound.objects.filter(
+                    activity=locked_activity, sequence=sequence
+                ).exists()
+            ):
+                form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
+                return render(
+                    request,
+                    "staff_panel/round_form.html",
+                    {
+                        "error": _form_error(form),
+                        "activities": Activity.objects.filter(
+                            activity_type=Activity.Type.SINGER_CONTEST
+                        ),
+                        "round_types": _choices(ContestRound.RoundType),
+                        "scoring_modes": _choices(ContestRound.ScoringMode),
+                        "order_policies": _choices(ContestRound.OrderPolicy),
+                        "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+                        "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                    },
+                )
+            try:
+                with transaction.atomic():
+                    create_kwargs = {
+                        "activity": locked_activity,
+                        "round_type": form.cleaned_data["round_type"],
+                        "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "name": form.cleaned_data["name"],
+                        "advance_count": form.cleaned_data["advance_count"],
+                        "order_policy": form.cleaned_data["order_policy"],
+                        "tie_order_policy": form.cleaned_data["tie_order_policy"],
+                        "roster_source": form.cleaned_data["roster_source"],
+                        "roster_source_stage": form.cleaned_data["roster_source_stage"],
+                        "rubric": form.cleaned_data["rubric"],
+                    }
+                    if sequence is not None:
+                        create_kwargs["sequence"] = sequence
+                    contest_round = ContestRound.objects.create(**create_kwargs)
+            except IntegrityError:
+                form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
+                return render(
+                    request,
+                    "staff_panel/round_form.html",
+                    {
+                        "error": _form_error(form),
+                        "activities": Activity.objects.filter(
+                            activity_type=Activity.Type.SINGER_CONTEST
+                        ),
+                        "round_types": _choices(ContestRound.RoundType),
+                        "scoring_modes": _choices(ContestRound.ScoringMode),
+                        "order_policies": _choices(ContestRound.OrderPolicy),
+                        "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+                        "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                    },
+                )
             log_action(
                 request,
                 AuditLog.ActionType.OTHER,
@@ -1106,10 +1154,21 @@ def round_scores_api(request, pk):
         payload = json.loads(request.body or "{}")
     except json.JSONDecodeError:
         return JsonResponse({"detail": "请求体不是有效 JSON。"}, status=400)
-    base_version = payload.get("base_version")
+    command_form = RapidScoreCommandForm(
+        {"command_id": payload.get("command_id"), "base_version": payload.get("base_version")}
+    )
+    if not command_form.is_valid():
+        return JsonResponse(
+            {"detail": command_form.errors.get_json_data(), "reason_code": "INVALID_REQUEST"},
+            status=400,
+        )
+    base_version = command_form.cleaned_data["base_version"]
+    command_id = command_form.cleaned_data["command_id"]
     cells = payload.get("cells", [])
-    if base_version is None:
-        return JsonResponse({"detail": "缺少 base_version。"}, status=400)
+    if not isinstance(cells, list):
+        return JsonResponse(
+            {"detail": "cells 必须是列表。", "reason_code": "INVALID_REQUEST"}, status=400
+        )
 
     score_values = {}
     for cell in cells:
@@ -1123,12 +1182,36 @@ def round_scores_api(request, pk):
     # ``apply_scores_if_version`` owns the Activity→Round transaction and its locks;
     # the view holds no row lock itself (M0 canonical order, §13.2 stale-guard).
     try:
-        result = apply_scores_if_version(contest_round.pk, base_version, score_values, request.user)
+        result = apply_scores_if_version(
+            contest_round.pk,
+            base_version,
+            score_values,
+            request.user,
+            command_id=command_id,
+        )
+    except IdempotencyConflictError:
+        return JsonResponse(
+            {
+                "detail": "同一 command_id 已用于不同的评分请求。",
+                "reason_code": IdempotencyConflictError.reason_code,
+                "conflict": True,
+            },
+            status=409,
+        )
     except StaleScoreVersionError:
         contest_round.refresh_from_db()
-        return JsonResponse({**_round_grid_payload(contest_round), "conflict": True}, status=409)
+        return JsonResponse(
+            {
+                **_round_grid_payload(contest_round),
+                "conflict": True,
+                "reason_code": "STALE_SCORE_VERSION",
+            },
+            status=409,
+        )
     except ValidationError as error:
-        return JsonResponse({"detail": error.messages}, status=400)
+        return JsonResponse(
+            {"detail": error.messages, "reason_code": "INVALID_REQUEST"}, status=400
+        )
     except PermissionDenied:
         return JsonResponse({"detail": "权限不足。"}, status=403)
 

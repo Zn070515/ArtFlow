@@ -14,8 +14,10 @@ module generalises it so RulesetVersion and StageResult share one mechanism rath
 """
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Any
 
 # Write-authority scope identifiers.
 RULESET_FREEZE = "ruleset.freeze"
@@ -24,6 +26,52 @@ ACTIVITY_STATE = "activity.state"
 CONTEST_ROUND_STATE = "contestround.state"
 VOTE_SESSION_STATE = "votesession.state"
 SCORE_SUMMARY_RECALCULATE = "scoresummary.recalculate"
+TEST_DATA_CLEANUP = "test_data.cleanup"
+ACCOUNT_AUTHORITY = "account.authority"
+
+
+@dataclass(frozen=True)
+class BulkCreateOptions:
+    """Parsed Django ``QuerySet.bulk_create`` conflict options.
+
+    Django's public signature after ``objs`` is:
+    ``batch_size, ignore_conflicts, update_conflicts, update_fields, unique_fields``.
+    Guarded queryset wrappers that keep ``*args, **kwargs`` must inspect both forms
+    before delegating, otherwise a positional ``update_conflicts=True`` can bypass the
+    model-specific authority check and reach ORM SQL.
+    """
+
+    update_conflicts: bool
+    update_fields: tuple[Any, ...]
+    unique_fields: tuple[Any, ...]
+
+
+def _option_tuple(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
+
+
+def parse_bulk_create_options(
+    args: tuple[Any, ...], kwargs: Mapping[str, Any]
+) -> BulkCreateOptions:
+    """Read conflict-upsert options from positional or keyword bulk_create args.
+
+    This intentionally mirrors Django's current call signature without normalizing
+    or mutating the actual call arguments passed onward to ``super().bulk_create``.
+    """
+
+    update_conflicts = args[2] if len(args) >= 3 else kwargs.get("update_conflicts", False)
+    update_fields = args[3] if len(args) >= 4 else kwargs.get("update_fields")
+    unique_fields = args[4] if len(args) >= 5 else kwargs.get("unique_fields")
+    return BulkCreateOptions(
+        update_conflicts=bool(update_conflicts),
+        update_fields=_option_tuple(update_fields),
+        unique_fields=_option_tuple(unique_fields),
+    )
+
 
 _scope = threading.local()
 

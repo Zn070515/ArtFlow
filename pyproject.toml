@@ -179,6 +179,10 @@ module = [
     # churns them without adding safety. Treated like common.tests (gradual).
     "common.test_characterization",
     "common.test_contest_domain_characterization",
+    # The authority matrix deliberately invokes dynamic Django model/Admin entry
+    # points across applications. Its runtime contracts are covered by the matrix;
+    # gradual typing avoids false positives from dynamically generated managers.
+    "common.test_authority_matrix",
     "config.tests",
 ]
 disallow_incomplete_defs = false

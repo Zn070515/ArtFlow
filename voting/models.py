@@ -1,4 +1,11 @@
-from common.authority import VOTE_SESSION_STATE, authority_authorized
+from typing import Any
+
+from common.authority import (
+    TEST_DATA_CLEANUP,
+    VOTE_SESSION_STATE,
+    authority_authorized,
+    parse_bulk_create_options,
+)
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
@@ -27,6 +34,14 @@ def _relation_pk(value):
     return getattr(value, "pk", value)
 
 
+def _reject_conflict_upsert(args, kwargs, model_name: str) -> None:
+    if parse_bulk_create_options(args, kwargs).update_conflicts:
+        raise ValidationError(
+            f"{model_name} does not support bulk_create(update_conflicts=True); "
+            "use the audited authority service or ordinary bulk_create()."
+        )
+
+
 def _ensure_vote_session_origins(*session_ids: int | None) -> None:
     for session_id in dict.fromkeys(session_id for session_id in session_ids if session_id):
         _ensure_vote_session_mutable(session_id)
@@ -36,6 +51,142 @@ def _session_id_for(model, pk: int | None) -> int | None:
     if not pk:
         return None
     return model._base_manager.filter(pk=pk).values_list("vote_session_id", flat=True).first()
+
+
+def _vote_session_activity_id(vote_session_id: int | None) -> int | None:
+    if not vote_session_id:
+        return None
+    return (
+        VoteSession._base_manager.filter(pk=vote_session_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _singer_activity_id(singer_id: int | None) -> int | None:
+    if not singer_id:
+        return None
+    from singer_contest.models import SingerRegistration
+
+    return (
+        SingerRegistration._base_manager.filter(pk=singer_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _ensure_vote_option_update_consistent(queryset, kwargs) -> None:
+    if not {"vote_session", "vote_session_id", "singer", "singer_id"}.intersection(kwargs):
+        return
+    new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+    new_singer_id = _relation_pk(kwargs.get("singer", kwargs.get("singer_id")))
+    for row in queryset.values("vote_session_id", "singer_id"):
+        current_activity_id = _vote_session_activity_id(row["vote_session_id"])
+        if new_session_id and new_session_id != row["vote_session_id"]:
+            raise ValidationError("Vote option cannot move to another vote session.")
+        target_session_activity_id = (
+            _vote_session_activity_id(new_session_id) if new_session_id else current_activity_id
+        )
+        target_singer_activity_id = (
+            _singer_activity_id(new_singer_id)
+            if new_singer_id
+            else _singer_activity_id(row["singer_id"])
+        )
+        if (
+            target_session_activity_id
+            and current_activity_id
+            and target_session_activity_id != current_activity_id
+        ):
+            raise ValidationError("Vote option cannot move to another activity.")
+        if (
+            target_session_activity_id
+            and target_singer_activity_id
+            and target_singer_activity_id != target_session_activity_id
+        ):
+            raise ValidationError("Vote option singer must belong to the vote activity.")
+
+
+def _ensure_vote_ballot_update_consistent(queryset, kwargs) -> None:
+    if not {"vote_session", "vote_session_id"}.intersection(kwargs):
+        return
+    new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+    if not new_session_id:
+        return
+    for current_session_id in queryset.values_list("vote_session_id", flat=True):
+        if current_session_id != new_session_id:
+            raise ValidationError("Vote ballot cannot move to another vote session.")
+
+
+def _ensure_vote_option_instance_consistent(option) -> None:
+    if option._state.adding or not option.pk:
+        return
+    stored_session_id = _stored_relation_id(option, "vote_session")
+    if stored_session_id != option.vote_session_id:
+        raise ValidationError("Vote option cannot move to another vote session.")
+    target_session_activity_id = _vote_session_activity_id(option.vote_session_id)
+    target_singer_activity_id = _singer_activity_id(option.singer_id)
+    if (
+        target_session_activity_id
+        and target_singer_activity_id
+        and target_singer_activity_id != target_session_activity_id
+    ):
+        raise ValidationError("Vote option singer must belong to the vote activity.")
+
+
+def _ensure_vote_ballot_instance_consistent(ballot) -> None:
+    if ballot._state.adding or not ballot.pk:
+        return
+    stored_session_id = _stored_relation_id(ballot, "vote_session")
+    if stored_session_id != ballot.vote_session_id:
+        raise ValidationError("Vote ballot cannot move to another vote session.")
+
+
+def _ensure_vote_record_instance_consistent(record) -> None:
+    if record._state.adding or not record.pk:
+        return
+    stored = type(record)._base_manager.filter(pk=record.pk).values("vote_session_id").first()
+    if stored and stored["vote_session_id"] != record.vote_session_id:
+        raise ValidationError("Vote record cannot move to another vote session.")
+    if record.ballot_id and _session_id_for(VoteBallot, record.ballot_id) != record.vote_session_id:
+        raise ValidationError("Vote record ballot must belong to the vote session.")
+    if (
+        record.vote_option_id
+        and _session_id_for(VoteOption, record.vote_option_id) != record.vote_session_id
+    ):
+        raise ValidationError("Vote record option must belong to the vote session.")
+
+
+def _ensure_vote_record_update_consistent(queryset, kwargs) -> None:
+    if not {
+        "vote_session",
+        "vote_session_id",
+        "ballot",
+        "ballot_id",
+        "vote_option",
+        "vote_option_id",
+    }.intersection(kwargs):
+        return
+    new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+    new_ballot_id = _relation_pk(kwargs.get("ballot", kwargs.get("ballot_id")))
+    new_option_id = _relation_pk(kwargs.get("vote_option", kwargs.get("vote_option_id")))
+    for row in queryset.values("vote_session_id", "ballot_id", "vote_option_id"):
+        target_session_id = new_session_id or row["vote_session_id"]
+        if target_session_id != row["vote_session_id"]:
+            raise ValidationError("Vote record cannot move to another vote session.")
+        target_ballot_session_id = (
+            _session_id_for(VoteBallot, new_ballot_id)
+            if new_ballot_id
+            else _session_id_for(VoteBallot, row["ballot_id"])
+        )
+        target_option_session_id = (
+            _session_id_for(VoteOption, new_option_id)
+            if new_option_id
+            else _session_id_for(VoteOption, row["vote_option_id"])
+        )
+        if target_ballot_session_id and target_ballot_session_id != target_session_id:
+            raise ValidationError("Vote record ballot must belong to the vote session.")
+        if target_option_session_id and target_option_session_id != target_session_id:
+            raise ValidationError("Vote record option must belong to the vote session.")
 
 
 def _vote_record_session_origins(record) -> tuple[int | None, ...]:
@@ -97,6 +248,28 @@ class VoteSessionQuerySet(models.QuerySet):
                     raise ValidationError("投票锁定后，投票配置不可直接修改。")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        options = parse_bulk_create_options(args, kwargs)
+        if options.update_conflicts:
+            update_fields = set(options.update_fields)
+            self._ensure_state_authorized(update_fields)
+            if self.configuration_fields.intersection(update_fields):
+                for vote_session in objs:
+                    lookup = {
+                        field: getattr(vote_session, field) for field in options.unique_fields
+                    }
+                    if self.model._base_manager.filter(**lookup, is_locked=True).exists():
+                        raise ValidationError("投票锁定后，投票配置不可直接修改。")
+        for vote_session in objs:
+            vote_session._ensure_initial_state_authorized()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def delete(self):
+        for vote_session in self:
+            vote_session._ensure_deletion_authorized()  # type: ignore[attr-defined]
+        return super().delete()
+
 
 VoteSessionManager = models.Manager.from_queryset(VoteSessionQuerySet)
 
@@ -155,8 +328,30 @@ class VoteSession(models.Model):
     def __str__(self):
         return self.name
 
-    def save(self, *args, **kwargs):
-        if not self._state.adding and self.pk:
+    def _ensure_initial_state_authorized(self):
+        if authority_authorized(VOTE_SESSION_STATE):
+            return
+        if self.is_open or self.is_locked:
+            raise ValidationError("投票必须以关闭且未锁定的初始状态创建。")
+
+    def _ensure_deletion_authorized(self):
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("投票删除需要显式测试数据清理权限。")
+        if (
+            not self.is_test_data
+            or not self.activity.is_test_mode
+            or self.is_open
+            or self.is_locked
+        ):
+            raise ValidationError("只有关闭且未锁定的测试投票可以删除。")
+        from singer_contest.services import ensure_vote_not_consumed_by_confirmed_stage
+
+        ensure_vote_not_consumed_by_confirmed_stage(self)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding:
+            self._ensure_initial_state_authorized()
+        elif self.pk:
             update_fields = kwargs.get("update_fields")
             compared_configuration_fields = (
                 self._configuration_fields
@@ -186,7 +381,11 @@ class VoteSession(models.Model):
                 )
             ):
                 raise ValidationError("投票锁定后，投票配置不可直接修改。")
-        return super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_deletion_authorized()
+        return super().delete(*args, **kwargs)
 
 
 class VoteBallotQuerySet(models.QuerySet):
@@ -201,6 +400,7 @@ class VoteBallotQuerySet(models.QuerySet):
                 *self.values_list("vote_session_id", flat=True),
                 _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id"))),
             )
+        _ensure_vote_ballot_update_consistent(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -208,6 +408,7 @@ class VoteBallotQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             _ensure_vote_session_mutable(obj.vote_session_id)
@@ -219,6 +420,7 @@ class VoteBallotQuerySet(models.QuerySet):
             _ensure_vote_session_origins(
                 _stored_relation_id(obj, "vote_session"), obj.vote_session_id
             )
+            _ensure_vote_ballot_instance_consistent(obj)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -247,6 +449,7 @@ class VoteBallot(models.Model):
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
+        _ensure_vote_ballot_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -267,6 +470,7 @@ class VoteOptionQuerySet(models.QuerySet):
             _ensure_vote_session_mutable(
                 _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
             )
+        _ensure_vote_option_update_consistent(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -274,6 +478,7 @@ class VoteOptionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -287,6 +492,7 @@ class VoteOptionQuerySet(models.QuerySet):
                 _stored_relation_id(obj, "vote_session"), obj.vote_session_id
             )
             obj.clean()
+            _ensure_vote_option_instance_consistent(obj)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -318,6 +524,7 @@ class VoteOption(models.Model):
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
+        _ensure_vote_option_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -355,6 +562,7 @@ class VoteRecordQuerySet(models.QuerySet):
                     _relation_pk(kwargs.get("vote_option", kwargs.get("vote_option_id"))),
                 )
             )
+        _ensure_vote_record_update_consistent(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -362,6 +570,7 @@ class VoteRecordQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -378,6 +587,7 @@ class VoteRecordQuerySet(models.QuerySet):
         for obj in objs:
             obj.clean()
             _ensure_vote_session_origins(*_vote_record_session_origins(obj))
+            _ensure_vote_record_instance_consistent(obj)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -423,6 +633,7 @@ class VoteRecord(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         _ensure_vote_session_origins(*_vote_record_session_origins(self))
+        _ensure_vote_record_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

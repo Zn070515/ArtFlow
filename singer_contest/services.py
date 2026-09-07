@@ -15,14 +15,16 @@ from common.authority import (
     VOTE_SESSION_STATE,
     authority_write,
 )
-from common.business_rules import ensure_round_unlocked
+from common.business_rules import ensure_activity_unlocked, ensure_round_unlocked
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
-from core.policies import ActivityAction
+from core.models import Activity
+from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Max, Q, QuerySet
 from django.utils import timezone
 from ruleset.compiler import ExecutionPlan, compile_version
@@ -53,6 +55,7 @@ from .models import (
     RubricCriterion,
     ScoreRecord,
     ScoreSummary,
+    ScoreWriteReceipt,
     ScoringRubric,
     SingerRegistration,
     StageAwardDecision,
@@ -895,6 +898,52 @@ class StaleScoreVersionError(Exception):
         super().__init__(f"评分已过期，当前版本为 {current_version}。")
 
 
+class IdempotencyConflictError(Exception):
+    """A rapid-score command ID was already used for a different command payload."""
+
+    reason_code = "IDEMPOTENCY_CONFLICT"
+
+    def __init__(self):
+        super().__init__(self.reason_code)
+
+
+RAPID_SCORE_OPERATION = "rapid_score_apply"
+
+
+def _validated_score_command_id(command_id: object) -> str:
+    if not isinstance(command_id, str):
+        raise ValidationError("缺少 command_id。")
+    command_id = command_id.strip()
+    if not command_id or len(command_id) > 64:
+        raise ValidationError("command_id 无效。")
+    return command_id
+
+
+def _score_command_payload_hash(
+    contest_round: ContestRound,
+    base_version: int,
+    score_values: Mapping[tuple[int, int], object],
+) -> str:
+    """Hash a canonical, non-sensitive description of the score command.
+
+    The receipt never persists the cells themselves.  IDs, the optimistic version, and
+    the operation context make an accidental reuse across activity/round/version a
+    conflict instead of an authority bypass.
+    """
+    payload = {
+        "activity_id": contest_round.activity_id,
+        "base_version": base_version,
+        "cells": [
+            {"judge_id": judge_id, "score": str(score).strip(), "singer_id": singer_id}
+            for (singer_id, judge_id), score in sorted(score_values.items())
+        ],
+        "operation": RAPID_SCORE_OPERATION,
+        "round_id": contest_round.pk,
+    }
+    canonical = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 @transaction.atomic
 def apply_scores_if_version(
     round_id: int,
@@ -902,6 +951,7 @@ def apply_scores_if_version(
     score_values: Mapping[tuple[int, int], object],
     operator,
     *,
+    command_id: str,
     note: str = "",
 ) -> dict:
     """Apply a sparse cell save under the M0 Activity→Round lock order (M1-H).
@@ -914,21 +964,68 @@ def apply_scores_if_version(
     """
     if base_version is None:
         raise ValidationError("缺少 base_version。")
+    command_id = _validated_score_command_id(command_id)
+    if not getattr(operator, "pk", None):
+        raise PermissionDenied("评分操作缺少有效执行人。")
+    operator_model = get_user_model()
+    try:
+        locked_operator = operator_model.objects.select_for_update().get(pk=operator.pk)
+    except operator_model.DoesNotExist:
+        raise PermissionDenied("评分操作缺少有效执行人。") from None
+    try:
+        parsed_base_version = int(base_version)
+    except (TypeError, ValueError):
+        raise ValidationError("base_version 无效。") from None
     contest_round = ContestRound.objects.get(pk=round_id)
-    lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
+    locked_activity = Activity.objects.select_for_update().get(pk=contest_round.activity_id)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=round_id)
     )
+    if locked_round.activity_id != locked_activity.pk:
+        raise ValidationError("评分轮次活动上下文不一致。")
+    payload_hash = _score_command_payload_hash(locked_round, parsed_base_version, score_values)
+    try:
+        with transaction.atomic():
+            receipt = ScoreWriteReceipt.objects.create(
+                command_id=command_id,
+                operator=locked_operator,
+                operation=RAPID_SCORE_OPERATION,
+                payload_hash=payload_hash,
+                result_version=0,
+                result_payload={},
+                status=ScoreWriteReceipt.Status.PENDING,
+            )
+    except IntegrityError:
+        receipt = ScoreWriteReceipt.objects.select_for_update().get(command_id=command_id)
+        if (
+            receipt.operator_id != locked_operator.pk
+            or receipt.payload_hash != payload_hash
+            or receipt.operation != RAPID_SCORE_OPERATION
+        ):
+            raise IdempotencyConflictError() from None
+        if receipt.status != ScoreWriteReceipt.Status.SUCCEEDED:
+            raise ValidationError("评分写入回执仍在处理中。")
+        return receipt.result_payload
+    ensure_activity_unlocked(locked_activity)
+    ensure_activity_action_allowed(locked_activity, ActivityAction.SCORE)
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备比赛轮次后再录入评分。")
-    if int(base_version) != locked_round.score_version:
+    if parsed_base_version != locked_round.score_version:
         raise StaleScoreVersionError(locked_round.score_version)
-    apply_scores(locked_round, score_values, operator, note=note)
+    apply_scores(locked_round, score_values, locked_operator, note=note)
     locked_round.refresh_from_db()
-    return {
+    result = {
+        "status": ScoreWriteReceipt.Status.SUCCEEDED,
+        "reason_code": "SCORES_APPLIED",
         "version": locked_round.score_version,
         "matrix_complete": not missing_score_cells(locked_round),
     }
+    receipt.result_version = locked_round.score_version
+    receipt.result_payload = result
+    receipt.status = ScoreWriteReceipt.Status.SUCCEEDED
+    receipt.full_clean(validate_unique=False)
+    receipt.save(update_fields=["result_version", "result_payload", "status"])
+    return result
 
 
 @transaction.atomic

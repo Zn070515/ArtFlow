@@ -65,7 +65,7 @@ class ContestRoundForm(forms.Form):
         initial=ContestRound.ScoringMode.AVERAGE,
     )
     advance_count = forms.IntegerField(min_value=0, required=False, initial=0)
-    sequence = forms.IntegerField(min_value=1, required=False, initial=1)
+    sequence = forms.IntegerField(min_value=1, required=False)
     order_policy = forms.ChoiceField(
         choices=ContestRound.OrderPolicy.choices,
         required=False,
@@ -96,7 +96,7 @@ class ContestRoundForm(forms.Form):
         return self.cleaned_data.get("scoring_mode") or ContestRound.ScoringMode.AVERAGE
 
     def clean_sequence(self):
-        return self.cleaned_data.get("sequence") or 1
+        return self.cleaned_data.get("sequence")
 
     def clean_order_policy(self):
         return self.cleaned_data.get("order_policy") or ContestRound.OrderPolicy.REGISTRATION_ORDER
@@ -116,6 +116,19 @@ class ContestRoundForm(forms.Form):
 
     def clean_rubric(self):
         return self.cleaned_data.get("rubric") or None
+
+
+class RapidScoreCommandForm(forms.Form):
+    """Validate the bounded idempotency envelope for a JSON rapid-score save."""
+
+    command_id = forms.CharField(max_length=64)
+    base_version = forms.IntegerField()
+
+    def clean_command_id(self):
+        command_id = self.cleaned_data["command_id"].strip()
+        if not command_id:
+            raise forms.ValidationError("缺少 command_id。")
+        return command_id
 
 
 class RoundRunningOrderForm(forms.Form):

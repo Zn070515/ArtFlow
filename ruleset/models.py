@@ -1,10 +1,10 @@
 from typing import cast
 
-from common.authority import RULESET_FREEZE, authority_authorized
+from common.authority import RULESET_FREEZE, authority_authorized, parse_bulk_create_options
 from common.lifecycle import runtime_is_test
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 
 from .schema import content_hash, parse_definition
@@ -213,9 +213,43 @@ class RulesetVersionQuerySet(models.QuerySet):
             raise ValidationError("赛制版本最终状态跃迁是 service-only。")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
+    def _conflict_lookup(self, version, unique_fields) -> dict:
+        lookup = {}
+        for field in unique_fields:
+            field_name = (
+                self.model._meta.pk.name if field == "pk" else getattr(field, "name", field)
+            )
+            lookup[field_name] = getattr(version, field_name)
+        return lookup
+
+    def _ensure_conflict_upsert_not_rewriting_authority(self, versions, unique_fields) -> None:
+        protected = Q(status=RulesetVersion.Status.FROZEN) | Q(is_current=True)
+        for version in versions:
+            lookup = self._conflict_lookup(version, unique_fields) if unique_fields else {}
+            if not lookup and version.pk:
+                # Backends without a conflict target can still upsert an existing PK.
+                lookup = {self.model._meta.pk.name: version.pk}
+            if (
+                lookup
+                and self.model._base_manager.using(self.db)
+                .select_for_update()
+                .filter(**lookup)
+                .filter(protected)
+                .exists()
+            ):
+                raise ValidationError(
+                    "A frozen/current ruleset version cannot be conflict-upserted."
+                )
+
     def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
         if any(o.status == RulesetVersion.Status.FROZEN or o.is_current for o in objs):
             raise ValidationError("只有冻结服务可以产生已冻结/当前赛制版本。")
+        options = parse_bulk_create_options(args, kwargs)
+        if options.update_conflicts:
+            with transaction.atomic(using=self.db):
+                self._ensure_conflict_upsert_not_rewriting_authority(objs, options.unique_fields)
+                return super().bulk_create(objs, *args, **kwargs)
         return super().bulk_create(objs, *args, **kwargs)
 
 

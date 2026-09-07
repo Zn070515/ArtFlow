@@ -9,9 +9,11 @@ from common.authority import (
     authority_write,
 )
 from core.models import Activity
+from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.db.models.deletion import ProtectedError
+from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from voting.models import VoteBallot, VoteOption, VoteSession
 
@@ -258,3 +260,309 @@ class M1CoreFinalAuthorityTests(TestCase):
         for model in protected_models:
             self.assertEqual(model._meta.base_manager_name, "objects")
             self.assertIs(model._base_manager.model, model)
+
+
+class AdminAuthoritySurfaceTests(TestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/admin/")
+        self.request.user = User.objects.create_superuser(
+            "authority-surface-admin", "authority@example.com", "pass"
+        )
+
+    def assert_observation_only(self, model):
+        model_admin = admin.site._registry.get(model)
+        self.assertIsNotNone(model_admin, f"{model.__name__} must be observable in Admin")
+        assert model_admin is not None
+        self.assertTrue(model_admin.has_view_permission(self.request))
+        self.assertFalse(model_admin.has_add_permission(self.request))
+        self.assertFalse(model_admin.has_change_permission(self.request))
+        self.assertFalse(model_admin.has_delete_permission(self.request))
+
+    def assert_editable_metadata(self, model):
+        model_admin = admin.site._registry[model]
+        self.assertTrue(model_admin.has_add_permission(self.request))
+        self.assertTrue(model_admin.has_change_permission(self.request))
+        self.assertTrue(model_admin.has_delete_permission(self.request))
+
+    def test_raw_and_derived_contest_facts_are_observation_only(self):
+        from .models import CriterionScore, RoundEntry, RoundJudge
+
+        for model in (
+            ContestRound,
+            RoundEntry,
+            RoundJudge,
+            ScoreRecord,
+            CriterionScore,
+            ScoreSummary,
+            Award,
+        ):
+            with self.subTest(model=model.__name__):
+                self.assert_observation_only(model)
+
+    def test_contest_profile_and_rubric_metadata_remain_editable(self):
+        from .models import RubricCriterion, ScoringRubric
+
+        for model in (SingerRegistration, Judge, ScoringRubric, RubricCriterion):
+            with self.subTest(model=model.__name__):
+                self.assert_editable_metadata(model)
+
+    def test_activity_authority_is_service_only_but_presentation_metadata_remains_editable(self):
+        from core.admin import ActivityAdmin
+
+        activity_admin = ActivityAdmin(Activity, admin.site)
+        self.assertFalse(activity_admin.has_add_permission(self.request))
+        self.assertTrue(activity_admin.has_change_permission(self.request))
+        self.assertFalse(activity_admin.has_delete_permission(self.request))
+        self.assertEqual(
+            set(activity_admin.get_readonly_fields(self.request)),
+            {
+                "activity_type",
+                "phase",
+                "is_test_mode",
+                "data_lifecycle",
+                "is_locked",
+                "locked_at",
+                "locked_by",
+            },
+        )
+        self.assertTrue(
+            {"title", "subtitle", "description", "cover_image"}.isdisjoint(
+                activity_admin.get_readonly_fields(self.request)
+            )
+        )
+
+    def test_vote_authority_and_raw_vote_facts_are_observation_only(self):
+        from voting.models import VoteRecord
+
+        for model in (VoteSession, VoteOption, VoteBallot, VoteRecord):
+            with self.subTest(model=model.__name__):
+                self.assert_observation_only(model)
+
+    def test_file_facts_are_observation_only_but_operational_metadata_remains_editable(self):
+        from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
+
+        for model in (SubmissionFile, MaterialCheck):
+            with self.subTest(model=model.__name__):
+                self.assert_observation_only(model)
+        for metadata_model in (StaffNote, MaterialRequirement):
+            with self.subTest(model=metadata_model.__name__):
+                self.assert_editable_metadata(metadata_model)
+
+
+class ContestRoundCreationAuthorityTests(TestCase):
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Round creation", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def test_round_creation_rejects_non_initial_state_through_both_managers(self):
+        for manager, sequence in (
+            (ContestRound.objects, 1),
+            (ContestRound._base_manager, 2),
+        ):
+            with self.subTest(manager=manager.name):
+                with self.assertRaises(ValidationError):
+                    manager.create(
+                        activity=self.activity,
+                        round_type=ContestRound.RoundType.PRELIMINARY,
+                        sequence=sequence,
+                        status=ContestRound.Status.LOCKED,
+                        is_locked=True,
+                    )
+                self.assertFalse(
+                    ContestRound.objects.filter(activity=self.activity, sequence=sequence).exists()
+                )
+
+    def test_round_bulk_create_rejects_scoring_initial_state_through_both_managers(self):
+        for manager, sequence in (
+            (ContestRound.objects, 1),
+            (ContestRound._base_manager, 2),
+        ):
+            with self.subTest(manager=manager.name):
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            ContestRound(
+                                activity=self.activity,
+                                round_type=ContestRound.RoundType.PRELIMINARY,
+                                sequence=sequence,
+                                status=ContestRound.Status.SCORING,
+                            )
+                        ]
+                    )
+                self.assertFalse(
+                    ContestRound.objects.filter(activity=self.activity, sequence=sequence).exists()
+                )
+
+    def test_round_bulk_create_update_conflicts_rejects_state_change(self):
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            sequence=1,
+        )
+
+        with self.assertRaises(ValidationError):
+            ContestRound.objects.bulk_create(
+                [
+                    ContestRound(
+                        activity=self.activity,
+                        round_type=contest_round.round_type,
+                        sequence=contest_round.sequence,
+                        status=ContestRound.Status.SCORING,
+                    )
+                ],
+                update_conflicts=True,
+                update_fields=["status"],
+                unique_fields=["activity", "sequence"],
+            )
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.status, ContestRound.Status.DRAFT)
+
+    def test_round_bulk_create_positional_configuration_guard_through_both_managers(
+        self,
+    ):
+        for manager, sequence, original_name in (
+            (ContestRound.objects, 1, "Default positional original"),
+            (ContestRound._base_manager, 2, "Base positional original"),
+        ):
+            with self.subTest(manager=manager.name):
+                contest_round = ContestRound.objects.create(
+                    activity=self.activity,
+                    round_type=ContestRound.RoundType.PRELIMINARY,
+                    sequence=sequence,
+                    name=original_name,
+                )
+                with authority_write(CONTEST_ROUND_STATE):
+                    ContestRound.objects.filter(pk=contest_round.pk).update(
+                        status=ContestRound.Status.PREPARED
+                    )
+
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            ContestRound(
+                                activity=self.activity,
+                                round_type=contest_round.round_type,
+                                sequence=contest_round.sequence,
+                                name="Positional bypass",
+                            )
+                        ],
+                        None,
+                        False,
+                        True,
+                        ["name"],
+                        ["activity", "sequence"],
+                    )
+
+                contest_round.refresh_from_db()
+                self.assertEqual(contest_round.status, ContestRound.Status.PREPARED)
+                self.assertEqual(contest_round.name, original_name)
+
+    def test_round_bulk_create_update_conflicts_rejects_prepared_configuration_change(self):
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            sequence=1,
+            name="Original",
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound.objects.filter(pk=contest_round.pk).update(
+                status=ContestRound.Status.PREPARED
+            )
+
+        with self.assertRaises(ValidationError):
+            ContestRound.objects.bulk_create(
+                [
+                    ContestRound(
+                        activity=self.activity,
+                        round_type=contest_round.round_type,
+                        sequence=contest_round.sequence,
+                        name="Bypass",
+                    )
+                ],
+                update_conflicts=True,
+                update_fields=["name"],
+                unique_fields=["activity", "sequence"],
+            )
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.name, "Original")
+
+
+class ContestRoundDeletionAuthorityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="round-delete", password="pass")
+        self.activity = Activity.objects.create(
+            title="Round delete", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def _round(self, sequence):
+        return ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            sequence=sequence,
+        )
+
+    def test_round_delete_rejects_non_draft_and_unauthorized_manager_paths(self):
+        direct = self._round(1)
+        queryset = self._round(2)
+        base_queryset = self._round(3)
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound.objects.filter(pk=direct.pk).update(status=ContestRound.Status.PREPARED)
+
+        with self.assertRaises(ValidationError):
+            direct.delete()
+        with self.assertRaises(ValidationError):
+            ContestRound.objects.filter(pk=queryset.pk).delete()
+        with self.assertRaises(ValidationError):
+            ContestRound._base_manager.filter(pk=base_queryset.pk).delete()
+
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 3)
+
+    def test_round_delete_preserves_prepared_child_protect(self):
+        contest_round = self._round(1)
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Round delete singer",
+            student_id="round-delete-1",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        from .models import RoundEntry
+
+        RoundEntry.objects.create(round=contest_round, singer=singer)
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound.objects.filter(pk=contest_round.pk).update(
+                status=ContestRound.Status.PREPARED
+            )
+
+        with authority_write("test_data.cleanup"):
+            with self.assertRaises(ProtectedError):
+                contest_round.delete()
+
+        self.assertTrue(ContestRound.objects.filter(pk=contest_round.pk).exists())
+
+    def test_prepared_round_admin_disables_delete(self):
+        from .admin import ContestRoundAdmin
+
+        contest_round = self._round(1)
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound.objects.filter(pk=contest_round.pk).update(
+                status=ContestRound.Status.PREPARED
+            )
+        contest_round.refresh_from_db()
+        request = RequestFactory().get("/admin/singer_contest/contestround/")
+        request.user = User.objects.create_superuser(
+            "round-delete-admin", "admin@example.com", "pass"
+        )
+
+        self.assertFalse(
+            ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(
+                request, contest_round
+            )
+        )

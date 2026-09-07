@@ -1,22 +1,25 @@
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from io import StringIO
 from unittest import skipUnless
 from unittest.mock import patch
 
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
+from django.contrib import admin
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import close_old_connections, connection
+from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.models import Q
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from .admin import CustomUserAdmin
 from .models import User
 from .services import (
     admin_verification_is_valid,
@@ -27,6 +30,11 @@ from .services import (
 )
 
 
+def create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
+
+
 class LoginModeTests(TestCase):
     def setUp(self):
         self.participant = User.objects.create_user(
@@ -34,7 +42,7 @@ class LoginModeTests(TestCase):
             password="pass12345",
             role=User.Role.PARTICIPANT,
         )
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -128,7 +136,7 @@ class AdminVerificationTTLTests(TestCase):
     """§17 P1 — the elevated admin verification marker must expire (bounded TTL)."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -155,9 +163,9 @@ class AdminVerificationTTLTests(TestCase):
             mock_now.return_value = datetime(2026, 8, 29, 12, 0, 0, tzinfo=dt_timezone.utc)
             mark_admin_verified(session)
             mid = mock_now.return_value
-            mock_now.return_value = mid + timezone.timedelta(seconds=1800)  # type: ignore[attr-defined]
+            mock_now.return_value = mid + timedelta(seconds=1800)
             self.assertTrue(admin_verification_is_valid(session))
-            mock_now.return_value = mid + timezone.timedelta(seconds=3601)  # type: ignore[attr-defined]
+            mock_now.return_value = mid + timedelta(seconds=3601)
             self.assertFalse(admin_verification_is_valid(session))
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
@@ -199,7 +207,7 @@ class AdminVerificationTTLTests(TestCase):
 class AdminLoginRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="admin",
             password="pass12345",
             role=User.Role.ADMIN,
@@ -240,18 +248,171 @@ class AdminLoginRateLimitTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("staff:dashboard"))
 
+    @override_settings(ADMIN_LOGIN_KEY="secret-key", RATE_LIMIT_BACKEND="database")
+    def test_admin_login_uses_shared_database_throttle(self):
+        from common.models import RateLimitBucket
+
+        url = reverse("accounts:admin_login")
+        for _ in range(11):
+            self.client.post(
+                url,
+                {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+                REMOTE_ADDR="198.51.100.7",
+            )
+
+        bucket = RateLimitBucket.objects.get()
+        self.assertEqual(bucket.count, 11)
+
+
+class DatabaseRateLimitTests(TransactionTestCase):
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_database_allow_removes_only_a_bounded_expired_batch(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        now = timezone.now()
+        for index in range(3):
+            RateLimitBucket.objects.create(
+                key=f"{index:064x}",
+                window_started_at=now - timedelta(minutes=10),
+                count=1,
+                expires_at=now - timedelta(seconds=1),
+            )
+        active_bucket = RateLimitBucket.objects.create(
+            key="f" * 64,
+            window_started_at=now,
+            count=1,
+            expires_at=now + timedelta(minutes=5),
+        )
+
+        with patch.object(rate_limit, "_CLEANUP_BATCH_SIZE", 2):
+            rate_limit.allow("new-public-key", limit=1, window_seconds=300)
+
+        self.assertEqual(RateLimitBucket.objects.filter(expires_at__lte=now).count(), 1)
+        self.assertTrue(RateLimitBucket.objects.filter(pk=active_bucket.pk).exists())
+        self.assertEqual(RateLimitBucket.objects.filter(expires_at__gt=now).count(), 2)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_cleanup_database_error_does_not_break_outer_transaction(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        now = timezone.now()
+        expired_bucket = RateLimitBucket.objects.create(
+            key="e" * 64,
+            window_started_at=now - timedelta(minutes=10),
+            count=1,
+            expires_at=now - timedelta(seconds=1),
+        )
+        quoted_table = connection.ops.quote_name(RateLimitBucket._meta.db_table)
+
+        def fail_cleanup_delete(execute, sql, params, many, context):
+            if sql.lstrip().upper().startswith("DELETE") and quoted_table in sql:
+                raise DatabaseError("injected cleanup failure")
+            return execute(sql, params, many, context)
+
+        with transaction.atomic():
+            with connection.execute_wrapper(fail_cleanup_delete):
+                decision = rate_limit.allow("successful-public-key", limit=1, window_seconds=300)
+
+            allowed_bucket = RateLimitBucket.objects.exclude(pk=expired_bucket.pk).get()
+            self.assertEqual(allowed_bucket.count, 1)
+
+        self.assertTrue(decision.allowed)
+        self.assertTrue(RateLimitBucket.objects.filter(pk=expired_bucket.pk).exists())
+        self.assertTrue(RateLimitBucket.objects.filter(pk=allowed_bucket.pk).exists())
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_database_bucket_is_shared_across_connection_boundaries(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        first = rate_limit.allow("shared-worker-key", limit=2, window_seconds=300)
+        connection.close()
+        second = rate_limit.allow("shared-worker-key", limit=2, window_seconds=300)
+        connection.close()
+        third = rate_limit.allow("shared-worker-key", limit=2, window_seconds=300)
+
+        self.assertEqual(
+            [first.allowed, second.allowed, third.allowed],
+            [True, True, False],
+        )
+        self.assertEqual(RateLimitBucket.objects.get().count, 3)
+        self.assertGreater(third.retry_after_seconds, 0)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_expired_database_bucket_restarts_its_window(self):
+        from common import rate_limit
+        from common.models import RateLimitBucket
+
+        rate_limit.allow("expired-window-key", limit=1, window_seconds=300)
+        RateLimitBucket.objects.all().update(expires_at=timezone.now() - timedelta(seconds=1))
+
+        decision = rate_limit.allow("expired-window-key", limit=1, window_seconds=300)
+        bucket = RateLimitBucket.objects.get()
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(bucket.count, 1)
+
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_rate_limit_decision_contains_only_allowance_and_retry_metadata(self):
+        from common import rate_limit
+
+        rate_limit.allow("non-sensitive-result-key", limit=1, window_seconds=300)
+        decision = rate_limit.allow("non-sensitive-result-key", limit=1, window_seconds=300)
+
+        self.assertFalse(decision.allowed)
+        self.assertGreater(decision.retry_after_seconds, 0)
+        self.assertEqual(set(vars(decision)), {"allowed", "retry_after_seconds"})
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL atomic upsert")
+class DatabaseRateLimitConcurrencyTests(TransactionTestCase):
+    @override_settings(RATE_LIMIT_BACKEND="database")
+    def test_concurrent_workers_allow_only_the_configured_limit(self):
+        from common import rate_limit
+
+        start = threading.Barrier(2)
+        outcomes: list[bool] = []
+        errors: list[Exception] = []
+
+        def hit_from_worker():
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                outcomes.append(
+                    rate_limit.allow("concurrent-worker-key", limit=1, window_seconds=300).allowed
+                )
+            except Exception as error:  # pragma: no cover - diagnostic assertion below
+                errors.append(error)
+            finally:
+                close_old_connections()
+
+        workers = [threading.Thread(target=hit_from_worker) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=20)
+
+        self.assertFalse(errors)
+        self.assertCountEqual(outcomes, [True, False])
+
 
 class UserPermissionSynchronizationTests(TestCase):
-    def test_demoting_staff_user_clears_django_staff_flag(self):
-        user = User.objects.create_user(
+    def test_service_demoting_staff_user_clears_django_staff_flag(self):
+        actor = create_provisioned_user(
+            username="authority-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        user = create_provisioned_user(
             username="demoted-staff",
             password="pass12345",
             role=User.Role.STAFF,
         )
         self.assertTrue(user.is_staff)
 
-        user.role = User.Role.PARTICIPANT
-        user.save()
+        change_user_role(target=user, new_role=User.Role.PARTICIPANT, actor=actor)
 
         user.refresh_from_db()
         self.assertFalse(user.is_staff)
@@ -319,7 +480,7 @@ class EffectiveAdminAuthorityTests(TestCase):
         # The superuser is an effective admin even with a participant role, so a
         # real role-based admin may be demoted without leaving zero admins. The
         # old guard only counted role == ADMIN and rejected this correctly.
-        real_admin = User.objects.create_user(
+        real_admin = create_provisioned_user(
             username="real-admin", password="pass12345", role=User.Role.ADMIN
         )
         change_user_role(target=real_admin, new_role=User.Role.PARTICIPANT, actor=self.super_admin)
@@ -338,10 +499,10 @@ class EffectiveAdminAuthorityTests(TestCase):
         # Demote the actor to participant (revoker remains admin). The actor
         # object in memory still says ADMIN; the service must reject using that
         # stale authority to mutate a third user.
-        revoker = User.objects.create_user(
+        revoker = create_provisioned_user(
             username="revoker", password="pass12345", role=User.Role.ADMIN
         )
-        actor = User.objects.create_user(
+        actor = create_provisioned_user(
             username="actor", password="pass12345", role=User.Role.ADMIN
         )
         change_user_role(target=actor, new_role=User.Role.PARTICIPANT, actor=revoker)
@@ -352,16 +513,296 @@ class EffectiveAdminAuthorityTests(TestCase):
         self.assertEqual(self.participant.role, User.Role.PARTICIPANT)
 
     def test_last_effective_admin_cannot_be_demoted(self):
-        # Only ``alone`` is an effective admin here (the superuser is neutralized).
-        self.super_admin.is_superuser = False
-        self.super_admin.save(update_fields=["is_superuser"])
-        alone = User.objects.create_user(
+        # Only ``alone`` is effective after the service deactivates the superuser.
+        alone = create_provisioned_user(
             username="only-admin", password="pass12345", role=User.Role.ADMIN
         )
+        set_user_active(target=self.super_admin, is_active=False, actor=alone)
         with self.assertRaises(ValidationError):
             change_user_role(target=alone, new_role=User.Role.PARTICIPANT, actor=alone)
         alone.refresh_from_db()
         self.assertEqual(alone.role, User.Role.ADMIN)
+
+
+class AccountAuthorityBoundaryTests(TestCase):
+    """Only audited account services may change security-bearing User fields."""
+
+    def setUp(self):
+        self.admin = create_provisioned_user(
+            username="account-authority-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        self.target = User.objects.create_user(
+            username="account-authority-target",
+            password="pass12345",
+            role=User.Role.PARTICIPANT,
+        )
+
+    def test_instance_save_rejects_role_active_and_superuser_changes(self):
+        self.target.role = User.Role.STAFF
+        with self.assertRaises(ValidationError):
+            self.target.save()
+
+        self.target.refresh_from_db()
+        self.target.is_active = False
+        with self.assertRaises(ValidationError):
+            self.target.save()
+
+        self.target.refresh_from_db()
+        self.target.is_superuser = True
+        with self.assertRaises(ValidationError):
+            self.target.save()
+
+    def test_queryset_update_rejects_role_active_and_superuser_changes(self):
+        for field, value in (
+            ("role", User.Role.STAFF),
+            ("is_active", False),
+            ("is_superuser", True),
+        ):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                User.objects.filter(pk=self.target.pk).update(**{field: value})
+
+    def test_base_manager_update_rejects_role_active_and_superuser_changes(self):
+        for field, value in (
+            ("role", User.Role.STAFF),
+            ("is_active", False),
+            ("is_superuser", True),
+        ):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                User._base_manager.filter(pk=self.target.pk).update(**{field: value})
+
+    def test_bulk_update_rejects_role_active_and_superuser_changes(self):
+        for field, value in (
+            ("role", User.Role.STAFF),
+            ("is_active", False),
+            ("is_superuser", True),
+        ):
+            self.target.refresh_from_db()
+            setattr(self.target, field, value)
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                User.objects.bulk_update([self.target], [field])
+
+    def test_admin_change_form_keeps_protected_account_fields_readonly(self):
+        request = RequestFactory().get("/admin/accounts/user/")
+        request.user = User.objects.create_superuser(
+            username="account-authority-superuser",
+            email="authority@example.com",
+            password="pass12345",
+        )
+        form_class = CustomUserAdmin(User, admin.site).get_form(request, self.target, change=True)
+        self.assertNotIn("role", form_class.base_fields)
+        self.assertNotIn("is_active", form_class.base_fields)
+        self.assertNotIn("is_superuser", form_class.base_fields)
+
+    def test_role_and_active_services_change_authority_fields_and_audit(self):
+        changed = change_user_role(
+            target=self.target,
+            new_role=User.Role.STAFF,
+            actor=self.admin,
+        )
+        self.assertEqual(changed.role, User.Role.STAFF)
+        role_audit = AuditLog.objects.get(target=f"User:{self.target.pk}", old_value="participant")
+        self.assertEqual(role_audit.new_value, "staff")
+
+        changed = set_user_active(target=self.target, is_active=False, actor=self.admin)
+        self.assertFalse(changed.is_active)
+        active_audit = AuditLog.objects.get(
+            target=f"User:{self.target.pk}", old_value="active=True"
+        )
+        self.assertEqual(active_audit.new_value, "active=False")
+
+
+class AccountAuthorityCreationTests(TestCase):
+    """Initial account authority needs the same explicit scope as later changes."""
+
+    def test_instance_save_rejects_nondefault_authority_values_on_creation(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User(username=f"instance-create-{suffix}", **values).save()
+
+    def test_default_manager_create_rejects_nondefault_authority_values(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User.objects.create_user(username=f"manager-create-{suffix}", **values)
+
+    def test_base_manager_create_rejects_nondefault_authority_values(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User._base_manager.create(username=f"base-create-{suffix}", **values)
+
+    def test_bulk_create_rejects_nondefault_authority_values(self):
+        for suffix, values in (
+            ("role", {"role": User.Role.ADMIN}),
+            ("active", {"is_active": False}),
+            ("superuser", {"is_superuser": True}),
+        ):
+            with self.subTest(field=suffix), self.assertRaises(ValidationError):
+                User.objects.bulk_create([User(username=f"bulk-create-{suffix}", **values)])
+
+    def test_default_creation_remains_valid_and_authority_scope_allows_provisioning(self):
+        ordinary = User.objects.create_user(username="ordinary-created", password="pass12345")
+        self.assertEqual(ordinary.role, User.Role.PARTICIPANT)
+        self.assertTrue(ordinary.is_active)
+        self.assertFalse(ordinary.is_superuser)
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            provisioned = User.objects.create_user(
+                username="provisioned-created",
+                password="pass12345",
+                role=User.Role.ADMIN,
+                is_superuser=True,
+            )
+        self.assertTrue(provisioned.is_admin)
+
+    def test_conflict_profile_update_allows_existing_admin_authority_values(self):
+        existing = create_provisioned_user(
+            username="conflict-existing-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        existing.email = "updated@example.com"
+
+        User.objects.bulk_create(
+            [existing],
+            update_conflicts=True,
+            update_fields=["email"],
+            unique_fields=["username"],
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.email, "updated@example.com")
+        self.assertEqual(existing.role, User.Role.ADMIN)
+        self.assertTrue(existing.is_staff)
+
+    def test_conflict_update_rejects_protected_authority_field(self):
+        existing = User.objects.create_user(
+            username="conflict-existing-participant",
+            password="pass12345",
+        )
+
+        with self.assertRaises(ValidationError):
+            User.objects.bulk_create(
+                [existing],
+                update_conflicts=True,
+                update_fields=["role"],
+                unique_fields=["username"],
+            )
+
+    def test_authorized_conflict_role_update_derives_staff_flag(self):
+        existing = User.objects.create_user(
+            username="conflict-role-participant",
+            password="pass12345",
+        )
+        replacement = User(
+            username=existing.username,
+            role=User.Role.STAFF,
+        )
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            User.objects.bulk_create(
+                [replacement],
+                update_conflicts=True,
+                update_fields=["role"],
+                unique_fields=["username"],
+            )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.role, User.Role.STAFF)
+        self.assertTrue(existing.is_staff)
+
+    def test_positional_conflict_profile_update_allows_existing_admin_authority_values(self):
+        existing = create_provisioned_user(
+            username="positional-conflict-existing-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        existing.email = "positional-updated@example.com"
+
+        User.objects.bulk_create(
+            [existing],
+            None,
+            False,
+            True,
+            ["email"],
+            ["username"],
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.email, "positional-updated@example.com")
+        self.assertEqual(existing.role, User.Role.ADMIN)
+        self.assertTrue(existing.is_staff)
+
+    def test_positional_conflict_update_rejects_protected_authority_field(self):
+        existing = User.objects.create_user(
+            username="positional-conflict-existing-participant",
+            password="pass12345",
+        )
+
+        with self.assertRaises(ValidationError):
+            User.objects.bulk_create(
+                [existing],
+                None,
+                False,
+                True,
+                ["role"],
+                ["username"],
+            )
+
+    def test_positional_conflict_upsert_allows_existing_admin_and_ordinary_insert(self):
+        existing = create_provisioned_user(
+            username="positional-mixed-existing-admin",
+            password="pass12345",
+            role=User.Role.ADMIN,
+        )
+        existing.email = "mixed-updated@example.com"
+        new_user = User(username="positional-mixed-new-participant", email="new@example.com")
+
+        User.objects.bulk_create(
+            [existing, new_user],
+            None,
+            False,
+            True,
+            ["email"],
+            ["username"],
+        )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.email, "mixed-updated@example.com")
+        self.assertTrue(User.objects.filter(username=new_user.username).exists())
+
+    def test_authorized_positional_conflict_role_update_derives_staff_flag(self):
+        existing = User.objects.create_user(
+            username="positional-conflict-role-participant",
+            password="pass12345",
+        )
+        replacement = User(username=existing.username, role=User.Role.STAFF)
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            User.objects.bulk_create(
+                [replacement],
+                None,
+                False,
+                True,
+                ["role"],
+                ["username"],
+            )
+
+        existing.refresh_from_db()
+        self.assertEqual(existing.role, User.Role.STAFF)
+        self.assertTrue(existing.is_staff)
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
@@ -376,10 +817,10 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
         )
 
     def test_concurrent_mutual_demotion_keeps_at_least_one_admin(self):
-        admin_a = User.objects.create_user(
+        admin_a = create_provisioned_user(
             username="admin-a", password="pass12345", role=User.Role.ADMIN
         )
-        admin_b = User.objects.create_user(
+        admin_b = create_provisioned_user(
             username="admin-b", password="pass12345", role=User.Role.ADMIN
         )
         results: dict[str, str] = {}
@@ -418,10 +859,10 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
         self.assertLessEqual(list(results.values()).count("ok"), 1)
 
     def test_concurrent_mutual_deactivation_keeps_at_least_one_admin(self):
-        admin_a = User.objects.create_user(
+        admin_a = create_provisioned_user(
             username="deact-a", password="pass12345", role=User.Role.ADMIN
         )
-        admin_b = User.objects.create_user(
+        admin_b = create_provisioned_user(
             username="deact-b", password="pass12345", role=User.Role.ADMIN
         )
         results: dict[str, str] = {}

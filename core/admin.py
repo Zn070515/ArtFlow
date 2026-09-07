@@ -17,6 +17,7 @@ class ActivityAdmin(admin.ModelAdmin):
     list_filter = ["activity_type", "phase", "data_lifecycle", "is_test_mode"]
     search_fields = ["title"]
     readonly_fields = [
+        "activity_type",
         "phase",
         "is_test_mode",
         "data_lifecycle",
@@ -24,6 +25,12 @@ class ActivityAdmin(admin.ModelAdmin):
         "locked_at",
         "locked_by",
     ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ActivityPhase)

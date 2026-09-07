@@ -25,6 +25,19 @@ ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
 
 DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
 
+# Production workers must share throttle buckets through the primary database.
+# Development and tests deliberately default to lightweight local cache behavior,
+# while the local event manifest may explicitly opt into the shared database store.
+RATE_LIMIT_BACKEND = (
+    os.environ.get("RATE_LIMIT_BACKEND", "database" if APP_ENV == "production" else "locmem")
+    .strip()
+    .lower()
+)
+if RATE_LIMIT_BACKEND not in {"database", "locmem"}:
+    raise ImproperlyConfigured("RATE_LIMIT_BACKEND must be locmem or database.")
+if APP_ENV == "production" and RATE_LIMIT_BACKEND != "database":
+    raise ImproperlyConfigured("Production configuration requires RATE_LIMIT_BACKEND=database.")
+
 ALLOWED_HOSTS = get_csv(os.environ, "ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
 CSRF_TRUSTED_ORIGINS = get_csv(os.environ, "CSRF_TRUSTED_ORIGINS")
 # Only trust X-Forwarded-For when a known reverse proxy overwrites and appends
@@ -146,6 +159,7 @@ ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SEC
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SECURE_SSL_REDIRECT = APP_ENV == "production"
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if APP_ENV == "production" else None
 SESSION_COOKIE_SECURE = APP_ENV == "production"
 SESSION_COOKIE_HTTPONLY = True

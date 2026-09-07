@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from datetime import timezone as dt_timezone
 
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -103,7 +104,8 @@ def change_user_role(*, target: User, new_role: str, actor: User) -> User:
         _ensure_another_effective_admin(locked.pk)
     old_role = locked.role
     locked.role = new_role
-    locked.save()  # Model.save() keeps is_staff in sync with the new role.
+    with authority_write(ACCOUNT_AUTHORITY):
+        locked.save()  # Model.save() keeps is_staff in sync with the new role.
     AuditLog.objects.create(
         operator=current_actor,
         action_type=AuditLog.ActionType.UPDATE_PERMISSION,
@@ -128,7 +130,8 @@ def set_user_active(*, target: User, is_active: bool, actor: User) -> User:
         _ensure_another_effective_admin(locked.pk)
     was_active = locked.is_active
     locked.is_active = is_active
-    locked.save()
+    with authority_write(ACCOUNT_AUTHORITY):
+        locked.save()
     AuditLog.objects.create(
         operator=current_actor,
         action_type=AuditLog.ActionType.UPDATE_PERMISSION,

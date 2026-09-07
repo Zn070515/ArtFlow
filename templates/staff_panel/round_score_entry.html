@@ -16,7 +16,7 @@
     </div>
 </div>
 {% else %}
-<div class="max-w-7xl mx-auto px-4 py-8" id="rapid-entry" data-api-url="{% url 'staff:round_scores_api' round.pk %}" data-locked="{% if is_locked %}true{% else %}false{% endif %}">
+<div class="max-w-7xl mx-auto px-4 py-8" id="rapid-entry" data-api-url="{% url 'staff:round_scores_api' round.pk %}" data-activity-id="{{ round.activity_id }}" data-round-id="{{ round.pk }}" data-locked="{% if is_locked %}true{% else %}false{% endif %}">
     {% csrf_token %}
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 快速录入</p>
 
@@ -50,6 +50,14 @@
                 <span>赛果状态</span>
                 <span class="font-medium" data-resolved>未计算</span>
             </div>
+            <div class="flex items-center justify-between mt-2">
+                <span>已保存</span>
+                <span class="font-medium" data-saved-count>0</span>
+            </div>
+            <div class="flex items-center justify-between mt-2">
+                <span>待保存</span>
+                <span class="font-medium text-orange-700" data-pending-count>0</span>
+            </div>
         </div>
     </div>
 
@@ -61,7 +69,12 @@
         <kbd class="px-1 rounded bg-white border border-gray-200 ml-2">Ctrl+V</kbd> 粘贴矩形分数
     </div>
 
+    <div class="flex items-center gap-3 mb-4">
+        <button type="button" data-retry class="border border-brand text-brand px-3 py-1.5 rounded text-sm hover:bg-brand-light hover:text-white">重试保存</button>
+        <span class="text-xs text-gray-500">待保存内容仅保存在此浏览器，服务器确认后才会成为正式评分。</span>
+    </div>
     <div data-error class="hidden bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4"></div>
+    <div data-conflicts class="hidden bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm px-4 py-3 rounded mb-4"></div>
 
     {% if not grid_payload.grid %}
     <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">

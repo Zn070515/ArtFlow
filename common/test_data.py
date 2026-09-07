@@ -12,6 +12,8 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_CLEANUP,
+    VOTE_SESSION_STATE,
     authority_write,
 )
 
@@ -181,6 +183,14 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         raise PermissionDenied("Test data can only be cleared while the activity is in test mode.")
     _reject_mixed_marker_dependencies(locked_activity)
     counts = get_test_data_counts(locked_activity)
+    # The cleanup service is the only authority that can unwind test voting state.
+    # Do this before deleting raw vote rows, whose model guards correctly refuse to
+    # mutate a locked session during ordinary operation.
+    with authority_write(VOTE_SESSION_STATE):
+        VoteSession.objects.filter(activity=locked_activity, is_test_data=True).update(  # type: ignore[no-untyped-call]
+            is_open=False,
+            is_locked=False,
+        )
     for contest_round in (
         ContestRound.objects.filter(
             activity=locked_activity,
@@ -250,7 +260,8 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         vote_session__is_test_data=True,
         is_test_data=True,
     ).delete()
-    VoteSession.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    with authority_write(TEST_DATA_CLEANUP):
+        VoteSession.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     Program.objects.filter(activity=locked_activity, is_test_data=True).delete()
     SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=locked_activity, is_test=True).delete()

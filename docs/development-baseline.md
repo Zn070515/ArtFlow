@@ -56,6 +56,12 @@ Invoke-WebRequest http://127.0.0.1:8000/healthz/
 
 The database remains on the internal Docker network. The web port is bound to loopback. Compose uses named volumes for PostgreSQL data (`postgres_data`), collected static files (`static_data`), and media (`media_data`). `docker compose down` stops the stack while retaining those volumes. `docker compose down --volumes` permanently removes all three local volumes, so use it only when intentional data loss is acceptable.
 
+This root Compose file is development/integration only. For an event operated from one local Staff machine, use the separate [`deploy/compose.event.yml`](../deploy/compose.event.yml) contract and its loopback-only web port. For production, use [`deploy/compose.production.yml`](../deploy/compose.production.yml), never this root file.
+
+### Event/local-only contract
+
+Use `deploy/compose.event.yml` only on the single Staff-operated primary machine. It publishes `web` solely as `127.0.0.1:8000` and keeps PostgreSQL private; configure `EVENT_ALLOWED_HOSTS=localhost,127.0.0.1` and, when a tunnel or IPv6 ingress is deliberately used, append its hostname plus its HTTPS origin in `EVENT_CSRF_TRUSTED_ORIGINS`. A public tunnel or cloud endpoint supplies ingress only: it is not a second server or authority database. Never run a second writable event stack. PowerPoint remains an independent presentation tool.
+
 ### PostgreSQL acceptance gate
 
 Run the Task 8 PostgreSQL acceptance contract against the Compose services with:
@@ -80,7 +86,7 @@ pwsh -NoProfile -File scripts/check_docs.ps1
 git diff --check
 ```
 
-`scripts\verify.ps1` runs the broader local verification contract, including formatting, typing, tests, Docker configuration, workflow checks, documentation checks, and a production settings check.
+`scripts\verify.ps1` runs the broader local verification contract, including formatting, typing, tests, root development Compose configuration, production-manifest structure plus `docker compose -f deploy/compose.production.yml config --quiet`, workflow checks, documentation checks, and a production settings check. It does not start or tear down production services.
 
 ## Troubleshooting
 

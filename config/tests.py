@@ -182,6 +182,23 @@ class SettingsTests(SimpleTestCase):
             settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
         )
 
+    def test_rate_limit_backend_is_locmem_outside_production_and_database_in_production(self):
+        development_backend = self.reload_settings({"APP_ENV": "development"}).RATE_LIMIT_BACKEND
+        test_backend = self.reload_settings({"APP_ENV": "test"}).RATE_LIMIT_BACKEND
+        production_backend = self.reload_settings(production_environment()).RATE_LIMIT_BACKEND
+        event_backend = self.reload_settings(
+            {"APP_ENV": "development", "RATE_LIMIT_BACKEND": "database"}
+        ).RATE_LIMIT_BACKEND
+
+        self.assertEqual(development_backend, "locmem")
+        self.assertEqual(test_backend, "locmem")
+        self.assertEqual(production_backend, "database")
+        self.assertEqual(event_backend, "database")
+
+    def test_unknown_rate_limit_backend_is_rejected(self):
+        with self.assertRaises(ImproperlyConfigured):
+            self.reload_settings({"APP_ENV": "development", "RATE_LIMIT_BACKEND": "per-worker"})
+
     def test_development_rejects_malformed_debug_value(self):
         with self.assertRaises(ImproperlyConfigured):
             self.reload_settings({"APP_ENV": "development", "DEBUG": "not-a-boolean"})
@@ -200,6 +217,7 @@ class SettingsTests(SimpleTestCase):
 
         self.assertFalse(settings_module.DEBUG)
         self.assertTrue(settings_module.SECURE_SSL_REDIRECT)
+        self.assertIn(r"^healthz/$", settings_module.SECURE_REDIRECT_EXEMPT)
         self.assertEqual(
             settings_module.SECURE_PROXY_SSL_HEADER, ("HTTP_X_FORWARDED_PROTO", "https")
         )
@@ -208,6 +226,19 @@ class SettingsTests(SimpleTestCase):
         self.assertGreater(settings_module.SECURE_HSTS_SECONDS, 0)
         self.assertTrue(settings_module.SECURE_HSTS_INCLUDE_SUBDOMAINS)
         self.assertTrue(settings_module.SECURE_HSTS_PRELOAD)
+
+    def test_https_redirect_exempts_healthz_but_not_public_pages(self):
+        with (
+            override_settings(SECURE_SSL_REDIRECT=True, SECURE_REDIRECT_EXEMPT=[r"^healthz/$"]),
+            patch("config.health.run_checks", return_value=[]),
+            patch.object(connections["default"], "ensure_connection", return_value=None),
+        ):
+            health_response = self.client.get("/healthz/")
+            public_response = self.client.get("/")
+
+        self.assertEqual(health_response.status_code, 200)
+        self.assertEqual(public_response.status_code, 301)
+        self.assertTrue(public_response["Location"].startswith("https://"))
 
     def test_production_check_reports_invalid_configuration_without_secret_values(self):
         from config.checks import production_config_check

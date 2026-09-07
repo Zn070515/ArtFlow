@@ -70,3 +70,15 @@ class SeedRecord(models.Model):
 
     def __str__(self) -> str:
         return self.key
+
+
+class RateLimitBucket(models.Model):
+    """An expiring, shared counter for production throttle attempts."""
+
+    key = models.CharField(max_length=64, unique=True)
+    window_started_at = models.DateTimeField()
+    count = models.PositiveIntegerField()
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["expires_at"], name="common_rate_limit_expiry_idx")]

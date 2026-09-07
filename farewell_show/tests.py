@@ -18,12 +18,13 @@ from .views import my_program_detail
 class FarewellUploadViewTests(TestCase):
     def test_invalid_upload_does_not_create_program(self):
         user = User.objects.create_user(username="applicant", password="pass")
-        activity = Activity.objects.create(
-            title="Farewell",
-            activity_type=Activity.Type.FAREWELL_SHOW,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACTIVITY_STATE):
+            activity = Activity.objects.create(
+                title="Farewell",
+                activity_type=Activity.Type.FAREWELL_SHOW,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         self.client.force_login(user)
 
         response = self.client.post(
@@ -46,12 +47,13 @@ class FarewellUploadViewTests(TestCase):
 class ProgramMaterialPurityTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="program-owner", password="pass")
-        self.activity = Activity.objects.create(
-            title="Farewell",
-            activity_type=Activity.Type.FAREWELL_SHOW,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Farewell",
+                activity_type=Activity.Type.FAREWELL_SHOW,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         self.prog = Program.objects.create(
             activity=self.activity,
             user=self.user,
@@ -102,12 +104,13 @@ class ProgramLockOrderConcurrencyTests(TransactionTestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="program-participant", password="pass")
-        self.activity = Activity.objects.create(
-            title="Farewell Boundary",
-            activity_type=Activity.Type.FAREWELL_SHOW,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Farewell Boundary",
+                activity_type=Activity.Type.FAREWELL_SHOW,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         self.prog = Program.objects.create(
             activity=self.activity,
             user=self.user,

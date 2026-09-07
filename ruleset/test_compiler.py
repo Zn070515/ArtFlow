@@ -14,16 +14,22 @@ and audits via FINALIZE_RULESET.
 import json
 
 from accounts.models import User
-from common.authority import RULESET_FREEZE, STAGE_RESULT_CONFIRM, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    authority_write,
+)
 from common.models import AuditLog
+from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
 
 from ruleset.compiler import (
     ExecutionPlan,
     compile_definition,
 )
-from ruleset.models import ContestRuleset, RulesetVersion
+from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, content_hash
 from ruleset.services import (
     RulesetInvalidError,
@@ -49,6 +55,64 @@ from ruleset.test_schema import (
 
 def _ctx(**kw):
     return kw
+
+
+class RulesetAdminAuthoritySurfaceTests(SimpleTestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/admin/ruleset/")
+        self.request.user = User(username="ruleset-admin", is_active=True, is_superuser=True)
+
+    def test_ruleset_versions_are_observation_only(self):
+        model_admin = admin.site._registry[RulesetVersion]
+        self.assertTrue(model_admin.has_view_permission(self.request))
+        self.assertFalse(model_admin.has_add_permission(self.request))
+        self.assertFalse(model_admin.has_change_permission(self.request))
+        self.assertFalse(model_admin.has_delete_permission(self.request))
+
+    def test_ruleset_containers_preserve_only_safe_maintenance_metadata(self):
+        template_admin = admin.site._registry[RulesetTemplate]
+        ruleset_admin = admin.site._registry[ContestRuleset]
+
+        self.assertFalse(template_admin.has_add_permission(self.request))
+        self.assertTrue(template_admin.has_change_permission(self.request))
+        self.assertFalse(template_admin.has_delete_permission(self.request))
+        self.assertEqual(
+            set(template_admin.get_readonly_fields(self.request)),
+            {
+                "schema_version",
+                "definition",
+                "status",
+                "builtin_key",
+                "capability_status",
+                "content_hash",
+                "created_by",
+                "frozen_by",
+                "frozen_at",
+                "created_at",
+                "updated_at",
+            },
+        )
+        self.assertFalse(ruleset_admin.has_add_permission(self.request))
+        self.assertTrue(ruleset_admin.has_change_permission(self.request))
+        self.assertFalse(ruleset_admin.has_delete_permission(self.request))
+        self.assertEqual(
+            set(ruleset_admin.get_readonly_fields(self.request)),
+            {
+                "activity",
+                "source_template",
+                "is_test_data",
+                "stage_key",
+                "round_keys",
+                "announcement_blocks",
+                "announcement_blocks_by_checkpoint",
+                "vote_keys",
+                "group_keys",
+                "audience_keys",
+                "created_by",
+                "created_at",
+                "updated_at",
+            },
+        )
 
 
 class CompilerValidCorpusTests(SimpleTestCase):
@@ -942,7 +1006,8 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
     def _admin(self):
         user = self.make_user("ruleset-admin")
         user.role = User.Role.ADMIN
-        user.save()
+        with authority_write(ACCOUNT_AUTHORITY):
+            user.save()
         return user
 
     def _draft(
@@ -1244,7 +1309,8 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
     def _admin(self):
         user = self.make_user("r1-admin")
         user.role = User.Role.ADMIN
-        user.save()
+        with authority_write(ACCOUNT_AUTHORITY):
+            user.save()
         return user
 
     def _ruleset_with_binding(self):

@@ -4,7 +4,12 @@ from datetime import timedelta
 from unittest import skipUnless
 
 from accounts.models import User
-from common.authority import ACTIVITY_STATE, VOTE_SESSION_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.models import AuditLog
 from common.test_data import clear_activity_test_data
 from core.models import Activity
@@ -27,6 +32,33 @@ from .services import (
 )
 
 
+def create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
+
+
+def create_vote_session(**kwargs):
+    is_open = kwargs.pop("is_open", False)
+    is_locked = kwargs.pop("is_locked", False)
+    session = VoteSession.objects.create(**kwargs)
+    if is_open or is_locked:
+        session.is_open = is_open
+        session.is_locked = is_locked
+        with authority_write(VOTE_SESSION_STATE):
+            session.save(update_fields=["is_open", "is_locked"])
+    return session
+
+
+def create_activity(**kwargs):
+    activity = Activity(**kwargs)
+    if activity.phase != Activity.Phase.DRAFT or activity.is_locked:
+        with authority_write(ACTIVITY_STATE):
+            activity.save()
+    else:
+        activity.save()
+    return activity
+
+
 class VotePublicStagingBoundaryTests(TestCase):
     """TEST activity vote sessions are invisible to anonymous/ordinary users.
 
@@ -38,15 +70,15 @@ class VotePublicStagingBoundaryTests(TestCase):
         self.participant = User.objects.create_user(
             username="vote-participant", password="pass", role=User.Role.PARTICIPANT
         )
-        self.staff = User.objects.create_user(
+        self.staff = create_provisioned_user(
             username="vote-staff", password="pass", role=User.Role.STAFF
         )
-        self.admin = User.objects.create_user(
+        self.admin = create_provisioned_user(
             username="vote-admin", password="pass", role=User.Role.ADMIN
         )
 
     def _make_session(self, *, is_test_mode):
-        activity = Activity.objects.create(
+        activity = create_activity(
             title="Vote Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=is_test_mode,
@@ -63,7 +95,7 @@ class VotePublicStagingBoundaryTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=is_test_mode,
         )
-        session = VoteSession.objects.create(
+        session = create_vote_session(
             activity=activity,
             name="Popularity",
             passcode="1234",
@@ -142,7 +174,7 @@ class VoteBallotTests(TestCase):
     def setUp(self):
         user = User.objects.create_user(username="participant", password="pass")
         second_user = User.objects.create_user(username="participant-two", password="pass")
-        activity = Activity.objects.create(
+        activity = create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -168,7 +200,7 @@ class VoteBallotTests(TestCase):
             song_name="Song 2",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        self.session = VoteSession.objects.create(
+        self.session = create_vote_session(
             activity=activity,
             name="Popularity",
             passcode="1234",
@@ -217,7 +249,7 @@ class VoteBallotTests(TestCase):
         self.assertEqual(VoteBallot.objects.filter(ip_address="10.0.0.1").count(), 2)
 
     def test_submit_ballot_rejects_option_from_another_session(self):
-        other_session = VoteSession.objects.create(
+        other_session = create_vote_session(
             activity=self.session.activity,
             name="Other",
             passcode="5678",
@@ -260,7 +292,7 @@ class VoteActivityLockOverlayTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="overlay-voter", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = create_activity(
             title="Overlay Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -278,7 +310,7 @@ class VoteActivityLockOverlayTests(TestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        self.session = VoteSession.objects.create(
+        self.session = create_vote_session(
             activity=self.activity,
             name="Popularity",
             passcode="1234",
@@ -332,7 +364,7 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.admin = User.objects.create_user(username="concurrent-staff", password="pass")
         user = User.objects.create_user(username="concurrent-overlay-voter", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = create_activity(
             title="Concurrent Overlay Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -351,7 +383,7 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=True,
         )
-        self.session = VoteSession.objects.create(
+        self.session = create_vote_session(
             activity=self.activity,
             name="Popularity",
             passcode="1234",
@@ -463,7 +495,7 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
 class VoteBallotConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="concurrent-participant", password="pass")
-        activity = Activity.objects.create(
+        activity = create_activity(
             title="Concurrent Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
@@ -478,7 +510,7 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
             song_name="Song",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        self.session = VoteSession.objects.create(
+        self.session = create_vote_session(
             activity=activity,
             name="Popularity",
             passcode="1234",
@@ -550,7 +582,7 @@ class VoteStateServiceTests(TestCase):
             activity_type=Activity.Type.SINGER_CONTEST,
             is_locked=False,
         )
-        self.session = VoteSession.objects.create(
+        self.session = create_vote_session(
             activity=self.activity,
             name="Popularity",
             passcode="1234",
@@ -628,6 +660,167 @@ class VoteStateServiceTests(TestCase):
         self.assertFalse(session.is_locked)
 
 
+class VoteSessionCreationAuthorityTests(TestCase):
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Vote creation", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def _session_kwargs(self, name, **kwargs):
+        now = timezone.now()
+        return {
+            "activity": self.activity,
+            "name": name,
+            "passcode": "1234",
+            "start_time": now,
+            "end_time": now + timedelta(minutes=10),
+            **kwargs,
+        }
+
+    def test_vote_session_creation_rejects_open_initial_state_through_both_managers(self):
+        for manager, name in (
+            (VoteSession.objects, "Default manager open"),
+            (VoteSession._base_manager, "Base manager open"),
+        ):
+            with self.subTest(manager=manager.name):
+                with self.assertRaises(ValidationError):
+                    manager.create(**self._session_kwargs(name, is_open=True))
+                self.assertFalse(VoteSession.objects.filter(name=name).exists())
+
+    def test_vote_session_bulk_create_rejects_locked_initial_state_through_both_managers(self):
+        for manager, name in (
+            (VoteSession.objects, "Default bulk locked"),
+            (VoteSession._base_manager, "Base bulk locked"),
+        ):
+            with self.subTest(manager=manager.name):
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create([VoteSession(**self._session_kwargs(name, is_locked=True))])
+                self.assertFalse(VoteSession.objects.filter(name=name).exists())
+
+    def test_vote_session_bulk_create_update_conflicts_rejects_state_change(self):
+        session = VoteSession.objects.create(**self._session_kwargs("Conflict target"))
+
+        with self.assertRaises(ValidationError):
+            VoteSession.objects.bulk_create(
+                [
+                    VoteSession(
+                        **self._session_kwargs("Conflict target", pk=session.pk, is_locked=True)
+                    )
+                ],
+                update_conflicts=True,
+                update_fields=["is_locked"],
+                unique_fields=["pk"],
+            )
+
+        session.refresh_from_db()
+        self.assertFalse(session.is_locked)
+
+    def test_vote_session_bulk_create_positional_configuration_guard_through_both_managers(
+        self,
+    ):
+        for manager, name in (
+            (VoteSession.objects, "Default positional conflict target"),
+            (VoteSession._base_manager, "Base positional conflict target"),
+        ):
+            with self.subTest(manager=manager.name):
+                session = VoteSession.objects.create(**self._session_kwargs(name))
+                with authority_write(VOTE_SESSION_STATE):
+                    VoteSession.objects.filter(pk=session.pk).update(is_locked=True)
+
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            VoteSession(
+                                **self._session_kwargs(
+                                    f"{name} bypass",
+                                    pk=session.pk,
+                                    is_test_data=session.is_test_data,
+                                )
+                            )
+                        ],
+                        None,
+                        False,
+                        True,
+                        ["name"],
+                        ["pk"],
+                    )
+
+                session.refresh_from_db()
+                self.assertTrue(session.is_locked)
+                self.assertEqual(session.name, name)
+
+    def test_vote_session_bulk_create_update_conflicts_rejects_locked_configuration_change(self):
+        session = VoteSession.objects.create(**self._session_kwargs("Original"))
+        with authority_write(VOTE_SESSION_STATE):
+            VoteSession.objects.filter(pk=session.pk).update(is_locked=True)
+
+        with self.assertRaises(ValidationError):
+            VoteSession.objects.bulk_create(
+                [VoteSession(**self._session_kwargs("Bypass", pk=session.pk))],
+                update_conflicts=True,
+                update_fields=["name"],
+                unique_fields=["pk"],
+            )
+
+        session.refresh_from_db()
+        self.assertEqual(session.name, "Original")
+
+
+class VoteSessionDeletionAuthorityTests(TestCase):
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Vote deletion", activity_type=Activity.Type.SINGER_CONTEST
+        )
+
+    def _session(self, name, **kwargs):
+        now = timezone.now()
+        return VoteSession.objects.create(
+            activity=self.activity,
+            name=name,
+            passcode="1234",
+            start_time=now,
+            end_time=now + timedelta(minutes=10),
+            is_test_data=True,
+            **kwargs,
+        )
+
+    def test_vote_session_delete_rejects_locked_and_unauthorized_manager_paths(self):
+        direct = self._session("Direct")
+        queryset = self._session("Queryset")
+        base_queryset = self._session("Base queryset")
+        with authority_write(VOTE_SESSION_STATE):
+            VoteSession.objects.filter(pk=direct.pk).update(is_locked=True)
+
+        with self.assertRaises(ValidationError):
+            direct.delete()
+        with self.assertRaises(ValidationError):
+            VoteSession.objects.filter(pk=queryset.pk).delete()
+        with self.assertRaises(ValidationError):
+            VoteSession._base_manager.filter(pk=base_queryset.pk).delete()
+
+        self.assertEqual(VoteSession.objects.filter(activity=self.activity).count(), 3)
+
+    def test_vote_session_delete_allows_only_explicit_test_cleanup_scope(self):
+        session = self._session("Cleanup")
+
+        with self.assertRaises(ValidationError):
+            session.delete()
+        with authority_write("test_data.cleanup"):
+            session.delete()
+
+        self.assertFalse(VoteSession.objects.filter(pk=session.pk).exists())
+
+    def test_clear_test_data_closes_and_unlocks_vote_sessions_before_cleanup(self):
+        operator = User.objects.create_user(username="vote-cleanup", password="pass")
+        session = self._session("Locked cleanup")
+        with authority_write(VOTE_SESSION_STATE):
+            VoteSession.objects.filter(pk=session.pk).update(is_locked=True)
+
+        clear_activity_test_data(self.activity, operator=operator)
+
+        self.assertFalse(VoteSession.objects.filter(pk=session.pk).exists())
+
+
 class VoteEntryRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -636,7 +829,7 @@ class VoteEntryRateLimitTests(TestCase):
             activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=False,
         )
-        self.session = VoteSession.objects.create(
+        self.session = create_vote_session(
             activity=self.activity,
             name="Popularity",
             passcode="1234",
@@ -660,7 +853,7 @@ class VoteEntryRateLimitTests(TestCase):
         self.assertContains(throttled, "尝试次数过多")
 
     def test_throttle_is_scoped_to_the_vote_session(self):
-        other = VoteSession.objects.create(
+        other = create_vote_session(
             activity=self.activity,
             name="Other",
             passcode="5678",
@@ -679,3 +872,13 @@ class VoteEntryRateLimitTests(TestCase):
         )
         self.assertEqual(other_response.status_code, 200)
         self.assertContains(other_response, "口令错误")
+
+    def test_vote_passcode_uses_shared_database_throttle(self):
+        from common.models import RateLimitBucket
+
+        url = reverse("voting:vote_entry", args=[self.session.pk])
+        with self.settings(RATE_LIMIT_BACKEND="database"):
+            for _ in range(11):
+                self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="198.51.100.7")
+
+        self.assertEqual(RateLimitBucket.objects.get().count, 11)

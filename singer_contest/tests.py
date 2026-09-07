@@ -8,11 +8,13 @@ from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import (
+    ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_CLEANUP,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -54,12 +56,15 @@ from .models import (
     RoundJudge,
     ScoreRecord,
     ScoreSummary,
+    ScoreWriteReceipt,
     SingerRegistration,
     StageDecision,
     StageResult,
 )
 from .services import (
+    IdempotencyConflictError,
     apply_scores,
+    apply_scores_if_version,
     downstream_rounds,
     ensure_round_final_for_advancement,
     expected_score_cells,
@@ -114,6 +119,21 @@ def _promote_version_to_current(version):
     version.refresh_from_db()
 
 
+def _create_provisioned_user(*args, **kwargs):
+    with authority_write(ACCOUNT_AUTHORITY):
+        return User.objects.create_user(*args, **kwargs)
+
+
+def _create_activity(**kwargs):
+    with authority_write(ACTIVITY_STATE):
+        return Activity.objects.create(**kwargs)
+
+
+def _create_round(**kwargs):
+    with authority_write(CONTEST_ROUND_STATE):
+        return ContestRound.objects.create(**kwargs)
+
+
 def _save_round_state(round_, fields=None):
     with authority_write(CONTEST_ROUND_STATE):
         if fields is None:
@@ -143,12 +163,13 @@ def _create_score_summary(**kwargs):
 class ScoringServiceTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="singer", password="pass")
-        self.activity = Activity.objects.create(
-            title="Contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         self.round = ContestRound.objects.create(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -188,6 +209,27 @@ class ScoringServiceTests(TestCase):
 
         with self.assertRaises(ValidationError):
             RoundEntry.objects.create(round=self.round, singer=foreign)
+
+    def test_contest_round_manager_allocates_blank_sequences(self):
+        second = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            sequence=None,
+        )
+
+        self.assertEqual(second.sequence, 2)
+
+    def test_contest_round_configuration_can_change_only_while_draft(self):
+        self.round.sequence = 2
+        self.round.save(update_fields=["sequence"])
+        self.assertEqual(ContestRound.objects.get(pk=self.round.pk).sequence, 2)
+
+        self.round.status = ContestRound.Status.PREPARED
+        self.round.is_locked = False
+        _save_round_state(self.round, ["status", "is_locked"])
+        self.round.sequence = 3
+        with self.assertRaisesMessage(ValidationError, "轮次准备后，执行配置不可直接修改。"):
+            self.round.save(update_fields=["sequence"])
 
     def test_round_judge_rejects_judge_from_another_activity(self):
         other_activity = Activity.objects.create(
@@ -361,12 +403,13 @@ class ScoringServiceTests(TestCase):
         self.round.status = ContestRound.Status.PREPARED
         _save_round_state(self.round)
 
-        with self.assertRaises(ProtectedError):
-            self.round.delete()
-        with self.assertRaises(ProtectedError):
-            self.singer.delete()
-        with self.assertRaises(ProtectedError):
-            self.judge.delete()
+        with authority_write(TEST_DATA_CLEANUP):
+            with self.assertRaises(ProtectedError):
+                self.round.delete()
+            with self.assertRaises(ProtectedError):
+                self.singer.delete()
+            with self.assertRaises(ProtectedError):
+                self.judge.delete()
 
     def test_draft_round_allows_snapshot_bulk_operations(self):
         entry = RoundEntry.objects.bulk_create([RoundEntry(round=self.round, singer=self.singer)])[
@@ -407,27 +450,50 @@ class ScoringServiceTests(TestCase):
             RoundJudge._base_manager.bulk_create([RoundJudge(round=self.round, judge=judge)])
 
     def test_draft_snapshots_allow_parent_deletion(self):
-        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
-        round_judge = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        test_activity = Activity.objects.create(
+            title="Draft parent cleanup",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        test_round = ContestRound.objects.create(
+            activity=test_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        singer = SingerRegistration.objects.create(
+            activity=test_activity,
+            user=User.objects.create_user(username="draft-parent-singer-user", password="pass"),
+            name="Draft Parent Singer",
+            student_id="draft-parent-singer",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        judge = Judge.objects.create(activity=test_activity, name="Draft Parent Judge")
+        entry = RoundEntry.objects.create(round=test_round, singer=singer)
+        round_judge = RoundJudge.objects.create(round=test_round, judge=judge)
 
-        self.round.delete()
+        with authority_write(TEST_DATA_CLEANUP):
+            test_round.delete()
 
         self.assertFalse(RoundEntry.objects.filter(pk=entry.pk).exists())
         self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
 
         singer_round = ContestRound.objects.create(
-            activity=self.activity,
+            activity=test_activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
         )
-        singer = self.make_singer(activity=self.activity, student_id="draft-parent-singer")
         singer_entry = RoundEntry.objects.create(round=singer_round, singer=singer)
 
-        singer.delete()
+        with authority_write(TEST_DATA_CLEANUP):
+            singer.delete()
 
         self.assertFalse(RoundEntry.objects.filter(pk=singer_entry.pk).exists())
 
         other_activity = Activity.objects.create(
-            title="Other", activity_type=Activity.Type.SINGER_CONTEST
+            title="Other", activity_type=Activity.Type.SINGER_CONTEST, is_test_mode=True
         )
         judge_round = ContestRound.objects.create(
             activity=other_activity,
@@ -436,7 +502,8 @@ class ScoringServiceTests(TestCase):
         judge = Judge.objects.create(activity=other_activity, name="Draft Parent Judge")
         round_judge = RoundJudge.objects.create(round=judge_round, judge=judge)
 
-        judge.delete()
+        with authority_write(TEST_DATA_CLEANUP):
+            judge.delete()
 
         self.assertFalse(RoundJudge.objects.filter(pk=round_judge.pk).exists())
 
@@ -1095,7 +1162,7 @@ class ScoringServiceTests(TestCase):
 class SingerUploadViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="applicant", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1250,7 +1317,7 @@ class RoundResetServiceTests(TestCase):
             reset_round_to_draft(self.round, self.actor, reason="  ")
 
     def test_reset_round_to_draft_rejects_downstream_active(self):
-        semifinal = ContestRound.objects.create(
+        semifinal = _create_round(
             activity=self.activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
             status=ContestRound.Status.PREPARED,
@@ -1283,7 +1350,7 @@ class ParticipantRegistrationFlowTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="participant", password="pass")
         self.other = User.objects.create_user(username="other", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1303,7 +1370,7 @@ class ParticipantRegistrationFlowTests(TestCase):
         )
 
     def test_my_registrations_lists_all_activities(self):
-        other_activity = Activity.objects.create(
+        other_activity = _create_activity(
             title="Other Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1465,7 +1532,7 @@ class LockActivityForActionTests(TestCase):
     """The canonical activity-first lock helper re-validates state under the lock."""
 
     def setUp(self):
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1498,12 +1565,13 @@ class RoundLockTOCTOUTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="round-actor", password="pass")
-        self.activity = Activity.objects.create(
-            title="Contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
         self.round = ContestRound.objects.create(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -1586,11 +1654,12 @@ class RoundLockTOCTOUTests(TestCase):
 
     def test_unlock_round_rejects_active_downstream(self):
         self.prepare_matrix()
-        ContestRound.objects.create(
-            activity=self.activity,
-            round_type=ContestRound.RoundType.SEMI_FINAL,
-            status=ContestRound.Status.PREPARED,
-        )
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                status=ContestRound.Status.PREPARED,
+            )
         with self.assertRaisesMessage(
             PermissionDenied, "后续轮次仍在使用本轮结果，解锁前必须先清空后续轮次。"
         ):
@@ -1617,7 +1686,7 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="concurrency-actor", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1696,12 +1765,176 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
+    """One idempotency command is serialized at the Activity → Round lock boundary."""
+
+    def setUp(self):
+        self.operator = User.objects.create_user(username="receipt-race", password="pass")
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Receipt race",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="receipt-race-singer", password="pass"),
+            name="Receipt Singer",
+            student_id="receipt-race-01",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Receipt Judge")
+        RoundEntry.objects.create(round=self.round, singer=self.singer)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.round.status = ContestRound.Status.PREPARED
+        _save_round_state(self.round, ["status"])
+
+    def test_concurrent_identical_commands_create_one_receipt_and_one_score_change(self):
+        start = threading.Barrier(2)
+        result_versions: list[int] = []
+        errors: list[BaseException] = []
+        result_lock = threading.Lock()
+
+        def apply_identical_command():
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                result = apply_scores_if_version(
+                    self.round.pk,
+                    0,
+                    {(self.singer.pk, self.judge.pk): "90"},
+                    self.operator,
+                    command_id="receipt-race-command-001",
+                )
+                with result_lock:
+                    result_versions.append(result["version"])
+            except BaseException as error:
+                with result_lock:
+                    errors.append(error)
+            finally:
+                close_old_connections()
+
+        workers = [threading.Thread(target=apply_identical_command) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=20)
+
+        self.assertFalse(any(worker.is_alive() for worker in workers))
+        self.assertEqual(errors, [])
+        self.assertEqual(result_versions, [1, 1])
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.score_version, 1)
+        self.assertEqual(ScoreRecord.objects.filter(round=self.round).count(), 1)
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.ENTER_SCORE,
+                target=f"ContestRound:{self.round.pk}",
+            ).count(),
+            1,
+        )
+
+    def test_cross_activity_command_conflict_rolls_back_losing_score_mutation(self):
+        with authority_write(ACTIVITY_STATE):
+            other_activity = Activity.objects.create(
+                title="Receipt race other activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
+        other_round = ContestRound.objects.create(
+            activity=other_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        other_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=User.objects.create_user(username="receipt-race-other-singer", password="pass"),
+            name="Other Receipt Singer",
+            student_id="receipt-race-other",
+            college="College",
+            class_name="Class",
+            phone="13800000001",
+            song_name="Other Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        other_judge = Judge.objects.create(activity=other_activity, name="Other Receipt Judge")
+        RoundEntry.objects.create(round=other_round, singer=other_singer)
+        RoundJudge.objects.create(round=other_round, judge=other_judge)
+        other_round.status = ContestRound.Status.PREPARED
+        _save_round_state(other_round, ["status"])
+
+        start = threading.Barrier(2)
+        results = []
+        errors = []
+        result_lock = threading.Lock()
+
+        def apply_command(round_id, singer_id, judge_id):
+            close_old_connections()
+            try:
+                start.wait(timeout=10)
+                result = apply_scores_if_version(
+                    round_id,
+                    0,
+                    {(singer_id, judge_id): "90"},
+                    self.operator,
+                    command_id="receipt-cross-activity-001",
+                )
+                with result_lock:
+                    results.append(result)
+            except BaseException as error:
+                with result_lock:
+                    errors.append(error)
+            finally:
+                close_old_connections()
+
+        workers = [
+            threading.Thread(
+                target=apply_command,
+                args=(self.round.pk, self.singer.pk, self.judge.pk),
+            ),
+            threading.Thread(
+                target=apply_command,
+                args=(other_round.pk, other_singer.pk, other_judge.pk),
+            ),
+        ]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=20)
+
+        self.assertFalse(any(worker.is_alive() for worker in workers))
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], IdempotencyConflictError)
+        self.assertEqual(ScoreRecord.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ENTER_SCORE).count(), 1
+        )
+        self.assertEqual(ScoreWriteReceipt.objects.count(), 1)
+        self.round.refresh_from_db()
+        other_round.refresh_from_db()
+        self.assertEqual(sorted([self.round.score_version, other_round.score_version]), [0, 1])
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
 class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
     """M0-W: a no-SCORE phase commit must prevent prepare_round from landing."""
 
     def setUp(self):
         self.user = User.objects.create_user(username="prepare-actor", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Prepared Score Authority",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1789,10 +2022,10 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="boundary-participant", password="pass")
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="boundary-staff", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Boundary Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -1982,7 +2215,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         self.assertEqual(mutate_result.get("rejected"), True, mutate_result)
 
     def test_o5_test_cleanup_vs_participant_upload_no_deadlock(self):
-        test_activity = Activity.objects.create(
+        test_activity = _create_activity(
             title="Test Cleanup",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2054,10 +2287,10 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
 
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="r0-rule-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="R0 Ruleset Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2197,16 +2430,16 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
 class ParticipantApplyVisibilityTests(TestCase):
     def setUp(self):
         self.participant = User.objects.create_user(username="apply-participant", password="pass")
-        self.staff = User.objects.create_user(
+        self.staff = _create_provisioned_user(
             username="apply-staff", password="pass", role=User.Role.STAFF
         )
-        self.formal = Activity.objects.create(
+        self.formal = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=False,
         )
-        self.testing = Activity.objects.create(
+        self.testing = _create_activity(
             title="Test Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2280,7 +2513,7 @@ class StageResultModelTests(TestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username="stage-staff", password="pass")
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2413,10 +2646,10 @@ class StageResolverBindingTests(TestCase):
     """M1-F binder + run_ruleset/persist over a small DB-backed fixture."""
 
     def setUp(self):
-        self.user = User.objects.create_user(
+        self.user = _create_provisioned_user(
             username="binder-staff", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -2571,7 +2804,7 @@ class StageResolverBindingTests(TestCase):
     def test_run_ruleset_rejects_version_from_other_activity(self):
         from .services import run_ruleset
 
-        other = Activity.objects.create(
+        other = _create_activity(
             title="其他",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3204,10 +3437,10 @@ class RoundEntryBridgeTests(TestCase):
     """
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="roster-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="Roster Bridge",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3429,10 +3662,10 @@ class GoldenSchiduiDbTests(TestCase):
     JUDGE_COUNT = 5
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="golden-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3649,10 +3882,10 @@ class GoldenSchiduiXiaofengDbTests(TestCase):
     JUDGE_COUNT = 5
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="xf-golden-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="校十佳屏峰",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -3891,15 +4124,17 @@ class RapidEntryServiceTests(TestCase):
     """M1-H rapid-entry backstage: stale-edit version bump + auto re-resolve service."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
-            username="rapid-admin", password="pass", role=User.Role.ADMIN
-        )
-        self.activity = Activity.objects.create(
-            title="录分活动",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=True,
-        )
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="rapid-admin", password="pass", role=User.Role.ADMIN
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="录分活动",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
         self.round = ContestRound.objects.create(
             activity=self.activity,
             round_type=ContestRound.RoundType.PRELIMINARY,
@@ -4114,10 +4349,10 @@ class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
     final guard). Identical facts converge to a single row; no thread raises IntegrityError."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="recompute-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="并发重算活动",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PENDING,
@@ -4221,10 +4456,10 @@ class BindingSourceHelperTests(TestCase):
     """§32 binding-sourcing helpers: group_of / vote_scores / manual are read from DB."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="src-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="源活动",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4364,13 +4599,13 @@ class ManualDecisionModelTests(TestCase):
     """ManualDecision clean + unique_together (§31 closure for §32 MANUAL_SELECT)."""
 
     def setUp(self):
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="手动",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=True,
         )
-        self.other = Activity.objects.create(
+        self.other = _create_activity(
             title="他活动",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4457,16 +4692,16 @@ class ManualDecisionServiceTests(TestCase):
     """
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="md-svc-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="手动服务",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=True,
         )
-        self.other = Activity.objects.create(
+        self.other = _create_activity(
             title="其他活动",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -4701,10 +4936,10 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
     a manual pick that was mutated underneath it."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="md-race-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="并发人工选择",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PENDING,
@@ -4827,10 +5062,10 @@ class ConfirmedDependencyClosureTests(TestCase):
     """
 
     def setUp(self):
-        self.user = User.objects.create_user(
+        self.user = _create_provisioned_user(
             username="closure-admin", password="pass", role=User.Role.STAFF
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="闭环节",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PENDING,
@@ -5058,10 +5293,10 @@ class AutoResolveCheckpointTests(TestCase):
     """M1-INTEGRATION-2: progressive auto-resolution publishes READY_TO_CONFIRM stages."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="auto-resolve", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -5171,10 +5406,10 @@ class AudienceCompositeFlowTests(TestCase):
     """M1-INTEGRATION-2: a staff-entered AudienceScore flows into the composite as a 0-100 value."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="aud-comp", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -5286,7 +5521,7 @@ class VoteBoundaryRegressionTests(TestCase):
         from django.utils import timezone
         from voting.models import VoteOption
 
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="投票边界",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.REGISTRATION_OPEN,
@@ -5360,10 +5595,10 @@ class ShadowRehearsalTests(TestCase):
     JUDGE_COUNT = 5
 
     def setUp(self):
-        self.admin = User.objects.create_user(
+        self.admin = _create_provisioned_user(
             username="shadow-admin", password="pass", role=User.Role.ADMIN
         )
-        self.activity = Activity.objects.create(
+        self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PENDING,

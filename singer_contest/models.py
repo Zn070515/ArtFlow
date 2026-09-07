@@ -1,3 +1,4 @@
+import json
 import threading
 from typing import Any, cast
 
@@ -5,7 +6,9 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_CLEANUP,
     authority_authorized,
+    parse_bulk_create_options,
 )
 from common.lifecycle import runtime_is_test
 from django.conf import settings
@@ -26,6 +29,7 @@ _manual_writes = threading.local()
 _duel_writes = threading.local()
 _raw_fact_writes = threading.local()
 _award_materializations = threading.local()
+_score_receipt_bulk_updates = threading.local()
 
 
 def _manual_write_authorized() -> bool:
@@ -58,6 +62,14 @@ def _award_materialization_authorized() -> bool:
 
 def _authorize_award_materialization(authorized: bool) -> None:
     _award_materializations.authorized = authorized
+
+
+def _score_receipt_bulk_update_authorized() -> bool:
+    return bool(getattr(_score_receipt_bulk_updates, "authorized", False))
+
+
+def _authorize_score_receipt_bulk_update(authorized: bool) -> None:
+    _score_receipt_bulk_updates.authorized = authorized
 
 
 def _ensure_round_raw_fact_mutable(round_id: int | None) -> None:
@@ -124,6 +136,67 @@ def _stored_fk_id(instance, field: str) -> int | None:
     )
 
 
+def _ensure_identity_ownership_unchanged(instance, fields: frozenset[str]) -> None:
+    """Keep an existing contest identity bound to its original owner."""
+    if instance._state.adding or not instance.pk:
+        return
+    stored = type(instance)._base_manager.filter(pk=instance.pk).values(*fields).first()
+    if stored and any(stored[field] != getattr(instance, field) for field in fields):
+        raise ValidationError("比赛身份归属创建后不可修改。")
+
+
+def _reject_conflict_upsert(args, kwargs, model_name: str) -> None:
+    if parse_bulk_create_options(args, kwargs).update_conflicts:
+        raise ValidationError(
+            f"{model_name} does not support bulk_create(update_conflicts=True); "
+            "use the audited authority service or ordinary bulk_create()."
+        )
+
+
+class IdentityOwnershipQuerySet(models.QuerySet):
+    ownership_fields: frozenset[str] = frozenset()
+
+    def _update_ownership_fields(self) -> set[str]:
+        return {field.removesuffix("_id") for field in self.ownership_fields} | set(
+            self.ownership_fields
+        )
+
+    def _ensure_ownership_update_immutable(self, fields) -> None:
+        if self._update_ownership_fields().intersection(fields):
+            raise ValidationError("比赛身份归属创建后不可修改。")
+
+    def update(self, **kwargs):
+        self._ensure_ownership_update_immutable(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        self._ensure_ownership_update_immutable(fields)
+        for obj in objs:
+            _ensure_identity_ownership_unchanged(obj, self.ownership_fields)
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
+        return super().bulk_create(objs, *args, **kwargs)
+
+
+class SingerRegistrationQuerySet(IdentityOwnershipQuerySet):
+    ownership_fields = frozenset({"activity_id", "user_id"})
+
+
+class JudgeQuerySet(IdentityOwnershipQuerySet):
+    ownership_fields = frozenset({"activity_id"})
+
+
+class SingerRegistrationManager(models.Manager.from_queryset(SingerRegistrationQuerySet)):  # type: ignore[misc]
+    pass
+
+
+class JudgeManager(models.Manager.from_queryset(JudgeQuerySet)):  # type: ignore[misc]
+    pass
+
+
 def _relation_pk(value):
     return getattr(value, "pk", value)
 
@@ -143,6 +216,106 @@ def _ensure_stage_result_origins(*stage_result_ids: int | None) -> None:
         stage_result_id for stage_result_id in stage_result_ids if stage_result_id
     ):
         _ensure_stage_result_mutable(stage_result_id)
+
+
+def _stage_result_activity_id(stage_result_id: int | None) -> int | None:
+    if not stage_result_id:
+        return None
+    return (
+        StageResult._base_manager.filter(pk=stage_result_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _singer_activity_id(singer_id: int | None) -> int | None:
+    if not singer_id:
+        return None
+    return (
+        SingerRegistration._base_manager.filter(pk=singer_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+
+
+def _ensure_same_activity_stage_child_update(
+    queryset,
+    kwargs,
+    *,
+    has_activity_field: bool = False,
+) -> None:
+    relation_fields = {"stage_result", "stage_result_id", "singer", "singer_id"}
+    if has_activity_field:
+        relation_fields |= {"activity", "activity_id"}
+    if not relation_fields.intersection(kwargs):
+        return
+    new_stage_id = _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
+    new_singer_id = _relation_pk(kwargs.get("singer", kwargs.get("singer_id")))
+    new_activity_id = _relation_pk(kwargs.get("activity", kwargs.get("activity_id")))
+    value_fields = ["stage_result_id", "singer_id"]
+    if has_activity_field:
+        value_fields.append("activity_id")
+    for row in queryset.values(*value_fields):
+        current_stage_activity_id = _stage_result_activity_id(row["stage_result_id"])
+        target_stage_activity_id = (
+            _stage_result_activity_id(new_stage_id) if new_stage_id else current_stage_activity_id
+        )
+        target_singer_activity_id = (
+            _singer_activity_id(new_singer_id)
+            if new_singer_id
+            else _singer_activity_id(row["singer_id"])
+        )
+        target_activity_id = new_activity_id if new_activity_id else row.get("activity_id")
+        if (
+            target_stage_activity_id
+            and current_stage_activity_id
+            and target_stage_activity_id != current_stage_activity_id
+        ):
+            raise ValidationError("赛段派生结果不可迁移到其它活动。")
+        if (
+            target_stage_activity_id
+            and target_singer_activity_id
+            and target_singer_activity_id != target_stage_activity_id
+        ):
+            raise ValidationError("赛段派生结果选手必须属于同一活动。")
+        if (
+            has_activity_field
+            and target_stage_activity_id
+            and target_activity_id
+            and target_activity_id != target_stage_activity_id
+        ):
+            raise ValidationError("奖项候选必须属于结果所在活动。")
+
+
+def _ensure_same_activity_stage_child_instance(
+    instance, *, has_activity_field: bool = False
+) -> None:
+    if instance._state.adding or not instance.pk:
+        return
+    stored_stage_result_id = _stored_fk_id(instance, "stage_result")
+    current_stage_activity_id = _stage_result_activity_id(stored_stage_result_id)
+    target_stage_activity_id = _stage_result_activity_id(instance.stage_result_id)
+    target_singer_activity_id = _singer_activity_id(instance.singer_id)
+    target_activity_id = instance.activity_id if has_activity_field else target_stage_activity_id
+    if (
+        target_stage_activity_id
+        and current_stage_activity_id
+        and target_stage_activity_id != current_stage_activity_id
+    ):
+        raise ValidationError("赛段派生结果不可迁移到其它活动。")
+    if (
+        target_stage_activity_id
+        and target_singer_activity_id
+        and target_singer_activity_id != target_stage_activity_id
+    ):
+        raise ValidationError("赛段派生结果选手必须属于同一活动。")
+    if (
+        has_activity_field
+        and target_stage_activity_id
+        and target_activity_id
+        and target_activity_id != target_stage_activity_id
+    ):
+        raise ValidationError("奖项候选必须属于结果所在活动。")
 
 
 def _score_record_round_id(score_record_id: int | None) -> int | None:
@@ -203,8 +376,10 @@ class SingerRegistration(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = SingerRegistrationManager()
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
@@ -219,6 +394,10 @@ class SingerRegistration(models.Model):
 
     def __str__(self):
         return f"{self.name} — {self.song_name}"
+
+    def save(self, *args, **kwargs):
+        _ensure_identity_ownership_unchanged(self, frozenset({"activity_id", "user_id"}))
+        return super().save(*args, **kwargs)
 
 
 _CONTEST_ROUND_STATE_FIELDS = frozenset(
@@ -261,6 +440,37 @@ class ContestRoundQuerySet(models.QuerySet):
                 obj._ensure_authorized_mutation()
         return super().bulk_update(objs, fields, *args, **kwargs)
 
+    def bulk_create(self, objs, *args, **kwargs):
+        objs = list(objs)
+        options = parse_bulk_create_options(args, kwargs)
+        if options.update_conflicts:
+            update_fields = set(options.update_fields)
+            if _CONTEST_ROUND_STATE_FIELDS.intersection(update_fields) and not authority_authorized(
+                CONTEST_ROUND_STATE
+            ):
+                raise ValidationError("轮次状态只能通过轮次服务变更。")
+            if _CONTEST_ROUND_CONFIGURATION_FIELDS.intersection(
+                update_fields
+            ) and not authority_authorized(CONTEST_ROUND_STATE):
+                for contest_round in objs:
+                    lookup = {
+                        field: getattr(contest_round, field) for field in options.unique_fields
+                    }
+                    if (
+                        self.model._base_manager.filter(**lookup)
+                        .exclude(status=ContestRound.Status.DRAFT)
+                        .exists()
+                    ):
+                        raise ValidationError("轮次准备后，执行配置不可直接修改。")
+        for contest_round in objs:
+            contest_round._ensure_initial_state_authorized()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def delete(self):
+        for contest_round in self:
+            contest_round._ensure_deletion_authorized()  # type: ignore[attr-defined]
+        return super().delete()
+
 
 ContestRoundQuerySetManager = models.Manager.from_queryset(ContestRoundQuerySet)
 
@@ -268,14 +478,20 @@ ContestRoundQuerySetManager = models.Manager.from_queryset(ContestRoundQuerySet)
 class ContestRoundManager(ContestRoundQuerySetManager):  # type: ignore[misc]
     def create(self, **kwargs):
         activity_id = kwargs.get("activity_id") or getattr(kwargs.get("activity"), "pk", None)
-        if "sequence" not in kwargs and activity_id:
-            kwargs["sequence"] = (
-                self.filter(activity_id=activity_id)
-                .order_by("-sequence")
-                .values_list("sequence", flat=True)
-                .first()
-                or 0
-            ) + 1
+        if kwargs.get("sequence") is None and activity_id:
+            from core.models import Activity
+            from django.db import transaction
+
+            with transaction.atomic():
+                Activity.objects.select_for_update().get(pk=activity_id)
+                kwargs["sequence"] = (
+                    self.filter(activity_id=activity_id)
+                    .order_by("-sequence")
+                    .values_list("sequence", flat=True)
+                    .first()
+                    or 0
+                ) + 1
+                return super().create(**kwargs)
         return super().create(**kwargs)
 
 
@@ -404,9 +620,44 @@ class ContestRound(models.Model):
             ):
                 raise ValidationError("轮次准备后，执行配置不可直接修改。")
 
+    def _ensure_initial_state_authorized(self):
+        if authority_authorized(CONTEST_ROUND_STATE):
+            return
+        if (
+            self.status != self.Status.DRAFT
+            or self.is_locked
+            or self.score_version != 0
+            or self.advancement_status != self.AdvancementStatus.AUTO
+        ):
+            raise ValidationError("轮次必须以未锁定的 DRAFT 初始状态创建。")
+
+    def _ensure_deletion_authorized(self):
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("轮次删除需要显式测试数据清理权限。")
+        if self.status != self.Status.DRAFT or self.is_locked:
+            if self.entries.exists() or self.round_judges.exists():
+                from django.db.models.deletion import ProtectedError
+
+                protected: set[models.Model] = set()
+                protected.update(self.entries.all())
+                protected.update(self.round_judges.all())
+                raise ProtectedError("Prepared round snapshots are protected.", protected)
+            raise ValidationError("只有未锁定的 DRAFT 轮次可以删除。")
+        if not self.activity.is_test_mode:
+            raise ValidationError("只有测试活动中的轮次可以删除。")
+        from .services import ensure_round_not_consumed_by_confirmed_stage
+
+        ensure_round_not_consumed_by_confirmed_stage(self)
+
     def save(self, *args, **kwargs):
+        if self._state.adding:
+            self._ensure_initial_state_authorized()
         self._ensure_authorized_mutation()
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_deletion_authorized()
+        return super().delete(*args, **kwargs)
 
     def effective_roster_source(self) -> str:
         """The roster provider for this round, resolving the M1-INTEGRATION-1 source.
@@ -433,12 +684,18 @@ class Judge(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="judges")
     name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
+    objects = JudgeManager()
 
     class Meta:
+        base_manager_name = "objects"
         ordering = ["pk"]
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        _ensure_identity_ownership_unchanged(self, frozenset({"activity_id"}))
+        return super().save(*args, **kwargs)
 
 
 class RoundSnapshotMixin:
@@ -501,6 +758,7 @@ class RoundSnapshotQuerySet(models.QuerySet):
                 raise ValidationError("Snapshot relation must belong to the round activity.")
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -623,6 +881,7 @@ class ScoreRecordQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             _ensure_round_raw_fact_mutable(obj.round_id)
@@ -687,6 +946,123 @@ class ScoreRecord(models.Model):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
 
 
+class ScoreWriteReceiptQuerySet(models.QuerySet):
+    def _ensure_receipts_valid(self, receipts) -> None:
+        for receipt in receipts:
+            receipt.clean()
+
+    def update(self, **kwargs):
+        if _score_receipt_bulk_update_authorized():
+            return super().update(**kwargs)
+        if {"status", "result_payload", "result_version"}.intersection(kwargs):
+            model = cast(Any, self.model)
+            for row in self.values("status", "result_payload", "result_version"):
+                status = kwargs.get("status", row["status"])
+                result_payload = kwargs.get("result_payload", row["result_payload"])
+                result_version = kwargs.get("result_version", row["result_version"])
+                model.validate_result_payload(status, result_payload, result_version)
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
+        objs = list(objs)
+        self._ensure_receipts_valid(objs)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        objs = list(objs)
+        if {"status", "result_payload", "result_version"}.intersection(fields):
+            self._ensure_receipts_valid(objs)
+        _authorize_score_receipt_bulk_update(True)
+        try:
+            return super().bulk_update(objs, fields, *args, **kwargs)
+        finally:
+            _authorize_score_receipt_bulk_update(False)
+
+
+ScoreWriteReceiptManager = models.Manager.from_queryset(ScoreWriteReceiptQuerySet)
+
+
+class ScoreWriteReceipt(models.Model):
+    """Bounded idempotency record for one rapid-score command.
+
+    This is a transaction receipt, not a second score authority: the score facts remain
+    in :class:`ScoreRecord` and their change detail remains in :class:`AuditLog`.
+    """
+
+    RESULT_PAYLOAD_MAX_BYTES = 256
+    RESULT_PAYLOAD_KEYS = frozenset({"status", "reason_code", "version", "matrix_complete"})
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+
+    command_id = models.CharField(max_length=64, unique=True)
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="score_write_receipts",
+    )
+    operation = models.CharField(max_length=64)
+    payload_hash = models.CharField(max_length=64)
+    result_version = models.PositiveIntegerField()
+    result_payload = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = ScoreWriteReceiptManager()
+
+    @classmethod
+    def validate_result_payload(cls, status, result_payload, result_version=None) -> None:
+        if status == cls.Status.PENDING:
+            if result_payload != {}:
+                raise ValidationError({"result_payload": "待处理成绩写入回执不得包含结果。"})
+            if result_version not in {None, 0}:
+                raise ValidationError({"result_version": "待处理成绩写入回执结果版本必须为 0。"})
+            return
+        if status != cls.Status.SUCCEEDED:
+            raise ValidationError({"status": "成绩写入回执状态无效。"})
+        if not isinstance(result_payload, dict):
+            raise ValidationError({"result_payload": "成绩写入回执结果必须是对象。"})
+        if set(result_payload) != cls.RESULT_PAYLOAD_KEYS:
+            raise ValidationError({"result_payload": "成绩写入回执结果字段无效。"})
+        if result_payload["status"] != cls.Status.SUCCEEDED:
+            raise ValidationError({"result_payload": "成绩写入回执结果状态无效。"})
+        if result_payload["reason_code"] != "SCORES_APPLIED":
+            raise ValidationError({"result_payload": "成绩写入回执结果原因无效。"})
+        if isinstance(result_payload["version"], bool) or not isinstance(
+            result_payload["version"], int
+        ):
+            raise ValidationError({"result_payload": "成绩写入回执结果版本必须是整数。"})
+        if not isinstance(result_payload["matrix_complete"], bool):
+            raise ValidationError({"result_payload": "成绩写入回执完成标记必须是布尔值。"})
+        if result_version is not None and result_payload["version"] != result_version:
+            raise ValidationError({"result_payload": "成绩写入回执结果版本不一致。"})
+        try:
+            size = len(
+                json.dumps(
+                    result_payload,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+        except (TypeError, ValueError):
+            raise ValidationError({"result_payload": "成绩写入回执结果不可序列化。"}) from None
+        if size > cls.RESULT_PAYLOAD_MAX_BYTES:
+            raise ValidationError({"result_payload": "成绩写入回执结果过大。"})
+
+    def clean(self):
+        super().clean()
+        self.validate_result_payload(self.status, self.result_payload, self.result_version)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    class Meta:
+        base_manager_name = "objects"
+
+
 class ScoreSummaryQuerySet(models.QuerySet):
     def _ensure_authorized(self):
         if not authority_authorized(SCORE_SUMMARY_RECALCULATE):
@@ -701,6 +1077,7 @@ class ScoreSummaryQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         self._ensure_authorized()
         return super().bulk_create(objs, *args, **kwargs)
 
@@ -772,6 +1149,7 @@ class AudienceScoreQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -937,6 +1315,7 @@ class AwardQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1090,6 +1469,7 @@ class RoundSetupFactQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1137,6 +1517,7 @@ class ScoringRubricQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1168,6 +1549,8 @@ class RubricCriterionQuerySet(models.QuerySet):
 
     def update(self, **kwargs):
         self._ensure_mutable()
+        if "rubric" in kwargs or "rubric_id" in kwargs:
+            _ensure_rubric_mutable(_relation_pk(kwargs.get("rubric", kwargs.get("rubric_id"))))
         return super().update(**kwargs)
 
     def delete(self):
@@ -1175,6 +1558,7 @@ class RubricCriterionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1388,6 +1772,7 @@ class CriterionScoreQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1487,6 +1872,7 @@ class StageResultQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1614,7 +2000,7 @@ class StageResult(models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         confirm_authorized = authority_authorized(STAGE_RESULT_CONFIRM)
-        stored = self._stored(["status"])
+        stored = self._stored(self._immutable_fields)
         if self._state.adding:
             if not confirm_authorized and self.status == self.Status.CONFIRMED:
                 raise ValidationError("只在核定服务中产生已核定赛段结果。")
@@ -1657,6 +2043,7 @@ class StageDecisionQuerySet(models.QuerySet):
             _ensure_stage_result_mutable(
                 _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
             )
+        _ensure_same_activity_stage_child_update(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -1668,6 +2055,7 @@ class StageDecisionQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            _ensure_same_activity_stage_child_instance(obj)
             _ensure_stage_result_origins(_stored_fk_id(obj, "stage_result"), obj.stage_result_id)
             if (
                 obj.stage_result_id
@@ -1679,6 +2067,7 @@ class StageDecisionQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1742,6 +2131,7 @@ class StageDecision(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_same_activity_stage_child_instance(self)
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
@@ -1768,6 +2158,7 @@ class StageAwardDecisionQuerySet(models.QuerySet):
             _ensure_stage_result_mutable(
                 _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
             )
+        _ensure_same_activity_stage_child_update(self, kwargs, has_activity_field=True)
         return super().update(**kwargs)
 
     def delete(self):
@@ -1779,6 +2170,7 @@ class StageAwardDecisionQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            _ensure_same_activity_stage_child_instance(obj, has_activity_field=True)
             _ensure_stage_result_origins(_stored_fk_id(obj, "stage_result"), obj.stage_result_id)
             if (
                 obj.stage_result_id
@@ -1790,6 +2182,7 @@ class StageAwardDecisionQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1846,6 +2239,7 @@ class StageAwardDecision(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_same_activity_stage_child_instance(self, has_activity_field=True)
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if (
             self.stage_result_id
@@ -1884,6 +2278,7 @@ class CompositeResultQuerySet(models.QuerySet):
             _ensure_stage_result_mutable(
                 _relation_pk(kwargs.get("stage_result", kwargs.get("stage_result_id")))
             )
+        _ensure_same_activity_stage_child_update(self, kwargs)
         return super().update(**kwargs)
 
     def delete(self):
@@ -1895,6 +2290,7 @@ class CompositeResultQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            _ensure_same_activity_stage_child_instance(obj)
             _ensure_stage_result_origins(_stored_fk_id(obj, "stage_result"), obj.stage_result_id)
             if (
                 obj.stage_result_id
@@ -1906,6 +2302,7 @@ class CompositeResultQuerySet(models.QuerySet):
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -1965,6 +2362,7 @@ class CompositeResult(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_same_activity_stage_child_instance(self)
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Composites of a confirmed stage result are immutable.")
@@ -2004,6 +2402,7 @@ class ManualDecisionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         self._ensure_auth()
         return super().bulk_create(objs, *args, **kwargs)
 
@@ -2105,6 +2504,7 @@ class DuelDecisionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         self._ensure_auth()
         return super().bulk_create(objs, *args, **kwargs)
 

@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from common.authority import ACTIVITY_STATE, authority_write
 from core.models import Activity
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -129,18 +130,19 @@ class PublicPhotoImportTests(TestCase):
 
 class PublicPortalVisibilityTests(TestCase):
     def setUp(self):
-        self.formal = Activity.objects.create(
-            title="Formal Contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=False,
-        )
-        self.testing = Activity.objects.create(
-            title="Test Contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            is_test_mode=True,
-        )
+        with authority_write(ACTIVITY_STATE):
+            self.formal = Activity.objects.create(
+                title="Formal Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
+            self.testing = Activity.objects.create(
+                title="Test Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
 
     def _showcase(self, title, activity):
         return PublicPost.objects.create(
