@@ -29,6 +29,8 @@ from .services import (
     deactivate_entry_point,
     issue_access_grant,
     redeem_access_grant,
+    revoke_access_grant,
+    revoke_ephemeral_session,
 )
 
 User = get_user_model()
@@ -425,3 +427,97 @@ class EntryAccessRedemptionConcurrencyTests(TransactionTestCase):
         self.assertEqual(len(results), 2)
         self.assertEqual(sum(not isinstance(result, Exception) for result in results), 1)
         self.assertEqual(EphemeralSession.objects.count(), 1)
+
+
+class EntryAccessRevocationTests(TestCase):
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Access revocation test", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="revocation-staff", password="pass", role=User.Role.STAFF
+            )
+        self.entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.OPERATIONAL,
+            label="Operational bootstrap",
+            actor=self.staff,
+        )
+
+    def _issue(self):
+        return issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+
+    def test_revoke_access_grant_blocks_redemption_and_is_idempotent(self):
+        issued = self._issue()
+
+        revoked = revoke_access_grant(issued.grant, actor=self.staff, note="lost device")
+
+        self.assertIsNotNone(revoked.revoked_at)
+        with self.assertRaises(ValidationError):
+            redeem_access_grant(issued.token)
+
+        again = revoke_access_grant(issued.grant, actor=self.staff, note="duplicate request")
+        self.assertEqual(again.revoked_at, revoked.revoked_at)
+        self.assertEqual(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ACCESS_GRANT_REVOKE).count(),
+            1,
+        )
+        audit = AuditLog.objects.get(action_type=AuditLog.ActionType.ACCESS_GRANT_REVOKE)
+        self.assertEqual(audit.operator, self.staff)
+        self.assertEqual(audit.note, "lost device")
+        self.assertNotIn(issued.token, " ".join([audit.target, audit.old_value, audit.new_value]))
+
+    def test_revoke_redeemed_grant_does_not_reopen_or_destroy_session(self):
+        issued = self._issue()
+        session_result = redeem_access_grant(issued.token)
+
+        revoke_access_grant(issued.grant, actor=self.staff, note="rotate bootstrap")
+
+        with self.assertRaises(ValidationError):
+            redeem_access_grant(issued.token)
+        authenticated = authenticate_ephemeral_session(
+            session_result.token,
+            expected_kind=EntryPoint.Kind.OPERATIONAL,
+            activity=self.activity,
+        )
+        self.assertEqual(authenticated.pk, session_result.session.pk)
+
+    def test_revoke_ephemeral_session_blocks_authentication_and_is_idempotent(self):
+        issued = self._issue()
+        session_result = redeem_access_grant(issued.token)
+
+        revoked = revoke_ephemeral_session(
+            session_result.session, actor=self.staff, note="operator signed out"
+        )
+
+        self.assertIsNotNone(revoked.revoked_at)
+        with self.assertRaises(ValidationError):
+            authenticate_ephemeral_session(
+                session_result.token,
+                expected_kind=EntryPoint.Kind.OPERATIONAL,
+                activity=self.activity,
+            )
+
+        again = revoke_ephemeral_session(
+            session_result.session, actor=self.staff, note="duplicate request"
+        )
+        self.assertEqual(again.revoked_at, revoked.revoked_at)
+        self.assertEqual(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.ACCESS_SESSION_REVOKE).count(),
+            1,
+        )
+
+    def test_revocation_rereads_actor_authority(self):
+        issued = self._issue()
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff.role = User.Role.PARTICIPANT
+            self.staff.is_staff = False
+            self.staff.save(update_fields=["role", "is_staff"])
+
+        with self.assertRaises(PermissionDenied):
+            revoke_access_grant(issued.grant, actor=self.staff, note="stale actor")

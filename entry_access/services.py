@@ -193,3 +193,59 @@ def authenticate_ephemeral_session(raw_token, *, expected_kind, activity, round=
         with authority_write(EPHEMERAL_SESSION_STATE):
             session.save(update_fields=["last_seen_at"])
         return session
+
+
+def _normalize_revoke_note(note):
+    if note is None:
+        return ""
+    if not isinstance(note, str) or len(note) > 1000:
+        raise ValidationError("撤销备注必须是 1000 个字符以内的文本。")
+    return note.strip()
+
+
+def revoke_access_grant(grant, *, actor, note=None):
+    current_actor = require_current_staff(actor)
+    normalized_note = _normalize_revoke_note(note)
+
+    with transaction.atomic():
+        locked = AccessGrant.objects.select_for_update().get(pk=grant.pk)
+        if locked.revoked_at is not None:
+            return locked
+        revoked_at = timezone.now()
+        locked.revoked_at = revoked_at
+        with authority_write(ACCESS_GRANT_STATE):
+            locked.save(update_fields=["revoked_at"])
+        AuditLog.objects.create(
+            operator=current_actor,
+            action_type=AuditLog.ActionType.ACCESS_GRANT_REVOKE,
+            target=f"AccessGrant:{locked.pk}",
+            old_value=f"redeemed_at={locked.redeemed_at.isoformat() if locked.redeemed_at else ''}",
+            new_value=f"revoked_at={revoked_at.isoformat()}",
+            note=normalized_note,
+        )
+        return locked
+
+
+def revoke_ephemeral_session(session, *, actor, note=None):
+    current_actor = require_current_staff(actor)
+    normalized_note = _normalize_revoke_note(note)
+
+    with transaction.atomic():
+        locked = EphemeralSession.objects.select_for_update().get(pk=session.pk)
+        if locked.revoked_at is not None:
+            return locked
+        revoked_at = timezone.now()
+        locked.revoked_at = revoked_at
+        with authority_write(EPHEMERAL_SESSION_STATE):
+            locked.save(update_fields=["revoked_at"])
+        AuditLog.objects.create(
+            operator=current_actor,
+            action_type=AuditLog.ActionType.ACCESS_SESSION_REVOKE,
+            target=f"EphemeralSession:{locked.pk}",
+            old_value=(
+                f"last_seen_at={locked.last_seen_at.isoformat() if locked.last_seen_at else ''}"
+            ),
+            new_value=f"revoked_at={revoked_at.isoformat()}",
+            note=normalized_note,
+        )
+        return locked
