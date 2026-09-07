@@ -7,7 +7,8 @@
     "check:css": "npm run build:css && git diff --exit-code -- static/css/app.css",
     "build:client": "tsc -p tsconfig.client.json",
     "check:client": "npm run build:client && git diff --exit-code -- static/dist/",
-    "test:client": "node --test tests/client/*.test.mjs"
+    "test:client": "node --test tests/client/*.test.mjs",
+    "check:pyright": "uv run pyright"
   },
   "devDependencies": {
     "tailwindcss": "3.4.17",

@@ -1,0 +1,21 @@
+{
+  "include": [
+    "common/authority.py",
+    "core/services.py",
+    "staff_panel/views.py",
+    "singer_contest/services.py"
+  ],
+  "exclude": [
+    "**/migrations",
+    "**/tests.py",
+    "**/test_*.py",
+    "tests",
+    "static",
+    "staticfiles",
+    "media"
+  ],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv"
+}
