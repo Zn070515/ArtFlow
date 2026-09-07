@@ -2,18 +2,26 @@ from datetime import timedelta
 
 from common.authority import (
     ACCESS_GRANT_STATE,
+    ACCOUNT_AUTHORITY,
+    CONTEST_ROUND_STATE,
     ENTRY_POINT_CONFIG,
     EPHEMERAL_SESSION_STATE,
     authority_write,
 )
+from common.models import AuditLog
 from core.models import Activity
 from django.apps import apps
-from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
 from django.urls import get_resolver
 from django.utils import timezone
+from singer_contest.models import ContestRound
 
 from .models import AccessGrant, EntryPoint, EphemeralSession
+from .services import create_entry_point, deactivate_entry_point, issue_access_grant
+
+User = get_user_model()
 
 
 class EntryAccessScaffoldTests(SimpleTestCase):
@@ -139,3 +147,86 @@ class EntryAccessModelTests(TestCase):
                     )
                 ]
             )
+
+
+class EntryAccessIssuanceTests(TestCase):
+    def setUp(self):
+        self.activity = Activity.objects.create(
+            title="Access issuance test", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="access-staff", password="pass", role=User.Role.STAFF
+            )
+        self.entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.JUDGE,
+            label="Judge bootstrap",
+            actor=self.staff,
+        )
+
+    def test_create_entry_point_requires_current_staff(self):
+        participant = User.objects.create_user(username="access-participant", password="pass")
+
+        with self.assertRaises(PermissionDenied):
+            create_entry_point(
+                self.activity,
+                kind=EntryPoint.Kind.SCANNER,
+                label="Scanner bootstrap",
+                actor=participant,
+            )
+
+    def test_issue_returns_raw_token_once_and_persists_only_digest(self):
+        result = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+
+        self.assertGreaterEqual(len(result.token), 43)
+        self.assertNotEqual(result.token, result.grant.token_digest)
+        self.assertEqual(len(result.grant.token_digest), 64)
+        audit = AuditLog.objects.get(action_type=AuditLog.ActionType.ACCESS_GRANT_ISSUE)
+        self.assertEqual(audit.operator, self.staff)
+        self.assertNotIn(
+            result.token, " ".join([audit.target, audit.old_value, audit.new_value, audit.note])
+        )
+
+    def test_issue_rejects_expired_or_overlong_ttl(self):
+        for ttl in (timedelta(0), timedelta(minutes=31)):
+            with self.subTest(ttl=ttl), self.assertRaises(ValidationError):
+                issue_access_grant(self.entry_point, actor=self.staff, ttl=ttl)
+
+    def test_issue_rejects_inactive_entry_point(self):
+        deactivate_entry_point(self.entry_point, actor=self.staff)
+
+        with self.assertRaises(ValidationError):
+            issue_access_grant(self.entry_point, actor=self.staff, ttl=timedelta(minutes=5))
+
+    def test_issue_rejects_round_from_another_activity(self):
+        other_activity = Activity.objects.create(
+            title="Other activity", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            other_round = ContestRound.objects.create(
+                activity=other_activity,
+                name="Other round",
+                round_type=ContestRound.RoundType.PRELIMINARY,
+            )
+
+        with self.assertRaises(ValidationError):
+            issue_access_grant(
+                self.entry_point,
+                actor=self.staff,
+                ttl=timedelta(minutes=5),
+                round=other_round,
+            )
+
+    def test_issue_rereads_actor_authority(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff.role = User.Role.PARTICIPANT
+            self.staff.is_staff = False
+            self.staff.save(update_fields=["role", "is_staff"])
+
+        with self.assertRaises(PermissionDenied):
+            issue_access_grant(self.entry_point, actor=self.staff, ttl=timedelta(minutes=5))
