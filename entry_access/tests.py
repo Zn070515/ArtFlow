@@ -13,6 +13,7 @@ from common.authority import (
 from common.models import AuditLog
 from core.models import Activity
 from django.apps import apps
+from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
@@ -46,6 +47,16 @@ class EntryAccessScaffoldTests(SimpleTestCase):
         resolver = get_resolver()
 
         self.assertIn("entry_access", resolver.namespace_dict)
+
+    def test_admin_exposes_only_read_only_non_secret_inspection(self):
+        for model in (AccessGrant, EntryPoint, EphemeralSession):
+            with self.subTest(model=model.__name__):
+                model_admin = django_admin.site._registry[model]
+                self.assertFalse(model_admin.has_add_permission(None))
+                self.assertFalse(model_admin.has_change_permission(None))
+                self.assertFalse(model_admin.has_delete_permission(None))
+                if model in (AccessGrant, EphemeralSession):
+                    self.assertIn("token_digest", model_admin.get_exclude(None) or ())
 
 
 class EntryAccessModelTests(TestCase):

@@ -51,6 +51,20 @@ Award 只保留可追溯性，不能冒充当前正式奖项。
 授权 Award 创建、重算或替换；删除该字段或清理历史值前，必须先审计真实历史数据并
 通过显式迁移处理。
 
+## M2-A 入口访问能力状态
+
+M2-A 当前标记为 `EXPERIMENTAL`，只提供工程基础能力，不代表 Judge/Ticket 的正式业务
+流程已经上线。已具备的边界是：Staff/Admin 可创建入口并签发一次性短期 grant；公共兑换
+必须使用显式 `POST` body token，生成的 ephemeral session 具有更短有效期和精确的
+activity/round/kind 范围；grant/session 均可由 Staff/Admin 撤销。GET 兑换、未知/过期/已
+撤销授权以及错误范围的会话都不会改变状态或返回差异化的敏感信息。
+
+grant 和 session 只在成功的签发/兑换响应中返回一次原始 token，数据库、审计记录和只读
+Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的无 cookie、body-only bearer
+边界，因此不依赖 CSRF cookie；Staff 的签发和撤销仍走登录会话与 CSRF 保护。后续接入
+JudgeSeat、正式扫码页或业务工作区前，必须先完成 PostgreSQL 并发/恢复彩排和真实角色
+流程验证。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：
