@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from accounts.services import require_current_admin
+from accounts.services import require_current_admin, require_current_staff
 from common.authority import VOTE_SESSION_STATE, authority_write
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
@@ -114,6 +114,7 @@ def _audit_vote_state(vote_session, operator, action_type, old_value, new_value,
 
 
 def open_vote_session(vote_session, operator):
+    current_operator = require_current_staff(operator)
     with transaction.atomic():
         _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
@@ -125,12 +126,17 @@ def open_vote_session(vote_session, operator):
         with authority_write(VOTE_SESSION_STATE):
             locked.save(update_fields=["is_open"])
         _audit_vote_state(
-            locked, operator, AuditLog.ActionType.VOTE_MANAGE, "is_open=false", "is_open=true"
+            locked,
+            current_operator,
+            AuditLog.ActionType.VOTE_MANAGE,
+            "is_open=false",
+            "is_open=true",
         )
         return locked
 
 
 def close_vote_session(vote_session, operator):
+    current_operator = require_current_staff(operator)
     with transaction.atomic():
         _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
@@ -140,12 +146,17 @@ def close_vote_session(vote_session, operator):
         with authority_write(VOTE_SESSION_STATE):
             locked.save(update_fields=["is_open"])
         _audit_vote_state(
-            locked, operator, AuditLog.ActionType.VOTE_MANAGE, "is_open=true", "is_open=false"
+            locked,
+            current_operator,
+            AuditLog.ActionType.VOTE_MANAGE,
+            "is_open=true",
+            "is_open=false",
         )
         return locked
 
 
 def lock_vote_session(vote_session, operator):
+    current_operator = require_current_staff(operator)
     with transaction.atomic():
         _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
@@ -156,7 +167,11 @@ def lock_vote_session(vote_session, operator):
         with authority_write(VOTE_SESSION_STATE):
             locked.save(update_fields=["is_locked", "is_open"])
         _audit_vote_state(
-            locked, operator, AuditLog.ActionType.RELOCK_RESULT, "is_locked=false", "is_locked=true"
+            locked,
+            current_operator,
+            AuditLog.ActionType.RELOCK_RESULT,
+            "is_locked=false",
+            "is_locked=true",
         )
         return locked
 

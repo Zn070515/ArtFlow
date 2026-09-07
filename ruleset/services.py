@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from accounts.services import require_current_admin
+from accounts.services import require_current_admin, require_current_staff
 from common.authority import RULESET_FREEZE, authority_write
 from common.models import AuditLog
 from core.services import lock_activity_for_action
@@ -250,6 +250,7 @@ def update_ruleset_definition(
     ``base_content_hash`` is supplied — rejects a save whose editor started from a stale
     definition (the 409-contract for concurrent editing). Returns the locked version.
     """
+    require_current_staff(operator)
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
@@ -271,6 +272,7 @@ def update_ruleset_binding(
     save whose editor started from a stale binding surface (``base_binding`` signature).
     Does not touch the version: the snapshot runs at freeze time.
     """
+    require_current_staff(operator)
     lock_activity_for_action(ruleset.activity)
     locked = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
     if base_binding is not None and _binding_signature(locked) != base_binding:
@@ -511,6 +513,7 @@ def supersede_ruleset_version(
     atomically flips authority). The editor finds this successor by ``status=DRAFT``, not
     by ``is_current``. Freezing the successor later re-promotes it to current FROZEN.
     """
+    current_operator = require_current_staff(created_by)
     lock_activity_for_action(version.ruleset.activity)
     ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
     locked = (
@@ -529,7 +532,7 @@ def supersede_ruleset_version(
         binding=locked.binding,
         is_current=False,
         status=RulesetVersion.Status.DRAFT,
-        created_by=created_by,
+        created_by=current_operator,
     )
 
 
@@ -546,6 +549,7 @@ def create_ruleset_version(
     ``max(version)+1`` to avoid the unique ``(ruleset, version)`` collision when a ruleset
     — or an activity's ruleset — is cloned repeatedly.
     """
+    current_operator = require_current_staff(created_by)
     lock_activity_for_action(ruleset.activity)
     locked = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
     last = locked.versions.order_by("-version").values_list("version", flat=True).first()
@@ -556,5 +560,5 @@ def create_ruleset_version(
         definition=definition,
         binding=dict(binding or {}),
         is_current=False,
-        created_by=created_by,
+        created_by=current_operator,
     )

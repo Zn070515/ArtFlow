@@ -50,7 +50,13 @@ from singer_contest.models import (
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.audit import client_ip
-from common.authority import ACTIVITY_STATE, CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    authority_write,
+)
 from common.management.commands.backup_artflow import (
     apply_migration_heads,
     collect_counts,
@@ -237,7 +243,10 @@ class M1StageResultTestDataCleanupTests(TestCase):
     """R0: test-mode cleanup must clear M1 ruleset + stage-result residue, even READY."""
 
     def setUp(self):
-        self.operator = User.objects.create_user(username="m1-cleanup", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.operator = User.objects.create_user(
+                username="m1-cleanup", password="pass", role=User.Role.STAFF
+            )
         self.activity = Activity.objects.create(
             title="R0 Test Activity", activity_type=Activity.Type.SINGER_CONTEST
         )

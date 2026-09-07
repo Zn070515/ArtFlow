@@ -161,6 +161,14 @@ def _form_error(form):
     return "提交的数据无效。"
 
 
+def domain_error_messages(error) -> str:
+    """Return the stable user-facing text for an expected domain failure."""
+    error_messages = getattr(error, "messages", None)
+    if error_messages:
+        return "；".join(str(message) for message in error_messages)
+    return str(error)
+
+
 def _require_admin(user):
     return require_current_admin(user)
 
@@ -709,7 +717,7 @@ def material_check_review(request):
             actor=request.user,
         )
     except ValidationError as error:
-        messages.error(request, "；".join(error.messages))
+        messages.error(request, domain_error_messages(error))
         return _material_review_redirect(owner)
     messages.success(request, f"「{check.item_name}」已审核。")
     return _material_review_redirect(owner)
@@ -1039,9 +1047,12 @@ def round_create(request):
 @require_POST
 def round_prepare(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    ensure_activity_unlocked(contest_round.activity)
-    ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
-    prepare_round(contest_round, request.user)
+    try:
+        ensure_activity_unlocked(contest_round.activity)
+        ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
+        prepare_round(contest_round, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"比赛轮次准备失败：{domain_error_messages(error)}")
     return redirect("staff:round_list")
 
 
@@ -1058,7 +1069,7 @@ def round_running_order(request, pk):
                     contest_round, form.cleaned_data["singer_ids"], request.user
                 )
             except (PermissionDenied, ValidationError) as error:
-                form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+                form.add_error(None, domain_error_messages(error))
             else:
                 messages.success(request, "人工出场顺序已保存。")
                 return redirect("staff:round_list")
@@ -1089,7 +1100,7 @@ def round_groups(request, pk):
             try:
                 set_round_groups(contest_round, form.cleaned_data["groups"], request.user)
             except (PermissionDenied, ValidationError) as error:
-                form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+                form.add_error(None, domain_error_messages(error))
             else:
                 messages.success(request, "分组与演出归属已保存。")
                 return redirect("staff:round_list")
@@ -1245,7 +1256,7 @@ def round_scores_api(request, pk):
             # Surface a ruleset/resolve problem to the operator instead of silently
             # dropping it (M1-INTEGRATION-CLOSE Item 7): the scores are saved but the
             # stage that could not auto-resolve must be visible, not invisible.
-            resolve_warning = "；".join(getattr(exc, "messages", []))
+            resolve_warning = domain_error_messages(exc)
             if not resolve_warning:
                 resolve_warning = "该赛段无法自动核定，请人工核定。"
         # Report the stage's true current status (not just whether this save newly resolved
@@ -1356,7 +1367,7 @@ def audience_score_entry(request, activity_id):
     try:
         version = _current_frozen_version(activity)
     except ValidationError as error:
-        messages.error(request, "；".join(error.messages))
+        messages.error(request, domain_error_messages(error))
         return redirect("staff:audience_score_entry", activity_id=activity_id)
     sets = _audience_sets(activity, version)
     return render(
@@ -1469,7 +1480,7 @@ def audience_scores_api(request, activity_id):
     try:
         maybe_resolve_checkpoints(activity, request.user)
     except (ValidationError, PermissionDenied) as exc:
-        resolve_warning = "；".join(getattr(exc, "messages", []))
+        resolve_warning = domain_error_messages(exc)
         if not resolve_warning:
             resolve_warning = "该赛段无法自动核定，请人工核定。"
 
@@ -1547,11 +1558,11 @@ def stage_result_detail(request, pk):
 def stage_result_confirm(request, pk):
     """核定并锁定 a stage result into its final handcard state (M1-H §36-37)."""
     stage = get_object_or_404(StageResult, pk=pk)
-    ensure_activity_action_allowed(stage.activity, ActivityAction.PUBLISH_RESULT)
     try:
+        ensure_activity_action_allowed(stage.activity, ActivityAction.PUBLISH_RESULT)
         confirm_stage_result(stage, confirmed_by=request.user)
-    except ValidationError as error:
-        messages.error(request, "；".join(error.messages))
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"赛段核定失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "已核定并锁定该赛段结果，可抄主持手卡。")
     return redirect("staff:stage_result_detail", pk=pk)
@@ -1565,8 +1576,8 @@ def stage_result_unlock(request, pk):
     stage = get_object_or_404(StageResult, pk=pk)
     try:
         unlock_stage_result(stage, operator=request.user, note=request.POST.get("note", "").strip())
-    except ValidationError as error:
-        messages.error(request, "；".join(error.messages))
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"赛段解锁失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "已解锁该赛段结果，可修正原始数据后重新核定。")
     return redirect("staff:stage_result_detail", pk=pk)
@@ -1576,13 +1587,13 @@ def stage_result_unlock(request, pk):
 @require_POST
 def round_finalize_advancement(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
     try:
+        ensure_activity_action_allowed(contest_round.activity, ActivityAction.SCORE)
         finalize_advancement(
             contest_round, request.POST.getlist("selected_singer_ids"), request.user
         )
-    except ValidationError as error:
-        messages.error(request, "；".join(error.messages))
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"晋级名单核定失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "已核定晋级名单。")
     return redirect("staff:round_ranking", pk=pk)
@@ -1595,17 +1606,23 @@ def round_lock(request, pk):
     try:
         lock_round(contest_round, request.user)
     except ValidationError as error:
-        messages.error(request, f"轮次锁定失败：{'；'.join(error.messages)}")
+        messages.error(request, f"轮次锁定失败：{domain_error_messages(error)}")
         return redirect("staff:round_ranking", pk=pk)
     except PermissionDenied as error:
-        messages.error(request, f"轮次锁定失败：{error}")
+        messages.error(request, f"轮次锁定失败：{domain_error_messages(error)}")
         return redirect("staff:round_ranking", pk=pk)
     try:
         maybe_resolve_checkpoints(contest_round.activity, request.user)
     except ValidationError as error:
-        messages.warning(request, f"轮次已锁定，但赛段未能自动解析：{'；'.join(error.messages)}")
+        messages.warning(
+            request,
+            f"轮次已锁定，但赛段未能自动解析：{domain_error_messages(error)}",
+        )
     except PermissionDenied as error:
-        messages.warning(request, f"轮次已锁定，但赛段未能自动解析：{error}")
+        messages.warning(
+            request,
+            f"轮次已锁定，但赛段未能自动解析：{domain_error_messages(error)}",
+        )
     return redirect("staff:round_ranking", pk=pk)
 
 
@@ -1614,7 +1631,10 @@ def round_lock(request, pk):
 def round_unlock(request, pk):
     _require_admin(request.user)
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    unlock_round(contest_round, request.user, note=request.POST.get("note", "").strip())
+    try:
+        unlock_round(contest_round, request.user, note=request.POST.get("note", "").strip())
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"轮次解锁失败：{domain_error_messages(error)}")
     return redirect("staff:round_ranking", pk=pk)
 
 
@@ -1625,8 +1645,12 @@ def round_reset(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
     reason = request.POST.get("reason", "")
     if not reason.strip():
-        raise PermissionDenied("重置轮次必须填写原因。")
-    reset_round_to_draft(contest_round, request.user, reason=reason)
+        messages.error(request, "轮次重置失败：重置轮次必须填写原因。")
+        return redirect("staff:round_list")
+    try:
+        reset_round_to_draft(contest_round, request.user, reason=reason)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"轮次重置失败：{domain_error_messages(error)}")
     return redirect("staff:round_list")
 
 
@@ -1672,7 +1696,7 @@ def rubric_create(request):
                 operator=request.user,
             )
         except (PermissionDenied, ValidationError) as error:
-            form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+            form.add_error(None, domain_error_messages(error))
         else:
             messages.success(request, "评分标准及评分项已创建。")
             return redirect("staff:round_create")
@@ -1704,7 +1728,7 @@ def award_create(request):
                     operator=request.user,
                 )
             except (PermissionDenied, ValidationError) as error:
-                messages.error(request, str(error))
+                messages.error(request, domain_error_messages(error))
                 return redirect("staff:award_list")
         return redirect("staff:award_list")
 
@@ -1843,8 +1867,11 @@ def vote_session_detail(request, pk):
 @require_POST
 def vote_session_open(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
-    ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
-    open_vote_session(vote_session, request.user)
+    try:
+        ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
+        open_vote_session(vote_session, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"投票开放失败：{domain_error_messages(error)}")
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -1852,8 +1879,11 @@ def vote_session_open(request, pk):
 @require_POST
 def vote_session_close(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
-    ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
-    close_vote_session(vote_session, request.user)
+    try:
+        ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
+        close_vote_session(vote_session, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"投票关闭失败：{domain_error_messages(error)}")
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -1862,12 +1892,19 @@ def vote_session_close(request, pk):
 @transaction.atomic
 def vote_session_lock(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
-    ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
-    lock_vote_session(vote_session, request.user)
+    try:
+        ensure_activity_action_allowed(vote_session.activity, ActivityAction.MANAGE_VOTE)
+        lock_vote_session(vote_session, request.user)
+    except (ValidationError, PermissionDenied) as error:
+        messages.error(request, f"投票锁定失败：{domain_error_messages(error)}")
+        return redirect("staff:vote_session_detail", pk=pk)
     try:
         maybe_resolve_checkpoints(vote_session.activity, request.user)
     except (ValidationError, PermissionDenied) as error:
-        messages.warning(request, "投票已锁定，但自动重算未完成：" + str(error))
+        messages.warning(
+            request,
+            "投票已锁定，但自动重算未完成：" + domain_error_messages(error),
+        )
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -1877,7 +1914,10 @@ def vote_session_unlock(request, pk):
     _require_admin(request.user)
     vote_session = get_object_or_404(VoteSession, pk=pk)
     note = request.POST.get("note", "").strip()
-    unlock_vote_session(vote_session, request.user, note=note)
+    try:
+        unlock_vote_session(vote_session, request.user, note=note)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"投票解锁失败：{domain_error_messages(error)}")
     return redirect("staff:vote_session_detail", pk=pk)
 
 
@@ -2125,7 +2165,7 @@ def activity_archive(request, pk):
     try:
         archive_activity(activity, request.user, note=request.POST.get("note", "").strip())
     except (PermissionDenied, ValidationError) as error:
-        messages.error(request, str(error))
+        messages.error(request, domain_error_messages(error))
         return redirect("staff:export_center")
     messages.success(request, "活动已归档并锁定。")
     return redirect("staff:export_center")
@@ -2439,7 +2479,7 @@ def user_role_update(request, pk):
             target=target, new_role=request.POST.get("new_role", ""), actor=request.user
         )
     except (ValidationError, PermissionDenied) as error:
-        messages.error(request, str(error))
+        messages.error(request, domain_error_messages(error))
     else:
         messages.success(
             request, f"已将 {updated.username} 的角色改为 {updated.get_role_display()}。"
@@ -2456,7 +2496,7 @@ def user_set_active(request, pk):
     try:
         updated = set_user_active(target=target, is_active=is_active, actor=request.user)
     except (ValidationError, PermissionDenied) as error:
-        messages.error(request, str(error))
+        messages.error(request, domain_error_messages(error))
     else:
         messages.success(
             request, f"已{'启用' if updated.is_active else '停用'}账号 {updated.username}。"
@@ -2804,7 +2844,7 @@ def ruleset_edit(request, pk):
                 base_content_hash=request.POST.get("base_content_hash") or None,
             )
         except ValidationError as exc:
-            messages.error(request, str(exc))
+            messages.error(request, domain_error_messages(exc))
             return redirect("staff:ruleset_edit", pk=pk)
         messages.success(request, "赛制已保存。")
         return redirect("staff:ruleset_edit", pk=pk)
@@ -2884,10 +2924,10 @@ def ruleset_bind(request, pk):
             base_binding=request.POST.get("base_binding") or None,
         )
     except ValidationError as exc:
-        messages.error(request, "；".join(exc.messages))
+        messages.error(request, domain_error_messages(exc))
         return redirect("staff:ruleset_edit", pk=pk)
     except PermissionDenied as exc:
-        messages.error(request, str(exc))
+        messages.error(request, domain_error_messages(exc))
         return redirect("staff:ruleset_edit", pk=pk)
     messages.success(request, "生产绑定已保存。")
     return redirect("staff:ruleset_edit", pk=pk)
@@ -2909,7 +2949,7 @@ def manual_decision(request, pk):
                 created_by=request.user,
             )
         except (PermissionDenied, ValidationError) as error:
-            form.add_error(None, ";".join(getattr(error, "messages", [str(error)])))
+            form.add_error(None, domain_error_messages(error))
         else:
             messages.success(request, "人工晋级选择已保存。")
             return redirect("staff:ruleset_edit", pk=pk)
@@ -2963,12 +3003,12 @@ def ruleset_freeze(request, pk):
     try:
         freeze_ruleset_version(version, request.user)
     except PermissionDenied as exc:
-        messages.error(request, str(exc))
+        messages.error(request, domain_error_messages(exc))
     except RulesetInvalidError as exc:
         errors = [i.message for i in exc.report.issues if i.severity.value == "error"]
         messages.error(request, "赛制排版未通过校验：" + ("；".join(errors) or "存在 ERROR"))
     except ValidationError as exc:
-        messages.error(request, "；".join(exc.messages))
+        messages.error(request, domain_error_messages(exc))
     else:
         messages.success(request, "赛制已冻结。")
     return redirect("staff:ruleset_edit", pk=pk)

@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "build:css": "tailwindcss -i ./static/css/src.css -o ./static/css/app.css --minify",
-    "check:css": "npm run build:css && git diff --exit-code -- static/css/app.css"
+    "check:css": "npm run build:css && git diff --exit-code -- static/css/app.css",
+    "test:client": "node --test tests/rapid_score_client.test.mjs"
   },
   "devDependencies": {
     "tailwindcss": "3.4.17"

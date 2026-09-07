@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from accounts.models import User
 from common.authority import (
+    ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
@@ -36,7 +37,10 @@ from singer_contest.models import (
 
 class CoreRawAuthorityTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username="raw-staff", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.user = User.objects.create_user(
+                username="raw-staff", password="pass", role=User.Role.STAFF
+            )
         self.activity = Activity.objects.create(
             title="Raw authority",
             activity_type=Activity.Type.SINGER_CONTEST,

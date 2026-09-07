@@ -60,6 +60,9 @@ jobs:
       - name: Prepare runtime directories
         run: mkdir -p staticfiles media
 
+      - name: Collect static assets
+        run: uv run python manage.py collectstatic --noinput
+
       - name: Apply migrations
         run: uv run python manage.py migrate --noinput
 
@@ -144,6 +147,23 @@ jobs:
             sleep 1
           done
           exit 1
+
+      - name: Check published static assets from runner
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          static_url() {
+            docker compose exec -T web python -c \
+              "import django; django.setup(); from django.contrib.staticfiles.storage import staticfiles_storage; print(staticfiles_storage.url('$1'))" \
+              | tr -d '\r' | tail -n 1
+          }
+          css_url="$(static_url css/app.css)"
+          js_url="$(static_url js/rapid_score.js)"
+          [[ "$css_url" =~ ^/static/css/app\.[0-9a-f]+\.css$ ]]
+          [[ "$js_url" =~ ^/static/js/rapid_score\.[0-9a-f]+\.js$ ]]
+          test "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:8000$css_url")" = "200"
+          test "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:8000$js_url")" = "200"
+          test "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8000/static/does-not-exist.js)" = "404"
 
       - name: Seed demo data twice in web container
         run: |

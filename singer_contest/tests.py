@@ -1691,7 +1691,10 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
     """Concurrent M0-P races must never produce a state the lock order forbids."""
 
     def setUp(self):
-        self.user = User.objects.create_user(username="concurrency-actor", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.user = User.objects.create_user(
+                username="concurrency-actor", password="pass", role=User.Role.STAFF
+            )
         self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -1775,7 +1778,10 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
     """One idempotency command is serialized at the Activity → Round lock boundary."""
 
     def setUp(self):
-        self.operator = User.objects.create_user(username="receipt-race", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.operator = User.objects.create_user(
+                username="receipt-race", password="pass", role=User.Role.STAFF
+            )
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(
                 title="Receipt race",
