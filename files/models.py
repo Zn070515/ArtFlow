@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -188,6 +190,10 @@ class MaterialCheck(models.Model):
                 name="materialcheck_unique_program_item",
             ),
         ]
+
+    if TYPE_CHECKING:
+
+        def get_status_display(self) -> str: ...
 
     def __str__(self):
         return f"{self.item_name} — {self.get_status_display()}"

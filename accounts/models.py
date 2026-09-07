@@ -1,10 +1,17 @@
-from common.authority import ACCOUNT_AUTHORITY, authority_authorized, authority_write
+from typing import TYPE_CHECKING
+
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    AuthorityQuerySetMixin,
+    authority_authorized,
+    authority_write,
+)
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 
-class UserAuthorityQuerySet(models.QuerySet):
+class UserAuthorityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Prevent ORM bypasses around account-bearing authority fields."""
 
     protected_fields = frozenset({"role", "is_active", "is_superuser", "is_staff"})
@@ -127,6 +134,10 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=16, choices=Role, default=Role.PARTICIPANT)
     objects = UserAuthorityManager()  # type: ignore[misc]
+
+    if TYPE_CHECKING:
+
+        def get_role_display(self) -> str: ...
 
     class Meta:
         base_manager_name = "objects"

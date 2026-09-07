@@ -4,6 +4,7 @@ from common.authority import (
     ACCESS_GRANT_STATE,
     ENTRY_POINT_CONFIG,
     EPHEMERAL_SESSION_STATE,
+    AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
 )
@@ -25,7 +26,7 @@ def _reject_conflict_upsert(args, kwargs, model_name: str) -> None:
         )
 
 
-class EntryPointQuerySet(models.QuerySet):
+class EntryPointQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     mutable_fields = {"is_active"}
 
     def update(self, **kwargs):
@@ -54,7 +55,7 @@ class EntryPointQuerySet(models.QuerySet):
         raise ValidationError("入口删除需要显式生命周期服务。")
 
 
-class AccessGrantQuerySet(models.QuerySet):
+class AccessGrantQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     lifecycle_fields = {"redeemed_at", "revoked_at"}
 
     def _ensure_update_fields(self, fields):
@@ -84,7 +85,7 @@ class AccessGrantQuerySet(models.QuerySet):
         raise ValidationError("临时访问授权删除需要显式生命周期服务。")
 
 
-class EphemeralSessionQuerySet(models.QuerySet):
+class EphemeralSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     lifecycle_fields = {"last_seen_at", "revoked_at"}
 
     def _ensure_update_fields(self, fields):

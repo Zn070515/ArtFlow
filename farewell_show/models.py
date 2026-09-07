@@ -1,5 +1,10 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.db import models
+
+if TYPE_CHECKING:
+    from files.models import MaterialCheck, StaffNote, SubmissionFile
 
 
 class Program(models.Model):
@@ -41,6 +46,15 @@ class Program(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    if TYPE_CHECKING:
+        activity_id: int
+        files: models.Manager[SubmissionFile]
+        material_checks: models.Manager[MaterialCheck]
+        staff_notes: models.Manager[StaffNote]
+
+        def get_program_type_display(self) -> str: ...
+        def get_status_display(self) -> str: ...
 
     class Meta:
         ordering = ["sort_order", "-created_at"]

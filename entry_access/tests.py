@@ -15,6 +15,7 @@ from core.models import Activity
 from django.apps import apps
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase
@@ -537,6 +538,7 @@ class EntryAccessRevocationTests(TestCase):
 
 class EntryAccessHttpTests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = Client()
         self.activity = Activity.objects.create(
             title="Access HTTP test", activity_type=Activity.Type.SINGER_CONTEST
@@ -621,6 +623,38 @@ class EntryAccessHttpTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
+
+    def test_redeem_rejects_payload_above_route_limit(self):
+        response = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data=b'{"token":"' + b"x" * (4096 + 1) + b'"}',
+            content_type="application/json",
+            REMOTE_ADDR="198.51.100.10",
+        )
+
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.json()["reason_code"], "REQUEST_TOO_LARGE")
+
+    def test_redeem_rate_limits_attempts_by_ip(self):
+        for _ in range(30):
+            response = self.client.post(
+                reverse("entry_access:grant_redeem"),
+                data={"token": "unknown-token"},
+                content_type="application/json",
+                REMOTE_ADDR="198.51.100.11",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        throttled = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": "unknown-token"},
+            content_type="application/json",
+            REMOTE_ADDR="198.51.100.11",
+        )
+
+        self.assertEqual(throttled.status_code, 429)
+        self.assertEqual(throttled.json()["reason_code"], "RATE_LIMITED")
+        self.assertIn("Retry-After", throttled)
 
     def test_redeem_does_not_require_csrf_cookie(self):
         issued = issue_access_grant(
