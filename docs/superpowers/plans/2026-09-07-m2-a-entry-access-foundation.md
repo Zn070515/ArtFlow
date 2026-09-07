@@ -62,9 +62,12 @@ class EphemeralSession(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 ```
 
-`EntryPoint` configuration and grant/session scope and kind are immutable
-after creation. The three lifecycle models may be created or transition state
-only inside their named authority service scopes. The service validates that
+`EntryPoint` identity fields (`activity`, `kind`, and `label`) and grant/session
+scope and kind are immutable after creation. `EntryPoint.is_active` is the sole
+configuration lifecycle flag and may change only through the explicit
+activation/deactivation service. The three access lifecycle models may be
+created or transition state only inside their named authority service scopes.
+The service validates that
 `entry_point.activity_id == activity_id`, `entry_point.kind == kind`, and any
 round belongs to the activity before writing. A session copies the grant scope
 and kind; it never accepts client-supplied replacement scope.
