@@ -76,8 +76,8 @@ def issue_grant(request):
             "grant_id": result.grant.pk,
             "token": result.token,
             "kind": result.grant.kind,
-            "activity_id": result.grant.activity_id,
-            "round_id": result.grant.round_id,
+            "activity_id": getattr(result.grant, "activity_id", None),
+            "round_id": getattr(result.grant, "round_id", None),
             "expires_at": result.grant.expires_at.isoformat(),
         },
         status=201,
@@ -111,8 +111,8 @@ def redeem_grant(request):
             "session_id": result.session.pk,
             "session_token": result.token,
             "kind": result.session.kind,
-            "activity_id": result.session.activity_id,
-            "round_id": result.session.round_id,
+            "activity_id": getattr(result.session, "activity_id", None),
+            "round_id": getattr(result.session, "round_id", None),
             "expires_at": result.session.expires_at.isoformat(),
         }
     )
