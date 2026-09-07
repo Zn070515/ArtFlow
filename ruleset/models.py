@@ -1,6 +1,11 @@
 from typing import cast
 
-from common.authority import RULESET_FREEZE, authority_authorized, parse_bulk_create_options
+from common.authority import (
+    RULESET_FREEZE,
+    AuthorityQuerySetMixin,
+    authority_authorized,
+    parse_bulk_create_options,
+)
 from common.lifecycle import runtime_is_test
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -180,7 +185,7 @@ class ContestRuleset(models.Model):
         return f"{self.name} — {self.activity.title}"
 
 
-class RulesetVersionQuerySet(models.QuerySet):
+class RulesetVersionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if authority_authorized(RULESET_FREEZE):
             return

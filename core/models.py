@@ -1,5 +1,6 @@
 from common.authority import (
     ACTIVITY_STATE,
+    AuthorityQuerySetMixin,
     TEST_DATA_CLEANUP,
     authority_authorized,
     parse_bulk_create_options,
@@ -9,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
 
 
-class ActivityQuerySet(models.QuerySet):
+class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     lifecycle_fields = {"is_test_mode", "data_lifecycle"}
     state_fields = {"phase", "is_locked", "locked_at", "locked_by", "locked_by_id"}
 

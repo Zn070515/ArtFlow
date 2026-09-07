@@ -1,10 +1,15 @@
-from common.authority import ACCOUNT_AUTHORITY, authority_authorized, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    AuthorityQuerySetMixin,
+    authority_authorized,
+    authority_write,
+)
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 
-class UserAuthorityQuerySet(models.QuerySet):
+class UserAuthorityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Prevent ORM bypasses around account-bearing authority fields."""
 
     protected_fields = frozenset({"role", "is_active", "is_superuser", "is_staff"})

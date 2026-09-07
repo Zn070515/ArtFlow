@@ -3,6 +3,7 @@ import threading
 from typing import Any, cast
 
 from common.authority import (
+    AuthorityQuerySetMixin,
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
@@ -153,7 +154,7 @@ def _reject_conflict_upsert(args, kwargs, model_name: str) -> None:
         )
 
 
-class IdentityOwnershipQuerySet(models.QuerySet):
+class IdentityOwnershipQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     ownership_fields: frozenset[str] = frozenset()
 
     def _update_ownership_fields(self) -> set[str]:
@@ -422,7 +423,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
 )
 
 
-class ContestRoundQuerySet(models.QuerySet):
+class ContestRoundQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def update(self, **kwargs):
         if not authority_authorized(CONTEST_ROUND_STATE):
             if _CONTEST_ROUND_STATE_FIELDS.intersection(kwargs):
@@ -717,7 +718,7 @@ class RoundSnapshotMixin:
         return super().delete(*args, **kwargs)  # type: ignore[misc]
 
 
-class RoundSnapshotQuerySet(models.QuerySet):
+class RoundSnapshotQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     related_field = ""
     related_model: type[models.Model] | None = None
 
@@ -864,7 +865,7 @@ class RoundJudge(RoundSnapshotMixin, models.Model):
         return super().save(*args, **kwargs)
 
 
-class ScoreRecordQuerySet(models.QuerySet):
+class ScoreRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         _ensure_round_queryset_mutable(self)
 
@@ -946,7 +947,7 @@ class ScoreRecord(models.Model):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
 
 
-class ScoreWriteReceiptQuerySet(models.QuerySet):
+class ScoreWriteReceiptQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_receipts_valid(self, receipts) -> None:
         for receipt in receipts:
             receipt.clean()
@@ -1063,7 +1064,7 @@ class ScoreWriteReceipt(models.Model):
         base_manager_name = "objects"
 
 
-class ScoreSummaryQuerySet(models.QuerySet):
+class ScoreSummaryQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_authorized(self):
         if not authority_authorized(SCORE_SUMMARY_RECALCULATE):
             raise ValidationError("成绩汇总只能由成绩重算服务维护。")
@@ -1120,7 +1121,7 @@ class ScoreSummary(models.Model):
         return super().delete(*args, **kwargs)
 
 
-class AudienceScoreQuerySet(models.QuerySet):
+class AudienceScoreQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if _raw_fact_write_authorized():
             return
@@ -1271,7 +1272,7 @@ class AudienceScore(models.Model):
         return super().delete(*args, **kwargs)
 
 
-class AwardQuerySet(models.QuerySet):
+class AwardQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if (
             not _award_materialization_authorized()
@@ -1450,7 +1451,7 @@ class Award(models.Model):
         return f"{self.singer.name}: {self.name}"
 
 
-class RoundSetupFactQuerySet(models.QuerySet):
+class RoundSetupFactQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     round_lookup = "round"
 
     def _ensure_mutable(self):
@@ -1493,7 +1494,7 @@ class RoundSetupFactQuerySet(models.QuerySet):
 RoundSetupFactManager = models.Manager.from_queryset(RoundSetupFactQuerySet)
 
 
-class ScoringRubricQuerySet(models.QuerySet):
+class ScoringRubricQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if _raw_fact_write_authorized():
             return
@@ -1534,7 +1535,7 @@ class ScoringRubricQuerySet(models.QuerySet):
 ScoringRubricManager = models.Manager.from_queryset(ScoringRubricQuerySet)
 
 
-class RubricCriterionQuerySet(models.QuerySet):
+class RubricCriterionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if _raw_fact_write_authorized():
             return
@@ -1750,7 +1751,7 @@ class RubricCriterion(models.Model):
         return f"{self.name} ({self.max_score})"
 
 
-class CriterionScoreQuerySet(models.QuerySet):
+class CriterionScoreQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if _raw_fact_write_authorized():
             return
@@ -1840,7 +1841,7 @@ class CriterionScore(models.Model):
         return f"{self.criterion.name}: {self.value}"
 
 
-class StageResultQuerySet(models.QuerySet):
+class StageResultQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Guard: a CONFIRMED stage result is immutable; only confirm_stage_result() confirms."""
 
     def _ensure_mutable(self):
@@ -2030,7 +2031,7 @@ class StageResult(models.Model):
         return f"{self.activity.title} — {self.stage_key} ({self.get_status_display()})"
 
 
-class StageDecisionQuerySet(models.QuerySet):
+class StageDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Guard: decisions of a CONFIRMED (locked) stage result are immutable."""
 
     def _ensure_mutable(self):
@@ -2147,7 +2148,7 @@ class StageDecision(models.Model):
         return f"{self.singer.name} — {self.outcome_code}"
 
 
-class StageAwardDecisionQuerySet(models.QuerySet):
+class StageAwardDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
             raise ValidationError("已核定赛段的奖项候选不可修改。")
@@ -2265,7 +2266,7 @@ class StageAwardDecision(models.Model):
         return f"{self.name}: {self.singer.name}"
 
 
-class CompositeResultQuerySet(models.QuerySet):
+class CompositeResultQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Guard: composites of a CONFIRMED (locked) stage result are immutable."""
 
     def _ensure_mutable(self):
@@ -2378,7 +2379,7 @@ class CompositeResult(models.Model):
         return f"{self.singer.name} — {self.node_key}: {self.value}"
 
 
-class ManualDecisionQuerySet(models.QuerySet):
+class ManualDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Guard: a queryset-level bulk mutation is the same ORM bypass as a bare save().
 
     ``set_manual_decision`` and the residue-cleanup service hold the write authority; an
@@ -2488,7 +2489,7 @@ class ManualDecision(models.Model):
         return f"{self.manual_key} — {self.group or '(整体)'}"
 
 
-class DuelDecisionQuerySet(models.QuerySet):
+class DuelDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Guard direct ORM mutations of persisted pairwise decisions."""
 
     def _ensure_auth(self):

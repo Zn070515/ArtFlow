@@ -1,6 +1,7 @@
 from typing import Any
 
 from common.authority import (
+    AuthorityQuerySetMixin,
     TEST_DATA_CLEANUP,
     VOTE_SESSION_STATE,
     authority_authorized,
@@ -221,7 +222,7 @@ def _vote_record_session_origins(record) -> tuple[int | None, ...]:
     )
 
 
-class VoteSessionQuerySet(models.QuerySet):
+class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     state_fields = {"is_open", "is_locked"}
     configuration_fields = {
         "activity",
@@ -429,7 +430,7 @@ class VoteSession(models.Model):
         return super().delete(*args, **kwargs)
 
 
-class VoteBallotQuerySet(models.QuerySet):
+class VoteBallotQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if self.filter(vote_session__is_locked=True).exists():
             raise ValidationError("已锁定投票的原始记录不可直接修改。")
@@ -500,7 +501,7 @@ class VoteBallot(models.Model):
         return super().delete(*args, **kwargs)
 
 
-class VoteOptionQuerySet(models.QuerySet):
+class VoteOptionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         for session_id in self.values_list("vote_session_id", flat=True).distinct():
             _ensure_vote_option_mutable(session_id)
@@ -581,7 +582,7 @@ class VoteOption(models.Model):
         return f"{self.vote_session.name} — {self.singer.name}"
 
 
-class VoteRecordQuerySet(models.QuerySet):
+class VoteRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if self.filter(vote_session__is_locked=True).exists():
             raise ValidationError("已锁定投票的原始记录不可直接修改。")

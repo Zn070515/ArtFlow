@@ -19,6 +19,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
+from django.core.exceptions import ValidationError
+
 # Write-authority scope identifiers.
 RULESET_FREEZE = "ruleset.freeze"
 STAGE_RESULT_CONFIRM = "stageresult.confirm"
@@ -77,6 +79,7 @@ def parse_bulk_create_options(
 
 
 _scope = threading.local()
+_raw_delete_scope = threading.local()
 
 
 def _active_scopes() -> frozenset[str]:
@@ -90,6 +93,36 @@ def authority_authorized(scope: str) -> bool:
 
 def _set_scope(scopes: frozenset[str]) -> None:
     _scope.scopes = frozenset(scopes)
+
+
+def _raw_delete_allowed() -> bool:
+    return bool(getattr(_raw_delete_scope, "allowed", False))
+
+
+@contextmanager
+def allow_authority_raw_delete() -> Iterator[None]:
+    """Allow only normal Django delete collection to reach ``_raw_delete``."""
+    prior = _raw_delete_allowed()
+    _raw_delete_scope.allowed = True
+    try:
+        yield
+    finally:
+        _raw_delete_scope.allowed = prior
+
+
+class AuthorityQuerySetMixin:
+    """Block direct private raw deletes while preserving guarded delete flows."""
+
+    def _raw_delete(self, using: str):
+        if not _raw_delete_allowed():
+            raise ValidationError(
+                "受 authority 保护的数据不能通过 QuerySet._raw_delete() 删除。"
+            )
+        return super()._raw_delete(using)
+
+    def delete(self, *args: Any, **kwargs: Any):
+        with allow_authority_raw_delete():
+            return super().delete(*args, **kwargs)
 
 
 @contextmanager

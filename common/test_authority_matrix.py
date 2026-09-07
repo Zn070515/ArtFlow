@@ -25,6 +25,12 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
+from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
+from entry_access.services import (
+    create_entry_point,
+    issue_access_grant,
+    redeem_access_grant,
+)
 from ruleset.admin import RulesetVersionAdmin
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import (
@@ -147,6 +153,19 @@ class AuthorityMutationMatrixTests(TestCase):
         self.other_activity = Activity.objects.create(
             title="matrix-other", activity_type=Activity.Type.SINGER_CONTEST, is_test_mode=True
         )
+        self.entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.JUDGE,
+            label="Matrix judge entry",
+            actor=self.staff_user,
+        )
+        self.access_grant_result = issue_access_grant(
+            self.entry_point,
+            actor=self.staff_user,
+            ttl=timedelta(minutes=5),
+        )
+        self.access_grant = self.access_grant_result.grant
+        self.ephemeral_session = redeem_access_grant(self.access_grant_result.token).session
         self.singer = SingerRegistration.objects.create(
             activity=self.activity,
             user=self.operator,
@@ -1680,6 +1699,59 @@ def _vote_session_row(case):
     case._assert_rejects(lambda: VoteSession.objects.bulk_update([case.vote_session], ["is_open"]))
 
 
+def _entry_point_row(case):
+    case.entry_point.is_active = False
+    case._assert_rejects(lambda: case.entry_point.save(update_fields=["is_active"]))
+    case._assert_rejects(
+        lambda: EntryPoint.objects.filter(pk=case.entry_point.pk).update(is_active=False)
+    )
+    case._assert_rejects(
+        lambda: EntryPoint._base_manager.filter(pk=case.entry_point.pk).update(is_active=False)
+    )
+    case.entry_point.is_active = False
+    case._assert_rejects(lambda: EntryPoint.objects.bulk_update([case.entry_point], ["is_active"]))
+
+
+def _access_grant_row(case):
+    revoked_at = timezone.now()
+    case.access_grant.revoked_at = revoked_at
+    case._assert_rejects(lambda: case.access_grant.save(update_fields=["revoked_at"]))
+    case._assert_rejects(
+        lambda: AccessGrant.objects.filter(pk=case.access_grant.pk).update(
+            revoked_at=revoked_at
+        )
+    )
+    case._assert_rejects(
+        lambda: AccessGrant._base_manager.filter(pk=case.access_grant.pk).update(
+            revoked_at=revoked_at
+        )
+    )
+    case._assert_rejects(
+        lambda: AccessGrant.objects.bulk_update([case.access_grant], ["revoked_at"])
+    )
+
+
+def _ephemeral_session_row(case):
+    last_seen_at = timezone.now()
+    case.ephemeral_session.last_seen_at = last_seen_at
+    case._assert_rejects(
+        lambda: case.ephemeral_session.save(update_fields=["last_seen_at"])
+    )
+    case._assert_rejects(
+        lambda: EphemeralSession.objects.filter(pk=case.ephemeral_session.pk).update(
+            last_seen_at=last_seen_at
+        )
+    )
+    case._assert_rejects(
+        lambda: EphemeralSession._base_manager.filter(pk=case.ephemeral_session.pk).update(
+            last_seen_at=last_seen_at
+        )
+    )
+    case._assert_rejects(
+        lambda: EphemeralSession.objects.bulk_update([case.ephemeral_session], ["last_seen_at"])
+    )
+
+
 def _locked_round_raw_row(case, model, obj, field, value):
     case._lock_round()
     case._assert_rejects(lambda: model.objects.filter(pk=obj.pk).update(**{field: value}))
@@ -2406,6 +2478,27 @@ MODEL_MATRIX = (
         "ruleset freeze",
         "version",
         _mutation("protected instance/queryset/base-manager/bulk/delete", _ruleset_version),
+    ),
+    _descriptor(
+        "EntryPoint",
+        EntryPoint,
+        "entry_access.create_entry_point",
+        "entry_point",
+        _mutation("protected instance/queryset/base-manager/bulk", _entry_point_row),
+    ),
+    _descriptor(
+        "AccessGrant",
+        AccessGrant,
+        "entry_access.issue_access_grant",
+        "access_grant",
+        _mutation("protected instance/queryset/base-manager/bulk", _access_grant_row),
+    ),
+    _descriptor(
+        "EphemeralSession",
+        EphemeralSession,
+        "entry_access.redeem_access_grant",
+        "ephemeral_session",
+        _mutation("protected instance/queryset/base-manager/bulk", _ephemeral_session_row),
     ),
 )
 
