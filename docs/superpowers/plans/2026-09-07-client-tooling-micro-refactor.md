@@ -31,7 +31,7 @@
 **Files:**
 - Move: tests/rapid_score_client.test.mjs to tests/client/rapid_score.test.mjs
 - Modify: tests/client/rapid_score.test.mjs
-- Read-only reference: frontend/rapid_score.ts, templates/staff_panel/rapid_score_entry.html
+- Read-only reference: frontend/rapid_score.ts, templates/staff_panel/round_score_entry.html
 
 **Interfaces:**
 - Consumes the current classic-script bootstrap contract exposed by static/dist/rapid_score.js.
@@ -66,7 +66,7 @@ test("pending drafts are isolated by operator identity", () => {
   const storage = new FakeStorage();
   const firstOperator = boot({ storage, operatorId: "7" });
   firstOperator.input.value = "91";
-  firstOperator.input.dispatch("input");
+  firstOperator.tbody.dispatch("input", { target: firstOperator.input });
   assert.equal(storage.records().length, 1);
   assert.equal(storage.records()[0].cells[0].score, "91");
 
@@ -170,7 +170,7 @@ git commit -m "build: generalize TypeScript client boundary"
 ### Task 3: Implement operator-scoped Rapid Score storage and strict narrowing
 
 **Files:**
-- Modify: templates/staff_panel/rapid_score_entry.html
+- Modify: templates/staff_panel/round_score_entry.html
 - Modify: frontend/rapid_score.ts
 - Modify: tests/client/rapid_score.test.mjs
 - Regenerate: static/dist/rapid_score.js
@@ -337,7 +337,7 @@ git commit -m "build: add scoped Pyright evaluation"
 
 **Files:**
 - Modify: AGENTS.md
-- Read-only verification: .github/workflows/ci.yml, .github/workflows/integration.yml, templates/staff_panel/rapid_score_entry.html, config/tests.py, package-lock.json
+- Read-only verification: .github/workflows/ci.yml, .github/workflows/integration.yml, templates/staff_panel/round_score_entry.html, config/tests.py, package-lock.json
 
 **Interfaces:**
 - Documents the three new local commands and the distinction between tracked runtime artifacts, mypy, and scoped Pyright.
