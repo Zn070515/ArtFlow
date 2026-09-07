@@ -1,9 +1,9 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from common.authority import (
-    AuthorityQuerySetMixin,
     TEST_DATA_CLEANUP,
     VOTE_SESSION_STATE,
+    AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
 )
@@ -344,6 +344,9 @@ class VoteSession(models.Model):
     state_fields = VoteSessionQuerySet.state_fields
     _configuration_fields = VoteSessionQuerySet.configuration_fields - {"activity"}
 
+    if TYPE_CHECKING:
+        options: models.Manager["VoteOption"]
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["-created_at"]
@@ -551,6 +554,9 @@ class VoteOption(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = VoteOptionManager()
+
+    if TYPE_CHECKING:
+        singer_id: int
 
     class Meta:
         base_manager_name = "objects"

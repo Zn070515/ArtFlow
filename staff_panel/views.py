@@ -1934,7 +1934,7 @@ def vote_session_export(request, pk):
         vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
     )
     for opt in option_list:
-        ws.append([opt.singer.name, opt.vote_count])
+        ws.append([opt.singer.name, getattr(opt, "vote_count", 0)])
     audit_export(request, vote_session.activity, "vote_result", row_count=len(option_list))
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1958,8 +1958,10 @@ def _popularity_top_tie(vote_session):
     )
     if not leaderboard:
         return None, []
-    top_count = leaderboard[0].vote_count
-    return top_count, [option for option in leaderboard if option.vote_count == top_count]
+    top_count = getattr(leaderboard[0], "vote_count", 0)
+    return top_count, [
+        option for option in leaderboard if getattr(option, "vote_count", 0) == top_count
+    ]
 
 
 # --- QR code center ---

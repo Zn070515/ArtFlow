@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from common.authority import (
     ACCOUNT_AUTHORITY,
     AuthorityQuerySetMixin,
@@ -132,6 +134,10 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=16, choices=Role, default=Role.PARTICIPANT)
     objects = UserAuthorityManager()  # type: ignore[misc]
+
+    if TYPE_CHECKING:
+
+        def get_role_display(self) -> str: ...
 
     class Meta:
         base_manager_name = "objects"

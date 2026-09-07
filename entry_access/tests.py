@@ -13,9 +13,9 @@ from common.authority import (
 from common.models import AuditLog
 from core.models import Activity
 from django.apps import apps
-from django.core.cache import cache
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase

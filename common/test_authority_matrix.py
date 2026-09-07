@@ -496,7 +496,8 @@ class AuthorityMutationMatrixTests(TestCase):
 
     def test_raw_delete_cannot_bypass_authority_matrix(self):
         for descriptor in MODEL_MATRIX:
-            instance = descriptor.model._base_manager.order_by("pk").first()
+            model = cast(Any, descriptor.model)
+            instance = model._base_manager.order_by("pk").first()
             if instance is None and descriptor.model is ScoreSummary:
                 with authority_write(SCORE_SUMMARY_RECALCULATE):
                     instance = ScoreSummary.objects.create(
@@ -510,12 +511,8 @@ class AuthorityMutationMatrixTests(TestCase):
                 with transaction.atomic():
                     try:
                         with self.assertRaises(ValidationError):
-                            descriptor.model._base_manager.filter(pk=instance.pk)._raw_delete(
-                                "default"
-                            )
-                        self.assertTrue(
-                            descriptor.model._base_manager.filter(pk=instance.pk).exists()
-                        )
+                            model._base_manager.filter(pk=instance.pk)._raw_delete("default")
+                        self.assertTrue(model._base_manager.filter(pk=instance.pk).exists())
                     finally:
                         transaction.set_rollback(True)
 
@@ -1717,9 +1714,7 @@ def _access_grant_row(case):
     case.access_grant.revoked_at = revoked_at
     case._assert_rejects(lambda: case.access_grant.save(update_fields=["revoked_at"]))
     case._assert_rejects(
-        lambda: AccessGrant.objects.filter(pk=case.access_grant.pk).update(
-            revoked_at=revoked_at
-        )
+        lambda: AccessGrant.objects.filter(pk=case.access_grant.pk).update(revoked_at=revoked_at)
     )
     case._assert_rejects(
         lambda: AccessGrant._base_manager.filter(pk=case.access_grant.pk).update(
@@ -1734,9 +1729,7 @@ def _access_grant_row(case):
 def _ephemeral_session_row(case):
     last_seen_at = timezone.now()
     case.ephemeral_session.last_seen_at = last_seen_at
-    case._assert_rejects(
-        lambda: case.ephemeral_session.save(update_fields=["last_seen_at"])
-    )
+    case._assert_rejects(lambda: case.ephemeral_session.save(update_fields=["last_seen_at"]))
     case._assert_rejects(
         lambda: EphemeralSession.objects.filter(pk=case.ephemeral_session.pk).update(
             last_seen_at=last_seen_at

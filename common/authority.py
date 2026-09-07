@@ -17,7 +17,7 @@ import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from django.core.exceptions import ValidationError
 
@@ -113,16 +113,14 @@ def allow_authority_raw_delete() -> Iterator[None]:
 class AuthorityQuerySetMixin:
     """Block direct private raw deletes while preserving guarded delete flows."""
 
-    def _raw_delete(self, using: str):
+    def _raw_delete(self, using: str | None = None) -> Any:
         if not _raw_delete_allowed():
-            raise ValidationError(
-                "受 authority 保护的数据不能通过 QuerySet._raw_delete() 删除。"
-            )
-        return super()._raw_delete(using)
+            raise ValidationError("受 authority 保护的数据不能通过 QuerySet._raw_delete() 删除。")
+        return cast(Any, super())._raw_delete(using)
 
-    def delete(self, *args: Any, **kwargs: Any):
+    def delete(self, *args: Any, **kwargs: Any) -> Any:
         with allow_authority_raw_delete():
-            return super().delete(*args, **kwargs)
+            return cast(Any, super()).delete(*args, **kwargs)
 
 
 @contextmanager

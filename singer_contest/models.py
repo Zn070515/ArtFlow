@@ -1,13 +1,13 @@
 import json
 import threading
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from common.authority import (
-    AuthorityQuerySetMixin,
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
+    AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
 )
@@ -19,6 +19,9 @@ from django.db.models import Q
 from ruleset.resolver import OutcomeCode, ResolverState
 
 from .deletion import cascade_draft_snapshots_or_protect_prepared
+
+if TYPE_CHECKING:
+    from files.models import MaterialCheck, StaffNote, SubmissionFile
 
 # M1-R9 (§三 ManualDecision Authority): a ManualDecision is a human picking a MANUAL_SELECT
 # outcome that a CONFIRMED stage may have already read, so its mutation must run through a
@@ -379,6 +382,15 @@ class SingerRegistration(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     objects = SingerRegistrationManager()
 
+    if TYPE_CHECKING:
+        activity_id: int
+        staff_notes: models.Manager[StaffNote]
+        files: models.Manager[SubmissionFile]
+        material_checks: models.Manager[MaterialCheck]
+
+        def get_pre_status_display(self) -> str: ...
+        def get_live_status_display(self) -> str: ...
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["-created_at"]
@@ -574,6 +586,12 @@ class ContestRound(models.Model):
     roster_source_stage = models.CharField(max_length=100, blank=True, default="")
 
     objects = ContestRoundManager()
+
+    if TYPE_CHECKING:
+        activity_id: int
+        rubric_id: int | None
+        entries: models.Manager["RoundEntry"]
+        round_judges: models.Manager["RoundJudge"]
 
     class Meta:
         base_manager_name = "objects"
@@ -810,6 +828,9 @@ class RoundEntry(RoundSnapshotMixin, models.Model):
     )
     objects = RoundEntryManager()
 
+    if TYPE_CHECKING:
+        singer_id: int
+
     class Meta:
         base_manager_name = "objects"
         unique_together = [("round", "singer")]
@@ -913,6 +934,10 @@ class ScoreRecord(models.Model):
 
     objects = ScoreRecordManager()
 
+    if TYPE_CHECKING:
+        singer_id: int
+        judge_id: int
+
     class Meta:
         base_manager_name = "objects"
         unique_together = [("round", "singer", "judge")]
@@ -1011,6 +1036,9 @@ class ScoreWriteReceipt(models.Model):
     status = models.CharField(max_length=16, choices=Status, default=Status.PENDING)
     created_at = models.DateTimeField(auto_now_add=True)
     objects = ScoreWriteReceiptManager()
+
+    if TYPE_CHECKING:
+        operator_id: int
 
     @classmethod
     def validate_result_payload(cls, status, result_payload, result_version=None) -> None:
@@ -1215,6 +1243,9 @@ class AudienceScore(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     objects = AudienceScoreManager()
+
+    if TYPE_CHECKING:
+        singer_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -1590,6 +1621,9 @@ class PerformanceGroup(models.Model):
 
     objects = RoundSetupFactManager()
 
+    if TYPE_CHECKING:
+        performances: models.Manager["Performance"]
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["sequence", "pk"]
@@ -1638,6 +1672,9 @@ class Performance(models.Model):
 
     objects = RoundSetupFactManager()
 
+    if TYPE_CHECKING:
+        singer_id: int
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["sequence", "pk"]
@@ -1684,6 +1721,9 @@ class ScoringRubric(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = ScoringRubricManager()
+
+    if TYPE_CHECKING:
+        criteria: models.Manager["RubricCriterion"]
 
     class Meta:
         base_manager_name = "objects"
@@ -1940,6 +1980,11 @@ class StageResult(models.Model):
 
     objects = StageResultManager()
 
+    if TYPE_CHECKING:
+        activity_id: int
+        ruleset_version_id: int
+        decisions: models.Manager["StageDecision"]
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["-computed_at", "pk"]
@@ -2102,6 +2147,9 @@ class StageDecision(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = StageDecisionManager()
+
+    if TYPE_CHECKING:
+        singer_id: int
 
     class Meta:
         base_manager_name = "objects"

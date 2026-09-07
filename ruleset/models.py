@@ -1,4 +1,4 @@
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from common.authority import (
     RULESET_FREEZE,
@@ -165,6 +165,9 @@ class ContestRuleset(models.Model):
             # hold the history). The DB unique is the backstop behind the service reuse.
             models.UniqueConstraint(fields=["activity"], name="contest_ruleset_unique_activity"),
         ]
+
+    if TYPE_CHECKING:
+        versions: models.Manager["RulesetVersion"]
 
     def clean(self):
         if self.activity_id:

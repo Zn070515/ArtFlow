@@ -2,9 +2,9 @@ from typing import Any
 
 from common.authority import (
     ACCESS_GRANT_STATE,
-    AuthorityQuerySetMixin,
     ENTRY_POINT_CONFIG,
     EPHEMERAL_SESSION_STATE,
+    AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
 )

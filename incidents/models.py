@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -45,6 +47,10 @@ class IncidentRecord(models.Model):
 
     class Meta:
         ordering = ["-occurred_at"]
+
+    if TYPE_CHECKING:
+
+        def get_event_type_display(self) -> str: ...
 
     def clean(self):
         singer = self.singer if self.singer_id else None

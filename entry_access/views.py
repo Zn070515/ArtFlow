@@ -55,9 +55,7 @@ def _invalid_request(error):
 
 
 def _request_too_large_response():
-    return JsonResponse(
-        {"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413
-    )
+    return JsonResponse({"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413)
 
 
 def _rate_limited_response(retry_after_seconds: int):

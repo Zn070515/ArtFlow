@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.db import models
 
@@ -53,6 +55,10 @@ class PublicPost(models.Model):
     # staff editing the same post) fails with an explicit "已过期" instead of
     # silently overwriting a co-editor's content.
     version = models.PositiveIntegerField(default=0)
+
+    if TYPE_CHECKING:
+        related_activity_id: int | None
+        media_items: models.Manager["PublicMedia"]
 
     class Meta:
         ordering = ["-is_pinned", "sort_order", "-created_at"]

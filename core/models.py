@@ -1,13 +1,18 @@
+from typing import TYPE_CHECKING
+
 from common.authority import (
     ACTIVITY_STATE,
-    AuthorityQuerySetMixin,
     TEST_DATA_CLEANUP,
+    AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
 )
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
+
+if TYPE_CHECKING:
+    from voting.models import VoteSession
 
 
 class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
@@ -105,6 +110,9 @@ class Activity(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     objects = ActivityManager()
+
+    if TYPE_CHECKING:
+        vote_sessions: models.Manager[VoteSession]
 
     class Meta:
         verbose_name_plural = "activities"
