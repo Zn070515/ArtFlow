@@ -59,11 +59,16 @@ M2-A 当前标记为 `EXPERIMENTAL`，只提供工程基础能力，不代表 Ju
 activity/round/kind 范围；grant/session 均可由 Staff/Admin 撤销。GET 兑换、未知/过期/已
 撤销授权以及错误范围的会话都不会改变状态或返回差异化的敏感信息。
 
+`M2-A-FINAL` 已关闭反向代理下的限流边界：兑换端点使用受配置保护的
+`common.audit.client_ip()` 同时作为限流 bucket 和兑换审计 IP。因而在 Caddy 等可信代理
+后面，不同真实客户端不会因共享容器 `REMOTE_ADDR` 而互相串桶；未启用可信代理时仍只
+使用直接连接地址。兑换请求体上限和基础速率限制也属于该边界的一部分。
+
 grant 和 session 只在成功的签发/兑换响应中返回一次原始 token，数据库、审计记录和只读
 Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的无 cookie、body-only bearer
 边界，因此不依赖 CSRF cookie；Staff 的签发和撤销仍走登录会话与 CSRF 保护。后续接入
-JudgeSeat、正式扫码页或业务工作区前，必须先完成 PostgreSQL 并发/恢复彩排和真实角色
-流程验证。
+JudgeSeat、正式扫码页或业务工作区前，仍必须完成 PostgreSQL 并发/恢复彩排和真实角色
+流程验证；因此 M2-A 继续保持 `EXPERIMENTAL`，不会被误标为 Judge/Ticket 已上线。
 
 ## M2 渐进式能力门禁
 

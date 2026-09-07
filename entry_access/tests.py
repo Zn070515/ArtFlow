@@ -18,7 +18,14 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
-from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase
+from django.test import (
+    Client,
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import get_resolver, reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound
@@ -655,6 +662,48 @@ class EntryAccessHttpTests(TestCase):
         self.assertEqual(throttled.status_code, 429)
         self.assertEqual(throttled.json()["reason_code"], "RATE_LIMITED")
         self.assertIn("Retry-After", throttled)
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True)
+    def test_redeem_rate_limits_by_trusted_client_ip(self):
+        for _ in range(30):
+            response = self.client.post(
+                reverse("entry_access:grant_redeem"),
+                data={"token": "unknown-token"},
+                content_type="application/json",
+                REMOTE_ADDR="172.19.0.5",
+                HTTP_X_FORWARDED_FOR="198.51.100.20",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        other_client = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": "unknown-token"},
+            content_type="application/json",
+            REMOTE_ADDR="172.19.0.5",
+            HTTP_X_FORWARDED_FOR="198.51.100.21",
+        )
+
+        self.assertEqual(other_client.status_code, 400)
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True)
+    def test_redeem_audit_uses_trusted_client_ip(self):
+        issued = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+
+        response = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": issued.token},
+            content_type="application/json",
+            REMOTE_ADDR="172.19.0.5",
+            HTTP_X_FORWARDED_FOR="198.51.100.22, 172.19.0.5",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        audit = AuditLog.objects.get(action_type=AuditLog.ActionType.ACCESS_GRANT_REDEEM)
+        self.assertEqual(audit.ip_address, "198.51.100.22")
 
     def test_redeem_does_not_require_csrf_cookie(self):
         issued = issue_access_grant(

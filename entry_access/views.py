@@ -3,6 +3,7 @@ from datetime import timedelta
 from typing import Any
 
 from accounts.decorators import staff_required
+from common.audit import client_ip
 from common.rate_limit import allow
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
@@ -122,7 +123,7 @@ def issue_grant(request):
 @require_POST
 def redeem_grant(request):
     """Redeem only a body token; no cookie authentication or URL token is accepted."""
-    ip_address = request.META.get("REMOTE_ADDR") or "unknown"
+    ip_address = client_ip(request) or "unknown"
     decision = allow(
         f"entry-access-redeem:{ip_address}",
         limit=REDEEM_RATE_LIMIT,
@@ -140,7 +141,7 @@ def redeem_grant(request):
         raw_token = payload["token"]
         result = redeem_access_grant(
             raw_token,
-            request_meta=AccessRequestMeta(ip_address=request.META.get("REMOTE_ADDR")),
+            request_meta=AccessRequestMeta(ip_address=ip_address),
         )
     except (KeyError, TypeError):
         return JsonResponse(
