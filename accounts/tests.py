@@ -154,14 +154,16 @@ class ParticipantLoginRateLimitTests(TestCase):
             "password": "wrong-password",
         }
 
-        for _ in range(10):
-            response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.10")
-            self.assertEqual(response.status_code, 200)
+        with patch("accounts.views.ParticipantLoginForm.is_valid", return_value=False) as is_valid:
+            for _ in range(10):
+                response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.10")
+                self.assertEqual(response.status_code, 200)
 
-        throttled = self.client.post(url, payload, REMOTE_ADDR="198.51.100.10")
+            throttled = self.client.post(url, payload, REMOTE_ADDR="198.51.100.10")
 
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
+        self.assertEqual(is_valid.call_count, 10)
 
     @override_settings(TRUST_X_FORWARDED_FOR=True)
     def test_participant_login_uses_the_forwarded_client_ip_when_trusted(self):
@@ -208,16 +210,18 @@ class RegistrationRateLimitTests(TestCase):
             "password2": "different-password",
         }
 
-        for _ in range(10):
-            response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
-            self.assertEqual(response.status_code, 200)
+        with patch("accounts.views.RegisterForm.is_valid", return_value=False) as is_valid:
+            for _ in range(10):
+                response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
+                self.assertEqual(response.status_code, 200)
 
-        before_throttled_attempt = User.objects.count()
-        throttled = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
+            before_throttled_attempt = User.objects.count()
+            throttled = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
 
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
         self.assertEqual(User.objects.count(), before_throttled_attempt)
+        self.assertEqual(is_valid.call_count, 10)
 
 
 class AdminVerificationTTLTests(TestCase):
