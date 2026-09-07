@@ -22,7 +22,7 @@ ADMIN_LOGIN_RATE_WINDOW_SECONDS = 300
 
 def _allow_form_submission(
     request: HttpRequest,
-    form: forms.Form,
+    form: forms.BaseForm,
     *,
     key_prefix: str,
     limit: int,
