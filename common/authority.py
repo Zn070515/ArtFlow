@@ -13,6 +13,7 @@ module generalises it so RulesetVersion and StageResult share one mechanism rath
 ``_allow_freeze``/``_bypass_confirmed`` kwarg that any caller could pass.
 """
 
+import inspect
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -99,6 +100,22 @@ def _raw_delete_allowed() -> bool:
     return bool(getattr(_raw_delete_scope, "allowed", False))
 
 
+def _called_from_django_collector_delete() -> bool:
+    frame = inspect.currentframe()
+    try:
+        while frame is not None:
+            if (
+                frame.f_globals.get("__name__") == "django.db.models.deletion"
+                and frame.f_code.co_name == "delete"
+                and frame.f_locals.get("self").__class__.__name__ == "Collector"
+            ):
+                return True
+            frame = frame.f_back
+    finally:
+        del frame
+    return False
+
+
 @contextmanager
 def allow_authority_raw_delete() -> Iterator[None]:
     """Allow only normal Django delete collection to reach ``_raw_delete``."""
@@ -114,7 +131,7 @@ class AuthorityQuerySetMixin:
     """Block direct private raw deletes while preserving guarded delete flows."""
 
     def _raw_delete(self, using: str | None = None) -> Any:
-        if not _raw_delete_allowed():
+        if not _raw_delete_allowed() and not _called_from_django_collector_delete():
             raise ValidationError("受 authority 保护的数据不能通过 QuerySet._raw_delete() 删除。")
         return cast(Any, super())._raw_delete(using)
 
