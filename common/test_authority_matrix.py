@@ -477,8 +477,17 @@ class AuthorityMutationMatrixTests(TestCase):
 
     def test_raw_delete_cannot_bypass_authority_matrix(self):
         for descriptor in MODEL_MATRIX:
-            instance = descriptor.factory(self)
+            instance = descriptor.model._base_manager.order_by("pk").first()
+            if instance is None and descriptor.model is ScoreSummary:
+                with authority_write(SCORE_SUMMARY_RECALCULATE):
+                    instance = ScoreSummary.objects.create(
+                        round=self.round,
+                        singer=self.singer,
+                        average_score=Decimal("90"),
+                        is_test_data=True,
+                    )
             with self.subTest(model=descriptor.name):
+                self.assertIsNotNone(instance)
                 with transaction.atomic():
                     try:
                         with self.assertRaises(ValidationError):
