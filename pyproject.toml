@@ -192,3 +192,8 @@ disallow_untyped_defs = false
 
 [tool.django-stubs]
 django_settings_module = "config.settings"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1,<2",
+]

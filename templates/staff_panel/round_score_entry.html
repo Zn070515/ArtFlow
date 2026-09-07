@@ -16,7 +16,7 @@
     </div>
 </div>
 {% else %}
-<div class="max-w-7xl mx-auto px-4 py-8" id="rapid-entry" data-api-url="{% url 'staff:round_scores_api' round.pk %}" data-activity-id="{{ round.activity_id }}" data-round-id="{{ round.pk }}" data-locked="{% if is_locked %}true{% else %}false{% endif %}">
+<div class="max-w-7xl mx-auto px-4 py-8" id="rapid-entry" data-api-url="{% url 'staff:round_scores_api' round.pk %}" data-activity-id="{{ round.activity_id }}" data-round-id="{{ round.pk }}" data-operator-id="{{ request.user.pk }}" data-locked="{% if is_locked %}true{% else %}false{% endif %}">
     {% csrf_token %}
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 快速录入</p>
 

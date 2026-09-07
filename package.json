@@ -6,8 +6,9 @@
     "build:css": "tailwindcss -i ./static/css/src.css -o ./static/css/app.css --minify",
     "check:css": "npm run build:css && git diff --exit-code -- static/css/app.css",
     "build:client": "tsc -p tsconfig.client.json",
-    "check:client": "npm run build:client && git diff --exit-code -- static/dist/rapid_score.js",
-    "test:client": "node --test tests/rapid_score_client.test.mjs"
+    "check:client": "npm run build:client && git diff --exit-code -- static/dist/",
+    "test:client": "node --test tests/client/*.test.mjs",
+    "check:pyright": "uv run pyright"
   },
   "devDependencies": {
     "tailwindcss": "3.4.17",

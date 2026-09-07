@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../static/dist/rapid_score.js", import.meta.url), "utf8");
-const pendingKey = "artflow:rapid-score:pending:44:55:/staff/rounds/55/scores/api/";
+const source = readFileSync(new URL("../../static/dist/rapid_score.js", import.meta.url), "utf8");
+const pendingKey = "artflow:rapid-score:pending:44:55:7:/staff/rounds/55/scores/api/";
 
 class FakeStorage {
   #values = new Map();
@@ -83,7 +83,13 @@ function response(status, data) {
   return { status, json: async () => data };
 }
 
-function boot({ storage = new FakeStorage(), online = true, fetchImpl, initialGrid = grid() } = {}) {
+function boot({
+  storage = new FakeStorage(),
+  online = true,
+  fetchImpl,
+  initialGrid = grid(),
+  operatorId = "7",
+} = {}) {
   const input = new FakeElement({ dataset: { singerId: "1", judgeId: "9" } });
   const secondInput = new FakeElement({ dataset: { singerId: "1", judgeId: "10" } });
   const tbody = new FakeElement();
@@ -92,6 +98,7 @@ function boot({ storage = new FakeStorage(), online = true, fetchImpl, initialGr
       apiUrl: "/staff/rounds/55/scores/api/",
       activityId: "44",
       roundId: "55",
+      operatorId,
       locked: "false",
     },
   });
@@ -303,6 +310,30 @@ test("pending work warns before unloading the page", async () => {
   runtime.window.dispatch("beforeunload", event);
 
   assert.match(event.returnValue, /未保存|保存/);
+});
+
+test("pending drafts are isolated by operator identity", () => {
+  const storage = new FakeStorage();
+  const firstOperator = boot({ storage, operatorId: "7" });
+  firstOperator.input.value = "91";
+  firstOperator.tbody.dispatch("input", { target: firstOperator.input });
+  assert.equal(storage.records().length, 1);
+  assert.equal(storage.records()[0].cells[0].score, "91");
+
+  const secondOperator = boot({ storage, operatorId: "8" });
+  assert.equal(secondOperator.input.value, "");
+  assert.equal(secondOperator.pendingCount.textContent, "0");
+});
+
+test("missing operator identity fails closed for pending drafts", () => {
+  const storage = new FakeStorage();
+  const runtime = boot({ storage, operatorId: "" });
+
+  runtime.input.value = "91";
+  runtime.tbody.dispatch("input", { target: runtime.input });
+
+  assert.equal(storage.records().length, 0);
+  assert.equal(runtime.pendingCount.textContent, "");
 });
 
 test("a stale response rebases a draft when its server cell is unchanged", async () => {
