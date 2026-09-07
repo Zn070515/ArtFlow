@@ -455,7 +455,7 @@ ArtFlow 是一个平台，但不应该让所有角色进入同一个复杂 Dashb
 
 每张实体票拥有一个高熵唯一 QR Secret。
 
-票券状态至少：
+票券生命周期至少：
 
 ```text
 CREATED
@@ -463,9 +463,18 @@ CREATED
 ISSUED
 ↓
 CHECKED_IN
-↓
-VOTED
+
+另外：
+VOID / REVOKED
 ```
+
+`VOTED` 不是 Ticket 的全局终态。同一张有效票可以在不同的 `VoteSession` 中分别获得投票资格；投票状态属于：
+
+```text
+Ticket + VoteSession
+```
+
+数据库必须对 `(ticket_id, vote_session_id)` 建立唯一约束，确保一张票在每个投票场次只能产生一份 Ballot。
 
 实际发票流程：
 
@@ -496,8 +505,6 @@ VoteSession OPEN
 +
 该 Ticket 尚未投票
 ```
-
-数据库必须有一票一 Ballot 的唯一约束。
 
 ---
 
@@ -537,13 +544,13 @@ VoteSession OPEN
 
 # 5. Audience Ticket & Vote
 
-## 5.1 一张真实入场票 = 一份投票资格
+## 5.1 一张真实入场票 = 每个投票场次一份投票资格
 
 ArtFlow 不追求在无账号、无实名条件下证明“一个自然人”。
 
-系统证明的是：
+系统在每个 `VoteSession` 中证明的是：
 
-> 这是一张真实发放、已经现场检票、尚未使用投票资格的票。
+> 这是一张真实发放、已经现场检票、在本投票场次尚未使用投票资格的票。
 
 这样攻击者想制造 N 票，就必须实际控制 N 张有效票并通过对应检票状态，而不是仅靠浏览器脚本无限制造提交。
 
