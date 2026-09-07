@@ -626,6 +626,44 @@ class StaffPanelSmokeTests(TestCase):
             ).exists()
         )
 
+    def test_round_prepare_without_active_judge_is_a_redirect_with_message(self):
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="No Judge Singer",
+            student_id="20260021",
+            college="Info",
+            class_name="CS1",
+            phone="13800000020",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        round_ = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(reverse("staff:round_prepare", args=[round_.pk]), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "至少一名选手和一名活跃评委")
+
+    def test_round_prepare_without_eligible_singer_is_a_redirect_with_message(self):
+        Judge.objects.create(activity=self.singer_activity, name="No Singer Judge")
+        round_ = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(reverse("staff:round_prepare", args=[round_.pk]), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "至少一名选手和一名活跃评委")
+
     def test_formal_score_update_stays_formal(self):
         formal_activity = _create_activity(
             title="Formal Score Contest",
@@ -799,13 +837,29 @@ class StaffPanelSmokeTests(TestCase):
         )
 
         response = self.client.post(
-            reverse("staff:round_unlock", args=[round_.pk]), {"note": "Correction needed"}
+            reverse("staff:round_unlock", args=[round_.pk]),
+            {"note": "Correction needed"},
+            follow=True,
         )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "后续轮次仍在使用本轮结果")
         round_.refresh_from_db()
         self.assertEqual(round_.status, ContestRound.Status.LOCKED)
         self.assertTrue(round_.is_locked)
+
+    def test_round_unlock_invalid_state_is_a_redirect_with_message(self):
+        round_ = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(reverse("staff:round_unlock", args=[round_.pk]), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "该比赛轮次未锁定")
 
     def test_round_reset_prepared_round_to_draft(self):
         SingerRegistration.objects.create(
@@ -851,9 +905,50 @@ class StaffPanelSmokeTests(TestCase):
         )
         login_admin(self.client, self.admin)
 
-        response = self.client.post(reverse("staff:round_reset", args=[round_.pk]), {"reason": ""})
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:round_reset", args=[round_.pk]), {"reason": ""}, follow=True
+        )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "重置轮次必须填写原因")
+
+    def test_round_reset_with_active_downstream_is_a_redirect_with_message(self):
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Reset Downstream Singer",
+            student_id="20260022",
+            college="Info",
+            class_name="CS1",
+            phone="13800000021",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Reset Downstream Judge")
+        round_ = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            status=ContestRound.Status.PREPARED,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:round_reset", args=[round_.pk]),
+            {"reason": "Admin unwind"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "后续轮次仍在使用本轮结果")
+        round_.refresh_from_db()
+        self.assertEqual(round_.status, ContestRound.Status.PREPARED)
 
     def test_score_entry_and_template_use_prepared_round_snapshots(self):
         registration = SingerRegistration.objects.create(
@@ -1031,9 +1126,9 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         self.assertEqual(
             self.client.post(
-                reverse("staff:vote_session_open", args=[vote_session.pk])
+                reverse("staff:vote_session_open", args=[vote_session.pk]), follow=True
             ).status_code,
-            403,
+            200,
         )
 
     def test_activity_lock_does_not_destroy_child_open_state(self):
@@ -1057,9 +1152,9 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
         self.assertEqual(
             self.client.post(
-                reverse("staff:vote_session_close", args=[vote_session.pk])
+                reverse("staff:vote_session_close", args=[vote_session.pk]), follow=True
             ).status_code,
-            403,
+            200,
         )
 
     def test_admin_can_unlock_vote_session_and_audit_is_recorded(self):
@@ -1160,14 +1255,17 @@ class StaffPanelSmokeTests(TestCase):
         login_admin(self.client, self.admin)
         self.client.post(reverse("staff:activity_lock", args=[self.singer_activity.pk]))
 
+        self.client.raise_request_exception = False
         response = self.client.post(
             reverse(
                 "staff:round_unlock",
                 args=[ContestRound.objects.get(activity=self.singer_activity).pk],
             ),
+            follow=True,
         )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Activity results are locked.")
 
     def test_test_cleanup_cannot_delete_formal_registration(self):
         self.singer_activity = _create_activity(

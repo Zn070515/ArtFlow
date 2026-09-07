@@ -51,6 +51,12 @@ jobs:
       - name: Verify compiled static CSS
         run: npm ci && npm run check:css
 
+      - name: Collect static assets
+        run: uv run python manage.py collectstatic --noinput
+
+      - name: Run Rapid Score client regression
+        run: npm run test:client
+
       - name: Run Ruff lint
         run: uv run ruff check .
 
@@ -108,6 +114,9 @@ jobs:
 
       - name: Install locked dependencies
         run: uv sync --locked --all-extras
+
+      - name: Collect static assets
+        run: uv run python manage.py collectstatic --noinput
 
       - name: Run Django checks
         run: uv run python manage.py check

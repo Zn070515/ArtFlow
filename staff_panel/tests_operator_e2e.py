@@ -24,6 +24,7 @@ import json
 from decimal import Decimal
 
 from accounts.models import User
+from accounts.services import mark_admin_verified
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -59,6 +60,9 @@ class OperatorEndToEndTests(TestCase):
     def setUp(self):
         self.operator = self._make_operator()
         self.client.force_login(self.operator)
+        session = self.client.session
+        mark_admin_verified(session)
+        session.save()
 
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(

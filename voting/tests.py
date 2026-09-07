@@ -362,7 +362,9 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
     """Verify the Activity row lock is taken before the child rows."""
 
     def setUp(self):
-        self.admin = User.objects.create_user(username="concurrent-staff", password="pass")
+        self.admin = create_provisioned_user(
+            username="concurrent-staff", password="pass", role=User.Role.STAFF
+        )
         user = User.objects.create_user(username="concurrent-overlay-voter", password="pass")
         self.activity = create_activity(
             title="Concurrent Overlay Contest",

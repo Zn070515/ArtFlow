@@ -198,6 +198,7 @@ def _order_singers_for_round(
 
 @transaction.atomic
 def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
+    current_operator = require_current_staff(operator)
     locked_activity = lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -249,7 +250,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["status", "is_locked"])
     AuditLog.objects.create(
-        operator=operator,
+        operator=current_operator,
         action_type=AuditLog.ActionType.UPDATE_STATUS,
         target=f"ContestRound:{locked_round.pk}",
         new_value=json.dumps(
@@ -268,6 +269,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
 @transaction.atomic
 def set_round_running_order(contest_round, singer_ids, operator) -> ContestRound:
     """Persist a complete manual running-order snapshot on a draft round."""
+    current_operator = require_current_staff(operator)
     locked_activity = lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -299,7 +301,7 @@ def set_round_running_order(contest_round, singer_ids, operator) -> ContestRound
     for index, singer_id in enumerate(ordered_ids, start=1):
         entries.filter(singer_id=singer_by_id[singer_id].pk).update(running_order=index)
     AuditLog.objects.create(
-        operator=operator,
+        operator=current_operator,
         action_type=AuditLog.ActionType.UPDATE_STATUS,
         target=f"ContestRound:{locked_round.pk}",
         new_value=json.dumps(
@@ -319,6 +321,7 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
     command therefore requires a complete partition of the round roster and writes
     groups and performances together while the Activity is locked.
     """
+    current_operator = require_current_staff(operator)
     locked_activity = lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -385,7 +388,7 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
         )
         created.append(group)
     AuditLog.objects.create(
-        operator=operator,
+        operator=current_operator,
         action_type=AuditLog.ActionType.OTHER,
         target=f"ContestRound:{locked_round.pk}",
         new_value=json.dumps(
@@ -408,6 +411,7 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
 @transaction.atomic
 def create_scoring_rubric(activity, *, name, description, criteria, operator) -> ScoringRubric:
     """Provision a scoring rubric and all criteria as one audited operator command."""
+    current_operator = require_current_staff(operator)
     locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
     name = str(name or "").strip()
     if not name:
@@ -447,7 +451,7 @@ def create_scoring_rubric(activity, *, name, description, criteria, operator) ->
         [RubricCriterion(rubric=rubric, **item) for item in normalized]
     )
     AuditLog.objects.create(
-        operator=operator,
+        operator=current_operator,
         action_type=AuditLog.ActionType.OTHER,
         target=f"ScoringRubric:{rubric.pk}",
         new_value=json.dumps(
@@ -1032,6 +1036,7 @@ def apply_scores_if_version(
 @transaction.atomic
 def lock_round(contest_round: ContestRound, operator) -> ContestRound:
     """Freeze a prepared/scoring round once its score matrix is complete."""
+    current_operator = require_current_staff(operator)
     lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -1052,7 +1057,7 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["is_locked", "status"])
     AuditLog.objects.create(
-        operator=operator,
+        operator=current_operator,
         action_type=AuditLog.ActionType.RELOCK_RESULT,
         target=f"ContestRound:{locked_round.pk}",
         old_value="unlocked",
@@ -2726,6 +2731,7 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
     an already-current result is skipped so an incomplete stage never pollutes the board and
     a re-run never duplicates.
     """
+    current_operator = require_current_staff(operator)
     lock_activity_for_action(activity)
     version = _current_frozen_version(activity)
     if version is None:
@@ -2745,7 +2751,7 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
                 version,
                 activity,
                 stage_key=stage_key,
-                computed_by=operator,
+                computed_by=current_operator,
                 checkpoint=checkpoint,
                 preview=True,
                 **args,
@@ -2764,7 +2770,7 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
         )
         if latest is not None and latest.input_fingerprint == probe.input_fingerprint:
             continue
-        recompute_activity_result(activity, operator, checkpoint=checkpoint)
+        recompute_activity_result(activity, current_operator, checkpoint=checkpoint)
         resolved.append(stage_key)
     return resolved
 

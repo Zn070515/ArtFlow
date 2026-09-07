@@ -26,7 +26,13 @@ from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from ruleset.admin import RulesetVersionAdmin
 from ruleset.models import ContestRuleset, RulesetVersion
-from ruleset.services import create_ruleset_version, freeze_ruleset_version
+from ruleset.services import (
+    create_ruleset_version,
+    freeze_ruleset_version,
+    supersede_ruleset_version,
+    update_ruleset_binding,
+    update_ruleset_definition,
+)
 from singer_contest.admin import (
     AwardAdmin,
     ContestRoundAdmin,
@@ -65,12 +71,16 @@ from singer_contest.services import (
     _authorized_award_materialization,
     apply_scores,
     confirm_stage_result,
+    create_scoring_rubric,
     lock_round,
+    maybe_resolve_checkpoints,
     prepare_round,
     run_ruleset,
+    set_round_groups,
+    set_round_running_order,
 )
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
-from voting.services import lock_vote_session
+from voting.services import close_vote_session, lock_vote_session, open_vote_session
 
 from common.authority import (
     ACCOUNT_AUTHORITY,
@@ -1522,6 +1532,67 @@ class AuthorityMutationMatrixTests(TestCase):
             confirm_stage_result(self.stage, confirmed_by=self.staff_user)
         with self.assertRaises(PermissionDenied):
             unlock_vote_session(self.vote_session, self.staff_user)
+
+    def _public_staff_service_attempts(self, actor):
+        return {
+            "prepare_round": lambda: prepare_round(self.round, actor),
+            "set_round_running_order": lambda: set_round_running_order(
+                self.round, [self.singer.pk], actor
+            ),
+            "set_round_groups": lambda: set_round_groups(
+                self.round, [{"name": "group", "singer_ids": [self.singer.pk]}], actor
+            ),
+            "create_scoring_rubric": lambda: create_scoring_rubric(
+                self.activity,
+                name="stale rubric",
+                description="",
+                criteria=[{"name": "criterion", "max_score": 100}],
+                operator=actor,
+            ),
+            "lock_round": lambda: lock_round(self.round, actor),
+            "maybe_resolve_checkpoints": lambda: maybe_resolve_checkpoints(self.activity, actor),
+            "open_vote_session": lambda: open_vote_session(self.vote_session, actor),
+            "close_vote_session": lambda: close_vote_session(self.vote_session, actor),
+            "lock_vote_session": lambda: lock_vote_session(self.vote_session, actor),
+            "update_ruleset_definition": lambda: update_ruleset_definition(
+                self.version,
+                definition=self.version.definition,
+                operator=actor,
+            ),
+            "update_ruleset_binding": lambda: update_ruleset_binding(
+                self.ruleset, binding={}, operator=actor
+            ),
+            "create_ruleset_version": lambda: create_ruleset_version(
+                self.ruleset,
+                definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+                created_by=actor,
+                binding={},
+            ),
+            "supersede_ruleset_version": lambda: supersede_ruleset_version(
+                self.version, created_by=actor
+            ),
+        }
+
+    def _assert_public_staff_services_reject(self, actor):
+        for name, attempt in self._public_staff_service_attempts(actor).items():
+            with self.subTest(service=name), self.assertRaises(PermissionDenied):
+                attempt()
+
+    def test_public_staff_services_reject_stale_downgraded_operator(self):
+        stale_staff = User.objects.get(pk=self.staff_user.pk)
+        with authority_write(ACCOUNT_AUTHORITY):
+            User.objects.filter(pk=stale_staff.pk).update(role=User.Role.PARTICIPANT)
+
+        self._assert_public_staff_services_reject(stale_staff)
+
+    def test_public_staff_services_reject_inactive_and_missing_operators(self):
+        inactive_staff = User.objects.get(pk=self.staff_user.pk)
+        with authority_write(ACCOUNT_AUTHORITY):
+            User.objects.filter(pk=inactive_staff.pk).update(is_active=False)
+        self._assert_public_staff_services_reject(inactive_staff)
+        self._assert_public_staff_services_reject(
+            User(username="missing-staff", role=User.Role.STAFF)
+        )
 
 
 def _user_row(case):
