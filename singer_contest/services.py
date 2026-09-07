@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping
 
+from accounts.services import require_current_admin, require_current_staff
 from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
@@ -15,14 +16,17 @@ from common.authority import (
     VOTE_SESSION_STATE,
     authority_write,
 )
-from common.business_rules import ensure_activity_unlocked, ensure_round_unlocked
+from common.business_rules import (
+    ensure_activity_unlocked,
+    ensure_lifecycle_consistent,
+    ensure_round_unlocked,
+)
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
-from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Max, Q, QuerySet
@@ -574,6 +578,7 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
     Rejects when a later round already consumes this round's advancement, since
     resetting upstream would orphan the downstream snapshot. Requires a reason.
     """
+    current_actor = require_current_admin(actor)
     if not reason.strip():
         raise ValidationError("重置轮次必须填写原因。")
     lock_activity_for_runtime_data(contest_round.activity)
@@ -595,7 +600,7 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
             (other.sequence, other.pk) > (locked_round.sequence, locked_round.pk)
         ):
             raise ValidationError("后续轮次仍在使用本轮结果，重置前必须先清空后续轮次。")
-    return reset_round_snapshots(locked_round, actor, reason=reason)
+    return reset_round_snapshots(locked_round, current_actor, reason=reason)
 
 
 def downstream_rounds(contest_round: ContestRound) -> QuerySet[ContestRound]:
@@ -766,6 +771,7 @@ def finalize_advancement(
     database order. Staff explicitly choose who advances; that choice is frozen
     for downstream round consumption and audited.
     """
+    current_actor = require_current_admin(actor)
     lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -805,7 +811,7 @@ def finalize_advancement(
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["advancement_status"])
     AuditLog.objects.create(
-        operator=actor,
+        operator=current_actor,
         action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
         target=f"ContestRound:{locked_round.pk}",
         old_value=json.dumps({"advanced": sorted(old_advanced)}, ensure_ascii=False),
@@ -823,6 +829,7 @@ def apply_scores(
     *,
     note: str = "",
 ) -> list[dict[str, int | str | None]]:
+    current_operator = require_current_staff(operator)
     lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -875,7 +882,7 @@ def apply_scores(
         with authority_write(CONTEST_ROUND_STATE):
             locked_round.save(update_fields=["status", "score_version"])
         AuditLog.objects.create(
-            operator=operator,
+            operator=current_operator,
             action_type=AuditLog.ActionType.ENTER_SCORE,
             target=f"ContestRound:{locked_round.pk}",
             new_value=json.dumps(
@@ -965,18 +972,12 @@ def apply_scores_if_version(
     if base_version is None:
         raise ValidationError("缺少 base_version。")
     command_id = _validated_score_command_id(command_id)
-    if not getattr(operator, "pk", None):
-        raise PermissionDenied("评分操作缺少有效执行人。")
-    operator_model = get_user_model()
-    try:
-        locked_operator = operator_model.objects.select_for_update().get(pk=operator.pk)
-    except operator_model.DoesNotExist:
-        raise PermissionDenied("评分操作缺少有效执行人。") from None
+    current_operator = require_current_staff(operator)
     try:
         parsed_base_version = int(base_version)
     except (TypeError, ValueError):
         raise ValidationError("base_version 无效。") from None
-    contest_round = ContestRound.objects.get(pk=round_id)
+    contest_round = ContestRound.objects.only("activity_id").get(pk=round_id)
     locked_activity = Activity.objects.select_for_update().get(pk=contest_round.activity_id)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=round_id)
@@ -988,7 +989,7 @@ def apply_scores_if_version(
         with transaction.atomic():
             receipt = ScoreWriteReceipt.objects.create(
                 command_id=command_id,
-                operator=locked_operator,
+                operator=current_operator,
                 operation=RAPID_SCORE_OPERATION,
                 payload_hash=payload_hash,
                 result_version=0,
@@ -998,7 +999,7 @@ def apply_scores_if_version(
     except IntegrityError:
         receipt = ScoreWriteReceipt.objects.select_for_update().get(command_id=command_id)
         if (
-            receipt.operator_id != locked_operator.pk
+            receipt.operator_id != current_operator.pk
             or receipt.payload_hash != payload_hash
             or receipt.operation != RAPID_SCORE_OPERATION
         ):
@@ -1012,7 +1013,7 @@ def apply_scores_if_version(
         raise ValidationError("请先准备比赛轮次后再录入评分。")
     if parsed_base_version != locked_round.score_version:
         raise StaleScoreVersionError(locked_round.score_version)
-    apply_scores(locked_round, score_values, locked_operator, note=note)
+    apply_scores(locked_round, score_values, current_operator, note=note)
     locked_round.refresh_from_db()
     result = {
         "status": ScoreWriteReceipt.Status.SUCCEEDED,
@@ -1063,6 +1064,7 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
 @transaction.atomic
 def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> ContestRound:
     """Unlock an upstream locked round only if no downstream round consumes it."""
+    current_actor = require_current_admin(actor)
     lock_activity_for_action(contest_round.activity)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -1086,7 +1088,7 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["is_locked", "status"])
     AuditLog.objects.create(
-        operator=actor,
+        operator=current_actor,
         action_type=AuditLog.ActionType.UNLOCK_RESULT,
         target=f"ContestRound:{locked_round.pk}",
         old_value="locked",
@@ -2161,6 +2163,7 @@ def set_duel_decision(
     """Upsert one explicit DUEL winner for a frozen ruleset version."""
     from ruleset.models import RulesetVersion
 
+    current_actor = require_current_admin(created_by)
     activity = activity or version.ruleset.activity
     locked_activity = lock_activity_for_action(activity)
     locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
@@ -2183,12 +2186,12 @@ def set_duel_decision(
             defaults={
                 "activity": locked_activity,
                 "winner": winner,
-                "created_by": created_by,
+                "created_by": current_actor,
                 "is_test_data": runtime_is_test(locked_activity),
             },
         )
     AuditLog.objects.create(
-        operator=created_by,
+        operator=current_actor,
         action_type=AuditLog.ActionType.DUEL_DECISION,
         target=f"RulesetVersion:{locked.pk}",
         old_value=json.dumps(
@@ -2216,6 +2219,7 @@ def delete_duel_decision(
     """Remove one explicit DUEL winner through the formal authority service."""
     from ruleset.models import RulesetVersion
 
+    current_actor = require_current_admin(deleted_by)
     activity = activity or version.ruleset.activity
     locked_activity = lock_activity_for_action(activity)
     locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
@@ -2238,7 +2242,7 @@ def delete_duel_decision(
     with _authorized_duel_write():
         decision.delete()
     AuditLog.objects.create(
-        operator=deleted_by,
+        operator=current_actor,
         action_type=AuditLog.ActionType.DUEL_DECISION,
         target=f"RulesetVersion:{locked.pk}",
         old_value=json.dumps(old_value, ensure_ascii=False, sort_keys=True),
@@ -2263,6 +2267,7 @@ def set_manual_decision(
     """
     from ruleset.models import RulesetVersion
 
+    current_actor = require_current_admin(created_by)
     activity = activity or version.ruleset.activity
     locked_activity = lock_activity_for_action(activity)
     locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
@@ -2281,12 +2286,12 @@ def set_manual_decision(
             defaults={
                 "activity": locked_activity,
                 "chosen": chosen,
-                "created_by": created_by,
+                "created_by": current_actor,
                 "is_test_data": runtime_is_test(locked_activity),
             },
         )
     AuditLog.objects.create(
-        operator=created_by,
+        operator=current_actor,
         action_type=AuditLog.ActionType.MANUAL_DECISION,
         target=f"RulesetVersion:{locked.pk}",
         old_value="",
@@ -2295,7 +2300,7 @@ def set_manual_decision(
                 "manual_key": manual_key,
                 "group": group or "",
                 "chosen": chosen,
-                "created_by": created_by.pk if created_by else None,
+                "created_by": current_actor.pk,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -2316,6 +2321,7 @@ def delete_manual_decision(
     """
     from ruleset.models import RulesetVersion
 
+    current_actor = require_current_admin(deleted_by)
     activity = activity or version.ruleset.activity
     locked_activity = lock_activity_for_action(activity)
     locked = RulesetVersion.objects.select_for_update().get(pk=version.pk)
@@ -2333,7 +2339,7 @@ def delete_manual_decision(
     with _authorized_manual_write():
         decision.delete()
     AuditLog.objects.create(
-        operator=deleted_by,
+        operator=current_actor,
         action_type=AuditLog.ActionType.MANUAL_DECISION,
         target=f"RulesetVersion:{locked.pk}",
         old_value=json.dumps(
@@ -2348,6 +2354,37 @@ def delete_manual_decision(
         new_value="",
     )
     return decision
+
+
+@transaction.atomic
+def create_manual_award(activity, *, singer, name: str, operator) -> Award:
+    """Create an explicitly manual official award under admin authority."""
+    current_operator = require_current_admin(operator)
+    locked_activity = lock_activity_for_action(activity, ActivityAction.MANAGE_AWARD)
+    award_name = str(name or "").strip()
+    if not award_name:
+        raise ValidationError("奖项名称不能为空。")
+    locked_singer = SingerRegistration.objects.select_for_update().get(pk=singer.pk)
+    if locked_singer.activity_id != locked_activity.pk:
+        raise ValidationError("奖项选手必须属于当前活动。")
+    ensure_lifecycle_consistent(locked_activity, locked_singer, label="Award 选手")
+    award = Award.objects.create(
+        activity=locked_activity,
+        singer=locked_singer,
+        name=award_name,
+        source_node="MANUAL",
+        is_test_data=locked_activity.is_test_mode,
+    )
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"Award:{award.pk}",
+        new_value=json.dumps(
+            {"name": award.name, "source": "MANUAL", "activity": locked_activity.pk},
+            ensure_ascii=False,
+        ),
+    )
+    return award
 
 
 @transaction.atomic
@@ -2366,6 +2403,7 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     require the consumed raw facts to be at rest (rounds/votes locked). Idempotent: a
     re-confirm of an already-locked row returns it as-is.
     """
+    current_actor = require_current_admin(confirmed_by)
     locked_activity = lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.activity_id != locked_activity.pk:
@@ -2397,12 +2435,12 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
         raise ValidationError("该结果已过期（原始分数/票数已变化），请重新计算后核定。")
     _ensure_stage_dependencies_final(version, locked.activity, locked.stage_key)
     locked.status = StageResult.Status.CONFIRMED
-    locked.confirmed_by = confirmed_by
+    locked.confirmed_by = current_actor
     locked.confirmed_at = timezone.now()
     with authority_write(STAGE_RESULT_CONFIRM):
         locked.save(update_fields=["status", "confirmed_by", "confirmed_at"])
     AuditLog.objects.create(
-        operator=confirmed_by,
+        operator=current_actor,
         action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
         target=f"StageResult:{locked.pk}",
         old_value=StageResult.Status.READY_TO_CONFIRM,
@@ -2414,15 +2452,15 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
                 "ruleset_version": version.pk,
                 "authority_hash": version.authority_hash,
                 "input_fingerprint": locked.input_fingerprint,
-                "confirmed_by": confirmed_by.pk,
+                "confirmed_by": current_actor.pk,
                 "plan_version": locked.plan_version,
             },
             ensure_ascii=False,
             sort_keys=True,
         ),
     )
-    materialize_stage_awards(locked, operator=confirmed_by)
-    materialize_round_entry_from_stage(locked, operator=confirmed_by)
+    materialize_stage_awards(locked, operator=current_actor)
+    materialize_round_entry_from_stage(locked, operator=current_actor)
     return locked
 
 
@@ -2487,6 +2525,7 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     imposed: the round / vote / manual edits that the result consumed are editable again,
     and the stage can be re-resolved and re-confirmed. Audits the change.
     """
+    current_operator = require_current_admin(operator)
     lock_activity_for_action(stage.activity)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.status != StageResult.Status.CONFIRMED:
@@ -2508,9 +2547,9 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     locked.status = StageResult.Status.READY_TO_CONFIRM
     with authority_write(STAGE_RESULT_CONFIRM):
         locked.save(update_fields=["confirmed_by", "confirmed_at", "status"])
-    _release_stage_consumed_facts(locked, operator=operator)
+    _release_stage_consumed_facts(locked, operator=current_operator)
     AuditLog.objects.create(
-        operator=operator,
+        operator=current_operator,
         action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
         target=f"StageResult:{locked.pk}",
         old_value=StageResult.Status.CONFIRMED,

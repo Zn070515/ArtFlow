@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from accounts.services import require_current_admin
 from common.authority import VOTE_SESSION_STATE, authority_write
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
@@ -161,6 +162,7 @@ def lock_vote_session(vote_session, operator):
 
 
 def unlock_vote_session(vote_session, operator, *, note: str = ""):
+    current_operator = require_current_admin(operator)
     with transaction.atomic():
         _locked_runtime_activity(vote_session.activity)
         locked = _locked_vote_session(vote_session)
@@ -174,7 +176,7 @@ def unlock_vote_session(vote_session, operator, *, note: str = ""):
             locked.save(update_fields=["is_locked"])
         _audit_vote_state(
             locked,
-            operator,
+            current_operator,
             AuditLog.ActionType.UNLOCK_RESULT,
             "is_locked=true",
             "is_locked=false",

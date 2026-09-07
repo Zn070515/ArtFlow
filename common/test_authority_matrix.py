@@ -16,7 +16,7 @@ from typing import Any, Callable, cast
 
 from accounts.admin import CustomUserAdmin
 from accounts.models import User
-from accounts.services import change_user_role
+from accounts.services import change_user_role, require_current_admin
 from core.admin import ActivityAdmin
 from core.models import Activity
 from core.services import transition_activity_phase
@@ -124,6 +124,9 @@ class AuthorityMutationMatrixTests(TestCase):
         with authority_write(ACCOUNT_AUTHORITY):
             self.admin_user = User.objects.create_user(
                 username="matrix-admin", password="pass", role=User.Role.ADMIN
+            )
+            self.staff_user = User.objects.create_user(
+                username="matrix-staff", password="pass", role=User.Role.STAFF
             )
             User.objects.filter(pk=self.admin_user.pk).update(is_superuser=True, is_staff=True)
         self.admin_user.refresh_from_db()
@@ -1504,6 +1507,21 @@ class AuthorityMutationMatrixTests(TestCase):
                 action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
             ).exists()
         )
+
+    def test_terminal_services_reject_current_non_admin_authority(self):
+        from singer_contest.services import finalize_advancement
+        from voting.services import unlock_vote_session
+
+        with self.assertRaises(PermissionDenied):
+            require_current_admin(self.staff_user)
+        with self.assertRaises(PermissionDenied):
+            transition_activity_phase(self.activity, Activity.Phase.TESTING, actor=self.staff_user)
+        with self.assertRaises(PermissionDenied):
+            finalize_advancement(self.round, [], self.staff_user)
+        with self.assertRaises(PermissionDenied):
+            confirm_stage_result(self.stage, confirmed_by=self.staff_user)
+        with self.assertRaises(PermissionDenied):
+            unlock_vote_session(self.vote_session, self.staff_user)
 
 
 def _user_row(case):

@@ -69,7 +69,8 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 
 - **数据库**：使用持久化的 PostgreSQL 卷，不允许容器重建后数据丢失。
 - **Media**：上传的文件、生成文档、导出档案存放在持久化卷，并纳入备份目标。
-- **静态资源**：由构建产物（`collectstatic`）提供，不依赖运行时 Tailwind CDN。
+- **静态资源**：由构建产物（`collectstatic`）提供，并由 Gunicorn 前的 WhiteNoise 中间件
+  服务压缩、带 manifest 的静态文件；不依赖运行时 Tailwind CDN。
 
 ## 备份目标
 
@@ -80,6 +81,9 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 - 健康检查使用匿名 `GET /healthz/`，只返回通用状态，不泄露配置细节。
 - 上传最大值按用途在 `files/services.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB）。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
 - 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。
+- 内部提交文件和生成文档由 Django 受控媒体视图流式返回，当前没有独立的媒体下载 worker。
+  正式活动前必须按最大文件尺寸和并发下载量做一次负载演练；若下载占满 Gunicorn worker，
+  应把媒体交给独立的受控文件服务，并保留同等权限校验，不能直接暴露 `/media/` 目录。
 
 ## 发布门禁
 

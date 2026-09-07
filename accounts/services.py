@@ -14,6 +14,32 @@ from django.utils import timezone
 from .models import User
 
 
+def _current_user(actor) -> User:
+    actor_pk = getattr(actor, "pk", None)
+    if not actor_pk:
+        raise PermissionDenied("当前操作者无有效账户。")
+    try:
+        return User.objects.get(pk=actor_pk)
+    except User.DoesNotExist:
+        raise PermissionDenied("当前操作者账户不存在。") from None
+
+
+def require_current_admin(actor) -> User:
+    """Re-read and authorize an active admin for a terminal operation."""
+    current = _current_user(actor)
+    if not current.is_active or not current.is_admin:
+        raise PermissionDenied("只有当前有效管理员可以执行该终局操作。")
+    return current
+
+
+def require_current_staff(actor) -> User:
+    """Re-read and authorize an active staff/admin for operational work."""
+    current = _current_user(actor)
+    if not current.is_active or not current.is_staff_or_admin:
+        raise PermissionDenied("只有当前有效工作人员可以执行该操作。")
+    return current
+
+
 def _verification_ttl_seconds() -> int:
     return int(settings.ADMIN_VERIFICATION_TTL_SECONDS)
 

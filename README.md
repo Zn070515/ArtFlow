@@ -56,7 +56,7 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 ## 事件本机运行
 
-`deploy/compose.event.yml` 是单机现场运行契约：`web` 只绑定 `127.0.0.1:8000`，PostgreSQL 不发布端口，数据库和媒体使用持久化卷。工作人员在本机用 `http://127.0.0.1:8000/` 操作；如需对外入口，可由现场人员另行配置受控公网 tunnel 或 IPv6 入口，并把入口主机名加入 `EVENT_ALLOWED_HOSTS`、HTTPS 来源加入 `EVENT_CSRF_TRUSTED_ORIGINS`。公网/云入口只是访问路径，不能成为正式 authority；比赛期间始终只有这台主机上的一个主数据库/服务器可写。PowerPoint 播放与控制仍独立于 ArtFlow。
+`deploy/compose.event.yml` 是单机现场运行契约：`web` 只绑定 `127.0.0.1:8000`，PostgreSQL 不发布端口，数据库和媒体使用持久化卷。工作人员只能在主机本机通过 `http://127.0.0.1:8000/` 操作；该 manifest 不提供公网入口。比赛期间始终只有这台主机上的一个主数据库/服务器可写。PowerPoint 播放与控制仍独立于 ArtFlow。
 
 ```powershell
 docker compose --env-file .env.event -f deploy/compose.event.yml up --build --wait

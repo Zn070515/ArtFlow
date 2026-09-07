@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from accounts.services import require_current_admin
 from common.authority import ACTIVITY_STATE, authority_write
 from common.business_rules import ensure_activity_unlocked
 from common.models import AuditLog
@@ -71,6 +72,8 @@ def transition_activity_phase(
     if target_phase not in Activity.Phase.values:
         raise ValidationError(f"Unknown phase: {target_phase}")
 
+    current_actor = require_current_admin(actor)
+
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
     ensure_activity_unlocked(locked_activity)
     if locked_activity.phase == target_phase:
@@ -86,7 +89,7 @@ def transition_activity_phase(
     with authority_write(ACTIVITY_STATE):
         locked_activity.save(update_fields=["phase"])
     AuditLog.objects.create(
-        operator=actor,
+        operator=current_actor,
         action_type=AuditLog.ActionType.PHASE_TRANSITION,
         target=f"Activity:{locked_activity.pk}",
         old_value=old_phase,
@@ -106,6 +109,7 @@ def _enter_archived_phase_locked(
     phase transitions must never target ARCHIVED, so only archive_activity may
     reach this state. Locks the Activity row and audits the transition.
     """
+    current_actor = require_current_admin(actor)
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
     if locked_activity.phase == Activity.Phase.ARCHIVED:
         return locked_activity
@@ -114,7 +118,7 @@ def _enter_archived_phase_locked(
     with authority_write(ACTIVITY_STATE):
         locked_activity.save(update_fields=["phase"])
     AuditLog.objects.create(
-        operator=actor,
+        operator=current_actor,
         action_type=AuditLog.ActionType.PHASE_TRANSITION,
         target=f"Activity:{locked_activity.pk}",
         old_value=old_phase,
@@ -133,8 +137,7 @@ def unarchive_activity(activity: Activity, *, actor: Any = None, note: str = "")
     archive package, then audits the change. Ordinary results-unlock and generic
     phase transitions can never reach ARCHIVED, so this is the only back door.
     """
-    if actor is None or not actor.is_admin:
-        raise PermissionDenied("只有管理员才能解归档。")
+    current_actor = require_current_admin(actor)
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
     if locked_activity.phase != Activity.Phase.ARCHIVED:
         raise PermissionDenied("只有已归档活动才能解归档。")
@@ -153,7 +156,7 @@ def unarchive_activity(activity: Activity, *, actor: Any = None, note: str = "")
             update_fields=["phase", "is_locked", "locked_at", "locked_by"],
         )
     AuditLog.objects.create(
-        operator=actor,
+        operator=current_actor,
         action_type=AuditLog.ActionType.UNARCHIVE_ACTIVITY,
         target=f"Activity:{locked_activity.pk}",
         old_value=old_phase,

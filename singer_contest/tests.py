@@ -162,7 +162,9 @@ def _create_score_summary(**kwargs):
 
 class ScoringServiceTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username="singer", password="pass")
+        self.user = _create_provisioned_user(
+            username="singer", password="pass", role=User.Role.ADMIN
+        )
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(
                 title="Contest",
@@ -1241,7 +1243,9 @@ class SingerUploadViewTests(TestCase):
 
 class RoundResetServiceTests(TestCase):
     def setUp(self):
-        self.actor = User.objects.create_user(username="reset-actor", password="pass")
+        self.actor = _create_provisioned_user(
+            username="reset-actor", password="pass", role=User.Role.ADMIN
+        )
         self.activity = Activity.objects.create(
             title="Test contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -1564,7 +1568,9 @@ class RoundLockTOCTOUTests(TestCase):
     """M0-P guards: activity-first lock and re-validation of round mutations."""
 
     def setUp(self):
-        self.user = User.objects.create_user(username="round-actor", password="pass")
+        self.user = _create_provisioned_user(
+            username="round-actor", password="pass", role=User.Role.ADMIN
+        )
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(
                 title="Contest",
@@ -2647,7 +2653,7 @@ class StageResolverBindingTests(TestCase):
 
     def setUp(self):
         self.user = _create_provisioned_user(
-            username="binder-staff", password="pass", role=User.Role.STAFF
+            username="binder-admin", password="pass", role=User.Role.ADMIN
         )
         self.activity = _create_activity(
             title="院十佳",
@@ -4695,6 +4701,9 @@ class ManualDecisionServiceTests(TestCase):
         self.admin = _create_provisioned_user(
             username="md-svc-admin", password="pass", role=User.Role.ADMIN
         )
+        self.staff = _create_provisioned_user(
+            username="md-svc-staff", password="pass", role=User.Role.STAFF
+        )
         self.activity = _create_activity(
             title="手动服务",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -4802,6 +4811,18 @@ class ManualDecisionServiceTests(TestCase):
                 operator=self.admin, action_type=AuditLog.ActionType.MANUAL_DECISION
             ).exists()
         )
+
+    def test_mutations_reject_non_admin_actor(self):
+        from .services import set_manual_decision
+
+        with self.assertRaises(PermissionDenied):
+            set_manual_decision(
+                self.version,
+                manual_key="manual",
+                group="G1",
+                chosen=[str(self.singers[0].pk)],
+                created_by=self.staff,
+            )
 
     def test_delete_removes_and_returns_none_when_missing(self):
         from .models import ManualDecision
@@ -5063,7 +5084,7 @@ class ConfirmedDependencyClosureTests(TestCase):
 
     def setUp(self):
         self.user = _create_provisioned_user(
-            username="closure-admin", password="pass", role=User.Role.STAFF
+            username="closure-admin", password="pass", role=User.Role.ADMIN
         )
         self.activity = _create_activity(
             title="闭环节",

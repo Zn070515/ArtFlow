@@ -26,6 +26,8 @@ from .services import (
     change_user_role,
     expire_admin_verification,
     mark_admin_verified,
+    require_current_admin,
+    require_current_staff,
     set_user_active,
 )
 
@@ -522,6 +524,24 @@ class EffectiveAdminAuthorityTests(TestCase):
             change_user_role(target=alone, new_role=User.Role.PARTICIPANT, actor=alone)
         alone.refresh_from_db()
         self.assertEqual(alone.role, User.Role.ADMIN)
+
+    def test_current_authority_rejects_stale_downgraded_and_disabled_actors(self):
+        actor = create_provisioned_user(
+            username="fresh-admin", password="pass12345", role=User.Role.ADMIN
+        )
+        stale_actor = User.objects.get(pk=actor.pk)
+        self.assertEqual(require_current_admin(stale_actor).pk, actor.pk)
+
+        change_user_role(target=actor, new_role=User.Role.STAFF, actor=self.super_admin)
+        with self.assertRaises(PermissionDenied):
+            require_current_admin(stale_actor)
+        self.assertEqual(require_current_staff(stale_actor).pk, actor.pk)
+
+        set_user_active(target=actor, is_active=False, actor=self.super_admin)
+        with self.assertRaises(PermissionDenied):
+            require_current_admin(stale_actor)
+        with self.assertRaises(PermissionDenied):
+            require_current_staff(stale_actor)
 
 
 class AccountAuthorityBoundaryTests(TestCase):
