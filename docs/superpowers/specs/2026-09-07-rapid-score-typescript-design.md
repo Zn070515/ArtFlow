@@ -1,6 +1,6 @@
 # Rapid Score TypeScript Migration Design
 
-**Status:** Approved direction pending implementation-plan review
+**Status:** Approved for implementation planning
 
 **Date:** 2026-09-07
 
@@ -31,6 +31,8 @@ static/dist/rapid_score.js   (tracked, deterministic runtime artifact)
 ```
 
 The TypeScript source remains a browser script with the current self-invoking entrypoint. It will not export a public application API or introduce a module loader. The first migration should preserve the current runtime behavior and DOM selectors; structural cleanup is allowed only when it does not alter the established protocol.
+
+TypeScript 7 does not support the historical `module: "none"` compiler value. The client boundary therefore uses `module: "ES2020"`; because the source has no imports or exports, this preserves a classic browser script and the existing IIFE entrypoint.
 
 The generated JavaScript is tracked because Docker must be able to serve a fresh checkout without a Node build stage. CI will rebuild it and fail if the tracked artifact changes, making source/artifact drift visible before merge. Source maps and nondeterministic banners are not generated.
 

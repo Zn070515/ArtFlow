@@ -38,6 +38,8 @@ Thumbs.db
 # Node / Tailwind
 node_modules/
 dist/
+!static/dist/
+!static/dist/rapid_score.js
 backups/
 
 logs/**

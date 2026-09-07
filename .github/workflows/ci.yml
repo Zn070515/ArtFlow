@@ -48,8 +48,11 @@ jobs:
       - name: Verify lockfile
         run: uv lock --check
 
-      - name: Verify compiled static CSS
+      - name: Verify compiled static assets
         run: npm ci && npm run check:css
+
+      - name: Verify compiled Rapid Score client
+        run: npm run check:client
 
       - name: Collect static assets
         run: uv run python manage.py collectstatic --noinput

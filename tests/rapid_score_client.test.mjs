@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../static/js/rapid_score.js", import.meta.url), "utf8");
+const source = readFileSync(new URL("../static/dist/rapid_score.js", import.meta.url), "utf8");
 const pendingKey = "artflow:rapid-score:pending:44:55:/staff/rounds/55/scores/api/";
 
 class FakeStorage {
