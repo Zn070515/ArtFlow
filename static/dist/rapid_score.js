@@ -269,17 +269,19 @@
         }
     }
     function cellsFromDirty() {
-        return Object.keys(state.dirty).sort().flatMap((cellKey) => {
+        const cells = [];
+        for (const cellKey of Object.keys(state.dirty).sort()) {
             const [singerPart, judgePart] = cellKey.split(":");
             const score = state.dirty[cellKey];
             if (singerPart === undefined || judgePart === undefined || score === undefined)
-                return [];
-            return [{
-                    singer_id: parseInt(singerPart, 10),
-                    judge_id: parseInt(judgePart, 10),
-                    score,
-                }];
-        });
+                return null;
+            cells.push({
+                singer_id: parseInt(singerPart, 10),
+                judge_id: parseInt(judgePart, 10),
+                score,
+            });
+        }
+        return cells;
     }
     function validPendingCells(cells) {
         return Array.isArray(cells) && cells.length > 0 && cells.every((cell) => {
@@ -335,7 +337,7 @@
     }
     function pendingRecord(commandId) {
         const cells = cellsFromDirty();
-        if (!validPendingCells(cells))
+        if (!cells || !validPendingCells(cells))
             return null;
         const conflicts = conflictRecords(cells);
         if (!conflicts || !validPendingConflicts(conflicts, cells))

@@ -352,17 +352,19 @@
     }
   }
 
-  function cellsFromDirty(): PendingCell[] {
-    return Object.keys(state.dirty).sort().flatMap((cellKey) => {
+  function cellsFromDirty(): PendingCell[] | null {
+    const cells: PendingCell[] = [];
+    for (const cellKey of Object.keys(state.dirty).sort()) {
       const [singerPart, judgePart] = cellKey.split(":");
       const score = state.dirty[cellKey];
-      if (singerPart === undefined || judgePart === undefined || score === undefined) return [];
-      return [{
+      if (singerPart === undefined || judgePart === undefined || score === undefined) return null;
+      cells.push({
         singer_id: parseInt(singerPart, 10),
         judge_id: parseInt(judgePart, 10),
         score,
-      }];
-    });
+      });
+    }
+    return cells;
   }
 
   function validPendingCells(cells: unknown): cells is PendingCell[] {
@@ -418,7 +420,7 @@
 
   function pendingRecord(commandId?: string): PendingRecord | null {
     const cells = cellsFromDirty();
-    if (!validPendingCells(cells)) return null;
+    if (!cells || !validPendingCells(cells)) return null;
     const conflicts = conflictRecords(cells);
     if (!conflicts || !validPendingConflicts(conflicts, cells)) return null;
     let baseVersion = state.draftBaseVersion ?? state.version;
