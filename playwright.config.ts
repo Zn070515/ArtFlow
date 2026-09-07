@@ -9,7 +9,8 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:8000",
-    trace: "retain-on-failure",
+    // Keep bearer tokens out of artifacts by default; opt in only for non-sensitive tests.
+    trace: "off",
   },
   projects: [
     {

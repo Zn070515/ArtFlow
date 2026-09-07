@@ -102,9 +102,9 @@ npm run test:e2e
 
 The default base URL is `http://127.0.0.1:8000`; set `PLAYWRIGHT_BASE_URL` for
 another disposable local/CI service. The initial suite is read-only and checks
-`/healthz/`. Future Judge/Ticket specs must use disposable data and must set
-`trace: "off"` (and avoid video/screenshots) whenever a bearer token is in a
-request, so raw credentials cannot enter test artifacts.
+`/healthz/`. Trace is disabled by default; future Judge/Ticket specs must use
+disposable data and keep trace/video/screenshots disabled whenever a bearer
+token is in a request, so raw credentials cannot enter test artifacts.
 
 ## Troubleshooting
 
