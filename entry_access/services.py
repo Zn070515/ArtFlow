@@ -129,7 +129,7 @@ def redeem_access_grant(raw_token, *, request_meta=None):
 
     with transaction.atomic():
         grant = (
-            AccessGrant.objects.select_for_update()
+            AccessGrant.objects.select_for_update(of=("self",))
             .select_related("entry_point", "activity", "round")
             .filter(token_digest=digest)
             .first()
