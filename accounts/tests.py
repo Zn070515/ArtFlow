@@ -134,6 +134,96 @@ class LoginModeTests(TestCase):
         self.assertContains(response, "管理员登录")
 
 
+class ParticipantLoginRateLimitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.participant = User.objects.create_user(
+            username="rate-limited-participant",
+            password="pass12345",
+            role=User.Role.PARTICIPANT,
+        )
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_participant_login_is_throttled_before_authentication(self):
+        url = reverse("accounts:login")
+        payload = {
+            "login_mode": "normal",
+            "username": self.participant.username,
+            "password": "wrong-password",
+        }
+
+        with patch("accounts.views.ParticipantLoginForm.is_valid", return_value=False) as is_valid:
+            for _ in range(10):
+                response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.10")
+                self.assertEqual(response.status_code, 200)
+
+            throttled = self.client.post(url, payload, REMOTE_ADDR="198.51.100.10")
+
+        self.assertEqual(throttled.status_code, 200)
+        self.assertContains(throttled, "尝试次数过多")
+        self.assertEqual(is_valid.call_count, 10)
+
+    @override_settings(TRUST_X_FORWARDED_FOR=True)
+    def test_participant_login_uses_the_forwarded_client_ip_when_trusted(self):
+        url = reverse("accounts:login")
+        invalid_payload = {
+            "login_mode": "normal",
+            "username": self.participant.username,
+            "password": "wrong-password",
+        }
+        for _ in range(10):
+            self.client.post(
+                url,
+                invalid_payload,
+                REMOTE_ADDR="10.0.0.5",
+                HTTP_X_FORWARDED_FOR="198.51.100.10",
+            )
+
+        response = self.client.post(
+            url,
+            {
+                **invalid_payload,
+                "password": "pass12345",
+            },
+            REMOTE_ADDR="10.0.0.5",
+            HTTP_X_FORWARDED_FOR="198.51.100.11",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("public_portal:home"))
+
+
+class RegistrationRateLimitTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_registration_is_throttled_before_form_processing(self):
+        url = reverse("accounts:register")
+        payload = {
+            "username": "new-student",
+            "password1": "pass12345",
+            "password2": "different-password",
+        }
+
+        with patch("accounts.views.RegisterForm.is_valid", return_value=False) as is_valid:
+            for _ in range(10):
+                response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
+                self.assertEqual(response.status_code, 200)
+
+            before_throttled_attempt = User.objects.count()
+            throttled = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
+
+        self.assertEqual(throttled.status_code, 200)
+        self.assertContains(throttled, "尝试次数过多")
+        self.assertEqual(User.objects.count(), before_throttled_attempt)
+        self.assertEqual(is_valid.call_count, 10)
+
+
 class AdminVerificationTTLTests(TestCase):
     """§17 P1 — the elevated admin verification marker must expire (bounded TTL)."""
 

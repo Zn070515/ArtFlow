@@ -42,6 +42,7 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
 
     assert web["environment"]["APP_ENV"] == "production"
     assert web["environment"]["DATABASE_ENGINE"] == "postgresql"
+    assert web["environment"]["RATE_LIMIT_BACKEND"] == "database"
     assert "ports" not in web
     assert "ports" not in db
     assert set(web["networks"]) == {"artflow_internal"}
@@ -57,9 +58,11 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
         encoding="utf-8"
     )
     assert compose["configs"]["caddyfile"]["file"] == "./Caddyfile"
-    assert "reverse_proxy web:8000" in (PRODUCTION_COMPOSE_PATH.parent / "Caddyfile").read_text(
-        encoding="utf-8"
-    )
+    caddyfile = (PRODUCTION_COMPOSE_PATH.parent / "Caddyfile").read_text(encoding="utf-8")
+    assert "request_body" in caddyfile
+    assert "max_size 520MB" in caddyfile
+    assert "header -Server" in caddyfile
+    assert "reverse_proxy web:8000" in caddyfile
 
 
 def test_event_compose_exposes_web_only_on_localhost():

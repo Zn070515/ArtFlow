@@ -32,6 +32,7 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
       TRUST_X_FORWARDED_FOR: "true"
+      RATE_LIMIT_BACKEND: database
       DATABASE_ENGINE: postgresql
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}

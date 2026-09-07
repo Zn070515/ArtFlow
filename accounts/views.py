@@ -1,8 +1,10 @@
 from common.audit import client_ip, log_action
 from common.models import AuditLog
 from common.rate_limit import allow
+from django import forms
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
+from django.http import HttpRequest
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
@@ -10,13 +12,48 @@ from django.views.decorators.http import require_POST
 from .forms import AdminLoginForm, ParticipantLoginForm, RegisterForm
 from .services import admin_verification_is_valid, mark_admin_verified
 
+PARTICIPANT_LOGIN_RATE_LIMIT = 10
+PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS = 300
+REGISTRATION_RATE_LIMIT = 10
+REGISTRATION_RATE_WINDOW_SECONDS = 600
+ADMIN_LOGIN_RATE_LIMIT = 10
+ADMIN_LOGIN_RATE_WINDOW_SECONDS = 300
+
+
+def _allow_form_submission(
+    request: HttpRequest,
+    form: forms.BaseForm,
+    *,
+    key_prefix: str,
+    limit: int,
+    window_seconds: int,
+) -> bool:
+    decision = allow(
+        f"{key_prefix}:{client_ip(request) or 'unknown'}",
+        limit=limit,
+        window_seconds=window_seconds,
+    )
+    if not decision.allowed:
+        form.add_error(None, "尝试次数过多，请稍后再试。")
+        return False
+    return True
+
 
 def register_view(request):
     if request.user.is_authenticated:
         return redirect("public_portal:home")
     if request.method == "POST":
         form = RegisterForm(request.POST)
-        if form.is_valid():
+        if (
+            _allow_form_submission(
+                request,
+                form,
+                key_prefix="register",
+                limit=REGISTRATION_RATE_LIMIT,
+                window_seconds=REGISTRATION_RATE_WINDOW_SECONDS,
+            )
+            and form.is_valid()
+        ):
             user = form.save()
             login(request, user)
             return redirect("public_portal:home")
@@ -32,7 +69,16 @@ def login_view(request):
     next_url = request.GET.get("next", "")
     if request.method == "POST":
         form = ParticipantLoginForm(request, data=request.POST)
-        if form.is_valid():
+        if (
+            _allow_form_submission(
+                request,
+                form,
+                key_prefix="participant-login",
+                limit=PARTICIPANT_LOGIN_RATE_LIMIT,
+                window_seconds=PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS,
+            )
+            and form.is_valid()
+        ):
             user = form.get_user()
             login(request, user)
             log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}")
@@ -56,7 +102,16 @@ def admin_login_view(request):
     next_url = request.GET.get("next", "")
     if request.method == "POST":
         form = AdminLoginForm(request, data=request.POST)
-        if form.is_valid():
+        if (
+            _allow_form_submission(
+                request,
+                form,
+                key_prefix="admin-login",
+                limit=ADMIN_LOGIN_RATE_LIMIT,
+                window_seconds=ADMIN_LOGIN_RATE_WINDOW_SECONDS,
+            )
+            and form.is_valid()
+        ):
             user = form.get_user()
             login(request, user)
             mark_admin_verified(request.session)
@@ -66,14 +121,6 @@ def admin_login_view(request):
             ):
                 return redirect(next_url)
             return redirect("staff:dashboard")
-        else:
-            decision = allow(
-                f"admin-login:{client_ip(request) or 'unknown'}",
-                limit=10,
-                window_seconds=300,
-            )
-            if not decision.allowed:
-                form.add_error(None, "尝试次数过多，请稍后再试。")
     else:
         form = AdminLoginForm()
     return render(request, "accounts/admin_login.html", {"form": form})

@@ -52,6 +52,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 | `DATABASE_ENGINE` | 必须是 `postgresql` |
 | `POSTGRES_DB` / `USER` / `PASSWORD` / `HOST` / `PORT` | 生产数据库连接（口令不能是占位值） |
 | `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
+| `RATE_LIMIT_BACKEND` | 生产 manifest 固定为 `database`，保证多 worker 共享限流桶 |
 
 `DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
 
@@ -80,10 +81,17 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 
 - 健康检查使用匿名 `GET /healthz/`，只返回通用状态，不泄露配置细节。
 - 上传最大值按用途在 `files/services.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB）。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
+- 生产 Caddy manifest 固定 `request_body max_size 520MB`，覆盖应用允许的最大 500MB 测试活动视频并留出 multipart 余量；正式活动仍由 `ARTFLOW_VIDEO_UPLOAD_MAX_MB`（默认 100MB）在应用层收紧。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
 - 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。
 - 内部提交文件和生成文档由 Django 受控媒体视图流式返回，当前没有独立的媒体下载 worker。
   正式活动前必须按最大文件尺寸和并发下载量做一次负载演练；若下载占满 Gunicorn worker，
   应把媒体交给独立的受控文件服务，并保留同等权限校验，不能直接暴露 `/media/` 目录。
+
+## 公网入口的滥用与 DDoS 边界
+
+- 登录和注册 POST 在进入密码哈希/表单深处理前按客户端 IP 限流；生产限流桶必须使用 PostgreSQL，不能使用每个 Gunicorn worker 独立的本地缓存。
+- Caddy 删除上游 `Server` 指纹并拒绝超过 manifest 体积上限的请求；应用仍会再次按业务用途校验文件大小、扩展名和媒体类型。
+- volumetric DDoS、TLS 握手洪泛、慢客户端连接和公网连接数保护必须由学校网络、云负载均衡或 WAF/边缘服务提供，并在正式接入前完成限速、连接超时、黑名单/挑战和告警契约验证。仅依赖 Django/Caddy 或本机 Gunicorn 不满足学校公网接入条件。
 
 ## 发布门禁
 
