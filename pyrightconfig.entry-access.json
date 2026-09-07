@@ -1,0 +1,16 @@
+{
+  "extends": "./pyrightconfig.json",
+  "include": ["entry_access"],
+  "exclude": [
+    "entry_access/tests.py",
+    "entry_access/migrations",
+    "tests",
+    "static",
+    "staticfiles",
+    "media"
+  ],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv"
+}

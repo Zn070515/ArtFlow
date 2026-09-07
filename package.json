@@ -8,7 +8,8 @@
     "build:client": "tsc -p tsconfig.client.json",
     "check:client": "npm run build:client && git diff --exit-code -- static/dist/",
     "test:client": "node --test tests/client/*.test.mjs",
-    "check:pyright": "uv run pyright"
+    "check:pyright": "uv run pyright",
+    "check:pyright:entry-access": "uv run pyright -p pyrightconfig.entry-access.json"
   },
   "devDependencies": {
     "tailwindcss": "3.4.17",

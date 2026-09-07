@@ -181,7 +181,7 @@ class EntryPoint(models.Model):
                 )
                 stored_fields = {"activity": "activity_id", "created_by": "created_by_id"}
                 if stored and any(
-                    stored[stored_fields.get(field, field)]
+                    stored[stored_fields.get(field, field)]  # type: ignore[literal-required]
                     != getattr(self, f"{field}_id" if field in stored_fields else field)
                     for field in immutable_fields
                     if field in {"activity", "kind", "label", "created_by"}
@@ -234,11 +234,18 @@ class AccessGrant(models.Model):
 
     def clean(self):
         super().clean()
-        if self.entry_point_id and self.activity_id:
+        if getattr(self, "entry_point_id", None) and getattr(self, "activity_id", None):
             entry_point = self.entry_point
-            if entry_point.activity_id != self.activity_id or entry_point.kind != self.kind:
+            if (
+                getattr(entry_point, "activity_id", None) != getattr(self, "activity_id", None)
+                or entry_point.kind != self.kind
+            ):
                 raise ValidationError("访问授权范围与入口不一致。")
-        if self.round_id and self.activity_id and self.round.activity_id != self.activity_id:
+        if (
+            getattr(self, "round_id", None)
+            and getattr(self, "activity_id", None)
+            and getattr(self.round, "activity_id", None) != getattr(self, "activity_id", None)
+        ):
             raise ValidationError("访问授权轮次不属于当前活动。")
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -286,7 +293,7 @@ class AccessGrant(models.Model):
                 }
                 relation_fields = set(stored_fields)
                 if stored and any(
-                    stored[stored_fields.get(field, field)]
+                    stored[stored_fields.get(field, field)]  # type: ignore[literal-required]
                     != getattr(self, f"{field}_id" if field in relation_fields else field)
                     for field in immutable_fields
                     if field in relation_fields | {"kind", "token_digest", "expires_at"}
@@ -333,12 +340,12 @@ class EphemeralSession(models.Model):
 
     def clean(self):
         super().clean()
-        if self.grant_id:
+        if getattr(self, "grant_id", None):
             grant = self.grant
             if (
                 grant.kind != self.kind
-                or grant.activity_id != self.activity_id
-                or grant.round_id != self.round_id
+                or getattr(grant, "activity_id", None) != getattr(self, "activity_id", None)
+                or getattr(grant, "round_id", None) != getattr(self, "round_id", None)
             ):
                 raise ValidationError("临时会话范围与授权不一致。")
             if self.expires_at and grant.expires_at and self.expires_at > grant.expires_at:

@@ -99,7 +99,9 @@ def issue_access_grant(entry_point, *, actor, ttl, round=None):
         locked_round = None
         if round_id is not None:
             locked_round = ContestRound.objects.get(pk=round_id)
-            if locked_round.activity_id != locked_entry_point.activity_id:
+            if getattr(locked_round, "activity_id", None) != getattr(
+                locked_entry_point, "activity_id", None
+            ):
                 raise ValidationError("临时访问授权轮次不属于入口活动。")
 
         raw_token = secrets.token_urlsafe(32)
@@ -119,10 +121,11 @@ def issue_access_grant(entry_point, *, actor, ttl, round=None):
             action_type=AuditLog.ActionType.ACCESS_GRANT_ISSUE,
             target=f"AccessGrant:{grant.pk}",
             new_value=(
-                f"kind={grant.kind};activity={grant.activity_id};"
-                f"round={grant.round_id or ''};expires_at={grant.expires_at.isoformat()}"
+                f"kind={grant.kind};activity={getattr(grant, 'activity_id', None)};"
+                f"round={getattr(grant, 'round_id', None) or ''};"
+                f"expires_at={grant.expires_at.isoformat()}"
             ),
-            note=f"entry_point={grant.entry_point_id}",
+            note=f"entry_point={getattr(grant, 'entry_point_id', None)}",
         )
         return IssuedAccessGrant(grant=grant, token=raw_token)
 
@@ -166,7 +169,10 @@ def redeem_access_grant(raw_token, *, request_meta=None):
             operator=None,
             action_type=AuditLog.ActionType.ACCESS_GRANT_REDEEM,
             target=f"AccessGrant:{grant.pk}",
-            new_value=f"session={session.pk};kind={session.kind};activity={session.activity_id}",
+            new_value=(
+                f"session={session.pk};kind={session.kind};"
+                f"activity={getattr(session, 'activity_id', None)}"
+            ),
             ip_address=request_meta.ip_address,
         )
         return RedeemedEphemeralSession(session=session, token=session_token)
@@ -190,8 +196,8 @@ def authenticate_ephemeral_session(raw_token, *, expected_kind, activity, round=
             or session.revoked_at is not None
             or session.expires_at <= now
             or session.kind != expected_kind
-            or session.activity_id != activity_id
-            or session.round_id != round_id
+            or getattr(session, "activity_id", None) != activity_id
+            or getattr(session, "round_id", None) != round_id
         ):
             raise ValidationError("临时访问会话无效。")
         session.last_seen_at = now

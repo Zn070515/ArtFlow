@@ -9,6 +9,7 @@ MYPY_FILES = [
     "common",
     "config",
     "core",
+    "entry_access",
     "exports",
     "farewell_show",
     "files",
