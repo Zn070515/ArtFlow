@@ -42,10 +42,10 @@ def vote_entry(request, pk):
 
     if request.method == "POST":
         passcode = request.POST.get("passcode", "").strip()
-        if passcode != vote_session.passcode:
+        if not _vote_rate_limit_decision(request, pk).allowed:
+            error = "尝试次数过多，请稍后再试。"
+        elif passcode != vote_session.passcode:
             error = "口令错误"
-            if not _vote_rate_limit_decision(request, pk).allowed:
-                error = "尝试次数过多，请稍后再试。"
         elif not vote_session.is_open or vote_session.is_locked:
             error = "投票尚未开放或已锁定"
         elif now < vote_session.start_time:

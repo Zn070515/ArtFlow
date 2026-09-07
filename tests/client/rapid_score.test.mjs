@@ -257,6 +257,17 @@ test("a non-acknowledgement response retains the pending record", async () => {
   assertPendingRecord(runtime.storage.records()[0]);
 });
 
+test("clearing an existing server score restores it without creating a mutation", () => {
+  const runtime = boot({ initialGrid: grid("70") });
+
+  runtime.input.value = "";
+  runtime.tbody.dispatch("input", { target: runtime.input });
+
+  assert.equal(runtime.input.value, "70");
+  assert.equal(runtime.storage.records().length, 0);
+  assert.equal(runtime.pendingCount.textContent, "0");
+});
+
 test("reload restores only this round's pending cells", () => {
   const storage = new FakeStorage();
   storage.setItem(pendingKey, JSON.stringify({

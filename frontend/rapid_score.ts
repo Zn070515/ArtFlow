@@ -314,6 +314,8 @@
     setVisual(input, false);
     const cellKey = key(input.dataset.singerId || "", input.dataset.judgeId || "");
     if (status === "empty") {
+      const serverValue = state.cells[cellKey] || "";
+      if (serverValue !== "") input.value = serverValue;
       delete state.dirty[cellKey];
       delete state.conflicts[cellKey];
       persistDraft();

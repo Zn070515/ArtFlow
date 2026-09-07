@@ -65,6 +65,7 @@ from singer_contest.models import (
 )
 from singer_contest.services import apply_scores, prepare_round, stage_decisions_by_blocks
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
+from voting.services import open_vote_session
 
 from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
 from staff_panel.views import post_edit
@@ -529,9 +530,10 @@ class StaffPanelSmokeTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
+        vote_session = open_vote_session(vote_session, self.staff)
         visitor = self.client_class()
         self.assertEqual(
             visitor.post(
@@ -2201,9 +2203,10 @@ class StaffPanelSmokeTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
+        vote_session = open_vote_session(vote_session, self.staff)
         VoteRecord.objects.create(
             vote_session=vote_session,
             vote_option=option,
@@ -2249,10 +2252,11 @@ class StaffPanelSmokeTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         first_option = VoteOption.objects.create(vote_session=vote_session, singer=first)
         second_option = VoteOption.objects.create(vote_session=vote_session, singer=second)
+        vote_session = open_vote_session(vote_session, self.staff)
         VoteRecord.objects.create(
             vote_session=vote_session,
             vote_option=first_option,
@@ -2311,10 +2315,11 @@ class StaffPanelSmokeTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         option1 = VoteOption.objects.create(vote_session=vote_session, singer=reg1)
         option2 = VoteOption.objects.create(vote_session=vote_session, singer=reg2)
+        vote_session = open_vote_session(vote_session, self.staff)
         VoteRecord.objects.create(
             vote_session=vote_session,
             vote_option=option1,
@@ -2739,9 +2744,10 @@ class StaffPanelSmokeTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
+        vote_session = open_vote_session(vote_session, self.staff)
         first = self.client_class()
         second = self.client_class()
         first.post(
@@ -2832,9 +2838,10 @@ class StaffPanelSmokeTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=singer)
+        vote_session = open_vote_session(vote_session, self.staff)
         ballot = VoteBallot.objects.create(
             vote_session=vote_session,
             browser_session_key="runtime-browser",
@@ -3730,9 +3737,10 @@ class SensitiveExportAuditSweepTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         VoteOption.objects.create(vote_session=self.vote_session, singer=self.registration)
+        self.vote_session = open_vote_session(self.vote_session, self.staff)
         IncidentRecord.objects.create(
             activity=self.activity,
             occurred_at=timezone.now(),
