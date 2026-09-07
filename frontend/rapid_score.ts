@@ -153,6 +153,9 @@
   const container = document.getElementById("rapid-entry");
   if (!container) return;
 
+  const operatorId = container.dataset.operatorId || "";
+  if (!/^[1-9]\d*$/.test(operatorId)) return;
+
   const apiUrl = container.dataset.apiUrl || "";
   const activityId = parseInt(container.dataset.activityId || "", 10);
   const roundId = parseInt(container.dataset.roundId || "", 10);
@@ -173,7 +176,15 @@
   const pendingCountEl = container.querySelector<HTMLElement>("[data-pending-count]");
   const savedCountEl = container.querySelector<HTMLElement>("[data-saved-count]");
   const conflictsEl = container.querySelector<HTMLElement>("[data-conflicts]");
-  const pendingStorageKey = "artflow:rapid-score:pending:" + activityId + ":" + roundId + ":" + apiUrl;
+  const pendingStorageKey =
+    "artflow:rapid-score:pending:" +
+    activityId +
+    ":" +
+    roundId +
+    ":" +
+    operatorId +
+    ":" +
+    apiUrl;
 
   const state: ScoreState = {
     version: initial.version,
@@ -265,11 +276,12 @@
       conflictsEl.classList.add("hidden");
       return;
     }
-    conflictsEl.textContent = conflictKeys.map((conflictKey) => {
+    conflictsEl.textContent = conflictKeys.flatMap((conflictKey) => {
       const conflict = state.conflicts[conflictKey];
-      return "选手 " + conflict.singer_id + "、评委 " + conflict.judge_id +
+      if (!conflict) return [];
+      return ["选手 " + conflict.singer_id + "、评委 " + conflict.judge_id +
         "：服务器为 " + conflict.server + "，本机草稿为 " + conflict.local +
-        "。请修改该单元格后再重试保存，以明确选择。";
+        "。请修改该单元格后再重试保存，以明确选择。"];
     }).join(" ");
     conflictsEl.classList.remove("hidden");
   }
@@ -341,13 +353,15 @@
   }
 
   function cellsFromDirty(): PendingCell[] {
-    return Object.keys(state.dirty).sort().map((cellKey) => {
-      const parts = cellKey.split(":");
-      return {
-        singer_id: parseInt(parts[0], 10),
-        judge_id: parseInt(parts[1], 10),
-        score: state.dirty[cellKey],
-      };
+    return Object.keys(state.dirty).sort().flatMap((cellKey) => {
+      const [singerPart, judgePart] = cellKey.split(":");
+      const score = state.dirty[cellKey];
+      if (singerPart === undefined || judgePart === undefined || score === undefined) return [];
+      return [{
+        singer_id: parseInt(singerPart, 10),
+        judge_id: parseInt(judgePart, 10),
+        score,
+      }];
     });
   }
 
@@ -359,21 +373,25 @@
     });
   }
 
-  function conflictRecords(cells: PendingCell[]): ConflictRecord[] {
+  function conflictRecords(cells: PendingCell[]): ConflictRecord[] | null {
     const pendingByKey: Record<CellKey, ScoreValue> = {};
     cells.forEach((cell) => {
       pendingByKey[key(cell.singer_id, cell.judge_id)] = cell.score;
     });
-    return Object.keys(state.conflicts).sort().map((cellKey) => {
+    const records: ConflictRecord[] = [];
+    for (const cellKey of Object.keys(state.conflicts).sort()) {
       const conflict = state.conflicts[cellKey];
-      return {
+      const local = pendingByKey[cellKey];
+      if (!conflict || local === undefined) return null;
+      records.push({
         singer_id: conflict.singer_id,
         judge_id: conflict.judge_id,
         base: conflict.base,
         server: conflict.server,
-        local: pendingByKey[cellKey],
-      };
-    });
+        local,
+      });
+    }
+    return records;
   }
 
   function validPendingConflicts(conflicts: unknown, cells: PendingCell[]): conflicts is ConflictRecord[] {
@@ -402,7 +420,7 @@
     const cells = cellsFromDirty();
     if (!validPendingCells(cells)) return null;
     const conflicts = conflictRecords(cells);
-    if (!validPendingConflicts(conflicts, cells)) return null;
+    if (!conflicts || !validPendingConflicts(conflicts, cells)) return null;
     let baseVersion = state.draftBaseVersion ?? state.version;
     if (!Number.isInteger(baseVersion) || baseVersion < 0) baseVersion = state.version;
     const resolvedCommandId = commandId || state.draftCommandId || newCommandId();
@@ -604,8 +622,10 @@
         const beforeRefresh: Record<CellKey, ScoreValue> = {};
         const localDraft: Record<CellKey, ScoreValue> = {};
         for (const dirtyKey in state.dirty) {
+          const localValue = state.dirty[dirtyKey];
+          if (localValue === undefined) continue;
           beforeRefresh[dirtyKey] = state.cells[dirtyKey] || "";
-          localDraft[dirtyKey] = state.dirty[dirtyKey];
+          localDraft[dirtyKey] = localValue;
         }
         setVersion(data.version);
         initCells(data.grid);
@@ -620,17 +640,18 @@
         });
         state.conflicts = {};
         for (const cellKey in localDraft) {
-          const parts = cellKey.split(":");
-          const serverValue = state.cells[cellKey] || "";
+          const [singerPart, judgePart] = cellKey.split(":");
           const localValue = localDraft[cellKey];
-          const singerId = parseInt(parts[0], 10);
-          const judgeId = parseInt(parts[1], 10);
+          if (singerPart === undefined || judgePart === undefined || localValue === undefined) continue;
+          const serverValue = state.cells[cellKey] || "";
+          const singerId = parseInt(singerPart, 10);
+          const judgeId = parseInt(judgePart, 10);
           const input = inputFor(singerId, judgeId);
-          if (serverValue !== beforeRefresh[cellKey] && serverValue !== localValue) {
+          if (serverValue !== (beforeRefresh[cellKey] || "") && serverValue !== localValue) {
             state.conflicts[cellKey] = {
               singer_id: singerId,
               judge_id: judgeId,
-              base: beforeRefresh[cellKey],
+              base: beforeRefresh[cellKey] || "",
               server: serverValue,
               local: localValue,
             };
@@ -678,17 +699,19 @@
     if (event.key === "Enter" || event.key === "ArrowDown") {
       event.preventDefault();
       const nextRow = row.nextElementSibling;
-      if (nextRow) moveTo(nextRow.querySelector<HTMLInputElement>('input[data-judge-id="' + judgeId + '"]'));
+      if (nextRow) {
+        moveTo(nextRow.querySelector<HTMLInputElement>('input[data-judge-id="' + judgeId + '"]'));
+      }
     } else if (event.key === "ArrowRight") {
       event.preventDefault();
       const cols = row.querySelectorAll<HTMLInputElement>("input[data-judge-id]");
       const index = Array.prototype.indexOf.call(cols, input) as number;
-      if (index < cols.length - 1) moveTo(cols[index + 1]);
+      if (index < cols.length - 1) moveTo(cols[index + 1] || null);
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
       const cols = row.querySelectorAll<HTMLInputElement>("input[data-judge-id]");
       const index = Array.prototype.indexOf.call(cols, input) as number;
-      if (index > 0) moveTo(cols[index - 1]);
+      if (index > 0) moveTo(cols[index - 1] || null);
     } else if (event.key === "Escape") {
       const cellKey = key(input.dataset.singerId || "", input.dataset.judgeId || "");
       input.value = state.cells[cellKey] || "";
@@ -725,15 +748,18 @@
 
     for (let rowOffset = 0; rowOffset < lines.length; rowOffset++) {
       const line = lines[rowOffset];
-      if (line === "") continue;
+      if (line === undefined || line === "") continue;
       const values = line.split("\t");
       for (let colOffset = 0; colOffset < values.length; colOffset++) {
-        const value = values[colOffset].replace(/\s+/g, "");
+        const rawValue = values[colOffset];
+        if (rawValue === undefined) continue;
+        const value = rawValue.replace(/\s+/g, "");
         if (value === "") continue;
         const target = rows[startRow + rowOffset];
         const index = startCol + colOffset;
         if (target && index >= 0 && index < cols.length) {
-          applyCellValue(target.querySelectorAll<HTMLInputElement>("input[data-judge-id]")[index] || null, value);
+          const targetInput = target.querySelectorAll<HTMLInputElement>("input[data-judge-id]")[index];
+          if (targetInput) applyCellValue(targetInput, value);
         }
       }
     }

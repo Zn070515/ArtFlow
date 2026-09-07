@@ -316,7 +316,7 @@ test("pending drafts are isolated by operator identity", () => {
   const storage = new FakeStorage();
   const firstOperator = boot({ storage, operatorId: "7" });
   firstOperator.input.value = "91";
-  firstOperator.input.dispatch("input");
+  firstOperator.tbody.dispatch("input", { target: firstOperator.input });
   assert.equal(storage.records().length, 1);
   assert.equal(storage.records()[0].cells[0].score, "91");
 
