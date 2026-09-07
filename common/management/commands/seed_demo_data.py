@@ -26,6 +26,7 @@ from singer_contest.models import (
 )
 from singer_contest.services import prepare_round, reset_test_round_snapshots
 from voting.models import VoteOption, VoteRecord, VoteSession
+from voting.services import close_vote_session, open_vote_session
 
 from common.authority import (
     ACCOUNT_AUTHORITY,
@@ -448,6 +449,17 @@ class Command(BaseCommand):
                 "is_test_data": singer_is_test,
             },
         )
+        existing_vote_session = self._owned_object_or_none(
+            "demo.vote_session.audience_choice", VoteSession
+        )
+        if existing_vote_session:
+            if existing_vote_session.is_locked:
+                raise CommandError(
+                    "Cannot reseed the demo vote session while it is locked; reset it first."
+                )
+            if existing_vote_session.is_open:
+                close_vote_session(existing_vote_session, admin)
+
         vote_session = self._upsert(
             "demo.vote_session.audience_choice",
             VoteSession,
@@ -457,7 +469,7 @@ class Command(BaseCommand):
                 "passcode": "demo-vote",
                 "start_time": SEED_TIME,
                 "end_time": SEED_TIME + timedelta(hours=2),
-                "is_open": True,
+                "is_open": False,
                 "selection_type": VoteSession.SelectionType.SINGLE,
                 "max_selections": 1,
                 "is_test_data": singer_is_test,
@@ -505,6 +517,8 @@ class Command(BaseCommand):
                 "is_test_data": singer_is_test,
             },
         )
+        if not vote_session.is_open:
+            open_vote_session(vote_session, admin)
         self._upsert(
             "demo.incident.one",
             IncidentRecord,
@@ -697,6 +711,13 @@ class Command(BaseCommand):
         content_type = ContentType.objects.get_for_model(model)
         seed_record = SeedRecord.objects.get(key=key, content_type=content_type)
         return model.objects.get(pk=seed_record.object_id)
+
+    def _owned_object_or_none(self, key: str, model: Any) -> Any | None:
+        content_type = ContentType.objects.get_for_model(model)
+        seed_record = SeedRecord.objects.filter(key=key, content_type=content_type).first()
+        if seed_record is None:
+            return None
+        return model.objects.filter(pk=seed_record.object_id).first()
 
     def _upsert(
         self,

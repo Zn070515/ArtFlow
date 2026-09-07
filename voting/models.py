@@ -12,10 +12,23 @@ from django.db.models import F, Q
 
 
 def _ensure_vote_session_mutable(vote_session_id: int | None) -> None:
-    if (
-        vote_session_id
-        and VoteSession._base_manager.filter(pk=vote_session_id, is_locked=True).exists()
-    ):
+    if not vote_session_id:
+        return
+    if VoteSession._base_manager.filter(pk=vote_session_id, is_locked=True).exists():
+        raise ValidationError("已锁定投票的原始记录不可直接写入。")
+
+
+def _ensure_vote_option_mutable(vote_session_id: int | None) -> None:
+    if not vote_session_id:
+        return
+    state = (
+        VoteSession._base_manager.filter(pk=vote_session_id).values("is_open", "is_locked").first()
+    )
+    if not state:
+        return
+    if state["is_open"]:
+        raise ValidationError("投票开放后，候选项不可直接修改。")
+    if state["is_locked"]:
         raise ValidationError("已锁定投票的原始记录不可直接写入。")
 
 
@@ -230,6 +243,8 @@ class VoteSessionQuerySet(models.QuerySet):
     def _ensure_configuration_mutable(self, fields):
         if not self.configuration_fields.intersection(fields):
             return
+        if self.filter(is_open=True).exists():
+            raise ValidationError("投票开放后，投票配置不可直接修改。")
         if self.filter(is_locked=True).exists():
             raise ValidationError("投票锁定后，投票配置不可直接修改。")
 
@@ -243,9 +258,20 @@ class VoteSessionQuerySet(models.QuerySet):
         self._ensure_state_authorized(fields)
         if self.configuration_fields.intersection(fields):
             for obj in objs:
-                stored = type(obj)._base_manager.filter(pk=obj.pk).values("is_locked").first()
-                if (stored and stored["is_locked"]) or obj.is_locked:
-                    raise ValidationError("投票锁定后，投票配置不可直接修改。")
+                stored = (
+                    type(obj)._base_manager.filter(pk=obj.pk).values("is_open", "is_locked").first()
+                )
+                if (
+                    (stored and (stored["is_open"] or stored["is_locked"]))
+                    or obj.is_open
+                    or obj.is_locked
+                ):
+                    message = (
+                        "投票开放后，投票配置不可直接修改。"
+                        if (stored and stored["is_open"]) or obj.is_open
+                        else "投票锁定后，投票配置不可直接修改。"
+                    )
+                    raise ValidationError(message)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
@@ -259,8 +285,18 @@ class VoteSessionQuerySet(models.QuerySet):
                     lookup = {
                         field: getattr(vote_session, field) for field in options.unique_fields
                     }
-                    if self.model._base_manager.filter(**lookup, is_locked=True).exists():
-                        raise ValidationError("投票锁定后，投票配置不可直接修改。")
+                    existing = (
+                        self.model._base_manager.filter(**lookup)
+                        .values("is_open", "is_locked")
+                        .first()
+                    )
+                    if existing and (existing["is_open"] or existing["is_locked"]):
+                        message = (
+                            "投票开放后，投票配置不可直接修改。"
+                            if existing["is_open"]
+                            else "投票锁定后，投票配置不可直接修改。"
+                        )
+                        raise ValidationError(message)
         for vote_session in objs:
             vote_session._ensure_initial_state_authorized()
         return super().bulk_create(objs, *args, **kwargs)
@@ -375,12 +411,17 @@ class VoteSession(models.Model):
                     raise ValidationError("投票状态只能通过投票服务变更。")
             if (
                 stored
-                and (stored["is_locked"] or self.is_locked)
+                and (stored["is_open"] or stored["is_locked"] or self.is_open or self.is_locked)
                 and any(
                     stored[field] != getattr(self, field) for field in compared_configuration_fields
                 )
             ):
-                raise ValidationError("投票锁定后，投票配置不可直接修改。")
+                message = (
+                    "投票开放后，投票配置不可直接修改。"
+                    if stored["is_open"] or self.is_open
+                    else "投票锁定后，投票配置不可直接修改。"
+                )
+                raise ValidationError(message)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -462,13 +503,13 @@ class VoteBallot(models.Model):
 class VoteOptionQuerySet(models.QuerySet):
     def _ensure_mutable(self):
         for session_id in self.values_list("vote_session_id", flat=True).distinct():
-            _ensure_vote_session_mutable(session_id)
+            _ensure_vote_option_mutable(session_id)
 
     def update(self, **kwargs):
         self._ensure_mutable()
         if "vote_session" in kwargs or "vote_session_id" in kwargs:
-            _ensure_vote_session_mutable(
-                _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+            _ensure_vote_option_mutable(
+                _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id"))),
             )
         _ensure_vote_option_update_consistent(self, kwargs)
         return super().update(**kwargs)
@@ -482,12 +523,13 @@ class VoteOptionQuerySet(models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
-            _ensure_vote_session_mutable(obj.vote_session_id)
+            _ensure_vote_option_mutable(obj.vote_session_id)
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs):
         objs = list(objs)
         for obj in objs:
+            _ensure_vote_option_mutable(obj.vote_session_id)
             _ensure_vote_session_origins(
                 _stored_relation_id(obj, "vote_session"), obj.vote_session_id
             )
@@ -521,6 +563,7 @@ class VoteOption(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        _ensure_vote_option_mutable(self.vote_session_id)
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
@@ -528,6 +571,7 @@ class VoteOption(models.Model):
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
+        _ensure_vote_option_mutable(self.vote_session_id)
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )

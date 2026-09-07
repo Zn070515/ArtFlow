@@ -101,12 +101,12 @@ class VotePublicStagingBoundaryTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
             is_test_data=is_test_mode,
         )
         option = VoteOption.objects.create(
             vote_session=session, singer=singer, is_test_data=is_test_mode
         )
+        session = open_vote_session(session, self.staff)
         return session, option
 
     def test_test_session_anonymous_entry_404(self):
@@ -172,6 +172,9 @@ class VotePublicStagingBoundaryTests(TestCase):
 
 class VoteBallotTests(TestCase):
     def setUp(self):
+        self.operator = create_provisioned_user(
+            username="vote-ballot-staff", password="pass", role=User.Role.STAFF
+        )
         user = User.objects.create_user(username="participant", password="pass")
         second_user = User.objects.create_user(username="participant-two", password="pass")
         activity = create_activity(
@@ -206,12 +209,12 @@ class VoteBallotTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
         )
         self.option = VoteOption.objects.create(vote_session=self.session, singer=singer)
         self.second_option = VoteOption.objects.create(
             vote_session=self.session, singer=second_singer
         )
+        self.session = open_vote_session(self.session, self.operator)
 
     def test_same_browser_can_submit_only_one_ballot(self):
         first = submit_ballot(
@@ -255,11 +258,11 @@ class VoteBallotTests(TestCase):
             passcode="5678",
             start_time=self.session.start_time,
             end_time=self.session.end_time,
-            is_open=True,
         )
         foreign_option = VoteOption.objects.create(
             vote_session=other_session, singer=self.option.singer
         )
+        other_session = open_vote_session(other_session, self.operator)
 
         with self.assertRaises(ValidationError):
             submit_ballot(
@@ -291,6 +294,9 @@ class VoteActivityLockOverlayTests(TestCase):
     """The Activity global lock is an overlay that rejects public ballots."""
 
     def setUp(self):
+        self.operator = create_provisioned_user(
+            username="overlay-staff", password="pass", role=User.Role.STAFF
+        )
         self.user = User.objects.create_user(username="overlay-voter", password="pass")
         self.activity = create_activity(
             title="Overlay Contest",
@@ -316,9 +322,9 @@ class VoteActivityLockOverlayTests(TestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
         )
         self.option = VoteOption.objects.create(vote_session=self.session, singer=singer)
+        self.session = open_vote_session(self.session, self.operator)
 
     def _cast_ballot(self):
         client = self.client_class()
@@ -391,12 +397,12 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
             is_test_data=True,
         )
         self.option = VoteOption.objects.create(
             vote_session=self.session, singer=self.singer, is_test_data=True
         )
+        self.session = open_vote_session(self.session, self.admin)
         self.judge = Judge.objects.create(activity=self.activity, name="Concurrent Judge")
         self.round = ContestRound.objects.create(
             activity=self.activity,
@@ -496,6 +502,9 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
 class VoteBallotConcurrencyTests(TransactionTestCase):
     def setUp(self):
+        self.operator = create_provisioned_user(
+            username="concurrent-ballot-staff", password="pass", role=User.Role.STAFF
+        )
         self.user = User.objects.create_user(username="concurrent-participant", password="pass")
         activity = create_activity(
             title="Concurrent Contest",
@@ -518,9 +527,9 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
             passcode="1234",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
         )
         self.option = VoteOption.objects.create(vote_session=self.session, singer=singer)
+        self.session = open_vote_session(self.session, self.operator)
 
     def test_concurrent_lock_prevents_ballot_after_commit(self):
         lock_held = threading.Event()
@@ -601,6 +610,39 @@ class VoteStateServiceTests(TestCase):
         again = open_vote_session(self.session, self.operator)
         self.assertTrue(again.is_open)
         self.assertTrue(VoteSession.objects.get(pk=self.session.pk).is_open)
+
+    def test_open_vote_session_freezes_configuration(self):
+        self.session = open_vote_session(self.session, self.operator)
+        self.session.name = "Changed after open"
+
+        with self.assertRaisesMessage(ValidationError, "投票开放后，投票配置不可直接修改。"):
+            self.session.save(update_fields=["name"])
+
+        self.assertEqual(VoteSession.objects.get(pk=self.session.pk).name, "Popularity")
+
+    def test_open_vote_session_freezes_vote_options(self):
+        participant = create_provisioned_user(
+            username="vote-option-participant", password="pass", role=User.Role.PARTICIPANT
+        )
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=participant,
+            name="Singer",
+            student_id="20260001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+        option = VoteOption.objects.create(vote_session=self.session, singer=singer)
+        open_vote_session(self.session, self.operator)
+
+        option.sort_order = 1
+        with self.assertRaisesMessage(ValidationError, "投票开放后，候选项不可直接修改。"):
+            option.save(update_fields=["sort_order"])
+
+        with self.assertRaisesMessage(ValidationError, "投票开放后，候选项不可直接修改。"):
+            VoteOption.objects.filter(pk=option.pk).delete()
 
     def test_close_vote_session_is_idempotent(self):
         open_vote_session(self.session, self.operator)
@@ -855,6 +897,17 @@ class VoteEntryRateLimitTests(TestCase):
         throttled = self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="127.0.0.1")
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
+
+    def test_correct_passcode_is_rejected_after_throttle_limit(self):
+        url = reverse("voting:vote_entry", args=[self.session.pk])
+        for _ in range(10):
+            self.client.post(url, {"passcode": "wrong"}, REMOTE_ADDR="127.0.0.1")
+
+        throttled = self.client.post(url, {"passcode": "1234"}, REMOTE_ADDR="127.0.0.1")
+
+        self.assertEqual(throttled.status_code, 200)
+        self.assertContains(throttled, "尝试次数过多")
+        self.assertNotIn("vote_passcode_ok", self.client.session)
 
     def test_throttle_is_scoped_to_the_vote_session(self):
         other = create_vote_session(

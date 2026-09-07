@@ -1,6 +1,7 @@
 from functools import partial
 from pathlib import PurePath
 
+from accounts.services import require_current_staff
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
@@ -323,6 +324,7 @@ def review_material_check(check, *, status, note, actor):
     row. A concurrent activity lock/archive therefore either commits before this
     review (which then sees the new state) or blocks/blocks it.
     """
+    current_actor = require_current_staff(actor)
     if status not in (MaterialCheck.Status.APPROVED, MaterialCheck.Status.NEEDS_SUPPLEMENT):
         raise ValidationError("无效的审核状态。")
     from common.models import AuditLog
@@ -341,11 +343,11 @@ def review_material_check(check, *, status, note, actor):
     old_status = locked_check.status
     locked_check.status = status
     locked_check.review_note = (note or "").strip()
-    locked_check.reviewed_by = actor
+    locked_check.reviewed_by = current_actor
     locked_check.reviewed_at = timezone.now()
     locked_check.save(update_fields=["status", "review_note", "reviewed_by", "reviewed_at"])
     AuditLog.objects.create(
-        operator=actor,
+        operator=current_actor,
         action_type=AuditLog.ActionType.REVIEW_MATERIAL,
         target=f"MaterialCheck:{locked_check.pk}",
         old_value=old_status,

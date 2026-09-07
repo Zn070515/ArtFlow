@@ -4,7 +4,7 @@ import threading
 from unittest import skipUnless
 
 from accounts.models import User
-from common.authority import ACTIVITY_STATE, authority_write
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -173,6 +173,10 @@ class MaterialCheckReviewTests(TestCase):
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
         self.user = User.objects.create_user(username="participant", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="material-reviewer", password="pass", role=User.Role.STAFF
+            )
         self.activity = _create_activity(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -201,14 +205,39 @@ class MaterialCheckReviewTests(TestCase):
             status=MaterialCheck.Status.UPLOADED,
         )
         review_material_check(
-            check, status=MaterialCheck.Status.APPROVED, note="清晰", actor=self.user
+            check, status=MaterialCheck.Status.APPROVED, note="清晰", actor=self.staff
         )
         check.refresh_from_db()
         self.assertEqual(check.status, MaterialCheck.Status.APPROVED)
         self.assertEqual(check.review_note, "清晰")
-        self.assertEqual(check.reviewed_by, self.user)
+        self.assertEqual(check.reviewed_by, self.staff)
         self.assertIsNotNone(check.reviewed_at)
         self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.REVIEW_MATERIAL,
+                target=f"MaterialCheck:{check.pk}",
+            ).exists()
+        )
+
+    def test_review_material_check_rejects_participant_actor(self):
+        check = MaterialCheck.objects.create(
+            singer_registration=self.registration,
+            item_name="伴奏文件",
+            status=MaterialCheck.Status.UPLOADED,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            review_material_check(
+                check,
+                status=MaterialCheck.Status.APPROVED,
+                note="不应越权审核",
+                actor=self.user,
+            )
+
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.UPLOADED)
+        self.assertIsNone(check.reviewed_by)
+        self.assertFalse(
             AuditLog.objects.filter(
                 action_type=AuditLog.ActionType.REVIEW_MATERIAL,
                 target=f"MaterialCheck:{check.pk}",
@@ -221,7 +250,7 @@ class MaterialCheckReviewTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             review_material_check(
-                check, status=MaterialCheck.Status.MISSING, note="", actor=self.user
+                check, status=MaterialCheck.Status.MISSING, note="", actor=self.staff
             )
 
     def test_sync_preserves_staff_review_state(self):
@@ -237,7 +266,7 @@ class MaterialCheckReviewTests(TestCase):
         )
         self.assertEqual(check.status, MaterialCheck.Status.UPLOADED)
         review_material_check(
-            check, status=MaterialCheck.Status.APPROVED, note="ok", actor=self.user
+            check, status=MaterialCheck.Status.APPROVED, note="ok", actor=self.staff
         )
         reconcile_singer_material_checks(self.registration)
         check.refresh_from_db()
@@ -264,7 +293,7 @@ class MaterialCheckReviewTests(TestCase):
             singer_registration=self.registration, item_name="伴奏文件"
         )
         review_material_check(
-            check, status=MaterialCheck.Status.APPROVED, note="ok", actor=self.user
+            check, status=MaterialCheck.Status.APPROVED, note="ok", actor=self.staff
         )
         store_submission_file(
             owner=self.registration,
