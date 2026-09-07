@@ -1,6 +1,6 @@
 # GOAL.md
 
-# ArtFlow 学院文艺活动全生命周期平台目标基线 v4
+# ArtFlow 学院文艺活动全生命周期平台目标基线 v5
 
 > 本文档是 ArtFlow 的长期产品目标、领域边界和工程原则基线。
 >
@@ -28,7 +28,7 @@ ArtFlow 是面向学院文艺活动全生命周期的 **EventOps 活动运行平
 
 中的活动工作，收束成一套：
 
-> **有状态、有权限、有版本、有审计、有二维码入口、有正式数据权威、有现场降级能力，并能在最后一个必要输入到达后快速给出唯一可信结果的工作系统。**
+> **有状态、有权限、有版本、有审计、有二维码入口、有正式数据权威、有个人信息生命周期、有现场降级能力，并能在最后一个必要输入到达后快速给出唯一可信结果的工作系统。**
 
 ArtFlow 的目标不是为了“数字化”而数字化，而是减少人工转录、信息断层、赛制理解错误、现场等待和不可追溯修改。
 
@@ -1203,22 +1203,52 @@ ArtFlow 应支持生成适合现有工作方式的通知材料：
 
 ## 16.3 Archive
 
-活动归档应包含：
+活动归档必须区分 **永久业务事实** 与 **有期限个人信息**。
+
+长期业务档案可以包含：
 
 - 活动配置；
-- 参赛 / 节目名单；
-- 材料；
+- 经确认需要长期保留的参赛 / 节目名单；
 - Ruleset；
-- 原始评分；
-- 投票；
+- 原始评分与正式计算事实；
+- 投票最终事实；
 - 正式结果；
 - Award；
-- 审计；
+- 结果确认 / 解锁 / override 等核心 Audit；
 - Incident；
-- 现场工作文档；
-- 必要导出。
+- 必要现场工作文档；
+- 经授权长期公开的媒体素材。
 
-归档不是删除。
+以下内容不得因为“活动归档”而默认永久保存：
+
+- 手机号；
+- 微信号；
+- 学号等身份标识；
+- 非公开联系方式；
+- 工作人员内部备注；
+- 原始报名表副本；
+- 临时导出的联系方式文件；
+- 未获得长期公开授权的原始照片 / 视频；
+- Ticket secret、AccessGrant、Session 等临时凭证；
+- 无长期业务必要性的 IP / 安全访问日志。
+
+因此：
+
+```text
+Archive
+├── Permanent Business Record
+├── Time-limited Personal Data
+├── Authorized Public Media
+└── Time-limited Security / Operational Logs
+```
+
+**归档不是“数据库永远不删除任何东西”。**
+
+正确原则是：
+
+> **比赛事实需要长期可信；个人信息只保存到实现其处理目的所需的期限。**
+
+Privacy cleanup 不得破坏正式评分、排名、获奖、Ruleset、确认记录等业务 authority。
 
 ---
 
@@ -1279,7 +1309,776 @@ ArtFlow 应支持生成适合现有工作方式的通知材料：
 
 ---
 
-# 18. Capability Truth
+# 18. 数据治理与学院 / 学校接管 Readiness
+
+ArtFlow 的长期目标允许从学生自研系统逐步演进为学院正式使用、甚至由学校信息化体系接管的业务系统。
+
+“学校接入”不是一个单独技术功能，也不等于“拿到学校域名”。
+
+它至少意味着：
+
+```text
+业务责任主体明确
++
+数据处理规则明确
++
+系统和账号可以移交
++
+部署资产可归属学校 / 学院
++
+网络与安全边界可说明
++
+个人信息有生命周期
++
+出现安全事件时有人负责
+```
+
+ArtFlow 必须从现在开始保持这种可接管性，但不得为了尚未发生的审批流程提前引入无法验证的复杂要求。
+
+---
+
+## 18.1 Personal Data Is Not Business Authority
+
+ArtFlow 必须长期遵守：
+
+> **Business facts are durable; personal data is perishable.**
+
+比赛和活动正式事实，例如：
+
+- Ruleset；
+- Round / Panel snapshot；
+- 原始评分事实；
+- StageResult；
+- 晋级 / 获奖；
+- 正式结果；
+- Confirm / Unlock / Override 记录；
+- 必要的核心 Audit；
+
+可以根据档案需要长期保存。
+
+但：
+
+- 手机；
+- 微信；
+- 学号；
+- 私人邮箱；
+- 内部备注；
+- 非公开原始材料；
+- 临时票券凭证；
+- AccessGrant / Session；
+- 安全访问 IP；
+
+必须有明确业务目的和保存期限。
+
+不能因为某个 Activity 是 Formal / Archived，就自动永久保存与活动结果无关的个人信息。
+
+---
+
+## 18.2 Data Inventory / Classification 先于加密
+
+正式生产必须能够回答：
+
+```text
+我们收了什么数据？
+为什么收？
+从哪里来？
+谁能看？
+谁能改？
+会不会公开？
+保存多久？
+到期怎么处理？
+是否会交给第三方？
+```
+
+ArtFlow 至少建立以下内部数据类别：
+
+### PUBLIC
+
+可以对外公开：
+
+- 活动名称 / 时间 / 地点；
+- 已批准公开的介绍；
+- 已 RELEASE 的结果；
+- 已授权公开的照片 / 展示素材。
+
+### INTERNAL BUSINESS
+
+仅活动内部使用但不以个人隐私为核心：
+
+- Ruleset；
+- 运行顺序；
+- 工作状态；
+- 非公开评分；
+- Panel；
+- Incident；
+- 内部结果候选。
+
+### PERSONAL
+
+与具体自然人相关：
+
+- 姓名；
+- 学号；
+- 手机；
+- 微信；
+- 邮箱；
+- 班级；
+- 选手报名资料；
+- Judge 到场记录等。
+
+### SECURITY / SECRET
+
+不得作为普通业务数据处理：
+
+- password hash；
+- MFA secret；
+- recovery code；
+- session token；
+- Ticket secret；
+- AccessGrant；
+- encryption key；
+- backup key；
+- signing key。
+
+### MEDIA
+
+区分：
+
+```text
+Original Private Media
+→ 默认私有、有期限
+
+Approved Public Derivative
+→ 经明确授权后可长期公开
+```
+
+数据分类必须进入 schema / documentation / preflight / export / archive 设计，而不是只存在审批文档里。
+
+---
+
+## 18.3 Data Minimization
+
+收集个人信息时，默认原则是：
+
+> **不收，比收完再加密更安全。**
+
+每个 Participant / Staff / Judge / Audience 字段都必须能解释业务用途。
+
+例如：
+
+- 微信号是否仍有必要；
+- 手机号和微信是否必须同时收；
+- 学院字段在仅面向本学院时是否必要；
+- 班级是否确实用于身份 / 活动运营；
+- 观众姓名是否有真实业务价值。
+
+“以前 Excel 一直有这一列”不能作为长期收集理由。
+
+选手报名必须把：
+
+```text
+比赛必需信息
+```
+
+和：
+
+```text
+可选公开展示 / 宣传授权
+```
+
+分开。
+
+不得用一个捆绑勾选框把“参加比赛”与“永久公开照片”等非必要处理混为一体。
+
+---
+
+## 18.4 Privacy Notice / Retention
+
+正式 Participant 注册 / 报名页面必须提供清晰、可读的个人信息处理说明，至少说明：
+
+- 谁在运行 ArtFlow；
+- 收集哪些信息；
+- 用来做什么；
+- 哪些会公开；
+- 是否交给第三方；
+- 保存期限或期限确定方法；
+- 如何更正 / 补充 / 申请删除非必要个人信息；
+- 联系方式。
+
+不同数据类别必须有可配置 retention policy。
+
+不得在 GOAL 中写死“180 天 / 365 天”作为法律期限。
+
+具体期限由：
+
+```text
+业务必要性
++
+学院管理要求
++
+适用法律 / 学校制度
+```
+
+共同确定。
+
+系统至少支持：
+
+```text
+retention_policy
+scheduled_cleanup_at
+cleanup_status
+cleanup_audit
+```
+
+Privacy cleanup 后：
+
+- 正式评分 / 结果不变；
+- 不再需要的联系方式删除或不可逆去标识化；
+- 临时 secret 失效 / 销毁；
+- 非必要原始材料删除；
+- 留下“执行过清理”的审计事实，但不能在审计里复制被清除的明文 PII。
+
+---
+
+## 18.5 部员仍然完全等权
+
+学院接入和个人信息最小权限原则 **不得重新把部员拆成材料组、舞台组、算分组等子权限**。
+
+所有部员仍保持相同日常权限和信息可见范围。
+
+个人信息保护通过以下方式实现：
+
+- 最小化收集；
+- 默认遮罩；
+- 按需查看完整值；
+- Sensitive Read 审计；
+- 高风险批量导出单独控制；
+- Archive / Retention；
+- Audit 脱敏。
+
+而不是通过制造信息孤岛实现。
+
+部长 / 主席仍只在少数终局 authority 和高风险治理动作上高于部员。
+
+---
+
+## 18.6 Sensitive Data View
+
+Staff 日常界面不必永远展示所有完整联系方式。
+
+推荐：
+
+```text
+张三
+学号：3020****0036
+手机：138****1234
+微信：***
+```
+
+当工作人员确有运营需要时：
+
+```text
+[查看完整联系方式]
+```
+
+服务器重新验证当前 Staff 身份，并记录：
+
+```text
+SENSITIVE_DATA_READ
+actor
+activity
+object
+field_group
+timestamp
+reason / context（必要时）
+```
+
+所有部员对这一能力保持相同权限。
+
+目标不是制造访问障碍，而是能够回答：
+
+> **谁实际查看过完整个人信息？**
+
+---
+
+## 18.7 Bulk Personal Data Export 是高风险动作
+
+普通结果、节目单、候场表等业务导出与“全体选手联系方式导出”不是同一风险等级。
+
+涉及批量个人信息的导出必须：
+
+- 明确用途；
+- 当前身份重新验证；
+- 记录导出人、活动、字段、记录数量和时间；
+- 文件按需即时生成；
+- 不在服务器永久保留导出副本；
+- 文件名 / 页眉可包含用途与导出时间标识；
+- 必要时要求部长 / 主席执行或批准。
+
+不得把：
+
+```text
+contacts.xlsx
+```
+
+作为 Archive 的永久默认组成部分。
+
+---
+
+## 18.8 Encryption Is Risk-based
+
+ArtFlow 应支持针对高风险字段的应用层加密，但 **不得为了“看起来安全”给所有字符串做可逆加密**。
+
+优先评估：
+
+- phone；
+- wechat；
+- private email；
+- student_id；
+- 其它泄露后会明显增加个人风险、且业务确需长期保存的标识。
+
+推荐使用经过广泛验证的 AEAD 方案，并保持：
+
+```text
+ciphertext
+key_version
+```
+
+设计。
+
+如果某字段同时需要：
+
+```text
+精确查询 / 去重 / UNIQUE
+```
+
+不得使用固定 IV 或自制“确定性 AES”。
+
+可以采用：
+
+```text
+encrypted_value
++
+HMAC / blind lookup index
+```
+
+实现查询与唯一约束。
+
+是否对 student_id / name 等具体字段实施应用层加密，必须以 threat model 和实际审批要求决定。
+
+磁盘 / volume / backup 加密不能被“字段已加密”取代；字段加密也不能取代访问控制。
+
+---
+
+## 18.9 Secret / Key Management
+
+正式环境中的：
+
+- DATA KEY；
+- lookup / HMAC key；
+- backup key；
+- signing key；
+- MFA secret wrapping key；
+
+不得：
+
+- 写入 Git；
+- 写入数据库同一行；
+- bake 进 Docker image；
+- 只存在某一个学生个人电脑且无人能恢复。
+
+必须支持：
+
+```text
+key id / version
+rotation
+compromise replacement
+recovery
+handover
+```
+
+正式由学院接管后，恢复能力不能只掌握在单个学生开发者手中。
+
+如果学校 / 云平台提供 Secret Manager / KMS，应允许替换本地 secret file 实现，而不重写业务模型。
+
+---
+
+## 18.10 Backup Protection
+
+备份属于正式数据副本，不能因为叫“backup”就绕过个人信息保护。
+
+正式 backup pipeline 应支持：
+
+```text
+PostgreSQL / media
+↓
+consistent backup
+↓
+integrity manifest
+↓
+independent backup encryption
+↓
+off-host copy
+↓
+restore verification
+```
+
+BACKUP KEY 与应用 DATA KEY 不应默认为同一把密钥。
+
+删除生产数据库中的 PII 后，还要明确旧备份如何按既定保留政策到期销毁；不能承诺“实时从所有历史 backup 擦除”这种无法实现的语义。
+
+---
+
+## 18.11 High-privilege Authentication
+
+主席 / 部长 / System Admin 属于高权限长期账户。
+
+正式学院生产模式不应把“所有管理员共享一个全局第二密钥”作为最终 MFA 方案。
+
+目标：
+
+```text
+个人账号
++
+个人密码 / SSO
++
+个人 MFA
+```
+
+可以优先支持 TOTP；以后可扩展 Passkey / WebAuthn。
+
+要求：
+
+- 每人独立 MFA secret；
+- recovery codes 只存 hash；
+- MFA secret 加密；
+- MFA reset / disable 是高风险操作；
+- 敏感 authority 可要求 recent re-authentication；
+- 共享 `ADMIN_LOGIN_KEY` 只能作为迁移期兼容机制，不是最终学校生产设计。
+
+普通部员和选手是否强制 MFA，根据实际风险与学校统一认证能力决定，不因高权限 MFA 自动增加所有人的操作负担。
+
+---
+
+## 18.12 Audit Must Be PII-safe
+
+Audit 用于证明“发生了什么”，不是复制一份个人信息历史镜像。
+
+禁止把完整敏感值直接写入：
+
+```text
+old_value
+new_value
+note
+exception
+telemetry
+```
+
+至少统一经过 Audit Safe Serializer / redaction。
+
+默认禁止记录：
+
+- plaintext password；
+- phone / wechat 的完整旧值、新值；
+- student_id plaintext（非必要）；
+- token；
+- session；
+- Ticket secret；
+- AccessGrant；
+- MFA secret；
+- encryption / backup key；
+- signed private URL。
+
+正确审计示例：
+
+```text
+phone_changed = true
+```
+
+而不是：
+
+```text
+138... → 139...
+```
+
+Security access log 与永久业务 Audit 必须拥有不同 retention policy。
+
+---
+
+## 18.13 Uploaded Files Are Untrusted
+
+文件上传成功不代表文件可以直接进入正式材料池或公开页面。
+
+至少采用分层验证：
+
+- allowlist extension；
+- size limit；
+- 不信任浏览器 Content-Type；
+- magic / signature check；
+- 随机内部对象名；
+- 私有存储，不使用个人信息拼接路径；
+- 图片实际 decode；
+- 公开图片重新编码并去 EXIF；
+- PDF / Office / 音视频按类型进行实际格式验证；
+- ZIP 防止异常压缩比 / 路径穿越，默认不自动解压不可信压缩包。
+
+当正式部署环境允许时，可增加 malware scanning / ClamAV。
+
+ClamAV 是 defense-in-depth，不应成为所有开发环境和现场评分的硬依赖。
+
+---
+
+## 18.14 Public Media 与 Original Media 分离
+
+公开展示不得默认直接暴露用户原始上传文件。
+
+推荐：
+
+```text
+Original Upload
+PRIVATE
+↓
+validate / decode
+↓
+strip metadata
+↓
+resize / re-encode
+↓
+Approved Public Derivative
+```
+
+这样可以避免：
+
+- EXIF GPS；
+- 原始文件名泄露个人信息；
+- 异常 metadata；
+- 巨大原图直接公开；
+- 撤销公开授权时无法区分业务原件与公开副本。
+
+---
+
+## 18.15 Third-party Dependency Registry
+
+正式环境必须知道哪些第三方可能接触：
+
+- 个人信息；
+- Ticket / Judge request；
+- backup；
+- media；
+- 日志。
+
+例如：
+
+- 云服务器；
+- 对象存储；
+- 公网 tunnel；
+- 邮件 / 短信服务；
+- Malware scanner；
+- CDN；
+- 外部表单 DR。
+
+必须记录：
+
+```text
+provider
+purpose
+data categories
+network path
+retention
+是否可替换
+是否为正式生产依赖
+```
+
+免费 tunnel 可以继续服务实验 / 零预算场景，但 **学院正式接管后不得因为“免费”而默认让第三方 HTTP tunnel 成为个人信息正式入口**。
+
+---
+
+## 18.16 Formal School Mode 默认境内部署
+
+学生自研 / 临时活动阶段允许根据实际条件选择部署位置。
+
+但如果 ArtFlow 进入学院 / 学校正式生产并持续处理学生个人信息：
+
+> **默认优先校内基础设施或中国大陆合规云资源。**
+
+香港或其它境外部署不得作为默认正式方案。
+
+如果确有必要向境外提供个人信息，必须先按适用规定确认：
+
+- 告知；
+- 单独同意；
+- 个人信息保护影响评估；
+- 数据出境适用程序；
+- 学校 / 学院批准。
+
+不要为了省一台大陆服务器主动制造数据跨境治理问题。
+
+---
+
+## 18.17 Domain / Internet Publication
+
+学校信息技术体系允许 ArtFlow 保持 deployment-neutral，但正式公网发布时必须尊重机构流程。
+
+如果由学院 / 学校正式主办：
+
+- 优先使用学校认可的域名 / 子域名；
+- 域名、证书、服务器和联系人不应只绑定某个学生个人身份；
+- ICP / 公安联网备案等事项由实际主办主体和接入方式按适用流程办理；
+- ArtFlow 代码不得假设一定拥有 `zjut.edu.cn` 域名。
+
+获得学校域名不是 ArtFlow 的业务 authority，也不等于自动通过安全审查。
+
+---
+
+## 18.18 SSO Is Pluggable, Not Mandatory Today
+
+当前本地账号体系继续是一等支持路径。
+
+如果学院 / NIC 明确要求统一身份认证，应通过可替换 Identity Provider 接入：
+
+```text
+Identity Provider
+├── LocalAuth
+└── School SSO / CAS / OIDC
+```
+
+业务模型继续只依赖 ArtFlow `User` / stable subject mapping。
+
+不得把：
+
+- 学号；
+- CAS ticket；
+- 外部 subject；
+- SSO 特有字段；
+
+散落到各业务表作为权限判断。
+
+在校方未提出要求前，不把 CAS / SSO 接入作为 M2 blocker，也不把“未来可能接 SSO”当审批筹码。
+
+---
+
+## 18.19 Prepare for MLPS / Institutional Inventory, Do Not Self-declare Level
+
+如果 ArtFlow 被学院 / 学校正式认定为信息系统，应能够向学校提供：
+
+- 系统边界；
+- 业务负责人；
+- 技术负责人；
+- 数据类别；
+- 网络拓扑；
+- 部署资产；
+- 外部依赖；
+- 用户与权限；
+- 备份 / 恢复；
+- 日志 / Audit；
+- 漏洞与补丁管理；
+- Incident response；
+- 当前版本 / release manifest。
+
+这些材料使 NIC 能够进行：
+
+```text
+系统摸底
+→ 定级判断
+→ 备案 / 整改（如适用）
+```
+
+ArtFlow 自己不得在 GOAL 中写死：
+
+```text
+“本系统一定是等保二级”
+```
+
+或者：
+
+```text
+“本系统无需等保”
+```
+
+最终范围和等级由正式责任主体 / 学校信息技术部门依据实际部署、影响和现行规范确定。
+
+---
+
+## 18.20 Ownership / Handover
+
+学院正式接管前必须解决 bus factor。
+
+不能存在：
+
+```text
+域名只有学生个人能续费
+云服务器只有学生个人账号
+GitHub 只有学生个人有管理员
+Backup key 只有学生个人知道
+MFA recovery 只有学生个人持有
+数据库恢复必须找原作者
+```
+
+正式模式至少指定：
+
+```text
+Business Owner
+System Owner
+Technical Maintainer
+Data Responsible Contact
+Security / Incident Contact
+Backup / Key Recovery Custodian
+```
+
+并有：
+
+- 源码与依赖锁定；
+- migration；
+- deployment manifest；
+- runbook；
+- backup / restore；
+- key recovery；
+- account recovery；
+- release procedure；
+- 最低限度维护文档。
+
+ArtFlow 的最终目标不是“徐昕永远维护它”。
+
+而是：
+
+> **即使原开发者毕业，学院仍然有能力安全地继续运行、停用、迁移或恢复系统。**
+
+---
+
+## 18.21 Institutional Readiness 不等于 M2 停工
+
+学院接入 readiness 与 M2 业务能力可以并行推进。
+
+在 M2 期间优先完成低迁移成本、高收益的基础：
+
+```text
+Data Inventory / Classification
+Privacy Notice / Retention Model
+Audit Redaction
+Secret / Key Contract
+High-privilege MFA migration plan
+Sensitive Export contract
+Third-party dependency inventory
+```
+
+以下能力可在 threat model / 校方要求明确后逐步实现：
+
+```text
+字段级加密覆盖范围
+ClamAV
+学校 SSO
+正式对象存储
+等保整改项
+学校域名 / 正式服务器
+```
+
+不得为了“未来可能审批”无限延迟 Ticket / Judge / QR 等已经明确的 M2 业务开发。
+
+---
+
+---
+
+# 19. Capability Truth
 
 功能只能处于明确状态，例如：
 
@@ -1299,7 +2098,7 @@ UI、模板、Ruleset Freeze、Preflight 必须尊重状态。
 
 ---
 
-# 19. Production Rehearsal
+# 20. Production Rehearsal
 
 任何正式新能力在首次使用前必须通过真实行为彩排，而不仅是单元测试。
 
@@ -1327,7 +2126,7 @@ UI、模板、Ruleset Freeze、Preflight 必须尊重状态。
 
 ---
 
-# 20. 当前开发顺序
+# 21. 当前开发顺序
 
 ## M1 — 当前十佳生产核心
 
@@ -1353,7 +2152,7 @@ M1 的重点仍然是让现有 Staff 主流程可靠运行。
 
 ## M2 — QR / Ticket / Direct Judge
 
-M1 稳定后再进入：
+M1 代码基线稳定后进入：
 
 ```text
 QR Entry Registry
@@ -1367,6 +2166,22 @@ Direct electronic scoring
 Local draft + idempotent ACK
 STAFF_PROXY
 ```
+
+同时并行推进 **Institutional Readiness Foundation**：
+
+```text
+Data Inventory / Classification
+Privacy Notice / Retention
+Audit Redaction
+Secret / Key Contract
+High-privilege MFA migration plan
+Sensitive Export contract
+Third-party dependency inventory
+```
+
+这批学校接入基础不得把 M2 重新拖回“大而全安全平台”。
+
+字段级加密覆盖范围、ClamAV、学校 SSO、正式域名 / 服务器、等保整改等，在 threat model 或校方要求明确后逐步落地。
 
 ---
 
@@ -1385,7 +2200,7 @@ STAFF_PROXY
 
 ---
 
-# 21. 永久禁止的错误方向
+# 22. 永久禁止的错误方向
 
 除非真实需求发生变化，不要：
 
@@ -1402,11 +2217,17 @@ STAFF_PROXY
 11. 把免费公网 tunnel 当正式结果产生的唯一依赖；
 12. 搞 PostgreSQL Active-Active；
 13. 让客户端缓存成为正式第二数据库；
-14. 因为老师或观众不配合而把系统正确性交给他们。
+14. 因为老师或观众不配合而把系统正确性交给他们；
+15. 为了“过审批”把所有字段无差别可逆加密；
+16. 为个人信息保护重新把部员拆成大量子角色；
+17. 把共享 `ADMIN_LOGIN_KEY` 作为正式学校生产环境最终 MFA；
+18. 在学院正式接管模式下未经评估默认把个人信息部署到境外；
+19. 把免费第三方公网 tunnel 作为学校正式个人信息系统不可替换的唯一入口；
+20. 因为“归档”而永久保存所有联系方式、Ticket secret、Session 和安全日志。
 
 ---
 
-# 22. 完全体最终标准
+# 23. 完全体最终标准
 
 ArtFlow 完全体不以“有多少页面”判断完成，而以真实活动能否满足以下标准判断：
 
