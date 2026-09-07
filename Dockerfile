@@ -29,6 +29,7 @@ COPY --chown=artflow:artflow archive ./archive
 COPY --chown=artflow:artflow common ./common
 COPY --chown=artflow:artflow config ./config
 COPY --chown=artflow:artflow core ./core
+COPY --chown=artflow:artflow entry_access ./entry_access
 COPY --chown=artflow:artflow exports ./exports
 COPY --chown=artflow:artflow farewell_show ./farewell_show
 COPY --chown=artflow:artflow files ./files
