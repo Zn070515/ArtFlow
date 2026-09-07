@@ -17,7 +17,7 @@ from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
-from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase, TransactionTestCase
 from django.urls import get_resolver, reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound
@@ -52,11 +52,12 @@ class EntryAccessScaffoldTests(SimpleTestCase):
         for model in (AccessGrant, EntryPoint, EphemeralSession):
             with self.subTest(model=model.__name__):
                 model_admin = django_admin.site._registry[model]
-                self.assertFalse(model_admin.has_add_permission(None))
-                self.assertFalse(model_admin.has_change_permission(None))
-                self.assertFalse(model_admin.has_delete_permission(None))
+                request = RequestFactory().get("/")
+                self.assertFalse(model_admin.has_add_permission(request))
+                self.assertFalse(model_admin.has_change_permission(request))
+                self.assertFalse(model_admin.has_delete_permission(request))
                 if model in (AccessGrant, EphemeralSession):
-                    self.assertIn("token_digest", model_admin.get_exclude(None) or ())
+                    self.assertIn("token_digest", model_admin.get_exclude(request) or ())
 
 
 class EntryAccessModelTests(TestCase):

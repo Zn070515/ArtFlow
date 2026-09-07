@@ -458,7 +458,7 @@ class Command(BaseCommand):
                     "Cannot reseed the demo vote session while it is locked; reset it first."
                 )
             if existing_vote_session.is_open:
-                close_vote_session(existing_vote_session, admin)
+                close_vote_session(existing_vote_session, admin)  # type: ignore[no-untyped-call]
 
         vote_session = self._upsert(
             "demo.vote_session.audience_choice",
@@ -518,7 +518,7 @@ class Command(BaseCommand):
             },
         )
         if not vote_session.is_open:
-            open_vote_session(vote_session, admin)
+            open_vote_session(vote_session, admin)  # type: ignore[no-untyped-call]
         self._upsert(
             "demo.incident.one",
             IncidentRecord,
