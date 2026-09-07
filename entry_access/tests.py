@@ -16,8 +16,8 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
-from django.test import SimpleTestCase, TestCase, TransactionTestCase
-from django.urls import get_resolver
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase
+from django.urls import get_resolver, reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound
 
@@ -521,3 +521,128 @@ class EntryAccessRevocationTests(TestCase):
 
         with self.assertRaises(PermissionDenied):
             revoke_access_grant(issued.grant, actor=self.staff, note="stale actor")
+
+
+class EntryAccessHttpTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.activity = Activity.objects.create(
+            title="Access HTTP test", activity_type=Activity.Type.SINGER_CONTEST
+        )
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="http-staff", password="pass", role=User.Role.STAFF
+            )
+        self.entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.SCANNER,
+            label="Scanner HTTP",
+            actor=self.staff,
+        )
+
+    def test_staff_can_issue_grant_and_raw_token_is_returned_once(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("entry_access:grant_issue"),
+            data={"entry_point_id": self.entry_point.pk, "ttl_seconds": 300},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        grant = AccessGrant.objects.get(pk=payload["grant_id"])
+        self.assertGreaterEqual(len(payload["token"]), 43)
+        self.assertNotEqual(payload["token"], grant.token_digest)
+
+    def test_redeem_is_explicit_post_and_does_not_put_token_in_url(self):
+        issued = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+        redeem_url = reverse("entry_access:grant_redeem")
+
+        get_response = self.client.get(f"{redeem_url}?token={issued.token}")
+        self.assertEqual(get_response.status_code, 405)
+        self.assertIsNone(AccessGrant.objects.get(pk=issued.grant.pk).redeemed_at)
+
+        post_response = self.client.post(
+            redeem_url,
+            data={"token": issued.token},
+            content_type="application/json",
+        )
+        self.assertEqual(post_response.status_code, 200)
+        self.assertIn("session_token", post_response.json())
+
+    def test_redeem_invalid_grant_has_generic_reason(self):
+        response = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": "unknown-token"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(), {"detail": "临时访问授权无效。", "reason_code": "INVALID_GRANT"}
+        )
+
+    def test_redeem_rejects_invalid_json_as_invalid_request(self):
+        response = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data="not-json",
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
+
+    def test_redeem_does_not_require_csrf_cookie(self):
+        issued = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+        csrf_client = Client(enforce_csrf_checks=True)
+
+        response = csrf_client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": issued.token},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_staff_can_revoke_grant_and_session(self):
+        issued = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+        self.client.force_login(self.staff)
+        revoke_grant_response = self.client.post(
+            reverse("entry_access:grant_revoke", args=[issued.grant.pk]),
+            data={"note": "HTTP revoke"},
+            content_type="application/json",
+        )
+        self.assertEqual(revoke_grant_response.status_code, 200)
+        self.assertIsNotNone(AccessGrant.objects.get(pk=issued.grant.pk).revoked_at)
+
+        redeemed = issue_access_grant(
+            self.entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+        redeem_response = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": redeemed.token},
+            content_type="application/json",
+        )
+        session_id = redeem_response.json()["session_id"]
+        revoke_session_response = self.client.post(
+            reverse("entry_access:session_revoke", args=[session_id]),
+            data={},
+            content_type="application/json",
+        )
+        self.assertEqual(revoke_session_response.status_code, 200)
+        self.assertIsNotNone(EphemeralSession.objects.get(pk=session_id).revoked_at)
