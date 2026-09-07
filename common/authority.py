@@ -28,6 +28,9 @@ VOTE_SESSION_STATE = "votesession.state"
 SCORE_SUMMARY_RECALCULATE = "scoresummary.recalculate"
 TEST_DATA_CLEANUP = "test_data.cleanup"
 ACCOUNT_AUTHORITY = "account.authority"
+ENTRY_POINT_CONFIG = "entry_point.config"
+ACCESS_GRANT_STATE = "access_grant.state"
+EPHEMERAL_SESSION_STATE = "ephemeral_session.state"
 
 
 @dataclass(frozen=True)
