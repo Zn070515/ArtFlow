@@ -98,3 +98,20 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 | Plan B | 压轴时的降级/绕行方案 |
 
 > 注：`录分到 READY` 需配套 M1-H 的 `round_scores_api` 自动 resolve（`recompute_activity_result`）链路；若评分表在彩排中依赖 Excel 导入，另按 §15.5 用过期工作簿验证全表拒绝。
+
+### 2026-09-07 本地技术彩排记录
+
+本次记录是工程技术彩排，不替代首次正式活动前由真实 Admin / Staff /
+Participant / Judge / Audience 参加的现场彩排。
+
+| 时间 | 参与者 | 场景 | 结论 | 录分到 READY 时间 | 实际恢复时间 | 已知风险 | Plan B |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase 模拟角色与恶意请求；真实参与者 0；Judge/Audience 未模拟 | 正常流程与恶意输入（容器 PostgreSQL 隔离测试库；948 tests） | PASS（技术彩排） | 未测量：本次未执行真实首张评分到最后一次自动 resolve | 不适用：无故障；完整套件 `948 tests`，`OK (skipped=3)` | 仍需真实角色在运行栈上完成登录、规则、评分、决定、投票、材料、文档和归档串联；媒体替换、大视频限制等人工步骤未执行 | 纸质评分 + Staff 工作区；锁定前人工核对缺分、结果和审计 |
+| 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase；真实参与者 0 | 灾难/恢复：web 重启、PostgreSQL 重启、应用备份恢复、PostgreSQL 隔离恢复 | PASS（技术彩排） | 未测量 | web 健康恢复 7.3s；PostgreSQL 重启后健康恢复 6.9s；应用备份恢复脚本 8.2s；PostgreSQL dump 恢复脚本 8.4s；各自恢复后健康检查/Django check 通过 | 尚未在真实域名、TLS、Caddy 和真实媒体负载下演练；生产 `.env`、DNS/ACME 和备份目标仍需活动部署方提供并验证 | 维持源库和媒体卷；切换到纸质评分/人工登记，暂停正式发布，按备份清单恢复到隔离或备用栈后由 Admin 复核再继续 |
+
+补充：首次直接在容器内运行完整测试时漏掉了验收脚本的 root-only `/app/.env`
+fixture，导致 1 个配置测试因权限失败；按现有验收脚本补齐 fixture 后，单测和完整
+`948` 测试均通过。镜像仍保持非 root `artflow` 运行，未为测试放宽 `/app` 写权限。
+
+因此，M1 的代码、自动化验收和本地技术恢复彩排已完成；M1-J 的“正式现场彩排”
+仍待真实参与者、真实部署域名和人工步骤完成后才能最终关闭。
