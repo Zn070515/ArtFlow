@@ -124,5 +124,5 @@
 {% endif %}
 
 {% if grid_payload %}{{ grid_payload|json_script:"rapid-grid-data" }}{% endif %}
-<script src="{% static 'js/rapid_score.js' %}"></script>
+  <script src="{% static 'dist/rapid_score.js' %}"></script>
 {% endblock %}

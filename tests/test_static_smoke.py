@@ -12,10 +12,11 @@ class StaticManifestSmokeTests(TestCase):
     def test_debug_false_manifest_assets_render_and_serve(self):
         response = self.client.get("/")
         css_url = staticfiles_storage.url("css/app.css")
-        js_url = staticfiles_storage.url("js/rapid_score.js")
+        js_url = staticfiles_storage.url("dist/rapid_score.js")
 
         try:
             self.assertRegex(css_url, r"/static/css/app\.[0-9a-f]+\.css$")
+            self.assertRegex(js_url, r"/static/dist/rapid_score\.[0-9a-f]+\.js$")
             self.assertContains(response, f'href="{css_url}"')
             for url, expected_status in (
                 (css_url, 200),

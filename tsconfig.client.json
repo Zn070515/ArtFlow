@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "strict": true,
+    "noEmitOnError": true,
+    "module": "ES2020",
+    "rootDir": "frontend",
+    "outDir": "static/dist",
+    "declaration": false,
+    "sourceMap": false,
+    "newLine": "lf",
+    "forceConsistentCasingInFileNames": true
+  },
+  "files": ["frontend/rapid_score.ts"]
+}
