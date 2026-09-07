@@ -1,7 +1,9 @@
 import json
 from datetime import timedelta
+from typing import Any
 
 from accounts.decorators import staff_required
+from common.rate_limit import allow
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -18,10 +20,29 @@ from .services import (
     revoke_ephemeral_session,
 )
 
+REDEEM_BODY_MAX_BYTES = 4096
+REDEEM_RATE_LIMIT = 30
+REDEEM_RATE_WINDOW_SECONDS = 60
 
-def _json_payload(request):
+
+class RequestBodyTooLarge(Exception):
+    """Raised when a route-specific request body cap is exceeded."""
+
+
+def _json_payload(request, *, body_limit: int | None = None) -> dict[str, Any]:
+    if body_limit is not None:
+        content_length = request.META.get("CONTENT_LENGTH")
+        try:
+            declared_length = int(content_length) if content_length else 0
+        except (TypeError, ValueError):
+            declared_length = 0
+        if declared_length > body_limit:
+            raise RequestBodyTooLarge
+    body = request.body or b""
+    if body_limit is not None and len(body) > body_limit:
+        raise RequestBodyTooLarge
     try:
-        payload = json.loads(request.body or "{}")
+        payload = json.loads(body or "{}")
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValidationError("请求体不是有效 JSON。") from error
     if not isinstance(payload, dict):
@@ -31,6 +52,21 @@ def _json_payload(request):
 
 def _invalid_request(error):
     return JsonResponse({"detail": error.messages, "reason_code": "INVALID_REQUEST"}, status=400)
+
+
+def _request_too_large_response():
+    return JsonResponse(
+        {"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413
+    )
+
+
+def _rate_limited_response(retry_after_seconds: int):
+    response = JsonResponse(
+        {"detail": "请求过于频繁，请稍后再试。", "reason_code": "RATE_LIMITED"},
+        status=429,
+    )
+    response["Retry-After"] = str(max(1, retry_after_seconds))
+    return response
 
 
 def _required_json_int(payload, key):
@@ -88,8 +124,18 @@ def issue_grant(request):
 @require_POST
 def redeem_grant(request):
     """Redeem only a body token; no cookie authentication or URL token is accepted."""
+    ip_address = request.META.get("REMOTE_ADDR") or "unknown"
+    decision = allow(
+        f"entry-access-redeem:{ip_address}",
+        limit=REDEEM_RATE_LIMIT,
+        window_seconds=REDEEM_RATE_WINDOW_SECONDS,
+    )
+    if not decision.allowed:
+        return _rate_limited_response(decision.retry_after_seconds)
     try:
-        payload = _json_payload(request)
+        payload = _json_payload(request, body_limit=REDEEM_BODY_MAX_BYTES)
+    except RequestBodyTooLarge:
+        return _request_too_large_response()
     except ValidationError as error:
         return _invalid_request(error)
     try:
