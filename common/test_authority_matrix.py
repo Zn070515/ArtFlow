@@ -22,6 +22,7 @@ from core.models import Activity
 from core.services import transition_activity_phase
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from ruleset.admin import RulesetVersionAdmin
@@ -468,8 +469,27 @@ class AuthorityMutationMatrixTests(TestCase):
                 "SingerRegistration",
                 "Judge",
                 "RulesetVersion",
+                "EntryPoint",
+                "AccessGrant",
+                "EphemeralSession",
             },
         )
+
+    def test_raw_delete_cannot_bypass_authority_matrix(self):
+        for descriptor in MODEL_MATRIX:
+            instance = descriptor.factory(self)
+            with self.subTest(model=descriptor.name):
+                with transaction.atomic():
+                    try:
+                        with self.assertRaises(ValidationError):
+                            descriptor.model._base_manager.filter(pk=instance.pk)._raw_delete(
+                                "default"
+                            )
+                        self.assertTrue(
+                            descriptor.model._base_manager.filter(pk=instance.pk).exists()
+                        )
+                    finally:
+                        transaction.set_rollback(True)
 
     def test_unauthorized_mutation_matrix(self):
         for descriptor in MODEL_MATRIX:
