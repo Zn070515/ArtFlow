@@ -82,7 +82,7 @@ Extend boot to accept an operatorId value and create a runtime with operatorId s
 
 - [ ] Step 6: Run the test and verify it fails for the intended reason.
 
-Run: npm run test:client
+Run: node --test tests/client/rapid_score.test.mjs
 
 Expected: the new isolation assertion fails because the production key is still unscoped by operator; existing assertions should remain informative. Do not change production code in this task to hide the failure.
 
