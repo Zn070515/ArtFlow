@@ -88,6 +88,24 @@ git diff --check
 
 `scripts\verify.ps1` runs the broader local verification contract, including formatting, typing, tests, root development Compose configuration, production-manifest structure plus `docker compose -f deploy/compose.production.yml config --quiet`, workflow checks, documentation checks, and a production settings check. It does not start or tear down production services.
 
+### Browser runtime smoke
+
+Playwright checks the browser-reachable shape of the already-running local or
+Compose web service. Install the locked Node dependencies and Chromium once,
+then run:
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run test:e2e
+```
+
+The default base URL is `http://127.0.0.1:8000`; set `PLAYWRIGHT_BASE_URL` for
+another disposable local/CI service. The initial suite is read-only and checks
+`/healthz/`. Future Judge/Ticket specs must use disposable data and must set
+`trace: "off"` (and avoid video/screenshots) whenever a bearer token is in a
+request, so raw credentials cannot enter test artifacts.
+
 ## Troubleshooting
 
 - If `uv sync --locked` fails, do not edit `requirements.txt` to work around it. Restore the expected lockfile or intentionally update the lockfile and regenerate the compatibility requirements through the provided script.
