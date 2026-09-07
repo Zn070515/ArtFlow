@@ -309,7 +309,7 @@ class EntryAccessRedemptionTests(TestCase):
         self.assertEqual(EphemeralSession.objects.count(), 1)
 
     def test_redeem_rejects_malformed_unknown_and_expired_tokens(self):
-        for token in ("", "x" * 129, "not-a-real-token"):
+        for token in ("", "x" * 129, "not-a-real-token", "中文 token"):
             with self.subTest(token=token), self.assertRaises(ValidationError):
                 redeem_access_grant(token)
 

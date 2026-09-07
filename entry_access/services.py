@@ -1,4 +1,5 @@
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
@@ -21,6 +22,7 @@ from .models import AccessGrant, EntryPoint, EphemeralSession
 
 MAX_GRANT_TTL = timedelta(minutes=30)
 MAX_SESSION_TTL = timedelta(minutes=15)
+TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,11 @@ class RedeemedEphemeralSession:
 
 def _token_digest(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+def _validate_raw_token(raw_token, message):
+    if not isinstance(raw_token, str) or not TOKEN_PATTERN.fullmatch(raw_token):
+        raise ValidationError(message)
 
 
 def create_entry_point(activity, *, kind, label, actor):
@@ -121,8 +128,7 @@ def issue_access_grant(entry_point, *, actor, ttl, round=None):
 
 
 def redeem_access_grant(raw_token, *, request_meta=None):
-    if not isinstance(raw_token, str) or not raw_token or len(raw_token) > 128:
-        raise ValidationError("临时访问授权无效。")
+    _validate_raw_token(raw_token, "临时访问授权无效。")
     request_meta = request_meta or AccessRequestMeta()
     digest = _token_digest(raw_token)
     now = timezone.now()
@@ -167,8 +173,7 @@ def redeem_access_grant(raw_token, *, request_meta=None):
 
 
 def authenticate_ephemeral_session(raw_token, *, expected_kind, activity, round=None):
-    if not isinstance(raw_token, str) or not raw_token or len(raw_token) > 128:
-        raise ValidationError("临时访问会话无效。")
+    _validate_raw_token(raw_token, "临时访问会话无效。")
     activity_id = getattr(activity, "pk", activity)
     round_id = getattr(round, "pk", round) if round is not None else None
     now = timezone.now()
