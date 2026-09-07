@@ -576,7 +576,9 @@ class VoteBallotConcurrencyTests(TransactionTestCase):
 
 class VoteStateServiceTests(TestCase):
     def setUp(self):
-        self.operator = User.objects.create_user(username="vote-staff", password="pass")
+        self.operator = create_provisioned_user(
+            username="vote-admin", password="pass", role=User.Role.ADMIN
+        )
         self.activity = Activity.objects.create(
             title="State Contest",
             activity_type=Activity.Type.SINGER_CONTEST,

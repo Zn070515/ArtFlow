@@ -70,9 +70,14 @@ def test_event_compose_exposes_web_only_on_localhost():
     assert "ports" not in compose["services"]["db"]
     assert web_environment["DATABASE_ENGINE"] == "postgresql"
     assert web_environment["RATE_LIMIT_BACKEND"] == "database"
+    assert web_environment["ALLOWED_HOSTS"] == "localhost,127.0.0.1"
+    assert web_environment["CSRF_TRUSTED_ORIGINS"] == ""
     assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
+    event_manifest = EVENT_COMPOSE_PATH.read_text(encoding="utf-8").lower()
+    assert "tunnel" not in event_manifest
+    assert "ipv6" not in event_manifest
 
 
 def test_production_web_healthcheck_uses_internal_exempt_health_route():

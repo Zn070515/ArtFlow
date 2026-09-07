@@ -502,7 +502,9 @@ class ActivityPhasePolicyTests(TestCase):
 
 class ActivityPhaseTransitionTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username="phase-admin", password="pass")
+        self.user = create_provisioned_user(
+            username="phase-admin", password="pass", role=User.Role.ADMIN
+        )
         self.activity = Activity.objects.create(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,

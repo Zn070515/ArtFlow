@@ -60,7 +60,7 @@ This root Compose file is development/integration only. For an event operated fr
 
 ### Event/local-only contract
 
-Use `deploy/compose.event.yml` only on the single Staff-operated primary machine. It publishes `web` solely as `127.0.0.1:8000` and keeps PostgreSQL private; configure `EVENT_ALLOWED_HOSTS=localhost,127.0.0.1` and, when a tunnel or IPv6 ingress is deliberately used, append its hostname plus its HTTPS origin in `EVENT_CSRF_TRUSTED_ORIGINS`. A public tunnel or cloud endpoint supplies ingress only: it is not a second server or authority database. Never run a second writable event stack. PowerPoint remains an independent presentation tool.
+Use `deploy/compose.event.yml` only on the single Staff-operated primary machine. It publishes `web` solely as `127.0.0.1:8000`, hard-codes `ALLOWED_HOSTS` to loopback names, and keeps PostgreSQL private; the event manifest provides no public ingress. Never run a second writable event stack. PowerPoint remains an independent presentation tool.
 
 ### PostgreSQL acceptance gate
 

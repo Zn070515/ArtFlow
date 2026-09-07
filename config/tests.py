@@ -212,6 +212,19 @@ class SettingsTests(SimpleTestCase):
 
         self.assertTrue(Path(settings.STATICFILES_DIRS[0]).is_dir())
 
+    def test_non_debug_runtime_uses_whitenoise_static_storage(self):
+        development_backend = self.reload_settings(
+            {"APP_ENV": "development", "DEBUG": "False"}
+        ).STORAGES["staticfiles"]["BACKEND"]
+        production_backend = self.reload_settings(production_environment()).STORAGES["staticfiles"][
+            "BACKEND"
+        ]
+
+        self.assertEqual(
+            development_backend, "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        )
+        self.assertEqual(production_backend, development_backend)
+
     def test_production_enables_secure_transport_and_cookie_settings(self):
         settings_module = self.reload_settings(production_environment())
 

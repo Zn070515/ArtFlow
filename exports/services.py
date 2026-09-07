@@ -6,6 +6,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Any
 
+from accounts.services import require_current_admin
 from common.authority import ACTIVITY_STATE, authority_write
 from common.business_rules import ensure_activity_unlocked
 from common.lifecycle import runtime_is_test, scope_runtime
@@ -705,9 +706,8 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
     package, transition phase to ARCHIVED, lock, and audit — all atomically."""
     from archive.models import ArchivePackage
 
+    current_actor = require_current_admin(actor)
     locked_activity = lock_activity_for_runtime_data(activity)
-    if not actor.is_admin:
-        raise PermissionDenied("只有管理员才能归档。")
     if locked_activity.data_lifecycle != Activity.DataLifecycle.FORMAL:
         raise PermissionDenied("只有正式活动才能归档。")
     if locked_activity.phase == Activity.Phase.ARCHIVED:
@@ -742,7 +742,7 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         activity=locked_activity,
         includes=", ".join(a.name for a in artifacts),
         note=note,
-        created_by=actor,
+        created_by=current_actor,
         version=next_version,
         is_current=True,
     )
@@ -755,15 +755,17 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
 
         old_phase = locked_activity.phase
         if old_phase != Activity.Phase.ARCHIVED:
-            locked_activity = _enter_archived_phase_locked(locked_activity, actor=actor, note=note)
+            locked_activity = _enter_archived_phase_locked(
+                locked_activity, actor=current_actor, note=note
+            )
         locked_activity.is_locked = True
         locked_activity.locked_at = timezone.now()
-        locked_activity.locked_by = actor
+        locked_activity.locked_by = current_actor
         with authority_write(ACTIVITY_STATE):
             locked_activity.save(update_fields=["is_locked", "locked_at", "locked_by"])
 
         AuditLog.objects.create(
-            operator=actor,
+            operator=current_actor,
             action_type=AuditLog.ActionType.ARCHIVE_ACTIVITY,
             target=f"Activity:{locked_activity.pk}",
             old_value=old_phase,

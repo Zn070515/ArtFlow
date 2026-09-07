@@ -2268,7 +2268,7 @@ class StaffPanelSmokeTests(TestCase):
 
         response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
         round_.refresh_from_db()
         self.assertFalse(round_.is_locked)
         self.assertFalse(ScoreRecord.objects.filter(singer=singer, judge=judge).exists())
@@ -2333,7 +2333,7 @@ class StaffPanelSmokeTests(TestCase):
 
         response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
         round_.refresh_from_db()
         self.assertEqual(round_.status, ContestRound.Status.LOCKED)
         self.assertTrue(round_.is_locked)
@@ -2457,11 +2457,17 @@ class StaffPanelSmokeTests(TestCase):
         self.client.force_login(self.staff)
 
         lock_response = self.client.post(reverse("staff:round_lock", args=[round_.pk]))
-        self.assertEqual(lock_response.status_code, 403)
+        self.assertEqual(lock_response.status_code, 302)
         round_.refresh_from_db()
         self.assertFalse(round_.is_locked)
         self.assertNotEqual(round_.status, ContestRound.Status.LOCKED)
 
+        finalize_response = self.client.post(
+            reverse("staff:round_finalize_advancement", args=[round_.pk]),
+            data={"selected_singer_ids": [str(singer.pk)]},
+        )
+        self.assertEqual(finalize_response.status_code, 403)
+        login_admin(self.client, self.admin)
         finalize_response = self.client.post(
             reverse("staff:round_finalize_advancement", args=[round_.pk]),
             data={"selected_singer_ids": [str(singer.pk)]},
@@ -2477,7 +2483,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(round_.is_locked)
         self.assertTrue(
             AuditLog.objects.filter(
-                operator=self.staff,
+                operator=self.admin,
                 action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
                 target=f"ContestRound:{round_.pk}",
             ).exists()
@@ -2510,7 +2516,7 @@ class StaffPanelSmokeTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
         self.assertFalse(Award.objects.filter(name="Invalid Award").exists())
 
     def test_vote_session_creation_rejects_singer_from_another_activity(self):
@@ -2842,12 +2848,15 @@ class RuntimeLifecycleMatrixTests(TestCase):
         )
 
     def test_candidate_pool_binds_each_singer_to_its_own_activity(self):
-        self.client.force_login(self.staff)
         for path in (
             reverse("staff:award_create"),
             reverse("staff:vote_session_create"),
             reverse("staff:incident_create"),
         ):
+            if path == reverse("staff:award_create"):
+                login_admin(self.client, self.admin)
+            else:
+                self.client.force_login(self.staff)
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
@@ -2871,7 +2880,7 @@ class RuntimeLifecycleMatrixTests(TestCase):
             reverse("staff:award_create"),
             {"activity_id": activity.pk, "singer_id": mismatched.pk, "name": "Bad Award"},
         )
-        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(rejected.status_code, 302)
         self.assertFalse(Award.objects.filter(name="Bad Award").exists())
 
         accepted = self.client.post(
@@ -2881,6 +2890,14 @@ class RuntimeLifecycleMatrixTests(TestCase):
         self.assertEqual(accepted.status_code, 302)
         award = Award.objects.get(name="Good Award")
         self.assertTrue(award.is_test_data)
+        self.assertEqual(award.source_node, "MANUAL")
+        self.assertTrue(
+            AuditLog.objects.filter(
+                operator=self.admin,
+                target=f"Award:{award.pk}",
+                new_value__contains='"source": "MANUAL"',
+            ).exists()
+        )
 
     def test_vote_session_create_rejects_wrong_lifecycle_singer(self):
         activity = _create_activity(
@@ -4153,6 +4170,9 @@ class PublicPortalPublicationTests(TestCase):
         self.staff = _create_provisioned_user(
             username="pub-staff", password="pass", role=User.Role.STAFF
         )
+        self.admin = _create_provisioned_user(
+            username="pub-admin", password="pass", role=User.Role.ADMIN
+        )
         self.formal = _create_activity(
             title="Formal Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -4188,6 +4208,31 @@ class PublicPortalPublicationTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(PublicPost.objects.filter(title="A Post").exists())
+
+    def test_staff_cannot_publish_formal_post(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:post_create"),
+            self._post_payload(
+                status=PublicPost.Status.PUBLISHED, related_activity_id=self.formal.pk
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(reverse("accounts:admin_login")))
+        self.assertFalse(PublicPost.objects.filter(title="A Post").exists())
+
+    def test_admin_can_publish_formal_post(self):
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            reverse("staff:post_create"),
+            self._post_payload(
+                status=PublicPost.Status.PUBLISHED, related_activity_id=self.formal.pk
+            ),
+        )
+        self.assertEqual(response.status_code, 302)
+        post = PublicPost.objects.get(title="A Post")
+        self.assertEqual(post.created_by, self.admin)
+        self.assertEqual(post.updated_by, self.admin)
 
     def test_post_create_allows_draft_for_test_activity(self):
         self.client.force_login(self.staff)
@@ -4761,6 +4806,9 @@ class ResultBoardTests(TestCase):
         self.staff = _create_provisioned_user(
             username="result-board-staff", password="pass", role=User.Role.STAFF
         )
+        self.admin = _create_provisioned_user(
+            username="result-board-admin", password="pass", role=User.Role.ADMIN
+        )
         self.activity = _create_activity(
             title="Board Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -5024,11 +5072,12 @@ class ResultBoardTests(TestCase):
             round_keys={"r1": contest_round},
         )
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
+        login_admin(self.client, self.admin)
         response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))  # type: ignore[union-attr]
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))  # type: ignore[union-attr]
         ready.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(ready.status, StageResult.Status.CONFIRMED)
-        self.assertEqual(ready.confirmed_by, self.staff)  # type: ignore[union-attr]
+        self.assertEqual(ready.confirmed_by, self.admin)  # type: ignore[union-attr]
         self.assertIsNotNone(ready.confirmed_at)  # type: ignore[union-attr]
         # M1-R8 Commit 4: the CONFIRM audit is recorded once by the service (rich payload),
         # not duplicated by the view with a stale READY_TO_CONFIRM status.
@@ -5055,6 +5104,7 @@ class ResultBoardTests(TestCase):
             ruleset_hash="hash-chold",
             reasons=["缺评分"],
         )
+        login_admin(self.client, self.admin)
         response = self.client.post(reverse("staff:stage_result_confirm", args=[hold.pk]))
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[hold.pk]))
         hold.refresh_from_db()
@@ -5377,7 +5427,7 @@ class RulesetEditorTests(TestCase):
             phase=Activity.Phase.REGISTRATION_OPEN,
             is_test_mode=True,
         )
-        self.client.force_login(self.admin)
+        login_admin(self.client, self.admin)
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity,
             name="院十佳2026规则",

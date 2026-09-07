@@ -4,7 +4,12 @@ from decimal import Decimal, InvalidOperation
 
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
-from accounts.services import change_user_role, set_user_active
+from accounts.services import (
+    admin_verification_is_valid,
+    change_user_role,
+    require_current_admin,
+    set_user_active,
+)
 from common.audit import audit_export, log_action
 from common.authority import ACTIVITY_STATE, authority_write
 from common.business_rules import (
@@ -33,6 +38,7 @@ from core.services import (
     unarchive_activity,
 )
 from django.contrib import messages
+from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
@@ -102,6 +108,7 @@ from singer_contest.services import (
     apply_scores,
     apply_scores_if_version,
     confirm_stage_result,
+    create_manual_award,
     create_scoring_rubric,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
@@ -155,8 +162,7 @@ def _form_error(form):
 
 
 def _require_admin(user):
-    if not user.is_admin:
-        raise PermissionDenied("Only admins can manage this resource.")
+    return require_current_admin(user)
 
 
 def _ensure_activity_mutable(activity):
@@ -309,6 +315,13 @@ def post_create(request):
                     get_object_or_404(Activity, pk=data["related_activity_id"])
                 )
             _ensure_publication_allowed(related_activity, data["status"])
+            publication_actor = request.user
+            if data["status"] == PublicPost.Status.PUBLISHED:
+                if not admin_verification_is_valid(request.session):
+                    return redirect_to_login(
+                        request.get_full_path(), reverse("accounts:admin_login")
+                    )
+                publication_actor = require_current_admin(request.user)
             post = PublicPost(
                 title=data["title"],
                 subtitle=data["subtitle"],
@@ -318,8 +331,8 @@ def post_create(request):
                 sort_order=data["sort_order"],
                 is_pinned=data["is_pinned"],
                 related_activity_id=data["related_activity_id"],
-                created_by=request.user,
-                updated_by=request.user,
+                created_by=publication_actor,
+                updated_by=publication_actor,
             )
             if request.FILES.get("cover_image"):
                 post.cover_image = request.FILES["cover_image"]
@@ -412,22 +425,30 @@ def post_edit(request, pk):
             )
         old_locked = locked_by_pk.get(old_hint_activity_id) if old_hint_activity_id else None
         new_locked = locked_by_pk.get(new_activity_id) if new_activity_id else None
+        old_status = locked_post.status
         # A move from a locked activity to an unlocked one must still be blocked;
         # checking only the new activity would let staff bypass the old lock.
         for locked_activity in (old_locked, new_locked):
             if locked_activity is not None:
                 ensure_activity_unlocked(locked_activity)
         _ensure_publication_allowed(new_locked, data["status"])
+        publication_actor = request.user
+        if (
+            data["status"] == PublicPost.Status.PUBLISHED
+            or old_status == PublicPost.Status.PUBLISHED
+        ):
+            if not admin_verification_is_valid(request.session):
+                return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))
+            publication_actor = require_current_admin(request.user)
         locked_post.title = data["title"]
         locked_post.subtitle = data["subtitle"]
         locked_post.content = data["content"]
         locked_post.post_type = data["post_type"]
-        old_status = locked_post.status
         locked_post.status = data["status"]
         locked_post.sort_order = data["sort_order"]
         locked_post.is_pinned = data["is_pinned"]
         locked_post.related_activity_id = data["related_activity_id"]
-        locked_post.updated_by = request.user
+        locked_post.updated_by = publication_actor
         locked_post.version += 1
         if request.FILES.get("cover_image"):
             locked_post.cover_image = request.FILES["cover_image"]
@@ -1521,7 +1542,7 @@ def stage_result_detail(request, pk):
     )
 
 
-@staff_required
+@admin_required
 @require_POST
 def stage_result_confirm(request, pk):
     """核定并锁定 a stage result into its final handcard state (M1-H §36-37)."""
@@ -1551,7 +1572,7 @@ def stage_result_unlock(request, pk):
     return redirect("staff:stage_result_detail", pk=pk)
 
 
-@staff_required
+@admin_required
 @require_POST
 def round_finalize_advancement(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
@@ -1571,11 +1592,20 @@ def round_finalize_advancement(request, pk):
 @require_POST
 def round_lock(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    lock_round(contest_round, request.user)
+    try:
+        lock_round(contest_round, request.user)
+    except ValidationError as error:
+        messages.error(request, f"轮次锁定失败：{'；'.join(error.messages)}")
+        return redirect("staff:round_ranking", pk=pk)
+    except PermissionDenied as error:
+        messages.error(request, f"轮次锁定失败：{error}")
+        return redirect("staff:round_ranking", pk=pk)
     try:
         maybe_resolve_checkpoints(contest_round.activity, request.user)
-    except (ValidationError, PermissionDenied):
-        pass
+    except ValidationError as error:
+        messages.warning(request, f"轮次已锁定，但赛段未能自动解析：{'；'.join(error.messages)}")
+    except PermissionDenied as error:
+        messages.warning(request, f"轮次已锁定，但赛段未能自动解析：{error}")
     return redirect("staff:round_ranking", pk=pk)
 
 
@@ -1658,28 +1688,24 @@ def award_list(request):
     return render(request, "staff_panel/award_list.html", {"awards": awards})
 
 
-@staff_required
+@admin_required
 @transaction.atomic
 def award_create(request):
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
-        activity = lock_activity_for_runtime_data(activity)
-        ensure_activity_unlocked(activity)
-        ensure_activity_action_allowed(activity, ActivityAction.MANAGE_AWARD)
         singer_id = request.POST.get("singer_id")
         if singer_id:
             singer = get_object_or_404(SingerRegistration, pk=singer_id)
-            ensure_same_activity(activity, singer, label="Award singer")
-            ensure_lifecycle_consistent(activity, singer, label="Award 选手")
-            award = Award.objects.create(
-                activity=activity,
-                singer=singer,
-                name=request.POST["name"],
-                is_test_data=activity.is_test_mode,
-            )
-            log_action(
-                request, AuditLog.ActionType.OTHER, f"Award:{award.pk}", new_value=award.name
-            )
+            try:
+                create_manual_award(
+                    activity,
+                    singer=singer,
+                    name=request.POST.get("name", ""),
+                    operator=request.user,
+                )
+            except (PermissionDenied, ValidationError) as error:
+                messages.error(request, str(error))
+                return redirect("staff:award_list")
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
@@ -2867,7 +2893,7 @@ def ruleset_bind(request, pk):
     return redirect("staff:ruleset_edit", pk=pk)
 
 
-@staff_required
+@admin_required
 def manual_decision(request, pk):
     version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
     form = ManualDecisionForm(
@@ -2930,7 +2956,7 @@ def ruleset_preview(request, pk):
     )
 
 
-@staff_required
+@admin_required
 @require_POST
 def ruleset_freeze(request, pk):
     version = get_object_or_404(RulesetVersion, pk=pk)

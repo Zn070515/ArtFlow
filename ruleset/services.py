@@ -20,10 +20,10 @@ from __future__ import annotations
 import hashlib
 import json
 
+from accounts.services import require_current_admin
 from common.authority import RULESET_FREEZE, authority_write
 from common.models import AuditLog
 from core.services import lock_activity_for_action
-from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -427,9 +427,7 @@ def freeze_ruleset_version(
     invalid; :class:`RulesetInvalidError` if compilation reports any ERROR.
     """
     locked = _lock_version_for_write(version)
-    current_operator = get_user_model().objects.get(pk=operator.pk)
-    if not current_operator.is_active or not current_operator.is_admin:
-        raise PermissionDenied("只有管理员可以核定冻结赛制。")
+    current_operator = require_current_admin(operator)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise ValidationError("该赛制版本已冻结。")
 

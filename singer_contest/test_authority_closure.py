@@ -15,6 +15,7 @@ from decimal import Decimal
 
 from accounts.models import User
 from common.authority import (
+    ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
@@ -24,7 +25,7 @@ from common.authority import (
 from common.models import AuditLog
 from core.models import Activity
 from django.contrib import admin
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
@@ -54,7 +55,10 @@ from .services import (
 
 class AuthorityClosureAcceptanceTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username="closure", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.user = User.objects.create_user(
+                username="closure", password="pass", role=User.Role.STAFF
+            )
         self.activity = Activity.objects.create(
             title="closure",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -339,7 +343,10 @@ class AuthorityClosureAcceptanceTests(TestCase):
         self.assertFalse(ScoreWriteReceipt.objects.exists())
 
     def test_rapid_score_receipt_rejects_replay_by_different_operator(self):
-        other_operator = User.objects.create_user(username="closure-other-operator")
+        with authority_write(ACCOUNT_AUTHORITY):
+            other_operator = User.objects.create_user(
+                username="closure-other-operator", role=User.Role.STAFF
+            )
         apply_scores_if_version(
             self.round.pk,
             0,
@@ -360,6 +367,20 @@ class AuthorityClosureAcceptanceTests(TestCase):
         self.round.refresh_from_db()
         self.assertEqual(self.round.score_version, 1)
         self.assertEqual(ScoreWriteReceipt.objects.get().operator_id, self.user.pk)
+
+    def test_rapid_score_requires_an_active_staff_or_admin_operator(self):
+        participant = User.objects.create_user(username="closure-participant", password="pass")
+
+        with self.assertRaises(PermissionDenied):
+            apply_scores_if_version(
+                self.round.pk,
+                0,
+                {(self.singer.pk, self.judge.pk): "90"},
+                participant,
+                command_id="receipt-participant-001",
+            )
+
+        self.assertFalse(ScoreWriteReceipt.objects.exists())
 
     def test_rapid_score_receipt_result_payload_is_bounded(self):
         receipt = ScoreWriteReceipt(
