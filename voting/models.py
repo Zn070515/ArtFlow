@@ -1,6 +1,11 @@
 from typing import Any
 
-from common.authority import TEST_DATA_CLEANUP, VOTE_SESSION_STATE, authority_authorized
+from common.authority import (
+    TEST_DATA_CLEANUP,
+    VOTE_SESSION_STATE,
+    authority_authorized,
+    parse_bulk_create_options,
+)
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
@@ -29,8 +34,8 @@ def _relation_pk(value):
     return getattr(value, "pk", value)
 
 
-def _reject_conflict_upsert(kwargs, model_name: str) -> None:
-    if kwargs.get("update_conflicts"):
+def _reject_conflict_upsert(args, kwargs, model_name: str) -> None:
+    if parse_bulk_create_options(args, kwargs).update_conflicts:
         raise ValidationError(
             f"{model_name} does not support bulk_create(update_conflicts=True); "
             "use the audited authority service or ordinary bulk_create()."
@@ -245,14 +250,14 @@ class VoteSessionQuerySet(models.QuerySet):
 
     def bulk_create(self, objs, *args, **kwargs):
         objs = list(objs)
-        if kwargs.get("update_conflicts"):
-            update_fields = set(kwargs.get("update_fields", ()))
+        options = parse_bulk_create_options(args, kwargs)
+        if options.update_conflicts:
+            update_fields = set(options.update_fields)
             self._ensure_state_authorized(update_fields)
             if self.configuration_fields.intersection(update_fields):
                 for vote_session in objs:
                     lookup = {
-                        field: getattr(vote_session, field)
-                        for field in kwargs.get("unique_fields", ())
+                        field: getattr(vote_session, field) for field in options.unique_fields
                     }
                     if self.model._base_manager.filter(**lookup, is_locked=True).exists():
                         raise ValidationError("投票锁定后，投票配置不可直接修改。")
@@ -403,7 +408,7 @@ class VoteBallotQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
-        _reject_conflict_upsert(kwargs, self.model.__name__)
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             _ensure_vote_session_mutable(obj.vote_session_id)
@@ -473,7 +478,7 @@ class VoteOptionQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
-        _reject_conflict_upsert(kwargs, self.model.__name__)
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()
@@ -565,7 +570,7 @@ class VoteRecordQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
-        _reject_conflict_upsert(kwargs, self.model.__name__)
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
             obj.clean()

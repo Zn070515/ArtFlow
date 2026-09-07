@@ -147,6 +147,39 @@ class ActivityCreationAuthorityTests(TestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.phase, Activity.Phase.DRAFT)
 
+    def test_activity_bulk_create_positional_lifecycle_guard_through_both_managers(
+        self,
+    ):
+        for manager, title in (
+            (Activity.objects, "Default positional conflict target"),
+            (Activity._base_manager, "Base positional conflict target"),
+        ):
+            with self.subTest(manager=manager.name):
+                activity = Activity.objects.create(
+                    title=title, activity_type=Activity.Type.SINGER_CONTEST
+                )
+
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            Activity(
+                                pk=activity.pk,
+                                title=activity.title,
+                                activity_type=activity.activity_type,
+                                is_test_mode=False,
+                            )
+                        ],
+                        None,
+                        False,
+                        True,
+                        ["is_test_mode"],
+                        ["pk"],
+                    )
+
+                activity.refresh_from_db()
+                self.assertTrue(activity.is_test_mode)
+                self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.TEST)
+
     def test_activity_creation_rejects_lock_provenance_through_both_managers(self):
         user = User.objects.create_user(username="activity-lock-provenance")
         for manager, title, provenance in (

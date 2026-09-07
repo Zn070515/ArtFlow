@@ -1,4 +1,9 @@
-from common.authority import ACTIVITY_STATE, TEST_DATA_CLEANUP, authority_authorized
+from common.authority import (
+    ACTIVITY_STATE,
+    TEST_DATA_CLEANUP,
+    authority_authorized,
+    parse_bulk_create_options,
+)
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
@@ -20,13 +25,12 @@ class ActivityQuerySet(models.QuerySet):
 
     def bulk_create(self, objs, *args, **kwargs):
         objs = list(objs)
-        if kwargs.get("update_conflicts") and self.lifecycle_fields.intersection(
-            kwargs.get("update_fields", ())
-        ):
+        options = parse_bulk_create_options(args, kwargs)
+        if options.update_conflicts and self.lifecycle_fields.intersection(options.update_fields):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
         if (
-            kwargs.get("update_conflicts")
-            and self.state_fields.intersection(kwargs.get("update_fields", ()))
+            options.update_conflicts
+            and self.state_fields.intersection(options.update_fields)
             and not authority_authorized(ACTIVITY_STATE)
         ):
             raise ValidationError("Activity state must be changed through the lifecycle service.")

@@ -44,12 +44,17 @@ from singer_contest.models import (
     CompositeResult,
     ContestRound,
     CriterionScore,
+    DuelDecision,
     Judge,
+    ManualDecision,
     Performance,
     PerformanceGroup,
+    RoundEntry,
+    RoundJudge,
     RubricCriterion,
     ScoreRecord,
     ScoreSummary,
+    ScoreWriteReceipt,
     ScoringRubric,
     SingerRegistration,
     StageAwardDecision,
@@ -469,6 +474,245 @@ class AuthorityMutationMatrixTests(TestCase):
             with self.subTest(model=descriptor.name):
                 descriptor.attempt(self)
 
+    def test_protected_fact_querysets_reject_positional_conflict_upsert_through_both_managers(
+        self,
+    ):
+        """Unsupported fact/child upserts must be identified before validation or SQL."""
+
+        entry = RoundEntry.objects.create(round=self.round, singer=self.singer)
+        assignment = RoundJudge.objects.create(round=self.round, judge=self.judge)
+        with authority_write(SCORE_SUMMARY_RECALCULATE):
+            summary = ScoreSummary.objects.create(
+                round=self.round,
+                singer=self.singer,
+                average_score=Decimal("90"),
+                is_test_data=True,
+            )
+        receipt = ScoreWriteReceipt.objects.create(
+            command_id="matrix-positional-receipt",
+            operator=self.operator,
+            operation="score",
+            payload_hash="0" * 64,
+            result_version=0,
+            result_payload={},
+            status=ScoreWriteReceipt.Status.PENDING,
+        )
+
+        cases: tuple[tuple[str, type[Any], Callable[[], Any], tuple[str, ...]], ...] = (
+            (
+                "SingerRegistration",
+                SingerRegistration,
+                lambda: SingerRegistration(
+                    pk=self.singer.pk,
+                    activity=self.activity,
+                    user=self.operator,
+                    name="Positional singer",
+                    student_id=self.singer.student_id,
+                    college="College",
+                    class_name="Class",
+                    phone="13000000000",
+                    song_name="Song",
+                    is_test_data=True,
+                ),
+                ("name",),
+            ),
+            (
+                "Judge",
+                Judge,
+                lambda: Judge(pk=self.judge.pk, activity=self.activity, name="Positional judge"),
+                ("name",),
+            ),
+            (
+                "RoundEntry",
+                RoundEntry,
+                lambda: RoundEntry(pk=entry.pk, round=self.round, singer=self.singer),
+                ("running_order",),
+            ),
+            (
+                "RoundJudge",
+                RoundJudge,
+                lambda: RoundJudge(pk=assignment.pk, round=self.round, judge=self.judge),
+                ("judge",),
+            ),
+            (
+                "ScoreRecord",
+                ScoreRecord,
+                lambda: ScoreRecord(
+                    pk=self.score.pk,
+                    round=self.round,
+                    singer=self.singer,
+                    judge=self.judge,
+                    score=Decimal("91"),
+                    is_test_data=True,
+                ),
+                ("score",),
+            ),
+            (
+                "ScoreWriteReceipt",
+                ScoreWriteReceipt,
+                lambda: ScoreWriteReceipt(
+                    pk=receipt.pk,
+                    command_id=receipt.command_id,
+                    operator=self.operator,
+                    operation="score",
+                    payload_hash="1" * 64,
+                    result_version=0,
+                    result_payload={},
+                    status=ScoreWriteReceipt.Status.PENDING,
+                ),
+                ("payload_hash",),
+            ),
+            (
+                "ScoreSummary",
+                ScoreSummary,
+                lambda: ScoreSummary(
+                    pk=summary.pk,
+                    round=self.round,
+                    singer=self.singer,
+                    average_score=Decimal("91"),
+                    is_test_data=True,
+                ),
+                ("average_score",),
+            ),
+            (
+                "AudienceScore",
+                AudienceScore,
+                lambda: AudienceScore(
+                    pk=self.audience.pk,
+                    activity=self.activity,
+                    stage_key=self.audience.stage_key,
+                    singer=self.singer,
+                    score=Decimal("91"),
+                    is_test_data=True,
+                ),
+                ("score",),
+            ),
+            (
+                "Award",
+                Award,
+                lambda: Award(
+                    pk=self.award.pk,
+                    activity=self.activity,
+                    singer=self.singer,
+                    name="Positional award",
+                    is_test_data=True,
+                ),
+                ("name",),
+            ),
+            (
+                "PerformanceGroup",
+                PerformanceGroup,
+                lambda: PerformanceGroup(
+                    pk=self.group.pk,
+                    activity=self.activity,
+                    round=self.round,
+                    name="Positional group",
+                    is_test_data=True,
+                ),
+                ("name",),
+            ),
+            (
+                "Performance",
+                Performance,
+                lambda: Performance(
+                    pk=self.performance.pk,
+                    activity=self.activity,
+                    round=self.round,
+                    singer=self.singer,
+                    group=self.group,
+                    song_title="Positional song",
+                    is_test_data=True,
+                ),
+                ("song_title",),
+            ),
+            (
+                "ScoringRubric",
+                ScoringRubric,
+                lambda: ScoringRubric(
+                    pk=self.rubric.pk,
+                    activity=self.activity,
+                    name="Positional rubric",
+                    is_test_data=True,
+                ),
+                ("name",),
+            ),
+            (
+                "RubricCriterion",
+                RubricCriterion,
+                lambda: RubricCriterion(
+                    pk=self.criterion.pk,
+                    rubric=self.rubric,
+                    name=self.criterion.name,
+                    max_score=Decimal("90"),
+                    is_test_data=True,
+                ),
+                ("max_score",),
+            ),
+            (
+                "CriterionScore",
+                CriterionScore,
+                lambda: CriterionScore(
+                    pk=self.criterion_score.pk,
+                    score_record=self.score,
+                    criterion=self.criterion,
+                    value=Decimal("91"),
+                    is_test_data=True,
+                ),
+                ("value",),
+            ),
+            (
+                "StageResult",
+                StageResult,
+                lambda: StageResult(
+                    pk=self.stage.pk,
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    stage_key="positional-stage",
+                    is_test_data=True,
+                ),
+                ("stage_key",),
+            ),
+            (
+                "ManualDecision",
+                ManualDecision,
+                lambda: ManualDecision(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    manual_key="manual",
+                    group="",
+                    chosen=[],
+                    is_test_data=True,
+                ),
+                ("chosen",),
+            ),
+            (
+                "DuelDecision",
+                DuelDecision,
+                lambda: DuelDecision(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    duel_key="duel",
+                    pair_key="1|2",
+                    winner="1",
+                    is_test_data=True,
+                ),
+                ("winner",),
+            ),
+        )
+        for name, model, candidate_factory, update_fields in cases:
+            for manager_name in ("objects", "_base_manager"):
+                manager = getattr(model, manager_name)
+                with self.subTest(model=name, manager=manager_name):
+                    with self.assertRaisesRegex(ValidationError, "update_conflicts=True"):
+                        manager.bulk_create(
+                            [candidate_factory()],
+                            None,
+                            False,
+                            True,
+                            update_fields,
+                            ["id"],
+                        )
+
     def test_formal_fk_mutation_matrix_checks_old_and_new_origins(self):
         self._lock_round()
         for model, protected, unprotected, field in (
@@ -794,6 +1038,16 @@ class AuthorityMutationMatrixTests(TestCase):
                 unique_fields=["id"],
             )
 
+        def attempt_positional_conflict_upsert(manager, candidate_factory, update_fields):
+            manager.bulk_create(
+                [candidate_factory()],
+                None,
+                False,
+                True,
+                update_fields,
+                ["id"],
+            )
+
         self._confirm_stage()
         stage_relation_upserts: tuple[
             tuple[
@@ -896,10 +1150,21 @@ class AuthorityMutationMatrixTests(TestCase):
             ]
             for manager_name in ("objects", "_base_manager"):
                 manager = getattr(model, manager_name)
-                with self.subTest(model=name, manager=manager_name):
+                with self.subTest(model=name, manager=manager_name, call="keyword"):
                     self._assert_rejects(
                         partial(attempt_conflict_upsert, manager, candidate_factory, update_fields)
                     )
+                    self.assertEqual(
+                        model._base_manager.filter(pk=candidate_factory().pk).values(
+                            *snapshot_fields
+                        )[0],
+                        before,
+                    )
+                with self.subTest(model=name, manager=manager_name, call="positional"):
+                    with self.assertRaisesRegex(ValidationError, "update_conflicts=True"):
+                        attempt_positional_conflict_upsert(
+                            manager, candidate_factory, update_fields
+                        )
                     self.assertEqual(
                         model._base_manager.filter(pk=candidate_factory().pk).values(
                             *snapshot_fields
@@ -1029,7 +1294,7 @@ class AuthorityMutationMatrixTests(TestCase):
             ]
             for manager_name in ("objects", "_base_manager"):
                 manager = getattr(model, manager_name)
-                with self.subTest(model=name, manager=manager_name):
+                with self.subTest(model=name, manager=manager_name, call="keyword"):
                     self._assert_rejects(
                         partial(attempt_conflict_upsert, manager, candidate_factory, update_fields)
                     )
@@ -1039,6 +1304,91 @@ class AuthorityMutationMatrixTests(TestCase):
                         )[0],
                         before,
                     )
+                with self.subTest(model=name, manager=manager_name, call="positional"):
+                    with self.assertRaisesRegex(ValidationError, "update_conflicts=True"):
+                        attempt_positional_conflict_upsert(
+                            manager, candidate_factory, update_fields
+                        )
+                    self.assertEqual(
+                        model._base_manager.filter(pk=candidate_factory().pk).values(
+                            *snapshot_fields
+                        )[0],
+                        before,
+                    )
+
+    def test_ruleset_version_conflict_upsert_rejects_existing_frozen_current_through_both_managers(
+        self,
+    ):
+        """Direct conflict-upsert must not rewrite a stored frozen/current ruleset."""
+
+        original = RulesetVersion._base_manager.filter(pk=self.version.pk).values(
+            "definition",
+            "status",
+            "is_current",
+            "content_hash",
+            "binding",
+        )[0]
+        replacement_definition = (
+            '{"schema_version": 1, "nodes": [{"key": "changed", "type": "ROSTER"}]}'
+        )
+
+        for manager_name in ("objects", "_base_manager"):
+            manager = getattr(RulesetVersion, manager_name)
+            with self.subTest(manager=manager_name, call="keyword"):
+                self._assert_rejects(
+                    lambda manager=manager: manager.bulk_create(
+                        [
+                            RulesetVersion(
+                                pk=self.version.pk,
+                                ruleset=self.ruleset,
+                                version=self.version.version,
+                                definition=replacement_definition,
+                                binding={"stage_key": "changed"},
+                            )
+                        ],
+                        update_conflicts=True,
+                        update_fields=["definition", "binding"],
+                        unique_fields=["pk"],
+                    )
+                )
+                self.assertEqual(
+                    RulesetVersion._base_manager.filter(pk=self.version.pk).values(
+                        "definition",
+                        "status",
+                        "is_current",
+                        "content_hash",
+                        "binding",
+                    )[0],
+                    original,
+                )
+            with self.subTest(manager=manager_name, call="positional"):
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            RulesetVersion(
+                                pk=self.version.pk,
+                                ruleset=self.ruleset,
+                                version=self.version.version,
+                                definition=replacement_definition,
+                                binding={"stage_key": "changed"},
+                            )
+                        ],
+                        None,
+                        False,
+                        True,
+                        ["definition", "binding"],
+                        ["pk"],
+                    )
+                self.assertEqual(
+                    RulesetVersion._base_manager.filter(pk=self.version.pk).values(
+                        "definition",
+                        "status",
+                        "is_current",
+                        "content_hash",
+                        "binding",
+                    )[0],
+                    original,
+                )
 
     def test_admin_canonical_boundaries(self):
         request = RequestFactory().get("/admin/")

@@ -715,6 +715,40 @@ class VoteSessionCreationAuthorityTests(TestCase):
         session.refresh_from_db()
         self.assertFalse(session.is_locked)
 
+    def test_vote_session_bulk_create_positional_configuration_guard_through_both_managers(
+        self,
+    ):
+        for manager, name in (
+            (VoteSession.objects, "Default positional conflict target"),
+            (VoteSession._base_manager, "Base positional conflict target"),
+        ):
+            with self.subTest(manager=manager.name):
+                session = VoteSession.objects.create(**self._session_kwargs(name))
+                with authority_write(VOTE_SESSION_STATE):
+                    VoteSession.objects.filter(pk=session.pk).update(is_locked=True)
+
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            VoteSession(
+                                **self._session_kwargs(
+                                    f"{name} bypass",
+                                    pk=session.pk,
+                                    is_test_data=session.is_test_data,
+                                )
+                            )
+                        ],
+                        None,
+                        False,
+                        True,
+                        ["name"],
+                        ["pk"],
+                    )
+
+                session.refresh_from_db()
+                self.assertTrue(session.is_locked)
+                self.assertEqual(session.name, name)
+
     def test_vote_session_bulk_create_update_conflicts_rejects_locked_configuration_change(self):
         session = VoteSession.objects.create(**self._session_kwargs("Original"))
         with authority_write(VOTE_SESSION_STATE):

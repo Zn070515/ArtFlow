@@ -419,6 +419,46 @@ class ContestRoundCreationAuthorityTests(TestCase):
         contest_round.refresh_from_db()
         self.assertEqual(contest_round.status, ContestRound.Status.DRAFT)
 
+    def test_round_bulk_create_positional_configuration_guard_through_both_managers(
+        self,
+    ):
+        for manager, sequence, original_name in (
+            (ContestRound.objects, 1, "Default positional original"),
+            (ContestRound._base_manager, 2, "Base positional original"),
+        ):
+            with self.subTest(manager=manager.name):
+                contest_round = ContestRound.objects.create(
+                    activity=self.activity,
+                    round_type=ContestRound.RoundType.PRELIMINARY,
+                    sequence=sequence,
+                    name=original_name,
+                )
+                with authority_write(CONTEST_ROUND_STATE):
+                    ContestRound.objects.filter(pk=contest_round.pk).update(
+                        status=ContestRound.Status.PREPARED
+                    )
+
+                with self.assertRaises(ValidationError):
+                    manager.bulk_create(
+                        [
+                            ContestRound(
+                                activity=self.activity,
+                                round_type=contest_round.round_type,
+                                sequence=contest_round.sequence,
+                                name="Positional bypass",
+                            )
+                        ],
+                        None,
+                        False,
+                        True,
+                        ["name"],
+                        ["activity", "sequence"],
+                    )
+
+                contest_round.refresh_from_db()
+                self.assertEqual(contest_round.status, ContestRound.Status.PREPARED)
+                self.assertEqual(contest_round.name, original_name)
+
     def test_round_bulk_create_update_conflicts_rejects_prepared_configuration_change(self):
         contest_round = ContestRound.objects.create(
             activity=self.activity,
