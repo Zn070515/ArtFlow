@@ -45,6 +45,15 @@ Use Django `TestCase`. Add regression tests for permission, lock-state, audit, f
 ## Commit & Pull Request Guidelines
 Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `style:`, `docs:`, `test:`, `chore:`. Keep commits scoped and push feature-branch commits after verification; push `main` only after the verified non-fast-forward merge.
 
+## Agent Execution & Git Network Rules
+
+- Do not spawn subagents to execute repository modifications. The primary agent must inspect, edit, test, and verify changes directly in the current conversation.
+- If `git push` times out, retry through the local VPN proxy at `127.0.0.1:12334`:
+
+```bash
+git -c http.proxy=http://127.0.0.1:12334 -c https.proxy=http://127.0.0.1:12334 push origin <branch>
+```
+
 ## Branch & Worktree Workflow
 
 Do not use `.worktree/`, `worktrees/`, or any other linked worktree for ArtFlow development. Work directly in the repository checkout on a short-lived branch created from a clean, up-to-date `main`:
