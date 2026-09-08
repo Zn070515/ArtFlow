@@ -885,6 +885,10 @@ class RoundJudge(RoundSnapshotMixin, models.Model):
     )
     objects = RoundJudgeManager()
 
+    if TYPE_CHECKING:
+        round_id: int
+        judge_id: int
+
     class Meta:
         base_manager_name = "objects"
         unique_together = [("round", "judge")]
@@ -983,6 +987,7 @@ class RoundPanelSnapshot(models.Model):
     if TYPE_CHECKING:
         round_id: int
         activity_id: int
+        members: models.Manager["RoundPanelSnapshotMember"]
 
     class Meta:
         base_manager_name = "objects"

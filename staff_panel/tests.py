@@ -34,7 +34,13 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Max
 from django.http import FileResponse
-from django.test import RequestFactory, SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test import (
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
@@ -5907,3 +5913,123 @@ class JudgeControlContractTests(SimpleTestCase):
             }
         )
         self.assertFalse(invalid_score.is_valid())
+
+
+class JudgeControlHTTPTests(TestCase):
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="judge-control-staff", password="pass", role=User.Role.STAFF
+        )
+        self.participant = _create_provisioned_user(
+            username="judge-control-participant", password="pass", role=User.Role.PARTICIPANT
+        )
+        self.activity = _create_activity(
+            title="Judge Control Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=True,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge One")
+        SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Demo Singer",
+            student_id="JC-001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Demo Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            minimum_judge_count=1,
+            is_locked=False,
+        )
+        prepare_round(self.contest_round, self.staff)
+        self.client.force_login(self.staff)
+
+    def _prepare_panel(self):
+        return self.client.post(
+            reverse("staff:judge_prepare", args=[self.contest_round.pk]),
+            {"attending_judge_ids": [str(self.judge.pk)]},
+        )
+
+    def test_control_page_is_staff_only_and_readable(self):
+        self.client.logout()
+        anonymous = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertEqual(anonymous.status_code, 302)
+
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PREPARE_REQUIRED")
+        self.assertContains(response, "准备评委组")
+
+    def test_prepare_requires_minimum_attendance_and_creates_authoritative_context(self):
+        insufficient = self.client.post(
+            reverse("staff:judge_prepare", args=[self.contest_round.pk]),
+            {},
+        )
+        self.assertEqual(insufficient.status_code, 200)
+        self.assertContains(insufficient, "INSUFFICIENT_JUDGES")
+
+        prepared = self._prepare_panel()
+        self.assertRedirects(
+            prepared,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        from singer_contest.models import JudgeSeat, PerformanceRunState, RoundPanelSnapshot
+
+        snapshot = RoundPanelSnapshot.objects.get(round=self.contest_round)
+        self.assertEqual(snapshot.expected_judge_count, 1)
+        self.assertEqual(snapshot.minimum_judge_count, 1)
+        self.assertEqual(snapshot.members.count(), 1)
+        self.assertEqual(JudgeSeat.objects.filter(panel_member__panel_snapshot=snapshot).count(), 1)
+        self.assertEqual(
+            PerformanceRunState.objects.get(round=self.contest_round).state,
+            PerformanceRunState.State.IDLE,
+        )
+
+    def test_qr_hold_and_resume_use_staff_authority_services(self):
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat, RoundPanelSnapshot
+
+        seat = JudgeSeat.objects.get()
+        qr_response = self.client.post(
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
+        )
+        self.assertEqual(qr_response.status_code, 200)
+        self.assertContains(qr_response, "data:image/png;base64,")
+        self.assertNotContains(qr_response, "Judge terminal")
+
+        hold_get = self.client.get(
+            reverse("staff:judge_panel_hold", args=[self.contest_round.pk])
+        )
+        self.assertEqual(hold_get.status_code, 405)
+        hold_post = self.client.post(
+            reverse("staff:judge_panel_hold", args=[self.contest_round.pk]),
+            {"reason": "设备检查"},
+        )
+        self.assertRedirects(
+            hold_post,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        self.assertEqual(
+            RoundPanelSnapshot.objects.get(round=self.contest_round).state,
+            RoundPanelSnapshot.State.HOLD,
+        )
+
+        resume_post = self.client.post(
+            reverse("staff:judge_panel_resume", args=[self.contest_round.pk])
+        )
+        self.assertRedirects(
+            resume_post,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        self.assertEqual(
+            RoundPanelSnapshot.objects.get(round=self.contest_round).state,
+            RoundPanelSnapshot.State.ACTIVE,
+        )

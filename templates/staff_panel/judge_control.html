@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}评委现场控制 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-8 space-y-6">
+    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+            <p class="text-sm text-gray-500"><a href="{% url 'staff:round_list' %}" class="hover:underline">轮次</a> / 现场控制</p>
+            <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round }}</h1>
+            <p class="text-sm text-gray-500 mt-1">{{ round.activity.title }}</p>
+        </div>
+        <span class="inline-flex w-fit rounded-full px-3 py-1 text-sm {% if policy_state == 'HOLD' %}bg-amber-100 text-amber-800{% elif policy_state == 'ACTIVE' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-700{% endif %}">
+            {{ policy_state }}
+        </span>
+    </div>
+
+    {% if error %}
+    <div class="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{{ error }}</div>
+    {% endif %}
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-gray-900">评委组</h2>
+            <div class="text-sm text-gray-600">预备 {{ expected_judge_count }} / 实到 {{ actual_judge_count }} / 最低 {{ minimum_judge_count }}</div>
+        </div>
+        {% if not panel_snapshot %}
+        <form method="post" action="{% url 'staff:judge_prepare' round.pk %}" class="mt-4 space-y-4">
+            {% csrf_token %}
+            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                {% for round_judge in round_judges %}
+                <label class="flex items-center gap-2 rounded border border-gray-200 px-3 py-2 text-sm">
+                    <input type="checkbox" name="attending_judge_ids" value="{{ round_judge.judge_id }}">
+                    <span>{{ round_judge.judge.name }}</span>
+                </label>
+                {% empty %}
+                <p class="text-sm text-gray-500">本轮尚未配置评委预备名单。</p>
+                {% endfor %}
+            </div>
+            <button class="rounded bg-brand px-4 py-2 text-sm text-white hover:bg-brand-light" type="submit">准备评委组</button>
+        </form>
+        {% else %}
+        <div class="mt-4 flex flex-wrap gap-2 text-sm">
+            {% for member in panel_members %}
+            <span class="rounded bg-gray-100 px-3 py-1 text-gray-700">{{ member.seat_key }} · {{ member.judge.name }}</span>
+            {% endfor %}
+        </div>
+        <div class="mt-5 flex flex-wrap gap-3">
+            {% if panel_snapshot.state == 'active' %}
+            <form method="post" action="{% url 'staff:judge_panel_hold' round.pk %}" class="flex gap-2">
+                {% csrf_token %}
+                <input class="rounded border border-gray-300 px-3 py-2 text-sm" name="reason" required maxlength="240" placeholder="暂停评委组原因">
+                <button class="rounded bg-amber-600 px-3 py-2 text-sm text-white" type="submit">暂停评委组</button>
+            </form>
+            {% else %}
+            <form method="post" action="{% url 'staff:judge_panel_resume' round.pk %}">
+                {% csrf_token %}
+                <button class="rounded bg-green-600 px-3 py-2 text-sm text-white" type="submit">恢复评委组</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+
+    {% if panel_snapshot %}
+    <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <h2 class="text-lg font-semibold text-gray-900">评委席位入口</h2>
+        <p class="mt-1 text-sm text-gray-500">二维码只在本次响应中显示；授权兑换后即不能重复使用。</p>
+        <div class="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {% for row in seat_rows %}
+            <div class="rounded border border-gray-200 p-4">
+                <div class="font-medium text-gray-900">{{ row.member.seat_key }} · {{ row.member.judge.name }}</div>
+                <div class="mt-1 text-xs text-gray-500">席位状态：{{ row.seat.get_state_display }}</div>
+                <form method="post" action="{% url 'staff:judge_seat_qr' round.pk row.seat.pk %}" class="mt-3">
+                    {% csrf_token %}
+                    <button class="rounded bg-brand px-3 py-2 text-sm text-white" type="submit">签发 15 分钟入口</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+        {% if qr_data_uri %}
+        <div class="mt-5 rounded border border-green-200 bg-green-50 p-4 text-center">
+            <p class="text-sm text-green-800">席位 {{ qr_seat_id }} 的一次性入口二维码</p>
+            <img class="mx-auto mt-3 h-64 w-64" src="{{ qr_data_uri }}" alt="评委入口二维码">
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-gray-900">表演进度</h2>
+            {% if run_state %}<span class="text-sm text-gray-600">{{ run_state.state }} · context {{ run_state.context_version }}</span>{% endif %}
+        </div>
+        <div class="mt-4 space-y-2">
+            {% for performance in performances %}
+            <div class="flex flex-col gap-2 rounded border border-gray-200 p-3 md:flex-row md:items-center md:justify-between">
+                <div class="text-sm"><span class="font-medium">{{ performance.sequence }}. {{ performance.singer.name }}</span>{% if performance.song_title %} · {{ performance.song_title }}{% endif %}</div>
+                <form method="post" action="{% url 'staff:judge_performance_advance' round.pk %}" class="flex gap-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="performance_id" value="{{ performance.pk }}">
+                    <input type="hidden" name="reason" value="现场切换表演">
+                    <button class="rounded bg-brand px-3 py-1.5 text-xs text-white" type="submit">切换到此表演</button>
+                </form>
+            </div>
+            {% empty %}
+            <p class="text-sm text-gray-500">暂无表演上下文。</p>
+            {% endfor %}
+        </div>
+        {% if run_state %}
+        <div class="mt-4 flex flex-wrap gap-3">
+            {% if run_state.state == 'hold' %}
+            <form method="post" action="{% url 'staff:judge_performance_resume' round.pk %}">
+                {% csrf_token %}
+                <button class="rounded bg-green-600 px-3 py-2 text-sm text-white" type="submit">恢复表演</button>
+            </form>
+            {% else %}
+            <form method="post" action="{% url 'staff:judge_performance_hold' round.pk %}" class="flex gap-2">
+                {% csrf_token %}
+                <input type="hidden" name="performance_id" value="{{ run_state.current_performance_id|default:1 }}">
+                <input class="rounded border border-gray-300 px-3 py-2 text-sm" name="reason" required maxlength="240" placeholder="暂停表演原因">
+                <button class="rounded bg-amber-600 px-3 py-2 text-sm text-white" type="submit">暂停表演</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <h2 class="text-lg font-semibold text-gray-900">工作人员代录 / 纸面录入</h2>
+        <p class="mt-1 text-sm text-gray-500">必须填写当前 context、席位、来源凭据、原因和唯一 command_id；所有写入走 authority service。</p>
+        <div class="mt-4 grid gap-6 lg:grid-cols-2">
+            {% for score_action in score_actions %}
+            <form method="post" action="{% if score_action == 'proxy' %}{% url 'staff:judge_score_proxy' round.pk %}{% else %}{% url 'staff:judge_score_paper' round.pk %}{% endif %}" class="space-y-3 rounded border border-gray-200 p-4">
+                {% csrf_token %}
+                <h3 class="font-medium text-gray-900">{% if score_action == 'proxy' %}工作人员代录{% else %}纸面评分补录{% endif %}</h3>
+                <label class="block text-sm">表演 ID<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="performance_id" value="{{ run_state.current_performance_id|default:'' }}" required></label>
+                <label class="block text-sm">席位
+                    <select class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="seat_id" required>
+                        <option value="">选择席位</option>
+                        {% for row in seat_rows %}<option value="{{ row.seat.pk }}">{{ row.member.seat_key }} · {{ row.member.judge.name }}</option>{% endfor %}
+                    </select>
+                </label>
+                <label class="block text-sm">Context version<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="context_version" value="{{ run_state.context_version|default:0 }}" required></label>
+                <label class="block text-sm">分数<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="score" inputmode="decimal" required></label>
+                <label class="block text-sm">备注<textarea class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="notes" maxlength="200"></textarea></label>
+                <label class="block text-sm">来源凭据<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="source_reference" required maxlength="120"></label>
+                <label class="block text-sm">原因<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="reason" required maxlength="240"></label>
+                <label class="block text-sm">command_id<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="command_id" required maxlength="64"></label>
+                <button class="rounded bg-brand px-4 py-2 text-sm text-white" type="submit">提交评分</button>
+            </form>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}
