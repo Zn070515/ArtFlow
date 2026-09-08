@@ -1546,8 +1546,12 @@ class JudgeScoreReceipt(models.Model):
     def clean(self):
         if self.status == self.Status.PENDING and self.score_record_id:
             raise ValidationError("待处理评委评分回执不能绑定正式评分事实。")
+        if self.status == self.Status.PENDING and self.completed_at:
+            raise ValidationError("待处理评委评分回执不能记录完成时间。")
         if self.status == self.Status.SUCCEEDED and not self.score_record_id:
             raise ValidationError("成功评委评分回执必须绑定正式评分事实。")
+        if self.status == self.Status.SUCCEEDED and not self.completed_at:
+            raise ValidationError("成功评委评分回执必须记录完成时间。")
         if self.source == ScoreSource.DIRECT_JUDGE and not self.session_id:
             raise ValidationError("直接评委评分回执必须绑定评委会话。")
         if self.source != ScoreSource.DIRECT_JUDGE and not self.operator_id:
