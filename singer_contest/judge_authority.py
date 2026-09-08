@@ -265,6 +265,7 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
     if not reason or len(reason) > 240:
         raise ValidationError("暂停评委组必须填写不超过 240 字的原因。")
     locked = _lock_judge_round(round_id, operator)
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     snapshot = _active_panel_snapshot(locked.contest_round)
     if snapshot is None:
         raise ValidationError("当前轮次没有活动中的评委组快照。")
@@ -273,7 +274,6 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
     with authority_write(JUDGE_PANEL_STATE):
         snapshot.state = RoundPanelSnapshot.State.HOLD
         snapshot.save(update_fields=["state"])
-    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     with authority_write(ROUND_PERFORMANCE_STATE):
         run_state.state = PerformanceRunState.State.HOLD
         run_state.hold_reason = reason
@@ -311,10 +311,10 @@ def resume_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
     if snapshot is None or snapshot.state != RoundPanelSnapshot.State.HOLD:
         raise ValidationError("当前轮次没有处于暂停状态的评委组。")
 
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     with authority_write(JUDGE_PANEL_STATE):
         snapshot.state = RoundPanelSnapshot.State.ACTIVE
         snapshot.save(update_fields=["state"])
-    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     next_state = (
         PerformanceRunState.State.PERFORMING
         if run_state.current_performance_id
@@ -544,7 +544,7 @@ def _authenticate_judge_session_locked(
     if binding is None:
         raise ValidationError("评委访问会话无效。")
     seat = binding.seat
-    snapshot = binding.panel_snapshot
+    snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=binding.panel_snapshot_id)
     if (
         binding.access_grant.revoked_at is not None
         or seat.state != JudgeSeat.State.ASSIGNED
