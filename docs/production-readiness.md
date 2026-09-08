@@ -230,3 +230,9 @@ PostgreSQL/Compose/Playwright/备份恢复门禁本轮未宣称通过。2026-09-
 本机门禁结果：Django 全仓 `1080 passed, 28 skipped`；C2/authority focused `27 passed`；Playwright `6 passed`；client `20 passed`；项目 Pyright 与 entry-access Pyright 均为 0 diagnostics；Ruff、Django check、migration check、文档检查和 CSS/client gates 通过。PostgreSQL focused C2/authority `27 passed`，并完成 Compose 容器内 migrate、doctor、seed 幂等与 reset safety 检查；源数据库和 volumes 保持不变。
 
 完整 `verify_postgres_acceptance.ps1 -StartCompose` 本轮未能启动，因为本机既有开发服务占用 `127.0.0.1:8000`；没有停止或删除该服务/volumes，改用无 host-port 的 Compose one-off focused 验证。完整 PostgreSQL acceptance、备份恢复、带真实 Staff 凭据的浏览器控制台流程、TLS/WAF/DDoS 和学校网络演练仍为部署前置 HOLD。
+
+### 2026-09-08 M2-C3 Judge Client Close 门禁记录
+
+本轮闭合 Judge terminal 的 server-owned 展示上下文、分项评分、即时本地草稿、按上下文隔离、2 秒短轮询和 stale recovery。rubric 轮次必须提交完整 criterion 集合；服务端计算 0–100 总分，并在同一 authority 事务中写入 `ScoreRecord`、`CriterionScore`、receipt 和审计。无 rubric 的历史总分模式继续保留；客户端不保存 bearer、二维码 fragment 或额外个人信息。
+
+已覆盖的本地回归包括：上下文展示字段、rubric 精确集合、跨 rubric/越界/重复/缺项、伪造总分、事务回滚、STAFF_PROXY 一致性、稳定 HTTP reason code、输入未提交草稿、性能切换草稿隔离、polling、HOLD 状态展示和分项请求体。完整门禁结果待本轮最终验证后补录；PostgreSQL 竞态、真实凭据型 Judge 浏览器流程、学校 IdP/MFA、TLS/WAF/DDoS、数据责任与保存期限仍是部署前置 HOLD。
