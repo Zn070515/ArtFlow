@@ -16,11 +16,14 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
+from entry_access.services import redeem_access_grant
 
 from .judge_authority import (
     advance_performance,
+    authenticate_judge_session,
     hold_judge_panel,
     hold_performance,
+    issue_judge_grant,
     prepare_judge_panel,
     resume_judge_panel,
     resume_performance,
@@ -303,6 +306,27 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(
             self.round.performance_run_state.state,
             PerformanceRunState.State.IDLE,
+        )
+
+    def test_judge_grant_binds_one_seat_and_redeemed_session(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        session = authenticate_judge_session(redeemed.token)
+        replay = authenticate_judge_session(redeemed.token)
+
+        self.assertEqual(session.pk, replay.pk)
+        self.assertEqual(session.seat_id, seat.pk)
+        self.assertEqual(session.panel_snapshot_id, snapshot.pk)
+        self.assertEqual(session.ephemeral_session_id, redeemed.session.pk)
+        self.assertNotIn(issued.token, str(session))
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.JUDGE_SESSION_ISSUE,
+                new_value__contains=issued.token,
+            ).exists()
         )
 
     def test_live_performance_transitions_increment_context_version(self):
