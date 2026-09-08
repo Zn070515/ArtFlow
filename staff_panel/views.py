@@ -1807,6 +1807,7 @@ def vote_session_create(request):
             selection_type=form.cleaned_data["selection_type"],
             max_selections=form.cleaned_data["max_selections"],
             purpose=form.cleaned_data["purpose"],
+            requires_ticket=form.cleaned_data["requires_ticket"],
             is_test_data=activity.is_test_mode,
         )
         for i, sid in enumerate(singer_ids):
