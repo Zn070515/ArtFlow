@@ -33,6 +33,7 @@ from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, content_hash
 from ruleset.services import (
     RulesetInvalidError,
+    _vote_binding,
     create_ruleset_version,
     freeze_ruleset_version,
     supersede_ruleset_version,
@@ -1557,6 +1558,17 @@ class BindingValidationTests(_RulesetModelBase):
             start_time=timezone.now(),
             end_time=timezone.now() + timezone.timedelta(hours=1),  # type: ignore[attr-defined]
             is_test_data=is_test_data,
+        )
+
+    def test_vote_binding_preserves_ticket_entitlement_for_frozen_context(self):
+        ruleset = self.make_ruleset()
+        vote = self._vote_session(ruleset)
+        vote.requires_ticket = True
+        vote.save(update_fields=["requires_ticket"])
+
+        self.assertEqual(
+            _vote_binding(vote.pk),
+            {"scale": "votes", "purpose": vote.purpose, "requires_ticket": True},
         )
 
     def test_accepts_and_normalizes_pk_map(self):
