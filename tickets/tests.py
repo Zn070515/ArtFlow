@@ -8,7 +8,7 @@ from core.models import Activity
 from core.services import transition_activity_phase
 from django.apps import apps
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -257,6 +257,7 @@ class TicketLifecycleServiceTests(TestCase):
         with authority_write(ACCOUNT_AUTHORITY):
             self.admin.role = User.Role.ADMIN
             self.admin.save(update_fields=["role", "is_staff"])
+        self.participant = User.objects.create_user(username="ticket-participant", password="pass")
         self.activity = Activity.objects.create(
             title="Ticket lifecycle activity",
             activity_type=Activity.Type.GENERAL,
@@ -307,6 +308,11 @@ class TicketLifecycleServiceTests(TestCase):
             create_ticket(self.activity, actor=self.staff, serial_number="0002"),
             actor=self.staff,
         )
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_CLOSED,
+            actor=self.admin,
+        )
         checked_in = check_in_ticket(ticket.secret, actor=self.staff)
         self.assertEqual(checked_in.state, ticket_model(self).State.CHECKED_IN)
         self.assertEqual(check_in_ticket(ticket.secret, actor=self.staff).pk, checked_in.pk)
@@ -319,3 +325,81 @@ class TicketLifecycleServiceTests(TestCase):
         transition_activity_phase(activity, Activity.Phase.REGISTRATION_CLOSED, actor=self.admin)
         ticket = create_ticket(activity, actor=self.staff, serial_number="0003")
         self.assertEqual(ticket.activity_id, activity.pk)
+
+    def test_check_in_is_rejected_until_the_activity_closes_registration(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        check_in_ticket = self._service("check_in_ticket")
+        issued = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0004"),
+            actor=self.staff,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            check_in_ticket(issued.secret, actor=self.staff)
+
+    def test_void_and_revoke_are_admin_only_terminal_transitions(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        void_ticket = self._service("void_ticket")
+        revoke_ticket = self._service("revoke_ticket")
+        check_in_ticket = self._service("check_in_ticket")
+        with self.assertRaises(PermissionDenied):
+            create_ticket(self.activity, actor=self.participant, serial_number="0000")
+        voided = create_ticket(self.activity, actor=self.staff, serial_number="0005")
+
+        voided = void_ticket(voided, actor=self.admin)
+        self.assertEqual(voided.state, ticket_model(self).State.VOID)
+        self.assertEqual(void_ticket(voided, actor=self.admin).pk, voided.pk)
+        with self.assertRaises(ValidationError):
+            issue_ticket(voided, actor=self.staff)
+
+        issued = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0006"),
+            actor=self.staff,
+        )
+        revoked = revoke_ticket(issued.ticket, actor=self.admin)
+        self.assertEqual(revoked.state, ticket_model(self).State.REVOKED)
+        self.assertEqual(revoke_ticket(revoked, actor=self.admin).pk, revoked.pk)
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_CLOSED,
+            actor=self.admin,
+        )
+        with self.assertRaises(ValidationError):
+            check_in_ticket(issued.secret, actor=self.staff)
+
+    def test_redeem_creates_only_a_short_lived_session_and_authentication_is_revocable(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        redeem_ticket = self._service("redeem_ticket")
+        authenticate = self._service("authenticate_ticket_session")
+        revoke_session = self._service("revoke_ticket_session")
+        issued = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0007"),
+            actor=self.staff,
+        )
+
+        redeemed = redeem_ticket(issued.secret, request_meta=None)
+
+        self.assertEqual(redeemed.session.ticket_id, issued.ticket.pk)
+        self.assertEqual(
+            ticket_model(self).objects.get(pk=issued.ticket.pk).state,
+            ticket_model(self).State.ISSUED,
+        )
+        self.assertGreater(redeemed.session.expires_at, timezone.now())
+        self.assertIsNotNone(authenticate(redeemed.token, activity=self.activity).last_seen_at)
+        revoke_session(redeemed.session, actor=self.staff)
+        with self.assertRaises(ValidationError):
+            authenticate(redeemed.token, activity=self.activity)
+
+    def test_unknown_credentials_are_generic_and_do_not_create_rows(self):
+        redeem_ticket = self._service("redeem_ticket")
+        check_in_ticket = self._service("check_in_ticket")
+        Session = ticket_session_model(self)
+
+        with self.assertRaisesMessage(ValidationError, "票据无效"):
+            redeem_ticket("unknown-ticket-secret")
+        with self.assertRaisesMessage(ValidationError, "票据无效"):
+            check_in_ticket("unknown-ticket-secret", actor=self.staff)
+        self.assertEqual(Session.objects.count(), 0)
