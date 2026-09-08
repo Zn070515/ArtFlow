@@ -150,6 +150,7 @@
     let pollInFlight = false;
     let pollDelay = 2000;
     let stopped = false;
+    let contextRequest = null;
     const criterionInputs = new Map();
     function contextFingerprint(value) {
         return [value.activity_id, value.round_id, value.seat_id, value.panel_snapshot_id,
@@ -161,7 +162,8 @@
     function validDraftCriteria(value) {
         if (!isRecord(value))
             return false;
-        return Object.entries(value).every(([key, item]) => /^\d+$/.test(key) && typeof item === "string" && item.length <= 16);
+        const entries = Object.entries(value);
+        return entries.length <= 100 && entries.every(([key, item]) => /^\d+$/.test(key) && typeof item === "string" && item.length <= 16);
     }
     function parseDraft(value, fingerprint) {
         if (!isRecord(value) || typeof value.command_id !== "string" ||
@@ -228,14 +230,14 @@
             // A local draft is a convenience and never changes server authority.
         }
     }
-    function clearDraft(command) {
+    function clearDraft(value) {
         const storage = localStorageOrNull();
-        if (!storage || !draft || draft.command_id !== command)
+        if (!storage)
             return;
         try {
-            storage.removeItem(storageKey(draft.context_fingerprint));
-            const legacy = parseDraft(JSON.parse(storage.getItem(legacyStorageKey) || "null"), draft.context_fingerprint);
-            if (legacy?.command_id === command)
+            storage.removeItem(storageKey(value.context_fingerprint));
+            const legacy = parseDraft(JSON.parse(storage.getItem(legacyStorageKey) || "null"), value.context_fingerprint);
+            if (legacy?.command_id === value.command_id)
                 storage.removeItem(legacyStorageKey);
         }
         catch {
@@ -397,10 +399,20 @@
         return response.ok ? parseSession(await jsonResponse(response)) : null;
     }
     async function loadContext(token) {
-        const response = await fetch(contextUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-        return response.ok ? parseContext(await jsonResponse(response)) : null;
+        if (contextRequest)
+            return contextRequest;
+        contextRequest = (async () => {
+            const response = await fetch(contextUrl, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            return response.ok ? parseContext(await jsonResponse(response)) : null;
+        })();
+        try {
+            return await contextRequest;
+        }
+        finally {
+            contextRequest = null;
+        }
     }
     function schedulePoll(delay = pollDelay) {
         if (stopped || !sessionToken)
@@ -484,6 +496,10 @@
             statusText(terminalRoot, "评分内容无效。");
             return;
         }
+        if (draftTimer !== null) {
+            clearTimeout(draftTimer);
+            draftTimer = null;
+        }
         const current = ensureDraft();
         if (!current)
             return;
@@ -504,8 +520,9 @@
             });
             const data = await jsonResponse(response);
             if (response.ok && parseReceipt(data)) {
-                clearDraft(current.command_id);
-                draft = null;
+                clearDraft(current);
+                if (draft?.command_id === current.command_id)
+                    draft = null;
                 statusText(terminalRoot, "评分已确认。");
             }
             else if (isRecord(data) && data.reason_code === "STALE_CONTEXT") {

@@ -303,3 +303,24 @@ test("submits rubric criterion values without trusting a client total", async ()
   });
   assert.equal("score" in submitted.score_payload, false);
 });
+
+test("a fast successful submit cancels the pending draft timer", async () => {
+  let scoreCalls = 0;
+  const runtime = boot(async (url) => {
+    if (url.includes("redeem")) return response(200, { kind: "judge", session_token: "session-secret" });
+    if (url.includes("context")) return response(200, contextPayload);
+    scoreCalls += 1;
+    return response(201, {
+      receipt: { receipt_id: 10, score_record_id: 11, reason_code: "ACCEPTED", status: "succeeded" },
+    });
+  });
+  await settle();
+  runtime.score.value = "90";
+  runtime.score.dispatch("input");
+  runtime.submit.dispatch("click");
+  await settle();
+  await runtime.advance(250);
+
+  assert.equal(scoreCalls, 1);
+  assert.equal(runtime.storage.value("artflow:judge:draft"), null);
+});

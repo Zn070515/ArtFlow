@@ -206,6 +206,7 @@
   let pollInFlight = false;
   let pollDelay = 2000;
   let stopped = false;
+  let contextRequest: Promise<JudgeContext | null> | null = null;
   const criterionInputs = new Map<number, HTMLInputElement>();
 
   function contextFingerprint(value: JudgeContext): string {
@@ -219,7 +220,8 @@
 
   function validDraftCriteria(value: unknown): value is Record<string, string> {
     if (!isRecord(value)) return false;
-    return Object.entries(value).every(([key, item]) =>
+    const entries = Object.entries(value);
+    return entries.length <= 100 && entries.every(([key, item]) =>
       /^\d+$/.test(key) && typeof item === "string" && item.length <= 16);
   }
 
@@ -282,16 +284,16 @@
     }
   }
 
-  function clearDraft(command: string): void {
+  function clearDraft(value: Draft): void {
     const storage = localStorageOrNull();
-    if (!storage || !draft || draft.command_id !== command) return;
+    if (!storage) return;
     try {
-      storage.removeItem(storageKey(draft.context_fingerprint));
+      storage.removeItem(storageKey(value.context_fingerprint));
       const legacy = parseDraft(
         JSON.parse(storage.getItem(legacyStorageKey) || "null"),
-        draft.context_fingerprint,
+        value.context_fingerprint,
       );
-      if (legacy?.command_id === command) storage.removeItem(legacyStorageKey);
+      if (legacy?.command_id === value.command_id) storage.removeItem(legacyStorageKey);
     } catch {
       // Ignore storage privacy/quota failures.
     }
@@ -446,10 +448,18 @@
   }
 
   async function loadContext(token: string): Promise<JudgeContext | null> {
-    const response = await fetch(contextUrl, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return response.ok ? parseContext(await jsonResponse(response)) : null;
+    if (contextRequest) return contextRequest;
+    contextRequest = (async () => {
+      const response = await fetch(contextUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return response.ok ? parseContext(await jsonResponse(response)) : null;
+    })();
+    try {
+      return await contextRequest;
+    } finally {
+      contextRequest = null;
+    }
   }
 
   function schedulePoll(delay = pollDelay): void {
@@ -526,6 +536,10 @@
       statusText(terminalRoot, "评分内容无效。");
       return;
     }
+    if (draftTimer !== null) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
     const current = ensureDraft();
     if (!current) return;
     current.score_payload = draftPayload();
@@ -545,8 +559,8 @@
       });
       const data = await jsonResponse(response);
       if (response.ok && parseReceipt(data)) {
-        clearDraft(current.command_id);
-        draft = null;
+        clearDraft(current);
+        if (draft?.command_id === current.command_id) draft = null;
         statusText(terminalRoot, "评分已确认。");
       } else if (isRecord(data) && data.reason_code === "STALE_CONTEXT") {
         statusText(terminalRoot, "现场上下文已变化，当前草稿未提交。");
