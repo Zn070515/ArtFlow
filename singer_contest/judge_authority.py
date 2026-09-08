@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import timedelta
 
 from accounts.models import User
 from accounts.services import require_current_staff
@@ -19,11 +20,19 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
+from entry_access.models import EntryPoint, EphemeralSession
+from entry_access.services import (
+    IssuedAccessGrant,
+    authenticate_ephemeral_session,
+    create_entry_point,
+    issue_access_grant,
+)
 
 from .models import (
     ContestRound,
     Judge,
     JudgeSeat,
+    JudgeSeatGrant,
     JudgeSession,
     Performance,
     PerformanceRunState,
@@ -357,3 +366,156 @@ def resume_performance(round_id: int, *, operator) -> PerformanceRunState:
         run_state.changed_by = locked.operator
         run_state.save(update_fields=["state", "hold_reason", "changed_by", "updated_at"])
     return run_state
+
+
+@transaction.atomic
+def issue_judge_grant(seat_id: int, *, operator, ttl_seconds: int) -> IssuedAccessGrant:
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+        raise ValidationError("评委授权有效期必须是整数秒。")
+    if ttl_seconds <= 0 or ttl_seconds > 30 * 60:
+        raise ValidationError("评委授权有效期必须大于 0 且不超过 30 分钟。")
+
+    seat_context = (
+        JudgeSeat.objects.select_related("panel_member__panel_snapshot__round__activity")
+        .filter(pk=seat_id)
+        .first()
+    )
+    if seat_context is None:
+        raise ValidationError("评委席位不存在。")
+    locked = _lock_judge_round(seat_context.panel_member.panel_snapshot.round_id, operator)
+    seat = (
+        JudgeSeat.objects.select_for_update()
+        .select_related("panel_member__panel_snapshot__round__activity")
+        .get(pk=seat_id)
+    )
+    snapshot = RoundPanelSnapshot.objects.select_for_update().get(
+        pk=seat.panel_member.panel_snapshot_id
+    )
+    if seat.panel_member.panel_snapshot.round_id != locked.contest_round.pk:
+        raise ValidationError("评委席位不属于当前轮次。")
+    if seat.state != JudgeSeat.State.ASSIGNED:
+        raise PermissionDenied("当前评委席位不可签发授权。")
+    if snapshot.state != RoundPanelSnapshot.State.ACTIVE:
+        raise PermissionDenied("评委组未处于可签发授权状态。")
+    if JudgeSeatGrant.objects.filter(
+        seat=seat,
+        access_grant__redeemed_at__isnull=True,
+        access_grant__revoked_at__isnull=True,
+        access_grant__expires_at__gt=timezone.now(),
+    ).exists():
+        raise ValidationError("当前评委席位已有未兑换授权。")
+
+    entry_point = (
+        EntryPoint.objects.filter(
+            activity=locked.activity,
+            kind=EntryPoint.Kind.JUDGE,
+            is_active=True,
+        )
+        .order_by("pk")
+        .first()
+    )
+    if entry_point is None:
+        entry_point = create_entry_point(
+            locked.activity,
+            kind=EntryPoint.Kind.JUDGE,
+            label=f"Judge terminal {locked.contest_round.pk}",
+            actor=locked.operator,
+        )
+    issued = issue_access_grant(
+        entry_point,
+        actor=locked.operator,
+        ttl=timedelta(seconds=ttl_seconds),
+        round=locked.contest_round,
+    )
+    with authority_write(JUDGE_SESSION_STATE):
+        JudgeSeatGrant.objects.create(
+            access_grant=issued.grant,
+            seat=seat,
+            panel_snapshot=snapshot,
+        )
+    _audit(
+        operator=locked.operator,
+        action_type=AuditLog.ActionType.JUDGE_SESSION_ISSUE,
+        target=f"JudgeSeat:{seat.pk}",
+        new_value=json.dumps(
+            {
+                "grant_id": issued.grant.pk,
+                "panel_snapshot_id": snapshot.pk,
+                "expires_at": issued.grant.expires_at.isoformat(),
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+    )
+    return issued
+
+
+def _ephemeral_token_digest(raw_token: str) -> str:
+    if not isinstance(raw_token, str):
+        raise ValidationError("评委访问会话无效。")
+    try:
+        return hashlib.sha256(raw_token.encode("ascii")).hexdigest()
+    except UnicodeEncodeError:
+        raise ValidationError("评委访问会话无效。") from None
+
+
+@transaction.atomic
+def authenticate_judge_session(raw_ephemeral_token: str) -> JudgeSession:
+    digest = _ephemeral_token_digest(raw_ephemeral_token)
+    transport = (
+        EphemeralSession._base_manager.select_related("activity", "round", "grant")
+        .filter(token_digest=digest)
+        .first()
+    )
+    if transport is None:
+        raise ValidationError("评委访问会话无效。")
+    transport = authenticate_ephemeral_session(
+        raw_ephemeral_token,
+        expected_kind=EntryPoint.Kind.JUDGE,
+        activity=transport.activity,
+        round=transport.round,
+    )
+    binding = (
+        JudgeSeatGrant.objects.select_for_update()
+        .select_related(
+            "access_grant",
+            "seat__panel_member__panel_snapshot__round__activity",
+            "panel_snapshot",
+        )
+        .filter(access_grant_id=transport.grant_id)
+        .first()
+    )
+    if binding is None:
+        raise ValidationError("评委访问会话无效。")
+    seat = binding.seat
+    snapshot = binding.panel_snapshot
+    if (
+        binding.access_grant.revoked_at is not None
+        or seat.state != JudgeSeat.State.ASSIGNED
+        or snapshot.state != RoundPanelSnapshot.State.ACTIVE
+        or snapshot.round.status == ContestRound.Status.LOCKED
+    ):
+        raise ValidationError("评委访问会话无效。")
+
+    now = timezone.now()
+    existing = (
+        JudgeSession.objects.select_for_update().filter(ephemeral_session_id=transport.pk).first()
+    )
+    if existing is not None:
+        if existing.state != JudgeSession.State.ACTIVE or existing.expires_at <= now:
+            raise ValidationError("评委访问会话无效。")
+        with authority_write(JUDGE_SESSION_STATE):
+            existing.last_seen_at = now
+            existing.save(update_fields=["last_seen_at"])
+        return existing
+
+    with authority_write(JUDGE_SESSION_STATE):
+        return JudgeSession.objects.create(
+            ephemeral_session=transport,
+            seat=seat,
+            panel_snapshot=snapshot,
+            state=JudgeSession.State.ACTIVE,
+            expires_at=transport.expires_at,
+            is_test_data=snapshot.is_test_data,
+            last_seen_at=now,
+        )
