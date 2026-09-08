@@ -1702,7 +1702,15 @@ def judge_create(request):
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
 
 
-def _judge_control_context(request, contest_round, *, error="", qr_data_uri="", qr_seat_id=None):
+def _judge_control_context(
+    request,
+    contest_round,
+    *,
+    error="",
+    qr_data_uri="",
+    qr_seat_id=None,
+    policy_state_override="",
+):
     round_judges = list(
         contest_round.round_judges.select_related("judge").order_by("pk")
     )
@@ -1766,8 +1774,12 @@ def _judge_control_context(request, contest_round, *, error="", qr_data_uri="", 
         policy_state = "PREPARE_REQUIRED"
     elif panel_snapshot.state == RoundPanelSnapshot.State.HOLD:
         policy_state = "HOLD"
+    elif run_state is not None and run_state.state == PerformanceRunState.State.HOLD:
+        policy_state = "HOLD"
     else:
         policy_state = "ACTIVE"
+    if policy_state_override:
+        policy_state = policy_state_override
 
     attendance_form = JudgePanelAttendanceForm(
         initial={"attending_judge_ids": [member.judge_id for member in panel_members]},
@@ -1837,7 +1849,17 @@ def judge_prepare(request, pk):
             attending_judge_ids=form.cleaned_data["attending_judge_ids"],
         )
     except (PermissionDenied, ValidationError) as error:
-        return _render_judge_control(request, contest_round, error=domain_error_messages(error))
+        error_message = domain_error_messages(error)
+        return _render_judge_control(
+            request,
+            contest_round,
+            error=error_message,
+            policy_state_override=(
+                "INSUFFICIENT_JUDGES / HOLD"
+                if "INSUFFICIENT_JUDGES" in str(error)
+                else ""
+            ),
+        )
     messages.success(request, "评委组已准备，评委席位和评分上下文已冻结。")
     return redirect("staff:judge_control", pk=pk)
 
