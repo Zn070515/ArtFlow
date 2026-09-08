@@ -52,11 +52,15 @@ def _json_payload(request: HttpRequest) -> dict[str, Any]:
 
 
 def _invalid_response() -> JsonResponse:
-    return JsonResponse({"detail": "票据操作无效。", "reason_code": "INVALID_TICKET"}, status=400)
+    return _no_store(
+        JsonResponse({"detail": "票据操作无效。", "reason_code": "INVALID_TICKET"}, status=400)
+    )
 
 
 def _too_large_response() -> JsonResponse:
-    return JsonResponse({"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413)
+    return _no_store(
+        JsonResponse({"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413)
+    )
 
 
 def _rate_limited_response(retry_after_seconds: int) -> JsonResponse:
@@ -65,6 +69,11 @@ def _rate_limited_response(retry_after_seconds: int) -> JsonResponse:
         status=429,
     )
     response["Retry-After"] = str(max(1, retry_after_seconds))
+    return _no_store(response)
+
+
+def _no_store(response: JsonResponse) -> JsonResponse:
+    response["Cache-Control"] = "no-store"
     return response
 
 
