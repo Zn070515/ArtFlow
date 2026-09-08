@@ -5,9 +5,22 @@ from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from tickets.services import authenticate_ticket_session
 
 from .models import VoteBallot, VoteSession
 from .services import submit_ballot
+
+
+def _ticket_session_for_request(request, vote_session):
+    if not vote_session.requires_ticket:
+        return None
+    raw_token = request.COOKIES.get("artflow_ticket_session")
+    if not raw_token:
+        return None
+    try:
+        return authenticate_ticket_session(raw_token, activity=vote_session.activity)
+    except ValidationError:
+        return None
 
 
 def _get_vote_session_for_public_request(request, pk):
@@ -79,16 +92,28 @@ def vote_cast(request, pk):
         return redirect("voting:vote_entry", pk=pk)
 
     error = None
+    ticket_session = _ticket_session_for_request(request, vote_session)
+    if vote_session.requires_ticket and ticket_session is None:
+        error = "请先核验入场票。"
     if not vote_session.is_open or vote_session.is_locked:
         error = "投票尚未开放或已锁定"
     elif now < vote_session.start_time:
         error = "投票尚未开始"
     elif now > vote_session.end_time:
         error = "投票已结束"
-    elif VoteBallot.objects.filter(
-        vote_session=vote_session,
-        browser_session_key=session_key,
-    ).exists():
+    elif (
+        ticket_session is not None
+        and VoteBallot.objects.filter(
+            vote_session=vote_session, ticket_id=ticket_session.ticket_id
+        ).exists()
+    ):
+        return redirect("voting:vote_done", pk=pk)
+    elif (
+        not vote_session.requires_ticket
+        and VoteBallot.objects.filter(
+            vote_session=vote_session, browser_session_key=session_key
+        ).exists()
+    ):
         return redirect("voting:vote_done", pk=pk)
 
     options = vote_session.options.select_related("singer")
@@ -107,6 +132,7 @@ def vote_cast(request, pk):
                 browser_session_key=session_key,
                 option_ids=selected,
                 ip_address=ip,
+                ticket_session=ticket_session,
             )
         except ValidationError as validation_error:
             error = "；".join(validation_error.messages)
