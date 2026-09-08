@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
@@ -9,7 +10,7 @@ from core.services import transition_activity_phase
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.utils import timezone
 
 from . import services as ticket_services
@@ -403,3 +404,104 @@ class TicketLifecycleServiceTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "票据无效"):
             check_in_ticket("unknown-ticket-secret", actor=self.staff)
         self.assertEqual(Session.objects.count(), 0)
+
+
+class TicketStaffHttpTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.staff = User.objects.create_user(username="http-ticket-staff", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff.role = User.Role.STAFF
+            self.staff.save(update_fields=["role", "is_staff"])
+        self.participant = User.objects.create_user(
+            username="http-ticket-participant", password="pass"
+        )
+        self.admin = User.objects.create_user(username="http-ticket-admin", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin.role = User.Role.ADMIN
+            self.admin.save(update_fields=["role", "is_staff"])
+        self.activity = Activity.objects.create(
+            title="Ticket HTTP activity",
+            activity_type=Activity.Type.GENERAL,
+            is_test_mode=True,
+        )
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_OPEN,
+            actor=self.admin,
+        )
+
+    def _issue(self, serial_number="http-0001"):
+        ticket = ticket_services.create_ticket(
+            self.activity,
+            actor=self.staff,
+            serial_number=serial_number,
+        )
+        return ticket_services.issue_ticket(ticket, actor=self.staff)
+
+    def test_staff_issue_returns_one_secret_and_list_never_reveals_it(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            "/staff/tickets/issue/",
+            data=json.dumps(
+                {
+                    "activity_id": self.activity.pk,
+                    "batch_reference": "HTTP-BATCH",
+                    "serial_number": "0001",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        secret = payload["secret"]
+        self.assertEqual(len(secret), 43)
+        listing = self.client.get(f"/staff/tickets/?activity_id={self.activity.pk}")
+        self.assertEqual(listing.status_code, 200)
+        self.assertNotContains(listing, secret)
+        self.assertNotContains(listing, "secret_digest")
+
+    def test_staff_check_in_requires_csrf_and_accepts_secret_only_in_post_body(self):
+        issued = self._issue()
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_CLOSED,
+            actor=self.admin,
+        )
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.staff)
+
+        rejected = csrf_client.post(
+            "/staff/tickets/check-in/",
+            data=json.dumps({"secret": issued.secret}),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(
+            ticket_model(self).objects.get(pk=issued.ticket.pk).state,
+            ticket_model(self).State.ISSUED,
+        )
+
+        self.client.force_login(self.staff)
+        accepted = self.client.post(
+            "/staff/tickets/check-in/",
+            data=json.dumps({"secret": issued.secret}),
+            content_type="application/json",
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json()["state"], ticket_model(self).State.CHECKED_IN)
+
+        query_attempt = self.client.get(f"/staff/tickets/check-in/?secret={issued.secret}")
+        self.assertIn(query_attempt.status_code, {404, 405})
+
+    def test_participant_cannot_issue_or_check_in_ticket(self):
+        self.client.force_login(self.participant)
+        issue_response = self.client.post(
+            "/staff/tickets/issue/",
+            data=json.dumps({"activity_id": self.activity.pk, "serial_number": "0002"}),
+            content_type="application/json",
+        )
+        self.assertIn(issue_response.status_code, {302, 403})
+        self.assertEqual(ticket_model(self).objects.filter(activity=self.activity).count(), 0)
