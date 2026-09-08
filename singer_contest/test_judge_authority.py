@@ -366,6 +366,29 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(self.round.performance_run_state.state, PerformanceRunState.State.HOLD)
         self.assertEqual(self.round.performance_run_state.hold_reason, "裁判席位核验")
 
+    def test_panel_hold_revokes_unredeemed_grant_and_rotates_context_generation(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+
+        held = hold_judge_panel(self.round.pk, operator=self.operator, reason="裁判席位核验")
+        self.round.performance_run_state.refresh_from_db()
+        self.assertEqual(held.state, RoundPanelSnapshot.State.HOLD)
+        self.assertEqual(self.round.performance_run_state.context_version, 1)
+
+        issued.grant.refresh_from_db()
+        self.assertIsNotNone(issued.grant.revoked_at)
+        with self.assertRaises(ValidationError):
+            redeem_access_grant(issued.token)
+
+        resumed = resume_judge_panel(self.round.pk, operator=self.operator)
+        self.round.performance_run_state.refresh_from_db()
+        self.assertEqual(resumed.state, RoundPanelSnapshot.State.ACTIVE)
+        self.assertEqual(self.round.performance_run_state.context_version, 2)
+
+        replacement = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        self.assertNotEqual(replacement.grant.pk, issued.grant.pk)
+
     def test_panel_resume_is_explicit_before_live_resume(self):
         prepare_judge_panel(self.round.pk, operator=self.operator)
         hold_judge_panel(self.round.pk, operator=self.operator, reason="裁判席位核验")
@@ -641,9 +664,30 @@ class JudgePanelServiceTests(TestCase):
 
         held = hold_performance(self.round.pk, operator=self.operator, reason="舞台暂停")
         self.assertEqual(held.state, PerformanceRunState.State.HOLD)
+        self.assertEqual(held.context_version, 2)
         resumed = resume_performance(self.round.pk, operator=self.operator)
         self.assertEqual(resumed.state, PerformanceRunState.State.PERFORMING)
-        self.assertEqual(resumed.context_version, 1)
+        self.assertEqual(resumed.context_version, 3)
+
+    def test_judge_score_rejects_context_from_before_performance_hold_and_resume(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        hold_performance(self.round.pk, operator=self.operator, reason="舞台暂停")
+        resume_performance(self.round.pk, operator=self.operator)
+
+        with self.assertRaises(ValidationError):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-command-after-hold",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={"score": "91.50"},
+            )
+        self.assertFalse(ScoreRecord.objects.exists())
 
     def test_judge_score_is_idempotent_and_provenance_bound(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)

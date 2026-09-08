@@ -157,8 +157,13 @@ pwsh -NoProfile -File scripts\check_docs.ps1
 
 ```powershell
 npx playwright install chromium
-npm run test:e2e
+$judgeFixture = Join-Path ([IO.Path]::GetTempPath()) "artflow-judge-e2e-$PID.json"
+uv run python manage.py prepare_judge_e2e --output-file $judgeFixture
+$env:PLAYWRIGHT_JUDGE_FIXTURE_PATH = $judgeFixture
+try { npm run test:e2e } finally { Remove-Item -LiteralPath $judgeFixture -Force -ErrorAction SilentlyContinue }
 ```
+
+该 fixture 只在非 production 环境创建测试活动、评委席位、一次性 grant 和当前表演；命令不会把 grant 写入 stdout。Compose/CI 必须在 web 容器内生成后用临时文件复制给 Playwright，不能把原始 grant 放进 workflow 日志；完整的 Compose 步骤见 `.github/workflows/integration.yml`。
 
 PostgreSQL 验收和恢复演练：
 

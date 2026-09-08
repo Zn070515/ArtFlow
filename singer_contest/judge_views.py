@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import asdict
 from urllib.parse import urlsplit
@@ -17,6 +18,12 @@ from .judge_authority import (
 )
 
 BODY_MAX_BYTES = 16 * 1024
+_JUDGE_CONTEXT_SESSION_LIMIT = 45
+_JUDGE_CONTEXT_ANONYMOUS_IP_LIMIT = 30
+_JUDGE_CONTEXT_IP_LIMIT = 600
+_JUDGE_SCORE_SESSION_LIMIT = 30
+_JUDGE_SCORE_ANONYMOUS_IP_LIMIT = 30
+_JUDGE_SCORE_IP_LIMIT = 120
 _KNOWN_REASON_CODES = {
     "DUPLICATE_SCORE_FACT",
     "IDEMPOTENCY_CONFLICT",
@@ -42,9 +49,39 @@ def _error(reason_code: str, status: int) -> JsonResponse:
     )
 
 
-def _rate_limit(request: HttpRequest, operation: str, *, limit: int) -> JsonResponse | None:
-    source = client_ip(request) or "unknown"
-    decision = allow(f"judge:{operation}:{source}", limit=limit, window_seconds=60)
+def _rate_limit_identity(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _rate_limit(
+    request: HttpRequest,
+    operation: str,
+    *,
+    session_limit: int,
+    anonymous_ip_limit: int,
+    ip_limit: int,
+) -> JsonResponse | None:
+    source = _rate_limit_identity(client_ip(request) or "unknown")
+    token = _bearer_token(request)
+    if token is None:
+        decision = allow(
+            f"judge:{operation}:anonymous-ip:{source}",
+            limit=anonymous_ip_limit,
+            window_seconds=60,
+        )
+    else:
+        decision = allow(
+            f"judge:{operation}:ip:{source}",
+            limit=ip_limit,
+            window_seconds=60,
+        )
+        if decision.allowed:
+            token_identity = _rate_limit_identity(token)
+            decision = allow(
+                f"judge:{operation}:session:{token_identity}",
+                limit=session_limit,
+                window_seconds=60,
+            )
     if decision.allowed:
         return None
     response = _error("RATE_LIMITED", 429)
@@ -102,7 +139,13 @@ def judge_terminal(request: HttpRequest):
 
 @require_http_methods(["GET"])
 def judge_context(request: HttpRequest) -> JsonResponse:
-    limited = _rate_limit(request, "context", limit=120)
+    limited = _rate_limit(
+        request,
+        "context",
+        session_limit=_JUDGE_CONTEXT_SESSION_LIMIT,
+        anonymous_ip_limit=_JUDGE_CONTEXT_ANONYMOUS_IP_LIMIT,
+        ip_limit=_JUDGE_CONTEXT_IP_LIMIT,
+    )
     if limited is not None:
         return limited
     if not _same_origin(request):
@@ -120,7 +163,13 @@ def judge_context(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(["POST"])
 def judge_score(request: HttpRequest) -> JsonResponse:
-    limited = _rate_limit(request, "score", limit=30)
+    limited = _rate_limit(
+        request,
+        "score",
+        session_limit=_JUDGE_SCORE_SESSION_LIMIT,
+        anonymous_ip_limit=_JUDGE_SCORE_ANONYMOUS_IP_LIMIT,
+        ip_limit=_JUDGE_SCORE_IP_LIMIT,
+    )
     if limited is not None:
         return limited
     if not _same_origin(request):

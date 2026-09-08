@@ -106,6 +106,12 @@ another disposable local/CI service. The initial suite is read-only and checks
 disposable data and keep trace/video/screenshots disabled whenever a bearer
 token is in a request, so raw credentials cannot enter test artifacts.
 
+The Judge authority browser flow requires a disposable fixture. Prepare it with
+`manage.py prepare_judge_e2e --output-file <private-temp-file>`, export
+`PLAYWRIGHT_JUDGE_FIXTURE_PATH` for the test process, and delete the file after
+the run. The command is disabled when `APP_ENV=production`, writes no grant to
+stdout, and the Playwright setup deletes the fixture after reading it.
+
 ## Troubleshooting
 
 - If `uv sync --locked` fails, do not edit `requirements.txt` to work around it. Restore the expected lockfile or intentionally update the lockfile and regenerate the compatibility requirements through the provided script.
