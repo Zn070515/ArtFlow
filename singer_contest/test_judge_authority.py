@@ -346,7 +346,6 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(RoundPanelSnapshot.objects.count(), 1)
         self.assertEqual(JudgeSeat.objects.count(), 1)
 
-
     def test_prepare_panel_rejects_draft_round(self):
         from django.core.exceptions import ValidationError
 
@@ -578,11 +577,14 @@ class JudgePanelServiceTests(TestCase):
         redeemed = redeem_access_grant(issued.token)
         advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
 
-        with patch.object(
-            CriterionScore.objects,
-            "bulk_create",
-            side_effect=ValidationError("forced criterion failure"),
-        ), self.assertRaises(ValidationError):
+        with (
+            patch.object(
+                CriterionScore.objects,
+                "bulk_create",
+                side_effect=ValidationError("forced criterion failure"),
+            ),
+            self.assertRaises(ValidationError),
+        ):
             submit_judge_score(
                 redeemed.token,
                 command_id="judge-rubric-atomic",

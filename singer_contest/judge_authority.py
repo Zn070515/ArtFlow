@@ -166,10 +166,7 @@ def _minimum_judges(contest_round: ContestRound, expected_judge_count: int) -> i
     minimum = configured if configured is not None else expected_judge_count
     if minimum < 1 or minimum > expected_judge_count:
         raise ValidationError("最低有效评委人数必须在预备名单人数范围内。")
-    if (
-        contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
-        and minimum <= 2
-    ):
+    if contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW and minimum <= 2:
         raise ValidationError("去最高最低计分方式的最低有效评委人数必须大于 2。")
     return minimum
 
@@ -694,9 +691,7 @@ def _normalize_judge_score_payload(
     if set(score_payload) - {"criteria", "notes"} or "criteria" not in score_payload:
         raise ValidationError("RUBRIC_PAYLOAD_INVALID")
     rubric_criteria = list(rubric.criteria.all().order_by("sequence", "pk"))
-    rubric_max_total = sum(
-        (criterion.max_score for criterion in rubric_criteria), Decimal()
-    )
+    rubric_max_total = sum((criterion.max_score for criterion in rubric_criteria), Decimal())
     if not rubric_criteria or rubric_max_total != Decimal("100"):
         raise ValidationError("RUBRIC_CONFIGURATION_INVALID")
     criteria_payload = score_payload["criteria"]
