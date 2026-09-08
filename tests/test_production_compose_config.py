@@ -12,6 +12,7 @@ EVENT_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.event.yml"
 REHEARSAL_RUNBOOK_PATH = PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md"
 PRODUCTION_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.production.example"
 DOCKER = shutil.which("docker")
+DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
 CONFIG_ENVIRONMENT = {
     "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
     "ADMIN_LOGIN_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
@@ -107,6 +108,12 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert values["TRUST_X_FORWARDED_FOR"] == "true"
     assert values["POSTGRES_HOST"] == "db"
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+
+
+def test_dockerfile_copies_every_runtime_local_app():
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+
+    assert "COPY --chown=artflow:artflow tickets ./tickets" in dockerfile
 
 
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")

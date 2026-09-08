@@ -38,6 +38,7 @@ COPY --chown=artflow:artflow public_portal ./public_portal
 COPY --chown=artflow:artflow ruleset ./ruleset
 COPY --chown=artflow:artflow singer_contest ./singer_contest
 COPY --chown=artflow:artflow staff_panel ./staff_panel
+COPY --chown=artflow:artflow tickets ./tickets
 COPY --chown=artflow:artflow voting ./voting
 COPY --chown=artflow:artflow static ./static
 COPY --chown=artflow:artflow templates ./templates

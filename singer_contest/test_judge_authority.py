@@ -22,6 +22,7 @@ from .judge_authority import (
     JudgeIdempotencyConflict,
     advance_performance,
     authenticate_judge_session,
+    get_judge_context,
     hold_judge_panel,
     hold_performance,
     issue_judge_grant,
@@ -370,6 +371,17 @@ class JudgePanelServiceTests(TestCase):
                 new_value__contains=issued.token,
             ).exists()
         )
+
+    def test_judge_context_handles_nullable_current_performance(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+
+        context = get_judge_context(redeemed.token)
+
+        self.assertEqual(context.round_id, self.round.pk)
+        self.assertIsNone(context.performance_id)
 
     def test_live_performance_transitions_increment_context_version(self):
         prepare_judge_panel(self.round.pk, operator=self.operator)
