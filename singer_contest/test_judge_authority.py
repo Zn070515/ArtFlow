@@ -317,6 +317,7 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(RoundPanelSnapshot.objects.count(), 1)
         self.assertEqual(JudgeSeat.objects.count(), 1)
 
+
     def test_prepare_panel_rejects_draft_round(self):
         from django.core.exceptions import ValidationError
 
@@ -498,4 +499,77 @@ class JudgePanelServiceTests(TestCase):
                 score_payload={"score": "88"},
                 paper_reference="纸面评分-001",
                 reason="重复录入测试",
+            )
+
+
+class ActualPanelPolicyTests(TestCase):
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.operator = User.objects.create_user(
+                username="actual-panel-operator", password="pass", role=User.Role.STAFF
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Actual panel policy",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
+        from .models import Judge, RoundJudge
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                minimum_judge_count=4,
+            )
+        self.judges = [
+            Judge.objects.create(activity=self.activity, name=f"Judge {index}")
+            for index in range(1, 6)
+        ]
+        for judge in self.judges:
+            RoundJudge.objects.create(round=self.round, judge=judge)
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+
+    def test_prepare_panel_accepts_four_attendees_from_five_judge_roster(self):
+        snapshot = prepare_judge_panel(
+            self.round.pk,
+            operator=self.operator,
+            attending_judge_ids=[judge.pk for judge in self.judges[:4]],
+        )
+
+        self.assertEqual(snapshot.expected_judge_count, 5)
+        self.assertEqual(snapshot.minimum_judge_count, 4)
+        self.assertEqual(snapshot.members.filter(is_active=True).count(), 4)
+        self.assertEqual(
+            set(snapshot.members.values_list("judge_id", flat=True)),
+            {judge.pk for judge in self.judges[:4]},
+        )
+
+    def test_prepare_panel_rejects_insufficient_attendance_with_stable_reason(self):
+        with self.assertRaisesMessage(ValidationError, "INSUFFICIENT_JUDGES"):
+            prepare_judge_panel(
+                self.round.pk,
+                operator=self.operator,
+                attending_judge_ids=[judge.pk for judge in self.judges[:3]],
+            )
+
+        self.assertFalse(
+            RoundPanelSnapshot.objects.filter(
+                round=self.round, state=RoundPanelSnapshot.State.ACTIVE
+            ).exists()
+        )
+
+    def test_unconfigured_minimum_fails_safe_to_expected_roster(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.minimum_judge_count = None
+            self.round.save(update_fields=["minimum_judge_count"])
+
+        with self.assertRaisesMessage(ValidationError, "INSUFFICIENT_JUDGES"):
+            prepare_judge_panel(
+                self.round.pk,
+                operator=self.operator,
+                attending_judge_ids=[judge.pk for judge in self.judges[:4]],
             )
