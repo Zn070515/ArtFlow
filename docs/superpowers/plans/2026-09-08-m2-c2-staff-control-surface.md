@@ -273,9 +273,11 @@
   npm run check:pyright:entry-access
   ```
 
-- [x] **Step 4: Run Docker/PostgreSQL and browser verification.**
+- [ ] **Step 4: Run Docker/PostgreSQL and browser verification.**
 
   Run the PostgreSQL acceptance contract with the already-running local web service or an explicit no-host-port Compose rehearsal, preserving source volumes. Run Playwright against the control console with a staff session and verify prepare → QR → advance → hold/resume → proxy/paper action; do not claim browser success if the service is merely an unrelated process.
+
+Current partial evidence: the no-host-port Compose rehearsal completed migration, doctor, seed/reset safety, and the PostgreSQL C2/authority focused suite; the six existing Playwright smoke tests passed. The full acceptance script remains pending because the host port 8000 was occupied by an existing development service, and a credentialed browser control-console run has not been claimed.
 
 - [ ] **Step 5: Commit isolated docs/verification fixes, push branch, merge, and push main.**
 
