@@ -152,7 +152,14 @@
                     </select>
                 </label>
                 <label class="block text-sm">Context version<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="context_version" value="{{ run_state.context_version|default:0 }}" required></label>
+                {% if round.rubric %}
+                <p class="text-sm text-gray-600">评分标准：{{ round.rubric.name }}；必须完整填写分项，系统将计算总分。</p>
+                {% for criterion in round.rubric.criteria.all %}
+                <label class="block text-sm">{{ criterion.name }}（最高 {{ criterion.max_score }}）<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="criterion_{{ criterion.pk }}" inputmode="decimal" required></label>
+                {% endfor %}
+                {% else %}
                 <label class="block text-sm">分数<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="score" inputmode="decimal" required></label>
+                {% endif %}
                 <label class="block text-sm">备注<textarea class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="notes" maxlength="200"></textarea></label>
                 <label class="block text-sm">来源凭据<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="source_reference" required maxlength="120"></label>
                 <label class="block text-sm">原因<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="reason" required maxlength="240"></label>

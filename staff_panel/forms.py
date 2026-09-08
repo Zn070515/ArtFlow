@@ -148,14 +148,34 @@ class JudgeBoundScoreForm(forms.Form):
     performance_id = forms.IntegerField(min_value=1)
     seat_id = forms.IntegerField(min_value=1)
     context_version = forms.IntegerField(min_value=0)
-    score = forms.CharField(max_length=16)
+    score = forms.CharField(max_length=16, required=False)
     notes = forms.CharField(max_length=200, required=False)
     source_reference = forms.CharField(max_length=120)
     reason = forms.CharField(max_length=240)
     command_id = forms.CharField(max_length=64)
 
+    def __init__(self, *args, rubric=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.rubric = rubric
+        if rubric is not None:
+            for criterion in rubric.criteria.all().order_by("sequence", "pk"):
+                self.fields[f"criterion_{criterion.pk}"] = forms.CharField(
+                    label=criterion.name,
+                    max_length=16,
+                )
+
+    def clean(self):
+        cleaned_data = super().clean() or {}
+        if self.rubric is None and not cleaned_data.get("score"):
+            self.add_error("score", "无分项评分标准时必须填写总分。")
+        if self.rubric is not None and cleaned_data.get("score"):
+            self.add_error("score", "使用分项评分标准时不能提交总分。")
+        return cleaned_data
+
     def clean_score(self):
-        value = self.cleaned_data["score"].strip()
+        value = self.cleaned_data.get("score", "").strip()
+        if not value:
+            return ""
         try:
             return str(validate_score(value))
         except forms.ValidationError as error:

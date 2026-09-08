@@ -6155,6 +6155,62 @@ class JudgeControlHTTPTests(TestCase):
         )
         self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
 
+    def test_rubric_proxy_score_uses_server_bound_criterion_fields(self):
+        from singer_contest.models import CriterionScore, JudgeSeat, RubricCriterion, ScoringRubric
+
+        rubric = ScoringRubric.objects.create(
+            activity=self.activity,
+            name="Staff fallback rubric",
+            is_test_data=True,
+        )
+        criterion_a = RubricCriterion.objects.create(
+            rubric=rubric,
+            name="音准",
+            max_score=40,
+            sequence=1,
+            is_test_data=True,
+        )
+        criterion_b = RubricCriterion.objects.create(
+            rubric=rubric,
+            name="台风",
+            max_score=60,
+            sequence=2,
+            is_test_data=True,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.contest_round.rubric = rubric
+            self.contest_round.save(update_fields=["rubric"])
+
+        self._prepare_panel()
+        seat = JudgeSeat.objects.get()
+        self.client.post(
+            reverse("staff:judge_performance_advance", args=[self.contest_round.pk]),
+            {"performance_id": self.performance.pk, "reason": "开始现场表演"},
+        )
+        page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertContains(page, f'name="criterion_{criterion_a.pk}"')
+        self.assertContains(page, f'name="criterion_{criterion_b.pk}"')
+
+        saved = self.client.post(
+            reverse("staff:judge_score_proxy", args=[self.contest_round.pk]),
+            {
+                "performance_id": self.performance.pk,
+                "seat_id": seat.pk,
+                "context_version": 1,
+                "criterion_" + str(criterion_a.pk): "37",
+                "criterion_" + str(criterion_b.pk): "55",
+                "notes": "分项代录",
+                "source_reference": "故障单 RUBRIC-001",
+                "reason": "评委终端故障",
+                "command_id": "proxy-rubric-001",
+            },
+        )
+
+        self.assertRedirects(saved, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        record = ScoreRecord.objects.get(round=self.contest_round)
+        self.assertEqual(record.score, 92)
+        self.assertEqual(CriterionScore.objects.filter(score_record=record).count(), 2)
+
     def test_paper_score_rejects_stale_context_and_accepts_current_context(self):
         self._prepare_panel()
         from singer_contest.models import JudgeSeat
