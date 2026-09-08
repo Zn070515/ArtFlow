@@ -20,7 +20,9 @@ from tickets.services import (
     create_ticket,
     issue_ticket,
     redeem_ticket,
+    revoke_ticket,
     revoke_ticket_session,
+    void_ticket,
 )
 
 from .models import VoteBallot, VoteOption, VoteSession
@@ -33,6 +35,10 @@ class TicketVoteSubmissionTests(TestCase):
         with authority_write(ACCOUNT_AUTHORITY):
             self.staff.role = User.Role.STAFF
             self.staff.save(update_fields=["role", "is_staff"])
+        self.admin = User.objects.create_user(username="ticket-vote-admin", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin.role = User.Role.ADMIN
+            self.admin.save(update_fields=["role", "is_staff"])
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(
                 title="Ticket vote activity",
@@ -130,6 +136,31 @@ class TicketVoteSubmissionTests(TestCase):
                 ticket_session=ticket_session,
             )
 
+    def test_void_or_revoked_ticket_cannot_cast_with_an_existing_session(self):
+        void_ticket_row = create_ticket(self.activity, actor=self.staff, serial_number="voided")
+        void_issued = issue_ticket(void_ticket_row, actor=self.staff)
+        void_redeemed = redeem_ticket(void_issued.secret)
+        void_ticket(void_ticket_row, actor=self.admin)
+        with self.assertRaises(ValidationError):
+            submit_ballot(
+                self.vote_session,
+                browser_session_key="ticket-browser-void",
+                option_ids=[self.option.pk],
+                ip_address="10.0.0.21",
+                ticket_session=void_redeemed.session,
+            )
+
+        _issued, revoked_redeemed = self._ticket_session()
+        revoke_ticket(revoked_redeemed.session.ticket, actor=self.admin)
+        with self.assertRaises(ValidationError):
+            submit_ballot(
+                self.vote_session,
+                browser_session_key="ticket-browser-ticket-revoked",
+                option_ids=[self.option.pk],
+                ip_address="10.0.0.22",
+                ticket_session=revoked_redeemed.session,
+            )
+
     def test_same_browser_cannot_switch_to_another_ticket(self):
         _issued, first_redeemed = self._ticket_session()
         _issued, second_redeemed = self._ticket_session()
@@ -149,6 +180,34 @@ class TicketVoteSubmissionTests(TestCase):
                 ip_address="10.0.0.18",
                 ticket_session=second_redeemed.session,
             )
+
+    def test_no_ticket_vote_ignores_supplied_ticket_context(self):
+        legacy_session = VoteSession.objects.create(
+            activity=self.activity,
+            name="Legacy Vote",
+            passcode="5678",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            requires_ticket=False,
+            is_test_data=True,
+        )
+        legacy_option = VoteOption.objects.create(
+            vote_session=legacy_session,
+            singer=self.option.singer,
+            is_test_data=True,
+        )
+        legacy_session = open_vote_session(legacy_session, self.staff)
+        _issued, redeemed = self._ticket_session()
+
+        ballot = submit_ballot(
+            legacy_session,
+            browser_session_key="legacy-browser",
+            option_ids=[legacy_option.pk],
+            ip_address="10.0.0.20",
+            ticket_session=redeemed.session,
+        )
+
+        self.assertIsNone(ballot.ticket_id)
 
     def test_foreign_ticket_cannot_cast_and_revoked_session_cannot_cast(self):
         with authority_write(ACTIVITY_STATE):
