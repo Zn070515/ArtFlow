@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from functools import partial
 from typing import Any
 
@@ -13,6 +14,7 @@ from common.authority import (
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
+    TICKET_SESSION_STATE,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -43,6 +45,7 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         StageDecision,
         StageResult,
     )
+    from tickets.models import Ticket, TicketAccessSession
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
     return {
@@ -64,6 +67,12 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         "vote_ballots": VoteBallot.objects.filter(
             vote_session__activity=activity,
             vote_session__is_test_data=True,
+            is_test_data=True,
+        ).count(),
+        "tickets": Ticket.objects.filter(activity=activity, is_test_data=True).count(),
+        "ticket_sessions": TicketAccessSession.objects.filter(
+            ticket__activity=activity,
+            ticket__is_test_data=True,
             is_test_data=True,
         ).count(),
         "scores": ScoreRecord.objects.filter(round__activity=activity, is_test_data=True).count(),
@@ -121,6 +130,7 @@ def _restore_test_related_posts_to_draft(activity: Any, *, operator: Any) -> Non
 
 def _reject_mixed_marker_dependencies(activity: Any) -> None:
     from files.models import SubmissionFile
+    from tickets.models import Ticket, TicketAccessSession
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
     test_vote_sessions = VoteSession.objects.filter(activity=activity, is_test_data=True)
@@ -134,6 +144,13 @@ def _reject_mixed_marker_dependencies(activity: Any) -> None:
         ).exists()
     ):
         raise PermissionDenied("Test vote sessions with formal dependents cannot be cleared.")
+
+    test_tickets = Ticket.objects.filter(activity=activity, is_test_data=True)
+    if (
+        TicketAccessSession.objects.filter(ticket__in=test_tickets, is_test_data=False).exists()
+        or VoteBallot.objects.filter(ticket__in=test_tickets, is_test_data=False).exists()
+    ):
+        raise PermissionDenied("Test tickets with formal dependents cannot be cleared.")
 
     test_singer_vote_options = VoteOption.objects.filter(
         singer__activity=activity,
@@ -161,6 +178,7 @@ def _reject_mixed_marker_dependencies(activity: Any) -> None:
 
 @transaction.atomic
 def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
+    from django.utils import timezone
     from exports.models import GeneratedDocument
     from farewell_show.models import Program
     from files.models import SubmissionFile
@@ -176,6 +194,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         StageResult,
     )
     from singer_contest.services import reset_round_snapshots
+    from tickets.models import Ticket, TicketAccessSession
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
     locked_activity = lock_activity_for_runtime_data(activity)
@@ -262,6 +281,18 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     ).delete()
     with authority_write(TEST_DATA_CLEANUP):
         VoteSession.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
+    ticket_sessions = TicketAccessSession.objects.filter(
+        ticket__activity=locked_activity,
+        ticket__is_test_data=True,
+        is_test_data=True,
+    ).select_for_update()
+    with authority_write(TICKET_SESSION_STATE):
+        for session in ticket_sessions:
+            session.expires_at = timezone.now() - timedelta(seconds=1)
+            session.save(update_fields=["expires_at"])
+            session.delete()
+    with authority_write(TEST_DATA_CLEANUP):
+        Ticket.objects.filter(activity=locked_activity, is_test_data=True).delete()
     Program.objects.filter(activity=locked_activity, is_test_data=True).delete()
     SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=locked_activity, is_test=True).delete()
