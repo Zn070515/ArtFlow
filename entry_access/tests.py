@@ -571,6 +571,8 @@ class EntryAccessHttpTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["Pragma"], "no-cache")
         payload = response.json()
         grant = AccessGrant.objects.get(pk=payload["grant_id"])
         self.assertGreaterEqual(len(payload["token"]), 43)
@@ -607,6 +609,8 @@ class EntryAccessHttpTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(post_response.status_code, 200)
+        self.assertEqual(post_response["Cache-Control"], "no-store")
+        self.assertEqual(post_response["Pragma"], "no-cache")
         self.assertIn("session_token", post_response.json())
 
     def test_redeem_invalid_grant_has_generic_reason(self):
