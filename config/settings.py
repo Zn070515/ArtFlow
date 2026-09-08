@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # ArtFlow
     "entry_access",
+    "tickets",
     "accounts",
     "core",
     "common",
@@ -171,6 +172,12 @@ ARTFLOW_VIDEO_UPLOAD_MAX_MB = get_int(os.environ, "ARTFLOW_VIDEO_UPLOAD_MAX_MB",
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.
 ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 15 * 60)
+
+# Ticket-backed audience sessions are intentionally short-lived. The raw session
+# token is held only by the browser's HttpOnly cookie and never by the database.
+TICKET_ACCESS_SESSION_TTL_SECONDS = get_int(
+    os.environ, "TICKET_ACCESS_SESSION_TTL_SECONDS", 30 * 60
+)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

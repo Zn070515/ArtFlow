@@ -14,6 +14,7 @@ urlpatterns = [
     path("staff/", include("staff_panel.urls")),
     path("vote/", include("voting.urls")),
     path("entry-access/", include("entry_access.urls")),
+    path("tickets/", include("tickets.urls")),
     path("media/<path:path>", controlled_media, name="controlled_media"),
 ]
 
