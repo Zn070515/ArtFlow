@@ -1548,12 +1548,24 @@ class JudgeScoreReceipt(models.Model):
         if self.source != ScoreSource.DIRECT_JUDGE and not self.operator_id:
             raise ValidationError("工作人员代录评分回执必须绑定操作员。")
         if self.panel_snapshot_id and self.performance_id:
-            if self.panel_snapshot.round_id != self.performance.round_id:
+            panel_snapshot = self.panel_snapshot
+            performance = self.performance
+            if panel_snapshot.round_id != performance.round_id:
                 raise ValidationError("评分回执快照与表演轮次不一致。")
+            if panel_snapshot.activity_id != performance.activity_id:
+                raise ValidationError("评分回执快照与表演活动不一致。")
         if self.seat_id and self.panel_snapshot_id:
             seat = self.seat
             if seat is None or seat.panel_member.panel_snapshot_id != self.panel_snapshot_id:
                 raise ValidationError("评分回执席位与快照不一致。")
+        if self.session_id:
+            session = self.session
+            if (
+                session is None
+                or session.seat_id != self.seat_id
+                or session.panel_snapshot_id != self.panel_snapshot_id
+            ):
+                raise ValidationError("评分回执会话与席位快照不一致。")
         if self.score_record_id:
             record = self.score_record
             if record is None:
