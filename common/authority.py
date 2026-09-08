@@ -36,6 +36,11 @@ ACCESS_GRANT_STATE = "access_grant.state"
 EPHEMERAL_SESSION_STATE = "ephemeral_session.state"
 TICKET_STATE = "ticket.state"
 TICKET_SESSION_STATE = "ticket_access_session.state"
+JUDGE_PANEL_STATE = "judge_panel.state"
+JUDGE_SESSION_STATE = "judge_session.state"
+ROUND_PERFORMANCE_STATE = "round_performance.state"
+JUDGE_SCORE_SUBMISSION = "judge_score.submission"
+SCORE_FACT_WRITE = "score_fact.write"
 
 
 @dataclass(frozen=True)
