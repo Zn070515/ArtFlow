@@ -17,7 +17,15 @@ from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
+from .judge_authority import (
+    advance_performance,
+    hold_judge_panel,
+    hold_performance,
+    prepare_judge_panel,
+    resume_performance,
+)
 from .models import (
+    ContestRound,
     JudgeSeat,
     JudgeSeatGrant,
     JudgeSession,
@@ -189,3 +197,109 @@ class JudgeAuthorityModelGuardTests(TestCase):
             )
             with self.assertRaises(ValidationError):
                 member.save()
+
+
+class JudgePanelServiceTests(TestCase):
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.operator = User.objects.create_user(
+                username="judge-service", password="pass", role=User.Role.STAFF
+            )
+            self.singer_user = User.objects.create_user(
+                username="judge-singer", password="pass", role=User.Role.STUDENT
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Judge service",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=True,
+            )
+        from .models import Judge, Performance, RoundEntry, RoundJudge, SingerRegistration
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="Service round",
+            )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.singer_user,
+            name="Singer",
+            student_id="judge-001",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge A")
+        RoundEntry.objects.create(round=self.round, singer=self.singer, running_order=1)
+        RoundJudge.objects.create(round=self.round, judge=self.judge)
+        self.performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=self.singer,
+            sequence=1,
+            is_test_data=True,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+
+    def test_prepare_panel_creates_immutable_snapshot_seat_and_live_context(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+
+        self.assertEqual(snapshot.version, 1)
+        self.assertEqual(snapshot.change_policy, RoundPanelSnapshot.ChangePolicy.HOLD_ONLY)
+        self.assertEqual(snapshot.expected_judge_count, 1)
+        self.assertEqual(snapshot.minimum_judge_count, 1)
+        self.assertEqual(snapshot.members.count(), 1)
+        self.assertEqual(snapshot.members.first().seats.count(), 1)
+        run_state = self.round.performance_run_state
+        self.assertEqual(run_state.state, PerformanceRunState.State.IDLE)
+        self.assertEqual(run_state.context_version, 0)
+
+    def test_prepare_panel_is_idempotent_for_existing_active_snapshot(self):
+        first = prepare_judge_panel(self.round.pk, operator=self.operator)
+        second = prepare_judge_panel(self.round.pk, operator=self.operator)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(RoundPanelSnapshot.objects.count(), 1)
+        self.assertEqual(JudgeSeat.objects.count(), 1)
+
+    def test_prepare_panel_rejects_draft_round(self):
+        from django.core.exceptions import ValidationError
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.save(update_fields=["status"])
+
+        with self.assertRaises(ValidationError):
+            prepare_judge_panel(self.round.pk, operator=self.operator)
+
+    def test_hold_panel_blocks_context_and_records_reason(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+
+        held = hold_judge_panel(self.round.pk, operator=self.operator, reason="裁判席位核验")
+
+        self.assertEqual(held.pk, snapshot.pk)
+        self.assertEqual(held.state, RoundPanelSnapshot.State.HOLD)
+        self.assertEqual(self.round.performance_run_state.state, PerformanceRunState.State.HOLD)
+        self.assertEqual(self.round.performance_run_state.hold_reason, "裁判席位核验")
+
+    def test_live_performance_transitions_increment_context_version(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+
+        started = advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+        self.assertEqual(started.current_performance_id, self.performance.pk)
+        self.assertEqual(started.state, PerformanceRunState.State.PERFORMING)
+        self.assertEqual(started.context_version, 1)
+
+        held = hold_performance(self.round.pk, operator=self.operator, reason="舞台暂停")
+        self.assertEqual(held.state, PerformanceRunState.State.HOLD)
+        resumed = resume_performance(self.round.pk, operator=self.operator)
+        self.assertEqual(resumed.state, PerformanceRunState.State.PERFORMING)
+        self.assertEqual(resumed.context_version, 1)
