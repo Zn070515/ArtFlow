@@ -1711,9 +1711,7 @@ def _judge_control_context(
     qr_seat_id=None,
     policy_state_override="",
 ):
-    round_judges = list(
-        contest_round.round_judges.select_related("judge").order_by("pk")
-    )
+    round_judges = list(contest_round.round_judges.select_related("judge").order_by("pk"))
     panel_snapshot = (
         RoundPanelSnapshot.objects.filter(round=contest_round)
         .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
@@ -1855,9 +1853,7 @@ def judge_prepare(request, pk):
             contest_round,
             error=error_message,
             policy_state_override=(
-                "INSUFFICIENT_JUDGES / HOLD"
-                if "INSUFFICIENT_JUDGES" in str(error)
-                else ""
+                "INSUFFICIENT_JUDGES / HOLD" if "INSUFFICIENT_JUDGES" in str(error) else ""
             ),
         )
     messages.success(request, "评委组已准备，评委席位和评分上下文已冻结。")

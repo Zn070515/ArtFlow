@@ -621,8 +621,7 @@ class ContestRound(models.Model):
                 name="round_advance_count_non_negative",
             ),
             models.CheckConstraint(
-                condition=Q(minimum_judge_count__isnull=True)
-                | Q(minimum_judge_count__gte=1),
+                condition=Q(minimum_judge_count__isnull=True) | Q(minimum_judge_count__gte=1),
                 name="round_minimum_judge_positive",
             ),
         ]

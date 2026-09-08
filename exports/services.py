@@ -30,8 +30,8 @@ from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
 from singer_contest.models import Award, ContestRound, ScoreSummary, SingerRegistration, StageResult
 from singer_contest.services import (
-    authoritative_panel_judges,
     _eligible_singers,
+    authoritative_panel_judges,
     bound_ruleset_version_label,
     missing_score_cells,
     snapshot_fingerprint,

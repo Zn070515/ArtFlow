@@ -5975,9 +5975,7 @@ class JudgeControlHTTPTests(TestCase):
 
         self.client.force_login(self.participant)
         self.client.raise_request_exception = False
-        participant = self.client.get(
-            reverse("staff:judge_control", args=[self.contest_round.pk])
-        )
+        participant = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertEqual(participant.status_code, 403)
         self.client.raise_request_exception = True
 
@@ -6071,9 +6069,7 @@ class JudgeControlHTTPTests(TestCase):
         self.assertEqual(mocked_qr.status_code, 200)
         self.assertNotContains(mocked_qr, "RawJudgeToken-should-not-be-plain")
 
-        hold_get = self.client.get(
-            reverse("staff:judge_panel_hold", args=[self.contest_round.pk])
-        )
+        hold_get = self.client.get(reverse("staff:judge_panel_hold", args=[self.contest_round.pk]))
         self.assertEqual(hold_get.status_code, 405)
         hold_post = self.client.post(
             reverse("staff:judge_panel_hold", args=[self.contest_round.pk]),
