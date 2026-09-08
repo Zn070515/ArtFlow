@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 from django.urls import reverse
 
@@ -71,6 +72,25 @@ class JudgeRouteContractTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["reason_code"], "ORIGIN_REJECTED")
+
+    @patch("singer_contest.judge_views.submit_judge_score")
+    def test_score_maps_rubric_payload_validation_to_stable_reason(self, submit_mock):
+        submit_mock.side_effect = ValidationError("RUBRIC_PAYLOAD_INVALID")
+
+        response = self.client.post(
+            reverse("judge:score"),
+            data={
+                "command_id": "judge-http-rubric",
+                "expected_context_version": 1,
+                "expected_performance_id": 6,
+                "score_payload": {"criteria": []},
+            },
+            content_type="application/json",
+            HTTP_AUTHORIZATION="Bearer test-session",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["reason_code"], "RUBRIC_PAYLOAD_INVALID")
 
     @patch("singer_contest.judge_views.allow")
     def test_score_has_a_shared_application_rate_limit_boundary(self, allow_mock):
