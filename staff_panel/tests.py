@@ -60,9 +60,12 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    JudgeScoreReceipt,
+    Performance,
     RoundEntry,
     RoundJudge,
     ScoreRecord,
+    ScoreSource,
     ScoreSummary,
     ScoreWriteReceipt,
     SingerRegistration,
@@ -5930,7 +5933,7 @@ class JudgeControlHTTPTests(TestCase):
             is_test_mode=True,
         )
         self.judge = Judge.objects.create(activity=self.activity, name="Judge One")
-        SingerRegistration.objects.create(
+        self.registration = SingerRegistration.objects.create(
             activity=self.activity,
             user=self.participant,
             name="Demo Singer",
@@ -5947,6 +5950,14 @@ class JudgeControlHTTPTests(TestCase):
             round_type=ContestRound.RoundType.PRELIMINARY,
             minimum_judge_count=1,
             is_locked=False,
+        )
+        self.performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.contest_round,
+            singer=self.registration,
+            sequence=1,
+            song_title="Demo Song",
+            is_test_data=True,
         )
         prepare_round(self.contest_round, self.staff)
         self.client.force_login(self.staff)
@@ -6033,3 +6044,81 @@ class JudgeControlHTTPTests(TestCase):
             RoundPanelSnapshot.objects.get(round=self.contest_round).state,
             RoundPanelSnapshot.State.ACTIVE,
         )
+
+    def test_performance_advance_binds_context_and_proxy_score_is_idempotent(self):
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat, PerformanceRunState
+
+        seat = JudgeSeat.objects.get()
+        advanced = self.client.post(
+            reverse("staff:judge_performance_advance", args=[self.contest_round.pk]),
+            {"performance_id": self.performance.pk, "reason": "开始现场表演"},
+        )
+        self.assertRedirects(advanced, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        run_state = PerformanceRunState.objects.get(round=self.contest_round)
+        self.assertEqual(run_state.current_performance_id, self.performance.pk)
+        self.assertEqual(run_state.context_version, 1)
+
+        score_data = {
+            "performance_id": self.performance.pk,
+            "seat_id": seat.pk,
+            "context_version": 1,
+            "score": "91.50",
+            "notes": "工作人员代录",
+            "source_reference": "故障单 JC-001",
+            "reason": "评委终端故障",
+            "command_id": "proxy-score-001",
+        }
+        saved = self.client.post(
+            reverse("staff:judge_score_proxy", args=[self.contest_round.pk]), score_data
+        )
+        self.assertRedirects(saved, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
+        self.assertEqual(ScoreRecord.objects.get().source, ScoreSource.STAFF_PROXY)
+        self.assertEqual(JudgeScoreReceipt.objects.count(), 1)
+
+        replayed = self.client.post(
+            reverse("staff:judge_score_proxy", args=[self.contest_round.pk]), score_data
+        )
+        self.assertRedirects(
+            replayed,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
+
+    def test_paper_score_rejects_stale_context_and_accepts_current_context(self):
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat
+
+        seat = JudgeSeat.objects.get()
+        self.client.post(
+            reverse("staff:judge_performance_advance", args=[self.contest_round.pk]),
+            {"performance_id": self.performance.pk, "reason": "开始现场表演"},
+        )
+        stale_data = {
+            "performance_id": self.performance.pk,
+            "seat_id": seat.pk,
+            "context_version": 0,
+            "score": "88",
+            "notes": "纸面记录",
+            "source_reference": "纸面表-001",
+            "reason": "终端故障期间纸面记录",
+            "command_id": "paper-score-stale",
+        }
+        stale = self.client.post(
+            reverse("staff:judge_score_paper", args=[self.contest_round.pk]), stale_data
+        )
+        self.assertRedirects(stale, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertFalse(ScoreRecord.objects.filter(round=self.contest_round).exists())
+
+        stale_data.update({"context_version": 1, "command_id": "paper-score-001"})
+        accepted = self.client.post(
+            reverse("staff:judge_score_paper", args=[self.contest_round.pk]), stale_data
+        )
+        self.assertRedirects(
+            accepted,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        record = ScoreRecord.objects.get(round=self.contest_round)
+        self.assertEqual(record.source, ScoreSource.PAPER_DR)
+        self.assertEqual(record.source_reference, "纸面表-001")
