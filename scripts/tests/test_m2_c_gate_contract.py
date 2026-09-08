@@ -5,9 +5,7 @@ CI_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/ci.yml").read_text(encoding=
 INTEGRATION_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/integration.yml").read_text(
     encoding="utf-8"
 )
-READINESS_DOC = (REPOSITORY_ROOT / "docs/production-readiness.md").read_text(
-    encoding="utf-8"
-)
+READINESS_DOC = (REPOSITORY_ROOT / "docs/production-readiness.md").read_text(encoding="utf-8")
 
 
 def test_ci_keeps_both_pyright_commands_blocking():
