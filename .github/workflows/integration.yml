@@ -80,6 +80,14 @@ jobs:
           uv run python manage.py seed_demo_data
           uv run python manage.py seed_demo_data
 
+      - name: Run focused Ticket and entitlement tests
+        run: >-
+          uv run python manage.py test
+          tickets
+          voting.test_ticket_authority
+          voting.test_ticket_submission
+          common.test_ticket_cleanup
+
       - name: Run full test suite
         run: uv run pytest -q
 
