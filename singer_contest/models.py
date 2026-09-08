@@ -1424,13 +1424,18 @@ class ScoreRecord(models.Model):
             and not self.source_reference.strip()
         ):
             raise ValidationError("代录或纸面评分必须提供来源参考。")
-        if self.source == ScoreSource.DIRECT_JUDGE:
+        if self.source != ScoreSource.STAFF_RAPID:
             if not self.panel_snapshot_id or not self.judge_seat_id:
-                raise ValidationError("直接评委评分必须绑定评委组快照和席位。")
+                raise ValidationError("非快速录分必须绑定评委组快照和席位。")
             if not self.source_command_id.strip():
-                raise ValidationError("直接评委评分必须绑定评分命令。")
-            if not authority_authorized(SCORE_FACT_WRITE):
-                raise ValidationError("直接评委评分只能通过正式评分 authority service 写入。")
+                raise ValidationError("非快速录分必须绑定评分命令。")
+        if (
+            self.source in {ScoreSource.STAFF_PROXY, ScoreSource.PAPER_DR}
+            and not self.source_reference.strip()
+        ):
+            raise ValidationError("代录或纸面评分必须提供来源参考。")
+        if self.source != ScoreSource.STAFF_RAPID and not authority_authorized(SCORE_FACT_WRITE):
+            raise ValidationError("非快速录分只能通过正式评分 authority service 写入。")
 
     def save(self, *args, **kwargs):
         self.clean()

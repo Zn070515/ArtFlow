@@ -611,12 +611,13 @@ def _normalize_judge_score_payload(score_payload: object) -> dict[str, str]:
 
 def _judge_payload_hash(
     *,
-    locked: LockedJudgeTransport,
+    locked: LockedJudgeRound | LockedJudgeTransport,
     snapshot: RoundPanelSnapshot,
     seat: JudgeSeat,
     performance: Performance,
     context_version: int,
     payload: Mapping[str, str],
+    source: str,
 ) -> str:
     canonical = json.dumps(
         {
@@ -628,7 +629,7 @@ def _judge_payload_hash(
             "judge_id": seat.panel_member.judge_id,
             "performance_id": performance.pk,
             "context_version": context_version,
-            "source": ScoreSource.DIRECT_JUDGE,
+            "source": source,
             "payload": dict(payload),
         },
         ensure_ascii=True,
@@ -714,6 +715,7 @@ def submit_judge_score(
         performance=performance,
         context_version=context_version,
         payload=normalized_payload,
+        source=ScoreSource.DIRECT_JUDGE,
     )
     receipt = (
         JudgeScoreReceipt.objects.select_for_update()
@@ -802,6 +804,226 @@ def submit_judge_score(
         score_record_id=score_record.pk,
         reason_code="ACCEPTED",
         status=receipt.status,
+    )
+
+
+def _submit_staff_bound_score(
+    round_id: int,
+    performance_id: object,
+    seat_id: object,
+    *,
+    operator,
+    command_id: object,
+    expected_context_version: object,
+    score_payload: object,
+    source: str,
+    source_reference: str,
+    reason: str,
+    audit_action: str,
+) -> JudgeScoreSubmission:
+    if source not in {ScoreSource.STAFF_PROXY, ScoreSource.PAPER_DR}:
+        raise ValidationError("工作人员评分来源无效。")
+    if (
+        not isinstance(source_reference, str)
+        or not source_reference.strip()
+        or len(source_reference) > 120
+    ):
+        raise ValidationError("代录或纸面评分必须提供有效来源参考。")
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 240:
+        raise ValidationError("代录或纸面评分必须填写不超过 240 字的原因。")
+    normalized_command_id = _validate_command_id(command_id)
+    context_version = _validate_expected_context(
+        expected_context_version, field="expected_context_version"
+    )
+    normalized_performance_id = _validate_expected_context(performance_id, field="performance_id")
+    normalized_seat_id = _validate_expected_context(seat_id, field="seat_id")
+    normalized_payload = _normalize_judge_score_payload(score_payload)
+    locked = _lock_judge_round(round_id, operator)
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
+    snapshot = _active_panel_snapshot(locked.contest_round)
+    if snapshot is None:
+        raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+    if run_state.state == PerformanceRunState.State.HOLD:
+        raise PermissionDenied("ROUND_ON_HOLD")
+    if run_state.state not in {
+        PerformanceRunState.State.PERFORMING,
+        PerformanceRunState.State.ACCEPTING_SCORE,
+    }:
+        raise PermissionDenied("PERFORMANCE_NOT_SCORABLE")
+    if (
+        run_state.context_version != context_version
+        or run_state.current_performance_id != normalized_performance_id
+    ):
+        raise ValidationError("STALE_CONTEXT")
+    performance = (
+        Performance._base_manager.select_related("singer")
+        .filter(
+            pk=normalized_performance_id,
+            round=locked.contest_round,
+            activity=locked.activity,
+        )
+        .first()
+    )
+    seat = (
+        JudgeSeat.objects.select_for_update()
+        .select_related("panel_member__panel_snapshot__round")
+        .filter(pk=normalized_seat_id)
+        .first()
+    )
+    if performance is None:
+        raise ValidationError("PERFORMANCE_NOT_SCORABLE")
+    if seat is None or seat.panel_member.panel_snapshot_id != snapshot.pk:
+        raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+    if seat.state != JudgeSeat.State.ASSIGNED:
+        raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+
+    payload_hash = _judge_payload_hash(
+        locked=locked,
+        snapshot=snapshot,
+        seat=seat,
+        performance=performance,
+        context_version=context_version,
+        payload=normalized_payload,
+        source=source,
+    )
+    receipt = (
+        JudgeScoreReceipt.objects.select_for_update()
+        .filter(command_id=normalized_command_id)
+        .first()
+    )
+    if receipt is not None:
+        if (
+            receipt.payload_hash != payload_hash
+            or receipt.source != source
+            or receipt.panel_snapshot_id != snapshot.pk
+            or receipt.seat_id != seat.pk
+            or receipt.performance_id != performance.pk
+        ):
+            raise JudgeIdempotencyConflict("评分命令已绑定其他内容。")
+        if receipt.status == JudgeScoreReceipt.Status.SUCCEEDED and receipt.score_record_id:
+            return JudgeScoreSubmission(
+                receipt_id=receipt.pk,
+                score_record_id=receipt.score_record_id,
+                reason_code=receipt.result_code or "ACCEPTED",
+                status=receipt.status,
+            )
+    if ScoreRecord._base_manager.filter(
+        round=locked.contest_round,
+        singer_id=performance.singer_id,
+        judge_id=seat.panel_member.judge_id,
+    ).exists():
+        raise ValidationError("DUPLICATE_SCORE_FACT")
+    current_operator = locked.operator
+    if receipt is None:
+        with authority_write(JUDGE_SCORE_SUBMISSION):
+            receipt = JudgeScoreReceipt.objects.create(
+                command_id=normalized_command_id,
+                operation=f"{source}.submit",
+                source=source,
+                payload_hash=payload_hash,
+                panel_snapshot=snapshot,
+                seat=seat,
+                performance=performance,
+                operator=current_operator,
+                status=JudgeScoreReceipt.Status.PENDING,
+            )
+    with _authorized_score_fact_write():
+        score_record = ScoreRecord.objects.create(
+            round=locked.contest_round,
+            singer=performance.singer,
+            judge=seat.panel_member.judge,
+            score=Decimal(normalized_payload["score"]),
+            notes=normalized_payload["notes"],
+            source=source,
+            panel_snapshot=snapshot,
+            judge_seat=seat,
+            source_command_id=normalized_command_id,
+            source_reference=source_reference.strip(),
+            is_test_data=locked.activity.is_test_mode,
+        )
+    with authority_write(JUDGE_SCORE_SUBMISSION):
+        receipt.score_record = score_record
+        receipt.status = JudgeScoreReceipt.Status.SUCCEEDED
+        receipt.result_code = "ACCEPTED"
+        receipt.completed_at = timezone.now()
+        receipt.save(update_fields=["score_record", "status", "result_code", "completed_at"])
+    _audit(
+        operator=current_operator,
+        action_type=audit_action,
+        target=f"JudgeScoreReceipt:{receipt.pk}",
+        new_value=json.dumps(
+            {
+                "score_record_id": score_record.pk,
+                "source": source,
+                "source_reference": source_reference.strip(),
+                "payload_hash": payload_hash,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+        note=reason.strip(),
+    )
+    return JudgeScoreSubmission(
+        receipt_id=receipt.pk,
+        score_record_id=score_record.pk,
+        reason_code="ACCEPTED",
+        status=receipt.status,
+    )
+
+
+@transaction.atomic
+def submit_staff_proxy_score(
+    round_id: int,
+    performance_id: object,
+    seat_id: object,
+    *,
+    operator,
+    command_id: object,
+    expected_context_version: object,
+    score_payload: object,
+    source_reference: str,
+    reason: str,
+) -> JudgeScoreSubmission:
+    return _submit_staff_bound_score(
+        round_id,
+        performance_id,
+        seat_id,
+        operator=operator,
+        command_id=command_id,
+        expected_context_version=expected_context_version,
+        score_payload=score_payload,
+        source=ScoreSource.STAFF_PROXY,
+        source_reference=source_reference,
+        reason=reason,
+        audit_action=AuditLog.ActionType.JUDGE_SCORE_PROXY,
+    )
+
+
+@transaction.atomic
+def submit_paper_score(
+    round_id: int,
+    performance_id: object,
+    seat_id: object,
+    *,
+    operator,
+    command_id: object,
+    expected_context_version: object,
+    score_payload: object,
+    paper_reference: str,
+    reason: str,
+) -> JudgeScoreSubmission:
+    return _submit_staff_bound_score(
+        round_id,
+        performance_id,
+        seat_id,
+        operator=operator,
+        command_id=command_id,
+        expected_context_version=expected_context_version,
+        score_payload=score_payload,
+        source=ScoreSource.PAPER_DR,
+        source_reference=paper_reference,
+        reason=reason,
+        audit_action=AuditLog.ActionType.JUDGE_SCORE_PAPER,
     )
 
 

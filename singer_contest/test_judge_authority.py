@@ -29,6 +29,8 @@ from .judge_authority import (
     resume_judge_panel,
     resume_performance,
     submit_judge_score,
+    submit_paper_score,
+    submit_staff_proxy_score,
 )
 from .models import (
     ContestRound,
@@ -447,3 +449,37 @@ class JudgePanelServiceTests(TestCase):
                 score_payload={"score": "91.50"},
             )
         self.assertFalse(ScoreRecord.objects.exists())
+
+    def test_staff_proxy_and_paper_sources_are_explicit_and_idempotent(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        proxy = submit_staff_proxy_score(
+            self.round.pk,
+            self.performance.pk,
+            seat.pk,
+            operator=self.operator,
+            command_id="proxy-command-1",
+            expected_context_version=1,
+            score_payload={"score": "89"},
+            source_reference="现场代录表-001",
+            reason="评委终端临时不可用",
+        )
+        proxy_record = ScoreRecord.objects.get(pk=proxy.score_record_id)
+        self.assertEqual(proxy_record.source, ScoreSource.STAFF_PROXY)
+        self.assertEqual(proxy_record.source_reference, "现场代录表-001")
+        self.assertEqual(proxy_record.source_command_id, "proxy-command-1")
+
+        with self.assertRaises(ValidationError):
+            submit_paper_score(
+                self.round.pk,
+                self.performance.pk,
+                seat.pk,
+                operator=self.operator,
+                command_id="paper-command-1",
+                expected_context_version=1,
+                score_payload={"score": "88"},
+                paper_reference="纸面评分-001",
+                reason="重复录入测试",
+            )
