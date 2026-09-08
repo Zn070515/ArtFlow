@@ -7,6 +7,7 @@ from django.core.checks import ERROR, run_checks
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.utils import timezone
 
 
 class DoctorExitCode(IntEnum):
@@ -34,7 +35,8 @@ class Command(BaseCommand):
             self.stdout.write("Configuration: failed")
             failures.append(DoctorExitCode.CONFIGURATION_FAILURE)
 
-        if self._database_is_healthy():
+        database_healthy = self._database_is_healthy()
+        if database_healthy:
             self.stdout.write("Database connection: ok")
         else:
             self.stdout.write("Database connection: failed")
@@ -52,6 +54,17 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f"{setting_name}: missing")
                 failures.append(DoctorExitCode.DIRECTORY_FAILURE)
+
+        if database_healthy:
+            from tickets.models import Ticket, TicketAccessSession
+
+            self.stdout.write(f"Ticket rows: {Ticket.objects.count()}")
+            self.stdout.write(
+                "Stale ticket sessions: "
+                f"{TicketAccessSession.objects.filter(expires_at__lte=timezone.now()).count()}"
+            )
+        else:
+            self.stdout.write("Ticket diagnostics: unavailable (database connection failed)")
 
         if failures:
             raise CommandError("Doctor checks failed.", returncode=min(failures))

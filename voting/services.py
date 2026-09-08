@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import timedelta
 
 from accounts.services import require_current_admin, require_current_staff
@@ -9,11 +11,50 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from tickets.models import Ticket, TicketAccessSession
 
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
 
 
-def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
+def _locked_ticket_for_vote(
+    vote_session: VoteSession,
+    ticket_session: TicketAccessSession | None,
+) -> Ticket | None:
+    if not vote_session.requires_ticket:
+        return None
+    if ticket_session is None:
+        raise ValidationError("请先核验入场票。")
+    access_session = (
+        TicketAccessSession.objects.select_for_update()
+        .select_related("ticket")
+        .filter(pk=ticket_session.pk)
+        .first()
+    )
+    now = timezone.now()
+    if (
+        access_session is None
+        or access_session.revoked_at is not None
+        or access_session.expires_at <= now
+    ):
+        raise ValidationError("票据会话无效。")
+    ticket = Ticket.objects.select_for_update().filter(pk=access_session.ticket_id).first()
+    if (
+        ticket is None
+        or ticket.activity_id != vote_session.activity_id
+        or ticket.state != Ticket.State.CHECKED_IN
+    ):
+        raise ValidationError("票据无效。")
+    return ticket
+
+
+def submit_ballot(
+    vote_session: VoteSession,
+    *,
+    browser_session_key: str,
+    option_ids,
+    ip_address: str,
+    ticket_session: TicketAccessSession | None = None,
+):
     if not browser_session_key:
         raise ValidationError("浏览器会话无效。")
     unique_ids = list(dict.fromkeys(str(option_id) for option_id in option_ids))
@@ -54,20 +95,37 @@ def submit_ballot(vote_session, *, browser_session_key, option_ids, ip_address):
             raise ValidationError("投票尚未开放或已锁定。")
         if now < locked_session.start_time or now > locked_session.end_time:
             raise ValidationError("当前不在投票时间内。")
+        ticket = _locked_ticket_for_vote(locked_session, ticket_session)
+        ticket_ballot = (
+            VoteBallot.objects.filter(vote_session=locked_session, ticket=ticket).first()
+            if ticket is not None
+            else None
+        )
+        if ticket_ballot:
+            return ticket_ballot
         ballot = VoteBallot.objects.filter(
             vote_session=locked_session, browser_session_key=browser_session_key
         ).first()
         if ballot:
+            if ticket is not None and ballot.ticket_id != ticket.pk:
+                raise ValidationError("该浏览器会话已使用其他入场票投票。")
             return ballot
         try:
             with transaction.atomic():
                 ballot = VoteBallot.objects.create(
                     vote_session=locked_session,
+                    ticket=ticket,
                     browser_session_key=browser_session_key,
                     ip_address=ip_address,
                     is_test_data=locked_activity.is_test_mode,
                 )
         except IntegrityError:
+            if ticket is not None:
+                ticket_ballot = VoteBallot.objects.filter(
+                    vote_session=locked_session, ticket=ticket
+                ).first()
+                if ticket_ballot:
+                    return ticket_ballot
             return VoteBallot.objects.get(
                 vote_session=locked_session, browser_session_key=browser_session_key
             )

@@ -25,6 +25,8 @@ from singer_contest.models import (
     SingerRegistration,
 )
 from singer_contest.services import prepare_round, reset_test_round_snapshots
+from tickets.models import Ticket
+from tickets.services import create_ticket, issue_ticket
 from voting.models import VoteOption, VoteRecord, VoteSession
 from voting.services import close_vote_session, open_vote_session
 
@@ -34,6 +36,7 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
     TEST_DATA_CLEANUP,
+    TICKET_STATE,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -73,6 +76,7 @@ DEMO_SEED_KEYS = frozenset(
         "demo.vote_option.two",
         "demo.vote_record.one",
         "demo.vote_record.two",
+        "demo.ticket.audience",
         "demo.incident.one",
     }
 )
@@ -90,6 +94,7 @@ TEST_DATA_FLAG_FIELDS = {
     VoteOption: "is_test_data",
     VoteRecord: "is_test_data",
     VoteSession: "is_test_data",
+    Ticket: "is_test_data",
 }
 
 RESET_RUNTIME_ROOTS = (
@@ -100,6 +105,7 @@ RESET_RUNTIME_ROOTS = (
     (IncidentRecord, "activity_id__in"),
     (Program, "activity_id__in"),
     (SingerRegistration, "activity_id__in"),
+    (Ticket, "activity_id__in"),
 )
 
 
@@ -519,6 +525,22 @@ class Command(BaseCommand):
         )
         if not vote_session.is_open:
             open_vote_session(vote_session, admin)  # type: ignore[no-untyped-call]
+        demo_ticket = self._owned_object_or_none("demo.ticket.audience", Ticket)
+        if demo_ticket is None:
+            demo_ticket = create_ticket(
+                singer_activity,
+                actor=admin,
+                batch_reference="DEMO-AUDIENCE",
+                serial_number="0001",
+            )
+            content_type = ContentType.objects.get_for_model(Ticket)
+            SeedRecord.objects.create(
+                key="demo.ticket.audience",
+                content_type=content_type,
+                object_id=demo_ticket.pk,
+            )
+        if demo_ticket.state == Ticket.State.CREATED:
+            issue_ticket(demo_ticket, actor=admin)
         self._upsert(
             "demo.incident.one",
             IncidentRecord,
@@ -773,6 +795,8 @@ class Command(BaseCommand):
             return authority_write(CONTEST_ROUND_STATE)
         if model is ScoreSummary:
             return authority_write(SCORE_SUMMARY_RECALCULATE)
+        if model is Ticket:
+            return authority_write(TICKET_STATE)
         if model is VoteSession:
             return authority_write(VOTE_SESSION_STATE)
         return nullcontext()

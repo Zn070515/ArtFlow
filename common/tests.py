@@ -1094,7 +1094,7 @@ class DemoSeedCommandTests(TestCase):
                 "vote_options": 2,
                 "vote_records": 2,
                 "incidents": 1,
-                "seed_records": 29,
+                "seed_records": 30,
             },
         )
         self.assertEqual(
@@ -1128,6 +1128,7 @@ class DemoSeedCommandTests(TestCase):
                 "demo.vote_option.two",
                 "demo.vote_record.one",
                 "demo.vote_record.two",
+                "demo.ticket.audience",
                 "demo.incident.one",
             },
         )

@@ -70,6 +70,30 @@ Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的�
 JudgeSeat、正式扫码页或业务工作区前，仍必须完成 PostgreSQL 并发/恢复彩排和真实角色
 流程验证；因此 M2-A 继续保持 `EXPERIMENTAL`，不会被误标为 Judge/Ticket 已上线。
 
+## M2-B Ticket / Check-in / Audience Entitlement
+
+M2-B 的票据是非个人化的权威输入：Ticket 只保存 SHA-256 digest、活动和库存标识，
+原始 secret 只在 Staff 签发响应中出现一次。生命周期由服务层审计并锁定活动与票据：
+`CREATED → ISSUED → CHECKED_IN`，另有受控的 `VOID/REVOKED` 终态。公开兑换只生成
+短期 HttpOnly `artflow_ticket_session` cookie，不改变票据状态；过期会话可通过
+`uv run python manage.py purge_ticket_sessions` 清理。扫描页先取得同源 CSRF token，
+再以 body-only `POST` 兑换；缺少或不匹配 CSRF token 的跨站请求不能设置票据会话。
+
+配置了 `VoteSession.requires_ticket` 的投票，提交时必须持有同活动、未过期、未撤销且
+已 `CHECKED_IN` 的票据会话。`VoteBallot.ticket` 是 PROTECT 关系，数据库约束保证同一
+票据在同一投票场次最多产生一张 ballot；浏览器 session 和 IP 只用于兼容性、幂等和
+滥用信号，不构成投票资格。未启用 ticket 的旧投票仍按浏览器 session 去重且 ballot
+不附带 Ticket。
+
+彩排必须逐项验证：重复扫码/兑换、未检票票、作废/撤销票、过期 cookie、跨活动票、
+同票并发投票、同浏览器换票、无票旧流程，以及 TEST cleanup 不触碰 FORMAL Ticket、
+ballot 和 audit。数据库故障时 `doctor` 只报告连接失败，不继续查询票据表；doctor、
+备份 manifest 和 audit 只输出非秘密计数/元数据。
+
+应用限流和 body 上限不等于 DDoS 防护。TLS 洪泛、慢连接、连接数上限、volumetric
+DDoS、WAF challenge/黑名单和学校公网入口审批仍由部署方、学校网络或边缘服务负责，
+必须在正式接入前单独验证并保留证据。
+
 ## M2 渐进式能力门禁
 
 每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
@@ -154,6 +178,14 @@ Participant / Judge / Audience 参加的现场彩排。
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase 模拟角色与恶意请求；真实参与者 0；Judge/Audience 未模拟 | 正常流程与恶意输入（容器 PostgreSQL 隔离测试库；948 tests） | PASS（技术彩排） | 未测量：本次未执行真实首张评分到最后一次自动 resolve | 不适用：无故障；完整套件 `948 tests`，`OK (skipped=3)` | 仍需真实角色在运行栈上完成登录、规则、评分、决定、投票、材料、文档和归档串联；媒体替换、大视频限制等人工步骤未执行 | 纸质评分 + Staff 工作区；锁定前人工核对缺分、结果和审计 |
 | 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase；真实参与者 0 | 灾难/恢复：web 重启、PostgreSQL 重启、应用备份恢复、PostgreSQL 隔离恢复 | PASS（技术彩排） | 未测量 | web 健康恢复 7.3s；PostgreSQL 重启后健康恢复 6.9s；应用备份恢复脚本 8.2s；PostgreSQL dump 恢复脚本 8.4s；各自恢复后健康检查/Django check 通过 | 尚未在真实域名、TLS、Caddy 和真实媒体负载下演练；生产 `.env`、DNS/ACME 和备份目标仍需活动部署方提供并验证 | 维持源库和媒体卷；切换到纸质评分/人工登记，暂停正式发布，按备份清单恢复到隔离或备用栈后由 Admin 复核再继续 |
+
+### 2026-09-08 M2-B 本地恶意边界彩排记录
+
+本次是本地工程彩排，不是学校接入或真实活动彩排。测试数据使用本地可丢弃数据库；没有把真实票据 secret 写入日志、测试产物或数据库。
+
+| 时间 | 参与者 | 场景 | 结论 | 录分到 READY 时间 | 实际恢复时间 | 已知风险 | Plan B |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-08 | 自动化 Django 测试与 Playwright 请求；真实参与者 0；Staff/Judge/Audience 未模拟 | Ticket 生命周期、authority/锁定规则、重复/跨活动/撤销/过期/换票/并发边界；公共扫描页与 body-only redeem 边界 | PASS（代码与公共边界）；完整 Staff 签发→扫码→投票浏览器流程未执行 | 未测量：本次不含评分录入 | 本地 SQLite 迁移后 Playwright 3/3 通过；完整 pytest `1045 passed, 30 skipped`；Ruff、mypy、Pyright、客户端/CSS、Django、文档与工作流门禁通过 | Docker Engine 当前不可用，PostgreSQL 并发、Compose 验收、备份/恢复未在本机重跑；完整凭据型 Staff 浏览器彩排、真实 TLS/WAF/学校网络 DDoS 演练仍为 HOLD | 票据或投票异常时暂停发布，改用纸质登记/人工核验；保留源库与媒体卷，待部署方提供可控 PostgreSQL/边缘环境后再复测 |
 
 补充：首次直接在容器内运行完整测试时漏掉了验收脚本的 root-only `/app/.env`
 fixture，导致 1 个配置测试因权限失败；按现有验收脚本补齐 fixture 后，单测和完整

@@ -239,6 +239,7 @@ class VoteSessionForm(forms.Form):
         required=False,
         initial=VoteSession.Purpose.SELECTION,
     )
+    requires_ticket = forms.BooleanField(required=False, initial=False)
 
     def _posted_singer_ids(self):
         data = cast(QueryDict, self.data)

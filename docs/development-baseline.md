@@ -37,13 +37,13 @@ uv run python manage.py doctor
 Invoke-WebRequest http://127.0.0.1:8000/healthz/
 ```
 
-`doctor` checks loaded configuration, database connectivity, unapplied migrations, and static/media directories. It returns nonzero for failures and does not print secrets or a complete database URL. `/healthz/` accepts only `GET`; it returns a minimal `ok` or generic unavailable status and is safe for container health checks.
+`doctor` checks loaded configuration, database connectivity, unapplied migrations, and static/media directories. When the database is healthy it also reports Ticket row and stale access-session counts; if the database check fails it does not query Ticket tables again. It returns nonzero for failures and does not print secrets or a complete database URL. `/healthz/` accepts only `GET`; it returns a minimal `ok` or generic unavailable status and is safe for container health checks.
 
 ## Demo data and reset safety
 
 `seed_dev_admin` creates or updates only the development administrator, taking its password from `DEV_ADMIN_PASSWORD` or an interactive prompt. `seed_demo_data` is repeatable and creates deterministic demo configuration and runtime data.
 
-`seed_demo_data --reset` is a narrow cleanup operation, not a database reset. It deletes only command-owned runtime rows with the repository's test-data flag and refuses an unsafe cascade. It preserves unmarked formal data, unmarked configuration, and audit records. Take a backup and use a disposable database before invoking it during troubleshooting.
+`seed_demo_data --reset` is a narrow cleanup operation, not a database reset. It deletes only command-owned runtime rows with the repository's test-data flag, including the demo Ticket inventory, and refuses an unsafe cascade. It preserves unmarked formal data, unmarked configuration, and audit records. Ticket access sessions are short-lived and can be purged explicitly with `uv run python manage.py purge_ticket_sessions`; this never deletes Tickets or ballots. Take a backup and use a disposable database before invoking reset during troubleshooting.
 
 ## Docker and PostgreSQL
 

@@ -3037,6 +3037,36 @@ class RuntimeLifecycleMatrixTests(TestCase):
         self.assertTrue(session.is_test_data)
         self.assertEqual(VoteOption.objects.filter(vote_session=session).count(), 1)
 
+    def test_vote_session_create_persists_ticket_requirement(self):
+        activity = _create_activity(
+            title="Ticket Vote Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        singer = self._singer(activity, "Ticket Vote Singer", True, "20260303")
+        self.client.force_login(self.staff)
+
+        form_response = self.client.get(reverse("staff:vote_session_create"))
+        self.assertContains(form_response, 'name="requires_ticket"')
+
+        response = self.client.post(
+            reverse("staff:vote_session_create"),
+            {
+                "activity_id": activity.pk,
+                "name": "Ticket Vote",
+                "passcode": "1234",
+                "start_time": "2026-08-27T10:00",
+                "end_time": "2026-08-27T11:00",
+                "singers": [str(singer.pk)],
+                "requires_ticket": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        session = VoteSession.objects.get(name="Ticket Vote")
+        self.assertTrue(session.requires_ticket)
+
     def test_incident_create_rejects_wrong_lifecycle_singer(self):
         activity = _create_activity(
             title="Incident Test",

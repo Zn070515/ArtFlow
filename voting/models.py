@@ -61,6 +61,27 @@ def _ensure_vote_session_origins(*session_ids: int | None) -> None:
         _ensure_vote_session_mutable(session_id)
 
 
+def _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id: int | None) -> None:
+    if not vote_session_id:
+        return
+    from ruleset.models import RulesetVersion
+
+    activity_id = (
+        VoteSession._base_manager.filter(pk=vote_session_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+    if activity_id is None:
+        return
+    for binding in RulesetVersion.objects.filter(
+        status=RulesetVersion.Status.FROZEN,
+        ruleset__activity_id=activity_id,
+    ).values_list("binding", flat=True):
+        vote_keys = (binding or {}).get("vote_keys") or {}
+        if any(str(bound_id) == str(vote_session_id) for bound_id in vote_keys.values()):
+            raise ValidationError("已冻结赛制绑定的投票配置不可直接修改。")
+
+
 def _session_id_for(model, pk: int | None) -> int | None:
     if not pk:
         return None
@@ -75,6 +96,14 @@ def _vote_session_activity_id(vote_session_id: int | None) -> int | None:
         .values_list("activity_id", flat=True)
         .first()
     )
+
+
+def _ticket_activity_id(ticket_id: int | None) -> int | None:
+    if not ticket_id:
+        return None
+    from tickets.models import Ticket
+
+    return Ticket._base_manager.filter(pk=ticket_id).values_list("activity_id", flat=True).first()
 
 
 def _singer_activity_id(singer_id: int | None) -> int | None:
@@ -121,14 +150,19 @@ def _ensure_vote_option_update_consistent(queryset, kwargs) -> None:
 
 
 def _ensure_vote_ballot_update_consistent(queryset, kwargs) -> None:
-    if not {"vote_session", "vote_session_id"}.intersection(kwargs):
+    if not {"vote_session", "vote_session_id", "ticket", "ticket_id"}.intersection(kwargs):
         return
     new_session_id = _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
-    if not new_session_id:
-        return
-    for current_session_id in queryset.values_list("vote_session_id", flat=True):
-        if current_session_id != new_session_id:
+    new_ticket_id = _relation_pk(kwargs.get("ticket", kwargs.get("ticket_id")))
+    for row in queryset.values("vote_session_id", "ticket_id"):
+        if new_session_id and row["vote_session_id"] != new_session_id:
             raise ValidationError("Vote ballot cannot move to another vote session.")
+        activity_id = _vote_session_activity_id(new_session_id or row["vote_session_id"])
+        ticket_activity_id = _ticket_activity_id(
+            new_ticket_id if "ticket" in kwargs or "ticket_id" in kwargs else row["ticket_id"]
+        )
+        if activity_id and ticket_activity_id and activity_id != ticket_activity_id:
+            raise ValidationError("Vote ballot ticket must belong to the vote activity.")
 
 
 def _ensure_vote_option_instance_consistent(option) -> None:
@@ -148,11 +182,21 @@ def _ensure_vote_option_instance_consistent(option) -> None:
 
 
 def _ensure_vote_ballot_instance_consistent(ballot) -> None:
-    if ballot._state.adding or not ballot.pk:
-        return
-    stored_session_id = _stored_relation_id(ballot, "vote_session")
-    if stored_session_id != ballot.vote_session_id:
-        raise ValidationError("Vote ballot cannot move to another vote session.")
+    if not ballot._state.adding and ballot.pk:
+        stored = (
+            type(ballot)
+            ._base_manager.filter(pk=ballot.pk)
+            .values("vote_session_id", "ticket_id")
+            .first()
+        )
+        if stored and stored["vote_session_id"] != ballot.vote_session_id:
+            raise ValidationError("Vote ballot cannot move to another vote session.")
+        if stored and stored["ticket_id"] != ballot.ticket_id:
+            raise ValidationError("Vote ballot ticket cannot be reassigned.")
+    activity_id = _vote_session_activity_id(ballot.vote_session_id)
+    ticket_activity_id = _ticket_activity_id(ballot.ticket_id)
+    if activity_id and ticket_activity_id and activity_id != ticket_activity_id:
+        raise ValidationError("Vote ballot ticket must belong to the vote activity.")
 
 
 def _ensure_vote_record_instance_consistent(record) -> None:
@@ -235,6 +279,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         "selection_type",
         "max_selections",
         "purpose",
+        "requires_ticket",
     }
 
     def _ensure_state_authorized(self, fields):
@@ -248,6 +293,9 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("投票开放后，投票配置不可直接修改。")
         if self.filter(is_locked=True).exists():
             raise ValidationError("投票锁定后，投票配置不可直接修改。")
+        if "requires_ticket" in fields:
+            for vote_session_id in self.values_list("pk", flat=True):
+                _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id)
 
     def update(self, **kwargs):
         self._ensure_state_authorized(kwargs)
@@ -273,6 +321,8 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                         else "投票锁定后，投票配置不可直接修改。"
                     )
                     raise ValidationError(message)
+                if "requires_ticket" in fields:
+                    _ensure_vote_session_not_bound_to_frozen_ruleset(obj.pk)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
@@ -288,7 +338,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                     }
                     existing = (
                         self.model._base_manager.filter(**lookup)
-                        .values("is_open", "is_locked")
+                        .values("pk", "is_open", "is_locked")
                         .first()
                     )
                     if existing and (existing["is_open"] or existing["is_locked"]):
@@ -298,6 +348,8 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                             else "投票锁定后，投票配置不可直接修改。"
                         )
                         raise ValidationError(message)
+                    if existing and "requires_ticket" in update_fields:
+                        _ensure_vote_session_not_bound_to_frozen_ruleset(existing["pk"])
         for vote_session in objs:
             vote_session._ensure_initial_state_authorized()
         return super().bulk_create(objs, *args, **kwargs)
@@ -336,6 +388,7 @@ class VoteSession(models.Model):
     )
     max_selections = models.IntegerField(default=1)
     purpose = models.CharField(max_length=16, choices=Purpose, default=Purpose.SELECTION)
+    requires_ticket = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -426,6 +479,12 @@ class VoteSession(models.Model):
                     else "投票锁定后，投票配置不可直接修改。"
                 )
                 raise ValidationError(message)
+            if (
+                stored
+                and "requires_ticket" in compared_configuration_fields
+                and stored["requires_ticket"] != self.requires_ticket
+            ):
+                _ensure_vote_session_not_bound_to_frozen_ruleset(self.pk)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -457,6 +516,7 @@ class VoteBallotQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         objs = list(objs)
         for obj in objs:
             _ensure_vote_session_mutable(obj.vote_session_id)
+            _ensure_vote_ballot_instance_consistent(obj)
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs):
@@ -474,6 +534,13 @@ VoteBallotManager = models.Manager.from_queryset(VoteBallotQuerySet)
 
 class VoteBallot(models.Model):
     vote_session = models.ForeignKey(VoteSession, on_delete=models.CASCADE, related_name="ballots")
+    ticket = models.ForeignKey(
+        "tickets.Ticket",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ballots",
+    )
     browser_session_key = models.CharField(max_length=64)
     ip_address = models.GenericIPAddressField()
     is_test_data = models.BooleanField(default=False)
@@ -487,7 +554,12 @@ class VoteBallot(models.Model):
             models.UniqueConstraint(
                 fields=["vote_session", "browser_session_key"],
                 name="voting_one_ballot_per_browser_session",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["vote_session", "ticket"],
+                condition=Q(ticket__isnull=False),
+                name="voting_one_ballot_per_ticket_session",
+            ),
         ]
 
     def save(self, *args, **kwargs):

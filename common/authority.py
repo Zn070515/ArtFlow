@@ -34,6 +34,8 @@ ACCOUNT_AUTHORITY = "account.authority"
 ENTRY_POINT_CONFIG = "entry_point.config"
 ACCESS_GRANT_STATE = "access_grant.state"
 EPHEMERAL_SESSION_STATE = "ephemeral_session.state"
+TICKET_STATE = "ticket.state"
+TICKET_SESSION_STATE = "ticket_access_session.state"
 
 
 @dataclass(frozen=True)
