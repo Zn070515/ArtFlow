@@ -5,11 +5,13 @@ from typing import Any
 
 from accounts.decorators import admin_required, staff_required
 from common.audit import client_ip
+from common.rate_limit import allow
 from core.models import Activity
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import Ticket
@@ -24,6 +26,8 @@ from .services import (
 )
 
 BODY_MAX_BYTES = 4096
+REDEEM_RATE_LIMIT = 30
+REDEEM_RATE_WINDOW_SECONDS = 60
 
 
 class RequestBodyTooLarge(Exception):
@@ -51,6 +55,19 @@ def _invalid_response() -> JsonResponse:
     return JsonResponse({"detail": "票据操作无效。", "reason_code": "INVALID_TICKET"}, status=400)
 
 
+def _too_large_response() -> JsonResponse:
+    return JsonResponse({"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413)
+
+
+def _rate_limited_response(retry_after_seconds: int) -> JsonResponse:
+    response = JsonResponse(
+        {"detail": "请求过于频繁，请稍后再试。", "reason_code": "RATE_LIMITED"},
+        status=429,
+    )
+    response["Retry-After"] = str(max(1, retry_after_seconds))
+    return response
+
+
 def _required_int(payload: dict[str, Any], key: str) -> int:
     value = payload[key]
     if isinstance(value, bool) or not isinstance(value, int):
@@ -70,8 +87,16 @@ def scan(request: HttpRequest):
     return render(request, "tickets/scan.html")
 
 
+@csrf_exempt
 @require_POST
 def redeem(request: HttpRequest) -> JsonResponse:
+    decision = allow(
+        f"ticket-redeem:{client_ip(request) or 'unknown'}",
+        limit=REDEEM_RATE_LIMIT,
+        window_seconds=REDEEM_RATE_WINDOW_SECONDS,
+    )
+    if not decision.allowed:
+        return _rate_limited_response(decision.retry_after_seconds)
     try:
         payload = _json_payload(request)
         raw_secret = _required_text(payload, "secret")
@@ -79,7 +104,9 @@ def redeem(request: HttpRequest) -> JsonResponse:
             raw_secret,
             request_meta=TicketRequestMeta(ip_address=client_ip(request)),
         )
-    except (KeyError, TypeError, ValueError, RequestBodyTooLarge, ValidationError):
+    except RequestBodyTooLarge:
+        return _too_large_response()
+    except (KeyError, TypeError, ValueError, ValidationError):
         return _invalid_response()
     response = JsonResponse(
         {
