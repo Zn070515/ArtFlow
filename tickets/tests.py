@@ -10,7 +10,7 @@ from core.services import transition_activity_phase
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from . import services as ticket_services
@@ -505,3 +505,94 @@ class TicketStaffHttpTests(TestCase):
         )
         self.assertIn(issue_response.status_code, {302, 403})
         self.assertEqual(ticket_model(self).objects.filter(activity=self.activity).count(), 0)
+
+
+class TicketPublicHttpTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.staff = User.objects.create_user(username="public-ticket-staff", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff.role = User.Role.STAFF
+            self.staff.save(update_fields=["role", "is_staff"])
+        self.admin = User.objects.create_user(username="public-ticket-admin", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin.role = User.Role.ADMIN
+            self.admin.save(update_fields=["role", "is_staff"])
+        self.activity = Activity.objects.create(
+            title="Public ticket activity",
+            activity_type=Activity.Type.GENERAL,
+            is_test_mode=True,
+        )
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_OPEN,
+            actor=self.admin,
+        )
+        ticket = ticket_services.create_ticket(
+            self.activity, actor=self.staff, serial_number="pub-1"
+        )
+        self.issued = ticket_services.issue_ticket(ticket, actor=self.staff)
+
+    def test_scan_page_is_read_only_and_redeem_uses_body_only(self):
+        response = self.client.get("/tickets/scan/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["request"].path, "/tickets/scan/")
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        redeemed = csrf_client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": self.issued.secret}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(redeemed.status_code, 200)
+        self.assertNotIn("secret", redeemed.json())
+        self.assertNotIn(self.issued.secret, redeemed.content.decode())
+        cookie = redeemed.cookies["artflow_ticket_session"]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        self.assertFalse(cookie["secure"])
+        self.assertEqual(redeemed["Cache-Control"], "no-store")
+        self.assertEqual(
+            ticket_model(self).objects.get(pk=self.issued.ticket.pk).state,
+            ticket_model(self).State.ISSUED,
+        )
+
+        query_attempt = self.client.get(f"/tickets/redeem/?secret={self.issued.secret}")
+        self.assertEqual(query_attempt.status_code, 405)
+
+    def test_unknown_or_oversized_redeem_is_generic_and_bounded(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        unknown = csrf_client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": "unknown-ticket-secret"}),
+            content_type="application/json",
+        )
+        self.assertEqual(unknown.status_code, 400)
+        self.assertEqual(unknown.json()["reason_code"], "INVALID_TICKET")
+        self.assertNotIn(self.issued.secret, unknown.content.decode())
+
+        oversized = csrf_client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": "x" * 5000}),
+            content_type="application/json",
+        )
+        self.assertEqual(oversized.status_code, 413)
+        self.assertEqual(oversized.json()["reason_code"], "REQUEST_TOO_LARGE")
+
+    @override_settings(RATE_LIMIT_BACKEND="locmem")
+    def test_redeem_rate_limit_returns_retry_after(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        for _ in range(30):
+            csrf_client.post(
+                "/tickets/redeem/",
+                data=json.dumps({"secret": "unknown-ticket-secret"}),
+                content_type="application/json",
+            )
+        limited = csrf_client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": "unknown-ticket-secret"}),
+            content_type="application/json",
+        )
+        self.assertEqual(limited.status_code, 429)
+        self.assertTrue(limited["Retry-After"].isdigit())
