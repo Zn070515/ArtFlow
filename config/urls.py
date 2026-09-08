@@ -12,6 +12,7 @@ urlpatterns = [
     path("contest/", include("singer_contest.urls")),
     path("farewell/", include("farewell_show.urls")),
     path("staff/", include("staff_panel.urls")),
+    path("staff/tickets/", include("tickets.staff_urls")),
     path("vote/", include("voting.urls")),
     path("entry-access/", include("entry_access.urls")),
     path("tickets/", include("tickets.urls")),
