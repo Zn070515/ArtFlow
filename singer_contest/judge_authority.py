@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
@@ -147,10 +147,40 @@ def _panel_roster_digest(judges: list[Judge]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _minimum_judges(contest_round: ContestRound) -> int:
-    if contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW:
-        return 3
-    return 1
+def _minimum_judges(contest_round: ContestRound, expected_judge_count: int) -> int:
+    configured = contest_round.minimum_judge_count
+    minimum = configured if configured is not None else expected_judge_count
+    if minimum < 1 or minimum > expected_judge_count:
+        raise ValidationError("最低有效评委人数必须在预备名单人数范围内。")
+    if (
+        contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
+        and minimum <= 2
+    ):
+        raise ValidationError("去最高最低计分方式的最低有效评委人数必须大于 2。")
+    return minimum
+
+
+def _attending_round_judges(
+    round_judges: list[RoundJudge], attending_judge_ids: Iterable[int] | None
+) -> list[RoundJudge]:
+    expected_ids = {round_judge.judge_id for round_judge in round_judges}
+    if attending_judge_ids is None:
+        attending_ids = expected_ids
+    else:
+        if isinstance(attending_judge_ids, (str, bytes)):
+            raise ValidationError("到场评委必须使用评委 ID 列表。")
+        try:
+            raw_ids = list(attending_judge_ids)
+        except TypeError:
+            raise ValidationError("到场评委必须使用评委 ID 列表。") from None
+        if any(isinstance(judge_id, bool) or not isinstance(judge_id, int) for judge_id in raw_ids):
+            raise ValidationError("到场评委 ID 必须是整数。")
+        if len(raw_ids) != len(set(raw_ids)):
+            raise ValidationError("到场评委 ID 不能重复。")
+        attending_ids = set(raw_ids)
+        if not attending_ids.issubset(expected_ids):
+            raise ValidationError("到场评委必须来自本轮次预备名单。")
+    return [round_judge for round_judge in round_judges if round_judge.judge_id in attending_ids]
 
 
 def _audit(
@@ -173,7 +203,12 @@ def _audit(
 
 
 @transaction.atomic
-def prepare_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
+def prepare_judge_panel(
+    round_id: int,
+    *,
+    operator,
+    attending_judge_ids: Iterable[int] | None = None,
+) -> RoundPanelSnapshot:
     locked = _lock_judge_round(round_id, operator)
     contest_round = locked.contest_round
     if contest_round.status == ContestRound.Status.DRAFT:
@@ -185,12 +220,20 @@ def prepare_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
     if existing is not None:
         return existing
 
-    judges = list(Judge.objects.filter(activity=locked.activity, is_active=True).order_by("pk"))
-    minimum_judges = _minimum_judges(contest_round)
-    if len(judges) < minimum_judges:
-        raise ValidationError("当前评分方式没有足够的活跃评委。")
-    if contest_round.round_judges.count() != len(judges):
-        raise ValidationError("准备后的评委名单与当前活跃评委不一致。")
+    round_judges = list(
+        RoundJudge.objects.filter(round=contest_round).select_related("judge").order_by("pk")
+    )
+    expected_judge_count = len(round_judges)
+    if expected_judge_count < 1:
+        raise ValidationError("本轮次没有预备评委名单。")
+    minimum_judges = _minimum_judges(contest_round, expected_judge_count)
+    attending_round_judges = _attending_round_judges(round_judges, attending_judge_ids)
+    if len(attending_round_judges) < minimum_judges:
+        raise ValidationError(
+            f"INSUFFICIENT_JUDGES: 实到评委 {len(attending_round_judges)} 人，"
+            f"最低需要 {minimum_judges} 人。"
+        )
+    judges = [round_judge.judge for round_judge in attending_round_judges]
 
     with authority_write(JUDGE_PANEL_STATE):
         snapshot = RoundPanelSnapshot.objects.create(
@@ -199,15 +242,12 @@ def prepare_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
             version=1,
             change_policy=RoundPanelSnapshot.ChangePolicy.HOLD_ONLY,
             state=RoundPanelSnapshot.State.ACTIVE,
-            expected_judge_count=len(judges),
+            expected_judge_count=expected_judge_count,
             minimum_judge_count=minimum_judges,
             scoring_method=contest_round.scoring_mode,
             roster_digest=_panel_roster_digest(judges),
             captured_by=locked.operator,
             is_test_data=locked.activity.is_test_mode,
-        )
-        round_judges = list(
-            RoundJudge.objects.filter(round=contest_round).select_related("judge").order_by("pk")
         )
         members = RoundPanelSnapshotMember.objects.bulk_create(
             [
@@ -218,7 +258,7 @@ def prepare_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
                     seat_key=f"seat-{index}",
                     is_active=True,
                 )
-                for index, round_judge in enumerate(round_judges, start=1)
+                for index, round_judge in enumerate(attending_round_judges, start=1)
             ]
         )
         JudgeSeat.objects.bulk_create(
@@ -249,7 +289,10 @@ def prepare_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
             {
                 "round_id": contest_round.pk,
                 "version": snapshot.version,
-                "judge_count": len(judges),
+                "expected_judge_count": expected_judge_count,
+                "actual_judge_count": len(judges),
+                "minimum_judge_count": minimum_judges,
+                "attending_judge_ids": [judge.pk for judge in judges],
                 "roster_digest": snapshot.roster_digest,
             },
             ensure_ascii=True,

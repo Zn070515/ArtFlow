@@ -155,3 +155,8 @@ class TicketSeedTests(TestCase):
         call_command("seed_demo_data", "--reset", stdout=output)
         self.assertIn("Demo test runtime data reset", output.getvalue())
         self.assertFalse(Ticket.objects.filter(pk=ticket.pk).exists())
+
+        call_command("seed_demo_data")
+        recreated_ticket = Ticket.objects.get(batch_reference="DEMO-AUDIENCE")
+        self.assertNotEqual(recreated_ticket.pk, ticket.pk)
+        self.assertTrue(recreated_ticket.is_test_data)

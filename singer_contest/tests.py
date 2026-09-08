@@ -80,6 +80,7 @@ from .services import (
     unlock_round,
     validate_score,
 )
+from .judge_authority import prepare_judge_panel
 from .views import my_registration_detail
 
 
@@ -232,6 +233,16 @@ class ScoringServiceTests(TestCase):
         self.round.sequence = 3
         with self.assertRaisesMessage(ValidationError, "轮次准备后，执行配置不可直接修改。"):
             self.round.save(update_fields=["sequence"])
+
+    def test_minimum_judge_count_is_frozen_after_preparation(self):
+        self.round.minimum_judge_count = 1
+        self.round.save(update_fields=["minimum_judge_count"])
+        self.round.status = ContestRound.Status.PREPARED
+        _save_round_state(self.round, ["status"])
+
+        self.round.minimum_judge_count = 2
+        with self.assertRaisesMessage(ValidationError, "轮次准备后，执行配置不可直接修改。"):
+            self.round.save(update_fields=["minimum_judge_count"])
 
     def test_round_judge_rejects_judge_from_another_activity(self):
         other_activity = Activity.objects.create(
@@ -831,6 +842,34 @@ class ScoringServiceTests(TestCase):
             ],
         )
         self.assertNotIn((self.singer.pk, new_judge.pk), expected_score_cells(self.round))
+
+    def test_actual_panel_snapshot_defines_score_matrix(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        self.round.minimum_judge_count = 1
+        self.round.save(update_fields=["minimum_judge_count"])
+        prepare_round(self.round, self.user)
+        prepare_judge_panel(
+            self.round.pk,
+            operator=self.user,
+            attending_judge_ids=[self.judge.pk],
+        )
+
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        self.assertEqual(
+            [cell["judge_id"] for cell in missing_score_cells(self.round)],
+            [self.judge.pk],
+        )
+        self.assertNotIn((self.singer.pk, second_judge.pk), expected_score_cells(self.round))
+
+        self.judge.is_active = False
+        self.judge.save(update_fields=["is_active"])
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        workbook = build_score_template_workbook(self.round)
+        self.assertEqual(
+            workbook.active.cell(row=1, column=3).value,
+            f"J{self.judge.pk} {self.judge.name}",
+        )
+        self.assertEqual(workbook.active.max_column, 3)
 
     def test_registration_status_change_does_not_change_prepared_roster(self):
         prepare_round(self.round, self.user)

@@ -37,6 +37,11 @@
             </select>
         </div>
         <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">最低有效到场评委数</label>
+            <input type="number" name="minimum_judge_count" min="1" class="w-24 border border-gray-300 rounded px-3 py-2 text-sm">
+            <p class="text-xs text-gray-500 mt-1">留空时按准备名单人数执行 fail-safe；轮次准备后不可修改。</p>
+        </div>
+        <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">轮次序号</label>
             <input type="number" name="sequence" min="1" class="w-24 border border-gray-300 rounded px-3 py-2 text-sm">
         </div>

@@ -100,7 +100,7 @@ from singer_contest.models import (
 from singer_contest.services import (
     IdempotencyConflictError,
     StaleScoreVersionError,
-    _active_judges,
+    authoritative_panel_judges,
     _current_frozen_version,
     _current_resolve_status,
     _eligible_singers,
@@ -990,6 +990,7 @@ def round_create(request):
                         "activity": locked_activity,
                         "round_type": form.cleaned_data["round_type"],
                         "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "minimum_judge_count": form.cleaned_data["minimum_judge_count"],
                         "name": form.cleaned_data["name"],
                         "advance_count": form.cleaned_data["advance_count"],
                         "order_policy": form.cleaned_data["order_policy"],
@@ -1138,7 +1139,7 @@ def round_score_entry(request, pk):
 
 def _round_grid_payload(contest_round: ContestRound) -> dict:
     singers = list(_eligible_singers(contest_round))
-    judges = list(_active_judges(contest_round))
+    judges = list(authoritative_panel_judges(contest_round))
     scores = {
         (s.singer_id, s.judge_id): str(s.score)
         for s in ScoreRecord.objects.filter(round=contest_round)
@@ -2431,6 +2432,7 @@ def activity_clone(request, pk):
             activity=new_activity,
             round_type=contest_round.round_type,
             scoring_mode=contest_round.scoring_mode,
+            minimum_judge_count=contest_round.minimum_judge_count,
             name=contest_round.name,
             advance_count=contest_round.advance_count,
             sequence=contest_round.sequence,

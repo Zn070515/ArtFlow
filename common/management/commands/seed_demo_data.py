@@ -533,12 +533,7 @@ class Command(BaseCommand):
                 batch_reference="DEMO-AUDIENCE",
                 serial_number="0001",
             )
-            content_type = ContentType.objects.get_for_model(Ticket)
-            SeedRecord.objects.create(
-                key="demo.ticket.audience",
-                content_type=content_type,
-                object_id=demo_ticket.pk,
-            )
+            self._register_seed_record("demo.ticket.audience", demo_ticket)
         if demo_ticket.state == Ticket.State.CREATED:
             issue_ticket(demo_ticket, actor=admin)
         self._upsert(
@@ -740,6 +735,26 @@ class Command(BaseCommand):
         if seed_record is None:
             return None
         return model.objects.filter(pk=seed_record.object_id).first()
+
+    def _register_seed_record(self, key: str, target: Any) -> None:
+        """Create or repair ownership after a reset removed the target row.
+
+        Runtime reset deliberately keeps ``SeedRecord`` rows so configuration
+        ownership remains auditable. A recreated runtime object must therefore
+        update the old pointer instead of inserting a duplicate key.
+        """
+        content_type = ContentType.objects.get_for_model(target)
+        seed_record = SeedRecord.objects.select_for_update().filter(key=key).first()
+        if seed_record is None:
+            SeedRecord.objects.create(
+                key=key,
+                content_type=content_type,
+                object_id=target.pk,
+            )
+            return
+        seed_record.content_type = content_type
+        seed_record.object_id = target.pk
+        seed_record.save(update_fields=["content_type", "object_id"])
 
     def _upsert(
         self,

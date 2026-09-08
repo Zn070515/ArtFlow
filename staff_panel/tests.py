@@ -189,6 +189,7 @@ class ContestRoundCreateHTTPTests(TestCase):
             "name": "Created round",
             "round_type": ContestRound.RoundType.PRELIMINARY,
             "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+            "minimum_judge_count": "2",
             "sequence": sequence,
             "order_policy": ContestRound.OrderPolicy.REGISTRATION_ORDER,
             "tie_order_policy": ContestRound.TieOrderPolicy.REVIEW,
@@ -211,6 +212,14 @@ class ContestRoundCreateHTTPTests(TestCase):
                 .values_list("sequence", flat=True)
             ),
             [1, 2],
+        )
+        self.assertEqual(
+            set(
+                ContestRound.objects.filter(activity=self.activity).values_list(
+                    "minimum_judge_count", flat=True
+                )
+            ),
+            {2},
         )
 
     def test_round_create_reports_explicit_duplicate_sequence_as_form_error(self):
