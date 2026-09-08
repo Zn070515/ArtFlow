@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 
+from accounts.services import mark_admin_verified
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
 from core.models import Activity
@@ -12,6 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client, TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
 
 from . import services as ticket_services
@@ -515,6 +517,8 @@ class TicketStaffHttpTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["Pragma"], "no-cache")
         payload = response.json()
         secret = payload["secret"]
         self.assertEqual(len(secret), 43)
@@ -522,6 +526,77 @@ class TicketStaffHttpTests(TestCase):
         self.assertEqual(listing.status_code, 200)
         self.assertNotContains(listing, secret)
         self.assertNotContains(listing, "secret_digest")
+
+    def test_staff_operator_list_and_detail_pages_redact_ticket_secrets(self):
+        issued = self._issue()
+        self.client.force_login(self.staff)
+
+        listing = self.client.get(
+            reverse("ticket_staff:list_page"),
+            {"activity_id": self.activity.pk, "state": "issued"},
+        )
+        self.assertEqual(listing.status_code, 200)
+        self.assertContains(listing, "票据管理")
+        self.assertContains(listing, issued.ticket.serial_number)
+        self.assertNotContains(listing, issued.secret)
+        self.assertNotContains(listing, issued.ticket.secret_digest)
+
+        detail = self.client.get(reverse("ticket_staff:detail", args=[issued.ticket.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "票据详情")
+        self.assertContains(detail, issued.ticket.get_state_display())
+        self.assertNotContains(detail, issued.secret)
+        self.assertNotContains(detail, issued.ticket.secret_digest)
+
+    def test_staff_issue_page_supports_batch_qr_output_without_caching(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("ticket_staff:issue_page"),
+            data={
+                "activity_id": self.activity.pk,
+                "quantity": "2",
+                "batch_reference": "PAGE-BATCH",
+                "serial_prefix": "PAGE",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["Pragma"], "no-cache")
+        self.assertContains(response, "PAGE-001")
+        self.assertContains(response, "PAGE-002")
+        self.assertContains(response, "data:image/png;base64,")
+        self.assertNotContains(response, "secret_digest")
+
+    def test_staff_check_in_page_and_admin_action_complete_operator_flow(self):
+        issued = self._issue(serial_number="page-check-in")
+        another = self._issue(serial_number="page-void")
+        self.client.force_login(self.staff)
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_CLOSED,
+            actor=self.admin,
+        )
+
+        check_in = self.client.post(
+            reverse("ticket_staff:check_in_page"),
+            data={"secret": issued.secret},
+        )
+        self.assertEqual(check_in.status_code, 200)
+        self.assertContains(check_in, "已完成检票")
+
+        self.client.force_login(self.admin)
+        session = self.client.session
+        mark_admin_verified(session)
+        session.save()
+        action = self.client.post(
+            reverse("ticket_staff:action", args=[another.ticket.pk]),
+            data={"action": "void"},
+        )
+        self.assertRedirects(action, reverse("ticket_staff:detail", args=[another.ticket.pk]))
+        another.ticket.refresh_from_db()
+        self.assertEqual(another.ticket.state, ticket_model(self).State.VOID)
 
     def test_staff_check_in_requires_csrf_and_accepts_secret_only_in_post_body(self):
         issued = self._issue()

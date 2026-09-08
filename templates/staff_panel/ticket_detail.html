@@ -6,5 +6,27 @@
 <div class="max-w-2xl mx-auto px-4 py-10">
     <h1 class="text-2xl font-bold text-gray-900">票据详情</h1>
     <p class="mt-2 text-sm text-gray-600">此页面不展示票据密钥或会话令牌。</p>
+    <dl class="mt-6 grid gap-3 rounded-lg border border-gray-200 bg-white p-5 text-sm sm:grid-cols-2">
+        <div><dt class="text-gray-500">活动</dt><dd class="font-medium">{{ ticket.activity.title }}</dd></div>
+        <div><dt class="text-gray-500">状态</dt><dd class="font-medium">{{ ticket.get_state_display }}</dd></div>
+        <div><dt class="text-gray-500">批次</dt><dd>{{ ticket.batch_reference|default:"—" }}</dd></div>
+        <div><dt class="text-gray-500">编号</dt><dd>{{ ticket.serial_number|default:"—" }}</dd></div>
+        <div><dt class="text-gray-500">签发时间</dt><dd>{{ ticket.issued_at|date:"Y-m-d H:i"|default:"—" }}</dd></div>
+        <div><dt class="text-gray-500">检票时间</dt><dd>{{ ticket.checked_in_at|date:"Y-m-d H:i"|default:"—" }}</dd></div>
+    </dl>
+    {% if user.is_admin %}
+    <div class="mt-5 flex gap-3">
+        {% if ticket.state == "created" or ticket.state == "issued" %}
+        <form method="post" action="{% url 'ticket_staff:action' ticket.pk %}">
+            {% csrf_token %}<input type="hidden" name="action" value="void"><button class="rounded border border-red-300 px-3 py-2 text-sm text-red-700" type="submit">作废</button>
+        </form>
+        {% endif %}
+        {% if ticket.state == "issued" or ticket.state == "checked_in" %}
+        <form method="post" action="{% url 'ticket_staff:action' ticket.pk %}">
+            {% csrf_token %}<input type="hidden" name="action" value="revoke"><button class="rounded border border-red-300 px-3 py-2 text-sm text-red-700" type="submit">撤销</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

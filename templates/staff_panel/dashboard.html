@@ -52,6 +52,10 @@
             <h3 class="font-medium text-gray-900">观众投票</h3>
             <p class="mt-1 text-sm text-gray-500">创建投票场次、管理口令、查看实时票数</p>
         </a>
+        <a href="{% url 'ticket_staff:list_page' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">票据与检票</h3>
+            <p class="mt-1 text-sm text-gray-500">签发票据、输出二维码、现场检票与状态查询</p>
+        </a>
         <a href="{% url 'staff:incident_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
             <h3 class="font-medium text-gray-900">异常记录</h3>
             <p class="mt-1 text-sm text-gray-500">记录活动异常事件、处理结果</p>
