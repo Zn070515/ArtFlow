@@ -4,7 +4,64 @@
 
 {% block content %}
 <div class="max-w-5xl mx-auto px-4 py-10">
-    <h1 class="text-2xl font-bold text-gray-900">票据管理</h1>
-    <p class="mt-2 text-sm text-gray-600">仅显示批次、编号、状态和时间，不显示票据密钥。</p>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">票据管理</h1>
+            <p class="mt-2 text-sm text-gray-600">仅显示批次、编号、状态和时间，不显示票据密钥。</p>
+        </div>
+        <div class="flex gap-2 text-sm">
+            <a href="{% url 'ticket_staff:issue_page' %}" class="rounded bg-brand px-3 py-2 text-white">签发票据</a>
+            <a href="{% url 'ticket_staff:check_in_page' %}" class="rounded border border-gray-300 px-3 py-2 text-gray-700">现场检票</a>
+        </div>
+    </div>
+
+    <form method="get" class="mt-6 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-5">
+        <select name="activity_id" class="rounded border-gray-300 text-sm">
+            <option value="">全部活动</option>
+            {% for activity in activities %}
+            <option value="{{ activity.pk }}" {% if selected_activity_id == activity.pk|stringformat:"s" %}selected{% endif %}>{{ activity.title }}</option>
+            {% endfor %}
+        </select>
+        <input name="batch_reference" value="{{ selected_batch_reference }}" placeholder="批次" class="rounded border-gray-300 text-sm">
+        <input name="serial_number" value="{{ selected_serial_number }}" placeholder="编号" class="rounded border-gray-300 text-sm">
+        <select name="state" class="rounded border-gray-300 text-sm">
+            <option value="">全部状态</option>
+            {% for value, label in state_choices %}
+            <option value="{{ value }}" {% if selected_state == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <button class="rounded bg-gray-900 px-3 py-2 text-sm text-white" type="submit">筛选</button>
+    </form>
+
+    <div class="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {% for row in state_rows %}
+        <div class="rounded-lg border border-gray-200 bg-white p-3">
+            <p class="text-xs text-gray-500">{{ row.label }}</p>
+            <p class="mt-1 text-xl font-semibold text-gray-900">{{ row.count }}</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="mt-6 overflow-x-auto rounded-lg border border-gray-200 bg-white">
+        <table class="min-w-full text-left text-sm">
+            <thead class="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
+                <tr><th class="px-4 py-3">活动</th><th class="px-4 py-3">批次</th><th class="px-4 py-3">编号</th><th class="px-4 py-3">状态</th><th class="px-4 py-3">更新时间</th><th class="px-4 py-3"></th></tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for ticket in tickets %}
+                <tr>
+                    <td class="px-4 py-3">{{ ticket.activity.title }}</td>
+                    <td class="px-4 py-3">{{ ticket.batch_reference|default:"—" }}</td>
+                    <td class="px-4 py-3">{{ ticket.serial_number|default:"—" }}</td>
+                    <td class="px-4 py-3">{{ ticket.get_state_display }}</td>
+                    <td class="px-4 py-3 text-gray-500">{{ ticket.updated_at|date:"Y-m-d H:i" }}</td>
+                    <td class="px-4 py-3"><a class="text-brand hover:underline" href="{% url 'ticket_staff:detail' ticket.pk %}">详情</a></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">暂无匹配票据。</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
 {% endblock %}

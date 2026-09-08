@@ -5,7 +5,11 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../../static/dist/ticket_scan.js", import.meta.url), "utf8");
 
-function boot({ hash = "#ticket-secret", response = { ok: true, status: 200 } } = {}) {
+function boot({
+  hash = "#ticket-secret",
+  response = { ok: true, status: 200 },
+  ticketState = "issued",
+} = {}) {
   const status = { textContent: "" };
   const root = {};
   const csrf = { value: "csrf-token" };
@@ -30,7 +34,7 @@ function boot({ hash = "#ticket-secret", response = { ok: true, status: 200 } } 
     },
     fetch: async (url, options) => {
       requests.push({ url, options });
-      return { ...response, json: async () => ({}) };
+      return { ...response, json: async () => ({ ticket_state: ticketState }) };
     },
     setTimeout,
     console,
@@ -48,7 +52,17 @@ test("ticket scan scrubs the fragment before body-only redemption", async () => 
   assert.equal(result.requests[0].options.method, "POST");
   assert.equal(result.requests[0].options.headers["X-CSRFToken"], "csrf-token");
   assert.deepEqual(JSON.parse(result.requests[0].options.body), { secret: "ticket-secret" });
-  assert.equal(result.status.textContent, "票据验证成功，可以继续投票。");
+  assert.equal(result.status.textContent, "票据已识别。完成现场检票后获得投票资格。");
+});
+
+test("ticket scan explains when a checked-in ticket is eligible", async () => {
+  const result = boot({ ticketState: "checked_in" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    result.status.textContent,
+    "已完成现场检票。你已具备票券投票资格，具体以当前投票场次状态为准。",
+  );
 });
 
 test("ticket scan shows a generic failure without echoing the secret", async () => {

@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 from accounts.models import User
@@ -279,3 +280,62 @@ class TicketVoteSubmissionTests(TestCase):
             VoteBallot.objects.get(vote_session=self.vote_session).ticket_id,
             redeemed.session.ticket_id,
         )
+
+    def test_operator_pages_close_issue_redeem_check_in_vote_flow(self):
+        self.client.force_login(self.staff)
+        issued_page = self.client.post(
+            "/staff/tickets/issue-page/",
+            {
+                "activity_id": self.activity.pk,
+                "quantity": "1",
+                "batch_reference": "FLOW",
+                "serial_prefix": "FLOW",
+            },
+        )
+        self.assertEqual(issued_page.status_code, 200)
+        issued = issued_page.context["issued_tickets"][0]
+        secret = issued["secret"]
+
+        redeemed_before_check_in = self.client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": secret}),
+            content_type="application/json",
+        )
+        self.assertEqual(redeemed_before_check_in.status_code, 200)
+        self.assertEqual(redeemed_before_check_in.json()["ticket_state"], "issued")
+        self.client.cookies["artflow_ticket_session"] = redeemed_before_check_in.cookies[
+            "artflow_ticket_session"
+        ].value
+        self.client.post(
+            reverse("voting:vote_entry", args=[self.vote_session.pk]),
+            {"passcode": self.vote_session.passcode},
+        )
+        blocked = self.client.post(
+            reverse("voting:vote_cast", args=[self.vote_session.pk]),
+            {"selected_option": [self.option.pk]},
+        )
+        self.assertEqual(blocked.status_code, 200)
+        self.assertFalse(VoteBallot.objects.filter(vote_session=self.vote_session).exists())
+
+        checked_in_page = self.client.post(
+            "/staff/tickets/check-in-page/",
+            {"secret": secret},
+        )
+        self.assertEqual(checked_in_page.status_code, 200)
+        self.assertContains(checked_in_page, "已完成检票")
+
+        redeemed_after_check_in = self.client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": secret}),
+            content_type="application/json",
+        )
+        self.assertEqual(redeemed_after_check_in.json()["ticket_state"], "checked_in")
+        self.client.cookies["artflow_ticket_session"] = redeemed_after_check_in.cookies[
+            "artflow_ticket_session"
+        ].value
+        accepted = self.client.post(
+            reverse("voting:vote_cast", args=[self.vote_session.pk]),
+            {"selected_option": [self.option.pk]},
+        )
+        self.assertEqual(accepted.status_code, 302)
+        self.assertTrue(VoteBallot.objects.filter(vote_session=self.vote_session).exists())

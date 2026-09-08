@@ -85,6 +85,13 @@ M2-B 的票据是非个人化的权威输入：Ticket 只保存 SHA-256 digest�
 滥用信号，不构成投票资格。未启用 ticket 的旧投票仍按浏览器 session 去重且 ballot
 不附带 Ticket。
 
+工作人员入口现已闭环：`/staff/tickets/manage/` 提供活动、批次、编号和状态筛选及
+生命周期统计；`/staff/tickets/issue-page/` 支持 1–100 张原子批量签发并在不落盘的
+响应中输出一次性 QR；`/staff/tickets/check-in-page/` 支持 POST 检票和重复扫描提示；
+详情页只显示非敏感生命周期元数据，作废/撤销仍由已验证管理员执行。既有 JSON API
+保持兼容并统一禁止缓存。公共扫描页会区分 `issued`（尚未获得投票资格）与
+`checked_in`（具备票券投票资格，仍受当前投票场次状态约束）。
+
 彩排必须逐项验证：重复扫码/兑换、未检票票、作废/撤销票、过期 cookie、跨活动票、
 同票并发投票、同浏览器换票、无票旧流程，以及 TEST cleanup 不触碰 FORMAL Ticket、
 ballot 和 audit。数据库故障时 `doctor` 只报告连接失败，不继续查询票据表；doctor、
@@ -111,7 +118,7 @@ M2-C 的本地代码门禁已覆盖模型 authority guard、命令幂等、重�
 | --- | --- | --- |
 | M2-A 临时入口基础 | `entry_access` scoped Pyright、mypy、Django/pytest、PostgreSQL 测试、Playwright runtime smoke | 真实 Staff/公共兑换彩排、撤销/重放、恢复 |
 | JudgeSeat / JudgeSession | TypeScript client check、Playwright 浏览器流程、PostgreSQL 并发测试 | 缺席评委、过期会话、`STAFF_PROXY`、纸笔 DR |
-| Ticket / Check-in | TypeScript client check、Playwright 资格流程、服务测试 | 重复票、已检票状态、投票边界、公共端失败 DR |
+| Ticket / Check-in | TypeScript client check、服务测试、operator page/issue→redeem→check-in→vote 回归 | PostgreSQL 并发、完整 Playwright 凭据流程、重复票/已检票现场演练、公共端失败 DR |
 | 电子直录分 | 类型化 payload/state client、Playwright 提交/重试流程、PostgreSQL 竞态测试 | ACK 丢失、重复命令、错误目标、panel 变化 HOLD |
 | Production 发布 | 以上全部门禁、彩排脚本、安全门禁、备份/恢复证据 | 真实角色现场彩排并保留报告 |
 

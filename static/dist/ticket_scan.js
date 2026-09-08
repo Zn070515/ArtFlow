@@ -2,8 +2,16 @@
 (() => {
     "use strict";
     const redeemEndpoint = "/tickets/redeem/";
-    const successMessage = "票据验证成功，可以继续投票。";
     const failureMessage = "票据验证失败，请重新扫描现场二维码。";
+    function ticketStateMessage(ticketState) {
+        if (ticketState === "issued") {
+            return "票据已识别。完成现场检票后获得投票资格。";
+        }
+        if (ticketState === "checked_in") {
+            return "已完成现场检票。你已具备票券投票资格，具体以当前投票场次状态为准。";
+        }
+        return failureMessage;
+    }
     function setStatus(status, message) {
         if (status)
             status.textContent = message;
@@ -30,7 +38,8 @@
                 },
                 body: JSON.stringify({ secret }),
             });
-            setStatus(status, response.ok ? successMessage : failureMessage);
+            const payload = response.ok ? await response.json() : null;
+            setStatus(status, response.ok ? ticketStateMessage(payload?.ticket_state) : failureMessage);
         }
         catch {
             setStatus(status, failureMessage);
