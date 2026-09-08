@@ -72,6 +72,9 @@ jobs:
       - name: Run entry access Pyright gate
         run: npm run check:pyright:entry-access
 
+      - name: Run project Pyright gate
+        run: npm run check:pyright
+
       - name: Run Django checks
         run: uv run python manage.py check
 

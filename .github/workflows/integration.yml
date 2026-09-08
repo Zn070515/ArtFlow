@@ -88,6 +88,13 @@ jobs:
           voting.test_ticket_submission
           common.test_ticket_cleanup
 
+      - name: Run M2-C Judge authority focused gate
+        run: >-
+          uv run python manage.py test
+          singer_contest.test_judge_authority
+          singer_contest.test_judge_http
+          staff_panel.tests.JudgeControlHTTPTests
+
       - name: Run full test suite
         run: uv run pytest -q
 
