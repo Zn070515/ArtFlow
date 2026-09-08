@@ -10,7 +10,7 @@ from unittest.mock import patch
 from django.core.checks import Error
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, connections
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 DEVELOPMENT_SECRET_KEY = "django-insecure-dev-only-change-me"
 
@@ -130,6 +130,15 @@ class HealthEndpointTests(TestCase):
 
     def test_healthz_rejects_non_get_requests(self):
         response = self.client.post("/healthz/")
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertEqual(response["Allow"], "GET")
+
+    def test_healthz_non_get_contract_survives_csrf_middleware(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+
+        response = csrf_client.post("/healthz/")
 
         self.assertEqual(response.status_code, 405)
         self.assertEqual(response.json(), {"status": "unavailable"})

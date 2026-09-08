@@ -4,6 +4,7 @@ from common.authority import (
     ACCESS_GRANT_STATE,
     ENTRY_POINT_CONFIG,
     EPHEMERAL_SESSION_STATE,
+    TEST_DATA_CLEANUP,
     AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
@@ -82,7 +83,8 @@ class AccessGrantQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_update(objs, list(fields), *args, **kwargs)
 
     def delete(self):
-        raise ValidationError("临时访问授权删除需要显式生命周期服务。")
+        _require_authority(TEST_DATA_CLEANUP, "测试数据访问授权删除需要显式清理 authority。")
+        return super().delete()
 
 
 class EphemeralSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
@@ -112,7 +114,8 @@ class EphemeralSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_update(objs, list(fields), *args, **kwargs)
 
     def delete(self):
-        raise ValidationError("临时访问会话删除需要显式生命周期服务。")
+        _require_authority(TEST_DATA_CLEANUP, "测试数据访问会话删除需要显式清理 authority。")
+        return super().delete()
 
 
 class EntryPoint(models.Model):
