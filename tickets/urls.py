@@ -1,6 +1,5 @@
-from django.urls import path
-
+from typing import Any
 
 app_name = "tickets"
 
-urlpatterns = []
+urlpatterns: list[Any] = []
