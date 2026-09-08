@@ -18,6 +18,7 @@ from django.db.migrations.executor import MigrationExecutor
 from exports.models import GeneratedDocument
 from files.models import SubmissionFile
 from singer_contest.models import ScoreRecord, SingerRegistration
+from tickets.models import Ticket, TicketAccessSession
 from voting.models import VoteBallot
 
 from common.models import AuditLog
@@ -27,6 +28,8 @@ COUNT_MODELS: dict[str, Any] = {
     "registrations": SingerRegistration,
     "score_records": ScoreRecord,
     "vote_ballots": VoteBallot,
+    "tickets": Ticket,
+    "ticket_access_sessions": TicketAccessSession,
     "audit_logs": AuditLog,
 }
 
