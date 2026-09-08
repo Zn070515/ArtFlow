@@ -19,4 +19,12 @@ class Migration(migrations.Migration):
                 null=True,
             ),
         ),
+        migrations.AddConstraint(
+            model_name="contestround",
+            constraint=models.CheckConstraint(
+                condition=models.Q(minimum_judge_count__isnull=True)
+                | models.Q(minimum_judge_count__gte=1),
+                name="round_minimum_judge_positive",
+            ),
+        ),
     ]

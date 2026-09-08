@@ -620,6 +620,11 @@ class ContestRound(models.Model):
                 condition=Q(advance_count__gte=0),
                 name="round_advance_count_non_negative",
             ),
+            models.CheckConstraint(
+                condition=Q(minimum_judge_count__isnull=True)
+                | Q(minimum_judge_count__gte=1),
+                name="round_minimum_judge_positive",
+            ),
         ]
 
     _state_fields = _CONTEST_ROUND_STATE_FIELDS
