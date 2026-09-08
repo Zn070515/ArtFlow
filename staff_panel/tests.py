@@ -5982,6 +5982,33 @@ class JudgeControlHTTPTests(TestCase):
         self.client.raise_request_exception = True
 
         self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        for route_name, data in (
+            (
+                "staff:judge_panel_hold",
+                {"reason": "尚未准备评委组"},
+            ),
+            (
+                "staff:judge_performance_hold",
+                {"performance_id": self.performance.pk, "reason": "尚未准备评委组"},
+            ),
+            (
+                "staff:judge_score_proxy",
+                {
+                    "performance_id": self.performance.pk,
+                    "seat_id": 1,
+                    "context_version": 0,
+                    "score": "90",
+                    "source_reference": "未准备",
+                    "reason": "未准备",
+                    "command_id": "not-prepared-001",
+                },
+            ),
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.post(reverse(route_name, args=[self.contest_round.pk]), data)
+                self.assertEqual(response.status_code, 302)
+        self.client.raise_request_exception = True
         response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "PREPARE_REQUIRED")
@@ -6024,6 +6051,25 @@ class JudgeControlHTTPTests(TestCase):
         self.assertEqual(qr_response.status_code, 200)
         self.assertContains(qr_response, "data:image/png;base64,")
         self.assertNotContains(qr_response, "Judge terminal")
+        self.assertContains(qr_response, "已有未兑换授权")
+        duplicate_qr = self.client.post(
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
+        )
+        self.assertRedirects(
+            duplicate_qr,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        from types import SimpleNamespace
+
+        with patch(
+            "staff_panel.views.issue_judge_grant",
+            return_value=SimpleNamespace(token="RawJudgeToken-should-not-be-plain"),
+        ):
+            mocked_qr = self.client.post(
+                reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
+            )
+        self.assertEqual(mocked_qr.status_code, 200)
+        self.assertNotContains(mocked_qr, "RawJudgeToken-should-not-be-plain")
 
         hold_get = self.client.get(
             reverse("staff:judge_panel_hold", args=[self.contest_round.pk])
@@ -6039,7 +6085,10 @@ class JudgeControlHTTPTests(TestCase):
         )
         held_page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertContains(held_page, "HOLD")
-        self.assertContains(held_page, "HOLD 中不可签发")
+        self.assertNotContains(
+            held_page,
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk]),
+        )
         self.assertContains(held_page, "评分已禁用")
         self.assertEqual(
             RoundPanelSnapshot.objects.get(round=self.contest_round).state,
