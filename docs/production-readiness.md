@@ -178,6 +178,14 @@ Participant / Judge / Audience 参加的现场彩排。
 | 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase 模拟角色与恶意请求；真实参与者 0；Judge/Audience 未模拟 | 正常流程与恶意输入（容器 PostgreSQL 隔离测试库；948 tests） | PASS（技术彩排） | 未测量：本次未执行真实首张评分到最后一次自动 resolve | 不适用：无故障；完整套件 `948 tests`，`OK (skipped=3)` | 仍需真实角色在运行栈上完成登录、规则、评分、决定、投票、材料、文档和归档串联；媒体替换、大视频限制等人工步骤未执行 | 纸质评分 + Staff 工作区；锁定前人工核对缺分、结果和审计 |
 | 2026-09-07 17:06–17:18 +08:00 | 自动化 Django TestCase；真实参与者 0 | 灾难/恢复：web 重启、PostgreSQL 重启、应用备份恢复、PostgreSQL 隔离恢复 | PASS（技术彩排） | 未测量 | web 健康恢复 7.3s；PostgreSQL 重启后健康恢复 6.9s；应用备份恢复脚本 8.2s；PostgreSQL dump 恢复脚本 8.4s；各自恢复后健康检查/Django check 通过 | 尚未在真实域名、TLS、Caddy 和真实媒体负载下演练；生产 `.env`、DNS/ACME 和备份目标仍需活动部署方提供并验证 | 维持源库和媒体卷；切换到纸质评分/人工登记，暂停正式发布，按备份清单恢复到隔离或备用栈后由 Admin 复核再继续 |
 
+### 2026-09-08 M2-B 本地恶意边界彩排记录
+
+本次是本地工程彩排，不是学校接入或真实活动彩排。测试数据使用本地可丢弃数据库；没有把真实票据 secret 写入日志、测试产物或数据库。
+
+| 时间 | 参与者 | 场景 | 结论 | 录分到 READY 时间 | 实际恢复时间 | 已知风险 | Plan B |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-08 | 自动化 Django 测试与 Playwright 请求；真实参与者 0；Staff/Judge/Audience 未模拟 | Ticket 生命周期、authority/锁定规则、重复/跨活动/撤销/过期/换票/并发边界；公共扫描页与 body-only redeem 边界 | PASS（代码与公共边界）；完整 Staff 签发→扫码→投票浏览器流程未执行 | 未测量：本次不含评分录入 | 本地 SQLite 迁移后 Playwright 3/3 通过；完整 pytest `1045 passed, 30 skipped`；Ruff、mypy、Pyright、客户端/CSS、Django、文档与工作流门禁通过 | Docker Engine 当前不可用，PostgreSQL 并发、Compose 验收、备份/恢复未在本机重跑；完整凭据型 Staff 浏览器彩排、真实 TLS/WAF/学校网络 DDoS 演练仍为 HOLD | 票据或投票异常时暂停发布，改用纸质登记/人工核验；保留源库与媒体卷，待部署方提供可控 PostgreSQL/边缘环境后再复测 |
+
 补充：首次直接在容器内运行完整测试时漏掉了验收脚本的 root-only `/app/.env`
 fixture，导致 1 个配置测试因权限失败；按现有验收脚本补齐 fixture 后，单测和完整
 `948` 测试均通过。镜像仍保持非 root `artflow` 运行，未为测试放宽 `/app` 写权限。
