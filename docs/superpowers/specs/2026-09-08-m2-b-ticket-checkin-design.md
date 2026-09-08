@@ -1,6 +1,6 @@
 # M2-B Ticket / Check-in / Audience Entitlement Design
 
-**Status:** Design revision 1 — two self-review rounds complete; pending user review
+**Status:** Design revision 1 — approved after two self-review rounds
 **Date:** 2026-09-08
 **Scope:** M2-B only; M2-A entry grants remain unchanged.
 
