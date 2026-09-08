@@ -10,6 +10,7 @@ urlpatterns = [
     path("", include("public_portal.urls")),
     path("", include("accounts.urls")),
     path("contest/", include("singer_contest.urls")),
+    path("judge/", include("singer_contest.judge_urls")),
     path("farewell/", include("farewell_show.urls")),
     path("staff/", include("staff_panel.urls")),
     path("staff/tickets/", include("tickets.staff_urls")),

@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING, Any, cast
 from common.authority import (
     CONTEST_ROUND_STATE,
     JUDGE_PANEL_STATE,
+    JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
     ROUND_PERFORMANCE_STATE,
+    SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
@@ -1345,12 +1347,41 @@ class ScoreRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
 ScoreRecordManager = models.Manager.from_queryset(ScoreRecordQuerySet)
 
 
+class ScoreSource(models.TextChoices):
+    STAFF_RAPID = "staff_rapid", "Staff rapid score"
+    DIRECT_JUDGE = "direct_judge", "Direct judge"
+    STAFF_PROXY = "staff_proxy", "Staff proxy"
+    PAPER_DR = "paper_dr", "Paper disaster recovery"
+    IMPORT = "import", "Approved import"
+
+
 class ScoreRecord(models.Model):
     round = models.ForeignKey(ContestRound, on_delete=models.CASCADE, related_name="scores")
     singer = models.ForeignKey(SingerRegistration, on_delete=models.CASCADE, related_name="scores")
     judge = models.ForeignKey(Judge, on_delete=models.CASCADE, related_name="scores")
     score = models.DecimalField(max_digits=5, decimal_places=2)
     notes = models.CharField(max_length=200, blank=True)
+    source = models.CharField(
+        max_length=16,
+        choices=ScoreSource.choices,
+        default=ScoreSource.STAFF_RAPID,
+    )
+    panel_snapshot = models.ForeignKey(
+        "RoundPanelSnapshot",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="score_records",
+    )
+    judge_seat = models.ForeignKey(
+        "JudgeSeat",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="score_records",
+    )
+    source_command_id = models.CharField(max_length=64, blank=True)
+    source_reference = models.CharField(max_length=120, blank=True)
     is_test_data = models.BooleanField(default=False)
 
     objects = ScoreRecordManager()
@@ -1358,6 +1389,8 @@ class ScoreRecord(models.Model):
     if TYPE_CHECKING:
         singer_id: int
         judge_id: int
+        panel_snapshot_id: int | None
+        judge_seat_id: int | None
 
     class Meta:
         base_manager_name = "objects"
@@ -1371,6 +1404,33 @@ class ScoreRecord(models.Model):
             raise ValidationError("Score singer must belong to the round activity.")
         if judge and contest_round and judge.activity_id != contest_round.activity_id:
             raise ValidationError("Score judge must belong to the round activity.")
+        if self.panel_snapshot_id and contest_round:
+            panel_snapshot = self.panel_snapshot
+            if panel_snapshot is None or panel_snapshot.round_id != contest_round.pk:
+                raise ValidationError("评分事实快照必须属于同一轮次。")
+        if self.judge_seat_id and self.panel_snapshot_id:
+            judge_seat = self.judge_seat
+            if (
+                judge_seat is None
+                or judge_seat.panel_member.panel_snapshot_id != self.panel_snapshot_id
+            ):
+                raise ValidationError("评分事实席位必须属于同一评委组快照。")
+        if self.judge_seat_id and judge:
+            judge_seat = self.judge_seat
+            if judge_seat is None or judge_seat.panel_member.judge_id != self.judge_id:
+                raise ValidationError("评分事实席位评委与评分评委不一致。")
+        if (
+            self.source in {ScoreSource.STAFF_PROXY, ScoreSource.PAPER_DR}
+            and not self.source_reference.strip()
+        ):
+            raise ValidationError("代录或纸面评分必须提供来源参考。")
+        if self.source == ScoreSource.DIRECT_JUDGE:
+            if not self.panel_snapshot_id or not self.judge_seat_id:
+                raise ValidationError("直接评委评分必须绑定评委组快照和席位。")
+            if not self.source_command_id.strip():
+                raise ValidationError("直接评委评分必须绑定评分命令。")
+            if not authority_authorized(SCORE_FACT_WRITE):
+                raise ValidationError("直接评委评分只能通过正式评分 authority service 写入。")
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -1391,6 +1451,136 @@ class ScoreRecord(models.Model):
 
     def __str__(self):
         return f"{self.singer.name} — {self.judge.name}: {self.score}"
+
+
+class JudgeScoreReceiptQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    def _ensure_authority(self) -> None:
+        if not authority_authorized(JUDGE_SCORE_SUBMISSION):
+            raise ValidationError("评委评分回执只能通过评分提交服务修改。")
+
+    def update(self, **kwargs):
+        self._ensure_authority()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_authority()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._ensure_authority()
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_authority()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+class JudgeScoreReceipt(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCEEDED = "succeeded", "Succeeded"
+
+    command_id = models.CharField(max_length=64, unique=True)
+    operation = models.CharField(max_length=32)
+    source = models.CharField(max_length=16, choices=ScoreSource.choices)
+    payload_hash = models.CharField(max_length=64)
+    panel_snapshot = models.ForeignKey(
+        RoundPanelSnapshot, on_delete=models.PROTECT, related_name="score_receipts"
+    )
+    seat = models.ForeignKey(JudgeSeat, on_delete=models.PROTECT, related_name="score_receipts")
+    performance = models.ForeignKey(
+        "Performance", on_delete=models.PROTECT, related_name="score_receipts"
+    )
+    session = models.ForeignKey(
+        JudgeSession,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="score_receipts",
+    )
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="judge_score_receipts",
+    )
+    score_record = models.OneToOneField(
+        ScoreRecord,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="judge_receipt",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    result_code = models.CharField(max_length=32, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = JudgeScoreReceiptQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        panel_snapshot_id: int
+        seat_id: int
+        performance_id: int
+        session_id: int | None
+        operator_id: int | None
+        score_record_id: int | None
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [models.Index(fields=["status", "created_at"], name="judge_receipt_status_idx")]
+
+    def clean(self):
+        if self.status == self.Status.PENDING and self.score_record_id:
+            raise ValidationError("待处理评委评分回执不能绑定正式评分事实。")
+        if self.status == self.Status.SUCCEEDED and not self.score_record_id:
+            raise ValidationError("成功评委评分回执必须绑定正式评分事实。")
+        if self.source == ScoreSource.DIRECT_JUDGE and not self.session_id:
+            raise ValidationError("直接评委评分回执必须绑定评委会话。")
+        if self.source != ScoreSource.DIRECT_JUDGE and not self.operator_id:
+            raise ValidationError("工作人员代录评分回执必须绑定操作员。")
+        if self.panel_snapshot_id and self.performance_id:
+            if self.panel_snapshot.round_id != self.performance.round_id:
+                raise ValidationError("评分回执快照与表演轮次不一致。")
+        if self.seat_id and self.panel_snapshot_id:
+            seat = self.seat
+            if seat is None or seat.panel_member.panel_snapshot_id != self.panel_snapshot_id:
+                raise ValidationError("评分回执席位与快照不一致。")
+        if self.score_record_id:
+            record = self.score_record
+            if record is None:
+                raise ValidationError("评分回执绑定的正式评分事实不存在。")
+            if record.source != self.source:
+                raise ValidationError("评分回执来源与正式评分事实不一致。")
+            if (
+                record.panel_snapshot_id != self.panel_snapshot_id
+                or record.judge_seat_id != self.seat_id
+            ):
+                raise ValidationError("评分回执 provenance 与正式评分事实不一致。")
+            if (
+                record.source == ScoreSource.DIRECT_JUDGE
+                and record.source_command_id != self.command_id
+            ):
+                raise ValidationError("直接评委评分命令与回执不一致。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_SCORE_SUBMISSION):
+            raise ValidationError("评委评分回执只能通过评分提交服务写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_SCORE_SUBMISSION):
+            raise ValidationError("评委评分回执删除需要评分提交服务。")
+        return super().delete(*args, **kwargs)
 
 
 class ScoreWriteReceiptQuerySet(AuthorityQuerySetMixin, models.QuerySet):

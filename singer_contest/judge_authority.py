@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 
 from accounts.models import User
 from accounts.services import require_current_staff
 from common.authority import (
     JUDGE_PANEL_STATE,
+    JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
     ROUND_PERFORMANCE_STATE,
+    SCORE_FACT_WRITE,
     authority_write,
 )
 from common.models import AuditLog
@@ -31,6 +36,7 @@ from entry_access.services import (
 from .models import (
     ContestRound,
     Judge,
+    JudgeScoreReceipt,
     JudgeSeat,
     JudgeSeatGrant,
     JudgeSession,
@@ -39,7 +45,12 @@ from .models import (
     RoundJudge,
     RoundPanelSnapshot,
     RoundPanelSnapshotMember,
+    ScoreRecord,
+    ScoreSource,
+    _authorize_raw_fact_write,
+    _raw_fact_write_authorized,
 )
+from .services import validate_score
 
 
 @dataclass(frozen=True)
@@ -47,6 +58,57 @@ class LockedJudgeRound:
     activity: Activity
     contest_round: ContestRound
     operator: User
+
+
+@dataclass(frozen=True)
+class JudgeContext:
+    activity_id: int
+    round_id: int
+    seat_id: int
+    panel_snapshot_id: int
+    panel_version: int
+    context_version: int
+    performance_id: int | None
+    performance_state: str
+    rubric_payload: dict[str, object]
+
+
+@dataclass(frozen=True)
+class JudgeScoreSubmission:
+    receipt_id: int
+    score_record_id: int
+    reason_code: str
+    status: str
+
+
+class JudgeIdempotencyConflict(ValidationError):
+    reason_code = "IDEMPOTENCY_CONFLICT"
+
+
+@dataclass(frozen=True)
+class LockedJudgeTransport:
+    activity: Activity
+    contest_round: ContestRound
+
+
+def _locked_judge_transport(raw_ephemeral_token: str) -> LockedJudgeTransport:
+    digest = _ephemeral_token_digest(raw_ephemeral_token)
+    transport = (
+        EphemeralSession._base_manager.select_related("activity", "round")
+        .filter(token_digest=digest)
+        .first()
+    )
+    if transport is None or transport.kind != EntryPoint.Kind.JUDGE or transport.round_id is None:
+        raise ValidationError("评委访问会话无效。")
+    locked_activity = lock_activity_for_action(transport.activity, ActivityAction.SCORE)
+    locked_round = (
+        ContestRound.objects.select_for_update()
+        .select_related("activity")
+        .get(pk=transport.round_id)
+    )
+    if locked_round.activity_id != locked_activity.pk:
+        raise ValidationError("评委访问会话无效。")
+    return LockedJudgeTransport(activity=locked_activity, contest_round=locked_round)
 
 
 def _lock_judge_round(round_id: int, operator) -> LockedJudgeRound:
@@ -459,21 +521,15 @@ def _ephemeral_token_digest(raw_token: str) -> str:
         raise ValidationError("评委访问会话无效。") from None
 
 
-@transaction.atomic
-def authenticate_judge_session(raw_ephemeral_token: str) -> JudgeSession:
-    digest = _ephemeral_token_digest(raw_ephemeral_token)
-    transport = (
-        EphemeralSession._base_manager.select_related("activity", "round", "grant")
-        .filter(token_digest=digest)
-        .first()
-    )
-    if transport is None:
-        raise ValidationError("评委访问会话无效。")
+def _authenticate_judge_session_locked(
+    raw_ephemeral_token: str,
+    locked: LockedJudgeTransport,
+) -> JudgeSession:
     transport = authenticate_ephemeral_session(
         raw_ephemeral_token,
         expected_kind=EntryPoint.Kind.JUDGE,
-        activity=transport.activity,
-        round=transport.round,
+        activity=locked.activity,
+        round=locked.contest_round,
     )
     binding = (
         JudgeSeatGrant.objects.select_for_update()
@@ -493,7 +549,10 @@ def authenticate_judge_session(raw_ephemeral_token: str) -> JudgeSession:
         binding.access_grant.revoked_at is not None
         or seat.state != JudgeSeat.State.ASSIGNED
         or snapshot.state != RoundPanelSnapshot.State.ACTIVE
-        or snapshot.round.status == ContestRound.Status.LOCKED
+        or snapshot.round_id != locked.contest_round.pk
+        or snapshot.activity_id != locked.activity.pk
+        or locked.contest_round.status == ContestRound.Status.LOCKED
+        or locked.contest_round.is_locked
     ):
         raise ValidationError("评委访问会话无效。")
 
@@ -519,3 +578,268 @@ def authenticate_judge_session(raw_ephemeral_token: str) -> JudgeSession:
             is_test_data=snapshot.is_test_data,
             last_seen_at=now,
         )
+
+
+@transaction.atomic
+def authenticate_judge_session(raw_ephemeral_token: str) -> JudgeSession:
+    locked = _locked_judge_transport(raw_ephemeral_token)
+    return _authenticate_judge_session_locked(raw_ephemeral_token, locked)
+
+
+@contextmanager
+def _authorized_score_fact_write():
+    previous = _raw_fact_write_authorized()
+    _authorize_raw_fact_write(True)
+    try:
+        with authority_write(SCORE_FACT_WRITE):
+            yield
+    finally:
+        _authorize_raw_fact_write(previous)
+
+
+def _normalize_judge_score_payload(score_payload: object) -> dict[str, str]:
+    if not isinstance(score_payload, Mapping):
+        raise ValidationError("评分内容必须是对象。")
+    if set(score_payload) - {"score", "notes"} or "score" not in score_payload:
+        raise ValidationError("评分内容字段无效。")
+    score = validate_score(score_payload["score"])
+    notes = score_payload.get("notes", "")
+    if not isinstance(notes, str) or len(notes) > 200:
+        raise ValidationError("评分备注必须是不超过 200 个字符的文本。")
+    return {"score": str(score), "notes": notes.strip()}
+
+
+def _judge_payload_hash(
+    *,
+    locked: LockedJudgeTransport,
+    snapshot: RoundPanelSnapshot,
+    seat: JudgeSeat,
+    performance: Performance,
+    context_version: int,
+    payload: Mapping[str, str],
+) -> str:
+    canonical = json.dumps(
+        {
+            "activity_id": locked.activity.pk,
+            "round_id": locked.contest_round.pk,
+            "panel_snapshot_id": snapshot.pk,
+            "panel_version": snapshot.version,
+            "seat_id": seat.pk,
+            "judge_id": seat.panel_member.judge_id,
+            "performance_id": performance.pk,
+            "context_version": context_version,
+            "source": ScoreSource.DIRECT_JUDGE,
+            "payload": dict(payload),
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validate_command_id(command_id: object) -> str:
+    if not isinstance(command_id, str) or not command_id.strip() or len(command_id) > 64:
+        raise ValidationError("评分命令标识无效。")
+    return command_id.strip()
+
+
+def _validate_expected_context(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValidationError(f"{field} 无效。")
+    return value
+
+
+@transaction.atomic
+def submit_judge_score(
+    raw_ephemeral_token: str,
+    *,
+    command_id: object,
+    expected_context_version: object,
+    expected_performance_id: object,
+    score_payload: object,
+) -> JudgeScoreSubmission:
+    locked = _locked_judge_transport(raw_ephemeral_token)
+    context_version = _validate_expected_context(
+        expected_context_version, field="expected_context_version"
+    )
+    performance_id = _validate_expected_context(
+        expected_performance_id, field="expected_performance_id"
+    )
+    normalized_command_id = _validate_command_id(command_id)
+    normalized_payload = _normalize_judge_score_payload(score_payload)
+
+    run_state = (
+        PerformanceRunState.objects.select_for_update()
+        .select_related("current_performance")
+        .get(round=locked.contest_round)
+    )
+    session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
+    snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=session.panel_snapshot_id)
+    seat = (
+        JudgeSeat.objects.select_for_update()
+        .select_related("panel_member__panel_snapshot")
+        .get(pk=session.seat_id)
+    )
+    if snapshot.state != RoundPanelSnapshot.State.ACTIVE or seat.state != JudgeSeat.State.ASSIGNED:
+        raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+    if run_state.state == PerformanceRunState.State.HOLD:
+        raise PermissionDenied("ROUND_ON_HOLD")
+    if run_state.state not in {
+        PerformanceRunState.State.PERFORMING,
+        PerformanceRunState.State.ACCEPTING_SCORE,
+    }:
+        raise PermissionDenied("PERFORMANCE_NOT_SCORABLE")
+    if (
+        run_state.context_version != context_version
+        or run_state.current_performance_id != performance_id
+    ):
+        raise ValidationError("STALE_CONTEXT")
+    performance = (
+        Performance._base_manager.select_related("singer")
+        .filter(
+            pk=performance_id,
+            round=locked.contest_round,
+            activity=locked.activity,
+        )
+        .first()
+    )
+    if performance is None or performance.pk != run_state.current_performance_id:
+        raise ValidationError("PERFORMANCE_NOT_SCORABLE")
+
+    payload_hash = _judge_payload_hash(
+        locked=locked,
+        snapshot=snapshot,
+        seat=seat,
+        performance=performance,
+        context_version=context_version,
+        payload=normalized_payload,
+    )
+    receipt = (
+        JudgeScoreReceipt.objects.select_for_update()
+        .filter(command_id=normalized_command_id)
+        .first()
+    )
+    if receipt is not None:
+        if (
+            receipt.payload_hash != payload_hash
+            or receipt.source != ScoreSource.DIRECT_JUDGE
+            or receipt.panel_snapshot_id != snapshot.pk
+            or receipt.seat_id != seat.pk
+            or receipt.performance_id != performance.pk
+        ):
+            raise JudgeIdempotencyConflict("评分命令已绑定其他内容。")
+        if receipt.status == JudgeScoreReceipt.Status.SUCCEEDED and receipt.score_record_id:
+            return JudgeScoreSubmission(
+                receipt_id=receipt.pk,
+                score_record_id=receipt.score_record_id,
+                reason_code=receipt.result_code or "ACCEPTED",
+                status=receipt.status,
+            )
+    existing = (
+        ScoreRecord._base_manager.select_for_update()
+        .filter(
+            round=locked.contest_round,
+            singer_id=performance.singer_id,
+            judge_id=seat.panel_member.judge_id,
+        )
+        .first()
+    )
+    if existing is not None:
+        raise ValidationError("DUPLICATE_SCORE_FACT")
+
+    if receipt is None:
+        with authority_write(JUDGE_SCORE_SUBMISSION):
+            receipt = JudgeScoreReceipt.objects.create(
+                command_id=normalized_command_id,
+                operation="judge_score.submit",
+                source=ScoreSource.DIRECT_JUDGE,
+                payload_hash=payload_hash,
+                panel_snapshot=snapshot,
+                seat=seat,
+                performance=performance,
+                session=session,
+                status=JudgeScoreReceipt.Status.PENDING,
+            )
+
+    with _authorized_score_fact_write():
+        score_record = ScoreRecord.objects.create(
+            round=locked.contest_round,
+            singer=performance.singer,
+            judge=seat.panel_member.judge,
+            score=Decimal(normalized_payload["score"]),
+            notes=normalized_payload["notes"],
+            source=ScoreSource.DIRECT_JUDGE,
+            panel_snapshot=snapshot,
+            judge_seat=seat,
+            source_command_id=normalized_command_id,
+            is_test_data=locked.activity.is_test_mode,
+        )
+    now = timezone.now()
+    with authority_write(JUDGE_SCORE_SUBMISSION):
+        receipt.score_record = score_record
+        receipt.status = JudgeScoreReceipt.Status.SUCCEEDED
+        receipt.result_code = "ACCEPTED"
+        receipt.completed_at = now
+        receipt.save(update_fields=["score_record", "status", "result_code", "completed_at"])
+    _audit(
+        operator=None,
+        action_type=AuditLog.ActionType.JUDGE_SCORE_SUBMIT,
+        target=f"JudgeScoreReceipt:{receipt.pk}",
+        new_value=json.dumps(
+            {
+                "score_record_id": score_record.pk,
+                "performance_id": performance.pk,
+                "context_version": context_version,
+                "payload_hash": payload_hash,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+    )
+    return JudgeScoreSubmission(
+        receipt_id=receipt.pk,
+        score_record_id=score_record.pk,
+        reason_code="ACCEPTED",
+        status=receipt.status,
+    )
+
+
+@transaction.atomic
+def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
+    locked = _locked_judge_transport(raw_ephemeral_token)
+    session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
+    run_state = (
+        PerformanceRunState.objects.select_for_update()
+        .select_related("current_performance")
+        .filter(round_id=session.panel_snapshot.round_id)
+        .first()
+    )
+    if run_state is None:
+        raise ValidationError("评委现场上下文尚未建立。")
+
+    rubric_payload: dict[str, object] = {}
+    rubric = session.panel_snapshot.round.rubric
+    if rubric is not None:
+        rubric_payload = {
+            "name": rubric.name,
+            "criteria": [
+                {
+                    "name": criterion.name,
+                    "max_score": str(criterion.max_score),
+                    "sequence": criterion.sequence,
+                }
+                for criterion in rubric.criteria.all().order_by("sequence", "pk")
+            ],
+        }
+    return JudgeContext(
+        activity_id=session.panel_snapshot.activity_id,
+        round_id=session.panel_snapshot.round_id,
+        seat_id=session.seat_id,
+        panel_snapshot_id=session.panel_snapshot_id,
+        panel_version=session.panel_snapshot.version,
+        context_version=run_state.context_version,
+        performance_id=run_state.current_performance_id,
+        performance_state=run_state.state,
+        rubric_payload=rubric_payload,
+    )
