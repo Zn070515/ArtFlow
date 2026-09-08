@@ -8,6 +8,7 @@ const source = readFileSync(new URL("../../static/dist/ticket_scan.js", import.m
 function boot({ hash = "#ticket-secret", response = { ok: true, status: 200 } } = {}) {
   const status = { textContent: "" };
   const root = {};
+  const csrf = { value: "csrf-token" };
   const requests = [];
   const historyCalls = [];
   const context = {
@@ -15,6 +16,7 @@ function boot({ hash = "#ticket-secret", response = { ok: true, status: 200 } } 
       querySelector(selector) {
         if (selector === "[data-ticket-scan-root]") return root;
         if (selector === "[data-ticket-scan-status]") return status;
+        if (selector === '[name="csrfmiddlewaretoken"]') return csrf;
         return null;
       },
     },
@@ -44,6 +46,7 @@ test("ticket scan scrubs the fragment before body-only redemption", async () => 
   assert.deepEqual(result.historyCalls[0], [null, "", "/tickets/scan/"]);
   assert.equal(result.requests[0].url, "/tickets/redeem/");
   assert.equal(result.requests[0].options.method, "POST");
+  assert.equal(result.requests[0].options.headers["X-CSRFToken"], "csrf-token");
   assert.deepEqual(JSON.parse(result.requests[0].options.body), { secret: "ticket-secret" });
   assert.equal(result.status.textContent, "票据验证成功，可以继续投票。");
 });

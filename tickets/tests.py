@@ -535,16 +535,32 @@ class TicketPublicHttpTests(TestCase):
         )
         self.issued = ticket_services.issue_ticket(ticket, actor=self.staff)
 
+    def _csrf_headers(self, client):
+        response = client.get("/tickets/scan/")
+        self.assertEqual(response.status_code, 200)
+        return {"HTTP_X_CSRFTOKEN": client.cookies["csrftoken"].value}
+
     def test_scan_page_is_read_only_and_redeem_uses_body_only(self):
         response = self.client.get("/tickets/scan/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["request"].path, "/tickets/scan/")
 
         csrf_client = Client(enforce_csrf_checks=True)
+        rejected = csrf_client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": self.issued.secret}),
+            content_type="application/json",
+        )
+        self.assertEqual(rejected.status_code, 403)
+
+        scan_page = csrf_client.get("/tickets/scan/")
+        self.assertEqual(scan_page.status_code, 200)
+        csrf_token = csrf_client.cookies["csrftoken"].value
         redeemed = csrf_client.post(
             "/tickets/redeem/",
             data=json.dumps({"secret": self.issued.secret}),
             content_type="application/json",
+            HTTP_X_CSRFTOKEN=csrf_token,
         )
 
         self.assertEqual(redeemed.status_code, 200)
@@ -569,6 +585,7 @@ class TicketPublicHttpTests(TestCase):
             "/tickets/redeem/",
             data=json.dumps({"secret": "unknown-ticket-secret"}),
             content_type="application/json",
+            **self._csrf_headers(csrf_client),
         )
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(unknown.json()["reason_code"], "INVALID_TICKET")
@@ -579,6 +596,7 @@ class TicketPublicHttpTests(TestCase):
             "/tickets/redeem/",
             data=json.dumps({"secret": "x" * 5000}),
             content_type="application/json",
+            **self._csrf_headers(csrf_client),
         )
         self.assertEqual(oversized.status_code, 413)
         self.assertEqual(oversized.json()["reason_code"], "REQUEST_TOO_LARGE")
@@ -592,11 +610,13 @@ class TicketPublicHttpTests(TestCase):
                 "/tickets/redeem/",
                 data=json.dumps({"secret": "unknown-ticket-secret"}),
                 content_type="application/json",
+                **self._csrf_headers(csrf_client),
             )
         limited = csrf_client.post(
             "/tickets/redeem/",
             data=json.dumps({"secret": "unknown-ticket-secret"}),
             content_type="application/json",
+            **self._csrf_headers(csrf_client),
         )
         self.assertEqual(limited.status_code, 429)
         self.assertTrue(limited["Retry-After"].isdigit())

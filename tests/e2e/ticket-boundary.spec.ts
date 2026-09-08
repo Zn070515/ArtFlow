@@ -16,8 +16,13 @@ test("ticket redeem is body-only and returns a generic bounded failure", async (
   expect(queryAttempt.status()).toBe(405);
   expect(await queryAttempt.text()).not.toContain(rawCredential);
 
+  const scanPage = await request.get("/tickets/scan/");
+  const scanHtml = await scanPage.text();
+  const csrfToken = scanHtml.match(/name="csrfmiddlewaretoken" value="([^"]+)"/)?.[1];
+  expect(csrfToken).toBeTruthy();
   const invalid = await request.post("/tickets/redeem/", {
     data: { secret: rawCredential },
+    headers: { "X-CSRFToken": csrfToken! },
   });
   expect(invalid.status()).toBe(400);
   expect(invalid.headers()["cache-control"]).toContain("no-store");
