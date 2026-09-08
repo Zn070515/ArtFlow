@@ -1,6 +1,6 @@
 # M2-C2 Staff Judge Control Surface
 
-状态：设计已获批准，待实现
+状态：实现完成，已通过本地与 PostgreSQL focused 验证；待合并主干
 
 ## 目标
 
@@ -96,4 +96,3 @@ POST 成功后使用 PRG 回到控制台；QR 签发成功时在当前响应中�
 6. Staff_PROXY 和 PAPER_DR 成功写入正确 `ScoreSource`、Panel、seat、context 和审计记录；重复命令幂等，过期 context 失败。
 7. 页面访问、跨轮次 ID、CSRF、权限、异常路径均有回归测试。
 8. Django、Pyright、client、PostgreSQL 和 Playwright 相关门禁保持通过。
-

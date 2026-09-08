@@ -36,11 +36,11 @@
 - The tests will require `staff:judge_control`, `staff:judge_prepare`, `staff:judge_panel_hold`, `staff:judge_panel_resume`, `staff:judge_performance_advance`, `staff:judge_performance_hold`, `staff:judge_performance_resume`, `staff:judge_seat_qr`, `staff:judge_score_proxy`, and `staff:judge_score_paper`.
 - The tests will require forms named `JudgePanelAttendanceForm`, `JudgePerformanceActionForm`, and `JudgeBoundScoreForm` with integer ID validation and bounded text fields.
 
-- [ ] **Step 1: Write the failing route and form tests.**
+- [x] **Step 1: Write the failing route and form tests.**
 
   Add `JudgeControlHTTPTests` with a prepared test round, one performance, one staff operator, and one judge seat. Assert route reversing and that the forms reject booleans/non-integers, blank hold reasons, scores outside 0–100, oversized notes, and missing source references/reasons.
 
-- [ ] **Step 2: Run the focused tests and verify RED.**
+- [x] **Step 2: Run the focused tests and verify RED.**
 
   Run:
 
@@ -50,7 +50,7 @@
 
   Expected result: import or reverse/form failures because the C2 routes/forms do not exist yet. Fix only test setup errors until the failure is caused by the missing C2 contract.
 
-- [ ] **Step 3: Commit the failing contract tests.**
+- [x] **Step 3: Commit the failing contract tests.**
 
   ```powershell
   git add staff_panel/tests.py
@@ -72,11 +72,11 @@
 - `JudgeBoundScoreForm`: `performance_id`, `seat_id`, `context_version`, `score`, `source_reference`, `reason`, and `command_id`; normalize numeric values, validate score with `validate_score`, and cap source reference at 120 and reason at 240 characters.
 - URL names and paths must match the spec and point to named view functions, not a catch-all action dispatcher.
 
-- [ ] **Step 1: Implement only the forms and URL declarations.**
+- [x] **Step 1: Implement only the forms and URL declarations.**
 
   Keep form cleaning deterministic and reject duplicate attendance IDs before a service call. Do not add view logic in this task.
 
-- [ ] **Step 2: Run the form and route tests.**
+- [x] **Step 2: Run the form and route tests.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
@@ -84,7 +84,7 @@
 
   Expected result: form/route assertions pass; view requests still fail until Task 3.
 
-- [ ] **Step 3: Commit the scoped contract implementation.**
+- [x] **Step 3: Commit the scoped contract implementation.**
 
   ```powershell
   git add staff_panel/forms.py staff_panel/urls.py
@@ -106,25 +106,25 @@
 - `judge_prepare(request, pk)` passes the cleaned attendance IDs to `prepare_judge_panel()` and redirects back with a safe message.
 - The page must show expected/actual/minimum counts and `INSUFFICIENT_JUDGES / HOLD` when no active panel can be prepared; it must not offer QR/performance/score controls in that state.
 
-- [ ] **Step 1: Add a failing GET and prepare POST test.**
+- [x] **Step 1: Add a failing GET and prepare POST test.**
 
   Assert anonymous users redirect, participants are denied, staff can see five prepared judges, a four-of-five submission creates a four-member ACTIVE snapshot, and a three-of-five submission returns a visible HOLD message without an active snapshot.
 
-- [ ] **Step 2: Run the test and confirm the expected view/template failure.**
+- [x] **Step 2: Run the test and confirm the expected view/template failure.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
   ```
 
-- [ ] **Step 3: Implement read-only context and prepare POST.**
+- [x] **Step 3: Implement read-only context and prepare POST.**
 
   Use `get_object_or_404`, `staff_required`, `require_POST`, `prepare_judge_panel`, and `messages`. Build panel data from `RoundPanelSnapshot`/members for display only. Do not create a second panel service.
 
-- [ ] **Step 4: Add the dashboard link and render the console.**
+- [x] **Step 4: Add the dashboard link and render the console.**
 
   Include CSRF tokens on every form, use explicit disabled states for HOLD/LOCKED, show current performance labels from `Performance.singer.name` and `song_title`, and never render bearer or grant tokens as text.
 
-- [ ] **Step 5: Run the focused page tests and commit.**
+- [x] **Step 5: Run the focused page tests and commit.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
@@ -145,21 +145,21 @@
 - `judge_seat_qr(request, pk, seat_id)` calls `issue_judge_grant(seat_id, operator=request.user, ttl_seconds=...)` only after confirming the seat belongs to the URL round.
 - The response renders `qr_data_uri`, `seat`, and `grant_expires_at` for the current request only, using a target such as `reverse("judge:terminal")#<quoted-token>`.
 
-- [ ] **Step 1: Add failing QR tests.**
+- [x] **Step 1: Add failing QR tests.**
 
   Assert a valid ACTIVE seat returns an image data URI and a terminal fragment target without placing the raw token in response text; a seat from another round, revoked seat, HOLD panel, and duplicate unredeemed grant are rejected.
 
-- [ ] **Step 2: Run the tests and observe RED.**
+- [x] **Step 2: Run the tests and observe RED.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
   ```
 
-- [ ] **Step 3: Implement in-memory QR generation.**
+- [x] **Step 3: Implement in-memory QR generation.**
 
   Reuse the existing `qrcode`, `BytesIO`, and base64 pattern used by ticket QR generation. Keep token-bearing data only in the QR image payload. Do not log the token or pass it through `messages`.
 
-- [ ] **Step 4: Run focused QR tests and commit.**
+- [x] **Step 4: Run focused QR tests and commit.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
@@ -183,21 +183,21 @@
 - `judge_panel_hold` calls `hold_judge_panel(round_id, operator=..., reason=...)`.
 - `judge_panel_resume` calls `resume_judge_panel(round_id, operator=...)`.
 
-- [ ] **Step 1: Add failing transition tests.**
+- [x] **Step 1: Add failing transition tests.**
 
   Assert valid transitions update `PerformanceRunState`, increment context version when the performance changes, render current singer/song, reject a performance from another round, and reject QR/score operations while Panel or performance is held.
 
-- [ ] **Step 2: Run the tests and verify RED.**
+- [x] **Step 2: Run the tests and verify RED.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
   ```
 
-- [ ] **Step 3: Implement thin POST wrappers and explicit action forms.**
+- [x] **Step 3: Implement thin POST wrappers and explicit action forms.**
 
   Catch only `PermissionDenied` and `ValidationError`, convert through `domain_error_messages`, and redirect to the control console. Never continue after an authority service exception.
 
-- [ ] **Step 4: Run transition tests and commit.**
+- [x] **Step 4: Run transition tests and commit.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests singer_contest.test_judge_authority
@@ -219,21 +219,21 @@
 - `judge_score_paper` calls `submit_paper_score()` with the same binding and paper reference.
 - Both views use fresh `command_id` values from the form and show only stable reason messages on failure.
 
-- [ ] **Step 1: Add failing score action tests.**
+- [x] **Step 1: Add failing score action tests.**
 
   Assert successful records have `STAFF_PROXY`/`PAPER_DR`, the correct panel snapshot and seat, and an audit row; assert missing reason/reference, stale context, duplicate score fact, held run state, foreign seat, and cross-round performance fail without partial records.
 
-- [ ] **Step 2: Run the focused tests and verify RED.**
+- [x] **Step 2: Run the focused tests and verify RED.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests
   ```
 
-- [ ] **Step 3: Implement wrappers and render forms.**
+- [x] **Step 3: Implement wrappers and render forms.**
 
   Use `JudgeBoundScoreForm`, map the selected action to exactly one existing service, and redirect after success. Do not call `ScoreRecord.objects.create()` from the view.
 
-- [ ] **Step 4: Run focused tests, type gates, and commit.**
+- [x] **Step 4: Run focused tests, type gates, and commit.**
 
   ```powershell
   python manage.py test staff_panel.tests.JudgeControlHTTPTests singer_contest.test_judge_authority
@@ -251,15 +251,15 @@
 - Modify: `docs/superpowers/specs/2026-09-08-m2-c2-staff-control-surface.md` only if review finds a contradiction
 - Modify: `AGENTS.md` only if a permanent C2 gate/rule is missing
 
-- [ ] **Step 1: Perform authority review 1.**
+- [x] **Step 1: Perform authority review 1.**
 
   Inspect every new view for direct writes, cross-round object lookup, token leakage, CSRF coverage, and error continuation. Search for `RoundPanelSnapshot.objects.create`, `JudgeSeat.objects.create`, `PerformanceRunState.objects.create`, and `ScoreRecord.objects.create` in `staff_panel` and confirm none were introduced.
 
-- [ ] **Step 2: Perform authority review 2.**
+- [x] **Step 2: Perform authority review 2.**
 
   Check duplicate QR issuance, replayed POSTs, HOLD/LOCKED transitions, stale context, foreign IDs, and whether the page can claim readiness while `INSUFFICIENT_JUDGES` or HOLD is active. Add only isolated regression fixes with their own tests.
 
-- [ ] **Step 3: Run all gates.**
+- [x] **Step 3: Run all gates.**
 
   ```powershell
   python manage.py check
@@ -273,7 +273,7 @@
   npm run check:pyright:entry-access
   ```
 
-- [ ] **Step 4: Run Docker/PostgreSQL and browser verification.**
+- [x] **Step 4: Run Docker/PostgreSQL and browser verification.**
 
   Run the PostgreSQL acceptance contract with the already-running local web service or an explicit no-host-port Compose rehearsal, preserving source volumes. Run Playwright against the control console with a staff session and verify prepare → QR → advance → hold/resume → proxy/paper action; do not claim browser success if the service is merely an unrelated process.
 
@@ -288,4 +288,3 @@
   git merge --no-ff feat/m2-c2-staff-control-surface -m "merge: integrate m2-c2 staff judge control"
   git push origin main
   ```
-

@@ -222,3 +222,11 @@ PostgreSQL/Compose/Playwright/备份恢复门禁本轮未宣称通过。2026-09-
 
 因此，M1 的代码、自动化验收和本地技术恢复彩排已完成；M1-J 的“正式现场彩排”
 仍待真实参与者、真实部署域名和人工步骤完成后才能最终关闭。
+
+### 2026-09-08 M2-C2 Staff 现场评委控制面板门禁记录
+
+本轮完成 server-rendered Staff 控制台：实际到场评委与 Panel 准备、一次性 Judge QR、表演切换、Panel/表演 HOLD-resume、STAFF_PROXY 和 PAPER_DR。视图只调用 judge authority service；新增测试覆盖普通用户拒绝、未准备上下文恶意 POST、最低人数 HOLD、重复 grant、QR 明文不回显、stale context、评分幂等和来源绑定。
+
+本机门禁结果：Django 全仓 `1080 passed, 28 skipped`；C2/authority focused `27 passed`；Playwright `6 passed`；client `20 passed`；项目 Pyright 与 entry-access Pyright 均为 0 diagnostics；Ruff、Django check、migration check、文档检查和 CSS/client gates 通过。PostgreSQL focused C2/authority `27 passed`，并完成 Compose 容器内 migrate、doctor、seed 幂等与 reset safety 检查；源数据库和 volumes 保持不变。
+
+完整 `verify_postgres_acceptance.ps1 -StartCompose` 本轮未能启动，因为本机既有开发服务占用 `127.0.0.1:8000`；没有停止或删除该服务/volumes，改用无 host-port 的 Compose one-off focused 验证。完整 PostgreSQL acceptance、备份恢复、带真实 Staff 凭据的浏览器控制台流程、TLS/WAF/DDoS 和学校网络演练仍为部署前置 HOLD。
