@@ -107,6 +107,8 @@ DDoS、WAF challenge/黑名单和学校公网入口审批仍由部署方、学�
 
 M2-C 已建立 immutable panel snapshot、JudgeSeat、JudgeSession、server-owned live context、direct judge score receipt、STAFF_PROXY 和 PAPER_DR 来源边界，以及 typed terminal 的内存 bearer 与安全草稿边界。judge 请求不接受客户端选择的 activity、round、judge、seat、singer、source 或 panel；expected context 只作 stale-page equality guard。
 
+恶意彩排不再只验证 13 个事件日错误场景；完整的 authority、会话/CSRF、输入解析、竞态、资源消耗、配置库存、学校 SSO/MFA、DDoS 分层和恢复矩阵见 [`m2-c-malicious-rehearsal-matrix.md`](m2-c-malicious-rehearsal-matrix.md)。本地压力仅限隔离环境的 bounded rehearsal；公网 DDoS、真实 IdP/MFA、TLS/WAF、学校网络和留存责任必须由部署方提供独立证据。
+
 M2-C 的本地代码门禁已覆盖模型 authority guard、命令幂等、重复事实、跨来源 provenance、跨 origin/无 bearer 的 HTTP 失败路径、客户端草稿不落 token 和 stale-context 显示。PostgreSQL 锁顺序/并发验收、真实 Playwright credential flow、学校 IdP/SSO、MFA、TLS/WAF/DDoS、数据责任与保存期限仍是部署前置条件，未被本地 SQLite 或静态检查替代。
 
 学校接入的责任清单见 [学校接入准备清单](school-onboarding.md)，异常取证与纸面 DR 见 [事件响应与证据链](incident-response.md)。

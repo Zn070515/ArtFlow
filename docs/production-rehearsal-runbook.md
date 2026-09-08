@@ -3,6 +3,7 @@
 > 配套文档：[production-readiness.md](production-readiness.md)（事件日检查矩阵 + 发布门禁 + 演练报告表）。
 > 目的：在首次正式活动前，按事件日矩阵逐项演练，**确认错误/重试/并发/恢复路径不会污染正式数据**。
 > 每个场景都给出 **Setup → Execute → Expected** 三列。标 `[automated]` 的步骤已有对应自动化回归（pytest / verify 脚本），标 `[manual]` 的必须人工在运行的栈上点一遍。
+> 恶意彩排扩展矩阵：[`m2-c-malicious-rehearsal-matrix.md`](m2-c-malicious-rehearsal-matrix.md)。本 runbook 的 13 个场景是事件日基线；执行 M2-C 或学校接入前，必须按扩展矩阵的优先级补齐 authority、会话、竞态、资源、学校身份和恢复证据。
 
 ## 0. Preflight
 
