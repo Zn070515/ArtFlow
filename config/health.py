@@ -1,8 +1,10 @@
 from django.core.checks import ERROR, run_checks
 from django.db import connections
 from django.http import HttpRequest, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 
 
+@csrf_exempt
 def healthz(request: HttpRequest) -> JsonResponse:
     if request.method != "GET":
         response = _unavailable_response(status=405)
