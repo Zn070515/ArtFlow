@@ -13,6 +13,8 @@ class ActivityAction(StrEnum):
     SCORE = "score"
     CAST_VOTE = "cast_vote"
     MANAGE_VOTE = "manage_vote"
+    MANAGE_TICKETS = "manage_tickets"
+    CHECK_IN = "check_in"
     MANAGE_AWARD = "manage_award"
     PUBLISH_RESULT = "publish_result"
     ARCHIVE = "archive"
@@ -42,6 +44,8 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
+            ActivityAction.MANAGE_TICKETS,
+            ActivityAction.CHECK_IN,
             ActivityAction.MANAGE_AWARD,
         }
     ),
@@ -53,6 +57,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
+            ActivityAction.MANAGE_TICKETS,
         }
     ),
     "registration_closed": frozenset(
@@ -62,6 +67,8 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
+            ActivityAction.MANAGE_TICKETS,
+            ActivityAction.CHECK_IN,
         }
     ),
     "reviewing": frozenset(
@@ -76,6 +83,8 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
+            ActivityAction.MANAGE_TICKETS,
+            ActivityAction.CHECK_IN,
         }
     ),
     "live": frozenset(
@@ -83,6 +92,8 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
+            ActivityAction.MANAGE_TICKETS,
+            ActivityAction.CHECK_IN,
             ActivityAction.MANAGE_AWARD,
             ActivityAction.PUBLISH_RESULT,
         }

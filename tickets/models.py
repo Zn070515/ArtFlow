@@ -187,7 +187,7 @@ class Ticket(models.Model):
         super().clean()
         if self.state == self.State.CREATED and self.secret_digest is not None:
             raise ValidationError("已创建票据不能携带可兑换密钥摘要。")
-        if self.state != self.State.CREATED and not self.secret_digest:
+        if self.state in {self.State.ISSUED, self.State.CHECKED_IN} and not self.secret_digest:
             raise ValidationError("已签发票据必须携带密钥摘要。")
         if self.secret_digest and len(self.secret_digest) != TICKET_DIGEST_LENGTH:
             raise ValidationError("票据密钥摘要格式无效。")
@@ -287,7 +287,9 @@ class TicketAccessSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_create(objs, *args, **kwargs)
 
     def delete(self) -> Any:
-        raise ValidationError("票据会话删除需要显式过期清理服务。")
+        for session in self:
+            getattr(session, "_ensure_deletion_authorized")()
+        return super().delete()
 
 
 class TicketAccessSession(models.Model):
@@ -317,6 +319,14 @@ class TicketAccessSession(models.Model):
             raise ValidationError("票据会话摘要格式无效。")
         if self.ticket_id and self.ticket.is_test_data != self.is_test_data:
             raise ValidationError("票据会话测试标记必须与票据一致。")
+
+    def _ensure_deletion_authorized(self) -> None:
+        from django.utils import timezone
+
+        if not authority_authorized(TICKET_SESSION_STATE):
+            raise ValidationError("票据会话删除需要显式过期清理权限。")
+        if self.expires_at > timezone.now():
+            raise ValidationError("未过期票据会话不可删除。")
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self._state.adding:
@@ -351,4 +361,5 @@ class TicketAccessSession(models.Model):
         super().save(*args, **kwargs)
 
     def delete(self, *args: Any, **kwargs: Any) -> Any:
-        raise ValidationError("票据会话删除需要显式过期清理服务。")
+        self._ensure_deletion_authorized()
+        return super().delete(*args, **kwargs)
