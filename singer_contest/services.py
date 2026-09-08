@@ -56,6 +56,7 @@ from .models import (
     PerformanceGroup,
     RoundEntry,
     RoundJudge,
+    RoundPanelSnapshot,
     RubricCriterion,
     ScoreRecord,
     ScoreSummary,
@@ -82,6 +83,27 @@ def _eligible_singers(contest_round: ContestRound) -> QuerySet[SingerRegistratio
 
 def _active_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     return Judge.objects.filter(round_assignments__round=contest_round).order_by("pk")
+
+
+def authoritative_panel_judges(contest_round: ContestRound) -> QuerySet[Judge]:
+    """Return the one judge set allowed to participate in this round's scoring matrix.
+
+    A formal panel snapshot is authoritative even when a judge's mutable activity
+    profile is later deactivated. Legacy rounds without a panel snapshot retain the
+    prepared ``RoundJudge`` fallback for compatibility.
+    """
+    snapshot = (
+        RoundPanelSnapshot.objects.filter(round=contest_round)
+        .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
+        .order_by("-version")
+        .first()
+    )
+    if snapshot is None:
+        return _active_judges(contest_round)
+    return Judge.objects.filter(
+        panel_snapshot_members__panel_snapshot=snapshot,
+        panel_snapshot_members__is_active=True,
+    ).distinct().order_by("pk")
 
 
 def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistration]:
@@ -662,13 +684,13 @@ def validate_score(value: object) -> Decimal:
 
 def expected_score_cells(contest_round: ContestRound) -> list[tuple[int, int]]:
     singers = list(_eligible_singers(contest_round).values_list("pk", flat=True))
-    judges = list(_active_judges(contest_round).values_list("pk", flat=True))
+    judges = list(authoritative_panel_judges(contest_round).values_list("pk", flat=True))
     return [(singer_id, judge_id) for singer_id in singers for judge_id in judges]
 
 
 def missing_score_cells(contest_round: ContestRound) -> list[dict[str, int | str]]:
     singers = list(_eligible_singers(contest_round))
-    judges = list(_active_judges(contest_round))
+    judges = list(authoritative_panel_judges(contest_round))
     existing = set(
         ScoreRecord.objects.filter(round=contest_round).values_list("singer_id", "judge_id")
     )
@@ -689,7 +711,7 @@ def ensure_score_records_belong_to_round(
     contest_round: ContestRound, pairs: Iterable[tuple[int, int]]
 ) -> None:
     singer_ids = set(_eligible_singers(contest_round).values_list("pk", flat=True))
-    judge_ids = set(_active_judges(contest_round).values_list("pk", flat=True))
+    judge_ids = set(authoritative_panel_judges(contest_round).values_list("pk", flat=True))
     for singer_id, judge_id in pairs:
         if singer_id not in singer_ids or judge_id not in judge_ids:
             raise ValidationError("选手和评委必须属于当前比赛活动。")
@@ -711,7 +733,7 @@ def _recalculate_round(contest_round: ContestRound) -> None:
         return
 
     singers = _eligible_singers(contest_round)
-    judge_ids = _active_judges(contest_round).values_list("pk", flat=True)
+    judge_ids = authoritative_panel_judges(contest_round).values_list("pk", flat=True)
     for singer in singers:
         singer_scores = list(
             ScoreRecord.objects.filter(
@@ -1248,7 +1270,7 @@ def _parse_id_authority_workbook(rows, headers, meta, contest_round: ContestRoun
     if meta.get("schema_version") and meta["schema_version"] != _SCORE_WORKBOOK_SCHEMA_VERSION:
         errors.append(f"评分表 schema_version 不受支持（{meta['schema_version']}）。")
 
-    active_judges = list(_active_judges(contest_round))
+    active_judges = list(authoritative_panel_judges(contest_round))
     judge_by_id = {judge.pk: judge for judge in active_judges}
     judge_by_name = {judge.name: judge for judge in active_judges}
     singers = {singer.pk: singer for singer in _eligible_singers(contest_round)}
@@ -1331,7 +1353,7 @@ def _parse_name_based_workbook(rows, headers, contest_round: ContestRound):
     errors = [f"评委姓名重复: {name}" for name in sorted(duplicate_judge_names)]
     judges_by_name = {
         judge.name: judge
-        for judge in _active_judges(contest_round)
+        for judge in authoritative_panel_judges(contest_round)
         if judge.name not in duplicate_judge_names
     }
     singers = list(_eligible_singers(contest_round))

@@ -30,7 +30,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
 from singer_contest.models import Award, ContestRound, ScoreSummary, SingerRegistration, StageResult
 from singer_contest.services import (
-    _active_judges,
+    authoritative_panel_judges,
     _eligible_singers,
     bound_ruleset_version_label,
     missing_score_cells,
@@ -364,7 +364,7 @@ def _add_artflow_meta(
 
 
 def build_score_template_workbook(contest_round: ContestRound) -> Workbook:
-    judges = list(_active_judges(contest_round))
+    judges = list(authoritative_panel_judges(contest_round))
     singers = list(_eligible_singers(contest_round))
     wb = Workbook()
     ws = _active_worksheet(wb)

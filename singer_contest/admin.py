@@ -47,6 +47,7 @@ class ContestRoundAdmin(ObservationOnlyAdmin):
         "activity",
         "round_type",
         "scoring_mode",
+        "minimum_judge_count",
         "name",
         "sequence",
         "order_policy",

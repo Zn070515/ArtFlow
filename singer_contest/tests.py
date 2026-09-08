@@ -861,6 +861,16 @@ class ScoringServiceTests(TestCase):
         )
         self.assertNotIn((self.singer.pk, second_judge.pk), expected_score_cells(self.round))
 
+        self.judge.is_active = False
+        self.judge.save(update_fields=["is_active"])
+        self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
+        workbook = build_score_template_workbook(self.round)
+        self.assertEqual(
+            workbook.active.cell(row=1, column=3).value,
+            f"J{self.judge.pk} {self.judge.name}",
+        )
+        self.assertEqual(workbook.active.max_column, 3)
+
     def test_registration_status_change_does_not_change_prepared_roster(self):
         prepare_round(self.round, self.user)
         self.singer.pre_status = SingerRegistration.PreStatus.SUBMITTED
