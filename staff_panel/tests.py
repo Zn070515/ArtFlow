@@ -6077,6 +6077,17 @@ class JudgeControlHTTPTests(TestCase):
         self.assertEqual(ScoreRecord.objects.get().source, ScoreSource.STAFF_PROXY)
         self.assertEqual(JudgeScoreReceipt.objects.count(), 1)
 
+        stale_hold = self.client.post(
+            reverse("staff:judge_performance_hold", args=[self.contest_round.pk]),
+            {"performance_id": 999, "reason": "并发切换测试"},
+        )
+        self.assertRedirects(
+            stale_hold,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        run_state.refresh_from_db()
+        self.assertEqual(run_state.state, PerformanceRunState.State.PERFORMING)
+
         replayed = self.client.post(
             reverse("staff:judge_score_proxy", args=[self.contest_round.pk]), score_data
         )
