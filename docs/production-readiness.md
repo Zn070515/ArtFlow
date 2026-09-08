@@ -263,3 +263,52 @@ migration 和文档检查通过。GitHub Actions 最近一次 push 的所有 job
 本 Gate 仍不宣称学校接入完成。真实凭据型 Judge 现场流程、学校 SSO/IdP、MFA/重新认证
 批准、TLS/WAF/DDoS、数据责任与保存期限、事件联系人和正式现场彩排继续保持部署前置
 `HOLD`。
+
+### 2026-09-08 M2-C 恶意彩排与压力测试量化记录
+
+本轮是本机隔离栈的 bounded rehearsal，不是公网 DDoS，也没有经过学校网络、WAF、
+TLS 终端或第三方 IdP。使用最新源码构建的临时 `web` 容器，连接现有 PostgreSQL
+16 容器；`RATE_LIMIT_BACKEND=database`，服务映射为 `127.0.0.1:18000`，单请求
+超时 5 秒，最大并发 32。测试脚本为
+[`scripts/m2_c_malicious_rehearsal.mjs`](../scripts/m2_c_malicious_rehearsal.mjs)，
+所有 Judge fixture 均为非生产一次性数据。除 redeem 建立 7 个测试会话外，599 个
+协议/负载请求均不提交评分、投票、奖项或其他权威事实；7 个 fixture 在测试后通过
+`clear_activity_test_data` 清理，测试活动仅按既有契约保留配置壳。
+
+| 攻击集合 | 请求/并发 | 状态分布 | p50 / p95 / p99（ms） | 结论 |
+| --- | ---: | --- | ---: | --- |
+| 非法方法、跨源、坏 JSON、超大 body（5 probes） | 5 / 1 | 405、405、403、400、413 各 1；canary 未回显 | 27.60 / 27.60 / 27.60（最长单探针） | PASS |
+| 匿名 Judge context 扫描 | 40 / 8 | 30×401，10×429 | 39.46 / 43.54 / 43.65 | PASS；匿名阈值 30/min 生效 |
+| 跨源 score 探测突发 | 64 / 16 | 64×403；写入 0 | 78.73 / 91.38 / 94.77 | PASS；Origin 边界生效 |
+| `/healthz/` 有界压力 | 320 / 32 | 320×200，错误 0 | 170.54 / 176.41 / 177.97；max 179.34 | PASS；189.05 req/s，墙钟 1692.67ms |
+| 6 个合法 Judge session、同一出口 IP | 120 / 6 | 120×200，429 为 0 | 84.73 / 88.68 / 89.76；max 89.83 | PASS；合法 session 未互相限流 |
+| 单个合法 Judge session 配额攻击 | 50 / 10 | 45×200，5×429 | 239.34 / 259.72 / 260.49；max 260.49 | PASS；session 阈值 45/min 精确生效 |
+
+本轮包含 5/5 协议探针、594 个负载请求和 7 个 redeem setup 请求，共 606 个本地
+HTTP 请求；没有超时、连接错误或 5xx。Django authority/恶意边界回归为
+`331 passed, 4 skipped, 53 subtests passed`；4 个 skip 是需要 PostgreSQL 行锁的
+测试，并非 HTTP 彩排失败。修复后的专门 test-data cleanup 回归为 `1 passed`。
+
+#### 权威与清理证据
+
+| 项目 | 实测值 |
+| --- | ---: |
+| 测试活动中的 `RoundJudge` / panel snapshot / seat / grant / session | 全部 0（清理后） |
+| 测试活动中的 Performance / run state / ScoreRecord / CriterionScore | 全部 0（清理后） |
+| 全局 `ScoreRecord` | 5 |
+| 全局 `CriterionScore` | 0 |
+| 全局 `JudgeScoreReceipt` | 1 |
+| 全局 `Award` | 1 |
+| 全局 `VoteRecord` | 2 |
+
+第一次运行发现两处运行时/清理问题并在本轮修复：只读 `/healthz/` 在真实 CSRF
+中间件下原先返回 403 而不是源码契约中的 405；Judge test fixture 清理原先因
+`RoundPanelSnapshotMember.source_round_judge`、`PerformanceRunState` 和受保护的
+临时授权行无法完成。现在只读健康端点显式 exempt CSRF，测试清理通过明确的
+`TEST_DATA_CLEANUP`、Judge panel/session authority 和 performance authority 顺序
+拆除 disposable graph；正式活动的 snapshot/authority 保护路径不变。
+
+本轮判定：**PASS（本地技术彩排）**。它证明了当前容器配置下的协议边界、限流分层、
+同出口合法评委隔离和健康端点有界吞吐；它不证明公网抗 DDoS、WAF 容量、学校 NAT
+规模、IdP/MFA、TLS、备份保留期限或事件响应时限。上述项目继续保持部署前置 `HOLD`，
+必须由部署方提供独立证据和负责人签字。
