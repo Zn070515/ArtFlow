@@ -431,12 +431,23 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
 
 
 @transaction.atomic
-def hold_performance(round_id: int, *, operator, reason: str) -> PerformanceRunState:
+def hold_performance(
+    round_id: int,
+    *,
+    operator,
+    reason: str,
+    expected_performance_id: int | None = None,
+) -> PerformanceRunState:
     reason = reason.strip()
     if not reason or len(reason) > 240:
         raise ValidationError("暂停表演必须填写不超过 240 字的原因。")
     locked = _lock_judge_round(round_id, operator)
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
+    if (
+        expected_performance_id is not None
+        and run_state.current_performance_id != expected_performance_id
+    ):
+        raise ValidationError("STALE_CONTEXT")
     with authority_write(ROUND_PERFORMANCE_STATE):
         run_state.state = PerformanceRunState.State.HOLD
         run_state.hold_reason = reason

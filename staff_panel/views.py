@@ -1904,6 +1904,7 @@ def judge_performance_hold(request, pk):
                 contest_round.pk,
                 operator=request.user,
                 reason=form.cleaned_data["reason"],
+                expected_performance_id=form.cleaned_data["performance_id"],
             )
         except (PermissionDenied, ValidationError) as error:
             messages.error(request, f"暂停表演失败：{domain_error_messages(error)}")
