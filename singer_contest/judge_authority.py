@@ -35,6 +35,7 @@ from entry_access.services import (
 
 from .models import (
     ContestRound,
+    CriterionScore,
     Judge,
     JudgeScoreReceipt,
     JudgeSeat,
@@ -45,6 +46,7 @@ from .models import (
     RoundJudge,
     RoundPanelSnapshot,
     RoundPanelSnapshotMember,
+    RubricCriterion,
     ScoreRecord,
     ScoreSource,
     _authorize_raw_fact_write,
@@ -64,11 +66,15 @@ class LockedJudgeRound:
 class JudgeContext:
     activity_id: int
     round_id: int
+    round_name: str
     seat_id: int
     panel_snapshot_id: int
     panel_version: int
     context_version: int
     performance_id: int | None
+    performance_label: str | None
+    singer_name: str | None
+    song_title: str | None
     performance_state: str
     rubric_payload: dict[str, object]
 
@@ -79,6 +85,14 @@ class JudgeScoreSubmission:
     score_record_id: int
     reason_code: str
     status: str
+
+
+@dataclass(frozen=True)
+class NormalizedJudgeScore:
+    score: Decimal
+    notes: str
+    criteria: tuple[tuple[RubricCriterion, Decimal], ...]
+    canonical_payload: dict[str, object]
 
 
 class JudgeIdempotencyConflict(ValidationError):
@@ -152,10 +166,7 @@ def _minimum_judges(contest_round: ContestRound, expected_judge_count: int) -> i
     minimum = configured if configured is not None else expected_judge_count
     if minimum < 1 or minimum > expected_judge_count:
         raise ValidationError("最低有效评委人数必须在预备名单人数范围内。")
-    if (
-        contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW
-        and minimum <= 2
-    ):
+    if contest_round.scoring_mode == ContestRound.ScoringMode.DROP_HIGH_LOW and minimum <= 2:
         raise ValidationError("去最高最低计分方式的最低有效评委人数必须大于 2。")
     return minimum
 
@@ -656,16 +667,73 @@ def _authorized_score_fact_write():
         _authorize_raw_fact_write(previous)
 
 
-def _normalize_judge_score_payload(score_payload: object) -> dict[str, str]:
+def _normalize_judge_score_payload(
+    score_payload: object, *, contest_round: ContestRound
+) -> NormalizedJudgeScore:
     if not isinstance(score_payload, Mapping):
         raise ValidationError("评分内容必须是对象。")
-    if set(score_payload) - {"score", "notes"} or "score" not in score_payload:
-        raise ValidationError("评分内容字段无效。")
-    score = validate_score(score_payload["score"])
     notes = score_payload.get("notes", "")
     if not isinstance(notes, str) or len(notes) > 200:
         raise ValidationError("评分备注必须是不超过 200 个字符的文本。")
-    return {"score": str(score), "notes": notes.strip()}
+    normalized_notes = notes.strip()
+    rubric = contest_round.rubric
+    if rubric is None:
+        if set(score_payload) - {"score", "notes"} or "score" not in score_payload:
+            raise ValidationError("评分内容字段无效。")
+        score = validate_score(score_payload["score"])
+        return NormalizedJudgeScore(
+            score=score,
+            notes=normalized_notes,
+            criteria=(),
+            canonical_payload={"score": str(score), "notes": normalized_notes},
+        )
+
+    if set(score_payload) - {"criteria", "notes"} or "criteria" not in score_payload:
+        raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+    rubric_criteria = list(rubric.criteria.all().order_by("sequence", "pk"))
+    rubric_max_total = sum((criterion.max_score for criterion in rubric_criteria), Decimal())
+    if not rubric_criteria or rubric_max_total != Decimal("100"):
+        raise ValidationError("RUBRIC_CONFIGURATION_INVALID")
+    criteria_payload = score_payload["criteria"]
+    if not isinstance(criteria_payload, list) or not criteria_payload:
+        raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+    criterion_by_id = {criterion.pk: criterion for criterion in rubric_criteria}
+    normalized_criteria: list[tuple[RubricCriterion, Decimal]] = []
+    seen_ids: set[int] = set()
+    for item in criteria_payload:
+        if not isinstance(item, Mapping) or set(item) != {"criterion_id", "value"}:
+            raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+        criterion_id = item["criterion_id"]
+        if isinstance(criterion_id, bool) or not isinstance(criterion_id, int) or criterion_id <= 0:
+            raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+        criterion = criterion_by_id.get(criterion_id)
+        if criterion is None or criterion_id in seen_ids:
+            raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+        value = validate_score(item["value"])
+        if value > criterion.max_score:
+            raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+        seen_ids.add(criterion_id)
+        normalized_criteria.append((criterion, value))
+    if seen_ids != set(criterion_by_id):
+        raise ValidationError("RUBRIC_PAYLOAD_INVALID")
+    values_by_id = {criterion.pk: value for criterion, value in normalized_criteria}
+    ordered_criteria = tuple(
+        (criterion, values_by_id[criterion.pk]) for criterion in rubric_criteria
+    )
+    score = sum((value for _, value in ordered_criteria), Decimal())
+    return NormalizedJudgeScore(
+        score=score,
+        notes=normalized_notes,
+        criteria=ordered_criteria,
+        canonical_payload={
+            "score": str(score),
+            "criteria": [
+                {"criterion_id": criterion.pk, "value": str(value)}
+                for criterion, value in ordered_criteria
+            ],
+            "notes": normalized_notes,
+        },
+    )
 
 
 def _judge_payload_hash(
@@ -675,7 +743,7 @@ def _judge_payload_hash(
     seat: JudgeSeat,
     performance: Performance,
     context_version: int,
-    payload: Mapping[str, str],
+    payload: Mapping[str, object],
     source: str,
 ) -> str:
     canonical = json.dumps(
@@ -696,6 +764,48 @@ def _judge_payload_hash(
         sort_keys=True,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _materialize_score_facts(
+    *,
+    contest_round: ContestRound,
+    performance: Performance,
+    judge: Judge,
+    snapshot: RoundPanelSnapshot,
+    seat: JudgeSeat,
+    command_id: str,
+    normalized_payload: NormalizedJudgeScore,
+    source: str,
+    is_test_data: bool,
+    source_reference: str = "",
+) -> ScoreRecord:
+    with _authorized_score_fact_write():
+        score_record = ScoreRecord.objects.create(
+            round=contest_round,
+            singer=performance.singer,
+            judge=judge,
+            score=normalized_payload.score,
+            notes=normalized_payload.notes,
+            source=source,
+            panel_snapshot=snapshot,
+            judge_seat=seat,
+            source_command_id=command_id,
+            source_reference=source_reference,
+            is_test_data=is_test_data,
+        )
+        if normalized_payload.criteria:
+            CriterionScore.objects.bulk_create(
+                [
+                    CriterionScore(
+                        score_record=score_record,
+                        criterion=criterion,
+                        value=value,
+                        is_test_data=is_test_data,
+                    )
+                    for criterion, value in normalized_payload.criteria
+                ]
+            )
+    return score_record
 
 
 def _validate_command_id(command_id: object) -> str:
@@ -727,7 +837,9 @@ def submit_judge_score(
         expected_performance_id, field="expected_performance_id"
     )
     normalized_command_id = _validate_command_id(command_id)
-    normalized_payload = _normalize_judge_score_payload(score_payload)
+    normalized_payload = _normalize_judge_score_payload(
+        score_payload, contest_round=locked.contest_round
+    )
 
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
@@ -769,7 +881,7 @@ def submit_judge_score(
         seat=seat,
         performance=performance,
         context_version=context_version,
-        payload=normalized_payload,
+        payload=normalized_payload.canonical_payload,
         source=ScoreSource.DIRECT_JUDGE,
     )
     receipt = (
@@ -819,19 +931,17 @@ def submit_judge_score(
                 status=JudgeScoreReceipt.Status.PENDING,
             )
 
-    with _authorized_score_fact_write():
-        score_record = ScoreRecord.objects.create(
-            round=locked.contest_round,
-            singer=performance.singer,
-            judge=seat.panel_member.judge,
-            score=Decimal(normalized_payload["score"]),
-            notes=normalized_payload["notes"],
-            source=ScoreSource.DIRECT_JUDGE,
-            panel_snapshot=snapshot,
-            judge_seat=seat,
-            source_command_id=normalized_command_id,
-            is_test_data=locked.activity.is_test_mode,
-        )
+    score_record = _materialize_score_facts(
+        contest_round=locked.contest_round,
+        performance=performance,
+        judge=seat.panel_member.judge,
+        snapshot=snapshot,
+        seat=seat,
+        command_id=normalized_command_id,
+        normalized_payload=normalized_payload,
+        source=ScoreSource.DIRECT_JUDGE,
+        is_test_data=locked.activity.is_test_mode,
+    )
     now = timezone.now()
     with authority_write(JUDGE_SCORE_SUBMISSION):
         receipt.score_record = score_record
@@ -892,8 +1002,10 @@ def _submit_staff_bound_score(
     )
     normalized_performance_id = _validate_expected_context(performance_id, field="performance_id")
     normalized_seat_id = _validate_expected_context(seat_id, field="seat_id")
-    normalized_payload = _normalize_judge_score_payload(score_payload)
     locked = _lock_judge_round(round_id, operator)
+    normalized_payload = _normalize_judge_score_payload(
+        score_payload, contest_round=locked.contest_round
+    )
     snapshot = _active_panel_snapshot(locked.contest_round)
     if snapshot is None:
         raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
@@ -938,7 +1050,7 @@ def _submit_staff_bound_score(
         seat=seat,
         performance=performance,
         context_version=context_version,
-        payload=normalized_payload,
+        payload=normalized_payload.canonical_payload,
         source=source,
     )
     receipt = (
@@ -982,20 +1094,18 @@ def _submit_staff_bound_score(
                 operator=current_operator,
                 status=JudgeScoreReceipt.Status.PENDING,
             )
-    with _authorized_score_fact_write():
-        score_record = ScoreRecord.objects.create(
-            round=locked.contest_round,
-            singer=performance.singer,
-            judge=seat.panel_member.judge,
-            score=Decimal(normalized_payload["score"]),
-            notes=normalized_payload["notes"],
-            source=source,
-            panel_snapshot=snapshot,
-            judge_seat=seat,
-            source_command_id=normalized_command_id,
-            source_reference=source_reference.strip(),
-            is_test_data=locked.activity.is_test_mode,
-        )
+    score_record = _materialize_score_facts(
+        contest_round=locked.contest_round,
+        performance=performance,
+        judge=seat.panel_member.judge,
+        snapshot=snapshot,
+        seat=seat,
+        command_id=normalized_command_id,
+        normalized_payload=normalized_payload,
+        source=source,
+        source_reference=source_reference.strip(),
+        is_test_data=locked.activity.is_test_mode,
+    )
     with authority_write(JUDGE_SCORE_SUBMISSION):
         receipt.score_record = score_record
         receipt.status = JudgeScoreReceipt.Status.SUCCEEDED
@@ -1094,14 +1204,31 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     if run_state is None:
         raise ValidationError("评委现场上下文尚未建立。")
 
+    contest_round = session.panel_snapshot.round
+    performance = None
+    if run_state.current_performance_id is not None:
+        performance = (
+            Performance._base_manager.select_related("singer")
+            .filter(
+                pk=run_state.current_performance_id,
+                round_id=session.panel_snapshot.round_id,
+                activity_id=session.panel_snapshot.activity_id,
+            )
+            .first()
+        )
+        if performance is None:
+            raise ValidationError("评委现场上下文尚未建立。")
+
     rubric_payload: dict[str, object] = {}
-    rubric = session.panel_snapshot.round.rubric
+    rubric = contest_round.rubric
     if rubric is not None:
         rubric_payload = {
             "name": rubric.name,
             "criteria": [
                 {
+                    "criterion_id": criterion.pk,
                     "name": criterion.name,
+                    "description": criterion.description,
                     "max_score": str(criterion.max_score),
                     "sequence": criterion.sequence,
                 }
@@ -1111,11 +1238,15 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     return JudgeContext(
         activity_id=session.panel_snapshot.activity_id,
         round_id=session.panel_snapshot.round_id,
+        round_name=contest_round.name or contest_round.get_round_type_display(),
         seat_id=session.seat_id,
         panel_snapshot_id=session.panel_snapshot_id,
         panel_version=session.panel_snapshot.version,
         context_version=run_state.context_version,
         performance_id=run_state.current_performance_id,
+        performance_label=(f"第 {performance.sequence} 个节目" if performance else None),
+        singer_name=(performance.singer.name if performance else None),
+        song_title=(performance.song_title if performance else None),
         performance_state=run_state.state,
         rubric_payload=rubric_payload,
     )

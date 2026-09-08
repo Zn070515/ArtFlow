@@ -46,6 +46,7 @@ from staff_panel.views import activity_material_requirements
 from voting.models import VoteSession
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
+from .judge_authority import prepare_judge_panel
 from .models import (
     AudienceScore,
     CompositeResult,
@@ -80,7 +81,6 @@ from .services import (
     unlock_round,
     validate_score,
 )
-from .judge_authority import prepare_judge_panel
 from .views import my_registration_detail
 
 
@@ -865,11 +865,13 @@ class ScoringServiceTests(TestCase):
         self.judge.save(update_fields=["is_active"])
         self.assertEqual(expected_score_cells(self.round), [(self.singer.pk, self.judge.pk)])
         workbook = build_score_template_workbook(self.round)
+        worksheet = workbook.active
+        assert worksheet is not None
         self.assertEqual(
-            workbook.active.cell(row=1, column=3).value,
+            worksheet.cell(row=1, column=3).value,
             f"J{self.judge.pk} {self.judge.name}",
         )
-        self.assertEqual(workbook.active.max_column, 3)
+        self.assertEqual(worksheet.max_column, 3)
 
     def test_registration_status_change_does_not_change_prepared_roster(self):
         prepare_round(self.round, self.user)

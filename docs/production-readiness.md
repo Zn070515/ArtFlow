@@ -208,17 +208,18 @@ fixture，导致 1 个配置测试因权限失败；按现有验收脚本补齐 
 
 ### 2026-09-08 M2-C 本地 authority / 学校准备门禁记录
 
-本轮已完成本机 SQLite 代码门禁：全仓库 `pytest` 为 `1069 passed, 30 skipped`，
-客户端编译与 19 项客户端测试通过，项目 Pyright、entry-access Pyright、Ruff、mypy、
-Django check、migration check 和文档链接检查通过。新增 judge authority focused
+本轮已完成本机代码门禁：全仓库 Django 测试 `1090 tests, OK (skipped=28)`，
+客户端编译与 `25 passed` 客户端测试通过，项目 Pyright、entry-access Pyright 均为
+`0 errors, 0 warnings, 0 informations`；Ruff format/check、mypy（275 source files）、
+CSS、Django check、migration check 和文档检查均通过。新增 judge authority focused
 测试覆盖 direct/proxy/paper provenance、命令幂等、重复事实、stale context、跨 origin
-失败、无 bearer 和客户端 token 不落草稿。
+失败、无 bearer、rubric 精确集合/服务端总分、事务回滚和客户端 token 不落草稿。
 
-PostgreSQL/Compose/Playwright/备份恢复门禁本轮未宣称通过。2026-09-08 本机执行
-`docker version` 与 `docker compose ps` 均失败，原始错误为：
-`failed to connect to the Docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is correct and if the daemon is running: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.`
-因此 PostgreSQL row-lock 竞态、Compose 验收、隔离备份恢复和带凭据浏览器流程仍为 `HOLD`，
-需 Docker Desktop/Compose 服务可用后重跑，不能用 SQLite 结果替代。
+本轮 Docker/Compose 已可用。当前源码重建 `web` 镜像后，PostgreSQL focused authority
+回归为 `42 tests, OK`；custom-format backup/isolated restore 成功，恢复目标上的 Django
+check 通过，且源数据库与 volumes 未被重置。当前源码临时 `8002` 服务上的 Playwright
+浏览器 smoke 为 `6 passed`。这些结果不替代学校生产接入验收：真实凭据型 Judge 流程、
+学校 IdP/SSO、MFA、TLS/WAF/DDoS、数据责任与保存期限仍为部署前置 `HOLD`。
 
 因此，M1 的代码、自动化验收和本地技术恢复彩排已完成；M1-J 的“正式现场彩排”
 仍待真实参与者、真实部署域名和人工步骤完成后才能最终关闭。
@@ -230,3 +231,9 @@ PostgreSQL/Compose/Playwright/备份恢复门禁本轮未宣称通过。2026-09-
 本机门禁结果：Django 全仓 `1080 passed, 28 skipped`；C2/authority focused `27 passed`；Playwright `6 passed`；client `20 passed`；项目 Pyright 与 entry-access Pyright 均为 0 diagnostics；Ruff、Django check、migration check、文档检查和 CSS/client gates 通过。PostgreSQL focused C2/authority `27 passed`，并完成 Compose 容器内 migrate、doctor、seed 幂等与 reset safety 检查；源数据库和 volumes 保持不变。
 
 完整 `verify_postgres_acceptance.ps1 -StartCompose` 本轮未能启动，因为本机既有开发服务占用 `127.0.0.1:8000`；没有停止或删除该服务/volumes，改用无 host-port 的 Compose one-off focused 验证。完整 PostgreSQL acceptance、备份恢复、带真实 Staff 凭据的浏览器控制台流程、TLS/WAF/DDoS 和学校网络演练仍为部署前置 HOLD。
+
+### 2026-09-08 M2-C3 Judge Client Close 门禁记录
+
+本轮闭合 Judge terminal 的 server-owned 展示上下文、分项评分、即时本地草稿、按上下文隔离、2 秒短轮询和 stale recovery。rubric 轮次必须提交完整 criterion 集合；服务端计算 0–100 总分，并在同一 authority 事务中写入 `ScoreRecord`、`CriterionScore`、receipt 和审计。无 rubric 的历史总分模式继续保留；客户端不保存 bearer、二维码 fragment 或额外个人信息。
+
+已覆盖的本地回归包括：上下文展示字段、rubric 精确集合、跨 rubric/越界/重复/缺项、伪造总分、事务回滚、STAFF_PROXY 一致性、稳定 HTTP reason code、输入未提交草稿、性能切换草稿隔离、polling、HOLD 状态展示和分项请求体。完整门禁结果待本轮最终验证后补录；PostgreSQL 竞态、真实凭据型 Judge 浏览器流程、学校 IdP/MFA、TLS/WAF/DDoS、数据责任与保存期限仍是部署前置 HOLD。

@@ -1711,9 +1711,7 @@ def _judge_control_context(
     qr_seat_id=None,
     policy_state_override="",
 ):
-    round_judges = list(
-        contest_round.round_judges.select_related("judge").order_by("pk")
-    )
+    round_judges = list(contest_round.round_judges.select_related("judge").order_by("pk"))
     panel_snapshot = (
         RoundPanelSnapshot.objects.filter(round=contest_round)
         .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
@@ -1802,10 +1800,11 @@ def _judge_control_context(
         "attendance_form": attendance_form,
         "performance_action_form": JudgePerformanceActionForm(),
         "score_form": JudgeBoundScoreForm(
+            rubric=contest_round.rubric,
             initial={
                 "performance_id": run_state.current_performance_id if run_state else "",
                 "context_version": run_state.context_version if run_state else 0,
-            }
+            },
         ),
         "score_actions": ("proxy", "paper"),
         "error": error,
@@ -1855,9 +1854,7 @@ def judge_prepare(request, pk):
             contest_round,
             error=error_message,
             policy_state_override=(
-                "INSUFFICIENT_JUDGES / HOLD"
-                if "INSUFFICIENT_JUDGES" in str(error)
-                else ""
+                "INSUFFICIENT_JUDGES / HOLD" if "INSUFFICIENT_JUDGES" in str(error) else ""
             ),
         )
     messages.success(request, "评委组已准备，评委席位和评分上下文已冻结。")
@@ -1980,12 +1977,24 @@ def judge_seat_qr(request, pk, seat_id):
 
 def _submit_staff_judge_score(request, pk, *, paper):
     contest_round = get_object_or_404(ContestRound, pk=pk)
-    form = JudgeBoundScoreForm(request.POST)
+    form = JudgeBoundScoreForm(request.POST, rubric=contest_round.rubric)
     if not form.is_valid():
         messages.error(request, f"评分提交失败：{_form_error(form)}")
         return redirect("staff:judge_control", pk=pk)
     values = form.cleaned_data
-    payload = {"score": values["score"], "notes": values["notes"]}
+    if contest_round.rubric is None:
+        payload = {"score": values["score"], "notes": values["notes"]}
+    else:
+        payload = {
+            "criteria": [
+                {
+                    "criterion_id": criterion.pk,
+                    "value": values[f"criterion_{criterion.pk}"],
+                }
+                for criterion in contest_round.rubric.criteria.all().order_by("sequence", "pk")
+            ],
+            "notes": values["notes"],
+        }
     try:
         if paper:
             submit_paper_score(

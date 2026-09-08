@@ -100,10 +100,14 @@ def authoritative_panel_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     )
     if snapshot is None:
         return _active_judges(contest_round)
-    return Judge.objects.filter(
-        panel_snapshot_members__panel_snapshot=snapshot,
-        panel_snapshot_members__is_active=True,
-    ).distinct().order_by("pk")
+    return (
+        Judge.objects.filter(
+            panel_snapshot_members__panel_snapshot=snapshot,
+            panel_snapshot_members__is_active=True,
+        )
+        .distinct()
+        .order_by("pk")
+    )
 
 
 def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistration]:
