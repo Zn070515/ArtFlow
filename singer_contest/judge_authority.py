@@ -31,6 +31,7 @@ from entry_access.services import (
     authenticate_ephemeral_session,
     create_entry_point,
     issue_access_grant,
+    revoke_access_grant,
 )
 
 from .models import (
@@ -329,10 +330,31 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
         snapshot.state = RoundPanelSnapshot.State.HOLD
         snapshot.save(update_fields=["state"])
     with authority_write(ROUND_PERFORMANCE_STATE):
+        run_state.context_version += 1
         run_state.state = PerformanceRunState.State.HOLD
         run_state.hold_reason = reason
         run_state.changed_by = locked.operator
-        run_state.save(update_fields=["state", "hold_reason", "changed_by", "updated_at"])
+        run_state.save(
+            update_fields=[
+                "state",
+                "context_version",
+                "hold_reason",
+                "changed_by",
+                "updated_at",
+            ]
+        )
+    revoked_grants = 0
+    for seat_grant in (
+        JudgeSeatGrant.objects.select_related("access_grant")
+        .filter(
+            panel_snapshot=snapshot,
+            access_grant__redeemed_at__isnull=True,
+            access_grant__revoked_at__isnull=True,
+        )
+        .order_by("pk")
+    ):
+        revoke_access_grant(seat_grant.access_grant, actor=locked.operator, note=reason)
+        revoked_grants += 1
     with authority_write(JUDGE_SESSION_STATE):
         JudgeSession.objects.filter(
             seat__panel_member__panel_snapshot=snapshot,
@@ -348,7 +370,8 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
         target=f"RoundPanelSnapshot:{snapshot.pk}",
         old_value=RoundPanelSnapshot.State.ACTIVE,
         new_value=RoundPanelSnapshot.State.HOLD,
-        note=reason,
+        note=f"{reason};context_version={run_state.context_version};"
+        f"revoked_unredeemed_grants={revoked_grants}",
     )
     return snapshot
 
@@ -375,10 +398,19 @@ def resume_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
         else PerformanceRunState.State.IDLE
     )
     with authority_write(ROUND_PERFORMANCE_STATE):
+        run_state.context_version += 1
         run_state.state = next_state
         run_state.hold_reason = ""
         run_state.changed_by = locked.operator
-        run_state.save(update_fields=["state", "hold_reason", "changed_by", "updated_at"])
+        run_state.save(
+            update_fields=[
+                "state",
+                "context_version",
+                "hold_reason",
+                "changed_by",
+                "updated_at",
+            ]
+        )
     _audit(
         operator=locked.operator,
         action_type=AuditLog.ActionType.JUDGE_PANEL_CHANGE,
@@ -465,10 +497,19 @@ def hold_performance(
     ):
         raise ValidationError("STALE_CONTEXT")
     with authority_write(ROUND_PERFORMANCE_STATE):
+        run_state.context_version += 1
         run_state.state = PerformanceRunState.State.HOLD
         run_state.hold_reason = reason
         run_state.changed_by = locked.operator
-        run_state.save(update_fields=["state", "hold_reason", "changed_by", "updated_at"])
+        run_state.save(
+            update_fields=[
+                "state",
+                "context_version",
+                "hold_reason",
+                "changed_by",
+                "updated_at",
+            ]
+        )
     _audit(
         operator=locked.operator,
         action_type=AuditLog.ActionType.JUDGE_PERF_HOLD,
@@ -493,10 +534,19 @@ def resume_performance(round_id: int, *, operator) -> PerformanceRunState:
         else PerformanceRunState.State.IDLE
     )
     with authority_write(ROUND_PERFORMANCE_STATE):
+        run_state.context_version += 1
         run_state.state = next_state
         run_state.hold_reason = ""
         run_state.changed_by = locked.operator
-        run_state.save(update_fields=["state", "hold_reason", "changed_by", "updated_at"])
+        run_state.save(
+            update_fields=[
+                "state",
+                "context_version",
+                "hold_reason",
+                "changed_by",
+                "updated_at",
+            ]
+        )
     return run_state
 
 
