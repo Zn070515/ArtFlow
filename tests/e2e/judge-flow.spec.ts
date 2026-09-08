@@ -5,6 +5,12 @@ test("judge terminal never exposes a credential without a QR fragment", async ({
 
   expect(response?.status()).toBe(200);
   await expect(page.locator("[data-status]")).toHaveText(/二维码/);
+  await expect(page.locator("[data-round]")).toBeVisible();
+  await expect(page.locator("[data-performance-label]")).toBeVisible();
+  await expect(page.locator("[data-singer]")).toBeVisible();
+  await expect(page.locator("[data-song]")).toBeVisible();
+  await expect(page.locator("[data-performance-state]")).toBeVisible();
+  await expect(page.locator("[data-submit]")).toBeDisabled();
   expect(await page.content()).not.toContain("session_token");
   expect(page.url()).not.toContain("#");
 });
