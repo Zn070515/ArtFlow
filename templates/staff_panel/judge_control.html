@@ -71,13 +71,15 @@
             <div class="rounded border border-gray-200 p-4">
                 <div class="font-medium text-gray-900">{{ row.member.seat_key }} · {{ row.member.judge.name }}</div>
                 <div class="mt-1 text-xs text-gray-500">席位状态：{{ row.seat.get_state_display }}</div>
-                {% if policy_state == 'ACTIVE' %}
+                {% if row.pending_grant %}
+                <div class="mt-2 text-xs text-amber-700">已有未兑换授权，不能重复签发。</div>
+                {% elif policy_state == 'ACTIVE' %}
                 <form method="post" action="{% url 'staff:judge_seat_qr' round.pk row.seat.pk %}" class="mt-3">
                     {% csrf_token %}
                     <button class="rounded bg-brand px-3 py-2 text-sm text-white" type="submit">签发 15 分钟入口</button>
                 </form>
                 {% else %}
-                <button class="mt-3 rounded bg-gray-200 px-3 py-2 text-sm text-gray-500" type="button" disabled>HOLD 中不可签发</button>
+                <button class="mt-3 rounded bg-gray-200 px-3 py-2 text-sm text-gray-500" type="button" data-control-state="hold-disabled" disabled>HOLD 中不可签发</button>
                 {% endif %}
             </div>
             {% endfor %}
@@ -93,7 +95,7 @@
     <section class="rounded-lg border border-gray-200 bg-white p-5">
         <div class="flex items-center justify-between gap-3">
             <h2 class="text-lg font-semibold text-gray-900">表演进度</h2>
-            {% if run_state %}<span class="text-sm text-gray-600">{{ run_state.state }} · context {{ run_state.context_version }}</span>{% endif %}
+            {% if run_state %}<span class="text-sm text-gray-600">{{ run_state.state }} · context {{ run_state.context_version }}{% if run_state.hold_reason %} · 原因：{{ run_state.hold_reason }}{% endif %}</span>{% endif %}
         </div>
         <div class="mt-4 space-y-2">
             {% for performance in performances %}
