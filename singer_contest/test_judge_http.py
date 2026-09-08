@@ -105,3 +105,42 @@ class JudgeRouteContractTests(SimpleTestCase):
         self.assertEqual(response.json()["reason_code"], "RATE_LIMITED")
         self.assertEqual(response["Retry-After"], "17")
         allow_mock.assert_called_once()
+
+    @patch("singer_contest.judge_views.get_judge_context")
+    @patch("singer_contest.judge_views.allow")
+    def test_context_rate_limit_separates_same_ip_judge_sessions(self, allow_mock, context_mock):
+        allow_mock.return_value.allowed = True
+        allow_mock.return_value.retry_after_seconds = 0
+        context_mock.return_value = JudgeContext(
+            activity_id=1,
+            round_id=2,
+            round_name="决赛",
+            seat_id=3,
+            panel_snapshot_id=4,
+            panel_version=1,
+            context_version=5,
+            performance_id=None,
+            performance_label=None,
+            singer_name=None,
+            song_title=None,
+            performance_state="idle",
+            rubric_payload={"name": "评分表", "criteria": []},
+        )
+
+        responses = [
+            self.client.get(
+                reverse("judge:context"),
+                HTTP_AUTHORIZATION=f"Bearer judge-session-{index}",
+                REMOTE_ADDR="192.0.2.55",
+            )
+            for index in range(5)
+        ]
+
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        keys = [call.args[0] for call in allow_mock.call_args_list]
+        session_keys = [key for key in keys if ":session:" in key]
+        ip_keys = [key for key in keys if ":ip:" in key]
+        self.assertEqual(len(session_keys), 5)
+        self.assertEqual(len(set(session_keys)), 5)
+        self.assertEqual(len(ip_keys), 5)
+        self.assertEqual(len(set(ip_keys)), 1)
