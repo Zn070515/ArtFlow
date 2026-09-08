@@ -1,8 +1,11 @@
 from datetime import timedelta
+from io import StringIO
+from tempfile import TemporaryDirectory
 
 from accounts.models import User
 from core.models import Activity
-from django.test import TestCase
+from django.core.management import call_command
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from singer_contest.models import SingerRegistration
 from tickets.models import Ticket, TicketAccessSession
@@ -10,7 +13,13 @@ from tickets.services import check_in_ticket, create_ticket, issue_ticket, redee
 from voting.models import VoteOption, VoteSession
 from voting.services import open_vote_session, submit_ballot
 
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    TICKET_SESSION_STATE,
+    authority_write,
+)
+from common.management.commands.backup_artflow import collect_counts
 from common.models import AuditLog
 from common.test_data import clear_activity_test_data, get_test_data_counts
 
@@ -101,3 +110,48 @@ class TicketTestDataCleanupTests(TestCase):
         )
         for values in AuditLog.objects.values_list("target", "old_value", "new_value", "note"):
             self.assertNotIn(self.test_secret, " ".join(value or "" for value in values))
+
+    def test_doctor_and_retention_report_or_remove_only_non_secret_session_metadata(self) -> None:
+        redeemed = redeem_ticket(self.test_secret)
+        redeemed.session.expires_at = timezone.now() - timedelta(minutes=1)
+        with authority_write(TICKET_SESSION_STATE):
+            redeemed.session.save(update_fields=["expires_at"])
+
+        with TemporaryDirectory() as root, override_settings(STATIC_ROOT=root, MEDIA_ROOT=root):
+            output = StringIO()
+            call_command("doctor", stdout=output)
+
+        self.assertIn("Ticket rows:", output.getvalue())
+        self.assertIn("Stale ticket sessions: 1", output.getvalue())
+        self.assertNotIn(self.test_secret, output.getvalue())
+
+        output = StringIO()
+        call_command("purge_ticket_sessions", stdout=output)
+        self.assertIn("Expired ticket sessions purged: 1", output.getvalue())
+        self.assertTrue(Ticket.objects.filter(pk=self.test_ticket.pk).exists())
+        self.assertFalse(TicketAccessSession.objects.filter(pk=redeemed.session.pk).exists())
+
+    def test_backup_counts_classify_ticket_rows_without_credentials(self) -> None:
+        counts = collect_counts()
+
+        self.assertIn("tickets", counts)
+        self.assertIn("ticket_access_sessions", counts)
+        self.assertNotIn("secret", str(counts).lower())
+        self.assertNotIn(self.test_secret, str(counts))
+
+
+class TicketSeedTests(TestCase):
+    def test_demo_seed_is_idempotent_and_ticket_is_owned_test_data(self) -> None:
+        call_command("seed_demo_data")
+        call_command("seed_demo_data")
+
+        tickets = Ticket.objects.filter(batch_reference="DEMO-AUDIENCE")
+        self.assertEqual(tickets.count(), 1)
+        ticket = tickets.get()
+        self.assertTrue(ticket.is_test_data)
+        self.assertEqual(ticket.state, Ticket.State.ISSUED)
+
+        output = StringIO()
+        call_command("seed_demo_data", "--reset", stdout=output)
+        self.assertIn("Demo test runtime data reset", output.getvalue())
+        self.assertFalse(Ticket.objects.filter(pk=ticket.pk).exists())
