@@ -34,7 +34,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Max
 from django.http import FileResponse
-from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
@@ -5837,3 +5837,73 @@ class RulesetEditorTests(TestCase):
             {"stage_key": "院十佳"},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class JudgeControlHTTPTests(SimpleTestCase):
+    def test_judge_control_routes_are_mounted(self):
+        route_args = {
+            "staff:judge_control": [7],
+            "staff:judge_prepare": [7],
+            "staff:judge_panel_hold": [7],
+            "staff:judge_panel_resume": [7],
+            "staff:judge_performance_advance": [7],
+            "staff:judge_performance_hold": [7],
+            "staff:judge_performance_resume": [7],
+            "staff:judge_seat_qr": [7, 11],
+            "staff:judge_score_proxy": [7],
+            "staff:judge_score_paper": [7],
+        }
+        for route_name, args in route_args.items():
+            with self.subTest(route_name=route_name):
+                self.assertTrue(reverse(route_name, args=args))
+
+    def test_judge_control_forms_validate_bounded_inputs(self):
+        from staff_panel.forms import (
+            JudgeBoundScoreForm,
+            JudgePanelAttendanceForm,
+            JudgePerformanceActionForm,
+        )
+
+        attendance = JudgePanelAttendanceForm(
+            {"attending_judge_ids": ["1", "2"]},
+            judge_choices=[("1", "Judge 1"), ("2", "Judge 2")],
+        )
+        self.assertTrue(attendance.is_valid())
+        self.assertEqual(attendance.cleaned_data["attending_judge_ids"], [1, 2])
+
+        duplicate_attendance = JudgePanelAttendanceForm(
+            {"attending_judge_ids": ["1", "1"]},
+            judge_choices=[("1", "Judge 1")],
+        )
+        self.assertFalse(duplicate_attendance.is_valid())
+
+        action = JudgePerformanceActionForm({"performance_id": "3", "reason": "现场暂停"})
+        self.assertTrue(action.is_valid())
+        invalid_action = JudgePerformanceActionForm({"performance_id": "0", "reason": ""})
+        self.assertFalse(invalid_action.is_valid())
+
+        score = JudgeBoundScoreForm(
+            {
+                "performance_id": "3",
+                "seat_id": "4",
+                "context_version": "2",
+                "score": "91.50",
+                "source_reference": "纸面-001",
+                "reason": "终端故障",
+                "command_id": "staff-score-001",
+            }
+        )
+        self.assertTrue(score.is_valid())
+        self.assertEqual(score.cleaned_data["context_version"], 2)
+        invalid_score = JudgeBoundScoreForm(
+            {
+                "performance_id": "3",
+                "seat_id": "4",
+                "context_version": "2",
+                "score": "101",
+                "source_reference": "",
+                "reason": "",
+                "command_id": "staff-score-001",
+            }
+        )
+        self.assertFalse(invalid_score.is_valid())
