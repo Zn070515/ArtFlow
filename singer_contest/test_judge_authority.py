@@ -14,7 +14,7 @@ from common.authority import (
 )
 from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase
 
 from .judge_authority import (
@@ -22,6 +22,7 @@ from .judge_authority import (
     hold_judge_panel,
     hold_performance,
     prepare_judge_panel,
+    resume_judge_panel,
     resume_performance,
 )
 from .models import (
@@ -206,7 +207,7 @@ class JudgePanelServiceTests(TestCase):
                 username="judge-service", password="pass", role=User.Role.STAFF
             )
             self.singer_user = User.objects.create_user(
-                username="judge-singer", password="pass", role=User.Role.STUDENT
+                username="judge-singer", password="pass", role=User.Role.PARTICIPANT
             )
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(
@@ -289,6 +290,20 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(held.state, RoundPanelSnapshot.State.HOLD)
         self.assertEqual(self.round.performance_run_state.state, PerformanceRunState.State.HOLD)
         self.assertEqual(self.round.performance_run_state.hold_reason, "裁判席位核验")
+
+    def test_panel_resume_is_explicit_before_live_resume(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        hold_judge_panel(self.round.pk, operator=self.operator, reason="裁判席位核验")
+
+        with self.assertRaises(PermissionDenied):
+            resume_performance(self.round.pk, operator=self.operator)
+
+        resumed_panel = resume_judge_panel(self.round.pk, operator=self.operator)
+        self.assertEqual(resumed_panel.state, RoundPanelSnapshot.State.ACTIVE)
+        self.assertEqual(
+            self.round.performance_run_state.state,
+            PerformanceRunState.State.IDLE,
+        )
 
     def test_live_performance_transitions_increment_context_version(self):
         prepare_judge_panel(self.round.pk, operator=self.operator)
