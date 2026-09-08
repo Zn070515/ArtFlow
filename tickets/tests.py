@@ -7,7 +7,6 @@ from common.models import AuditLog
 from core.models import Activity
 from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
 from django.test import TestCase
 from django.utils import timezone
 
@@ -54,6 +53,8 @@ class TicketModelContractTests(TestCase):
             "is_test_data": True,
             **overrides,
         }
+        if "state" not in overrides and values.get("secret_digest"):
+            values["state"] = Ticket.State.ISSUED
         with authority_write(TICKET_STATE_SCOPE):
             return Ticket.objects.create(**values)
 
@@ -96,7 +97,7 @@ class TicketModelContractTests(TestCase):
     def test_inventory_identity_is_unique_inside_activity(self):
         self._ticket()
 
-        with self.assertRaises(IntegrityError):
+        with self.assertRaises(ValidationError):
             self._ticket()
 
     def test_same_inventory_identity_is_allowed_in_another_activity(self):
@@ -121,7 +122,7 @@ class TicketModelContractTests(TestCase):
         Ticket = ticket_model(self)
         ticket = self._ticket(secret_digest="a" * 64)
 
-        ticket.state = Ticket.State.ISSUED
+        ticket.state = Ticket.State.CHECKED_IN
         with self.assertRaises(ValidationError):
             ticket.save(update_fields=["state"])
         with self.assertRaises(ValidationError):
