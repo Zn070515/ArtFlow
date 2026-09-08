@@ -64,6 +64,11 @@ class ContestRoundForm(forms.Form):
         required=False,
         initial=ContestRound.ScoringMode.AVERAGE,
     )
+    minimum_judge_count = forms.IntegerField(
+        min_value=1,
+        required=False,
+        help_text="留空时按准备名单人数作为最低人数。",
+    )
     advance_count = forms.IntegerField(min_value=0, required=False, initial=0)
     sequence = forms.IntegerField(min_value=1, required=False)
     order_policy = forms.ChoiceField(

@@ -426,6 +426,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
         "activity_id",
         "round_type",
         "scoring_mode",
+        "minimum_judge_count",
         "name",
         "sequence",
         "order_policy",
@@ -553,6 +554,11 @@ class ContestRound(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rounds")
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
+    minimum_judge_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="最低有效到场评委数；留空时按准备名单人数 fail-safe。",
+    )
     name = models.CharField(max_length=100, blank=True)
     sequence = models.PositiveIntegerField(default=1, help_text="同一活动内的轮次顺序")
     order_policy = models.CharField(

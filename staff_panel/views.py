@@ -990,6 +990,7 @@ def round_create(request):
                         "activity": locked_activity,
                         "round_type": form.cleaned_data["round_type"],
                         "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "minimum_judge_count": form.cleaned_data["minimum_judge_count"],
                         "name": form.cleaned_data["name"],
                         "advance_count": form.cleaned_data["advance_count"],
                         "order_policy": form.cleaned_data["order_policy"],
