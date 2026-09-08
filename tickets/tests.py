@@ -9,6 +9,7 @@ from core.models import Activity
 from core.services import transition_activity_phase
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -509,6 +510,7 @@ class TicketStaffHttpTests(TestCase):
 
 class TicketPublicHttpTests(TestCase):
     def setUp(self):
+        cache.clear()
         User = get_user_model()
         self.staff = User.objects.create_user(username="public-ticket-staff", password="pass")
         with authority_write(ACCOUNT_AUTHORITY):
