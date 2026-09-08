@@ -4,6 +4,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 from common.authority import (
     CONTEST_ROUND_STATE,
+    JUDGE_PANEL_STATE,
+    JUDGE_SESSION_STATE,
+    ROUND_PERFORMANCE_STATE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
@@ -884,6 +887,424 @@ class RoundJudge(RoundSnapshotMixin, models.Model):
     def save(self, *args, **kwargs):
         self.clean()
         return super().save(*args, **kwargs)
+
+
+class JudgeAuthorityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    authority_scope = ""
+
+    def _ensure_authority(self) -> None:
+        if not authority_authorized(self.authority_scope):
+            raise ValidationError(f"{self.model.__name__} 只能通过其 authority service 修改。")
+
+    def update(self, **kwargs):
+        self._ensure_authority()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_authority()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._ensure_authority()
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_authority()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+class JudgePanelSnapshotQuerySet(JudgeAuthorityQuerySet):
+    authority_scope = JUDGE_PANEL_STATE
+
+
+class JudgeSessionQuerySet(JudgeAuthorityQuerySet):
+    authority_scope = JUDGE_SESSION_STATE
+
+
+class JudgePerformanceQuerySet(JudgeAuthorityQuerySet):
+    authority_scope = ROUND_PERFORMANCE_STATE
+
+
+class RoundPanelSnapshot(models.Model):
+    class State(models.TextChoices):
+        ACTIVE = "active", "Active"
+        HOLD = "hold", "Hold"
+        SUPERSEDED = "superseded", "Superseded"
+
+    class ChangePolicy(models.TextChoices):
+        HOLD_ONLY = "hold_only", "Hold only"
+        VERSIONED_REPLACEMENT = "versioned_replacement", "Versioned replacement"
+
+    round = models.ForeignKey(
+        ContestRound, on_delete=models.PROTECT, related_name="judge_panel_snapshots"
+    )
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.PROTECT, related_name="judge_panel_snapshots"
+    )
+    version = models.PositiveIntegerField()
+    change_policy = models.CharField(max_length=24, choices=ChangePolicy.choices)
+    state = models.CharField(max_length=16, choices=State.choices)
+    expected_judge_count = models.PositiveIntegerField()
+    minimum_judge_count = models.PositiveIntegerField()
+    scoring_method = models.CharField(max_length=32)
+    roster_digest = models.CharField(max_length=64)
+    captured_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="captured_judge_panel_snapshots",
+    )
+    captured_at = models.DateTimeField(auto_now_add=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = JudgePanelSnapshotQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        round_id: int
+        activity_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["round", "version"], name="judge_panel_snapshot_round_version"
+            ),
+            models.CheckConstraint(
+                condition=Q(expected_judge_count__gte=1),
+                name="judge_panel_snapshot_expected_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(minimum_judge_count__gte=1)
+                & Q(minimum_judge_count__lte=models.F("expected_judge_count")),
+                name="judge_panel_snapshot_minimum_valid",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["round", "state"], name="judge_panel_snapshot_state_idx"),
+            models.Index(fields=["activity", "state"], name="judge_panel_activity_state_idx"),
+        ]
+
+    def clean(self):
+        if self.round_id and self.activity_id:
+            round_activity_id = (
+                ContestRound._base_manager.filter(pk=self.round_id)
+                .values_list("activity_id", flat=True)
+                .first()
+            )
+            if round_activity_id != self.activity_id:
+                raise ValidationError("评委组快照必须属于轮次所在活动。")
+        if self.version < 1:
+            raise ValidationError("评委组快照版本必须为正数。")
+        if self.minimum_judge_count > self.expected_judge_count:
+            raise ValidationError("评委组最少人数不能超过预期人数。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_PANEL_STATE):
+            raise ValidationError("评委组快照只能通过评委组 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_PANEL_STATE):
+            raise ValidationError("评委组快照删除需要评委组 authority service。")
+        return super().delete(*args, **kwargs)
+
+
+class RoundPanelSnapshotMember(models.Model):
+    panel_snapshot = models.ForeignKey(
+        RoundPanelSnapshot, on_delete=models.PROTECT, related_name="members"
+    )
+    judge = models.ForeignKey(
+        Judge, on_delete=models.PROTECT, related_name="panel_snapshot_members"
+    )
+    source_round_judge = models.ForeignKey(
+        RoundJudge, on_delete=models.PROTECT, related_name="panel_snapshot_members"
+    )
+    seat_key = models.CharField(max_length=32)
+    is_active = models.BooleanField(default=True)
+
+    objects = JudgePanelSnapshotQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        panel_snapshot_id: int
+        judge_id: int
+        source_round_judge_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["panel_snapshot", "seat_key"], name="judge_panel_member_seat_key"
+            ),
+            models.UniqueConstraint(
+                fields=["panel_snapshot", "judge"], name="judge_panel_member_judge"
+            ),
+        ]
+
+    def clean(self):
+        if not self.panel_snapshot_id or not self.judge_id or not self.source_round_judge_id:
+            return
+        snapshot = RoundPanelSnapshot._base_manager.get(pk=self.panel_snapshot_id)
+        source = RoundJudge._base_manager.select_related("round", "judge").get(
+            pk=self.source_round_judge_id
+        )
+        if source.round_id != snapshot.round_id:
+            raise ValidationError("评委组快照成员的来源轮次不一致。")
+        if source.judge_id != self.judge_id:
+            raise ValidationError("评委组快照成员的来源评委不一致。")
+        if source.judge.activity_id != snapshot.activity_id:
+            raise ValidationError("评委组快照成员必须属于同一活动。")
+        if not self.seat_key.strip():
+            raise ValidationError("评委席位标识不能为空。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_PANEL_STATE):
+            raise ValidationError("评委组快照成员只能通过评委组 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_PANEL_STATE):
+            raise ValidationError("评委组快照成员删除需要评委组 authority service。")
+        return super().delete(*args, **kwargs)
+
+
+class JudgeSeat(models.Model):
+    class State(models.TextChoices):
+        ASSIGNED = "assigned", "Assigned"
+        REVOKED = "revoked", "Revoked"
+        HOLD = "hold", "Hold"
+
+    panel_member = models.ForeignKey(
+        RoundPanelSnapshotMember, on_delete=models.PROTECT, related_name="seats"
+    )
+    state = models.CharField(max_length=16, choices=State.choices)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_judge_seats",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revocation_reason = models.CharField(max_length=240, blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = JudgePanelSnapshotQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        panel_member_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [models.Index(fields=["state"], name="judge_seat_state_idx")]
+
+    def clean(self):
+        if self.revoked_at is not None and self.state != self.State.REVOKED:
+            raise ValidationError("已撤销评委席位必须处于 REVOKED 状态。")
+        if self.state == self.State.REVOKED and not self.revoked_at:
+            raise ValidationError("REVOKED 评委席位必须记录撤销时间。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_PANEL_STATE):
+            raise ValidationError("评委席位只能通过评委组 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_PANEL_STATE):
+            raise ValidationError("评委席位删除需要评委组 authority service。")
+        return super().delete(*args, **kwargs)
+
+
+class JudgeSeatGrant(models.Model):
+    access_grant = models.OneToOneField(
+        "entry_access.AccessGrant", on_delete=models.PROTECT, related_name="judge_seat_grant"
+    )
+    seat = models.ForeignKey(JudgeSeat, on_delete=models.PROTECT, related_name="grants")
+    panel_snapshot = models.ForeignKey(
+        RoundPanelSnapshot, on_delete=models.PROTECT, related_name="seat_grants"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = JudgeSessionQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        access_grant_id: int
+        seat_id: int
+        panel_snapshot_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [models.Index(fields=["seat"], name="judge_seat_grant_seat_idx")]
+
+    def clean(self):
+        if not self.access_grant_id or not self.seat_id or not self.panel_snapshot_id:
+            return
+        grant = self.access_grant
+        seat = self.seat
+        if grant.kind != "judge":
+            raise ValidationError("评委席位授权必须使用 JUDGE 访问授权。")
+        if seat.panel_member.panel_snapshot_id != self.panel_snapshot_id:
+            raise ValidationError("评委席位授权的快照必须与席位一致。")
+        if grant.activity_id != seat.panel_member.panel_snapshot.activity_id:
+            raise ValidationError("评委席位授权必须属于同一活动。")
+        if grant.round_id != seat.panel_member.panel_snapshot.round_id:
+            raise ValidationError("评委席位授权必须属于同一轮次。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_SESSION_STATE):
+            raise ValidationError("评委席位授权只能通过评委会话 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_SESSION_STATE):
+            raise ValidationError("评委席位授权删除需要评委会话 authority service。")
+        return super().delete(*args, **kwargs)
+
+
+class JudgeSession(models.Model):
+    class State(models.TextChoices):
+        ACTIVE = "active", "Active"
+        REVOKED = "revoked", "Revoked"
+
+    ephemeral_session = models.OneToOneField(
+        "entry_access.EphemeralSession",
+        on_delete=models.PROTECT,
+        related_name="judge_session",
+    )
+    seat = models.ForeignKey(JudgeSeat, on_delete=models.PROTECT, related_name="sessions")
+    panel_snapshot = models.ForeignKey(
+        RoundPanelSnapshot, on_delete=models.PROTECT, related_name="judge_sessions"
+    )
+    state = models.CharField(max_length=16, choices=State.choices)
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revocation_reason = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = JudgeSessionQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        ephemeral_session_id: int
+        seat_id: int
+        panel_snapshot_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [
+            models.Index(fields=["expires_at"], name="judge_session_expiry_idx"),
+            models.Index(fields=["state"], name="judge_session_state_idx"),
+        ]
+
+    def clean(self):
+        if self.revoked_at is not None and self.state != self.State.REVOKED:
+            raise ValidationError("已撤销评委会话必须处于 REVOKED 状态。")
+        if self.state == self.State.REVOKED and not self.revoked_at:
+            raise ValidationError("REVOKED 评委会话必须记录撤销时间。")
+        if not self.ephemeral_session_id or not self.seat_id or not self.panel_snapshot_id:
+            return
+        transport = self.ephemeral_session
+        seat = self.seat
+        if transport.kind != "judge":
+            raise ValidationError("评委会话必须绑定 JUDGE 临时会话。")
+        if seat.panel_member.panel_snapshot_id != self.panel_snapshot_id:
+            raise ValidationError("评委会话的快照必须与席位一致。")
+        if transport.activity_id != seat.panel_member.panel_snapshot.activity_id:
+            raise ValidationError("评委会话必须属于同一活动。")
+        if transport.round_id != seat.panel_member.panel_snapshot.round_id:
+            raise ValidationError("评委会话必须属于同一轮次。")
+        if self.expires_at > transport.expires_at:
+            raise ValidationError("评委会话不能晚于临时会话过期。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_SESSION_STATE):
+            raise ValidationError("评委会话只能通过评委会话 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(JUDGE_SESSION_STATE):
+            raise ValidationError("评委会话删除需要评委会话 authority service。")
+        return super().delete(*args, **kwargs)
+
+
+class PerformanceRunState(models.Model):
+    class State(models.TextChoices):
+        IDLE = "idle", "Idle"
+        PERFORMING = "performing", "Performing"
+        ACCEPTING_SCORE = "accepting_score", "Accepting score"
+        HOLD = "hold", "Hold"
+        CLOSED = "closed", "Closed"
+
+    round = models.OneToOneField(
+        ContestRound, on_delete=models.PROTECT, related_name="performance_run_state"
+    )
+    current_performance = models.ForeignKey(
+        "Performance",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="active_run_states",
+    )
+    state = models.CharField(max_length=24, choices=State.choices)
+    context_version = models.PositiveIntegerField(default=0)
+    hold_reason = models.CharField(max_length=240, blank=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="changed_performance_run_states",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = JudgePerformanceQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        round_id: int
+        current_performance_id: int | None
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [
+            models.Index(fields=["state", "context_version"], name="judge_perf_run_state_idx")
+        ]
+
+    def clean(self):
+        if self.current_performance_id and self.round_id:
+            performance_round_id = (
+                Performance._base_manager.filter(pk=self.current_performance_id)
+                .values_list("round_id", flat=True)
+                .first()
+            )
+            if performance_round_id != self.round_id:
+                raise ValidationError("当前表演必须属于同一轮次。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(ROUND_PERFORMANCE_STATE):
+            raise ValidationError("表演上下文只能通过现场 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(ROUND_PERFORMANCE_STATE):
+            raise ValidationError("表演上下文删除需要现场 authority service。")
+        return super().delete(*args, **kwargs)
 
 
 class ScoreRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
