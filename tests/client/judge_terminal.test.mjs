@@ -30,7 +30,10 @@ class FakeElement {
   querySelectorAll(selector) {
     if (this.children.has(selector)) return this.children.get(selector);
     if (selector === "[data-criterion-id]") {
-      return this.childList.filter((child) => child.dataset.criterionId);
+      return this.childList.flatMap((child) => [
+        ...(child.dataset.criterionId ? [child] : []),
+        ...child.querySelectorAll(selector),
+      ]);
     }
     return [];
   }
@@ -139,6 +142,13 @@ const contextPayload = {
     singer_name: "参赛者",
     song_title: "曲目",
     performance_state: "performing",
+    rubric_payload: {},
+  },
+};
+
+const rubricContextPayload = {
+  context: {
+    ...contextPayload.context,
     rubric_payload: {
       name: "评分表",
       criteria: [{ criterion_id: 12, name: "音准", description: "音准表现", max_score: "100.00", sequence: 1 }],
@@ -271,7 +281,7 @@ test("submits rubric criterion values without trusting a client total", async ()
   let scoreOptions;
   const runtime = boot(async (url, options = {}) => {
     if (url.includes("redeem")) return response(200, { kind: "judge", session_token: "session-secret" });
-    if (url.includes("context")) return response(200, contextPayload);
+    if (url.includes("context")) return response(200, rubricContextPayload);
     scoreOptions = options;
     return response(201, {
       receipt: { receipt_id: 8, score_record_id: 9, reason_code: "ACCEPTED", status: "succeeded" },
