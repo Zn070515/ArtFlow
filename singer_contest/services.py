@@ -11,8 +11,13 @@ from typing import Iterable, Mapping
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import (
     CONTEST_ROUND_STATE,
+    JUDGE_PANEL_STATE,
+    JUDGE_SCORE_SUBMISSION,
+    JUDGE_SESSION_STATE,
+    ROUND_PERFORMANCE_STATE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_CLEANUP,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -51,12 +56,18 @@ from .models import (
     ContestRound,
     DuelDecision,
     Judge,
+    JudgeScoreReceipt,
+    JudgeSeat,
+    JudgeSeatGrant,
+    JudgeSession,
     ManualDecision,
     Performance,
     PerformanceGroup,
+    PerformanceRunState,
     RoundEntry,
     RoundJudge,
     RoundPanelSnapshot,
+    RoundPanelSnapshotMember,
     RubricCriterion,
     ScoreRecord,
     ScoreSummary,
@@ -582,6 +593,35 @@ def reset_round_snapshots(
     locked_round.is_locked = False
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["status", "is_locked"])
+    test_panel_snapshots = RoundPanelSnapshot.objects.filter(
+        round=locked_round,
+        is_test_data=True,
+    )
+    if activity.is_test_mode and test_panel_snapshots.exists():
+        from entry_access.models import AccessGrant, EphemeralSession
+
+        # Judge panel snapshots retain their source RoundJudge rows with PROTECT.  Test
+        # cleanup is the one explicit lifecycle that may unwind the complete disposable
+        # graph; formal snapshots remain immutable and therefore keep the old protection.
+        with authority_write(JUDGE_SCORE_SUBMISSION):
+            JudgeScoreReceipt.objects.filter(panel_snapshot__in=test_panel_snapshots).delete()
+        with authority_write(JUDGE_SESSION_STATE):
+            JudgeSession.objects.filter(panel_snapshot__in=test_panel_snapshots).delete()
+            JudgeSeatGrant.objects.filter(panel_snapshot__in=test_panel_snapshots).delete()
+        with authority_write(JUDGE_PANEL_STATE):
+            JudgeSeat.objects.filter(panel_member__panel_snapshot__in=test_panel_snapshots).delete()
+            RoundPanelSnapshotMember.objects.filter(
+                panel_snapshot__in=test_panel_snapshots
+            ).delete()
+            RoundPanelSnapshot.objects.filter(pk__in=test_panel_snapshots).delete()
+        with authority_write(TEST_DATA_CLEANUP):
+            EphemeralSession.objects.filter(round=locked_round).delete()
+        with authority_write(TEST_DATA_CLEANUP):
+            AccessGrant.objects.filter(round=locked_round).delete()
+        with authority_write(ROUND_PERFORMANCE_STATE):
+            PerformanceRunState.objects.filter(round=locked_round).delete()
+        Performance.objects.filter(round=locked_round).delete()
+        PerformanceGroup.objects.filter(round=locked_round).delete()
     ScoreRecord.objects.filter(round=locked_round).delete()
     with authority_write(SCORE_SUMMARY_RECALCULATE):
         ScoreSummary.objects.filter(round=locked_round).delete()
