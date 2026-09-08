@@ -51,6 +51,48 @@ urlpatterns = [
     path("rounds/<int:pk>/reset/", views.round_reset, name="round_reset"),
     path("judges/", views.judge_list, name="judge_list"),
     path("judges/new/", views.judge_create, name="judge_create"),
+    path("judges/round/<int:pk>/control/", views.judge_control, name="judge_control"),
+    path("judges/round/<int:pk>/prepare/", views.judge_prepare, name="judge_prepare"),
+    path(
+        "judges/round/<int:pk>/panel/hold/",
+        views.judge_panel_hold,
+        name="judge_panel_hold",
+    ),
+    path(
+        "judges/round/<int:pk>/panel/resume/",
+        views.judge_panel_resume,
+        name="judge_panel_resume",
+    ),
+    path(
+        "judges/round/<int:pk>/performances/advance/",
+        views.judge_performance_advance,
+        name="judge_performance_advance",
+    ),
+    path(
+        "judges/round/<int:pk>/performances/hold/",
+        views.judge_performance_hold,
+        name="judge_performance_hold",
+    ),
+    path(
+        "judges/round/<int:pk>/performances/resume/",
+        views.judge_performance_resume,
+        name="judge_performance_resume",
+    ),
+    path(
+        "judges/round/<int:pk>/seats/<int:seat_id>/qr/",
+        views.judge_seat_qr,
+        name="judge_seat_qr",
+    ),
+    path(
+        "judges/round/<int:pk>/scores/proxy/",
+        views.judge_score_proxy,
+        name="judge_score_proxy",
+    ),
+    path(
+        "judges/round/<int:pk>/scores/paper/",
+        views.judge_score_paper,
+        name="judge_score_paper",
+    ),
     path("rubrics/new/", views.rubric_create, name="rubric_create"),
     path("awards/", views.award_list, name="award_list"),
     path("awards/new/", views.award_create, name="award_create"),

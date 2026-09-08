@@ -5839,7 +5839,7 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
-class JudgeControlHTTPTests(SimpleTestCase):
+class JudgeControlContractTests(SimpleTestCase):
     def test_judge_control_routes_are_mounted(self):
         route_args = {
             "staff:judge_control": [7],
