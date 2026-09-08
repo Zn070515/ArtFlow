@@ -76,7 +76,9 @@ class JudgeAuthorityVocabularyTests(TestCase):
 
         for action_name in action_names:
             action = getattr(AuditLog.ActionType, action_name)
-            self.assertLessEqual(len(action), AuditLog._meta.get_field("action_type").max_length)
+            max_length = AuditLog._meta.get_field("action_type").max_length
+            assert max_length is not None
+            self.assertLessEqual(len(action), max_length)
 
     def test_judge_model_contracts_exist_and_are_guarded(self):
         for model in (
@@ -299,7 +301,9 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(snapshot.expected_judge_count, 1)
         self.assertEqual(snapshot.minimum_judge_count, 1)
         self.assertEqual(snapshot.members.count(), 1)
-        self.assertEqual(snapshot.members.first().seats.count(), 1)
+        member = snapshot.members.first()
+        assert member is not None
+        self.assertEqual(member.seats.count(), 1)
         run_state = self.round.performance_run_state
         self.assertEqual(run_state.state, PerformanceRunState.State.IDLE)
         self.assertEqual(run_state.context_version, 0)
