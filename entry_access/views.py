@@ -30,6 +30,12 @@ class RequestBodyTooLarge(Exception):
     """Raised when a route-specific request body cap is exceeded."""
 
 
+def _no_store(response):
+    response["Cache-Control"] = "no-store"
+    response["Pragma"] = "no-cache"
+    return response
+
+
 def _json_payload(request, *, body_limit: int | None = None) -> dict[str, Any]:
     if body_limit is not None:
         content_length = request.META.get("CONTENT_LENGTH")
@@ -52,11 +58,15 @@ def _json_payload(request, *, body_limit: int | None = None) -> dict[str, Any]:
 
 
 def _invalid_request(error):
-    return JsonResponse({"detail": error.messages, "reason_code": "INVALID_REQUEST"}, status=400)
+    return _no_store(
+        JsonResponse({"detail": error.messages, "reason_code": "INVALID_REQUEST"}, status=400)
+    )
 
 
 def _request_too_large_response():
-    return JsonResponse({"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413)
+    return _no_store(
+        JsonResponse({"detail": "请求体过大。", "reason_code": "REQUEST_TOO_LARGE"}, status=413)
+    )
 
 
 def _rate_limited_response(retry_after_seconds: int):
@@ -65,7 +75,7 @@ def _rate_limited_response(retry_after_seconds: int):
         status=429,
     )
     response["Retry-After"] = str(max(1, retry_after_seconds))
-    return response
+    return _no_store(response)
 
 
 def _required_json_int(payload, key):
@@ -97,25 +107,29 @@ def issue_grant(request):
             round=selected_round,
         )
     except (KeyError, TypeError, ValueError):
-        return JsonResponse(
-            {
-                "detail": "entry_point_id、ttl_seconds 或 round_id 无效。",
-                "reason_code": "INVALID_REQUEST",
-            },
-            status=400,
+        return _no_store(
+            JsonResponse(
+                {
+                    "detail": "entry_point_id、ttl_seconds 或 round_id 无效。",
+                    "reason_code": "INVALID_REQUEST",
+                },
+                status=400,
+            )
         )
     except ValidationError as error:
         return _invalid_request(error)
-    return JsonResponse(
-        {
-            "grant_id": result.grant.pk,
-            "token": result.token,
-            "kind": result.grant.kind,
-            "activity_id": getattr(result.grant, "activity_id", None),
-            "round_id": getattr(result.grant, "round_id", None),
-            "expires_at": result.grant.expires_at.isoformat(),
-        },
-        status=201,
+    return _no_store(
+        JsonResponse(
+            {
+                "grant_id": result.grant.pk,
+                "token": result.token,
+                "kind": result.grant.kind,
+                "activity_id": getattr(result.grant, "activity_id", None),
+                "round_id": getattr(result.grant, "round_id", None),
+                "expires_at": result.grant.expires_at.isoformat(),
+            },
+            status=201,
+        )
     )
 
 
@@ -144,22 +158,28 @@ def redeem_grant(request):
             request_meta=AccessRequestMeta(ip_address=ip_address),
         )
     except (KeyError, TypeError):
-        return JsonResponse(
-            {"detail": "请求缺少 token。", "reason_code": "INVALID_REQUEST"}, status=400
+        return _no_store(
+            JsonResponse(
+                {"detail": "请求缺少 token。", "reason_code": "INVALID_REQUEST"}, status=400
+            )
         )
     except ValidationError:
-        return JsonResponse(
-            {"detail": "临时访问授权无效。", "reason_code": "INVALID_GRANT"}, status=400
+        return _no_store(
+            JsonResponse(
+                {"detail": "临时访问授权无效。", "reason_code": "INVALID_GRANT"}, status=400
+            )
         )
-    return JsonResponse(
-        {
-            "session_id": result.session.pk,
-            "session_token": result.token,
-            "kind": result.session.kind,
-            "activity_id": getattr(result.session, "activity_id", None),
-            "round_id": getattr(result.session, "round_id", None),
-            "expires_at": result.session.expires_at.isoformat(),
-        }
+    return _no_store(
+        JsonResponse(
+            {
+                "session_id": result.session.pk,
+                "session_token": result.token,
+                "kind": result.session.kind,
+                "activity_id": getattr(result.session, "activity_id", None),
+                "round_id": getattr(result.session, "round_id", None),
+                "expires_at": result.session.expires_at.isoformat(),
+            }
+        )
     )
 
 
@@ -172,7 +192,9 @@ def revoke_grant(request, grant_id):
         revoked = revoke_access_grant(grant, actor=request.user, note=payload.get("note"))
     except ValidationError as error:
         return _invalid_request(error)
-    return JsonResponse({"grant_id": revoked.pk, "revoked_at": revoked.revoked_at.isoformat()})
+    return _no_store(
+        JsonResponse({"grant_id": revoked.pk, "revoked_at": revoked.revoked_at.isoformat()})
+    )
 
 
 @staff_required
@@ -184,4 +206,6 @@ def revoke_session(request, session_id):
         revoked = revoke_ephemeral_session(session, actor=request.user, note=payload.get("note"))
     except ValidationError as error:
         return _invalid_request(error)
-    return JsonResponse({"session_id": revoked.pk, "revoked_at": revoked.revoked_at.isoformat()})
+    return _no_store(
+        JsonResponse({"session_id": revoked.pk, "revoked_at": revoked.revoked_at.isoformat()})
+    )

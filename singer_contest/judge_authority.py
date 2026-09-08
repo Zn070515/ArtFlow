@@ -670,11 +670,7 @@ def submit_judge_score(
     normalized_command_id = _validate_command_id(command_id)
     normalized_payload = _normalize_judge_score_payload(score_payload)
 
-    run_state = (
-        PerformanceRunState.objects.select_for_update()
-        .select_related("current_performance")
-        .get(round=locked.contest_round)
-    )
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
     snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=session.panel_snapshot_id)
     seat = (
@@ -1033,7 +1029,6 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
     run_state = (
         PerformanceRunState.objects.select_for_update()
-        .select_related("current_performance")
         .filter(round_id=session.panel_snapshot.round_id)
         .first()
     )
