@@ -1,6 +1,9 @@
 import io
 import json
+from base64 import b64encode
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
+from urllib.parse import quote
 
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
@@ -83,13 +86,29 @@ from ruleset.services import (
     update_ruleset_binding,
     update_ruleset_definition,
 )
+from singer_contest.judge_authority import (
+    advance_performance,
+    hold_judge_panel,
+    hold_performance,
+    issue_judge_grant,
+    prepare_judge_panel,
+    resume_judge_panel,
+    resume_performance,
+    submit_paper_score,
+    submit_staff_proxy_score,
+)
 from singer_contest.models import (
     AudienceScore,
     Award,
     ContestRound,
     Judge,
+    JudgeSeat,
+    JudgeSeatGrant,
+    Performance,
     PerformanceGroup,
+    PerformanceRunState,
     RoundEntry,
+    RoundPanelSnapshot,
     RubricCriterion,
     ScoreRecord,
     ScoreSummary,
@@ -100,13 +119,13 @@ from singer_contest.models import (
 from singer_contest.services import (
     IdempotencyConflictError,
     StaleScoreVersionError,
-    authoritative_panel_judges,
     _current_frozen_version,
     _current_resolve_status,
     _eligible_singers,
     _version_binding,
     apply_scores,
     apply_scores_if_version,
+    authoritative_panel_judges,
     confirm_stage_result,
     create_manual_award,
     create_scoring_rubric,
@@ -138,6 +157,9 @@ from staff_panel.forms import (
     ActivityForm,
     ContestRoundForm,
     IncidentForm,
+    JudgeBoundScoreForm,
+    JudgePanelAttendanceForm,
+    JudgePerformanceActionForm,
     ManualDecisionForm,
     ProgramReviewForm,
     PublicPostForm,
@@ -1678,6 +1700,334 @@ def judge_create(request):
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
+
+
+def _judge_control_context(
+    request,
+    contest_round,
+    *,
+    error="",
+    qr_data_uri="",
+    qr_seat_id=None,
+    policy_state_override="",
+):
+    round_judges = list(
+        contest_round.round_judges.select_related("judge").order_by("pk")
+    )
+    panel_snapshot = (
+        RoundPanelSnapshot.objects.filter(round=contest_round)
+        .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
+        .order_by("-version")
+        .first()
+    )
+    panel_members = []
+    seat_rows = []
+    if panel_snapshot is not None:
+        panel_members = list(
+            panel_snapshot.members.select_related("judge").filter(is_active=True).order_by("pk")
+        )
+        seats = {
+            seat.panel_member_id: seat
+            for seat in JudgeSeat.objects.filter(panel_member__in=panel_members).order_by("pk")
+        }
+        for member in panel_members:
+            seat = seats.get(member.pk)
+            if seat is not None:
+                pending_grant = (
+                    JudgeSeatGrant.objects.filter(
+                        seat=seat,
+                        access_grant__redeemed_at__isnull=True,
+                        access_grant__revoked_at__isnull=True,
+                        access_grant__expires_at__gt=timezone.now(),
+                    )
+                    .select_related("access_grant")
+                    .first()
+                )
+            else:
+                pending_grant = None
+            seat_rows.append(
+                {
+                    "member": member,
+                    "seat": seat,
+                    "pending_grant": pending_grant,
+                }
+            )
+
+    run_state = (
+        PerformanceRunState.objects.filter(round=contest_round)
+        .select_related("current_performance__singer")
+        .first()
+    )
+    performances = list(
+        Performance._base_manager.filter(round=contest_round)
+        .select_related("singer")
+        .order_by("sequence", "pk")
+    )
+    expected_judge_count = len(round_judges)
+    actual_judge_count = len(panel_members)
+    minimum_judge_count = (
+        panel_snapshot.minimum_judge_count
+        if panel_snapshot is not None
+        else contest_round.minimum_judge_count or expected_judge_count
+    )
+    if panel_snapshot is None:
+        policy_state = "PREPARE_REQUIRED"
+    elif panel_snapshot.state == RoundPanelSnapshot.State.HOLD:
+        policy_state = "HOLD"
+    elif run_state is not None and run_state.state == PerformanceRunState.State.HOLD:
+        policy_state = "HOLD"
+    else:
+        policy_state = "ACTIVE"
+    if policy_state_override:
+        policy_state = policy_state_override
+
+    attendance_form = JudgePanelAttendanceForm(
+        initial={"attending_judge_ids": [member.judge_id for member in panel_members]},
+        judge_choices=[
+            (round_judge.judge_id, round_judge.judge.name) for round_judge in round_judges
+        ],
+    )
+    return {
+        "round": contest_round,
+        "round_judges": round_judges,
+        "panel_snapshot": panel_snapshot,
+        "panel_members": panel_members,
+        "seat_rows": seat_rows,
+        "run_state": run_state,
+        "performances": performances,
+        "expected_judge_count": expected_judge_count,
+        "actual_judge_count": actual_judge_count,
+        "minimum_judge_count": minimum_judge_count,
+        "policy_state": policy_state,
+        "attendance_form": attendance_form,
+        "performance_action_form": JudgePerformanceActionForm(),
+        "score_form": JudgeBoundScoreForm(
+            initial={
+                "performance_id": run_state.current_performance_id if run_state else "",
+                "context_version": run_state.context_version if run_state else 0,
+            }
+        ),
+        "score_actions": ("proxy", "paper"),
+        "error": error,
+        "qr_data_uri": qr_data_uri,
+        "qr_seat_id": qr_seat_id,
+    }
+
+
+def _render_judge_control(request, contest_round, **kwargs):
+    return render(
+        request,
+        "staff_panel/judge_control.html",
+        _judge_control_context(request, contest_round, **kwargs),
+    )
+
+
+@staff_required
+def judge_control(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    return _render_judge_control(request, contest_round)
+
+
+@staff_required
+@require_POST
+@transaction.atomic
+def judge_prepare(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    round_judges = list(contest_round.round_judges.select_related("judge").order_by("pk"))
+    form = JudgePanelAttendanceForm(
+        request.POST,
+        judge_choices=[
+            (round_judge.judge_id, round_judge.judge.name) for round_judge in round_judges
+        ],
+    )
+    if not form.is_valid():
+        return _render_judge_control(request, contest_round, error=_form_error(form))
+    try:
+        prepare_judge_panel(
+            contest_round.pk,
+            operator=request.user,
+            attending_judge_ids=form.cleaned_data["attending_judge_ids"],
+        )
+    except (PermissionDenied, ValidationError) as error:
+        error_message = domain_error_messages(error)
+        return _render_judge_control(
+            request,
+            contest_round,
+            error=error_message,
+            policy_state_override=(
+                "INSUFFICIENT_JUDGES / HOLD"
+                if "INSUFFICIENT_JUDGES" in str(error)
+                else ""
+            ),
+        )
+    messages.success(request, "评委组已准备，评委席位和评分上下文已冻结。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_panel_hold(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        hold_judge_panel(
+            contest_round.pk,
+            operator=request.user,
+            reason=request.POST.get("reason", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"暂停评委组失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "评委组已暂停，当前评委会话已撤销。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_panel_resume(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        resume_judge_panel(contest_round.pk, operator=request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"恢复评委组失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "评委组已恢复。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_performance_advance(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    form = JudgePerformanceActionForm(request.POST)
+    if form.is_valid():
+        try:
+            advance_performance(
+                contest_round.pk,
+                form.cleaned_data["performance_id"],
+                operator=request.user,
+            )
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, f"推进表演失败：{domain_error_messages(error)}")
+        else:
+            messages.success(request, "当前表演已切换，旧评分上下文自动失效。")
+    else:
+        messages.error(request, f"推进表演失败：{_form_error(form)}")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_performance_hold(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    form = JudgePerformanceActionForm(request.POST)
+    if form.is_valid():
+        try:
+            hold_performance(
+                contest_round.pk,
+                operator=request.user,
+                reason=form.cleaned_data["reason"],
+                expected_performance_id=form.cleaned_data["performance_id"],
+            )
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, f"暂停表演失败：{domain_error_messages(error)}")
+        else:
+            messages.success(request, "当前表演已暂停。")
+    else:
+        messages.error(request, f"暂停表演失败：{_form_error(form)}")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_performance_resume(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        resume_performance(contest_round.pk, operator=request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"恢复表演失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "当前表演已恢复。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_seat_qr(request, pk, seat_id):
+    seat = get_object_or_404(
+        JudgeSeat.objects.select_related("panel_member__panel_snapshot"),
+        pk=seat_id,
+        panel_member__panel_snapshot__round_id=pk,
+    )
+    try:
+        issued = issue_judge_grant(seat.pk, operator=request.user, ttl_seconds=15 * 60)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"签发评委入口失败：{domain_error_messages(error)}")
+        return redirect("staff:judge_control", pk=pk)
+    import qrcode
+
+    target = f"{request.build_absolute_uri(reverse('judge:terminal'))}#{quote(issued.token)}"
+    image = qrcode.make(target)
+    buffer = BytesIO()
+    image.save(buffer)
+    qr_data_uri = f"data:image/png;base64,{b64encode(buffer.getvalue()).decode('ascii')}"
+    return _render_judge_control(
+        request,
+        seat.panel_member.panel_snapshot.round,
+        qr_data_uri=qr_data_uri,
+        qr_seat_id=seat.pk,
+    )
+
+
+def _submit_staff_judge_score(request, pk, *, paper):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    form = JudgeBoundScoreForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, f"评分提交失败：{_form_error(form)}")
+        return redirect("staff:judge_control", pk=pk)
+    values = form.cleaned_data
+    payload = {"score": values["score"], "notes": values["notes"]}
+    try:
+        if paper:
+            submit_paper_score(
+                contest_round.pk,
+                values["performance_id"],
+                values["seat_id"],
+                operator=request.user,
+                command_id=values["command_id"],
+                expected_context_version=values["context_version"],
+                score_payload=payload,
+                paper_reference=values["source_reference"],
+                reason=values["reason"],
+            )
+        else:
+            submit_staff_proxy_score(
+                contest_round.pk,
+                values["performance_id"],
+                values["seat_id"],
+                operator=request.user,
+                command_id=values["command_id"],
+                expected_context_version=values["context_version"],
+                score_payload=payload,
+                source_reference=values["source_reference"],
+                reason=values["reason"],
+            )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"评分提交失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "工作人员评分已记录，并绑定到当前评委席位和表演上下文。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_score_proxy(request, pk):
+    return _submit_staff_judge_score(request, pk, paper=False)
+
+
+@staff_required
+@require_POST
+def judge_score_paper(request, pk):
+    return _submit_staff_judge_score(request, pk, paper=True)
 
 
 @staff_required

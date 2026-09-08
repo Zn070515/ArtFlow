@@ -34,7 +34,13 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Max
 from django.http import FileResponse
-from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
+from django.test import (
+    RequestFactory,
+    SimpleTestCase,
+    TestCase,
+    TransactionTestCase,
+    override_settings,
+)
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
@@ -54,9 +60,12 @@ from singer_contest.models import (
     Award,
     ContestRound,
     Judge,
+    JudgeScoreReceipt,
+    Performance,
     RoundEntry,
     RoundJudge,
     ScoreRecord,
+    ScoreSource,
     ScoreSummary,
     ScoreWriteReceipt,
     SingerRegistration,
@@ -5837,3 +5846,352 @@ class RulesetEditorTests(TestCase):
             {"stage_key": "院十佳"},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class JudgeControlContractTests(SimpleTestCase):
+    def test_judge_control_routes_are_mounted(self):
+        route_args = {
+            "staff:judge_control": [7],
+            "staff:judge_prepare": [7],
+            "staff:judge_panel_hold": [7],
+            "staff:judge_panel_resume": [7],
+            "staff:judge_performance_advance": [7],
+            "staff:judge_performance_hold": [7],
+            "staff:judge_performance_resume": [7],
+            "staff:judge_seat_qr": [7, 11],
+            "staff:judge_score_proxy": [7],
+            "staff:judge_score_paper": [7],
+        }
+        for route_name, args in route_args.items():
+            with self.subTest(route_name=route_name):
+                self.assertTrue(reverse(route_name, args=args))
+
+    def test_judge_control_forms_validate_bounded_inputs(self):
+        from staff_panel.forms import (
+            JudgeBoundScoreForm,
+            JudgePanelAttendanceForm,
+            JudgePerformanceActionForm,
+        )
+
+        attendance = JudgePanelAttendanceForm(
+            {"attending_judge_ids": ["1", "2"]},
+            judge_choices=[("1", "Judge 1"), ("2", "Judge 2")],
+        )
+        self.assertTrue(attendance.is_valid())
+        self.assertEqual(attendance.cleaned_data["attending_judge_ids"], [1, 2])
+
+        duplicate_attendance = JudgePanelAttendanceForm(
+            {"attending_judge_ids": ["1", "1"]},
+            judge_choices=[("1", "Judge 1")],
+        )
+        self.assertFalse(duplicate_attendance.is_valid())
+
+        action = JudgePerformanceActionForm({"performance_id": "3", "reason": "现场暂停"})
+        self.assertTrue(action.is_valid())
+        invalid_action = JudgePerformanceActionForm({"performance_id": "0", "reason": ""})
+        self.assertFalse(invalid_action.is_valid())
+
+        score = JudgeBoundScoreForm(
+            {
+                "performance_id": "3",
+                "seat_id": "4",
+                "context_version": "2",
+                "score": "91.50",
+                "source_reference": "纸面-001",
+                "reason": "终端故障",
+                "command_id": "staff-score-001",
+            }
+        )
+        self.assertTrue(score.is_valid())
+        self.assertEqual(score.cleaned_data["context_version"], 2)
+        invalid_score = JudgeBoundScoreForm(
+            {
+                "performance_id": "3",
+                "seat_id": "4",
+                "context_version": "2",
+                "score": "101",
+                "source_reference": "",
+                "reason": "",
+                "command_id": "staff-score-001",
+            }
+        )
+        self.assertFalse(invalid_score.is_valid())
+
+
+class JudgeControlHTTPTests(TestCase):
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="judge-control-staff", password="pass", role=User.Role.STAFF
+        )
+        self.participant = _create_provisioned_user(
+            username="judge-control-participant", password="pass", role=User.Role.PARTICIPANT
+        )
+        self.activity = _create_activity(
+            title="Judge Control Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=True,
+        )
+        self.judge = Judge.objects.create(activity=self.activity, name="Judge One")
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Demo Singer",
+            student_id="JC-001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Demo Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            minimum_judge_count=1,
+            is_locked=False,
+        )
+        self.performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.contest_round,
+            singer=self.registration,
+            sequence=1,
+            song_title="Demo Song",
+            is_test_data=True,
+        )
+        prepare_round(self.contest_round, self.staff)
+        self.client.force_login(self.staff)
+
+    def _prepare_panel(self):
+        return self.client.post(
+            reverse("staff:judge_prepare", args=[self.contest_round.pk]),
+            {"attending_judge_ids": [str(self.judge.pk)]},
+        )
+
+    def test_control_page_is_staff_only_and_readable(self):
+        self.client.logout()
+        anonymous = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertEqual(anonymous.status_code, 302)
+
+        self.client.force_login(self.participant)
+        self.client.raise_request_exception = False
+        participant = self.client.get(
+            reverse("staff:judge_control", args=[self.contest_round.pk])
+        )
+        self.assertEqual(participant.status_code, 403)
+        self.client.raise_request_exception = True
+
+        self.client.force_login(self.staff)
+        self.client.raise_request_exception = False
+        for route_name, data in (
+            (
+                "staff:judge_panel_hold",
+                {"reason": "尚未准备评委组"},
+            ),
+            (
+                "staff:judge_performance_hold",
+                {"performance_id": self.performance.pk, "reason": "尚未准备评委组"},
+            ),
+            (
+                "staff:judge_score_proxy",
+                {
+                    "performance_id": self.performance.pk,
+                    "seat_id": 1,
+                    "context_version": 0,
+                    "score": "90",
+                    "source_reference": "未准备",
+                    "reason": "未准备",
+                    "command_id": "not-prepared-001",
+                },
+            ),
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.post(reverse(route_name, args=[self.contest_round.pk]), data)
+                self.assertEqual(response.status_code, 302)
+        self.client.raise_request_exception = True
+        response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PREPARE_REQUIRED")
+        self.assertContains(response, "准备评委组")
+
+    def test_prepare_requires_minimum_attendance_and_creates_authoritative_context(self):
+        insufficient = self.client.post(
+            reverse("staff:judge_prepare", args=[self.contest_round.pk]),
+            {},
+        )
+        self.assertEqual(insufficient.status_code, 200)
+        self.assertContains(insufficient, "INSUFFICIENT_JUDGES")
+        self.assertContains(insufficient, "INSUFFICIENT_JUDGES / HOLD")
+
+        prepared = self._prepare_panel()
+        self.assertRedirects(
+            prepared,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        from singer_contest.models import JudgeSeat, PerformanceRunState, RoundPanelSnapshot
+
+        snapshot = RoundPanelSnapshot.objects.get(round=self.contest_round)
+        self.assertEqual(snapshot.expected_judge_count, 1)
+        self.assertEqual(snapshot.minimum_judge_count, 1)
+        self.assertEqual(snapshot.members.count(), 1)
+        self.assertEqual(JudgeSeat.objects.filter(panel_member__panel_snapshot=snapshot).count(), 1)
+        self.assertEqual(
+            PerformanceRunState.objects.get(round=self.contest_round).state,
+            PerformanceRunState.State.IDLE,
+        )
+
+    def test_qr_hold_and_resume_use_staff_authority_services(self):
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat, RoundPanelSnapshot
+
+        seat = JudgeSeat.objects.get()
+        qr_response = self.client.post(
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
+        )
+        self.assertEqual(qr_response.status_code, 200)
+        self.assertContains(qr_response, "data:image/png;base64,")
+        self.assertNotContains(qr_response, "Judge terminal")
+        self.assertContains(qr_response, "已有未兑换授权")
+        duplicate_qr = self.client.post(
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
+        )
+        self.assertRedirects(
+            duplicate_qr,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        from types import SimpleNamespace
+
+        with patch(
+            "staff_panel.views.issue_judge_grant",
+            return_value=SimpleNamespace(token="RawJudgeToken-should-not-be-plain"),
+        ):
+            mocked_qr = self.client.post(
+                reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
+            )
+        self.assertEqual(mocked_qr.status_code, 200)
+        self.assertNotContains(mocked_qr, "RawJudgeToken-should-not-be-plain")
+
+        hold_get = self.client.get(
+            reverse("staff:judge_panel_hold", args=[self.contest_round.pk])
+        )
+        self.assertEqual(hold_get.status_code, 405)
+        hold_post = self.client.post(
+            reverse("staff:judge_panel_hold", args=[self.contest_round.pk]),
+            {"reason": "设备检查"},
+        )
+        self.assertRedirects(
+            hold_post,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        held_page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertContains(held_page, "HOLD")
+        self.assertNotContains(
+            held_page,
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk]),
+        )
+        self.assertContains(held_page, "评分已禁用")
+        self.assertEqual(
+            RoundPanelSnapshot.objects.get(round=self.contest_round).state,
+            RoundPanelSnapshot.State.HOLD,
+        )
+
+        resume_post = self.client.post(
+            reverse("staff:judge_panel_resume", args=[self.contest_round.pk])
+        )
+        self.assertRedirects(
+            resume_post,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        self.assertEqual(
+            RoundPanelSnapshot.objects.get(round=self.contest_round).state,
+            RoundPanelSnapshot.State.ACTIVE,
+        )
+
+    def test_performance_advance_binds_context_and_proxy_score_is_idempotent(self):
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat, PerformanceRunState
+
+        seat = JudgeSeat.objects.get()
+        advanced = self.client.post(
+            reverse("staff:judge_performance_advance", args=[self.contest_round.pk]),
+            {"performance_id": self.performance.pk, "reason": "开始现场表演"},
+        )
+        self.assertRedirects(advanced, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        run_state = PerformanceRunState.objects.get(round=self.contest_round)
+        self.assertEqual(run_state.current_performance_id, self.performance.pk)
+        self.assertEqual(run_state.context_version, 1)
+
+        score_data = {
+            "performance_id": self.performance.pk,
+            "seat_id": seat.pk,
+            "context_version": 1,
+            "score": "91.50",
+            "notes": "工作人员代录",
+            "source_reference": "故障单 JC-001",
+            "reason": "评委终端故障",
+            "command_id": "proxy-score-001",
+        }
+        saved = self.client.post(
+            reverse("staff:judge_score_proxy", args=[self.contest_round.pk]), score_data
+        )
+        self.assertRedirects(saved, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
+        self.assertEqual(ScoreRecord.objects.get().source, ScoreSource.STAFF_PROXY)
+        self.assertEqual(JudgeScoreReceipt.objects.count(), 1)
+
+        stale_hold = self.client.post(
+            reverse("staff:judge_performance_hold", args=[self.contest_round.pk]),
+            {"performance_id": 999, "reason": "并发切换测试"},
+        )
+        self.assertRedirects(
+            stale_hold,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        run_state.refresh_from_db()
+        self.assertEqual(run_state.state, PerformanceRunState.State.PERFORMING)
+
+        replayed = self.client.post(
+            reverse("staff:judge_score_proxy", args=[self.contest_round.pk]), score_data
+        )
+        self.assertRedirects(
+            replayed,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
+
+    def test_paper_score_rejects_stale_context_and_accepts_current_context(self):
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat
+
+        seat = JudgeSeat.objects.get()
+        self.client.post(
+            reverse("staff:judge_performance_advance", args=[self.contest_round.pk]),
+            {"performance_id": self.performance.pk, "reason": "开始现场表演"},
+        )
+        stale_data = {
+            "performance_id": self.performance.pk,
+            "seat_id": seat.pk,
+            "context_version": 0,
+            "score": "88",
+            "notes": "纸面记录",
+            "source_reference": "纸面表-001",
+            "reason": "终端故障期间纸面记录",
+            "command_id": "paper-score-stale",
+        }
+        stale = self.client.post(
+            reverse("staff:judge_score_paper", args=[self.contest_round.pk]), stale_data
+        )
+        self.assertRedirects(stale, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertFalse(ScoreRecord.objects.filter(round=self.contest_round).exists())
+
+        stale_data.update({"context_version": 1, "command_id": "paper-score-001"})
+        accepted = self.client.post(
+            reverse("staff:judge_score_paper", args=[self.contest_round.pk]), stale_data
+        )
+        self.assertRedirects(
+            accepted,
+            reverse("staff:judge_control", args=[self.contest_round.pk]),
+        )
+        record = ScoreRecord.objects.get(round=self.contest_round)
+        self.assertEqual(record.source, ScoreSource.PAPER_DR)
+        self.assertEqual(record.source_reference, "纸面表-001")

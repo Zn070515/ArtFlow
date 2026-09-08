@@ -8,6 +8,7 @@ from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from ruleset.schema import parse_definition
 from singer_contest.models import ContestRound, ScoringRubric, SingerRegistration
+from singer_contest.services import validate_score
 from voting.models import VoteSession
 
 # Accepts both browser `datetime-local` values (naive ISO) and tz-aware ISO strings
@@ -121,6 +122,62 @@ class ContestRoundForm(forms.Form):
 
     def clean_rubric(self):
         return self.cleaned_data.get("rubric") or None
+
+
+class JudgePanelAttendanceForm(forms.Form):
+    attending_judge_ids = forms.MultipleChoiceField(required=False, choices=())
+
+    def __init__(self, *args, judge_choices=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        cast(forms.MultipleChoiceField, self.fields["attending_judge_ids"]).choices = judge_choices
+
+    def clean_attending_judge_ids(self):
+        raw_ids = self.cleaned_data.get("attending_judge_ids") or []
+        judge_ids = [int(raw_id) for raw_id in raw_ids]
+        if len(judge_ids) != len(set(judge_ids)):
+            raise forms.ValidationError("到场评委不能重复选择。")
+        return judge_ids
+
+
+class JudgePerformanceActionForm(forms.Form):
+    performance_id = forms.IntegerField(min_value=1)
+    reason = forms.CharField(max_length=240)
+
+
+class JudgeBoundScoreForm(forms.Form):
+    performance_id = forms.IntegerField(min_value=1)
+    seat_id = forms.IntegerField(min_value=1)
+    context_version = forms.IntegerField(min_value=0)
+    score = forms.CharField(max_length=16)
+    notes = forms.CharField(max_length=200, required=False)
+    source_reference = forms.CharField(max_length=120)
+    reason = forms.CharField(max_length=240)
+    command_id = forms.CharField(max_length=64)
+
+    def clean_score(self):
+        value = self.cleaned_data["score"].strip()
+        try:
+            return str(validate_score(value))
+        except forms.ValidationError as error:
+            raise forms.ValidationError(error.messages) from error
+
+    def clean_source_reference(self):
+        value = self.cleaned_data["source_reference"].strip()
+        if not value:
+            raise forms.ValidationError("必须填写来源参考。")
+        return value
+
+    def clean_reason(self):
+        value = self.cleaned_data["reason"].strip()
+        if not value:
+            raise forms.ValidationError("必须填写代录或纸面评分原因。")
+        return value
+
+    def clean_command_id(self):
+        value = self.cleaned_data["command_id"].strip()
+        if not value:
+            raise forms.ValidationError("缺少 command_id。")
+        return value
 
 
 class RapidScoreCommandForm(forms.Form):

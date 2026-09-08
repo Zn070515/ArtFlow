@@ -308,10 +308,10 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
     if not reason or len(reason) > 240:
         raise ValidationError("暂停评委组必须填写不超过 240 字的原因。")
     locked = _lock_judge_round(round_id, operator)
-    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     snapshot = _active_panel_snapshot(locked.contest_round)
     if snapshot is None:
         raise ValidationError("当前轮次没有活动中的评委组快照。")
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
 
     now = timezone.now()
     with authority_write(JUDGE_PANEL_STATE):
@@ -395,6 +395,8 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
     if performance is None:
         raise ValidationError("当前表演不属于该评委轮次。")
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
+    if run_state.state == PerformanceRunState.State.HOLD:
+        raise PermissionDenied("ROUND_ON_HOLD")
     next_version = run_state.context_version
     if run_state.current_performance_id != performance.pk:
         next_version += 1
@@ -431,12 +433,26 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
 
 
 @transaction.atomic
-def hold_performance(round_id: int, *, operator, reason: str) -> PerformanceRunState:
+def hold_performance(
+    round_id: int,
+    *,
+    operator,
+    reason: str,
+    expected_performance_id: int | None = None,
+) -> PerformanceRunState:
     reason = reason.strip()
     if not reason or len(reason) > 240:
         raise ValidationError("暂停表演必须填写不超过 240 字的原因。")
     locked = _lock_judge_round(round_id, operator)
+    snapshot = _active_panel_snapshot(locked.contest_round)
+    if snapshot is None or snapshot.state != RoundPanelSnapshot.State.ACTIVE:
+        raise PermissionDenied("评委组未处于可暂停状态。")
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
+    if (
+        expected_performance_id is not None
+        and run_state.current_performance_id != expected_performance_id
+    ):
+        raise ValidationError("STALE_CONTEXT")
     with authority_write(ROUND_PERFORMANCE_STATE):
         run_state.state = PerformanceRunState.State.HOLD
         run_state.hold_reason = reason
@@ -878,10 +894,10 @@ def _submit_staff_bound_score(
     normalized_seat_id = _validate_expected_context(seat_id, field="seat_id")
     normalized_payload = _normalize_judge_score_payload(score_payload)
     locked = _lock_judge_round(round_id, operator)
-    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     snapshot = _active_panel_snapshot(locked.contest_round)
     if snapshot is None:
         raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     if run_state.state == PerformanceRunState.State.HOLD:
         raise PermissionDenied("ROUND_ON_HOLD")
     if run_state.state not in {
