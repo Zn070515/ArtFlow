@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from accounts.models import User
 from common.authority import (
@@ -38,6 +39,7 @@ from .judge_authority import (
 from .models import (
     ContestRound,
     CriterionScore,
+    JudgeScoreReceipt,
     JudgeSeat,
     JudgeSeatGrant,
     JudgeSession,
@@ -513,6 +515,119 @@ class JudgePanelServiceTests(TestCase):
 
         self.assertFalse(ScoreRecord.objects.exists())
         self.assertFalse(CriterionScore.objects.exists())
+
+    def test_rubric_score_rejects_foreign_criterion_and_invalid_rubric_total(self):
+        _, criteria = self._bind_rubric("40", "60")
+        foreign_rubric = ScoringRubric.objects.create(
+            activity=self.activity,
+            name="Foreign rubric",
+            is_test_data=True,
+        )
+        foreign_criterion = RubricCriterion.objects.create(
+            rubric=foreign_rubric,
+            name="Foreign criterion",
+            max_score=Decimal("90"),
+            is_test_data=True,
+        )
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        with self.subTest(case="foreign criterion"), self.assertRaises(ValidationError):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-rubric-foreign",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={
+                    "criteria": [
+                        {"criterion_id": criteria[0].pk, "value": "40"},
+                        {"criterion_id": foreign_criterion.pk, "value": "60"},
+                    ]
+                },
+            )
+
+        self.assertFalse(ScoreRecord.objects.exists())
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.rubric = foreign_rubric
+            self.round.save(update_fields=["rubric"])
+
+        with self.subTest(case="invalid rubric total"), self.assertRaises(ValidationError):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-rubric-invalid-total",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={
+                    "criteria": [
+                        {"criterion_id": foreign_criterion.pk, "value": "90"},
+                    ]
+                },
+            )
+
+        self.assertFalse(ScoreRecord.objects.exists())
+
+    def test_rubric_materialization_is_atomic_when_criterion_write_fails(self):
+        _, criteria = self._bind_rubric("40", "60")
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        with patch.object(
+            CriterionScore.objects,
+            "bulk_create",
+            side_effect=ValidationError("forced criterion failure"),
+        ), self.assertRaises(ValidationError):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-rubric-atomic",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={
+                    "criteria": [
+                        {"criterion_id": criteria[0].pk, "value": "36"},
+                        {"criterion_id": criteria[1].pk, "value": "54"},
+                    ]
+                },
+            )
+
+        self.assertFalse(ScoreRecord.objects.exists())
+        self.assertFalse(CriterionScore.objects.exists())
+        self.assertFalse(JudgeScoreReceipt.objects.exists())
+
+    def test_staff_proxy_rubric_materialization_uses_the_same_criterion_contract(self):
+        _, criteria = self._bind_rubric("40", "60")
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        result = submit_staff_proxy_score(
+            self.round.pk,
+            self.performance.pk,
+            seat.pk,
+            operator=self.operator,
+            command_id="proxy-rubric-command-1",
+            expected_context_version=1,
+            score_payload={
+                "criteria": [
+                    {"criterion_id": criteria[0].pk, "value": "37"},
+                    {"criterion_id": criteria[1].pk, "value": "55"},
+                ],
+                "notes": "proxy rubric",
+            },
+            source_reference="proxy-rubric-001",
+            reason="评委终端临时不可用",
+        )
+
+        record = ScoreRecord.objects.get(pk=result.score_record_id)
+        self.assertEqual(record.source, ScoreSource.STAFF_PROXY)
+        self.assertEqual(record.score, Decimal("92"))
+        self.assertEqual(record.criterion_scores.count(), 2)
 
     def test_live_performance_transitions_increment_context_version(self):
         prepare_judge_panel(self.round.pk, operator=self.operator)
