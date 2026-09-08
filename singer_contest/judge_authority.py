@@ -64,11 +64,15 @@ class LockedJudgeRound:
 class JudgeContext:
     activity_id: int
     round_id: int
+    round_name: str
     seat_id: int
     panel_snapshot_id: int
     panel_version: int
     context_version: int
     performance_id: int | None
+    performance_label: str | None
+    singer_name: str | None
+    song_title: str | None
     performance_state: str
     rubric_payload: dict[str, object]
 
@@ -1094,14 +1098,31 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     if run_state is None:
         raise ValidationError("评委现场上下文尚未建立。")
 
+    contest_round = session.panel_snapshot.round
+    performance = None
+    if run_state.current_performance_id is not None:
+        performance = (
+            Performance._base_manager.select_related("singer")
+            .filter(
+                pk=run_state.current_performance_id,
+                round_id=session.panel_snapshot.round_id,
+                activity_id=session.panel_snapshot.activity_id,
+            )
+            .first()
+        )
+        if performance is None:
+            raise ValidationError("评委现场上下文尚未建立。")
+
     rubric_payload: dict[str, object] = {}
-    rubric = session.panel_snapshot.round.rubric
+    rubric = contest_round.rubric
     if rubric is not None:
         rubric_payload = {
             "name": rubric.name,
             "criteria": [
                 {
+                    "criterion_id": criterion.pk,
                     "name": criterion.name,
+                    "description": criterion.description,
                     "max_score": str(criterion.max_score),
                     "sequence": criterion.sequence,
                 }
@@ -1111,11 +1132,15 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     return JudgeContext(
         activity_id=session.panel_snapshot.activity_id,
         round_id=session.panel_snapshot.round_id,
+        round_name=contest_round.name or contest_round.get_round_type_display(),
         seat_id=session.seat_id,
         panel_snapshot_id=session.panel_snapshot_id,
         panel_version=session.panel_snapshot.version,
         context_version=run_state.context_version,
         performance_id=run_state.current_performance_id,
+        performance_label=(f"第 {performance.sequence} 个节目" if performance else None),
+        singer_name=(performance.singer.name if performance else None),
+        song_title=(performance.song_title if performance else None),
         performance_state=run_state.state,
         rubric_payload=rubric_payload,
     )
