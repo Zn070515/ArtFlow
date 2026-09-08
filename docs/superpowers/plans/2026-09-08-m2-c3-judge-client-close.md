@@ -10,6 +10,11 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-08-m2-c3-judge-client-close.md`
 
+**Status:** Implementation complete. Local SQLite, PostgreSQL focused authority, isolated
+backup/restore, client, Pyright, and Playwright gates passed. School IdP/MFA, TLS/WAF/DDoS,
+real credentialed Judge rehearsal, and retention/ownership acceptance remain deployment
+HOLDs.
+
 ## Global Constraints
 
 - Do not use `.worktree/`, linked worktrees, or subagents; work directly on the current feature branch.
@@ -37,25 +42,25 @@
 - A bound rubric with criterion max scores totaling 100 accepts a complete criterion payload and creates one total plus one `CriterionScore` per criterion.
 - Total-only payloads on rubric rounds, incomplete/duplicate/foreign/out-of-range criteria, invalid precision, and forged totals must fail without partial writes.
 
-- [ ] **Step 1: Extend test fixtures with a bound rubric and two criteria.**
+- [x] **Step 1: Extend test fixtures with a bound rubric and two criteria.**
 
   Keep existing total-only tests for no-rubric compatibility. Add explicit test data with max scores that sum to 100 and a performance song title.
 
-- [ ] **Step 2: Add RED authority tests.**
+- [x] **Step 2: Add RED authority tests.**
 
   Cover context display fields, successful atomic materialization, rollback when a criterion write fails, exact-set validation, server-computed total, idempotent replay, payload conflict, and stale/HOLD/panel guards.
 
-- [ ] **Step 3: Add RED HTTP tests.**
+- [x] **Step 3: Add RED HTTP tests.**
 
   Assert the new context JSON shape, generic errors, and the score endpoint keeps its exact top-level request contract while rejecting malformed rubric payloads.
 
-- [ ] **Step 4: Run the focused tests and verify the failure is the missing C3 behavior.**
+- [x] **Step 4: Run the focused tests and verify the failure is the missing C3 behavior.**
 
   ```powershell
   python manage.py test singer_contest.test_judge_authority singer_contest.test_judge_http
   ```
 
-- [ ] **Step 5: Commit the RED contract tests.**
+- [x] **Step 5: Commit the RED contract tests.**
 
   ```powershell
   git add singer_contest/test_judge_authority.py singer_contest/test_judge_http.py
@@ -76,17 +81,17 @@
 - Include `criterion_id` and `description` in rubric metadata.
 - Keep `performance_id` nullable and avoid returning unrelated personal profile fields.
 
-- [ ] **Step 1: Implement context fields and safe nullable display values.**
+- [x] **Step 1: Implement context fields and safe nullable display values.**
 
   Load the current performance only through the locked round/activity context. Use the existing `Performance.singer` and `ContestRound` relationships; do not accept client-selected IDs.
 
-- [ ] **Step 2: Add exact context serialization tests and run them.**
+- [x] **Step 2: Add exact context serialization tests and run them.**
 
   ```powershell
   python manage.py test singer_contest.test_judge_authority.JudgeAuthorityTests singer_contest.test_judge_http.JudgeRouteContractTests
   ```
 
-- [ ] **Step 3: Run Pyright and commit the isolated context contract.**
+- [x] **Step 3: Run Pyright and commit the isolated context contract.**
 
   ```powershell
   npm run check:pyright
@@ -111,19 +116,19 @@
 - Materialize `ScoreRecord` and `CriterionScore` under the existing `_authorized_score_fact_write()` scope, then complete the existing receipt under `JUDGE_SCORE_SUBMISSION`.
 - Reuse the normalization/materialization path for direct judge, STAFF_PROXY, and PAPER_DR without changing their source provenance rules.
 
-- [ ] **Step 1: Implement pure normalization helpers with bounded input.**
+- [x] **Step 1: Implement pure normalization helpers with bounded input.**
 
   Never use a client-supplied `score` as the authoritative total for rubric payloads. Preserve the existing no-rubric compatibility path and stable validation reason semantics.
 
-- [ ] **Step 2: Replace direct-only materialization with the shared authority helper.**
+- [x] **Step 2: Replace direct-only materialization with the shared authority helper.**
 
   Keep transaction boundaries, row locks, duplicate fact checks, payload hashing, receipt replay, and audit output intact. Criterion rows must be created only after all validation succeeds.
 
-- [ ] **Step 3: Add success, rollback, source, and authority regression tests.**
+- [x] **Step 3: Add success, rollback, source, and authority regression tests.**
 
   Verify no `ScoreRecord` or `CriterionScore` survives any failed submission and that locked-round direct ORM protections remain unchanged.
 
-- [ ] **Step 4: Run focused tests, Pyright, and commit.**
+- [x] **Step 4: Run focused tests, Pyright, and commit.**
 
   ```powershell
   python manage.py test singer_contest.test_judge_authority singer_contest.test_core_raw_close common.test_authority_matrix
@@ -146,9 +151,9 @@
 - Map new validation reason codes to stable generic response codes without leaking criterion internals or server exceptions.
 - Context and score responses remain no-store.
 
-- [ ] **Step 1: Add/adjust stable rubric error mapping tests.**
-- [ ] **Step 2: Implement only the mapping and leave authority decisions in `judge_authority.py`.**
-- [ ] **Step 3: Run HTTP focused tests and commit.**
+- [x] **Step 1: Add/adjust stable rubric error mapping tests.**
+- [x] **Step 2: Implement only the mapping and leave authority decisions in `judge_authority.py`.**
+- [x] **Step 3: Run HTTP focused tests and commit.**
 
   ```powershell
   python manage.py test singer_contest.test_judge_http
@@ -170,15 +175,15 @@
 - Stale response triggers context refresh and retains the old draft under the old fingerprint.
 - No-rubric and rubric payloads are both serialized correctly; rubric total is display-only.
 
-- [ ] **Step 1: Add deterministic fake timers or controllable timeout hooks to the client harness.**
-- [ ] **Step 2: Add RED tests for immediate draft persistence, context change isolation, poll updates, retry command reuse, and criterion payload serialization.**
-- [ ] **Step 3: Run the client test and verify RED.**
+- [x] **Step 1: Add deterministic fake timers or controllable timeout hooks to the client harness.**
+- [x] **Step 2: Add RED tests for immediate draft persistence, context change isolation, poll updates, retry command reuse, and criterion payload serialization.**
+- [x] **Step 3: Run the client test and verify RED.**
 
   ```powershell
   npm run test:client
   ```
 
-- [ ] **Step 4: Commit the client RED tests.**
+- [x] **Step 4: Commit the client RED tests.**
 
   ```powershell
   git add tests/client/judge_terminal.test.mjs
@@ -204,18 +209,18 @@
 - Reuse the same command ID for network retry and disable duplicate click submissions.
 - Never log or persist the session token or URL fragment.
 
-- [ ] **Step 1: Implement parse/render helpers and add the display/criterion markup.**
-- [ ] **Step 2: Implement draft persistence and input listeners before submit handling.**
-- [ ] **Step 3: Implement non-overlapping context polling and stale recovery.**
-- [ ] **Step 4: Implement no-rubric and rubric score payload serialization.**
-- [ ] **Step 5: Compile and run the client checks.**
+- [x] **Step 1: Implement parse/render helpers and add the display/criterion markup.**
+- [x] **Step 2: Implement draft persistence and input listeners before submit handling.**
+- [x] **Step 3: Implement non-overlapping context polling and stale recovery.**
+- [x] **Step 4: Implement no-rubric and rubric score payload serialization.**
+- [x] **Step 5: Compile and run the client checks.**
 
   ```powershell
   npm run check:client
   npm run test:client
   ```
 
-- [ ] **Step 6: Commit source and generated output together.**
+- [x] **Step 6: Commit source and generated output together.**
 
   ```powershell
   git add frontend/judge_terminal.ts templates/singer_contest/judge_terminal.html static/dist/judge_terminal.js tests/client/judge_terminal.test.mjs
@@ -230,15 +235,15 @@
 - Modify: `docs/production-readiness.md`
 - Modify: `docs/superpowers/specs/2026-09-08-m2-c3-judge-client-close.md` only if implementation review finds a contract correction
 
-- [ ] **Step 1: Add read-only browser assertions for current performance, rubric display, HOLD state, and no-store/context behavior.**
+- [x] **Step 1: Add read-only browser assertions for current performance, rubric display, HOLD state, and no-store/context behavior.**
 
   Do not put bearer tokens in test output or screenshots. Keep credentialed submit coverage within the existing safe test boundary.
 
-- [ ] **Step 2: Record M2-C3 verification scope and any remaining school/deployment HOLDs.**
+- [x] **Step 2: Record M2-C3 verification scope and any remaining school/deployment HOLDs.**
 
   Explicitly distinguish local client/authority coverage from PostgreSQL race, real credential flow, TLS/WAF/DDoS, school IdP/MFA, and data-retention acceptance.
 
-- [ ] **Step 3: Run focused browser/docs gates and commit.**
+- [x] **Step 3: Run focused browser/docs gates and commit.**
 
   ```powershell
   npm run test:e2e
@@ -249,7 +254,7 @@
 
 ### Task 8: Two-round review and full verification
 
-- [ ] **Step 1: Self-review round one — contract and authority.**
+- [x] **Step 1: Self-review round one — contract and authority.**
 
   Inspect the diff and search for direct writes or target trust:
 
@@ -260,11 +265,11 @@
 
   Confirm every mutation is service-owned, every rubric criterion is bound to the server rubric, total score is server-computed, context changes cannot retarget a draft, and no token reaches storage/logs/UI text.
 
-- [ ] **Step 2: Self-review round two — failure, concurrency, privacy, and semantic consistency.**
+- [x] **Step 2: Self-review round two — failure, concurrency, privacy, and semantic consistency.**
 
   Review malformed JSON, oversized input, missing/expired bearer, cross-origin requests, duplicate clicks, retry after lost ACK, simultaneous Staff advance, HOLD, panel change, no current performance, localStorage failure/quota, polling overlap, generated JS freshness, and all source paths. Add isolated regression fixes with their own tests and commits.
 
-- [ ] **Step 3: Run the complete local gates.**
+- [x] **Step 3: Run the complete local gates.**
 
   ```powershell
   python manage.py check
@@ -278,11 +283,11 @@
   npm run check:pyright:entry-access
   ```
 
-- [ ] **Step 4: Run Docker/PostgreSQL focused verification without destroying source state.**
+- [x] **Step 4: Run Docker/PostgreSQL focused verification without destroying source state.**
 
   Use the already-running Compose database or a separate temporary target. Never run `docker compose down --volumes`, reset the source database, or drop source volumes. Run PostgreSQL authority/race tests and the backup/restore rehearsal when host-port conditions permit; record any environmental HOLD accurately.
 
-- [ ] **Step 5: Verify final Git state, push feature, merge non-fast-forward, and push main.**
+- [x] **Step 5: Verify final Git state, push feature, merge non-fast-forward, and push main.**
 
   ```powershell
   git status --short
@@ -295,4 +300,3 @@
   ```
 
   If a push times out, retry with `git -c http.proxy=http://127.0.0.1:12334 -c https.proxy=http://127.0.0.1:12334 push ...`. Keep the feature branch until remote main and final clean status are verified.
-
