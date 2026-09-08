@@ -199,5 +199,19 @@ Participant / Judge / Audience 参加的现场彩排。
 fixture，导致 1 个配置测试因权限失败；按现有验收脚本补齐 fixture 后，单测和完整
 `948` 测试均通过。镜像仍保持非 root `artflow` 运行，未为测试放宽 `/app` 写权限。
 
+### 2026-09-08 M2-C 本地 authority / 学校准备门禁记录
+
+本轮已完成本机 SQLite 代码门禁：全仓库 `pytest` 为 `1069 passed, 30 skipped`，
+客户端编译与 19 项客户端测试通过，项目 Pyright、entry-access Pyright、Ruff、mypy、
+Django check、migration check 和文档链接检查通过。新增 judge authority focused
+测试覆盖 direct/proxy/paper provenance、命令幂等、重复事实、stale context、跨 origin
+失败、无 bearer 和客户端 token 不落草稿。
+
+PostgreSQL/Compose/Playwright/备份恢复门禁本轮未宣称通过。2026-09-08 本机执行
+`docker version` 与 `docker compose ps` 均失败，原始错误为：
+`failed to connect to the Docker API at npipe:////./pipe/dockerDesktopLinuxEngine; check if the path is correct and if the daemon is running: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.`
+因此 PostgreSQL row-lock 竞态、Compose 验收、隔离备份恢复和带凭据浏览器流程仍为 `HOLD`，
+需 Docker Desktop/Compose 服务可用后重跑，不能用 SQLite 结果替代。
+
 因此，M1 的代码、自动化验收和本地技术恢复彩排已完成；M1-J 的“正式现场彩排”
 仍待真实参与者、真实部署域名和人工步骤完成后才能最终关闭。
