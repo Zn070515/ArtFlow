@@ -119,6 +119,7 @@ def redeem(request: HttpRequest) -> JsonResponse:
         {
             "activity_id": result.session.ticket.activity_id,
             "expires_at": result.session.expires_at.isoformat(),
+            "ticket_state": result.session.ticket.state,
         }
     )
     response.set_cookie(

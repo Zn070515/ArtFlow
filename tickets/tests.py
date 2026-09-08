@@ -566,6 +566,7 @@ class TicketPublicHttpTests(TestCase):
         self.assertEqual(redeemed.status_code, 200)
         self.assertNotIn("secret", redeemed.json())
         self.assertNotIn(self.issued.secret, redeemed.content.decode())
+        self.assertEqual(redeemed.json()["ticket_state"], "issued")
         cookie = redeemed.cookies["artflow_ticket_session"]
         self.assertTrue(cookie["httponly"])
         self.assertEqual(cookie["samesite"], "Lax")
@@ -575,6 +576,21 @@ class TicketPublicHttpTests(TestCase):
             ticket_model(self).objects.get(pk=self.issued.ticket.pk).state,
             ticket_model(self).State.ISSUED,
         )
+
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_CLOSED,
+            actor=self.admin,
+        )
+        ticket_services.check_in_ticket(self.issued.secret, actor=self.staff)
+        checked_in = csrf_client.post(
+            "/tickets/redeem/",
+            data=json.dumps({"secret": self.issued.secret}),
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        self.assertEqual(checked_in.status_code, 200)
+        self.assertEqual(checked_in.json()["ticket_state"], "checked_in")
 
         query_attempt = self.client.get(f"/tickets/redeem/?secret={self.issued.secret}")
         self.assertEqual(query_attempt.status_code, 405)
