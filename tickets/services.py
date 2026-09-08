@@ -142,6 +142,53 @@ def issue_ticket(ticket: Ticket, *, actor: Any) -> IssuedTicket:
         return IssuedTicket(ticket=locked_ticket, secret=raw_secret)
 
 
+def issue_ticket_batch(
+    activity: Activity,
+    *,
+    actor: Any,
+    quantity: object,
+    batch_reference: str | None = None,
+    serial_prefix: str | None = None,
+) -> list[IssuedTicket]:
+    current_actor = require_current_staff(actor)
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or not 1 <= quantity <= 100:
+        raise ValidationError("批量签发数量必须是 1 到 100 之间的整数。")
+
+    normalized_batch = (batch_reference or "").strip() or None
+    normalized_prefix = (serial_prefix or "").strip() or None
+    if quantity > 1 and normalized_prefix is None:
+        raise ValidationError("批量签发需要填写编号前缀。")
+
+    serial_numbers = [
+        f"{normalized_prefix}-{index:03d}" if normalized_prefix else None
+        for index in range(1, quantity + 1)
+    ]
+    with transaction.atomic():
+        locked_activity = lock_activity_for_action(activity, ActivityAction.MANAGE_TICKETS)
+        if normalized_batch is not None:
+            if Ticket._base_manager.filter(
+                activity=locked_activity,
+                batch_reference=normalized_batch,
+                serial_number__in=[serial for serial in serial_numbers if serial is not None],
+            ).exists():
+                raise ValidationError("批次中已有相同票据编号。")
+
+        created_tickets = []
+        with authority_write(TICKET_STATE):
+            for serial_number in serial_numbers:
+                ticket = Ticket(
+                    activity=locked_activity,
+                    batch_reference=normalized_batch,
+                    serial_number=serial_number,
+                    state=Ticket.State.CREATED,
+                    is_test_data=locked_activity.is_test_mode,
+                )
+                ticket.save()
+                created_tickets.append(ticket)
+
+        return [issue_ticket(ticket, actor=current_actor) for ticket in created_tickets]
+
+
 def check_in_ticket(
     raw_secret: str,
     *,

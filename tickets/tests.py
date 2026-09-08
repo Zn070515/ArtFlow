@@ -301,6 +301,65 @@ class TicketLifecycleServiceTests(TestCase):
             ).exists()
         )
 
+    def test_batch_issue_creates_sequential_issued_tickets_atomically(self):
+        issue_batch = self._service("issue_ticket_batch")
+
+        issued = issue_batch(
+            self.activity,
+            actor=self.staff,
+            quantity=3,
+            batch_reference="GATE-A",
+            serial_prefix="A",
+        )
+
+        self.assertEqual(
+            [item.ticket.serial_number for item in issued], ["A-001", "A-002", "A-003"]
+        )
+        self.assertEqual({item.ticket.state for item in issued}, {ticket_model(self).State.ISSUED})
+        self.assertEqual(len({item.secret for item in issued}), 3)
+        self.assertEqual(ticket_model(self).objects.filter(activity=self.activity).count(), 3)
+
+    def test_batch_issue_rejects_collisions_without_partial_rows(self):
+        issue_batch = self._service("issue_ticket_batch")
+        issue_batch(
+            self.activity,
+            actor=self.staff,
+            quantity=1,
+            batch_reference="GATE-B",
+            serial_prefix="B",
+        )
+
+        with self.assertRaises(ValidationError):
+            issue_batch(
+                self.activity,
+                actor=self.staff,
+                quantity=2,
+                batch_reference="GATE-B",
+                serial_prefix="B",
+            )
+
+        self.assertEqual(ticket_model(self).objects.filter(activity=self.activity).count(), 1)
+
+    def test_batch_issue_rejects_invalid_quantity_and_participant(self):
+        issue_batch = self._service("issue_ticket_batch")
+
+        with self.assertRaises(ValidationError):
+            issue_batch(
+                self.activity,
+                actor=self.staff,
+                quantity=0,
+                batch_reference="GATE-C",
+                serial_prefix="C",
+            )
+        with self.assertRaises(PermissionDenied):
+            issue_batch(
+                self.activity,
+                actor=self.participant,
+                quantity=1,
+                batch_reference="GATE-C",
+                serial_prefix="C",
+            )
+
     def test_check_in_and_terminal_transitions_are_service_owned(self):
         create_ticket = self._service("create_ticket")
         issue_ticket = self._service("issue_ticket")
