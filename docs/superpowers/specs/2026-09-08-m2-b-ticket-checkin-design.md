@@ -159,8 +159,8 @@ history and sends the secret in a body-only `POST` to the redeem endpoint.
 
 Public redeem:
 
-- is deliberately CSRF-exempt because it is body-only bearer bootstrap and does
-  not mutate Ticket authority;
+- requires the same-origin CSRF token rendered by the scan page because success
+  sets a browser Ticket session cookie; it never uses a CSRF exemption;
 - has a strict JSON body limit and a route-specific rate limit;
 - accepts no URL token and no cookie as the source of the initial secret;
 - returns a generic failure for unknown, `CREATED`, expired, void, or revoked
@@ -260,8 +260,8 @@ The exact URL names follow repository conventions, but the contracts are fixed:
 ### Public endpoints
 
 - scan page: no state mutation;
-- redeem: body-only JSON Secret, CSRF-exempt bootstrap, rate-limited, strict
-  body-size limit, HttpOnly session cookie on success;
+- redeem: body-only JSON Secret, same-origin CSRF-protected bootstrap,
+  rate-limited, strict body-size limit, HttpOnly session cookie on success;
 - ticket-backed vote: existing public vote surface, using the TicketAccessSession
   and standard CSRF protection for browser POSTs.
 

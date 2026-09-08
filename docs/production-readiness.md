@@ -76,7 +76,8 @@ M2-B 的票据是非个人化的权威输入：Ticket 只保存 SHA-256 digest�
 原始 secret 只在 Staff 签发响应中出现一次。生命周期由服务层审计并锁定活动与票据：
 `CREATED → ISSUED → CHECKED_IN`，另有受控的 `VOID/REVOKED` 终态。公开兑换只生成
 短期 HttpOnly `artflow_ticket_session` cookie，不改变票据状态；过期会话可通过
-`uv run python manage.py purge_ticket_sessions` 清理。
+`uv run python manage.py purge_ticket_sessions` 清理。扫描页先取得同源 CSRF token，
+再以 body-only `POST` 兑换；缺少或不匹配 CSRF token 的跨站请求不能设置票据会话。
 
 配置了 `VoteSession.requires_ticket` 的投票，提交时必须持有同活动、未过期、未撤销且
 已 `CHECKED_IN` 的票据会话。`VoteBallot.ticket` 是 PROTECT 关系，数据库约束保证同一

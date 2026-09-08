@@ -80,11 +80,11 @@
 
 **Files:** `tickets/views.py`, `tickets/urls.py`, `frontend/ticket_scan.ts`, `tsconfig.client.json` if a new entry requires it, `static/dist/ticket_scan.js`, `templates/tickets/scan.html`, `tickets/tests.py`, `tests/e2e/runtime-smoke.spec.ts`, `tests/client/ticket_scan.test.mjs`.
 
-**Interfaces consumed:** Task 2 `redeem_ticket`/`authenticate_ticket_session`, `common.rate_limit.allow`, `common.audit.client_ip`, Django CSRF exemption conventions for non-authority public redeem, and the pinned TypeScript build.
+**Interfaces consumed:** Task 2 `redeem_ticket`/`authenticate_ticket_session`, `common.rate_limit.allow`, `common.audit.client_ip`, Django same-origin CSRF protection for the cookie-setting public redeem, and the pinned TypeScript build.
 
 **Interfaces produced:** Read-only `/tickets/scan/`, body-only `POST /tickets/redeem/`, HttpOnly `artflow_ticket_session` cookie, strict JSON cap, per-IP rate limit with `429` and `Retry-After`, and a browser flow that consumes a fragment without putting the secret in history or network URLs.
 
-- [ ] Add failing Django tests for GET scan, redeem success, unknown/CREATED/expired/void/revoked secret, replay, cookie attributes, oversized/malformed/non-object JSON, URL/query/path/cookie-as-initial-credential rejection, generic error shape, and rate-limit `429 Retry-After`.
+- [ ] Add failing Django tests for GET scan, CSRF rejection and redeem success, unknown/CREATED/expired/void/revoked secret, replay, cookie attributes, oversized/malformed/non-object JSON, URL/query/path/cookie-as-initial-credential rejection, generic error shape, and rate-limit `429 Retry-After`.
 - [ ] Add failing tests proving a successful public redeem does not transition Ticket state, does not create a Ballot, and writes no raw credential to AuditLog or response JSON. Test production cookie flags (`Secure`, `HttpOnly`, `SameSite=Lax`) and development test behavior separately.
 - [ ] Add failing client tests for fragment extraction, immediate `history.replaceState` scrubbing, POST body-only redemption, successful cookie-based navigation, and no token in query/path/console-visible error text.
 - [ ] Commit the red public/client tests as `test: cover ticket redeem boundary`; run the focused Django and client tests.
