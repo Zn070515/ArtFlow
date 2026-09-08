@@ -2,6 +2,8 @@ import json
 from dataclasses import asdict
 from urllib.parse import urlsplit
 
+from common.audit import client_ip
+from common.rate_limit import allow
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
@@ -36,6 +38,16 @@ def _error(reason_code: str, status: int) -> JsonResponse:
     return _no_store(
         JsonResponse({"detail": "评委请求未被接受。", "reason_code": reason_code}, status=status)
     )
+
+
+def _rate_limit(request: HttpRequest, operation: str, *, limit: int) -> JsonResponse | None:
+    source = client_ip(request) or "unknown"
+    decision = allow(f"judge:{operation}:{source}", limit=limit, window_seconds=60)
+    if decision.allowed:
+        return None
+    response = _error("RATE_LIMITED", 429)
+    response["Retry-After"] = str(max(1, decision.retry_after_seconds))
+    return response
 
 
 def _same_origin(request: HttpRequest) -> bool:
@@ -88,6 +100,9 @@ def judge_terminal(request: HttpRequest):
 
 @require_http_methods(["GET"])
 def judge_context(request: HttpRequest) -> JsonResponse:
+    limited = _rate_limit(request, "context", limit=120)
+    if limited is not None:
+        return limited
     if not _same_origin(request):
         return _error("ORIGIN_REJECTED", 403)
     token = _bearer_token(request)
@@ -103,6 +118,9 @@ def judge_context(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_http_methods(["POST"])
 def judge_score(request: HttpRequest) -> JsonResponse:
+    limited = _rate_limit(request, "score", limit=30)
+    if limited is not None:
+        return limited
     if not _same_origin(request):
         return _error("ORIGIN_REJECTED", 403)
     token = _bearer_token(request)
