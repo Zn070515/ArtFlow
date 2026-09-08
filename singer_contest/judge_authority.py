@@ -395,6 +395,8 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
     if performance is None:
         raise ValidationError("当前表演不属于该评委轮次。")
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
+    if run_state.state == PerformanceRunState.State.HOLD:
+        raise PermissionDenied("ROUND_ON_HOLD")
     next_version = run_state.context_version
     if run_state.current_performance_id != performance.pk:
         next_version += 1
