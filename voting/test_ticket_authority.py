@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from common.authority import TICKET_STATE, authority_write
+from common.authority import RULESET_FREEZE, TICKET_STATE, authority_write
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -16,7 +16,7 @@ class TicketVoteAuthorityTests(TestCase):
     def setUp(self):
         self.activity = Activity.objects.create(
             title="Ticket vote authority",
-            activity_type=Activity.Type.GENERAL,
+            activity_type=Activity.Type.SINGER_CONTEST,
             is_test_mode=True,
         )
         self.other_activity = Activity.objects.create(
@@ -64,6 +64,28 @@ class TicketVoteAuthorityTests(TestCase):
         self.session = lock_vote_session(self.session, self.staff)
         with self.assertRaises(ValidationError):
             VoteSession.objects.filter(pk=self.session.pk).update(requires_ticket=False)
+
+    def test_ticket_requirement_cannot_change_after_ruleset_binding_freeze(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from ruleset.test_schema import DEF
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Frozen ticket binding",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=DEF,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                binding={"vote_keys": {"audience": self.session.pk}},
+            )
+
+        self.session.requires_ticket = True
+        with self.assertRaises(ValidationError):
+            self.session.save(update_fields=["requires_ticket"])
 
     def test_ticket_ballot_rejects_cross_activity_relation(self):
         ballot = VoteBallot(
