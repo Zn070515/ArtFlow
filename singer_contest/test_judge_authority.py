@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from accounts.models import User
 from common.authority import (
     ACCOUNT_AUTHORITY,
@@ -35,14 +37,17 @@ from .judge_authority import (
 )
 from .models import (
     ContestRound,
+    CriterionScore,
     JudgeSeat,
     JudgeSeatGrant,
     JudgeSession,
     PerformanceRunState,
     RoundPanelSnapshot,
     RoundPanelSnapshotMember,
+    RubricCriterion,
     ScoreRecord,
     ScoreSource,
+    ScoringRubric,
 )
 
 
@@ -288,11 +293,33 @@ class JudgePanelServiceTests(TestCase):
             round=self.round,
             singer=self.singer,
             sequence=1,
+            song_title="Song title",
             is_test_data=True,
         )
         with authority_write(CONTEST_ROUND_STATE):
             self.round.status = ContestRound.Status.PREPARED
             self.round.save(update_fields=["status"])
+
+    def _bind_rubric(self, *max_scores: str) -> tuple[ScoringRubric, list[RubricCriterion]]:
+        rubric = ScoringRubric.objects.create(
+            activity=self.activity,
+            name="Judge rubric",
+            is_test_data=True,
+        )
+        criteria = [
+            RubricCriterion.objects.create(
+                rubric=rubric,
+                name=f"Criterion {index}",
+                max_score=Decimal(max_score),
+                sequence=index,
+                is_test_data=True,
+            )
+            for index, max_score in enumerate(max_scores, start=1)
+        ]
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.rubric = rubric
+            self.round.save(update_fields=["rubric"])
+        return rubric, criteria
 
     def test_prepare_panel_creates_immutable_snapshot_seat_and_live_context(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
@@ -383,6 +410,109 @@ class JudgePanelServiceTests(TestCase):
 
         self.assertEqual(context.round_id, self.round.pk)
         self.assertIsNone(context.performance_id)
+
+    def test_judge_context_includes_current_performance_display_fields(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        context = get_judge_context(redeemed.token)
+
+        self.assertEqual(context.round_name, "Service round")
+        self.assertEqual(context.performance_label, "第 1 个节目")
+        self.assertEqual(context.singer_name, "Singer")
+        self.assertEqual(context.song_title, "Song title")
+
+    def test_rubric_score_materializes_criterion_facts_and_server_computed_total(self):
+        _, criteria = self._bind_rubric("40", "60")
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        result = submit_judge_score(
+            redeemed.token,
+            command_id="judge-rubric-command-1",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={
+                "criteria": [
+                    {"criterion_id": criteria[0].pk, "value": "36.00"},
+                    {"criterion_id": criteria[1].pk, "value": "54.00"},
+                ],
+                "notes": "rubric note",
+            },
+        )
+
+        record = ScoreRecord.objects.get(pk=result.score_record_id)
+        self.assertEqual(record.score, Decimal("90.00"))
+        self.assertEqual(record.notes, "rubric note")
+        self.assertEqual(
+            list(
+                CriterionScore.objects.filter(score_record=record)
+                .order_by("criterion_id")
+                .values_list("criterion_id", "value")
+            ),
+            [(criteria[0].pk, Decimal("36.00")), (criteria[1].pk, Decimal("54.00"))],
+        )
+
+    def test_rubric_score_rejects_total_only_and_keeps_authoritative_rows_empty(self):
+        self._bind_rubric("100")
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        with self.assertRaises(ValidationError):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-rubric-total-only",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={"score": "90"},
+            )
+
+        self.assertFalse(ScoreRecord.objects.exists())
+        self.assertFalse(CriterionScore.objects.exists())
+
+    def test_rubric_score_rejects_incomplete_duplicate_and_out_of_range_criteria(self):
+        _, criteria = self._bind_rubric("40", "60")
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        payloads = (
+            [
+                {"criterion_id": criteria[0].pk, "value": "36"},
+            ],
+            [
+                {"criterion_id": criteria[0].pk, "value": "36"},
+                {"criterion_id": criteria[0].pk, "value": "35"},
+                {"criterion_id": criteria[1].pk, "value": "54"},
+            ],
+            [
+                {"criterion_id": criteria[0].pk, "value": "40.01"},
+                {"criterion_id": criteria[1].pk, "value": "59.99"},
+            ],
+        )
+        for index, criterion_payload in enumerate(payloads, start=1):
+            with self.subTest(case=index), self.assertRaises(ValidationError):
+                submit_judge_score(
+                    redeemed.token,
+                    command_id=f"judge-rubric-invalid-{index}",
+                    expected_context_version=1,
+                    expected_performance_id=self.performance.pk,
+                    score_payload={"criteria": criterion_payload, "notes": ""},
+                )
+
+        self.assertFalse(ScoreRecord.objects.exists())
+        self.assertFalse(CriterionScore.objects.exists())
 
     def test_live_performance_transitions_increment_context_version(self):
         prepare_judge_panel(self.round.pk, operator=self.operator)
