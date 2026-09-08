@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest, JsonResponse
+from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -78,6 +79,11 @@ def _reason_from_messages(error: ValidationError) -> str:
         if message in _KNOWN_REASON_CODES:
             return message
     return "INVALID_REQUEST"
+
+
+@require_http_methods(["GET"])
+def judge_terminal(request: HttpRequest):
+    return render(request, "singer_contest/judge_terminal.html")
 
 
 @require_http_methods(["GET"])
