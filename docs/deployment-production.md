@@ -92,6 +92,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 - 登录和注册 POST 在进入密码哈希/表单深处理前按客户端 IP 限流；生产限流桶必须使用 PostgreSQL，不能使用每个 Gunicorn worker 独立的本地缓存。
 - Caddy 删除上游 `Server` 指纹并拒绝超过 manifest 体积上限的请求；应用仍会再次按业务用途校验文件大小、扩展名和媒体类型。
 - volumetric DDoS、TLS 握手洪泛、慢客户端连接和公网连接数保护必须由学校网络、云负载均衡或 WAF/边缘服务提供，并在正式接入前完成限速、连接超时、黑名单/挑战和告警契约验证。仅依赖 Django/Caddy 或本机 Gunicorn 不满足学校公网接入条件。
+- Ticket redeem 的应用层 JSON 上限、IP 限流和 HttpOnly cookie 只保护应用边界；它们不替代边缘 DDoS/WAF/连接保护。正式接入学校前还必须演练 Ticket 重放、跨活动票、未检票票和并发投票，并确认边缘层不会把原始 secret/token 写入访问日志、trace 或告警载荷。
 
 ## 发布门禁
 

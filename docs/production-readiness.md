@@ -70,6 +70,29 @@ Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的�
 JudgeSeat、正式扫码页或业务工作区前，仍必须完成 PostgreSQL 并发/恢复彩排和真实角色
 流程验证；因此 M2-A 继续保持 `EXPERIMENTAL`，不会被误标为 Judge/Ticket 已上线。
 
+## M2-B Ticket / Check-in / Audience Entitlement
+
+M2-B 的票据是非个人化的权威输入：Ticket 只保存 SHA-256 digest、活动和库存标识，
+原始 secret 只在 Staff 签发响应中出现一次。生命周期由服务层审计并锁定活动与票据：
+`CREATED → ISSUED → CHECKED_IN`，另有受控的 `VOID/REVOKED` 终态。公开兑换只生成
+短期 HttpOnly `artflow_ticket_session` cookie，不改变票据状态；过期会话可通过
+`uv run python manage.py purge_ticket_sessions` 清理。
+
+配置了 `VoteSession.requires_ticket` 的投票，提交时必须持有同活动、未过期、未撤销且
+已 `CHECKED_IN` 的票据会话。`VoteBallot.ticket` 是 PROTECT 关系，数据库约束保证同一
+票据在同一投票场次最多产生一张 ballot；浏览器 session 和 IP 只用于兼容性、幂等和
+滥用信号，不构成投票资格。未启用 ticket 的旧投票仍按浏览器 session 去重且 ballot
+不附带 Ticket。
+
+彩排必须逐项验证：重复扫码/兑换、未检票票、作废/撤销票、过期 cookie、跨活动票、
+同票并发投票、同浏览器换票、无票旧流程，以及 TEST cleanup 不触碰 FORMAL Ticket、
+ballot 和 audit。数据库故障时 `doctor` 只报告连接失败，不继续查询票据表；doctor、
+备份 manifest 和 audit 只输出非秘密计数/元数据。
+
+应用限流和 body 上限不等于 DDoS 防护。TLS 洪泛、慢连接、连接数上限、volumetric
+DDoS、WAF challenge/黑名单和学校公网入口审批仍由部署方、学校网络或边缘服务负责，
+必须在正式接入前单独验证并保留证据。
+
 ## M2 渐进式能力门禁
 
 每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
