@@ -572,6 +572,7 @@ class TicketPublicHttpTests(TestCase):
         )
         self.assertEqual(unknown.status_code, 400)
         self.assertEqual(unknown.json()["reason_code"], "INVALID_TICKET")
+        self.assertEqual(unknown["Cache-Control"], "no-store")
         self.assertNotIn(self.issued.secret, unknown.content.decode())
 
         oversized = csrf_client.post(
@@ -581,6 +582,7 @@ class TicketPublicHttpTests(TestCase):
         )
         self.assertEqual(oversized.status_code, 413)
         self.assertEqual(oversized.json()["reason_code"], "REQUEST_TOO_LARGE")
+        self.assertEqual(oversized["Cache-Control"], "no-store")
 
     @override_settings(RATE_LIMIT_BACKEND="locmem")
     def test_redeem_rate_limit_returns_retry_after(self):
@@ -598,3 +600,4 @@ class TicketPublicHttpTests(TestCase):
         )
         self.assertEqual(limited.status_code, 429)
         self.assertTrue(limited["Retry-After"].isdigit())
+        self.assertEqual(limited["Cache-Control"], "no-store")
