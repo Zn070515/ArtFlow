@@ -61,6 +61,27 @@ def _ensure_vote_session_origins(*session_ids: int | None) -> None:
         _ensure_vote_session_mutable(session_id)
 
 
+def _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id: int | None) -> None:
+    if not vote_session_id:
+        return
+    from ruleset.models import RulesetVersion
+
+    activity_id = (
+        VoteSession._base_manager.filter(pk=vote_session_id)
+        .values_list("activity_id", flat=True)
+        .first()
+    )
+    if activity_id is None:
+        return
+    for binding in RulesetVersion.objects.filter(
+        status=RulesetVersion.Status.FROZEN,
+        ruleset__activity_id=activity_id,
+    ).values_list("binding", flat=True):
+        vote_keys = (binding or {}).get("vote_keys") or {}
+        if any(str(bound_id) == str(vote_session_id) for bound_id in vote_keys.values()):
+            raise ValidationError("已冻结赛制绑定的投票配置不可直接修改。")
+
+
 def _session_id_for(model, pk: int | None) -> int | None:
     if not pk:
         return None
@@ -272,6 +293,9 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("投票开放后，投票配置不可直接修改。")
         if self.filter(is_locked=True).exists():
             raise ValidationError("投票锁定后，投票配置不可直接修改。")
+        if "requires_ticket" in fields:
+            for vote_session_id in self.values_list("pk", flat=True):
+                _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id)
 
     def update(self, **kwargs):
         self._ensure_state_authorized(kwargs)
@@ -297,6 +321,8 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                         else "投票锁定后，投票配置不可直接修改。"
                     )
                     raise ValidationError(message)
+                if "requires_ticket" in fields:
+                    _ensure_vote_session_not_bound_to_frozen_ruleset(obj.pk)
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
@@ -312,7 +338,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                     }
                     existing = (
                         self.model._base_manager.filter(**lookup)
-                        .values("is_open", "is_locked")
+                        .values("pk", "is_open", "is_locked")
                         .first()
                     )
                     if existing and (existing["is_open"] or existing["is_locked"]):
@@ -322,6 +348,8 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                             else "投票锁定后，投票配置不可直接修改。"
                         )
                         raise ValidationError(message)
+                    if existing and "requires_ticket" in update_fields:
+                        _ensure_vote_session_not_bound_to_frozen_ruleset(existing["pk"])
         for vote_session in objs:
             vote_session._ensure_initial_state_authorized()
         return super().bulk_create(objs, *args, **kwargs)
@@ -451,6 +479,12 @@ class VoteSession(models.Model):
                     else "投票锁定后，投票配置不可直接修改。"
                 )
                 raise ValidationError(message)
+            if (
+                stored
+                and "requires_ticket" in compared_configuration_fields
+                and stored["requires_ticket"] != self.requires_ticket
+            ):
+                _ensure_vote_session_not_bound_to_frozen_ruleset(self.pk)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
