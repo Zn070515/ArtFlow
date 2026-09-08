@@ -189,6 +189,38 @@ class JudgeAuthorityModelGuardTests(TestCase):
             RoundPanelSnapshotMember._base_manager.get(pk=member.pk).seat_key, "seat-1"
         )
 
+    def test_direct_score_source_cannot_be_fabricated_by_ordinary_orm_write(self):
+        snapshot, _, seat = self._panel_rows()
+        from .models import SingerRegistration
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            singer_user = User.objects.create_user(
+                username="judge-authority-singer", password="pass", role=User.Role.PARTICIPANT
+            )
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Singer",
+            student_id="guard-001",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000000",
+            song_name="Song",
+            is_test_data=True,
+        )
+        with self.assertRaises(ValidationError):
+            ScoreRecord.objects.create(
+                round=self.round,
+                singer=singer,
+                judge=self.judge,
+                score=90,
+                source=ScoreSource.DIRECT_JUDGE,
+                panel_snapshot=snapshot,
+                judge_seat=seat,
+                source_command_id="forged-command",
+                is_test_data=True,
+            )
+
     def test_snapshot_member_rejects_cross_round_source(self):
         snapshot, _, _ = self._panel_rows()
         with authority_write(CONTEST_ROUND_STATE):

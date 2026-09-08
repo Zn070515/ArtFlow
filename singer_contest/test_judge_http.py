@@ -8,3 +8,21 @@ class JudgeRouteContractTests(SimpleTestCase):
 
     def test_judge_score_route_is_mounted(self):
         self.assertEqual(reverse("judge:score"), "/judge/score/")
+
+    def test_context_rejects_missing_bearer_without_secret_detail(self):
+        response = self.client.get(reverse("judge:context"))
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["reason_code"], "INVALID_JUDGE_SESSION")
+        self.assertEqual(response["Cache-Control"], "no-store")
+
+    def test_score_rejects_cross_origin_before_reading_body(self):
+        response = self.client.post(
+            reverse("judge:score"),
+            data="{}",
+            content_type="application/json",
+            HTTP_ORIGIN="https://evil.example",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["reason_code"], "ORIGIN_REJECTED")
