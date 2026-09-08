@@ -28,7 +28,7 @@ class JudgeTestDataCleanupTests(TestCase):
                 username="judge-cleanup-operator",
                 email="judge-cleanup@example.test",
                 password="unused",
-            )
+            )  # type: ignore[no-untyped-call]
 
         with TemporaryDirectory() as directory:
             fixture_path = Path(directory) / "judge-fixture.json"
