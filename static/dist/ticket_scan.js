@@ -21,9 +21,13 @@
     }
     async function redeem(secret, status) {
         try {
+            const csrf = document.querySelector('[name="csrfmiddlewaretoken"]');
             const response = await fetch(redeemEndpoint, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(csrf?.value ? { "X-CSRFToken": csrf.value } : {}),
+                },
                 body: JSON.stringify({ secret }),
             });
             setStatus(status, response.ok ? successMessage : failureMessage);

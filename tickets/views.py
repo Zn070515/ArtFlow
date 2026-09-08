@@ -11,7 +11,6 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, render
-from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import Ticket
@@ -96,7 +95,6 @@ def scan(request: HttpRequest):
     return render(request, "tickets/scan.html")
 
 
-@csrf_exempt
 @require_POST
 def redeem(request: HttpRequest) -> JsonResponse:
     decision = allow(
