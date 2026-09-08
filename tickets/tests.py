@@ -214,6 +214,17 @@ class TicketAccessSessionContractTests(TestCase):
         with self.assertRaises(ValidationError):
             Session._base_manager.filter(pk=session.pk).delete()
 
+    def test_expired_sessions_are_removed_only_by_cleanup_service(self):
+        purge = getattr(ticket_services, "purge_expired_ticket_sessions", None)
+        if purge is None:
+            self.fail("tickets.services.purge_expired_ticket_sessions is not implemented")
+        session = self._session(expires_at=timezone.now() - timedelta(minutes=1))
+
+        deleted = purge()
+
+        self.assertEqual(deleted, 1)
+        self.assertFalse(ticket_session_model(self).objects.filter(pk=session.pk).exists())
+
 
 class TicketAuditContractTests(TestCase):
     def test_ticket_audit_action_types_are_explicit_and_credential_free(self):
