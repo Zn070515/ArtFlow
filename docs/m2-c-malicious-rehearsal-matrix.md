@@ -182,4 +182,3 @@
 | Authority 证明 | score/criterion/ballot/performance/group fact、StageResult、Award 前后 digest/计数 |
 | 失败与处置 | 发现、是否回滚、临时隔离、owner、修复 commit、复测日期 |
 | 外部 HOLD | IdP/MFA/TLS/WAF/DDoS/学校网络/留存责任方和签字人 |
-
