@@ -175,10 +175,21 @@ jobs:
       - name: Install Chromium for browser smoke
         run: npx playwright install --with-deps chromium
 
+      - name: Prepare isolated Judge browser authority fixture
+        run: |
+          docker compose exec -T web python manage.py prepare_judge_e2e \
+            --output-file /tmp/artflow-judge-e2e.json
+          docker compose cp web:/tmp/artflow-judge-e2e.json "$RUNNER_TEMP/judge-e2e.json"
+
       - name: Run browser runtime smoke
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
+          PLAYWRIGHT_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/judge-e2e.json
         run: npm run test:e2e
+
+      - name: Remove Judge browser fixture
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/judge-e2e.json"
 
       - name: Check published static assets from runner
         shell: bash
