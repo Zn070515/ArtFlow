@@ -19,6 +19,7 @@ from django.test import TestCase
 from entry_access.services import redeem_access_grant
 
 from .judge_authority import (
+    JudgeIdempotencyConflict,
     advance_performance,
     authenticate_judge_session,
     hold_judge_panel,
@@ -27,6 +28,7 @@ from .judge_authority import (
     prepare_judge_panel,
     resume_judge_panel,
     resume_performance,
+    submit_judge_score,
 )
 from .models import (
     ContestRound,
@@ -36,6 +38,8 @@ from .models import (
     PerformanceRunState,
     RoundPanelSnapshot,
     RoundPanelSnapshotMember,
+    ScoreRecord,
+    ScoreSource,
 )
 
 
@@ -342,3 +346,72 @@ class JudgePanelServiceTests(TestCase):
         resumed = resume_performance(self.round.pk, operator=self.operator)
         self.assertEqual(resumed.state, PerformanceRunState.State.PERFORMING)
         self.assertEqual(resumed.context_version, 1)
+
+    def test_judge_score_is_idempotent_and_provenance_bound(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        first = submit_judge_score(
+            redeemed.token,
+            command_id="judge-command-1",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+        replay = submit_judge_score(
+            redeemed.token,
+            command_id="judge-command-1",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+
+        self.assertEqual(first.receipt_id, replay.receipt_id)
+        self.assertEqual(first.score_record_id, replay.score_record_id)
+        record = ScoreRecord.objects.get(pk=first.score_record_id)
+        self.assertEqual(record.source, ScoreSource.DIRECT_JUDGE)
+        self.assertEqual(record.judge_seat_id, seat.pk)
+        self.assertEqual(record.panel_snapshot_id, snapshot.pk)
+
+    def test_judge_score_rejects_command_reuse_with_changed_payload(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        submit_judge_score(
+            redeemed.token,
+            command_id="judge-command-conflict",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+        with self.assertRaises(JudgeIdempotencyConflict):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-command-conflict",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={"score": "91.51"},
+            )
+
+    def test_judge_score_rejects_stale_context_without_partial_write(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        with self.assertRaises(ValidationError):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-command-stale",
+                expected_context_version=0,
+                expected_performance_id=self.performance.pk,
+                score_payload={"score": "91.50"},
+            )
+        self.assertFalse(ScoreRecord.objects.exists())
