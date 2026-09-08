@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from common.authority import authority_write
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
 from core.models import Activity
+from core.services import transition_activity_phase
 from django.apps import apps
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from . import services as ticket_services
 
 TICKET_STATE_SCOPE = "ticket.state"
 TICKET_SESSION_STATE_SCOPE = "ticket_access_session.state"
@@ -187,8 +190,14 @@ class TicketAccessSessionContractTests(TestCase):
         Session = ticket_session_model(self)
         field_names = {field.name for field in Session._meta.get_fields()}
         self.assertTrue(
-            {"ticket", "token_digest", "expires_at", "last_seen_at", "revoked_at", "created_at"}
-            .issubset(field_names)
+            {
+                "ticket",
+                "token_digest",
+                "expires_at",
+                "last_seen_at",
+                "revoked_at",
+                "created_at",
+            }.issubset(field_names)
         )
         session = self._session()
         self.assertEqual(len(session.token_digest), 64)
@@ -224,3 +233,78 @@ class TicketAuditContractTests(TestCase):
         raw_session_token = "raw-ticket-session-token"
         for value in (raw_secret, raw_session_token):
             self.assertNotIn(value, " ".join(str(action.value) for action in actions))
+
+
+class TicketLifecycleServiceTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.staff = User.objects.create_user(username="ticket-staff", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff.role = User.Role.STAFF
+            self.staff.save(update_fields=["role", "is_staff"])
+        self.admin = User.objects.create_user(username="ticket-admin", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin.role = User.Role.ADMIN
+            self.admin.save(update_fields=["role", "is_staff"])
+        self.activity = Activity.objects.create(
+            title="Ticket lifecycle activity",
+            activity_type=Activity.Type.GENERAL,
+            is_test_mode=True,
+        )
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_OPEN,
+            actor=self.admin,
+        )
+
+    def _service(self, name):
+        service = getattr(ticket_services, name, None)
+        if service is None:
+            self.fail(f"tickets.services.{name} is not implemented")
+        return service
+
+    def test_issue_generates_a_one_time_digest_only_secret(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        ticket = create_ticket(
+            self.activity,
+            actor=self.staff,
+            batch_reference="LIFE-001",
+            serial_number="0001",
+        )
+        issued = issue_ticket(ticket, actor=self.staff)
+
+        self.assertEqual(ticket_model(self).State.ISSUED, issued.ticket.state)
+        self.assertEqual(len(issued.secret), 43)
+        self.assertNotEqual(issued.secret, issued.ticket.secret_digest)
+        issued.ticket.refresh_from_db()
+        self.assertNotIn(issued.secret, issued.ticket.secret_digest or "")
+        self.assertNotIn(issued.secret, str(issued.ticket))
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.TICKET_ISSUE,
+                target=f"Ticket:{issued.ticket.pk}",
+            ).exists()
+        )
+
+    def test_check_in_and_terminal_transitions_are_service_owned(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        check_in_ticket = self._service("check_in_ticket")
+        void_ticket = self._service("void_ticket")
+        ticket = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0002"),
+            actor=self.staff,
+        )
+        checked_in = check_in_ticket(ticket.secret, actor=self.staff)
+        self.assertEqual(checked_in.state, ticket_model(self).State.CHECKED_IN)
+        self.assertEqual(check_in_ticket(ticket.secret, actor=self.staff).pk, checked_in.pk)
+        with self.assertRaises(ValidationError):
+            void_ticket(checked_in, actor=self.admin)
+
+    def test_ticket_actions_are_phase_gated(self):
+        create_ticket = self._service("create_ticket")
+        activity = self.activity
+        transition_activity_phase(activity, Activity.Phase.REGISTRATION_CLOSED, actor=self.admin)
+        ticket = create_ticket(activity, actor=self.staff, serial_number="0003")
+        self.assertEqual(ticket.activity_id, activity.pk)

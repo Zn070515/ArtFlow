@@ -450,6 +450,38 @@ class ActivityPhasePolicyTests(TestCase):
         activity = self._activity(Activity.Phase.REGISTRATION_OPEN)
         self.assertIn(ActivityAction.SUBMIT_REGISTRATION, allowed_actions(activity))
 
+    def test_ticket_operations_follow_the_central_phase_policy(self):
+        self.assertIn("MANAGE_TICKETS", ActivityAction.__members__)
+        self.assertIn("CHECK_IN", ActivityAction.__members__)
+        manage_tickets = ActivityAction["MANAGE_TICKETS"]
+        check_in = ActivityAction["CHECK_IN"]
+        for phase in (
+            Activity.Phase.REGISTRATION_OPEN,
+            Activity.Phase.REGISTRATION_CLOSED,
+            Activity.Phase.REHEARSAL,
+            Activity.Phase.LIVE,
+        ):
+            with self.subTest(action="manage", phase=phase):
+                self.assertIn(manage_tickets, allowed_actions(self._activity(phase)))
+        for phase in (
+            Activity.Phase.REGISTRATION_CLOSED,
+            Activity.Phase.REHEARSAL,
+            Activity.Phase.LIVE,
+        ):
+            with self.subTest(action="check_in", phase=phase):
+                self.assertIn(check_in, allowed_actions(self._activity(phase)))
+        for phase in (
+            Activity.Phase.DRAFT,
+            Activity.Phase.REVIEWING,
+            Activity.Phase.RESULTS_PENDING,
+            Activity.Phase.RESULTS_PUBLISHED,
+            Activity.Phase.ARCHIVED,
+        ):
+            with self.subTest(action="manage", phase=phase):
+                self.assertNotIn(manage_tickets, allowed_actions(self._activity(phase)))
+            with self.subTest(action="check_in", phase=phase):
+                self.assertNotIn(check_in, allowed_actions(self._activity(phase)))
+
     def test_results_published_cannot_change_registration_state(self):
         activity = self._activity(Activity.Phase.RESULTS_PUBLISHED)
         for action in (
