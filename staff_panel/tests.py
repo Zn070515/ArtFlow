@@ -5973,6 +5973,14 @@ class JudgeControlHTTPTests(TestCase):
         anonymous = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertEqual(anonymous.status_code, 302)
 
+        self.client.force_login(self.participant)
+        self.client.raise_request_exception = False
+        participant = self.client.get(
+            reverse("staff:judge_control", args=[self.contest_round.pk])
+        )
+        self.assertEqual(participant.status_code, 403)
+        self.client.raise_request_exception = True
+
         self.client.force_login(self.staff)
         response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertEqual(response.status_code, 200)
@@ -5986,6 +5994,7 @@ class JudgeControlHTTPTests(TestCase):
         )
         self.assertEqual(insufficient.status_code, 200)
         self.assertContains(insufficient, "INSUFFICIENT_JUDGES")
+        self.assertContains(insufficient, "INSUFFICIENT_JUDGES / HOLD")
 
         prepared = self._prepare_panel()
         self.assertRedirects(
@@ -6028,6 +6037,10 @@ class JudgeControlHTTPTests(TestCase):
             hold_post,
             reverse("staff:judge_control", args=[self.contest_round.pk]),
         )
+        held_page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertContains(held_page, "HOLD")
+        self.assertContains(held_page, "HOLD 中不可签发")
+        self.assertContains(held_page, "评分已禁用")
         self.assertEqual(
             RoundPanelSnapshot.objects.get(round=self.contest_round).state,
             RoundPanelSnapshot.State.HOLD,
