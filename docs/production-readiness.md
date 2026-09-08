@@ -237,3 +237,22 @@ check 通过，且源数据库与 volumes 未被重置。当前源码临时 `800
 本轮闭合 Judge terminal 的 server-owned 展示上下文、分项评分、即时本地草稿、按上下文隔离、2 秒短轮询和 stale recovery。rubric 轮次必须提交完整 criterion 集合；服务端计算 0–100 总分，并在同一 authority 事务中写入 `ScoreRecord`、`CriterionScore`、receipt 和审计。无 rubric 的历史总分模式继续保留；客户端不保存 bearer、二维码 fragment 或额外个人信息。
 
 已覆盖的本地回归包括：上下文展示字段、rubric 精确集合、跨 rubric/越界/重复/缺项、伪造总分、事务回滚、STAFF_PROXY 一致性、稳定 HTTP reason code、输入未提交草稿、性能切换草稿隔离、polling、HOLD 状态展示和分项请求体。完整门禁结果待本轮最终验证后补录；PostgreSQL 竞态、真实凭据型 Judge 浏览器流程、学校 IdP/MFA、TLS/WAF/DDoS、数据责任与保存期限仍是部署前置 HOLD。
+
+### 2026-09-08 M2-C-GATE 门禁收口记录
+
+M2-C-GATE 将完整项目 Pyright 与 entry-access Pyright 都设为 Linux CI 阻塞门禁，
+并在 PostgreSQL integration 的完整测试前加入 Judge authority focused gate，覆盖
+`singer_contest.test_judge_authority`、`singer_contest.test_judge_http` 和
+`staff_panel.tests.JudgeControlHTTPTests`。门禁契约测试同时防止这些命令被移除、降级
+为 `continue-on-error` 或放到完整套件之后。
+
+本地证据：Django 全量 `1090 tests, OK (skipped=28)`；PostgreSQL Judge focused
+`42 tests, OK`；backup/isolated restore 通过且源 volumes 未重置；Playwright `6 passed`；
+client `25 passed`；两个 Pyright 配置均为 0 diagnostics；Ruff、mypy、CSS、Django、
+migration 和文档检查通过。GitHub Actions 最近一次 push 的所有 job 在 runner step
+开始前即以 0 秒失败、没有可读取的 step 日志，属于外部 runner/account 级异常，不能被
+本地结果冒充为远端 CI 通过；修复远端 Actions 服务后必须重新观察该 Gate。
+
+本 Gate 仍不宣称学校接入完成。真实凭据型 Judge 现场流程、学校 SSO/IdP、MFA/重新认证
+批准、TLS/WAF/DDoS、数据责任与保存期限、事件联系人和正式现场彩排继续保持部署前置
+`HOLD`。
