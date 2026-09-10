@@ -6397,3 +6397,63 @@ class ResultClosureViewTests(TestCase):
                 "audits": AuditLog.objects.count(),
             },
         )
+
+
+class StageResultAuthorityDetailTests(TestCase):
+    def test_old_result_detail_does_not_expose_superseded_result(self):
+        staff = _create_provisioned_user(
+            username="stage-detail-authority-staff", password="pass", role=User.Role.STAFF
+        )
+        activity = _create_activity(
+            title="Stage Detail Authority Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=activity,
+            name="Stage Detail Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                binding={"stage_key": "final"},
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        old = StageResult.objects.create(
+            activity=activity,
+            ruleset_version=version,
+            created_by=staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=["old"],
+            ruleset_hash=version.authority_hash,
+            input_fingerprint="old",
+            result_version=1,
+            is_test_data=True,
+        )
+        StageResult.objects.create(
+            activity=activity,
+            ruleset_version=version,
+            created_by=staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=["current"],
+            ruleset_hash=version.authority_hash,
+            input_fingerprint="current",
+            result_version=2,
+            is_test_data=True,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[old.pk]))
+
+        self.assertEqual(response.status_code, 404)

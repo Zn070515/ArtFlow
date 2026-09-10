@@ -3049,6 +3049,25 @@ class ResultClosureServiceTests(TestCase):
         with self.assertRaises(ValidationError):
             confirm_stage_result(old, confirmed_by=self.operator)
 
+    def test_unlock_rejects_confirmed_row_that_is_no_longer_current(self):
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        _save_activity_state(self.activity, ["phase"])
+        with authority_write(STAGE_RESULT_CONFIRM):
+            old = self._stage(
+                status=StageResult.Status.CONFIRMED,
+                confirmed_by=self.operator,
+                confirmed_at=timezone.now(),
+                result_version=1,
+            )
+        self._stage(result_version=2)
+
+        from .services import unlock_stage_result
+
+        with self.assertRaises(ValidationError):
+            unlock_stage_result(old, operator=self.operator, note="旧结果不应解锁")
+        old.refresh_from_db()
+        self.assertEqual(old.status, StageResult.Status.CONFIRMED)
+
     def test_official_queryset_keeps_manual_and_current_stage_awards_only(self):
         singer = SingerRegistration.objects.create(
             activity=self.activity,

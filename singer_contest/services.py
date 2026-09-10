@@ -2685,6 +2685,16 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.status != StageResult.Status.CONFIRMED:
         raise PermissionDenied("仅可解锁已核定并锁定的赛段结果。")
+    from ruleset.models import RulesetVersion
+
+    version = RulesetVersion.objects.select_for_update().get(pk=locked.ruleset_version_id)
+    if version.status != RulesetVersion.Status.FROZEN or not version.is_current:
+        raise ValidationError("只能解锁基于当前冻结赛制版本的最新结果。")
+    latest = StageResult.objects.filter(
+        activity=locked.activity, stage_key=locked.stage_key
+    ).aggregate(m=Max("result_version"))["m"]
+    if locked.result_version != latest:
+        raise ValidationError("只能解锁该赛段当前最新结果。")
     downstream_started = ContestRound.objects.filter(
         activity=locked.activity,
         roster_source=ContestRound.RosterSource.STAGE,
@@ -2844,6 +2854,22 @@ def official_stage_award_queryset(activity: Activity | None = None) -> QuerySet[
     return base.filter(
         Q(source_stage_result__isnull=True) | Q(pk__in=stage_awards)
     ).select_related("singer", "source_stage_result", "source_award_decision")
+
+
+def latest_stage_result_queryset(activity: Activity | None = None) -> QuerySet[StageResult]:
+    """Return only the maximum result version for each activity/stage pair."""
+    latest_version = (
+        StageResult.objects.filter(
+            activity_id=OuterRef("activity_id"),
+            stage_key=OuterRef("stage_key"),
+        )
+        .order_by("-result_version", "-pk")
+        .values("result_version")[:1]
+    )
+    base = StageResult.objects.filter(result_version=Subquery(latest_version))
+    if activity is not None:
+        base = base.filter(activity=activity)
+    return base.select_related("ruleset_version__ruleset", "activity", "created_by")
 
 
 def _coerce_bound_ids(values: Iterable[object]) -> set[int]:

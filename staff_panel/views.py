@@ -132,6 +132,7 @@ from singer_contest.services import (
     create_scoring_rubric,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
+    latest_stage_result_queryset,
     lock_round,
     maybe_resolve_checkpoints,
     missing_score_cells,
@@ -1543,17 +1544,7 @@ def round_ranking(request, pk):
 def activity_result_board(request, activity_id):
     """List the latest StageResult per stage_key with HOLD/REVIEW/READY banners (M1-H)."""
     activity = get_object_or_404(Activity, pk=activity_id)
-    stages = []
-    seen = set()
-    for stage in (
-        StageResult.objects.filter(activity=activity)
-        .select_related("ruleset_version__ruleset", "created_by")
-        .order_by("-computed_at", "-pk")
-    ):
-        if stage.stage_key in seen:
-            continue
-        seen.add(stage.stage_key)
-        stages.append(stage)
+    stages = list(latest_stage_result_queryset(activity).order_by("stage_key", "-pk"))
     return render(
         request,
         "staff_panel/activity_result_board.html",
@@ -1606,7 +1597,7 @@ def activity_result_closure(request, activity_id):
 def stage_result_detail(request, pk):
     """Render a single stage result's decisions grouped into handcard blocks (M1-H)."""
     stage = get_object_or_404(
-        StageResult.objects.select_related("ruleset_version__ruleset", "activity", "created_by"),
+        latest_stage_result_queryset(),
         pk=pk,
     )
     return render(
