@@ -2555,9 +2555,10 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.activity_id != locked_activity.pk:
         raise ValidationError("赛段结果不属于当前活动。")
-    if locked.status == StageResult.Status.CONFIRMED:
-        return locked
-    if locked.status != StageResult.Status.READY_TO_CONFIRM:
+    if locked.status not in {
+        StageResult.Status.READY_TO_CONFIRM,
+        StageResult.Status.CONFIRMED,
+    }:
         raise ValidationError("仅可核定已解析到“待核定”状态的赛段结果。")
     # M1-R9 (§五): 核定 only finalizes a result grounded in the *current* FROZEN
     # authority. A superseded (demoted) or draft version is not the running authority —
@@ -2581,6 +2582,8 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     if current_fingerprint != locked.input_fingerprint:
         raise ValidationError("该结果已过期（原始分数/票数已变化），请重新计算后核定。")
     _ensure_stage_dependencies_final(version, locked.activity, locked.stage_key)
+    if locked.status == StageResult.Status.CONFIRMED:
+        return locked
     locked.status = StageResult.Status.CONFIRMED
     locked.confirmed_by = current_actor
     locked.confirmed_at = timezone.now()
@@ -2809,31 +2812,31 @@ def _definition_checkpoints_ordered(version) -> tuple[str, ...]:
     return tuple(c["key"] for c in (obj.get("checkpoints") or ()) if c.get("key"))
 
 
-def official_stage_award_queryset(activity) -> QuerySet[Award]:
+def official_stage_award_queryset(activity: Activity | None = None) -> QuerySet[Award]:
     """Return manual Awards plus only current confirmed stage-sourced Awards."""
     from ruleset.models import RulesetVersion
 
     latest_version = (
         StageResult.objects.filter(
-            activity=activity,
+            activity_id=OuterRef("source_stage_result__activity_id"),
             stage_key=OuterRef("source_stage_result__stage_key"),
         )
         .order_by("-result_version", "-pk")
         .values("result_version")[:1]
     )
     stage_awards = Award.objects.filter(
-        activity=activity,
         source_stage_result__isnull=False,
-        source_stage_result__activity=activity,
+        source_stage_result__activity_id=F("activity_id"),
         source_stage_result__status=StageResult.Status.CONFIRMED,
         source_stage_result__result_version=Subquery(latest_version),
         source_stage_result__ruleset_version__is_current=True,
         source_stage_result__ruleset_version__status=RulesetVersion.Status.FROZEN,
-        source_award_decision__activity=activity,
+        source_award_decision__activity_id=F("activity_id"),
         source_award_decision__stage_result_id=F("source_stage_result_id"),
     )
-    return Award.objects.filter(
-        Q(activity=activity, source_stage_result__isnull=True) | Q(pk__in=stage_awards)
+    base = Award.objects.all() if activity is None else Award.objects.filter(activity=activity)
+    return base.filter(
+        Q(source_stage_result__isnull=True) | Q(pk__in=stage_awards)
     ).select_related("singer", "source_stage_result", "source_award_decision")
 
 

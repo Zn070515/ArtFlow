@@ -50,6 +50,7 @@ from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .judge_authority import prepare_judge_panel
 from .models import (
     AudienceScore,
+    Award,
     CompositeResult,
     ContestRound,
     DuelDecision,
@@ -60,6 +61,7 @@ from .models import (
     ScoreSummary,
     ScoreWriteReceipt,
     SingerRegistration,
+    StageAwardDecision,
     StageDecision,
     StageResult,
 )
@@ -2989,6 +2991,77 @@ class ResultClosureServiceTests(TestCase):
                 for token in ("INSERT", "UPDATE", "DELETE", "FOR UPDATE")
             )
         )
+
+    def test_confirm_rejects_confirmed_row_that_is_no_longer_current(self):
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        _save_activity_state(self.activity, ["phase"])
+        with authority_write(STAGE_RESULT_CONFIRM):
+            old = self._stage(
+                status=StageResult.Status.CONFIRMED,
+                confirmed_by=self.operator,
+                confirmed_at=timezone.now(),
+                result_version=1,
+            )
+        self._stage(result_version=2)
+
+        from .services import confirm_stage_result
+
+        with self.assertRaises(ValidationError):
+            confirm_stage_result(old, confirmed_by=self.operator)
+
+    def test_official_queryset_keeps_manual_and_current_stage_awards_only(self):
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=_create_provisioned_user(username="closure-singer", password="pass"),
+            name="闭场选手",
+            student_id="closure-001",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        manual = Award.objects.create(
+            activity=self.activity, singer=singer, name="人工奖", is_test_data=True
+        )
+        from .services import materialize_stage_awards, official_stage_award_queryset
+
+        old = self._stage(result_version=1)
+        old_candidate = StageAwardDecision.objects.create(
+            stage_result=old,
+            activity=self.activity,
+            singer=singer,
+            name="旧奖",
+            is_test_data=True,
+        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            old.status = StageResult.Status.CONFIRMED
+            old.confirmed_by = self.operator
+            old.confirmed_at = timezone.now()
+            old.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+        old_award = materialize_stage_awards(old, operator=self.operator)[0]
+
+        current = self._stage(result_version=2)
+        current_candidate = StageAwardDecision.objects.create(
+            stage_result=current,
+            activity=self.activity,
+            singer=singer,
+            name="新奖",
+            is_test_data=True,
+        )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            current.status = StageResult.Status.CONFIRMED
+            current.confirmed_by = self.operator
+            current.confirmed_at = timezone.now()
+            current.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+        current_award = materialize_stage_awards(current, operator=self.operator)[0]
+
+        official = official_stage_award_queryset(self.activity)
+        self.assertTrue(official.filter(pk=manual.pk).exists())
+        self.assertFalse(official.filter(pk=old_award.pk).exists())
+        self.assertTrue(official.filter(pk=current_award.pk).exists())
+        self.assertEqual(old_award.source_award_decision_id, old_candidate.pk)
+        self.assertEqual(current_award.source_award_decision_id, current_candidate.pk)
 
 
 class StageResolverBindingTests(TestCase):

@@ -3673,6 +3673,19 @@ class ExportPrivacyTests(TestCase):
         assert ws is not None
         return [ws.cell(row=idx, column=1).value for idx in range(2, ws.max_row + 1)]
 
+    def test_award_list_uses_official_stage_authority_queryset(self):
+        singer = self._registration(self.contest, "Contest Singer", "S1")
+        Award.objects.create(
+            activity=self.contest,
+            singer=singer,
+            name="人工奖",
+            is_test_data=False,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:award_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "人工奖")
+
     def test_staff_export_registrations_requires_activity_scope(self):
         self._registration(self.contest, "Contest Singer", "S1")
         self.client.force_login(self.staff)

@@ -44,7 +44,7 @@ from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -99,7 +99,6 @@ from singer_contest.judge_authority import (
 )
 from singer_contest.models import (
     AudienceScore,
-    Award,
     ContestRound,
     Judge,
     JudgeSeat,
@@ -134,6 +133,7 @@ from singer_contest.services import (
     lock_round,
     maybe_resolve_checkpoints,
     missing_score_cells,
+    official_stage_award_queryset,
     parse_score_workbook,
     prepare_round,
     reset_round_to_draft,
@@ -2065,10 +2065,7 @@ def rubric_create(request):
 
 @staff_required
 def award_list(request):
-    awards = Award.objects.filter(
-        Q(source_stage_result__isnull=True)
-        | Q(source_stage_result__status=StageResult.Status.CONFIRMED)
-    ).select_related("singer", "activity")
+    awards = official_stage_award_queryset().select_related("activity")
     return render(request, "staff_panel/award_list.html", {"awards": awards})
 
 

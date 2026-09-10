@@ -18,7 +18,7 @@ from core.services import _enter_archived_phase_locked
 from django.core.exceptions import PermissionDenied
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max
 from django.urls import reverse
 from django.utils import timezone
 from farewell_show.models import Program
@@ -28,12 +28,13 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
-from singer_contest.models import Award, ContestRound, ScoreSummary, SingerRegistration, StageResult
+from singer_contest.models import ContestRound, ScoreSummary, SingerRegistration
 from singer_contest.services import (
     _eligible_singers,
     authoritative_panel_judges,
     bound_ruleset_version_label,
     missing_score_cells,
+    official_stage_award_queryset,
     snapshot_fingerprint,
 )
 from voting.models import VoteOption, VoteSession
@@ -489,10 +490,7 @@ def _award_list_workbook(activity: Activity) -> Workbook:
     ws = _active_worksheet(wb)
     ws.title = "Awards"
     ws.append(["Singer", "Song", "Award"])
-    official_awards = Award.objects.filter(activity=activity).filter(
-        Q(source_stage_result__isnull=True)
-        | Q(source_stage_result__status=StageResult.Status.CONFIRMED)
-    )
+    official_awards = official_stage_award_queryset(activity)
     for award in scope_runtime(official_awards, activity).select_related("singer"):
         ws.append([award.singer.name, award.singer.song_name, award.name])
     _autosize_sheet(ws)
