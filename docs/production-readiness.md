@@ -113,6 +113,16 @@ M2-C 的本地代码门禁已覆盖模型 authority guard、命令幂等、重�
 
 学校接入的责任清单见 [学校接入准备清单](school-onboarding.md)，异常取证与纸面 DR 见 [事件响应与证据链](incident-response.md)。
 
+### M2-D1 Result authority / Event-day closure
+
+M2-D1 增加只读的 Staff 闭场预检，统一检查当前冻结赛制、当前结果版本、输入指纹、原始轮次/投票锁定、上游赛段核定和正式 Award/晋级入口来源。`READY_TO_CONFIRM` 仍只是候选；只有 `StageResult.status == CONFIRMED` 才是内部正式结果 authority。预检不写入 StageResult、Award、RoundEntry、锁或审计，也不替代 `confirm_stage_result()` 事务内的二次 freshness 检查。
+
+稳定阻塞码包括：`NO_CURRENT_FROZEN_RULESET`、`RULESET_BINDING_INVALID`、`RAW_FACTS_INCOMPLETE`、`RAW_FACTS_UNLOCKED`、`RULE_REVIEW_REQUIRED`、`UPSTREAM_CONFIRMATION_PENDING`、`STALE_CANDIDATE`、`STAGE_CONFIRMATION_PENDING` 和 `ACTIVITY_OPERATIONALLY_LOCKED`。Staff 页面只展示状态、版本、数量和阻塞码，不展示学生隐私、评分明细、评委备注、bearer、secret 或完整输入指纹。结果板入口为 `/staff/activity/<activity_id>/result-closure/`，只接受 GET。
+
+活动日闭场顺序固定为：最后一批输入审计 → 只读预检 → 逐阶段确认 → 再次预检 → 核对结果板/主持手卡/Award/下游入口 → 保存证据 → 交给后续独立公开发布门禁。解锁必须由管理员带非空原因执行；解锁后的旧来源立即退出正式 Award/导出，新候选必须重新 resolve 和确认。
+
+M2-D1 的本地 PASS 只证明内部 authority 闭合，不证明学校 SSO/MFA、代理 header、TLS/WAF、volumetric DDoS、数据保存期限、备份责任或学校批准接入。上述外部证据仍单独保持 `HOLD`。
+
 每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
 已经具备 Production 资格。
 

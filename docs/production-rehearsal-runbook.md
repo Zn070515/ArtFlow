@@ -124,19 +124,26 @@ pwsh -NoProfile -File scripts\verify_app_backup_restore.ps1 -ComposeProjectName 
 - **Legacy provenance**：`Award.source_vote_session` 只解释可能存在的历史行，不是当前 Award authority。删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。
 - **[automated + manual]** 自动回归覆盖 vote lock 不颁奖、候选/核定、重复核定、stale 拒绝和解锁；人工演练核对 Staff 正式列表与导出只显示当前已核定来源。
 
-### 4.11 过期评分 Excel
+### 4.11 M2-D1 结果闭场预检、核定与纠正
+- **Setup**：准备一个测试活动、当前冻结且绑定完整的 RulesetVersion，以及至少一个会产生 `READY_TO_CONFIRM` 的阶段；准备一个管理员和一个普通 Staff。不要使用正式活动或公网地址。
+- **Execute**：Staff 打开 `staff:activity_result_closure`，记录阶段状态、当前 result version、阻塞码和正式 artifact 数量。补齐最后一个输入后重新预检；管理员逐阶段 POST `staff:stage_result_confirm`，随后再次预检。重复点击确认一次，再用管理员带原因 POST `staff:stage_result_unlock`，修改原始输入、重新 resolve、重新预检并再次确认。
+- **Expected**：预检只读且不新增行；缺规则、缺输入、未锁原始事实、人工复核、上游未核定、stale 候选和活动锁定均 fail closed。首次核定只产生一份正式 Award/下游入口，重复确认幂等；解锁要求非空原因并保留审计，旧来源立即不再出现在正式列表/导出，新候选必须使用新版本或新指纹并重新核定。
+- **[automated]** `ResultClosureServiceTests`、`ResultClosureViewTests`、确认/解锁回归和官方 Award queryset 回归。
+- **[manual/automated]** 记录预检开始/结束、READY 延迟、确认延迟、重复/并发请求、stale 拒绝、旧来源泄露、5xx、超时和阻塞码计数。Docker 不可用时不得把 SQLite 结果写成 PostgreSQL 并发 PASS。
+
+### 4.12 过期评分 Excel
 - **Setup**：导入的 workbook 的报名名单/评委名单/规则版本或指纹与当前轮次不一致（§15.5）。
 - **Execute**：POST `staff:excel_import_scores`。
 - **Expected**：**全表拒绝，0 partial mutation**，提示"名单过期/版本过期/指纹不匹配"。
 - **[automated]** `singer_contest/services.py` snapshot 指纹 strict match + `staff_panel/tests.py` 回归已覆盖。
 
-### 4.12 大视频直传
+### 4.13 大视频直传
 - **Setup**：正式活动（非测试模式），`ARTFLOW_VIDEO_UPLOAD_MAX_MB`（默认 100）。
 - **Execute**：POST 超过上限的演唱/背景视频。
 - **Expected**：被拒"正式活动不支持大视频直传"；正式报名页不出现视频字段；**测试活动仍可传**。
 - **[manual]** 需人工确认表单隐藏与限资源端到端。
 
-### 4.13 PostgreSQL 恢复
+### 4.14 PostgreSQL 恢复
 - **Setup**：见 §3.1。
 - **Execute**：`verify_postgres_backup_restore.ps1` 在隔离库 `artflow_restore` 恢复。
 - **Expected**：`pg_restore` 成功、`manage.py check` 通过、**源卷未被重置**。
