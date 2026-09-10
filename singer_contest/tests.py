@@ -2,6 +2,7 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from dataclasses import FrozenInstanceError
 from decimal import Decimal
 from io import BytesIO
 from unittest import skipUnless
@@ -2693,6 +2694,100 @@ class StageResultModelTests(TestCase):
         self._result()
         with self.assertRaises(IntegrityError):
             self._result()
+
+
+class ResultClosureContractTests(TestCase):
+    def test_result_closure_dataclasses_are_immutable(self):
+        from .services import ResultClosure, ResultClosureCode, StageClosure
+
+        stage = StageClosure(
+            stage_key="final",
+            current_result_id=1,
+            result_version=2,
+            status="ready_to_confirm",
+            confirmable=True,
+            reasons=(),
+            input_fingerprint="fp",
+            required_raw_facts={"rounds": (3,)},
+            raw_facts_locked=True,
+            upstream_confirmed=True,
+            official_awards=0,
+            round_entries=3,
+            blocking_reasons=(ResultClosureCode.STAGE_CONFIRMATION_PENDING,),
+        )
+        closure = ResultClosure(
+            activity_id=7,
+            ruleset_version_id=8,
+            ruleset_authority_hash="hash",
+            stages=(stage,),
+            closeable=False,
+            blocking_reasons=(ResultClosureCode.STAGE_CONFIRMATION_PENDING,),
+        )
+
+        with self.assertRaises(FrozenInstanceError):
+            closure.closeable = True
+        with self.assertRaises(FrozenInstanceError):
+            stage.stage_key = "other"
+
+    def test_result_closure_codes_are_stable_strings(self):
+        from .services import ResultClosureCode
+
+        self.assertEqual(
+            {code.name: code.value for code in ResultClosureCode},
+            {
+                "NO_CURRENT_FROZEN_RULESET": "no_current_frozen_ruleset",
+                "RULESET_BINDING_INVALID": "ruleset_binding_invalid",
+                "RAW_FACTS_INCOMPLETE": "raw_facts_incomplete",
+                "RAW_FACTS_UNLOCKED": "raw_facts_unlocked",
+                "RULE_REVIEW_REQUIRED": "rule_review_required",
+                "UPSTREAM_CONFIRMATION_PENDING": "upstream_confirmation_pending",
+                "STALE_CANDIDATE": "stale_candidate",
+                "STAGE_CONFIRMATION_PENDING": "stage_confirmation_pending",
+                "ACTIVITY_OPERATIONALLY_LOCKED": "activity_operationally_locked",
+                "SCHOOL_EXTERNAL_EVIDENCE_PENDING": "school_external_evidence_pending",
+            },
+        )
+
+    def test_closure_does_not_contain_token_or_private_payload_fields(self):
+        from .services import (
+            ResultClosure,
+            ResultClosureCode,
+            StageClosure,
+            result_closure_as_dict,
+        )
+
+        closure = ResultClosure(
+            activity_id=7,
+            ruleset_version_id=8,
+            ruleset_authority_hash="sha256-prefix",
+            stages=(
+                StageClosure(
+                    stage_key="final",
+                    current_result_id=1,
+                    result_version=2,
+                    status="confirmed",
+                    confirmable=False,
+                    reasons=(),
+                    input_fingerprint="fingerprint-prefix",
+                    required_raw_facts={"rounds": (3,), "votes": (4,)},
+                    raw_facts_locked=True,
+                    upstream_confirmed=True,
+                    official_awards=1,
+                    round_entries=3,
+                    blocking_reasons=(),
+                ),
+            ),
+            closeable=True,
+            blocking_reasons=(),
+        )
+
+        payload = result_closure_as_dict(closure)
+        self.assertEqual(payload["activity_id"], 7)
+        self.assertEqual(payload["stages"][0]["blocking_reasons"], [])
+        self.assertNotIn("token", json.dumps(payload, ensure_ascii=False).lower())
+        self.assertNotIn("secret", json.dumps(payload, ensure_ascii=False).lower())
+        self.assertNotIn("judge_notes", payload)
+        self.assertNotIn("request_headers", payload)
 
 
 class StageResolverBindingTests(TestCase):

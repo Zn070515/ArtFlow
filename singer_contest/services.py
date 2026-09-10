@@ -5,7 +5,9 @@ import json
 import re
 import secrets
 from contextlib import contextmanager
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 from typing import Iterable, Mapping
 
 from accounts.services import require_current_admin, require_current_staff
@@ -84,6 +86,79 @@ from .models import (
     _duel_write_authorized,
     _manual_write_authorized,
 )
+
+
+class ResultClosureCode(StrEnum):
+    """Stable machine-readable reasons why an activity is not closed."""
+
+    NO_CURRENT_FROZEN_RULESET = "no_current_frozen_ruleset"
+    RULESET_BINDING_INVALID = "ruleset_binding_invalid"
+    RAW_FACTS_INCOMPLETE = "raw_facts_incomplete"
+    RAW_FACTS_UNLOCKED = "raw_facts_unlocked"
+    RULE_REVIEW_REQUIRED = "rule_review_required"
+    UPSTREAM_CONFIRMATION_PENDING = "upstream_confirmation_pending"
+    STALE_CANDIDATE = "stale_candidate"
+    STAGE_CONFIRMATION_PENDING = "stage_confirmation_pending"
+    ACTIVITY_OPERATIONALLY_LOCKED = "activity_operationally_locked"
+    SCHOOL_EXTERNAL_EVIDENCE_PENDING = "school_external_evidence_pending"
+
+
+@dataclass(frozen=True)
+class StageClosure:
+    stage_key: str
+    current_result_id: int | None
+    result_version: int | None
+    status: str | None
+    confirmable: bool
+    reasons: tuple[str, ...]
+    input_fingerprint: str | None
+    required_raw_facts: dict[str, tuple[int, ...]]
+    raw_facts_locked: bool
+    upstream_confirmed: bool
+    official_awards: int
+    round_entries: int
+    blocking_reasons: tuple[ResultClosureCode, ...]
+
+
+@dataclass(frozen=True)
+class ResultClosure:
+    activity_id: int
+    ruleset_version_id: int | None
+    ruleset_authority_hash: str | None
+    stages: tuple[StageClosure, ...]
+    closeable: bool
+    blocking_reasons: tuple[ResultClosureCode, ...]
+
+
+def result_closure_as_dict(closure: ResultClosure) -> dict[str, object]:
+    """Serialize closure status without exposing model objects or private payloads."""
+    return {
+        "activity_id": closure.activity_id,
+        "ruleset_version_id": closure.ruleset_version_id,
+        "ruleset_authority_hash": closure.ruleset_authority_hash,
+        "stages": [
+            {
+                "stage_key": stage.stage_key,
+                "current_result_id": stage.current_result_id,
+                "result_version": stage.result_version,
+                "status": stage.status,
+                "confirmable": stage.confirmable,
+                "reasons": list(stage.reasons),
+                "input_fingerprint": stage.input_fingerprint,
+                "required_raw_facts": {
+                    key: list(values) for key, values in stage.required_raw_facts.items()
+                },
+                "raw_facts_locked": stage.raw_facts_locked,
+                "upstream_confirmed": stage.upstream_confirmed,
+                "official_awards": stage.official_awards,
+                "round_entries": stage.round_entries,
+                "blocking_reasons": [code.value for code in stage.blocking_reasons],
+            }
+            for stage in closure.stages
+        ],
+        "closeable": closure.closeable,
+        "blocking_reasons": [code.value for code in closure.blocking_reasons],
+    }
 
 
 def _eligible_singers(contest_round: ContestRound) -> QuerySet[SingerRegistration]:
