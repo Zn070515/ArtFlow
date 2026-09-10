@@ -5810,7 +5810,11 @@ class ConfirmedDependencyClosureTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
             reset_round_to_draft(self.round, self.user, reason="admin unwind")
         # Unlocking the stage result releases finality so the round is editable again.
-        unlock_stage_result(StageResult.objects.get(pk=stage.pk), operator=self.user)
+        unlock_stage_result(
+            StageResult.objects.get(pk=stage.pk),
+            operator=self.user,
+            note="解除赛段终局以修正原始轮次",
+        )
         unlocked = unlock_round(self.round, self.user)
         self.assertFalse(unlocked.is_locked)
         self.assertEqual(unlocked.status, ContestRound.Status.SCORING)
