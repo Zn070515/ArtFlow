@@ -61,13 +61,15 @@ node scripts/m2_d1_result_closure_rehearsal.mjs
 | Django 闭场/authority 回归 | 22 passed, 1 PostgreSQL-only skipped | SQLite 代码证据 PASS；并发证据 BLOCKED |
 | Pyright baseline / entry-access | 0 / 0 diagnostics | PASS |
 | Ruff、文档检查、Node syntax | PASS | PASS |
-| Docker daemon / PostgreSQL | `dockerDesktopLinuxEngine` 无法连接 | BLOCKED |
-| 本地 HTTP 服务 `127.0.0.1:18000` | 未监听 | BLOCKED；无 p50/p95/p99、状态分布或 timeout 数可报告 |
-| duplicate confirm / stale rejection / official-source leakage | 由 Django 回归覆盖；只读 HTTP 脚本未执行 | HTTP 彩排 NOT EXERCISED |
-| token/secret leakage | serializer/view 回归未发现；HTTP 响应扫描未执行 | 本地代码证据 PASS，运行时 BLOCKED |
+| Docker daemon / PostgreSQL | Compose acceptance：`1122 passed, 3 skipped`；PostgreSQL 并发确认专项：`1 passed` | PASS；skip 仍按各测试声明记录 |
+| 本地 HTTP 服务 `127.0.0.1:8000` | 27 请求 / 并发 8；p50 5.75ms、p95 14.40ms、p99 23.71ms；2xx=0、4xx=1、5xx=0、timeout=0 | PASS；4xx 是匿名 mutation 的预期拒绝 |
+| duplicate confirm / stale rejection / official-source leakage | Django 回归覆盖；HTTP 只读脚本明确未执行 mutation/export | 本地 authority PASS；HTTP mutation/export NOT EXERCISED |
+| token/secret leakage | serializer/view/Playwright/HTTP 响应扫描均为 0 | PASS |
+| Playwright smoke | 7 passed；Judge redeem、ACK-loss retry、幂等 receipt、Ticket boundary 均覆盖 | PASS |
+| backup/restore | custom-format dump；隔离恢复目标 `manage.py check` 通过；源库/源卷未重置 | PASS |
 | 学校 IdP/MFA/TLS/WAF/DDoS/留存 | 未在部署方环境执行 | HOLD |
 
-因此本记录不是 M2-D1 全部 PASS：Docker/PostgreSQL、运行时 HTTP 彩排和外部学校责任项仍是放行前置条件。
+因此本地 M2-D1 authority、PostgreSQL、浏览器、HTTP 只读彩排和恢复证据已通过；确认 mutation/export 的独立运行时恶意脚本仍未执行，学校外部责任项仍是放行前置条件。
 
 ## 阈值与处置
 

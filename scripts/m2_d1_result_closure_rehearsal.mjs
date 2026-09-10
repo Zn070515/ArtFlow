@@ -134,15 +134,18 @@ checks.push({
 });
 
 const post = await request(closurePath, { method: "POST", body: "m2d1-canary" });
+const postExpectedStatuses = staffCookie ? [405] : [403, 405];
 checks.push({
   name: "closure rejects mutation method",
-  expected_statuses: [405],
-  passed: post.status === 405,
+  expected_statuses: postExpectedStatuses,
+  passed: postExpectedStatuses.includes(post.status),
   status: post.status,
   duration_ms: Math.round(post.durationMs * 100) / 100,
 });
 
 const load = summarize(closureResults);
+const allResults = [closureResults, [forgedQuery, foreign, post]].flat();
+const overall = summarize(allResults);
 const report = {
   schema: "artflow.m2-d1.result-closure-rehearsal.v1",
   base_url: baseUrl,
@@ -157,19 +160,19 @@ const report = {
   metrics: {
     total_requests: requestCount + 3,
     concurrency,
-    p50_ms: load.p50_ms,
-    p95_ms: load.p95_ms,
-    p99_ms: load.p99_ms,
-    timeout_count: load.timeout_count,
-    status_2xx: load.status_counts["200"] ?? 0,
-    status_4xx: Object.entries(load.status_counts)
+    p50_ms: overall.p50_ms,
+    p95_ms: overall.p95_ms,
+    p99_ms: overall.p99_ms,
+    timeout_count: overall.timeout_count,
+    status_2xx: overall.status_counts["200"] ?? 0,
+    status_4xx: Object.entries(overall.status_counts)
       .filter(([status]) => /^4\d\d$/.test(status))
       .reduce((total, [, count]) => total + count, 0),
-    status_5xx: load.server_error_count,
+    status_5xx: overall.server_error_count,
     duplicate_confirm_count: 0,
     stale_rejection_count: 0,
     cross_activity_rejection_count: foreign.status === 404 || (!staffCookie && foreign.status === 302) ? 1 : 0,
-    token_secret_leakage_count: load.token_secret_leakage_count,
+    token_secret_leakage_count: overall.token_secret_leakage_count,
     official_source_leakage_count: 0,
   },
   not_exercised_by_read_only_script: [
@@ -184,9 +187,9 @@ console.log(JSON.stringify(report, null, 2));
 
 if (
   checks.some((check) => !check.passed)
-  || load.timeout_count > 0
-  || load.server_error_count > 0
-  || load.token_secret_leakage_count > 0
+  || overall.timeout_count > 0
+  || overall.server_error_count > 0
+  || overall.token_secret_leakage_count > 0
 ) {
   process.exitCode = 1;
 }
