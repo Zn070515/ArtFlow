@@ -28,7 +28,7 @@ from common.models import AuditLog
 from core.models import Activity
 from core.services import unarchive_activity
 from django import forms
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
@@ -5300,6 +5300,28 @@ class ResultBoardTests(TestCase):
         self.assertEqual(confirmed.status, StageResult.Status.READY_TO_CONFIRM)
         self.assertIsNone(confirmed.confirmed_by)
         self.assertIsNone(confirmed.confirmed_at)
+
+    def test_stage_result_unlock_requires_non_empty_reason(self):
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        _save_activity_state(self.activity, ["phase"])
+        confirmed = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-empty-note")
+        admin = _create_provisioned_user(
+            username="result-empty-note-admin", password="pass", role=User.Role.ADMIN
+        )
+
+        from singer_contest.services import unlock_stage_result
+
+        with self.assertRaises(ValidationError):
+            unlock_stage_result(confirmed, operator=admin, note="   ")
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
+                target=f"StageResult:{confirmed.pk}",
+            ).count()
+            == 0
+        )
 
     def test_board_shows_ready_to_confirm_banner(self):
         """§36-37: a machine-computed (not yet 核定) stage shows 待核定, not 可抄手卡."""

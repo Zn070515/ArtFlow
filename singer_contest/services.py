@@ -2676,6 +2676,9 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     and the stage can be re-resolved and re-confirmed. Audits the change.
     """
     current_operator = require_current_admin(operator)
+    note = str(note or "").strip()
+    if not note:
+        raise ValidationError("解锁赛段结果必须填写原因。")
     lock_activity_for_action(stage.activity)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.status != StageResult.Status.CONFIRMED:
