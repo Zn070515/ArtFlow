@@ -145,7 +145,7 @@ token 的用例关闭 trace/video/screenshot，避免凭据进入测试产物。
 
 ### 2026-09-11 M2-D1 Task 6 执行记录
 
-闭场相关定向 Django 回归为 `22 passed, 1 skipped`；全量 Django 回归为 `1119 passed, 29 skipped`。
+闭场相关定向 Django 回归为 `31 passed`；全量 Django 回归为 `1122 passed, 29 skipped`。
 定向 skip 是要求 PostgreSQL row lock 的并发确认测试。Pyright baseline、entry-access、Ruff、
 Node syntax、TypeScript client 25 项和文档检查均通过。CSS gate 曾发现闭场模板生成物未同步，
 已由独立提交修复并复跑通过。当前 Docker CLI
