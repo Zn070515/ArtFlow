@@ -146,12 +146,13 @@ token 的用例关闭 trace/video/screenshot，避免凭据进入测试产物。
 ### 2026-09-11 M2-D1 Task 6 执行记录
 
 闭场相关定向 Django 回归为 `31 passed`；全量 Django 回归为 `1122 passed, 29 skipped`。
-定向 skip 是要求 PostgreSQL row lock 的并发确认测试。Pyright baseline、entry-access、Ruff、
-Node syntax、TypeScript client 25 项和文档检查均通过。CSS gate 曾发现闭场模板生成物未同步，
-已由独立提交修复并复跑通过。当前 Docker CLI
-无法连接 `dockerDesktopLinuxEngine`，`127.0.0.1:18000` 也没有运行服务，因此本轮 PostgreSQL
-并发、HTTP 彩排的 p50/p95/p99、状态计数、timeout 以及备份恢复均为 `BLOCKED`，不能把本轮
-标记为 M2-D1 全部 PASS。具体矩阵和边界见
+Compose PostgreSQL acceptance 为 `1122 passed, 3 skipped`，新增 PostgreSQL 并发确认专项为
+`1 passed`。Pyright baseline、entry-access、Ruff、Node syntax、TypeScript client 25 项和文档
+检查均通过。CSS gate 曾发现闭场模板生成物未同步，已由独立提交修复并复跑通过。Compose
+Playwright smoke 为 `7 passed`；HTTP 只读闭场彩排为 27 请求/并发 8，p50/p95/p99 为
+5.75/14.40/23.71ms，2xx/4xx/5xx 为 0/1/0，timeout 与 token/secret 泄露均为 0。custom-format
+备份恢复在隔离目标通过，源数据库与源卷未重置。确认 mutation/export 的独立运行时脚本仍
+未执行，不能把这些字段伪装成 HTTP attack PASS。具体矩阵和边界见
 [`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。
 
 ## 发布门禁
