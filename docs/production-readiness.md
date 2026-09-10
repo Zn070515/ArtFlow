@@ -145,8 +145,10 @@ token 的用例关闭 trace/video/screenshot，避免凭据进入测试产物。
 
 ### 2026-09-11 M2-D1 Task 6 执行记录
 
-闭场相关 Django 回归为 `22 passed, 1 skipped`；skip 是要求 PostgreSQL row lock 的并发确认
-测试。Pyright baseline、entry-access、Ruff、Node syntax 和文档检查均通过。当前 Docker CLI
+闭场相关定向 Django 回归为 `22 passed, 1 skipped`；全量 Django 回归为 `1119 passed, 29 skipped`。
+定向 skip 是要求 PostgreSQL row lock 的并发确认测试。Pyright baseline、entry-access、Ruff、
+Node syntax、TypeScript client 25 项和文档检查均通过。CSS gate 曾发现闭场模板生成物未同步，
+已由独立提交修复并复跑通过。当前 Docker CLI
 无法连接 `dockerDesktopLinuxEngine`，`127.0.0.1:18000` 也没有运行服务，因此本轮 PostgreSQL
 并发、HTTP 彩排的 p50/p95/p99、状态计数、timeout 以及备份恢复均为 `BLOCKED`，不能把本轮
 标记为 M2-D1 全部 PASS。具体矩阵和边界见
