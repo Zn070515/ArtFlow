@@ -44,12 +44,12 @@ from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 from exports.models import ArticleTemplate
 from exports.services import (
     archive_activity,
@@ -99,7 +99,6 @@ from singer_contest.judge_authority import (
 )
 from singer_contest.models import (
     AudienceScore,
-    Award,
     ContestRound,
     Judge,
     JudgeSeat,
@@ -118,6 +117,7 @@ from singer_contest.models import (
 )
 from singer_contest.services import (
     IdempotencyConflictError,
+    ResultClosureCode,
     StaleScoreVersionError,
     _current_frozen_version,
     _current_resolve_status,
@@ -126,17 +126,21 @@ from singer_contest.services import (
     apply_scores,
     apply_scores_if_version,
     authoritative_panel_judges,
+    build_result_closure,
     confirm_stage_result,
     create_manual_award,
     create_scoring_rubric,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
+    latest_stage_result_queryset,
     lock_round,
     maybe_resolve_checkpoints,
     missing_score_cells,
+    official_stage_award_queryset,
     parse_score_workbook,
     prepare_round,
     reset_round_to_draft,
+    result_closure_as_dict,
     set_manual_decision,
     set_round_groups,
     set_round_running_order,
@@ -1540,17 +1544,7 @@ def round_ranking(request, pk):
 def activity_result_board(request, activity_id):
     """List the latest StageResult per stage_key with HOLD/REVIEW/READY banners (M1-H)."""
     activity = get_object_or_404(Activity, pk=activity_id)
-    stages = []
-    seen = set()
-    for stage in (
-        StageResult.objects.filter(activity=activity)
-        .select_related("ruleset_version__ruleset", "created_by")
-        .order_by("-computed_at", "-pk")
-    ):
-        if stage.stage_key in seen:
-            continue
-        seen.add(stage.stage_key)
-        stages.append(stage)
+    stages = list(latest_stage_result_queryset(activity).order_by("stage_key", "-pk"))
     return render(
         request,
         "staff_panel/activity_result_board.html",
@@ -1558,11 +1552,52 @@ def activity_result_board(request, activity_id):
     )
 
 
+_RESULT_CLOSURE_LABELS = (
+    {"code": ResultClosureCode.NO_CURRENT_FROZEN_RULESET.value, "label": "没有当前冻结赛制"},
+    {"code": ResultClosureCode.RULESET_BINDING_INVALID.value, "label": "赛制绑定无效"},
+    {"code": ResultClosureCode.RAW_FACTS_INCOMPLETE.value, "label": "原始输入未齐"},
+    {"code": ResultClosureCode.RAW_FACTS_UNLOCKED.value, "label": "原始输入未锁定"},
+    {"code": ResultClosureCode.RULE_REVIEW_REQUIRED.value, "label": "规则要求人工复核"},
+    {
+        "code": ResultClosureCode.UPSTREAM_CONFIRMATION_PENDING.value,
+        "label": "上游赛段尚未核定",
+    },
+    {"code": ResultClosureCode.STALE_CANDIDATE.value, "label": "候选结果已过期"},
+    {"code": ResultClosureCode.STAGE_CONFIRMATION_PENDING.value, "label": "赛段等待核定"},
+    {
+        "code": ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED.value,
+        "label": "活动已被操作锁定",
+    },
+    {
+        "code": ResultClosureCode.SCHOOL_EXTERNAL_EVIDENCE_PENDING.value,
+        "label": "学校外部证据待补齐",
+    },
+)
+
+
+@staff_required
+@require_GET
+def activity_result_closure(request, activity_id):
+    """Render the read-only event-day result closure checklist."""
+    activity = get_object_or_404(Activity, pk=activity_id)
+    closure = build_result_closure(activity)
+    return render(
+        request,
+        "staff_panel/activity_result_closure.html",
+        {
+            "activity": activity,
+            "closure": closure,
+            "closure_payload": result_closure_as_dict(closure),
+            "blocking_labels": _RESULT_CLOSURE_LABELS,
+        },
+    )
+
+
 @staff_required
 def stage_result_detail(request, pk):
     """Render a single stage result's decisions grouped into handcard blocks (M1-H)."""
     stage = get_object_or_404(
-        StageResult.objects.select_related("ruleset_version__ruleset", "activity", "created_by"),
+        latest_stage_result_queryset(),
         pk=pk,
     )
     return render(
@@ -2065,10 +2100,7 @@ def rubric_create(request):
 
 @staff_required
 def award_list(request):
-    awards = Award.objects.filter(
-        Q(source_stage_result__isnull=True)
-        | Q(source_stage_result__status=StageResult.Status.CONFIRMED)
-    ).select_related("singer", "activity")
+    awards = official_stage_award_queryset().select_related("activity")
     return render(request, "staff_panel/award_list.html", {"awards": awards})
 
 

@@ -164,6 +164,11 @@ urlpatterns = [
         views.activity_result_board,
         name="activity_result_board",
     ),
+    path(
+        "activity/<int:activity_id>/result-closure/",
+        views.activity_result_closure,
+        name="activity_result_closure",
+    ),
     path("stage-results/<int:pk>/", views.stage_result_detail, name="stage_result_detail"),
     path(
         "stage-results/<int:pk>/confirm/",

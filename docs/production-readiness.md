@@ -113,6 +113,21 @@ M2-C 的本地代码门禁已覆盖模型 authority guard、命令幂等、重�
 
 学校接入的责任清单见 [学校接入准备清单](school-onboarding.md)，异常取证与纸面 DR 见 [事件响应与证据链](incident-response.md)。
 
+### M2-D1 Result authority / Event-day closure
+
+M2-D1 增加只读的 Staff 闭场预检，统一检查当前冻结赛制、当前结果版本、输入指纹、原始轮次/投票锁定、上游赛段核定和正式 Award/晋级入口来源。`READY_TO_CONFIRM` 仍只是候选；只有 `StageResult.status == CONFIRMED` 才是内部正式结果 authority。预检不写入 StageResult、Award、RoundEntry、锁或审计，也不替代 `confirm_stage_result()` 事务内的二次 freshness 检查。
+
+稳定阻塞码包括：`NO_CURRENT_FROZEN_RULESET`、`RULESET_BINDING_INVALID`、`RAW_FACTS_INCOMPLETE`、`RAW_FACTS_UNLOCKED`、`RULE_REVIEW_REQUIRED`、`UPSTREAM_CONFIRMATION_PENDING`、`STALE_CANDIDATE`、`STAGE_CONFIRMATION_PENDING` 和 `ACTIVITY_OPERATIONALLY_LOCKED`。Staff 页面只展示状态、版本、数量和阻塞码，不展示学生隐私、评分明细、评委备注、bearer、secret 或完整输入指纹。结果板入口为 `/staff/activity/<activity_id>/result-closure/`，只接受 GET。
+
+活动日闭场顺序固定为：最后一批输入审计 → 只读预检 → 逐阶段确认 → 再次预检 → 核对结果板/主持手卡/Award/下游入口 → 保存证据 → 交给后续独立公开发布门禁。解锁必须由管理员带非空原因执行；解锁后的旧来源立即退出正式 Award/导出，新候选必须重新 resolve 和确认。
+
+M2-D1 的本地 PASS 只证明内部 authority 闭合，不证明学校 SSO/MFA、代理 header、TLS/WAF、volumetric DDoS、数据保存期限、备份责任或学校批准接入。上述外部证据仍单独保持 `HOLD`。
+
+本轮恶意彩排的详细矩阵、脚本边界和量化字段见
+[`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。只读 HTTP 脚本不能替代
+确认重放、stale reject、旧来源导出和 PostgreSQL row-lock 证据；这些字段若未执行必须标记
+`BLOCKED`/`NOT EXERCISED`，不能用 0 伪装为通过。
+
 每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
 已经具备 Production 资格。
 
@@ -127,6 +142,17 @@ M2-C 的本地代码门禁已覆盖模型 authority guard、命令幂等、重�
 门禁覆盖随能力推进扩大，不允许为了通过新能力而静默移除既有门禁。Playwright 初始
 检查只读的 `/healthz/`；进入 Judge/Ticket 流程后，测试必须使用可丢弃数据，携带 bearer
 token 的用例关闭 trace/video/screenshot，避免凭据进入测试产物。
+
+### 2026-09-11 M2-D1 Task 6 执行记录
+
+闭场相关定向 Django 回归为 `31 passed`；全量 Django 回归为 `1122 passed, 29 skipped`。
+定向 skip 是要求 PostgreSQL row lock 的并发确认测试。Pyright baseline、entry-access、Ruff、
+Node syntax、TypeScript client 25 项和文档检查均通过。CSS gate 曾发现闭场模板生成物未同步，
+已由独立提交修复并复跑通过。当前 Docker CLI
+无法连接 `dockerDesktopLinuxEngine`，`127.0.0.1:18000` 也没有运行服务，因此本轮 PostgreSQL
+并发、HTTP 彩排的 p50/p95/p99、状态计数、timeout 以及备份恢复均为 `BLOCKED`，不能把本轮
+标记为 M2-D1 全部 PASS。具体矩阵和边界见
+[`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。
 
 ## 发布门禁
 

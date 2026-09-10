@@ -28,7 +28,7 @@ from common.models import AuditLog
 from core.models import Activity
 from core.services import unarchive_activity
 from django import forms
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
@@ -3673,6 +3673,19 @@ class ExportPrivacyTests(TestCase):
         assert ws is not None
         return [ws.cell(row=idx, column=1).value for idx in range(2, ws.max_row + 1)]
 
+    def test_award_list_uses_official_stage_authority_queryset(self):
+        singer = self._registration(self.contest, "Contest Singer", "S1")
+        Award.objects.create(
+            activity=self.contest,
+            singer=singer,
+            name="人工奖",
+            is_test_data=False,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:award_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "人工奖")
+
     def test_staff_export_registrations_requires_activity_scope(self):
         self._registration(self.contest, "Contest Singer", "S1")
         self.client.force_login(self.staff)
@@ -5288,6 +5301,28 @@ class ResultBoardTests(TestCase):
         self.assertIsNone(confirmed.confirmed_by)
         self.assertIsNone(confirmed.confirmed_at)
 
+    def test_stage_result_unlock_requires_non_empty_reason(self):
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        _save_activity_state(self.activity, ["phase"])
+        confirmed = self._stage(status=StageResult.Status.CONFIRMED, ruleset_hash="hash-empty-note")
+        admin = _create_provisioned_user(
+            username="result-empty-note-admin", password="pass", role=User.Role.ADMIN
+        )
+
+        from singer_contest.services import unlock_stage_result
+
+        with self.assertRaises(ValidationError):
+            unlock_stage_result(confirmed, operator=admin, note="   ")
+        confirmed.refresh_from_db()
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
+                target=f"StageResult:{confirmed.pk}",
+            ).count()
+            == 0
+        )
+
     def test_board_shows_ready_to_confirm_banner(self):
         """§36-37: a machine-computed (not yet 核定) stage shows 待核定, not 可抄手卡."""
         self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-rtc")
@@ -6247,3 +6282,178 @@ class JudgeControlHTTPTests(TestCase):
         record = ScoreRecord.objects.get(round=self.contest_round)
         self.assertEqual(record.source, ScoreSource.PAPER_DR)
         self.assertEqual(record.source_reference, "纸面表-001")
+
+
+class ResultClosureViewTests(TestCase):
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="closure-view-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = _create_activity(
+            title="Closure View Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+
+    def _ready_stage(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        definition = json.dumps(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Closure View Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=definition,
+                binding={"stage_key": "final"},
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        from singer_contest.services import _current_input_fingerprint
+
+        return StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            ruleset_hash=version.authority_hash,
+            input_fingerprint=_current_input_fingerprint(version, self.activity, "final"),
+            is_test_data=True,
+        )
+
+    def test_closure_view_requires_staff(self):
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_closure_view_is_get_only(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 405)
+
+    def test_closure_view_is_activity_scoped(self):
+        other = _create_activity(
+            title="Foreign Closure Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk]),
+            {"activity_id": other.pk, "result_id": 999999},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.activity.title)
+        self.assertNotContains(response, other.title)
+        self.assertNotContains(response, "999999")
+
+    def test_closure_view_shows_ready_confirmation(self):
+        self._ready_stage()
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "待核定")
+        self.assertContains(response, "stage_confirmation_pending")
+        self.assertNotContains(response, "bearer")
+        self.assertNotContains(response, "secret")
+        self.assertNotContains(response, "Authorization")
+
+    def test_closure_view_is_read_only(self):
+        self._ready_stage()
+        self.client.force_login(self.staff)
+        before = {
+            "results": StageResult.objects.count(),
+            "awards": Award.objects.count(),
+            "entries": RoundEntry.objects.count(),
+            "audits": AuditLog.objects.count(),
+        }
+
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            before,
+            {
+                "results": StageResult.objects.count(),
+                "awards": Award.objects.count(),
+                "entries": RoundEntry.objects.count(),
+                "audits": AuditLog.objects.count(),
+            },
+        )
+
+
+class StageResultAuthorityDetailTests(TestCase):
+    def test_old_result_detail_does_not_expose_superseded_result(self):
+        staff = _create_provisioned_user(
+            username="stage-detail-authority-staff", password="pass", role=User.Role.STAFF
+        )
+        activity = _create_activity(
+            title="Stage Detail Authority Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=activity,
+            name="Stage Detail Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                binding={"stage_key": "final"},
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        old = StageResult.objects.create(
+            activity=activity,
+            ruleset_version=version,
+            created_by=staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=["old"],
+            ruleset_hash=version.authority_hash,
+            input_fingerprint="old",
+            result_version=1,
+            is_test_data=True,
+        )
+        StageResult.objects.create(
+            activity=activity,
+            ruleset_version=version,
+            created_by=staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=["current"],
+            ruleset_hash=version.authority_hash,
+            input_fingerprint="current",
+            result_version=2,
+            is_test_data=True,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[old.pk]))
+
+        self.assertEqual(response.status_code, 404)

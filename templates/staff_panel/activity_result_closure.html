@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}闭场预检 — {{ activity.title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> /
+        <a href="{% url 'staff:activity_result_board' activity_id=activity.pk %}" class="hover:underline">结果公示板</a> /
+        闭场预检
+    </p>
+    <div class="flex items-start justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ activity.title }} · 闭场预检</h1>
+            <p class="text-sm text-gray-500 mt-1">只读检查内部结果 authority；不执行核定、锁定或公开发布。</p>
+        </div>
+        {% if closure_payload.closeable %}
+        <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-2 py-1 rounded font-medium">内部闭场通过</span>
+        {% else %}
+        <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2 py-1 rounded font-medium">存在阻塞</span>
+        {% endif %}
+    </div>
+
+    {% if closure_payload.blocking_reasons %}
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        <h2 class="font-semibold text-amber-900 mb-2">活动阻塞原因</h2>
+        <ul class="text-sm text-amber-800 list-disc list-inside space-y-1">
+            {% for label in blocking_labels %}
+            {% if label.code in closure_payload.blocking_reasons %}
+            <li>{{ label.label }} <span class="text-xs opacity-70">({{ label.code }})</span></li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if not closure_payload.stages %}
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">
+        当前没有可检查的赛段。
+    </div>
+    {% else %}
+    <div class="space-y-4">
+        {% for stage in closure_payload.stages %}
+        <section class="bg-white border border-gray-200 rounded-lg p-5">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h2 class="font-semibold text-gray-900">{{ stage.stage_key }}</h2>
+                    <p class="text-xs text-gray-500 mt-1">
+                        当前结果 #{{ stage.current_result_id|default:"—" }} · 版本 {{ stage.result_version|default:"—" }}
+                    </p>
+                </div>
+                {% if stage.status == "confirmed" %}
+                <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-2 py-1 rounded">已核定</span>
+                {% elif stage.status == "ready_to_confirm" %}
+                <span class="text-xs bg-sky-50 border border-sky-300 text-sky-800 px-2 py-1 rounded">待核定</span>
+                {% elif stage.status == "review" %}
+                <span class="text-xs bg-amber-50 border border-amber-300 text-amber-800 px-2 py-1 rounded">待人工复核</span>
+                {% elif stage.status == "hold" %}
+                <span class="text-xs bg-gray-50 border border-gray-300 text-gray-700 px-2 py-1 rounded">待齐数据</span>
+                {% else %}
+                <span class="text-xs bg-gray-50 border border-gray-300 text-gray-700 px-2 py-1 rounded">未生成</span>
+                {% endif %}
+            </div>
+
+            <dl class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 text-sm">
+                <div><dt class="text-gray-500">可核定</dt><dd class="font-medium">{% if stage.confirmable %}是{% else %}否{% endif %}</dd></div>
+                <div><dt class="text-gray-500">原始事实锁定</dt><dd class="font-medium">{% if stage.raw_facts_locked %}是{% else %}否{% endif %}</dd></div>
+                <div><dt class="text-gray-500">上游已核定</dt><dd class="font-medium">{% if stage.upstream_confirmed %}是{% else %}否{% endif %}</dd></div>
+                <div><dt class="text-gray-500">正式奖项/入口</dt><dd class="font-medium">{{ stage.official_awards }}/{{ stage.round_entries }}</dd></div>
+            </dl>
+
+            {% if stage.blocking_reasons %}
+            <div class="mt-4 border-t border-gray-100 pt-3">
+                <p class="text-xs font-medium text-gray-600 mb-1">阶段阻塞</p>
+                <ul class="text-xs text-gray-600 list-disc list-inside space-y-0.5">
+                    {% for label in blocking_labels %}
+                    {% if label.code in stage.blocking_reasons %}
+                    <li>{{ label.label }} <span class="text-gray-400">({{ label.code }})</span></li>
+                    {% endif %}
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </section>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
