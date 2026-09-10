@@ -6260,3 +6260,93 @@ class JudgeControlHTTPTests(TestCase):
         record = ScoreRecord.objects.get(round=self.contest_round)
         self.assertEqual(record.source, ScoreSource.PAPER_DR)
         self.assertEqual(record.source_reference, "纸面表-001")
+
+
+class ResultClosureViewTests(TestCase):
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="closure-view-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = _create_activity(
+            title="Closure View Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+
+    def _ready_stage(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        definition = json.dumps(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Closure View Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=definition,
+                binding={"stage_key": "final"},
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        from singer_contest.services import _current_input_fingerprint
+
+        return StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            ruleset_hash=version.authority_hash,
+            input_fingerprint=_current_input_fingerprint(version, self.activity, "final"),
+            is_test_data=True,
+        )
+
+    def test_closure_view_requires_staff(self):
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 302)
+
+    def test_closure_view_is_get_only(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 405)
+
+    def test_closure_view_is_activity_scoped(self):
+        other = _create_activity(
+            title="Foreign Closure Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk]),
+            {"activity_id": other.pk, "result_id": 999999},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.activity.title)
+        self.assertNotContains(response, other.title)
+        self.assertNotContains(response, "999999")
+
+    def test_closure_view_shows_ready_confirmation(self):
+        self._ready_stage()
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "待核定")
+        self.assertContains(response, "stage_confirmation_pending")
+        self.assertNotContains(response, "bearer")
+        self.assertNotContains(response, "secret")
+        self.assertNotContains(response, "Authorization")

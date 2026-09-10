@@ -49,7 +49,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 from exports.models import ArticleTemplate
 from exports.services import (
     archive_activity,
@@ -117,6 +117,7 @@ from singer_contest.models import (
 )
 from singer_contest.services import (
     IdempotencyConflictError,
+    ResultClosureCode,
     StaleScoreVersionError,
     _current_frozen_version,
     _current_resolve_status,
@@ -125,6 +126,7 @@ from singer_contest.services import (
     apply_scores,
     apply_scores_if_version,
     authoritative_panel_judges,
+    build_result_closure,
     confirm_stage_result,
     create_manual_award,
     create_scoring_rubric,
@@ -137,6 +139,7 @@ from singer_contest.services import (
     parse_score_workbook,
     prepare_round,
     reset_round_to_draft,
+    result_closure_as_dict,
     set_manual_decision,
     set_round_groups,
     set_round_running_order,
@@ -1555,6 +1558,47 @@ def activity_result_board(request, activity_id):
         request,
         "staff_panel/activity_result_board.html",
         {"activity": activity, "stages": stages},
+    )
+
+
+_RESULT_CLOSURE_LABELS = (
+    {"code": ResultClosureCode.NO_CURRENT_FROZEN_RULESET.value, "label": "没有当前冻结赛制"},
+    {"code": ResultClosureCode.RULESET_BINDING_INVALID.value, "label": "赛制绑定无效"},
+    {"code": ResultClosureCode.RAW_FACTS_INCOMPLETE.value, "label": "原始输入未齐"},
+    {"code": ResultClosureCode.RAW_FACTS_UNLOCKED.value, "label": "原始输入未锁定"},
+    {"code": ResultClosureCode.RULE_REVIEW_REQUIRED.value, "label": "规则要求人工复核"},
+    {
+        "code": ResultClosureCode.UPSTREAM_CONFIRMATION_PENDING.value,
+        "label": "上游赛段尚未核定",
+    },
+    {"code": ResultClosureCode.STALE_CANDIDATE.value, "label": "候选结果已过期"},
+    {"code": ResultClosureCode.STAGE_CONFIRMATION_PENDING.value, "label": "赛段等待核定"},
+    {
+        "code": ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED.value,
+        "label": "活动已被操作锁定",
+    },
+    {
+        "code": ResultClosureCode.SCHOOL_EXTERNAL_EVIDENCE_PENDING.value,
+        "label": "学校外部证据待补齐",
+    },
+)
+
+
+@staff_required
+@require_GET
+def activity_result_closure(request, activity_id):
+    """Render the read-only event-day result closure checklist."""
+    activity = get_object_or_404(Activity, pk=activity_id)
+    closure = build_result_closure(activity)
+    return render(
+        request,
+        "staff_panel/activity_result_closure.html",
+        {
+            "activity": activity,
+            "closure": closure,
+            "closure_payload": result_closure_as_dict(closure),
+            "blocking_labels": _RESULT_CLOSURE_LABELS,
+        },
     )
 
 
