@@ -36,7 +36,7 @@ from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Max, Q, QuerySet
+from django.db.models import F, Max, OuterRef, Q, QuerySet, Subquery
 from django.utils import timezone
 from ruleset.compiler import ExecutionPlan, compile_version
 from ruleset.resolver import (
@@ -51,6 +51,7 @@ from ruleset.resolver import (
     stage_consumed_duel_keys,
     stage_consumed_scopes,
 )
+from voting.models import VoteSession
 
 from .models import (
     Award,
@@ -2806,6 +2807,263 @@ def _definition_checkpoints_ordered(version) -> tuple[str, ...]:
         else json.loads(version.definition)
     )
     return tuple(c["key"] for c in (obj.get("checkpoints") or ()) if c.get("key"))
+
+
+def official_stage_award_queryset(activity) -> QuerySet[Award]:
+    """Return manual Awards plus only current confirmed stage-sourced Awards."""
+    from ruleset.models import RulesetVersion
+
+    latest_version = (
+        StageResult.objects.filter(
+            activity=activity,
+            stage_key=OuterRef("source_stage_result__stage_key"),
+        )
+        .order_by("-result_version", "-pk")
+        .values("result_version")[:1]
+    )
+    stage_awards = Award.objects.filter(
+        activity=activity,
+        source_stage_result__isnull=False,
+        source_stage_result__activity=activity,
+        source_stage_result__status=StageResult.Status.CONFIRMED,
+        source_stage_result__result_version=Subquery(latest_version),
+        source_stage_result__ruleset_version__is_current=True,
+        source_stage_result__ruleset_version__status=RulesetVersion.Status.FROZEN,
+        source_award_decision__activity=activity,
+        source_award_decision__stage_result_id=F("source_stage_result_id"),
+    )
+    return Award.objects.filter(
+        Q(activity=activity, source_stage_result__isnull=True) | Q(pk__in=stage_awards)
+    ).select_related("singer", "source_stage_result", "source_award_decision")
+
+
+def _coerce_bound_ids(values: Iterable[object]) -> set[int]:
+    ids: set[int] = set()
+    for value in values:
+        if value is None:
+            continue
+        text = str(value)
+        if not text.isdigit():
+            raise ValueError("规则绑定包含无法识别的原始数据 ID。")
+        ids.add(int(text))
+    return ids
+
+
+def _closure_required_raw_facts(version, activity, stage_key: str) -> dict[str, tuple[int, ...]]:
+    """Resolve the physical round/vote IDs consumed by one stage."""
+    checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
+    round_keys, vote_keys, group_keys, _manual_keys = stage_consumed_scopes(
+        version.definition, checkpoint
+    )
+    binding = _version_binding(version)
+    round_map = binding.get("round_keys") or {}
+    group_map = binding.get("group_keys") or {}
+    vote_map = binding.get("vote_keys") or {}
+    audience_map = binding.get("audience_keys") or {}
+    round_ids = _coerce_bound_ids(
+        [round_map.get(key) for key in round_keys]
+        + [group_map.get(key) for key in group_keys]
+    )
+    audience_keys = {key for key in vote_keys if key in audience_map}
+    vote_ids = _coerce_bound_ids([vote_map.get(key) for key in vote_keys - audience_keys])
+    round_qs = ContestRound.objects.filter(activity=activity, pk__in=round_ids)
+    vote_qs = VoteSession.objects.filter(activity=activity, pk__in=vote_ids)
+    if round_qs.count() != len(round_ids) or vote_qs.count() != len(vote_ids):
+        raise ValueError("规则绑定的原始轮次或投票不存在。")
+    return {
+        "rounds": tuple(sorted(round_ids)),
+        "votes": tuple(sorted(vote_ids)),
+    }
+
+
+def _closure_upstream_stage_keys(
+    version, activity, required_round_ids: tuple[int, ...]
+) -> tuple[str, ...]:
+    return tuple(
+        ContestRound.objects.filter(
+            activity=activity,
+            pk__in=required_round_ids,
+            roster_source=ContestRound.RosterSource.STAGE,
+        )
+        .exclude(roster_source_stage="")
+        .values_list("roster_source_stage", flat=True)
+        .distinct()
+    )
+
+
+def _closure_stage(
+    activity,
+    version,
+    stage_key: str,
+    latest: StageResult | None,
+) -> StageClosure:
+    blockers: list[ResultClosureCode] = []
+    if activity.is_locked:
+        blockers.append(ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED)
+    reasons: tuple[str, ...] = tuple(latest.reasons or ()) if latest else ()
+    required: dict[str, tuple[int, ...]] = {}
+    raw_facts_locked = True
+    upstream_confirmed = True
+    try:
+        required = _closure_required_raw_facts(version, activity, stage_key)
+    except (KeyError, TypeError, ValueError, ValidationError):
+        blockers.append(ResultClosureCode.RULESET_BINDING_INVALID)
+
+    if required:
+        round_ids = required.get("rounds", ())
+        vote_ids = required.get("votes", ())
+        rounds = ContestRound.objects.filter(activity=activity, pk__in=round_ids)
+        votes = VoteSession.objects.filter(activity=activity, pk__in=vote_ids)
+        if rounds.count() != len(round_ids) or votes.count() != len(vote_ids):
+            blockers.append(ResultClosureCode.RAW_FACTS_INCOMPLETE)
+        raw_facts_locked = not rounds.exclude(is_locked=True).exists() and not votes.exclude(
+            is_locked=True
+        ).exists()
+        if not raw_facts_locked:
+            blockers.append(ResultClosureCode.RAW_FACTS_UNLOCKED)
+        upstream_keys = _closure_upstream_stage_keys(version, activity, round_ids)
+        if upstream_keys:
+            upstream_confirmed = all(
+                StageResult.objects.filter(
+                    activity=activity,
+                    stage_key=upstream_key,
+                    status=StageResult.Status.CONFIRMED,
+                )
+                .order_by("-result_version", "-pk")
+                .first()
+                is not None
+                for upstream_key in upstream_keys
+            )
+            if not upstream_confirmed:
+                blockers.append(ResultClosureCode.UPSTREAM_CONFIRMATION_PENDING)
+
+    if latest is None:
+        blockers.append(ResultClosureCode.RAW_FACTS_INCOMPLETE)
+    else:
+        if latest.ruleset_version_id != version.pk or latest.ruleset_hash != version.authority_hash:
+            blockers.append(ResultClosureCode.STALE_CANDIDATE)
+        else:
+            try:
+                if latest.input_fingerprint != _current_input_fingerprint(
+                    version, activity, stage_key
+                ):
+                    blockers.append(ResultClosureCode.STALE_CANDIDATE)
+            except (KeyError, TypeError, ValueError, ValidationError):
+                blockers.append(ResultClosureCode.RULESET_BINDING_INVALID)
+        if latest.status == StageResult.Status.HOLD:
+            blockers.append(ResultClosureCode.RAW_FACTS_INCOMPLETE)
+        elif latest.status == StageResult.Status.REVIEW:
+            blockers.append(ResultClosureCode.RULE_REVIEW_REQUIRED)
+        elif latest.status not in {
+            StageResult.Status.READY_TO_CONFIRM,
+            StageResult.Status.CONFIRMED,
+        }:
+            blockers.append(ResultClosureCode.RULESET_BINDING_INVALID)
+        if latest.status == StageResult.Status.READY_TO_CONFIRM:
+            blockers.append(ResultClosureCode.STAGE_CONFIRMATION_PENDING)
+
+    ordered_blockers = tuple(dict.fromkeys(blockers))
+    confirmable = (
+        latest is not None
+        and latest.status == StageResult.Status.READY_TO_CONFIRM
+        and not set(ordered_blockers) - {ResultClosureCode.STAGE_CONFIRMATION_PENDING}
+    )
+    official_awards = 0
+    round_entries = 0
+    if latest is not None and latest.status == StageResult.Status.CONFIRMED:
+        official_awards = official_stage_award_queryset(activity).filter(
+            source_stage_result=latest
+        ).count()
+        round_entries = RoundEntry.objects.filter(
+            round__activity=activity,
+            round__roster_source=ContestRound.RosterSource.STAGE,
+            round__roster_source_stage=stage_key,
+        ).count()
+    return StageClosure(
+        stage_key=stage_key,
+        current_result_id=latest.pk if latest else None,
+        result_version=latest.result_version if latest else None,
+        status=latest.status if latest else None,
+        confirmable=confirmable,
+        reasons=reasons,
+        input_fingerprint=latest.input_fingerprint if latest else None,
+        required_raw_facts=required,
+        raw_facts_locked=raw_facts_locked,
+        upstream_confirmed=upstream_confirmed,
+        official_awards=official_awards,
+        round_entries=round_entries,
+        blocking_reasons=ordered_blockers,
+    )
+
+
+def build_result_closure(activity, *, stage_key: str | None = None) -> ResultClosure:
+    """Build a read-only, activity-scoped result closure report."""
+    version = _current_frozen_version(activity)
+    if version is None:
+        return ResultClosure(
+            activity_id=activity.pk,
+            ruleset_version_id=None,
+            ruleset_authority_hash=None,
+            stages=(),
+            closeable=False,
+            blocking_reasons=(ResultClosureCode.NO_CURRENT_FROZEN_RULESET,),
+        )
+    blockers: list[ResultClosureCode] = []
+    if activity.is_locked:
+        blockers.append(ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED)
+    try:
+        stage_keys = _definition_checkpoints_ordered(version)
+        if not stage_keys:
+            stage_keys = ((_version_binding(version).get("stage_key") or "").strip(),)
+        stage_keys = tuple(key for key in stage_keys if key)
+        if not stage_keys:
+            return ResultClosure(
+                activity_id=activity.pk,
+                ruleset_version_id=version.pk,
+                ruleset_authority_hash=version.authority_hash or None,
+                stages=(),
+                closeable=False,
+                blocking_reasons=(ResultClosureCode.RULESET_BINDING_INVALID,),
+            )
+        if stage_key is not None:
+            if stage_key not in stage_keys:
+                return ResultClosure(
+                    activity_id=activity.pk,
+                    ruleset_version_id=version.pk,
+                    ruleset_authority_hash=version.authority_hash or None,
+                    stages=(),
+                    closeable=False,
+                    blocking_reasons=(ResultClosureCode.RULESET_BINDING_INVALID,),
+                )
+            stage_keys = (stage_key,)
+    except (KeyError, TypeError, ValueError, ValidationError):
+        return ResultClosure(
+            activity_id=activity.pk,
+            ruleset_version_id=version.pk,
+            ruleset_authority_hash=version.authority_hash or None,
+            stages=(),
+            closeable=False,
+            blocking_reasons=(ResultClosureCode.RULESET_BINDING_INVALID,),
+        )
+    stages: list[StageClosure] = []
+    for key in stage_keys:
+        latest = (
+            StageResult.objects.filter(activity=activity, stage_key=key)
+            .order_by("-result_version", "-pk")
+            .first()
+        )
+        stages.append(_closure_stage(activity, version, key, latest))
+    for stage in stages:
+        blockers.extend(stage.blocking_reasons)
+    ordered_blockers = tuple(dict.fromkeys(blockers))
+    return ResultClosure(
+        activity_id=activity.pk,
+        ruleset_version_id=version.pk,
+        ruleset_authority_hash=version.authority_hash or None,
+        stages=tuple(stages),
+        closeable=bool(stages) and not ordered_blockers,
+        blocking_reasons=ordered_blockers,
+    )
 
 
 def _run_ruleset_args(version, activity) -> dict:

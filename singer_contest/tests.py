@@ -2751,7 +2751,6 @@ class ResultClosureContractTests(TestCase):
     def test_closure_does_not_contain_token_or_private_payload_fields(self):
         from .services import (
             ResultClosure,
-            ResultClosureCode,
             StageClosure,
             result_closure_as_dict,
         )
@@ -2788,6 +2787,208 @@ class ResultClosureContractTests(TestCase):
         self.assertNotIn("secret", json.dumps(payload, ensure_ascii=False).lower())
         self.assertNotIn("judge_notes", payload)
         self.assertNotIn("request_headers", payload)
+
+
+class ResultClosureServiceTests(TestCase):
+    _DEFINITION = json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"},
+            ],
+        }
+    )
+
+    def setUp(self):
+        self.operator = _create_provisioned_user(
+            username="closure-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = _create_activity(
+            title="Closure Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Closure Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        self.round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="Final source",
+            sequence=1,
+            status=ContestRound.Status.LOCKED,
+            is_locked=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self._DEFINITION,
+                version=1,
+                binding={"stage_key": "final", "round_keys": {"r1": self.round.pk}},
+                authority_hash="closure-authority",
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+
+    def _stage(self, **overrides):
+        from .services import _current_input_fingerprint
+
+        payload = {
+            "activity": self.activity,
+            "ruleset_version": self.version,
+            "created_by": self.operator,
+            "stage_key": "final",
+            "status": StageResult.Status.READY_TO_CONFIRM,
+            "reasons": [],
+            "ruleset_hash": self.version.authority_hash,
+            "input_fingerprint": _current_input_fingerprint(
+                self.version, self.activity, "final"
+            ),
+            "result_version": 1,
+            "is_test_data": True,
+        }
+        payload.update(overrides)
+        return StageResult.objects.create(**payload)
+
+    def test_closure_reports_no_current_frozen_ruleset(self):
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(
+                is_current=False, status=RulesetVersion.Status.DRAFT
+            )
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertFalse(closure.closeable)
+        self.assertEqual(closure.stages, ())
+        self.assertEqual(
+            closure.blocking_reasons, (ResultClosureCode.NO_CURRENT_FROZEN_RULESET,)
+        )
+
+    def test_closure_reports_ready_candidate_as_confirmation_pending(self):
+        stage = self._stage()
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertFalse(closure.closeable)
+        self.assertEqual(closure.stages[0].current_result_id, stage.pk)
+        self.assertTrue(closure.stages[0].confirmable)
+        self.assertEqual(
+            closure.stages[0].blocking_reasons,
+            (ResultClosureCode.STAGE_CONFIRMATION_PENDING,),
+        )
+
+    def test_closure_reports_missing_result_as_incomplete(self):
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(ResultClosureCode.RAW_FACTS_INCOMPLETE, closure.stages[0].blocking_reasons)
+        self.assertIsNone(closure.stages[0].current_result_id)
+
+    def test_closure_reports_unconfirmed_upstream(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.roster_source = ContestRound.RosterSource.STAGE
+            self.round.roster_source_stage = "upstream"
+            self.round.save(update_fields=["roster_source", "roster_source_stage"])
+        self._stage()
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(
+            ResultClosureCode.UPSTREAM_CONFIRMATION_PENDING,
+            closure.stages[0].blocking_reasons,
+        )
+        self.assertFalse(closure.stages[0].upstream_confirmed)
+
+    def test_closure_marks_latest_result_on_superseded_version_stale(self):
+        self._stage(
+            ruleset_version=self.version,
+            input_fingerprint="old-fingerprint",
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
+            successor = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self._DEFINITION,
+                version=2,
+                binding={"stage_key": "final", "round_keys": {"r1": self.round.pk}},
+                authority_hash="successor-authority",
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=successor,
+            created_by=self.operator,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            ruleset_hash=successor.authority_hash,
+            input_fingerprint="successor-fingerprint",
+            result_version=2,
+            is_test_data=True,
+        )
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(ResultClosureCode.STALE_CANDIDATE, closure.stages[0].blocking_reasons)
+        self.assertFalse(closure.stages[0].confirmable)
+
+    def test_closure_reports_unlocked_raw_facts(self):
+        self.round.status = ContestRound.Status.SCORING
+        self.round.is_locked = False
+        _save_round_state(self.round, ["status", "is_locked"])
+        self._stage()
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(ResultClosureCode.RAW_FACTS_UNLOCKED, closure.stages[0].blocking_reasons)
+        self.assertFalse(closure.stages[0].raw_facts_locked)
+        self.assertFalse(closure.stages[0].confirmable)
+
+    def test_closure_reports_review_result(self):
+        self._stage(status=StageResult.Status.REVIEW, reasons=["tie_requires_review"])
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(ResultClosureCode.RULE_REVIEW_REQUIRED, closure.stages[0].blocking_reasons)
+        self.assertEqual(closure.stages[0].reasons, ("tie_requires_review",))
+        self.assertFalse(closure.stages[0].confirmable)
+
+    def test_closure_is_read_only(self):
+        self._stage()
+        from django.test.utils import CaptureQueriesContext
+
+        from .services import build_result_closure
+
+        before = {
+            "results": StageResult.objects.count(),
+            "audits": AuditLog.objects.count(),
+        }
+        with CaptureQueriesContext(connection) as queries:
+            build_result_closure(self.activity)
+        after = {
+            "results": StageResult.objects.count(),
+            "audits": AuditLog.objects.count(),
+        }
+        self.assertEqual(before, after)
+        self.assertFalse(
+            any(
+                query["sql"].lstrip().upper().startswith(token)
+                or f" {token}" in query["sql"].upper()
+                for query in queries.captured_queries
+                for token in ("INSERT", "UPDATE", "DELETE", "FOR UPDATE")
+            )
+        )
 
 
 class StageResolverBindingTests(TestCase):
