@@ -59,7 +59,9 @@ Commit messages follow conventional prefixes seen in history: `feat:`, `fix:`, `
 
 ## Agent Execution & Git Network Rules
 
-- Do not spawn subagents to execute repository modifications. The primary agent must inspect, edit, test, and verify changes directly in the current conversation.
+- Execute repository work inline in the current conversation. Do not spawn subagents or delegate
+  inspection, editing, testing, verification, cleanup, commits, or merges; the primary agent must
+  perform and report those actions directly.
 - If `git push` times out, retry through the local VPN proxy at `127.0.0.1:12334`:
 
 ```bash
