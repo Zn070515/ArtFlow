@@ -2789,6 +2789,8 @@ class ResultClosureContractTests(TestCase):
         self.assertNotIn("secret", json.dumps(payload, ensure_ascii=False).lower())
         self.assertNotIn("judge_notes", payload)
         self.assertNotIn("request_headers", payload)
+        self.assertEqual(payload["stages"][0]["input_fingerprint_prefix"], "fingerprint-")
+        self.assertNotIn("fingerprint-prefix", json.dumps(payload, ensure_ascii=False))
 
 
 class ResultClosureServiceTests(TestCase):
@@ -2943,6 +2945,18 @@ class ResultClosureServiceTests(TestCase):
         self.assertIn(ResultClosureCode.STALE_CANDIDATE, closure.stages[0].blocking_reasons)
         self.assertFalse(closure.stages[0].confirmable)
 
+    def test_closure_marks_fingerprint_mismatch_stale(self):
+        self._stage(input_fingerprint="stale-fingerprint")
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(
+            ResultClosureCode.STALE_CANDIDATE,
+            closure.stages[0].blocking_reasons,
+        )
+        self.assertFalse(closure.stages[0].confirmable)
+
     def test_closure_reports_unlocked_raw_facts(self):
         self.round.status = ContestRound.Status.SCORING
         self.round.is_locked = False
@@ -2965,6 +2979,32 @@ class ResultClosureServiceTests(TestCase):
         self.assertIn(ResultClosureCode.RULE_REVIEW_REQUIRED, closure.stages[0].blocking_reasons)
         self.assertEqual(closure.stages[0].reasons, ("tie_requires_review",))
         self.assertFalse(closure.stages[0].confirmable)
+
+    def test_closure_rejects_forged_stage_key_without_cross_stage_reads(self):
+        self._stage()
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity, stage_key="foreign-stage")
+        self.assertFalse(closure.closeable)
+        self.assertEqual(closure.stages, ())
+        self.assertEqual(
+            closure.blocking_reasons, (ResultClosureCode.RULESET_BINDING_INVALID,)
+        )
+
+    def test_closure_marks_operationally_locked_activity(self):
+        self._stage()
+        self.activity.is_locked = True
+        _save_activity_state(self.activity, ["is_locked"])
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertIn(
+            ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED,
+            closure.blocking_reasons,
+        )
+        self.assertFalse(closure.closeable)
 
     def test_closure_is_read_only(self):
         self._stage()
@@ -3062,6 +3102,178 @@ class ResultClosureServiceTests(TestCase):
         self.assertTrue(official.filter(pk=current_award.pk).exists())
         self.assertEqual(old_award.source_award_decision_id, old_candidate.pk)
         self.assertEqual(current_award.source_award_decision_id, current_candidate.pk)
+
+    def test_official_queryset_excludes_cross_activity_stage_source(self):
+        SingerRegistration.objects.create(
+            activity=self.activity,
+            user=_create_provisioned_user(username="closure-local-singer", password="pass"),
+            name="本活动选手",
+            student_id="closure-local-001",
+            college="学院",
+            class_name="班级",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        other_activity = _create_activity(
+            title="Foreign Award Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        other_ruleset = ContestRuleset.objects.create(
+            activity=other_activity,
+            name="Foreign Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            other_version = RulesetVersion.objects.create(
+                ruleset=other_ruleset,
+                definition=self._DEFINITION,
+                version=1,
+                binding={"stage_key": "final"},
+                authority_hash="foreign-authority",
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        other_stage = StageResult.objects.create(
+            activity=other_activity,
+            ruleset_version=other_version,
+            created_by=self.operator,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            ruleset_hash=other_version.authority_hash,
+            input_fingerprint="foreign-fingerprint",
+            result_version=1,
+            is_test_data=True,
+        )
+        other_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=_create_provisioned_user(username="closure-foreign-singer", password="pass"),
+            name="外活动选手",
+            student_id="closure-foreign-001",
+            college="外学院",
+            class_name="外班级",
+            song_name="外歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        StageAwardDecision.objects.create(
+            stage_result=other_stage,
+            activity=other_activity,
+            singer=other_singer,
+            name="跨活动候选",
+            is_test_data=True,
+        )
+        from .services import materialize_stage_awards, official_stage_award_queryset
+
+        with authority_write(STAGE_RESULT_CONFIRM):
+            other_stage.status = StageResult.Status.CONFIRMED
+            other_stage.confirmed_at = timezone.now()
+            other_stage.confirmed_by = self.operator
+            other_stage.save(update_fields=["status", "confirmed_at", "confirmed_by"])
+        award = materialize_stage_awards(other_stage, operator=self.operator)[0]
+
+        self.assertFalse(official_stage_award_queryset(self.activity).filter(pk=award.pk).exists())
+
+
+@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+class ResultClosureConfirmationConcurrencyTests(TransactionTestCase):
+    """The Activity lock makes concurrent confirmation a single authority event."""
+
+    reset_sequences = True
+
+    def setUp(self):
+        self.operator = _create_provisioned_user(
+            username="closure-concurrency-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = _create_activity(
+            title="Closure Concurrency Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Closure Concurrency Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                version=1,
+                binding={"stage_key": "final"},
+                authority_hash="closure-concurrency-authority",
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        from .services import _current_input_fingerprint
+
+        self.stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=self.version,
+            created_by=self.operator,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            reasons=[],
+            ruleset_hash=self.version.authority_hash,
+            input_fingerprint=_current_input_fingerprint(self.version, self.activity, "final"),
+            result_version=1,
+            is_test_data=True,
+        )
+
+    def test_concurrent_confirmation_creates_one_audit_and_one_authority_state(self):
+        from .services import confirm_stage_result
+
+        outcomes = []
+        guard = threading.Lock()
+        start = threading.Barrier(2)
+
+        def confirm():
+            close_old_connections()
+            try:
+                start.wait(timeout=30)
+                actor = User.objects.get(pk=self.operator.pk)
+                result = confirm_stage_result(
+                    StageResult.objects.get(pk=self.stage.pk), confirmed_by=actor
+                )
+                with guard:
+                    outcomes.append(("ok", result.status))
+            except Exception as error:  # noqa: BLE001 — record both thread outcomes
+                with guard:
+                    outcomes.append(("error", type(error).__name__))
+            finally:
+                close_old_connections()
+
+        threads = [threading.Thread(target=confirm) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        self.assertEqual(len(outcomes), 2, outcomes)
+        self.assertFalse(any(kind == "error" for kind, _value in outcomes), outcomes)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.CONFIRM_STAGE_RESULT,
+                target=f"StageResult:{self.stage.pk}",
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            StageResult.objects.get(pk=self.stage.pk).status,
+            StageResult.Status.CONFIRMED,
+        )
+        self.assertEqual(
+            Award.objects.filter(source_stage_result_id=self.stage.pk).count(),
+            0,
+        )
 
 
 class StageResolverBindingTests(TestCase):

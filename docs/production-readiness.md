@@ -123,6 +123,11 @@ M2-D1 增加只读的 Staff 闭场预检，统一检查当前冻结赛制、当�
 
 M2-D1 的本地 PASS 只证明内部 authority 闭合，不证明学校 SSO/MFA、代理 header、TLS/WAF、volumetric DDoS、数据保存期限、备份责任或学校批准接入。上述外部证据仍单独保持 `HOLD`。
 
+本轮恶意彩排的详细矩阵、脚本边界和量化字段见
+[`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。只读 HTTP 脚本不能替代
+确认重放、stale reject、旧来源导出和 PostgreSQL row-lock 证据；这些字段若未执行必须标记
+`BLOCKED`/`NOT EXERCISED`，不能用 0 伪装为通过。
+
 每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
 已经具备 Production 资格。
 
@@ -137,6 +142,15 @@ M2-D1 的本地 PASS 只证明内部 authority 闭合，不证明学校 SSO/MFA�
 门禁覆盖随能力推进扩大，不允许为了通过新能力而静默移除既有门禁。Playwright 初始
 检查只读的 `/healthz/`；进入 Judge/Ticket 流程后，测试必须使用可丢弃数据，携带 bearer
 token 的用例关闭 trace/video/screenshot，避免凭据进入测试产物。
+
+### 2026-09-11 M2-D1 Task 6 执行记录
+
+闭场相关 Django 回归为 `22 passed, 1 skipped`；skip 是要求 PostgreSQL row lock 的并发确认
+测试。Pyright baseline、entry-access、Ruff、Node syntax 和文档检查均通过。当前 Docker CLI
+无法连接 `dockerDesktopLinuxEngine`，`127.0.0.1:18000` 也没有运行服务，因此本轮 PostgreSQL
+并发、HTTP 彩排的 p50/p95/p99、状态计数、timeout 以及备份恢复均为 `BLOCKED`，不能把本轮
+标记为 M2-D1 全部 PASS。具体矩阵和边界见
+[`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。
 
 ## 发布门禁
 

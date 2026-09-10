@@ -145,7 +145,9 @@ def result_closure_as_dict(closure: ResultClosure) -> dict[str, object]:
                 "status": stage.status,
                 "confirmable": stage.confirmable,
                 "reasons": list(stage.reasons),
-                "input_fingerprint": stage.input_fingerprint,
+                "input_fingerprint_prefix": (
+                    stage.input_fingerprint[:12] if stage.input_fingerprint else None
+                ),
                 "required_raw_facts": {
                     key: list(values) for key, values in stage.required_raw_facts.items()
                 },
