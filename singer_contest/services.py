@@ -2836,6 +2836,7 @@ def official_stage_award_queryset(activity: Activity | None = None) -> QuerySet[
         source_stage_result__result_version=Subquery(latest_version),
         source_stage_result__ruleset_version__is_current=True,
         source_stage_result__ruleset_version__status=RulesetVersion.Status.FROZEN,
+        source_stage_result__ruleset_version__ruleset__activity_id=F("activity_id"),
         source_award_decision__activity_id=F("activity_id"),
         source_award_decision__stage_result_id=F("source_stage_result_id"),
     )

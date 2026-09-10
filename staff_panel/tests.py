@@ -6372,3 +6372,28 @@ class ResultClosureViewTests(TestCase):
         self.assertNotContains(response, "bearer")
         self.assertNotContains(response, "secret")
         self.assertNotContains(response, "Authorization")
+
+    def test_closure_view_is_read_only(self):
+        self._ready_stage()
+        self.client.force_login(self.staff)
+        before = {
+            "results": StageResult.objects.count(),
+            "awards": Award.objects.count(),
+            "entries": RoundEntry.objects.count(),
+            "audits": AuditLog.objects.count(),
+        }
+
+        response = self.client.get(
+            reverse("staff:activity_result_closure", args=[self.activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            before,
+            {
+                "results": StageResult.objects.count(),
+                "awards": Award.objects.count(),
+                "entries": RoundEntry.objects.count(),
+                "audits": AuditLog.objects.count(),
+            },
+        )
