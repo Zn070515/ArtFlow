@@ -36,7 +36,6 @@ from .judge_authority import (
     submit_paper_score,
     submit_staff_proxy_score,
 )
-from .services import apply_scores
 from .models import (
     ContestRound,
     CriterionScore,
@@ -52,6 +51,7 @@ from .models import (
     ScoreSource,
     ScoringRubric,
 )
+from .services import apply_scores
 
 
 class JudgeAuthorityVocabularyTests(TestCase):
