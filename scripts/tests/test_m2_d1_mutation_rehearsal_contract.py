@@ -6,9 +6,7 @@ FIXTURE_COMMAND = REPOSITORY_ROOT / "common/management/commands/prepare_result_c
 INTEGRATION_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/integration.yml").read_text(
     encoding="utf-8"
 )
-UI_FLOW = (REPOSITORY_ROOT / "tests/e2e/result-closure-flow.spec.ts").read_text(
-    encoding="utf-8"
-)
+UI_FLOW = (REPOSITORY_ROOT / "tests/e2e/result-closure-flow.spec.ts").read_text(encoding="utf-8")
 
 
 def test_m2_d1_mutation_rehearsal_exercises_all_gate_boundaries():

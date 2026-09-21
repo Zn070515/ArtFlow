@@ -5444,7 +5444,7 @@ class ResultBoardTests(TestCase):
         response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f'data-stage-status="confirmed"')
+        self.assertContains(response, 'data-stage-status="confirmed"')
         self.assertContains(
             response,
             f'action="{reverse("staff:stage_result_unlock", args=[ready.pk])}"',
@@ -5453,7 +5453,9 @@ class ResultBoardTests(TestCase):
         self.assertContains(response, "required")
 
     def test_staff_stage_detail_does_not_render_admin_unlock_form(self):
-        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-ui")
+        ready = self._stage(
+            status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-ui"
+        )
         self._confirm(ready)
 
         response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
