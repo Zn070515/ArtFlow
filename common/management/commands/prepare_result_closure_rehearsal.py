@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from argparse import ArgumentParser
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 from accounts.models import User
@@ -14,7 +16,7 @@ from core.models import Activity
 from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.management.base import BaseCommand, CommandError
-from django.middleware.csrf import _get_new_csrf_string, _mask_cipher_secret
+from django.middleware.csrf import _get_new_csrf_string
 from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import SingerRegistration, StageAwardDecision, StageResult
 from singer_contest.services import _current_input_fingerprint, confirm_stage_result
@@ -25,10 +27,10 @@ from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, RULESET_FREEZE, 
 class Command(BaseCommand):
     help = "Prepare a private development-only M2-D1 result closure rehearsal fixture."
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--output-file", required=True)
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         if settings.APP_ENV == "production":
             raise CommandError("Result closure rehearsal fixtures are disabled in production.")
 
@@ -80,11 +82,13 @@ class Command(BaseCommand):
         )
         operator.set_unusable_password()
         with authority_write(ACCOUNT_AUTHORITY):
-            operator.save()
+            operator.save()  # type: ignore[no-untyped-call]
         return operator
 
     @classmethod
-    def _create_fixture(cls, operator: User):
+    def _create_fixture(
+        cls, operator: User
+    ) -> tuple[Activity, Activity, StageResult, StageResult, str, str]:
         suffix = uuid4().hex[:12]
         current_marker = f"M2-D1-CURRENT-AWARD-{suffix}"
         foreign_marker = f"M2-D1-FOREIGN-AWARD-{suffix}"
@@ -97,16 +101,19 @@ class Command(BaseCommand):
         current_stage = cls._create_ready_stage(
             activity, current_version, current_singer, operator, "current-stage", current_marker
         )
-        stale_stage = StageResult.objects.create(
-            activity=activity,
-            ruleset_version=current_version,
-            created_by=operator,
-            stage_key="stale-stage",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=current_version.authority_hash,
-            input_fingerprint="0" * 64,
-            result_version=1,
-            is_test_data=True,
+        stale_stage = cast(
+            StageResult,
+            StageResult.objects.create(  # type: ignore[no-untyped-call]
+                activity=activity,
+                ruleset_version=current_version,
+                created_by=operator,
+                stage_key="stale-stage",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=current_version.authority_hash,
+                input_fingerprint="0" * 64,
+                result_version=1,
+                is_test_data=True,
+            ),
         )
         foreign_stage = cls._create_ready_stage(
             foreign_activity,
@@ -142,16 +149,19 @@ class Command(BaseCommand):
             username=f"{name.lower().replace(' ', '-')}-{uuid4().hex}",
             password=None,
         )
-        return SingerRegistration.objects.create(
-            activity=activity,
-            user=user,
-            name=name,
-            student_id=f"M2D1{uuid4().hex[:10].upper()}",
-            college="Rehearsal College",
-            class_name="Rehearsal Class",
-            song_name="Rehearsal Song",
-            pre_status=SingerRegistration.PreStatus.APPROVED,
-            is_test_data=True,
+        return cast(
+            SingerRegistration,
+            SingerRegistration.objects.create(
+                activity=activity,
+                user=user,
+                name=name,
+                student_id=f"M2D1{uuid4().hex[:10].upper()}",
+                college="Rehearsal College",
+                class_name="Rehearsal Class",
+                song_name="Rehearsal Song",
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=True,
+            ),
         )
 
     @staticmethod
@@ -166,14 +176,17 @@ class Command(BaseCommand):
             is_test_data=True,
         )
         with authority_write(RULESET_FREEZE):
-            return RulesetVersion.objects.create(
-                ruleset=ruleset,
-                definition=definition,
-                authority_hash=hashlib.sha256(definition.encode()).hexdigest(),
-                status=RulesetVersion.Status.FROZEN,
-                is_current=True,
-                created_by=operator,
-                frozen_by=operator,
+            return cast(
+                RulesetVersion,
+                RulesetVersion.objects.create(  # type: ignore[no-untyped-call]
+                    ruleset=ruleset,
+                    definition=definition,
+                    authority_hash=hashlib.sha256(definition.encode()).hexdigest(),
+                    status=RulesetVersion.Status.FROZEN,
+                    is_current=True,
+                    created_by=operator,
+                    frozen_by=operator,
+                ),
             )
 
     @staticmethod
@@ -185,16 +198,19 @@ class Command(BaseCommand):
         stage_key: str,
         award_name: str,
     ) -> StageResult:
-        stage = StageResult.objects.create(
-            activity=activity,
-            ruleset_version=version,
-            created_by=operator,
-            stage_key=stage_key,
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=version.authority_hash,
-            input_fingerprint=_current_input_fingerprint(version, activity, stage_key),
-            result_version=1,
-            is_test_data=True,
+        stage = cast(
+            StageResult,
+            StageResult.objects.create(  # type: ignore[no-untyped-call]
+                activity=activity,
+                ruleset_version=version,
+                created_by=operator,
+                stage_key=stage_key,
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=version.authority_hash,
+                input_fingerprint=_current_input_fingerprint(version, activity, stage_key),
+                result_version=1,
+                is_test_data=True,
+            ),
         )
         StageAwardDecision.objects.create(
             stage_result=stage,
@@ -218,4 +234,4 @@ class Command(BaseCommand):
             f"{settings.SESSION_COOKIE_NAME}={session.session_key}; "
             f"{settings.CSRF_COOKIE_NAME}={csrf_secret}"
         )
-        return session_cookie, _mask_cipher_secret(csrf_secret)
+        return session_cookie, csrf_secret

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
 from io import BytesIO
+from typing import Any, cast
 from unittest import skipUnless
 
 from accounts.models import User
@@ -2727,9 +2728,9 @@ class ResultClosureContractTests(TestCase):
         )
 
         with self.assertRaises(FrozenInstanceError):
-            closure.closeable = True
+            cast(Any, closure).closeable = True
         with self.assertRaises(FrozenInstanceError):
-            stage.stage_key = "other"
+            cast(Any, stage).stage_key = "other"
 
     def test_result_closure_codes_are_stable_strings(self):
         from .services import ResultClosureCode
@@ -2783,13 +2784,17 @@ class ResultClosureContractTests(TestCase):
         )
 
         payload = result_closure_as_dict(closure)
+        stages = payload["stages"]
+        assert isinstance(stages, list)
+        stage_payload = stages[0]
+        assert isinstance(stage_payload, dict)
         self.assertEqual(payload["activity_id"], 7)
-        self.assertEqual(payload["stages"][0]["blocking_reasons"], [])
+        self.assertEqual(stage_payload["blocking_reasons"], [])
         self.assertNotIn("token", json.dumps(payload, ensure_ascii=False).lower())
         self.assertNotIn("secret", json.dumps(payload, ensure_ascii=False).lower())
         self.assertNotIn("judge_notes", payload)
         self.assertNotIn("request_headers", payload)
-        self.assertEqual(payload["stages"][0]["input_fingerprint_prefix"], "fingerprint-")
+        self.assertEqual(stage_payload["input_fingerprint_prefix"], "fingerprint-")
         self.assertNotIn("fingerprint-prefix", json.dumps(payload, ensure_ascii=False))
 
 

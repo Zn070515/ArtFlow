@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from argparse import ArgumentParser
 from pathlib import Path
+from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 from singer_contest.models import Award, StageResult
@@ -15,10 +17,10 @@ from common.models import AuditLog
 class Command(BaseCommand):
     help = "Inspect a development-only M2-D1 result closure rehearsal fixture."
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--fixture", required=True)
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:
         fixture_path = Path(options["fixture"]).expanduser()
         try:
             fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
