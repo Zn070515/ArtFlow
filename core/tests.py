@@ -2,13 +2,14 @@ from datetime import timedelta
 
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
+from django.apps import apps
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
-from .models import Activity, ActivityPhase, QRCodeLink
+from .models import Activity
 from .policies import ActivityAction, allowed_actions, ensure_activity_action_allowed
 from .services import (
     _enter_archived_phase_locked,
@@ -25,24 +26,11 @@ def create_provisioned_user(*args, **kwargs):
 
 
 class CoreModelTests(TestCase):
-    def test_activity_phase_and_qr_link_models_exist(self):
-        activity = Activity.objects.create(
-            title="Singer Contest",
-            activity_type=Activity.Type.SINGER_CONTEST,
-        )
-        phase = ActivityPhase.objects.create(
-            activity=activity,
-            phase=Activity.Phase.REGISTRATION_OPEN,
-            name="Registration",
-        )
-        qr_link = QRCodeLink.objects.create(
-            activity=activity,
-            kind=QRCodeLink.Kind.REGISTRATION,
-            title="Apply",
-            target_url="/contest/apply/",
-        )
-        self.assertEqual(str(phase), "Singer Contest - Registration")
-        self.assertEqual(str(qr_link), "Singer Contest - Apply")
+    def test_retired_phase_and_qr_models_are_not_registered(self):
+        with self.assertRaises(LookupError):
+            apps.get_model("core", "ActivityPhase")
+        with self.assertRaises(LookupError):
+            apps.get_model("core", "QRCodeLink")
 
     def test_activity_requires_lifecycle_service_to_promote_to_formal(self):
         activity = Activity.objects.create(

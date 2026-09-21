@@ -27,7 +27,6 @@ from singer_contest.models import (
     ScoringRubric,
 )
 
-from common.lifecycle import runtime_performances
 from common.test_characterization import _CharacterizationBase
 
 
@@ -295,39 +294,3 @@ class MaterialSlotCharacterizationTests(_CharacterizationBase):
                     category=MaterialSlot.Category.ACCOMPANIMENT,
                     label="伴奏",
                 )
-
-
-class RuntimePerformanceIsolationCharacterizationTests(_CharacterizationBase):
-    def test_runtime_performances_isolates_lifecycle(self):
-        test_activity = self.make_activity(is_test_mode=True)
-        formal_activity = self.make_activity(is_test_mode=False)
-        test_perf = Performance.objects.create(
-            activity=test_activity,
-            round=self.make_round(test_activity),
-            singer=self.make_singer(
-                test_activity, username="t1", student_id="t1", is_test_data=True
-            ),
-            is_test_data=True,
-            song_title="T",
-        )
-        formal_perf = Performance.objects.create(
-            activity=formal_activity,
-            round=self.make_round(formal_activity),
-            singer=self.make_singer(
-                formal_activity, username="f1", student_id="f1", is_test_data=False
-            ),
-            is_test_data=False,
-            song_title="F",
-        )
-        test_scope = list(runtime_performances(test_activity))
-        self.assertIn(test_perf, test_scope)
-        self.assertNotIn(formal_perf, test_scope)
-        self.assertEqual(runtime_performances(formal_activity).count(), 1)
-
-    def test_runtime_performances_scoped_to_activity(self):
-        activity = self.make_activity(is_test_mode=False)
-        singer = self.make_singer(activity, username="s1", student_id="1")
-        Performance.objects.create(
-            activity=activity, round=self.make_round(activity), singer=singer
-        )
-        self.assertEqual(runtime_performances(activity).count(), 1)

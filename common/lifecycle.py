@@ -6,7 +6,7 @@ from django.db.models import Model, Q, QuerySet
 
 if TYPE_CHECKING:
     from core.models import Activity
-    from singer_contest.models import Performance, SingerRegistration
+    from singer_contest.models import SingerRegistration
 
 TEST_VALUE = "test"
 FORMAL_VALUE = "formal"
@@ -58,16 +58,3 @@ def runtime_approved_singers(activity: Activity) -> QuerySet[SingerRegistration]
         ),
         activity,
     )
-
-
-def runtime_performances(activity: Activity) -> QuerySet[Performance]:
-    """Performances whose test marker matches the activity's lifecycle.
-
-    The generic contest fact model (M1-B) stores a per-round performance per
-    singer; views building a round programme or a material-slot audit must
-    resolve candidates through here so a TEST activity only sees test-marked
-    performances and a FORMAL activity only sees formal ones.
-    """
-    from singer_contest.models import Performance
-
-    return scope_runtime(Performance.objects.filter(activity=activity), activity)
