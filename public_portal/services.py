@@ -230,6 +230,8 @@ def revoke_result_release(
     """Revoke the active release for a public result post without deleting history."""
     note = _require_note(note)
     post_ref = PublicPost.objects.only("related_activity_id").get(pk=post.pk)
+    if post_ref.related_activity_id is None:
+        raise ValidationError("结果公示必须关联活动。")
     locked_activity = lock_activity_for_action(
         Activity.objects.get(pk=post_ref.related_activity_id), ActivityAction.PUBLISH_RESULT
     )
@@ -239,7 +241,7 @@ def revoke_result_release(
         .order_by("pk")
         .values_list("pk", "stage_result_id")
     )
-    stage_ids = sorted({stage_id for _, stage_id in active_refs})
+    stage_ids = sorted({stage_id for _, stage_id in active_refs if stage_id is not None})
     list(StageResult.objects.select_for_update().filter(pk__in=stage_ids).order_by("pk"))
     locked_post = PublicPost.objects.select_for_update().get(pk=post.pk)
     active_releases = list(

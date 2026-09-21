@@ -44,7 +44,7 @@ from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Prefetch
+from django.db.models import Count, Prefetch, QuerySet
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -535,7 +535,7 @@ def post_edit(request, pk):
 
 
 def _result_release_form_context(post, form):
-    stage_results = StageResult.objects.none()
+    stage_results: QuerySet[StageResult] = StageResult.objects.none()
     if post.related_activity_id:
         stage_results = latest_stage_result_queryset().filter(
             activity_id=post.related_activity_id,
