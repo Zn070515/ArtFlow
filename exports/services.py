@@ -581,13 +581,42 @@ def _public_content_index_workbook(activity: Activity) -> Workbook:
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "Public Content"
-    ws.append(["Title", "Type", "Status", "Pinned", "Published At", "Updated By"])
-    for post in PublicPost.objects.filter(related_activity=activity).select_related("updated_by"):
+    ws.append(
+        [
+            "Title",
+            "Type",
+            "Editorial Status",
+            "Result Release Status",
+            "Result Version",
+            "Result Released At",
+            "Pinned",
+            "Published At",
+            "Updated By",
+        ]
+    )
+    posts = PublicPost.objects.filter(related_activity=activity).select_related("updated_by")
+    posts = posts.prefetch_related(
+        "result_releases",
+    )
+    for post in posts:
+        latest_release = next(iter(post.result_releases.all()), None)
+        is_result = post.post_type == PublicPost.PostType.RESULT_PUBLICATION
         ws.append(
             [
                 post.title,
                 post.get_post_type_display(),
                 post.get_status_display(),
+                (
+                    latest_release.get_status_display()
+                    if is_result and latest_release
+                    else ("未发布" if is_result else "")
+                ),
+                latest_release.result_version if is_result and latest_release else "",
+                (
+                    latest_release.released_at.strftime("%Y-%m-%d %H:%M")
+                    if is_result and latest_release
+                    else ""
+                ),
                 "yes" if post.is_pinned else "no",
                 post.published_at.strftime("%Y-%m-%d %H:%M") if post.published_at else "",
                 post.updated_by.username if post.updated_by else "",

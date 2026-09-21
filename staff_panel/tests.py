@@ -4639,6 +4639,45 @@ class ResultReleaseHttpTests(TestCase):
         )
         self.assertEqual(closure.call_count, 1)
 
+    def test_archive_index_separates_editorial_and_result_release_state(self):
+        def archive_row():
+            artifact = next(
+                item
+                for item in build_archive_package(self.activity)
+                if item.name == "public_content_index.xlsx"
+            )
+            sheet = load_workbook(BytesIO(artifact.content)).active
+            assert sheet is not None
+            headers = [cell.value for cell in sheet[1]]
+            values = [cell.value for cell in sheet[2]]
+            return dict(zip(headers, values, strict=True))
+
+        unreleased = archive_row()
+        self.assertEqual(unreleased["Editorial Status"], "已发布")
+        self.assertEqual(unreleased["Result Release Status"], "未发布")
+        self.assertIsNone(unreleased["Result Version"])
+        self.assertNotIn(
+            "1111111111111111111111111111111111111111111111111111111111111111", str(unreleased)
+        )
+
+        ResultRelease.objects.create(
+            post=self.post,
+            stage_result=self.stage_result,
+            post_version=self.post.version,
+            result_version=self.stage_result.result_version,
+            ruleset_version=self.version,
+            authority_hash="private-authority-canary",
+            input_fingerprint="private-fingerprint-canary",
+            released_by=self.admin,
+            note="已审核",
+        )
+        released = archive_row()
+        self.assertEqual(released["Editorial Status"], "已发布")
+        self.assertEqual(released["Result Release Status"], "生效")
+        self.assertEqual(released["Result Version"], 1)
+        self.assertNotIn("private-authority-canary", str(released))
+        self.assertNotIn("private-fingerprint-canary", str(released))
+
 
 class RoundScoresApiTests(TestCase):
     """M1-H rapid-entry API: grid, sparse cell save, stale-edit conflict, auto re-resolve."""

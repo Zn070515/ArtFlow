@@ -188,6 +188,20 @@ Security 和 Workflow lint 全部为 `success`；PostgreSQL integration 记录�
 SSO/MFA、TLS/WAF、volumetric DDoS、数据责任、真实角色和部署 ownership 的
 外部 `HOLD`。
 
+### M2-D2 Public Result Release Authority
+
+M2-D2 将内部结果核定和公开内容发布明确分离：`PublicPost.PUBLISHED` 只是编辑状态，
+不能单独使 `RESULT_PUBLICATION` 对公网可见。公开结果必须在当前正式活动、当前冻结赛制、
+最新且 `CONFIRMED` 的 `StageResult` 通过闭场检查后，由管理员带二次验证和非空原因，
+通过独立事务创建 `ResultRelease.ACTIVE`。撤销、解锁和生成更新结果会保留历史并使旧
+release 进入 `REVOKED`/`SUPERSEDED`；公共首页、结果列表、详情和受控媒体统一使用同一
+fail-closed 查询边界。
+
+归档的 `public_content_index.xlsx` 分开记录 editorial status 与 result release status、
+result version 和 release 时间，不导出 authority hash、input fingerprint、学生私密字段或
+bearer。M2-D2 的代码证据仍不能替代学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存审批和
+部署 ownership；这些项目继续保持外部 `HOLD`，并必须在学校接入前单独验收。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：
