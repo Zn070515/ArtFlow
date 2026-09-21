@@ -44,7 +44,7 @@ from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count
+from django.db.models import Count, Prefetch, QuerySet
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -72,7 +72,8 @@ from files.services import (
 from incidents.models import IncidentRecord
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
-from public_portal.models import PublicPost
+from public_portal.models import PublicPost, ResultRelease
+from public_portal.services import release_result_post, revoke_result_release
 from ruleset import editor as ruleset_editor
 from ruleset.compiler import compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -168,6 +169,8 @@ from staff_panel.forms import (
     ProgramReviewForm,
     PublicPostForm,
     RapidScoreCommandForm,
+    ResultReleaseForm,
+    ResultReleaseRevokeForm,
     RoundGroupsForm,
     RoundRunningOrderForm,
     ScoringRubricProvisionForm,
@@ -325,7 +328,16 @@ def activity_edit(request, pk):
 
 @staff_required
 def post_list(request):
-    posts = PublicPost.objects.all()
+    posts = PublicPost.objects.select_related("related_activity").prefetch_related(
+        "result_releases__stage_result",
+        Prefetch(
+            "related_activity__stage_results",
+            queryset=latest_stage_result_queryset().filter(
+                status=StageResult.Status.CONFIRMED,
+            ),
+            to_attr="release_candidates",
+        ),
+    )
     return render(request, "staff_panel/post_list.html", {"posts": posts})
 
 
@@ -443,6 +455,10 @@ def post_edit(request, pk):
         locked_post = PublicPost.objects.select_for_update().get(pk=post.pk)
         if locked_post.related_activity_id != old_hint_activity_id:
             raise PermissionDenied("页面内容已发生并发修改，请刷新后重新编辑。")
+        if ResultRelease.objects.filter(
+            post=locked_post, status=ResultRelease.Status.ACTIVE
+        ).exists():
+            raise PermissionDenied("结果已公示，编辑或移动前必须先撤销当前结果发布。")
         # Optimistic concurrency: if the client's base_version is behind the
         # current one, another staff member already saved changes. Refuse to
         # silently overwrite them; render the stale form back with an explicit
@@ -516,6 +532,88 @@ def post_edit(request, pk):
             "activities": Activity.objects.all(),
         },
     )
+
+
+def _result_release_form_context(post, form):
+    stage_results: QuerySet[StageResult] = StageResult.objects.none()
+    if post.related_activity_id:
+        stage_results = latest_stage_result_queryset().filter(
+            activity_id=post.related_activity_id,
+            status=StageResult.Status.CONFIRMED,
+        )
+    return {
+        "post": post,
+        "form": form,
+        "stage_results": stage_results,
+    }
+
+
+@staff_required
+@require_POST
+def result_release(request, post_id):
+    post = get_object_or_404(PublicPost, pk=post_id)
+    if not admin_verification_is_valid(request.session):
+        return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))
+    current_admin = require_current_admin(request.user)
+    form = ResultReleaseForm(request.POST)
+    if not form.is_valid():
+        return render(
+            request,
+            "staff_panel/result_release_form.html",
+            _result_release_form_context(post, form),
+            status=400,
+        )
+    try:
+        stage_result = get_object_or_404(
+            StageResult,
+            pk=form.cleaned_data["stage_result_id"],
+            activity_id=post.related_activity_id,
+        )
+        release_result_post(
+            post,
+            stage_result,
+            current_admin,
+            note=form.cleaned_data["note"],
+        )
+    except (PermissionDenied, ValidationError, IntegrityError) as error:
+        form.add_error(None, domain_error_messages(error))
+        return render(
+            request,
+            "staff_panel/result_release_form.html",
+            _result_release_form_context(post, form),
+            status=400,
+        )
+    messages.success(request, "结果已通过独立发布权威公示。")
+    return redirect("staff:post_list")
+
+
+@staff_required
+@require_POST
+def result_release_revoke(request, post_id):
+    post = get_object_or_404(PublicPost, pk=post_id)
+    if not admin_verification_is_valid(request.session):
+        return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))
+    current_admin = require_current_admin(request.user)
+    form = ResultReleaseRevokeForm(request.POST)
+    if not form.is_valid():
+        return render(
+            request,
+            "staff_panel/result_release_form.html",
+            _result_release_form_context(post, form),
+            status=400,
+        )
+    try:
+        revoke_result_release(post, current_admin, note=form.cleaned_data["note"])
+    except (PermissionDenied, ValidationError, IntegrityError) as error:
+        form.add_error(None, domain_error_messages(error))
+        return render(
+            request,
+            "staff_panel/result_release_form.html",
+            _result_release_form_context(post, form),
+            status=400,
+        )
+    messages.success(request, "结果发布已撤销，历史记录已保留。")
+    return redirect("staff:post_list")
 
 
 # --- Singer registration management ---

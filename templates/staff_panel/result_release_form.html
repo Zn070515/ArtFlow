@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}结果发布 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">结果发布操作失败</h1>
+    <p class="text-sm text-gray-500 mb-6">{{ post.title }}</p>
+    <div class="rounded border border-red-300 bg-red-50 text-red-800 px-4 py-3 text-sm mb-6">
+        {% for error in form.non_field_errors %}{{ error }}{% endfor %}
+        {% for field in form %}
+            {% for error in field.errors %}{{ error }}{% endfor %}
+        {% endfor %}
+    </div>
+    <p class="text-sm text-gray-600 mb-4">请返回公开内容列表，确认当前核定结果和管理员复核状态后重试。</p>
+    <a href="{% url 'staff:post_list' %}" class="border border-gray-300 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-50">返回公开内容</a>
+</div>
+{% endblock %}

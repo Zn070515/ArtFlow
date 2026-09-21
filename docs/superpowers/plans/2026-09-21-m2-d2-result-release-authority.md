@@ -37,11 +37,11 @@
 - Produces `Wait-ForStableRestoreDatabase -DockerExecutable -ContainerName -DatabaseName -TimeoutSeconds`, which returns only after the official Postgres entrypoint has completed initialization and two consecutive SQL probes succeed.
 - Produces `Write-RestoreContainerDiagnostics -DockerExecutable -ContainerName`, which reports safe container status and tail logs without printing credentials.
 
-- [ ] **Step 1: Write the failing contract test.**
+- [x] **Step 1: Write the failing contract test.**
 
 Add tests that require both restore scripts to dot-source the shared helper, call the stable wait function after `docker run`, and call diagnostics from the failure path. Require the helper to look for the official init-complete marker and execute `psql` probes rather than trusting one `pg_isready` result.
 
-- [ ] **Step 2: Run the contract test and confirm RED.**
+- [x] **Step 2: Run the contract test and confirm RED.**
 
 Run:
 
@@ -51,7 +51,7 @@ uv run python -m pytest scripts/tests/test_restore_database_wait_contract.py -q
 
 Expected: FAIL because the helper and stable wait call do not exist yet.
 
-- [ ] **Step 3: Implement the shared wait and diagnostics helper.**
+- [x] **Step 3: Implement the shared wait and diagnostics helper.**
 
 In `scripts/restore_database_wait.ps1`:
 
@@ -63,7 +63,7 @@ In `scripts/restore_database_wait.ps1`:
 
 Replace each script's one-shot `pg_isready` loop with the helper. Invoke it immediately after `docker run` and before copying/restoring the dump. In each `finally` block, preserve the existing explicit temporary-container cleanup.
 
-- [ ] **Step 4: Run the contract test and local reproduction.**
+- [x] **Step 4: Run the contract test and local reproduction.**
 
 Run:
 
@@ -74,7 +74,7 @@ pwsh -NoProfile -File scripts/verify_app_backup_restore.ps1 -ComposeProjectName 
 
 Expected: contract tests pass; the application backup, isolated `pg_restore`, Django check, manifest, and media verification pass without changing source volumes.
 
-- [ ] **Step 5: Record the gate evidence and commit.**
+- [x] **Step 5: Record the gate evidence and commit.**
 
 Update the production-readiness evidence with the stable-init wait and diagnostics behavior, then run:
 

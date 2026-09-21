@@ -13,6 +13,12 @@ urlpatterns = [
     path("posts/new/", views.post_create, name="post_create"),
     path("posts/<int:pk>/preview/", views.post_preview, name="post_preview"),
     path("posts/<int:pk>/edit/", views.post_edit, name="post_edit"),
+    path("posts/<int:post_id>/result-release/", views.result_release, name="result_release"),
+    path(
+        "posts/<int:post_id>/result-release/revoke/",
+        views.result_release_revoke,
+        name="result_release_revoke",
+    ),
     path("registrations/", views.singer_registration_list, name="singer_registration_list"),
     path(
         "registrations/<int:pk>/",

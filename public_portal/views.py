@@ -1,4 +1,3 @@
-from core.models import Activity
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, render
 
@@ -23,14 +22,10 @@ def home(request):
         )
         .distinct()[:6]
     )
-    activity_photos = (
-        PublicMedia.objects.filter(
-            is_published=True,
-            post__status=PublicPost.Status.PUBLISHED,
-        )
-        .exclude(post__related_activity__data_lifecycle=Activity.DataLifecycle.TEST)
-        .select_related("post")[:12]
-    )
+    activity_photos = PublicMedia.objects.filter(
+        is_published=True,
+        post__in=posts,
+    ).select_related("post")[:12]
 
     return render(
         request,

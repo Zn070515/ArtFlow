@@ -172,6 +172,49 @@ Docker Compose web + PostgreSQL 在 `127.0.0.1:8000` 上执行了 7 个隔离 HT
 源数据库和 volumes 未 reset。学校 SSO/MFA、TLS/WAF、volumetric DDoS、数据责任和真实
 现场角色仍保持 `HOLD`，PostgreSQL 并发确认仍需独立验收。
 
+### 2026-09-21 M2-D2 entry gate
+
+M2-D2 开始前的恢复门禁已完成修复并重新验证。当前 `main` 为
+`38c25ed`；本地完整 Django 回归为 `1123 tests, OK (skipped=29)`，脚本契约
+为 `31 passed`，Ruff、format、mypy、两个 Pyright 配置、TypeScript client、
+文档、Django check 和 migration check 均通过。应用级备份恢复与 PostgreSQL
+custom-format 隔离恢复均通过，恢复目标上的 Django check 通过，源数据库与
+volumes 未重置。
+
+GitHub Actions 对该 SHA 的 CI、PostgreSQL integration、Compose acceptance、
+Security 和 Workflow lint 全部为 `success`；PostgreSQL integration 记录为
+`1176 passed, 5 skipped`，Compose acceptance 的应用测试与 backup/restore
+也通过。该证据闭合 M2-D2 spec 要求的 restore 前置条件，但不替代学校
+SSO/MFA、TLS/WAF、volumetric DDoS、数据责任、真实角色和部署 ownership 的
+外部 `HOLD`。
+
+### M2-D2 Public Result Release Authority
+
+M2-D2 将内部结果核定和公开内容发布明确分离：`PublicPost.PUBLISHED` 只是编辑状态，
+不能单独使 `RESULT_PUBLICATION` 对公网可见。公开结果必须在当前正式活动、当前冻结赛制、
+最新且 `CONFIRMED` 的 `StageResult` 通过闭场检查后，由管理员带二次验证和非空原因，
+通过独立事务创建 `ResultRelease.ACTIVE`。撤销、解锁和生成更新结果会保留历史并使旧
+release 进入 `REVOKED`/`SUPERSEDED`；公共首页、结果列表、详情和受控媒体统一使用同一
+fail-closed 查询边界。
+
+归档的 `public_content_index.xlsx` 分开记录 editorial status 与 result release status、
+result version 和 release 时间，不导出 authority hash、input fingerprint、学生私密字段或
+bearer。M2-D2 的代码证据仍不能替代学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存审批和
+部署 ownership；这些项目继续保持外部 `HOLD`，并必须在学校接入前单独验收。
+
+#### 2026-09-21 M2-D2 本地 Docker 黑盒彩排
+
+使用隔离 Compose PostgreSQL 和正式生命周期、专用前缀的临时 fixture，访问范围限制为
+`http://127.0.0.1:8000`，未重置源数据库或 volumes。共 19 个 HTTP 请求，`2xx=5`、
+`3xx=6`、`4xx=8`、`5xx=0`、超时 `0`；p50 为 `28 ms`，p95/p99 为 `200.65 ms`，
+最大值 `200.65 ms`。19/19 个 authority 检查通过：未 release 的已发布文章和受控媒体均为
+404，跨活动伪造为 404，active release 后编辑为 403，撤销/解锁后旧内容均为 404。
+
+数据库 inspector 记录 `release_audit=2`、`revoke_audit=1`、`supersede_audit=1`、
+历史 release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONFIRM`；
+重复 release 未产生额外 active row。fixture、临时操作员、活动、规则集、文章、release、
+审计和媒体均已精确清理。上述延迟只描述本机隔离服务，不是学校公网容量或抗 DDoS 证据。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：

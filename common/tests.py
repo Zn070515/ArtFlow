@@ -28,7 +28,7 @@ from django.db import (
 from django.db import models as django_models
 from django.db.models.signals import pre_save
 from django.http import Http404, HttpRequest
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
@@ -77,6 +77,16 @@ from .views import _media_file_response
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
 DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
 DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
+
+
+class ResultReleaseAuditActionTests(SimpleTestCase):
+    def test_result_release_audit_actions_are_distinct(self):
+        self.assertEqual(AuditLog.ActionType.RELEASE_RESULT, "release_result")
+        self.assertEqual(AuditLog.ActionType.REVOKE_RESULT, "revoke_result")
+        self.assertEqual(
+            AuditLog.ActionType.SUPERSEDE_RESULT_RELEASE,
+            "supersede_result_release",
+        )
 
 
 class ActivityLifecycleTests(TestCase):

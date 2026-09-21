@@ -298,6 +298,27 @@ class PublicPostForm(forms.Form):
         return self.cleaned_data.get("sort_order") or 0
 
 
+class ResultReleaseForm(forms.Form):
+    stage_result_id = forms.IntegerField(min_value=1)
+    note = forms.CharField(max_length=1000)
+
+    def clean_note(self):
+        note = self.cleaned_data["note"].strip()
+        if not note:
+            raise forms.ValidationError("结果发布必须填写原因。")
+        return note
+
+
+class ResultReleaseRevokeForm(forms.Form):
+    note = forms.CharField(max_length=1000)
+
+    def clean_note(self):
+        note = self.cleaned_data["note"].strip()
+        if not note:
+            raise forms.ValidationError("撤销结果发布必须填写原因。")
+        return note
+
+
 class IncidentForm(forms.Form):
     occurred_at = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
     event_type = forms.ChoiceField(choices=IncidentRecord.EventType.choices)

@@ -86,6 +86,18 @@ IdP/MFA 或真实现场角色流程。测试完成后必须清理 fixture 活动
 调用时允许清理，正式 Award authority 路径不放宽。新增回归测试覆盖 confirmed StageResult
 及其 Award 的清理。
 
+## M2-D2 公示 authority 交接边界
+
+M2-D1 的 `CONFIRMED` 只代表内部结果 authority，不自动代表公网可见。M2-D2 增加独立的
+`ResultRelease`：结果文章的 `PUBLISHED` 仍是编辑状态，必须再由当前管理员在闭场通过后以
+非空原因创建 `ACTIVE` release。公共首页、结果列表、详情和受控媒体必须全部经过同一
+release-aware 查询；撤销、解锁、更新结果、版本或 ruleset 变化均应 fail closed，并保留
+历史 release 记录。归档索引只记录 release 状态、结果版本和时间，不复制完整 fingerprint、
+authority hash、token、评分或学生隐私。
+
+这一层仍不是学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存审批或部署 ownership 证据；
+这些项目继续单独标记 `HOLD`，不得用应用 release 审计替代。
+
 ### 2026-09-11 Task 6 执行记录
 
 | 指标 | 实际值 | 判定 |

@@ -30,6 +30,13 @@ Judge 是活动范围内的临时身份；工作人员和管理员仍是唯一�
 
 ArtFlow 的 M2-D1 闭场预检只证明应用内部结果链条可以解释：当前冻结赛制、当前输入指纹、原始事实锁定、上游核定、Award/晋级入口来源和管理员纠正审计。`READY_TO_CONFIRM` 不是正式结果；解锁后的旧来源也不能作为正式列表或导出的 authority。该预检不创建公开文章，不代表 `PublicPost.PUBLISHED`，更不产生 `RELEASED` 的学校业务状态。
 
+M2-D2 的结果公示边界同样只属于应用内部 authority：`PublicPost.PUBLISHED` 是编辑状态，
+不等于结果已发布。只有当前正式活动的最新 `CONFIRMED` 赛段结果通过闭场检查，并由已二次
+验证的管理员带原因创建 `ResultRelease.ACTIVE` 后，结果文章和关联媒体才会进入公共查询。
+撤销、解锁或更新结果会使旧 release 失效；归档索引分别记录 editorial 与 release 状态，
+不包含完整指纹、token、评分明细或学生私密字段。该链条不能替代学校对公开内容审批、
+SSO/MFA、TLS/WAF、DDoS、留存和部署责任的书面证据。
+
 部署交接时可以把闭场报告作为应用证据附件，但必须另外提供学校/部署方签署的身份与 MFA、代理 forwarded-header 信任、TLS、WAF、慢连接/连接数/volumetric DDoS、数据库私网、备份隔离恢复、保存期限和事件联系人证据。缺少任一外部证据，学校接入结论仍为 `HOLD`；本地 Pyright、Django 测试或 bounded rehearsal 不能替代这些责任。
 
 ## 交接结论
