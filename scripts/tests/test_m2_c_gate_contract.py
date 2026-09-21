@@ -26,6 +26,11 @@ def test_postgresql_integration_has_the_m2_c_focused_gate_before_full_suite():
     )
 
 
+def test_published_static_probe_uses_configured_django_entrypoint():
+    assert "docker compose exec -T web python manage.py shell -c" in INTEGRATION_WORKFLOW
+    assert "import django; django.setup();" not in INTEGRATION_WORKFLOW
+
+
 def test_readiness_records_m2_c_gate_and_preserves_institutional_holds():
     assert "M2-C-GATE" in READINESS_DOC
     for hold in ("SSO", "MFA", "TLS/WAF/DDoS", "数据责任与保存期限"):
