@@ -4515,6 +4515,23 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(data["matrix_complete"])
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
 
+    @patch("staff_panel.views.maybe_resolve_checkpoints")
+    def test_post_does_not_expose_resolver_exception_text_in_json(self, resolve_mock):
+        resolve_mock.side_effect = ValidationError("internal resolver traceback detail")
+
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["resolve_warning"], "该赛段无法自动核定，请人工核定。"
+        )
+        self.assertNotIn("internal resolver traceback detail", response.content.decode())
+
     def test_post_replays_identical_command_without_second_score_mutation(self):
         payload = {
             "command_id": "rapid-api-replay-001",
