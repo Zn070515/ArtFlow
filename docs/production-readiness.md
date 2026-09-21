@@ -202,6 +202,19 @@ result version 和 release 时间，不导出 authority hash、input fingerprint
 bearer。M2-D2 的代码证据仍不能替代学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存审批和
 部署 ownership；这些项目继续保持外部 `HOLD`，并必须在学校接入前单独验收。
 
+#### 2026-09-21 M2-D2 本地 Docker 黑盒彩排
+
+使用隔离 Compose PostgreSQL 和正式生命周期、专用前缀的临时 fixture，访问范围限制为
+`http://127.0.0.1:8000`，未重置源数据库或 volumes。共 19 个 HTTP 请求，`2xx=5`、
+`3xx=6`、`4xx=8`、`5xx=0`、超时 `0`；p50 为 `28 ms`，p95/p99 为 `200.65 ms`，
+最大值 `200.65 ms`。19/19 个 authority 检查通过：未 release 的已发布文章和受控媒体均为
+404，跨活动伪造为 404，active release 后编辑为 403，撤销/解锁后旧内容均为 404。
+
+数据库 inspector 记录 `release_audit=2`、`revoke_audit=1`、`supersede_audit=1`、
+历史 release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONFIRM`；
+重复 release 未产生额外 active row。fixture、临时操作员、活动、规则集、文章、release、
+审计和媒体均已精确清理。上述延迟只描述本机隔离服务，不是学校公网容量或抗 DDoS 证据。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：
