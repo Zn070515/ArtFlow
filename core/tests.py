@@ -26,11 +26,10 @@ def create_provisioned_user(*args, **kwargs):
 
 
 class CoreModelTests(TestCase):
-    def test_retired_phase_and_qr_models_are_not_registered(self):
-        with self.assertRaises(LookupError):
-            apps.get_model("core", "ActivityPhase")
-        with self.assertRaises(LookupError):
-            apps.get_model("core", "QRCodeLink")
+    def test_retired_phase_and_qr_models_are_not_registered(self) -> None:
+        for model_name in ("ActivityPhase", "QRCodeLink"):
+            with self.subTest(model_name=model_name), self.assertRaises(LookupError):
+                apps.get_model("core", model_name)
 
     def test_activity_requires_lifecycle_service_to_promote_to_formal(self):
         activity = Activity.objects.create(
