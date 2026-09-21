@@ -40,6 +40,7 @@ def scope_lifecycle(
         | Q(**{f"{activity_relation}__data_lifecycle": FORMAL_VALUE, marker: False})
     )
 
+
 def runtime_approved_singers(activity: Activity) -> QuerySet[SingerRegistration]:
     """Approved singers whose test marker matches the activity's lifecycle.
 

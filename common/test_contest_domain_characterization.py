@@ -129,6 +129,7 @@ class PerformanceFactModelCharacterizationTests(_CharacterizationBase):
                     activity=activity, round=contest_round, singer=singer, song_title="B"
                 )
 
+
 class RubricCharacterizationTests(_CharacterizationBase):
     """§7.7 — a round binds its own rubric; criteria require a positive max."""
 
