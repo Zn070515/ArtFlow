@@ -29,6 +29,30 @@ from singer_contest.models import StageResult
 from .models import PublicMedia, PublicPost, ResultRelease
 
 
+def _close_file_response_resources(response):
+    """Close the streamed file without firing request_finished in TestCase."""
+    closers = getattr(response, "_resource_closers", [])
+    filelikes = []
+    filelike = getattr(response, "file_to_stream", None)
+    if filelike is not None and hasattr(filelike, "read") and hasattr(filelike, "close"):
+        filelikes.append(filelike)
+    for closer in closers:
+        resource = getattr(closer, "__self__", None)
+        if (
+            resource is not None
+            and hasattr(resource, "read")
+            and hasattr(resource, "close")
+            and all(resource is not existing for existing in filelikes)
+        ):
+            filelikes.append(resource)
+    if not filelikes:
+        return
+    for filelike in filelikes:
+        filelike.close()
+    response.file_to_stream = None
+    closers.clear()
+
+
 class PublicPhotoImportTests(TestCase):
     def setUp(self):
         self.media_root = tempfile.mkdtemp()
@@ -365,7 +389,7 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
             response = self.client.get(
                 reverse("controlled_media", kwargs={"path": "public/gallery/result.jpg"})
             )
-            response.close()
+            _close_file_response_resources(response)
         self.assertNotEqual(response.status_code, 200)
 
     def test_active_release_is_visible_through_all_public_result_paths(self):
@@ -391,7 +415,7 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
             response = self.client.get(
                 reverse("controlled_media", kwargs={"path": "public/gallery/result.jpg"})
             )
-            response.close()
+            _close_file_response_resources(response)
         self.assertEqual(response.status_code, 200)
 
     def test_revoked_and_superseded_releases_are_not_public(self):
