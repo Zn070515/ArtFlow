@@ -13,6 +13,7 @@
 | GET 不能触发状态变化，闭场页面拒绝 POST | 405、StageResult/Award/RoundEntry/AuditLog 计数不变 |
 | 并发确认最多一个正式确认轨迹 | PostgreSQL `TransactionTestCase`；SQLite 不得替代此证据 |
 | raw token、secret、完整 fingerprint 不进入页面/报告 | serializer prefix 测试、响应 canary 扫描 |
+| 闭场的“可核定”必须与 `PUBLISH_RESULT` 活动阶段策略一致 | `activity_phase_not_ready`、精确状态标记和浏览器 UI 彩排 |
 
 ## 本地自动化矩阵
 
@@ -36,6 +37,12 @@
 `activity_id` 的 archive。归档检查会继续解包内层 XLSX，不能只检查外层 ZIP 字节；报告中的
 重复确认、陈旧拒绝和正式来源泄漏计数由 web 容器内 inspector 读取数据库后填入。脚本拒绝
 非回环 HTTP 地址，不打印 cookie 或 token：
+
+闭场页面的浏览器彩排使用 `data-stage-status`、`data-result-version` 和
+`data-input-fingerprint-prefix` 这类精确 machine-readable 标记；不能用“核定并锁定”或
+“上游已核定”等页面文案的包含关系代替状态断言。管理员解锁必须从阶段详情页渲染的
+`data-stage-result-unlock-form` 提交，并验证解锁后的持久化状态回到
+`ready_to_confirm`。
 
 ```powershell
 $containerFixture = "/tmp/artflow-m2-d1-result-closure-$PID.json"

@@ -17,6 +17,7 @@ from common.authority import (
     JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
     ROUND_PERFORMANCE_STATE,
+    SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
@@ -101,6 +102,7 @@ class ResultClosureCode(StrEnum):
     STALE_CANDIDATE = "stale_candidate"
     STAGE_CONFIRMATION_PENDING = "stage_confirmation_pending"
     ACTIVITY_OPERATIONALLY_LOCKED = "activity_operationally_locked"
+    ACTIVITY_PHASE_NOT_READY = "activity_phase_not_ready"
     SCHOOL_EXTERNAL_EVIDENCE_PENDING = "school_external_evidence_pending"
 
 
@@ -1004,15 +1006,22 @@ def apply_scores(
             and record.is_test_data == locked_round.activity.is_test_mode
         ):
             continue
-        ScoreRecord.objects.update_or_create(
-            round=locked_round,
-            singer_id=singer_id,
-            judge_id=judge_id,
-            defaults={
-                "score": score,
-                "is_test_data": locked_round.activity.is_test_mode,
-            },
-        )
+        # ``ScoreRecord.source`` is provenance, not a UI mode.  A correction made
+        # through the rapid-entry surface must therefore retain a DIRECT_JUDGE /
+        # STAFF_PROXY / PAPER_DR source instead of relabeling the fact as rapid
+        # input.  The service is nevertheless the formal authority for the
+        # mutation, so non-rapid records are written under SCORE_FACT_WRITE and
+        # remain valid against their source-specific model contract.
+        with authority_write(SCORE_FACT_WRITE):
+            ScoreRecord.objects.update_or_create(
+                round=locked_round,
+                singer_id=singer_id,
+                judge_id=judge_id,
+                defaults={
+                    "score": score,
+                    "is_test_data": locked_round.activity.is_test_mode,
+                },
+            )
         changes.append(
             {
                 "singer": singer_id,
@@ -2942,6 +2951,10 @@ def _closure_stage(
     latest: StageResult | None,
 ) -> StageClosure:
     blockers: list[ResultClosureCode] = []
+    try:
+        ensure_activity_action_allowed(activity, ActivityAction.PUBLISH_RESULT)
+    except PermissionDenied:
+        blockers.append(ResultClosureCode.ACTIVITY_PHASE_NOT_READY)
     if activity.is_locked:
         blockers.append(ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED)
     reasons: tuple[str, ...] = tuple(latest.reasons or ()) if latest else ()

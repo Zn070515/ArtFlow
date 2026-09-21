@@ -2521,6 +2521,32 @@ class StaffPanelSmokeTests(TestCase):
         self.assertNotContains(response, late_singer.name)
         self.assertNotContains(response, foreign_singer.name)
 
+    def test_round_ranking_exposes_machine_readable_lock_state(self):
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Machine State Singer",
+            student_id="20260030",
+            college="Info",
+            class_name="CS1",
+            phone="13800000030",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Machine State Judge")
+        round_ = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:round_ranking", args=[round_.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-round-status="prepared"')
+        self.assertContains(response, 'data-round-locked="false"')
+
     def test_round_lock_get_is_rejected_without_mutating_state(self):
         round_ = _create_round(
             activity=self.singer_activity,
@@ -4749,6 +4775,61 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(data["matrix_complete"])
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
 
+    def test_post_corrects_existing_direct_judge_fact_through_formal_authority(self):
+        from entry_access.services import redeem_access_grant
+        from singer_contest.judge_authority import (
+            advance_performance,
+            issue_judge_grant,
+            prepare_judge_panel,
+            submit_judge_score,
+        )
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.save(update_fields=["status"])
+        performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=self.singer,
+            sequence=1,
+            song_title="快速录入更正节目",
+            is_test_data=False,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.admin)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.admin, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, performance.pk, operator=self.admin)
+        submit_judge_score(
+            redeemed.token,
+            command_id="rapid-http-original",
+            expected_context_version=1,
+            expected_performance_id=performance.pk,
+            score_payload={"score": "91.50"},
+        )
+
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [
+                    {
+                        "singer_id": self.singer.pk,
+                        "judge_id": self.judge.pk,
+                        "score": "92.75",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason_code"], "SCORES_APPLIED")
+        corrected = ScoreRecord.objects.get(round=self.round)
+        self.assertEqual(corrected.score, Decimal("92.75"))
+        self.assertEqual(corrected.source, ScoreSource.DIRECT_JUDGE)
+
     @patch("staff_panel.views.maybe_resolve_checkpoints")
     def test_post_does_not_expose_resolver_exception_text_in_json(self, resolve_mock):
         resolve_mock.side_effect = ValidationError("internal resolver traceback detail")
@@ -5436,6 +5517,33 @@ class ResultBoardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "直接晋级")
 
+    def test_confirmed_detail_renders_admin_unlock_form_and_machine_state(self):
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-ui")
+        self._confirm(ready)
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-stage-status="confirmed"')
+        self.assertContains(
+            response,
+            f'action="{reverse("staff:stage_result_unlock", args=[ready.pk])}"',
+        )
+        self.assertContains(response, 'name="note"')
+        self.assertContains(response, "required")
+
+    def test_staff_stage_detail_does_not_render_admin_unlock_form(self):
+        ready = self._stage(
+            status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-ui"
+        )
+        self._confirm(ready)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("staff:stage_result_unlock", args=[ready.pk]))
+
     def test_stage_result_confirm_flips_to_confirmed(self):
         """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state.
 
@@ -5577,6 +5685,7 @@ class ResultBoardTests(TestCase):
         self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-rtc")
         response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-stage-status="ready_to_confirm"')
         self.assertContains(response, "待核定")
         self.assertNotContains(response, "可抄手卡")
 
@@ -6610,7 +6719,7 @@ class ResultClosureViewTests(TestCase):
         self.assertNotContains(response, "999999")
 
     def test_closure_view_shows_ready_confirmation(self):
-        self._ready_stage()
+        stage = self._ready_stage()
         self.client.force_login(self.staff)
         response = self.client.get(
             reverse("staff:activity_result_closure", args=[self.activity.pk])
@@ -6618,9 +6727,15 @@ class ResultClosureViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "待核定")
         self.assertContains(response, "stage_confirmation_pending")
+        self.assertContains(response, 'data-stage-status="ready_to_confirm"')
+        self.assertContains(
+            response,
+            f'data-input-fingerprint-prefix="{stage.input_fingerprint[:12]}"',
+        )
         self.assertNotContains(response, "bearer")
         self.assertNotContains(response, "secret")
         self.assertNotContains(response, "Authorization")
+        self.assertNotContains(response, stage.input_fingerprint)
 
     def test_closure_view_is_read_only(self):
         self._ready_stage()
