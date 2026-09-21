@@ -352,6 +352,28 @@ class ResultReleaseModelTests(TestCase):
         with self.assertRaises(ValidationError):
             release.full_clean()
 
+    def test_active_release_requires_result_publication_post(self):
+        announcement = PublicPost.objects.create(
+            title="Announcement Cannot Carry Result Authority",
+            post_type=PublicPost.PostType.ANNOUNCEMENT,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.activity,
+        )
+        release = self.make_release(post=announcement)
+        with self.assertRaises(ValidationError):
+            release.full_clean()
+
+    def test_active_release_requires_published_result_post(self):
+        draft = PublicPost.objects.create(
+            title="Draft Cannot Carry Active Result Authority",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.DRAFT,
+            related_activity=self.activity,
+        )
+        release = self.make_release(post=draft)
+        with self.assertRaises(ValidationError):
+            release.full_clean()
+
 
 class ResultReleaseVisibilityTests(ResultReleaseModelTests):
     def confirm_stage_result(self):
