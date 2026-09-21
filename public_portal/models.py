@@ -1,7 +1,9 @@
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 
 class PublicPost(models.Model):
@@ -80,6 +82,83 @@ class PublicPost(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class ResultRelease(models.Model):
+    """Historical authority records that can expose a closed stage result."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "生效"
+        REVOKED = "revoked", "已撤销"
+        SUPERSEDED = "superseded", "已被新版本取代"
+
+    post = models.ForeignKey(
+        PublicPost,
+        on_delete=models.PROTECT,
+        related_name="result_releases",
+    )
+    stage_result = models.ForeignKey(
+        "singer_contest.StageResult",
+        on_delete=models.PROTECT,
+        related_name="result_releases",
+    )
+    post_version = models.PositiveIntegerField()
+    result_version = models.PositiveIntegerField()
+    ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion",
+        on_delete=models.PROTECT,
+        related_name="result_releases",
+    )
+    authority_hash = models.CharField(max_length=64)
+    input_fingerprint = models.CharField(max_length=64)
+    status = models.CharField(max_length=12, choices=Status, default=Status.ACTIVE)
+    released_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="result_releases",
+    )
+    released_at = models.DateTimeField(auto_now_add=True)
+    transition_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="result_release_transitions",
+    )
+    transition_at = models.DateTimeField(null=True, blank=True)
+    note = models.TextField()
+
+    class Meta:
+        ordering = ["-released_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["post"],
+                condition=Q(status="active"),
+                name="result_release_one_active_post",
+            ),
+            models.UniqueConstraint(
+                fields=["stage_result"],
+                condition=Q(status="active"),
+                name="result_release_one_active_stage",
+            ),
+        ]
+
+    def clean(self):
+        if self.post_id and self.stage_result_id:
+            post_activity_id = self.post.related_activity_id
+            stage_activity_id = self.stage_result.activity_id
+            if post_activity_id != stage_activity_id:
+                raise ValidationError(
+                    {"post": "A result release post must match the stage result activity."}
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.post} — {self.stage_result} ({self.get_status_display()})"
 
 
 class PublicMedia(models.Model):

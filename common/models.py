@@ -49,12 +49,15 @@ class AuditLog(models.Model):
         JUDGE_SCORE_PAPER = "judge_score_paper", "录入纸面评分"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
         UNARCHIVE_ACTIVITY = "unarchive_activity", "解归档活动"
+        RELEASE_RESULT = "release_result", "发布正式结果"
+        REVOKE_RESULT = "revoke_result", "撤销正式结果发布"
+        SUPERSEDE_RESULT_RELEASE = "supersede_result_release", "取代正式结果发布"
         OTHER = "other", "其他"
 
     operator = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="audit_logs"
     )
-    action_type = models.CharField(max_length=22, choices=ActionType, default=ActionType.OTHER)
+    action_type = models.CharField(max_length=32, choices=ActionType, default=ActionType.OTHER)
     target = models.CharField(max_length=200, blank=True, help_text="操作对象描述")
     old_value = models.TextField(blank=True)
     new_value = models.TextField(blank=True)

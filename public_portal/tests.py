@@ -4,14 +4,19 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from common.authority import ACTIVITY_STATE, authority_write
+from accounts.models import User
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, RULESET_FREEZE, authority_write
 from core.models import Activity
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from ruleset.models import ContestRuleset, RulesetVersion
+from singer_contest.models import StageResult
 
-from .models import PublicMedia, PublicPost
+from .models import PublicMedia, PublicPost, ResultRelease
 
 
 class PublicPhotoImportTests(TestCase):
@@ -189,3 +194,126 @@ class PublicPortalVisibilityTests(TestCase):
         formal_post = self._showcase("Formal Showcase", self.formal)
         response = self.client.get(reverse("public_portal:post_detail", args=[formal_post.pk]))
         self.assertEqual(response.status_code, 200)
+
+
+class ResultReleaseModelTests(TestCase):
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.operator = User.objects.create_user(
+                username="result-release-admin",
+                password="pass",
+                role=User.Role.ADMIN,
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Formal Result Activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.RESULTS_PUBLISHED,
+                is_test_mode=False,
+            )
+            self.other_activity = Activity.objects.create(
+                title="Other Formal Activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.RESULTS_PUBLISHED,
+                is_test_mode=False,
+            )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Release Ruleset",
+            stage_key="final",
+        )
+        with authority_write(RULESET_FREEZE):
+            self.ruleset_version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                version=1,
+                definition=(
+                    '{"schema_version": 1, "nodes": ['
+                    '{"key": "release-stage", "type": "ASSESS", '
+                    '"source": "entry", "vote_source": "release-source"}]}'
+                ),
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                authority_hash="a" * 64,
+            )
+        self.stage_result = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=self.ruleset_version,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            ruleset_hash=self.ruleset_version.authority_hash,
+            input_fingerprint="b" * 64,
+            result_version=3,
+            is_test_data=False,
+        )
+        self.post = PublicPost.objects.create(
+            title="Final Result",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.activity,
+            version=7,
+        )
+
+    def make_release(self, *, post=None, stage_result=None, status=None):
+        stage_result = stage_result or self.stage_result
+        return ResultRelease(
+            post=post or self.post,
+            stage_result=stage_result,
+            post_version=(post or self.post).version,
+            result_version=stage_result.result_version,
+            ruleset_version=self.ruleset_version,
+            authority_hash=self.ruleset_version.authority_hash,
+            input_fingerprint=stage_result.input_fingerprint,
+            status=status or ResultRelease.Status.ACTIVE,
+            released_by=self.operator,
+            note="Reviewed final result release",
+        )
+
+    def test_result_release_has_historical_statuses_and_persists_provenance(self):
+        self.assertEqual(
+            set(ResultRelease.Status.values),
+            {"active", "revoked", "superseded"},
+        )
+        release = self.make_release()
+        release.full_clean()
+        release.save()
+
+        stored = ResultRelease.objects.get(pk=release.pk)
+        self.assertEqual(stored.post_version, 7)
+        self.assertEqual(stored.result_version, 3)
+        self.assertEqual(stored.authority_hash, "a" * 64)
+        self.assertEqual(stored.input_fingerprint, "b" * 64)
+        self.assertNotIn("authority_hash", {field.name for field in PublicPost._meta.get_fields()})
+        self.assertNotIn(
+            "input_fingerprint", {field.name for field in PublicPost._meta.get_fields()}
+        )
+
+    def test_only_one_active_release_can_target_each_post(self):
+        self.make_release().save()
+        duplicate = self.make_release()
+        with self.assertRaises((IntegrityError, ValidationError)):
+            with transaction.atomic():
+                duplicate.save()
+
+    def test_only_one_active_release_can_target_each_stage_result(self):
+        self.make_release().save()
+        other_post = PublicPost.objects.create(
+            title="Other Result Post",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.activity,
+        )
+        duplicate = self.make_release(post=other_post)
+        with self.assertRaises((IntegrityError, ValidationError)):
+            with transaction.atomic():
+                duplicate.save()
+
+    def test_active_release_rejects_post_and_stage_result_activity_mismatch(self):
+        other_post = PublicPost.objects.create(
+            title="Foreign Result Post",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.other_activity,
+        )
+        release = self.make_release(post=other_post)
+        with self.assertRaises(ValidationError):
+            release.full_clean()
