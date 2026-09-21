@@ -5604,6 +5604,7 @@ class ResultBoardTests(TestCase):
         self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-rtc")
         response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-stage-status="ready_to_confirm"')
         self.assertContains(response, "待核定")
         self.assertNotContains(response, "可抄手卡")
 

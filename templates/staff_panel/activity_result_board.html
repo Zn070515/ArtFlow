@@ -19,7 +19,10 @@
     {% else %}
     <div class="space-y-4">
         {% for stage in stages %}
-        <div class="bg-white border border-gray-200 rounded-lg p-5 flex items-center justify-between gap-4">
+        <div class="bg-white border border-gray-200 rounded-lg p-5 flex items-center justify-between gap-4"
+             data-stage-key="{{ stage.stage_key }}"
+             data-stage-status="{{ stage.status }}"
+             data-result-version="{{ stage.result_version }}">
             <div class="min-w-0">
                 <div class="flex items-center gap-3">
                     <span class="font-semibold text-gray-900">{{ stage.stage_key }}</span>
