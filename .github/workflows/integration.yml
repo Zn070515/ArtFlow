@@ -181,15 +181,30 @@ jobs:
             --output-file /tmp/artflow-judge-e2e.json
           docker compose cp web:/tmp/artflow-judge-e2e.json "$RUNNER_TEMP/judge-e2e.json"
 
+      - name: Prepare isolated result closure browser fixture
+        run: |
+          docker compose exec -T web python manage.py prepare_result_closure_rehearsal \
+            --output-file /tmp/artflow-result-closure-e2e.json
+          docker compose cp web:/tmp/artflow-result-closure-e2e.json "$RUNNER_TEMP/result-closure-e2e.json"
+
       - name: Run browser runtime smoke
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
           PLAYWRIGHT_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/judge-e2e.json
+          PLAYWRIGHT_CLOSURE_FIXTURE_PATH: ${{ runner.temp }}/result-closure-e2e.json
         run: npm run test:e2e
 
       - name: Remove Judge browser fixture
         if: ${{ always() }}
-        run: rm -f "$RUNNER_TEMP/judge-e2e.json"
+        run: |
+          rm -f "$RUNNER_TEMP/judge-e2e.json"
+          docker compose exec -T web rm -f -- /tmp/artflow-judge-e2e.json || true
+
+      - name: Remove result closure browser fixture
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/result-closure-e2e.json"
+          docker compose exec -T web rm -f -- /tmp/artflow-result-closure-e2e.json || true
 
       - name: Check published static assets from runner
         shell: bash

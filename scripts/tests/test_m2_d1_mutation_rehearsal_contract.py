@@ -3,6 +3,12 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 REHEARSAL_SCRIPT = REPOSITORY_ROOT / "scripts/m2_d1_result_closure_mutation_rehearsal.mjs"
 FIXTURE_COMMAND = REPOSITORY_ROOT / "common/management/commands/prepare_result_closure_rehearsal.py"
+INTEGRATION_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/integration.yml").read_text(
+    encoding="utf-8"
+)
+UI_FLOW = (REPOSITORY_ROOT / "tests/e2e/result-closure-flow.spec.ts").read_text(
+    encoding="utf-8"
+)
 
 
 def test_m2_d1_mutation_rehearsal_exercises_all_gate_boundaries():
@@ -18,6 +24,9 @@ def test_m2_d1_mutation_rehearsal_exercises_all_gate_boundaries():
         "foreign_award_marker",
         "docker",
         "inspect_result_closure_rehearsal",
+        "const afterConfirm = await inspectFixture();",
+        'afterConfirm.current_stage_status === "confirmed"',
+        'afterStale.stale_stage_status !== "confirmed"',
         "BytesIO",
         "ZipFile",
     ):
@@ -35,3 +44,22 @@ def test_m2_d1_fixture_command_is_non_production_and_private():
     assert "SESSION_COOKIE_NAME" in command
     assert "csrf_token" in command
     assert "chmod" in command
+    assert 'binding={"stage_key": stage_key}' in command
+    assert "stage_key=stage_key" in command
+
+
+def test_m2_d1_browser_gate_uses_exact_state_markers_and_the_ui_boundary():
+    for marker in (
+        "prepare_result_closure_rehearsal",
+        "PLAYWRIGHT_CLOSURE_FIXTURE_PATH",
+        "Remove result closure browser fixture",
+    ):
+        assert marker in INTEGRATION_WORKFLOW
+    for marker in (
+        "data-stage-status",
+        "data-input-fingerprint-prefix",
+        "data-stage-result-unlock-form",
+        'data-stage-status="confirmed"',
+        'data-stage-status="ready_to_confirm"',
+    ):
+        assert marker in UI_FLOW

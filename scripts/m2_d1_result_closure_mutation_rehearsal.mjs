@@ -127,26 +127,46 @@ async function inspectFixture() {
 
 const checks = [];
 const confirm = await request(fixture.confirm_path, { method: "POST", headers: postHeaders });
+const afterConfirm = await inspectFixture();
 checks.push({
-  name: "first confirm is accepted by the real HTTP boundary",
-  passed: confirm.status === 302,
+  name: "first confirm is accepted and persisted by the real HTTP boundary",
+  passed:
+    confirm.status === 302 &&
+    afterConfirm.current_stage_status === "confirmed" &&
+    afterConfirm.confirm_audit_count === 1,
   status: confirm.status,
+  persisted_status: afterConfirm.current_stage_status,
+  confirm_audit_count: afterConfirm.confirm_audit_count,
   duration_ms: Math.round(confirm.durationMs * 100) / 100,
 });
 
 const replay = await request(fixture.confirm_path, { method: "POST", headers: postHeaders });
+const afterReplay = await inspectFixture();
 checks.push({
-  name: "duplicate confirm is idempotent at the real HTTP boundary",
-  passed: replay.status === 302,
+  name: "duplicate confirm is idempotent at the real HTTP boundary and database",
+  passed:
+    replay.status === 302 &&
+    afterReplay.current_stage_status === "confirmed" &&
+    afterReplay.confirm_audit_count === 1,
   status: replay.status,
+  persisted_status: afterReplay.current_stage_status,
+  confirm_audit_count: afterReplay.confirm_audit_count,
   duration_ms: Math.round(replay.durationMs * 100) / 100,
 });
 
 const stale = await request(fixture.stale_confirm_path, { method: "POST", headers: postHeaders });
+const afterStale = await inspectFixture();
 checks.push({
-  name: "stale result is rejected at the real HTTP boundary",
-  passed: stale.status === 302,
+  name: "stale result is rejected at the real HTTP boundary and database",
+  passed:
+    stale.status === 302 &&
+    afterStale.current_stage_status === "confirmed" &&
+    afterStale.stale_stage_status !== "confirmed" &&
+    afterStale.stale_confirm_audit_count === 0,
   status: stale.status,
+  current_stage_status: afterStale.current_stage_status,
+  stale_stage_status: afterStale.stale_stage_status,
+  stale_confirm_audit_count: afterStale.stale_confirm_audit_count,
   duration_ms: Math.round(stale.durationMs * 100) / 100,
 });
 

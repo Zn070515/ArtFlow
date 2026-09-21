@@ -53,6 +53,8 @@ class Command(BaseCommand):
             "activity_id": activity.pk,
             "foreign_activity_id": foreign_activity.pk,
             "stage_id": current_stage.pk,
+            "stage_key": current_stage.stage_key,
+            "input_fingerprint_prefix": current_stage.input_fingerprint[:12],
             "stale_stage_id": stale_stage.pk,
             "current_award_marker": current_marker,
             "foreign_award_marker": foreign_marker,
@@ -62,6 +64,8 @@ class Command(BaseCommand):
             "confirm_path": f"/staff/stage-results/{current_stage.pk}/confirm/",
             "stale_confirm_path": f"/staff/stage-results/{stale_stage.pk}/confirm/",
             "unlock_path": f"/staff/stage-results/{current_stage.pk}/unlock/",
+            "detail_path": f"/staff/stage-results/{current_stage.pk}/",
+            "closure_path": f"/staff/activity/{activity.pk}/result-closure/",
             "archive_path": f"/staff/archive-package/{activity.pk}/",
         }
         output_path.write_text(json.dumps(fixture, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -96,8 +100,12 @@ class Command(BaseCommand):
         foreign_activity = cls._create_activity(f"M2-D1 foreign activity {suffix}")
         current_singer = cls._create_singer(activity, f"Current singer {suffix}")
         foreign_singer = cls._create_singer(foreign_activity, f"Foreign singer {suffix}")
-        current_version = cls._create_version(activity, operator, f"current-{suffix}")
-        foreign_version = cls._create_version(foreign_activity, operator, f"foreign-{suffix}")
+        current_version = cls._create_version(
+            activity, operator, f"current-{suffix}", stage_key="current-stage"
+        )
+        foreign_version = cls._create_version(
+            foreign_activity, operator, f"foreign-{suffix}", stage_key="foreign-stage"
+        )
         current_stage = cls._create_ready_stage(
             activity, current_version, current_singer, operator, "current-stage", current_marker
         )
@@ -165,7 +173,9 @@ class Command(BaseCommand):
         )
 
     @staticmethod
-    def _create_version(activity: Activity, operator: User, label: str) -> RulesetVersion:
+    def _create_version(
+        activity: Activity, operator: User, label: str, *, stage_key: str
+    ) -> RulesetVersion:
         definition = json.dumps(
             {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
             sort_keys=True,
@@ -174,6 +184,7 @@ class Command(BaseCommand):
             activity=activity,
             name=f"M2-D1 rehearsal ruleset {label}",
             is_test_data=True,
+            stage_key=stage_key,
         )
         with authority_write(RULESET_FREEZE):
             return cast(
@@ -181,6 +192,7 @@ class Command(BaseCommand):
                 RulesetVersion.objects.create(  # type: ignore[no-untyped-call]
                     ruleset=ruleset,
                     definition=definition,
+                    binding={"stage_key": stage_key},
                     authority_hash=hashlib.sha256(definition.encode()).hexdigest(),
                     status=RulesetVersion.Status.FROZEN,
                     is_current=True,
