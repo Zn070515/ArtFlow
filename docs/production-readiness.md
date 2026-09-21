@@ -217,6 +217,10 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 ```
 
 备份脚本必须在源服务仍运行时执行。它只创建隔离恢复目标，不允许使用 `down --volumes`、源库 `dropdb` 或任何重置源卷的命令。
+隔离恢复目标必须先等待官方 PostgreSQL 初始化完成标记
+`PostgreSQL init process complete; ready for start up.`，再连续通过两次
+`psql SELECT 1` 探针；不能把临时 init server 的一次 `pg_isready` 当作最终数据库就绪。
+超时或容器提前退出时，脚本只输出容器状态和最近 80 行日志用于诊断，不输出环境变量或凭据。
 
 ## Production Rehearsal Report
 
