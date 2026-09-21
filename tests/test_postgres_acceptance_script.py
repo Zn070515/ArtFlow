@@ -191,7 +191,7 @@ def test_postgres_acceptance_default_order_uses_repository_root_and_has_no_teard
     assert command_text[3:] == [
         "compose exec -T web sh -lc python manage.py seed_demo_data",
         "compose exec -T web sh -lc python manage.py seed_demo_data",
-        "compose exec -T --user root web sh -lc touch /app/.env",
+        "compose exec -T --user root web sh -lc touch /app/.env && chown artflow:artflow /app/.env",
         "compose exec -T web sh -lc python manage.py test",
     ]
     assert not any(" down" in command for _, command in commands)

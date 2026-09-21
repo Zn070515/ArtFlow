@@ -84,7 +84,9 @@ def valid_workflow() -> str:
                   docker compose exec -T web python manage.py seed_demo_data
                   docker compose exec -T web python manage.py seed_demo_data
               - name: Prepare production startup test fixture
-                run: docker compose exec -T --user root web sh -lc 'touch /app/.env'
+                run: >-
+                  docker compose exec -T --user root web sh -lc
+                  'touch /app/.env && chown artflow:artflow /app/.env'
               - name: Preserve Compose volumes
                 if: ${{{{ always() }}}}
                 run: docker compose down
@@ -255,6 +257,10 @@ def test_verifier_rejects_workflow_contract_violations():
                 "POSTGRES_HOST: 127.0.0.1\n      POSTGRES_PASSWORD: unsafe-literal",
             ),
             "must not contain a literal credential",
+        ),
+        "root_owned_fixture": (
+            valid_workflow().replace(" && chown artflow:artflow /app/.env", ""),
+            "web-user ownership",
         ),
     }
 

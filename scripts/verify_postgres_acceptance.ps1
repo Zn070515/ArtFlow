@@ -60,7 +60,7 @@ try {
         Invoke-WebCommand 'python manage.py seed_demo_data'
     }
 
-    Invoke-RootWebCommand 'touch /app/.env'
+    Invoke-RootWebCommand 'touch /app/.env && chown artflow:artflow /app/.env'
     Invoke-WebCommand 'python manage.py test'
     Write-Host 'PostgreSQL acceptance contract completed. Services and volumes were left intact.'
 }

@@ -147,10 +147,11 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
     if (
         "docker compose exec -T --user root web sh -lc" not in compose_commands
         or "touch /app/.env" not in compose_commands
+        or "chown artflow:artflow /app/.env" not in compose_commands
     ):
         issues.append(
             f"{workflow_path.name}: Compose smoke must prepare the immutable-image "
-            "production startup test fixture"
+            "production startup test fixture with web-user ownership"
         )
     published_health_commands = "\n".join(
         str(step.get("run", ""))
