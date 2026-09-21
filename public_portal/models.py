@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Q
+from django.db.models import Exists, F, OuterRef, Q, Subquery
 
 
 class PublicPost(models.Model):
@@ -72,12 +72,41 @@ class PublicPost(models.Model):
         Defense-in-depth: a publication tied to a TEST activity must never be
         public. Posts with no related activity (or a FORMAL one) remain public,
         while TEST-related rows are excluded even if they were published by
-        legacy/dirty history.
+        legacy/dirty history. Result publications additionally require the
+        exact current active release of a confirmed stage result.
         """
         from core.models import Activity
+        from ruleset.models import RulesetVersion
+        from singer_contest.models import StageResult
 
-        return cls.objects.filter(status=cls.Status.PUBLISHED).exclude(
-            related_activity__data_lifecycle=Activity.DataLifecycle.TEST
+        latest_stage_result_version = (
+            StageResult.objects.filter(
+                activity_id=OuterRef("stage_result__activity_id"),
+                stage_key=OuterRef("stage_result__stage_key"),
+            )
+            .order_by("-result_version", "-pk")
+            .values("result_version")[:1]
+        )
+        active_result_release = ResultRelease.objects.filter(
+            post_id=OuterRef("pk"),
+            status=ResultRelease.Status.ACTIVE,
+            post_version=F("post__version"),
+            result_version=F("stage_result__result_version"),
+            ruleset_version_id=F("stage_result__ruleset_version_id"),
+            authority_hash=F("stage_result__ruleset_hash"),
+            input_fingerprint=F("stage_result__input_fingerprint"),
+            stage_result__status=StageResult.Status.CONFIRMED,
+            stage_result__activity_id=F("post__related_activity_id"),
+            stage_result__ruleset_version__status=RulesetVersion.Status.FROZEN,
+            stage_result__ruleset_version__is_current=True,
+            stage_result__ruleset_version__ruleset__activity_id=F("post__related_activity_id"),
+            stage_result__result_version=Subquery(latest_stage_result_version),
+        )
+
+        return (
+            cls.objects.filter(status=cls.Status.PUBLISHED)
+            .exclude(related_activity__data_lifecycle=Activity.DataLifecycle.TEST)
+            .filter(~Q(post_type=cls.PostType.RESULT_PUBLICATION) | Exists(active_result_release))
         )
 
     def __str__(self):

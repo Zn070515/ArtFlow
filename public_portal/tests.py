@@ -5,7 +5,13 @@ import tempfile
 from pathlib import Path
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
+    authority_write,
+)
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -13,6 +19,7 @@ from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import StageResult
 
@@ -317,3 +324,189 @@ class ResultReleaseModelTests(TestCase):
         release = self.make_release(post=other_post)
         with self.assertRaises(ValidationError):
             release.full_clean()
+
+
+class ResultReleaseVisibilityTests(ResultReleaseModelTests):
+    def confirm_stage_result(self):
+        with authority_write(STAGE_RESULT_CONFIRM):
+            self.stage_result.status = StageResult.Status.CONFIRMED
+            self.stage_result.confirmed_by = self.operator
+            self.stage_result.confirmed_at = timezone.now()
+            self.stage_result.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+
+    def create_public_media(self):
+        return PublicMedia.objects.create(
+            post=self.post,
+            related_activity=self.activity,
+            image="public/gallery/result.jpg",
+            caption="Result media",
+        )
+
+    def test_published_result_without_active_release_is_private_everywhere(self):
+        media = self.create_public_media()
+        home = self.client.get(reverse("public_portal:home"))
+        result_list = self.client.get(reverse("public_portal:result_list"))
+        self.client.raise_request_exception = False
+        detail = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+
+        self.assertNotIn(self.post, list(home.context["results"]))
+        self.assertNotIn(self.post, list(home.context["activity_photos"]))
+        self.assertNotContains(result_list, self.post.title)
+        self.assertNotEqual(detail.status_code, 200)
+        self.assertTrue(PublicMedia.objects.filter(pk=media.pk).exists())
+
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            media_path = Path(media_root) / "public/gallery/result.jpg"
+            media_path.parent.mkdir(parents=True)
+            media_path.write_bytes(b"private-result-media")
+            response = self.client.get(
+                reverse("controlled_media", kwargs={"path": "public/gallery/result.jpg"})
+            )
+            response.close()
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_active_release_is_visible_through_all_public_result_paths(self):
+        self.confirm_stage_result()
+        release = self.make_release()
+        release.save()
+        media = self.create_public_media()
+
+        home = self.client.get(reverse("public_portal:home"))
+        result_list = self.client.get(reverse("public_portal:result_list"))
+        detail = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+
+        self.assertIn(self.post, list(home.context["results"]))
+        self.assertIn(media, list(home.context["activity_photos"]))
+        self.assertContains(result_list, self.post.title)
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(media, list(detail.context["media_items"]))
+
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            media_path = Path(media_root) / "public/gallery/result.jpg"
+            media_path.parent.mkdir(parents=True)
+            media_path.write_bytes(b"public-result-media")
+            response = self.client.get(
+                reverse("controlled_media", kwargs={"path": "public/gallery/result.jpg"})
+            )
+            response.close()
+        self.assertEqual(response.status_code, 200)
+
+    def test_revoked_and_superseded_releases_are_not_public(self):
+        for status in (ResultRelease.Status.REVOKED, ResultRelease.Status.SUPERSEDED):
+            with self.subTest(status=status):
+                release = self.make_release(status=status)
+                release.save()
+                self.client.raise_request_exception = False
+                response = self.client.get(
+                    reverse("public_portal:post_detail", args=[self.post.pk])
+                )
+                self.assertEqual(response.status_code, 404)
+                release.delete()
+
+    def test_release_is_hidden_after_post_version_changes(self):
+        self.confirm_stage_result()
+        release = self.make_release()
+        release.save()
+        self.post.version += 1
+        self.post.save(update_fields=["version"])
+
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_release_is_hidden_when_a_newer_stage_result_exists(self):
+        self.confirm_stage_result()
+        release = self.make_release()
+        release.save()
+        StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=self.ruleset_version,
+            stage_key=self.stage_result.stage_key,
+            status=StageResult.Status.READY_TO_CONFIRM,
+            ruleset_hash=self.ruleset_version.authority_hash,
+            input_fingerprint="c" * 64,
+            result_version=self.stage_result.result_version + 1,
+            is_test_data=False,
+        )
+
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_release_is_hidden_for_non_current_ruleset_snapshot(self):
+        self.confirm_stage_result()
+        alternate_version = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            version=2,
+            definition=(
+                '{"schema_version": 1, "nodes": ['
+                '{"key": "alternate-stage", "type": "ASSESS", '
+                '"source": "entry", "vote_source": "alternate-source"}]}'
+            ),
+            authority_hash="c" * 64,
+        )
+        release = self.make_release()
+        release.ruleset_version = alternate_version
+        release.save()
+
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_active_release_for_test_activity_is_not_public(self):
+        with authority_write(ACTIVITY_STATE):
+            test_activity = Activity.objects.create(
+                title="Test Result Activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.RESULTS_PUBLISHED,
+                is_test_mode=True,
+            )
+        test_ruleset = ContestRuleset.objects.create(
+            activity=test_activity,
+            name="Test Release Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            test_version = RulesetVersion.objects.create(
+                ruleset=test_ruleset,
+                version=1,
+                definition=(
+                    '{"schema_version": 1, "nodes": ['
+                    '{"key": "test-stage", "type": "ASSESS", '
+                    '"source": "entry", "vote_source": "test-source"}]}'
+                ),
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                authority_hash="d" * 64,
+            )
+        test_stage = StageResult.objects.create(
+            activity=test_activity,
+            ruleset_version=test_version,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            ruleset_hash=test_version.authority_hash,
+            input_fingerprint="e" * 64,
+            is_test_data=True,
+        )
+        test_post = PublicPost.objects.create(
+            title="Test Result",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=test_activity,
+        )
+        ResultRelease.objects.create(
+            post=test_post,
+            stage_result=test_stage,
+            post_version=test_post.version,
+            result_version=test_stage.result_version,
+            ruleset_version=test_version,
+            authority_hash=test_version.authority_hash,
+            input_fingerprint=test_stage.input_fingerprint,
+            released_by=self.operator,
+            note="Test release",
+        )
+
+        self.client.raise_request_exception = False
+        response = self.client.get(reverse("public_portal:post_detail", args=[test_post.pk]))
+        self.assertEqual(response.status_code, 404)
