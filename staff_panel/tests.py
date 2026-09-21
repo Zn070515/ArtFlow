@@ -5436,6 +5436,31 @@ class ResultBoardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "直接晋级")
 
+    def test_confirmed_detail_renders_admin_unlock_form_and_machine_state(self):
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-ui")
+        self._confirm(ready)
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'data-stage-status="confirmed"')
+        self.assertContains(
+            response,
+            f'action="{reverse("staff:stage_result_unlock", args=[ready.pk])}"',
+        )
+        self.assertContains(response, 'name="note"')
+        self.assertContains(response, "required")
+
+    def test_staff_stage_detail_does_not_render_admin_unlock_form(self):
+        ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-ui")
+        self._confirm(ready)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("staff:stage_result_unlock", args=[ready.pk]))
+
     def test_stage_result_confirm_flips_to_confirmed(self):
         """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state.
 
@@ -6610,7 +6635,7 @@ class ResultClosureViewTests(TestCase):
         self.assertNotContains(response, "999999")
 
     def test_closure_view_shows_ready_confirmation(self):
-        self._ready_stage()
+        stage = self._ready_stage()
         self.client.force_login(self.staff)
         response = self.client.get(
             reverse("staff:activity_result_closure", args=[self.activity.pk])
@@ -6618,9 +6643,15 @@ class ResultClosureViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "待核定")
         self.assertContains(response, "stage_confirmation_pending")
+        self.assertContains(response, 'data-stage-status="ready_to_confirm"')
+        self.assertContains(
+            response,
+            f'data-input-fingerprint-prefix="{stage.input_fingerprint[:12]}"',
+        )
         self.assertNotContains(response, "bearer")
         self.assertNotContains(response, "secret")
         self.assertNotContains(response, "Authorization")
+        self.assertNotContains(response, stage.input_fingerprint)
 
     def test_closure_view_is_read_only(self):
         self._ready_stage()

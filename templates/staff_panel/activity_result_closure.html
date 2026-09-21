@@ -41,12 +41,18 @@
     {% else %}
     <div class="space-y-4">
         {% for stage in closure_payload.stages %}
-        <section class="bg-white border border-gray-200 rounded-lg p-5">
+        <section
+            class="bg-white border border-gray-200 rounded-lg p-5"
+            data-stage-key="{{ stage.stage_key }}"
+            data-stage-status="{{ stage.status|default:'missing' }}"
+            data-result-version="{{ stage.result_version|default:'' }}"
+            data-input-fingerprint-prefix="{{ stage.input_fingerprint_prefix|default:'' }}"
+        >
             <div class="flex items-start justify-between gap-4">
                 <div>
                     <h2 class="font-semibold text-gray-900">{{ stage.stage_key }}</h2>
                     <p class="text-xs text-gray-500 mt-1">
-                        当前结果 #{{ stage.current_result_id|default:"—" }} · 版本 {{ stage.result_version|default:"—" }}
+                        当前结果 #{{ stage.current_result_id|default:"—" }} · 版本 <span data-result-version>{{ stage.result_version|default:"—" }}</span>
                     </p>
                 </div>
                 {% if stage.status == "confirmed" %}
@@ -67,6 +73,7 @@
                 <div><dt class="text-gray-500">原始事实锁定</dt><dd class="font-medium">{% if stage.raw_facts_locked %}是{% else %}否{% endif %}</dd></div>
                 <div><dt class="text-gray-500">上游已核定</dt><dd class="font-medium">{% if stage.upstream_confirmed %}是{% else %}否{% endif %}</dd></div>
                 <div><dt class="text-gray-500">正式奖项/入口</dt><dd class="font-medium">{{ stage.official_awards }}/{{ stage.round_entries }}</dd></div>
+                <div><dt class="text-gray-500">输入指纹前缀</dt><dd class="font-mono text-xs" data-input-fingerprint-prefix>{{ stage.input_fingerprint_prefix|default:"—" }}</dd></div>
             </dl>
 
             {% if stage.blocking_reasons %}

@@ -9,7 +9,7 @@
         <a href="{% url 'staff:activity_result_board' activity.pk %}" class="hover:underline">结果公示板</a> /
         {{ stage.stage_key }}
     </p>
-    <div class="flex items-center justify-between gap-4 mb-2">
+    <div class="flex items-center justify-between gap-4 mb-2" data-stage-status="{{ stage.status }}">
         <h1 class="text-2xl font-bold text-gray-900">{{ stage.stage_key }}</h1>
         {% if stage.status == "confirmed" %}
         <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1 rounded font-medium">可抄手卡</span>
@@ -44,10 +44,21 @@
         </button>
     </form>
     {% elif stage.status == "confirmed" %}
-    <p class="mb-6 text-sm text-emerald-700">
-        已于 {% if stage.confirmed_at %}{{ stage.confirmed_at|date:"Y-m-d H:i" }}{% else %}——{% endif %}
-        核定并锁定，结果不可再更动。
-    </p>
+    <div class="mb-6 space-y-3">
+        <p class="text-sm text-emerald-700">
+            已于 {% if stage.confirmed_at %}{{ stage.confirmed_at|date:"Y-m-d H:i" }}{% else %}——{% endif %}
+            核定并锁定，结果不可再更动。
+        </p>
+        {% if can_unlock_stage_result %}
+        <form method="post" action="{% url 'staff:stage_result_unlock' stage.pk %}" data-stage-result-unlock-form class="border border-red-200 bg-red-50 rounded-lg p-4 space-y-2">
+            {% csrf_token %}
+            <label for="stage-result-unlock-note" class="block text-sm font-medium text-red-900">管理员解锁原因</label>
+            <textarea id="stage-result-unlock-note" name="note" required maxlength="1000" rows="2" class="w-full border border-red-200 rounded px-3 py-2 text-sm" placeholder="必须填写修正原因"></textarea>
+            <p class="text-xs text-red-700">解锁会撤销当前结果的最终性；修正原始数据后必须重新计算、核定。</p>
+            <button type="submit" class="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700">管理员解锁</button>
+        </form>
+        {% endif %}
+    </div>
     {% endif %}
 
     {% for block in blocks %}

@@ -1666,6 +1666,10 @@ _RESULT_CLOSURE_LABELS = (
         "label": "活动已被操作锁定",
     },
     {
+        "code": ResultClosureCode.ACTIVITY_PHASE_NOT_READY.value,
+        "label": "活动尚未进入结果整理/公示阶段",
+    },
+    {
         "code": ResultClosureCode.SCHOOL_EXTERNAL_EVIDENCE_PENDING.value,
         "label": "学校外部证据待补齐",
     },
@@ -1704,6 +1708,7 @@ def stage_result_detail(request, pk):
             "stage": stage,
             "activity": stage.activity,
             "blocks": stage_decisions_by_blocks(stage),
+            "can_unlock_stage_result": request.user.is_admin,
         },
     )
 
