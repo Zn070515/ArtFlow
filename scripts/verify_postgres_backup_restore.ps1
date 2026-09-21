@@ -9,6 +9,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'restore_database_wait.ps1')
+
 $repositoryRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
 $composeNetwork = "${ComposeProjectName}_artflow_internal"
@@ -75,13 +77,8 @@ try {
     }
     Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", 'postgres:16-alpine')
     try {
-        $ready = $false
-        for ($attempt = 1; $attempt -le 30; $attempt++) {
-            & $script:dockerExecutable exec $restoreContainer pg_isready -U postgres -d $RestoreDatabase *> $null
-            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-            Start-Sleep -Seconds 1
-        }
-        if (-not $ready) { throw 'The isolated restore database did not become ready.' }
+        Wait-ForStableRestoreDatabase -DockerExecutable $script:dockerExecutable -ContainerName $restoreContainer -DatabaseName $RestoreDatabase -TimeoutSeconds 90
+
         Invoke-Docker -Arguments @('cp', $backupFile, "${restoreContainer}:/tmp/artflow-backup.dump")
         Invoke-Docker -Arguments @('exec', $restoreContainer, 'pg_restore', '--list', '/tmp/artflow-backup.dump')
         Invoke-Docker -Arguments @('exec', $restoreContainer, 'pg_restore', '--username', 'postgres', '--exit-on-error', '--no-owner', '--dbname', $RestoreDatabase, '/tmp/artflow-backup.dump')
