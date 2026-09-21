@@ -2521,6 +2521,32 @@ class StaffPanelSmokeTests(TestCase):
         self.assertNotContains(response, late_singer.name)
         self.assertNotContains(response, foreign_singer.name)
 
+    def test_round_ranking_exposes_machine_readable_lock_state(self):
+        SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Machine State Singer",
+            student_id="20260030",
+            college="Info",
+            class_name="CS1",
+            phone="13800000030",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        Judge.objects.create(activity=self.singer_activity, name="Machine State Judge")
+        round_ = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+        )
+        prepare_round(round_, self.staff)
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:round_ranking", args=[round_.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-round-status="prepared"')
+        self.assertContains(response, 'data-round-locked="false"')
+
     def test_round_lock_get_is_rejected_without_mutating_state(self):
         round_ = _create_round(
             activity=self.singer_activity,
@@ -4748,6 +4774,61 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(data["version"], 1)
         self.assertTrue(data["matrix_complete"])
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
+
+    def test_post_corrects_existing_direct_judge_fact_through_formal_authority(self):
+        from entry_access.services import redeem_access_grant
+        from singer_contest.judge_authority import (
+            advance_performance,
+            issue_judge_grant,
+            prepare_judge_panel,
+            submit_judge_score,
+        )
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.save(update_fields=["status"])
+        performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=self.singer,
+            sequence=1,
+            song_title="快速录入更正节目",
+            is_test_data=False,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.admin)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.admin, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, performance.pk, operator=self.admin)
+        submit_judge_score(
+            redeemed.token,
+            command_id="rapid-http-original",
+            expected_context_version=1,
+            expected_performance_id=performance.pk,
+            score_payload={"score": "91.50"},
+        )
+
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [
+                    {
+                        "singer_id": self.singer.pk,
+                        "judge_id": self.judge.pk,
+                        "score": "92.75",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason_code"], "SCORES_APPLIED")
+        corrected = ScoreRecord.objects.get(round=self.round)
+        self.assertEqual(corrected.score, Decimal("92.75"))
+        self.assertEqual(corrected.source, ScoreSource.DIRECT_JUDGE)
 
     @patch("staff_panel.views.maybe_resolve_checkpoints")
     def test_post_does_not_expose_resolver_exception_text_in_json(self, resolve_mock):
