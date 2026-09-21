@@ -55,6 +55,7 @@ from common.authority import (
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
+    STAGE_RESULT_CONFIRM,
     authority_write,
 )
 from common.management.commands.backup_artflow import (
@@ -297,6 +298,75 @@ class M1StageResultTestDataCleanupTests(TestCase):
         # TEST→FORMAL promotion in leave_test_mode).
         self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
         self.assertTrue(ContestRuleset.objects.filter(activity=self.activity).exists())
+
+    def test_clear_removes_confirmed_stage_award_under_cleanup_authority(self):
+        import hashlib
+        import json
+
+        from django.utils import timezone
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from singer_contest.models import StageAwardDecision, StageResult
+        from singer_contest.services import materialize_stage_awards
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            admin = User.objects.create_user(
+                username="m1-cleanup-admin", password="pass", role=User.Role.ADMIN
+            )
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="confirmed-cleanup-singer", password="pass"),
+            name="Confirmed cleanup singer",
+            student_id="20260101",
+            college="College",
+            class_name="Class",
+            phone="13800000101",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        definition = json.dumps(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="Confirmed cleanup rules", is_test_data=True
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=definition,
+                authority_hash=hashlib.sha256(definition.encode()).hexdigest(),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.operator,
+            stage_key="confirmed-cleanup-stage",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            ruleset_hash=version.authority_hash,
+            input_fingerprint="0" * 64,
+            is_test_data=True,
+        )
+        StageAwardDecision.objects.create(
+            stage_result=stage,
+            activity=self.activity,
+            singer=singer,
+            name="Confirmed cleanup award",
+            is_test_data=True,
+        )
+        stage.status = StageResult.Status.CONFIRMED
+        stage.confirmed_by = admin
+        stage.confirmed_at = timezone.now()
+        with authority_write(STAGE_RESULT_CONFIRM):
+            stage.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+        materialize_stage_awards(stage, operator=admin)
+
+        counts = clear_activity_test_data(self.activity, operator=self.operator)
+
+        self.assertEqual(counts["awards"], 1)
+        self.assertFalse(Award.objects.filter(activity=self.activity).exists())
+        self.assertFalse(StageResult.objects.filter(activity=self.activity).exists())
 
     def test_clear_removes_manual_decision_and_counts_it(self):
         import json
