@@ -215,6 +215,20 @@ bearer。M2-D2 的代码证据仍不能替代学校 SSO/MFA、TLS/WAF、volumetr
 重复 release 未产生额外 active row。fixture、临时操作员、活动、规则集、文章、release、
 审计和媒体均已精确清理。上述延迟只描述本机隔离服务，不是学校公网容量或抗 DDoS 证据。
 
+#### 2026-09-21 M2-D2 gate-close 重跑
+
+在代码基线 `ca8490b` 上使用 Docker Compose PostgreSQL、本机回环地址
+`http://127.0.0.1:8000` 重跑结果发布恶意彩排。共 19 个 HTTP 请求、20 个断言，
+`2xx=5`、`3xx=6`、`4xx=8`、`5xx=0`、超时 `0`；p50 `26.34 ms`，p95/p99/max
+`43.43 ms`，20/20 检查通过。跨活动伪造、重复发布、active 编辑冻结、撤销、重新发布、
+解锁后旧结果和受控媒体均符合 fail-closed 预期。
+
+Inspector 记录 `release_audit=2`、`revoke_audit=1`、`supersede_audit=1`、历史
+release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONFIRM`。模型
+边界回归还确认 active release 不能绑定公告或草稿文章。fixture 已精确清理，源数据库与
+volumes 未 reset。本次证据只覆盖应用层 authority，不替代学校 SSO/MFA、TLS/WAF、
+volumetric DDoS、留存审批和部署 ownership 的外部 `HOLD`。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：
