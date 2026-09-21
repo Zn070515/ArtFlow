@@ -2747,6 +2747,7 @@ class ResultClosureContractTests(TestCase):
                 "STALE_CANDIDATE": "stale_candidate",
                 "STAGE_CONFIRMATION_PENDING": "stage_confirmation_pending",
                 "ACTIVITY_OPERATIONALLY_LOCKED": "activity_operationally_locked",
+                "ACTIVITY_PHASE_NOT_READY": "activity_phase_not_ready",
                 "SCHOOL_EXTERNAL_EVIDENCE_PENDING": "school_external_evidence_pending",
             },
         )
@@ -2815,7 +2816,7 @@ class ResultClosureServiceTests(TestCase):
         self.activity = _create_activity(
             title="Closure Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
+            phase=Activity.Phase.RESULTS_PENDING,
             is_test_mode=True,
         )
         self.ruleset = ContestRuleset.objects.create(
@@ -2886,6 +2887,20 @@ class ResultClosureServiceTests(TestCase):
         self.assertEqual(
             closure.stages[0].blocking_reasons,
             (ResultClosureCode.STAGE_CONFIRMATION_PENDING,),
+        )
+
+    def test_closure_blocks_confirmation_when_activity_phase_disallows_results(self):
+        self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+        _save_activity_state(self.activity, ["phase"])
+        self._stage()
+
+        from .services import ResultClosureCode, build_result_closure
+
+        closure = build_result_closure(self.activity)
+        self.assertFalse(closure.stages[0].confirmable)
+        self.assertIn(
+            ResultClosureCode.ACTIVITY_PHASE_NOT_READY,
+            closure.stages[0].blocking_reasons,
         )
 
     def test_closure_reports_missing_result_as_incomplete(self):

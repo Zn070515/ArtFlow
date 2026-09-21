@@ -101,6 +101,7 @@ class ResultClosureCode(StrEnum):
     STALE_CANDIDATE = "stale_candidate"
     STAGE_CONFIRMATION_PENDING = "stage_confirmation_pending"
     ACTIVITY_OPERATIONALLY_LOCKED = "activity_operationally_locked"
+    ACTIVITY_PHASE_NOT_READY = "activity_phase_not_ready"
     SCHOOL_EXTERNAL_EVIDENCE_PENDING = "school_external_evidence_pending"
 
 
@@ -2942,6 +2943,10 @@ def _closure_stage(
     latest: StageResult | None,
 ) -> StageClosure:
     blockers: list[ResultClosureCode] = []
+    try:
+        ensure_activity_action_allowed(activity, ActivityAction.PUBLISH_RESULT)
+    except PermissionDenied:
+        blockers.append(ResultClosureCode.ACTIVITY_PHASE_NOT_READY)
     if activity.is_locked:
         blockers.append(ResultClosureCode.ACTIVITY_OPERATIONALLY_LOCKED)
     reasons: tuple[str, ...] = tuple(latest.reasons or ()) if latest else ()
