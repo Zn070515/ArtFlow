@@ -8,6 +8,7 @@ import zipfile
 from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest import skipUnless
 from unittest.mock import patch
@@ -54,7 +55,8 @@ from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
 from files.services import reconcile_singer_material_checks, store_submission_file
 from incidents.models import IncidentRecord
 from openpyxl import load_workbook
-from public_portal.models import PublicPost
+from public_portal.models import PublicPost, ResultRelease
+from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import (
     AudienceScore,
     Award,
@@ -4443,6 +4445,199 @@ class PublicPortalPublicationTests(TestCase):
         self.client.raise_request_exception = False
         public_response = self.client.get(reverse("public_portal:post_detail", args=[draft.pk]))
         self.assertEqual(public_response.status_code, 404)
+
+
+class ResultReleaseHttpTests(TestCase):
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="release-http-staff", password="pass", role=User.Role.STAFF
+        )
+        self.admin = _create_provisioned_user(
+            username="release-http-admin", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = _create_activity(
+            title="HTTP Release Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+        self.ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="HTTP Release Ruleset",
+            stage_key="final",
+        )
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                version=1,
+                definition=(
+                    '{"schema_version": 1, "nodes": ['
+                    '{"key": "final", "type": "ASSESS", '
+                    '"source": "entry", "vote_source": "http-source"}]}'
+                ),
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                authority_hash="f" * 64,
+            )
+        with authority_write(STAGE_RESULT_CONFIRM):
+            self.stage_result = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="final",
+                status=StageResult.Status.CONFIRMED,
+                ruleset_hash=self.version.authority_hash,
+                input_fingerprint="1" * 64,
+                result_version=1,
+                is_test_data=False,
+                confirmed_by=self.admin,
+                confirmed_at=timezone.now(),
+            )
+        self.post = PublicPost.objects.create(
+            title="HTTP Final Result",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.activity,
+        )
+
+    def _release_payload(self, *, stage_result_id=None, note="审核后公示"):
+        return {
+            "stage_result_id": str(stage_result_id or self.stage_result.pk),
+            "note": note,
+        }
+
+    def test_release_requires_post_and_admin_verification(self):
+        self.client.force_login(self.staff)
+        response = self.client.post(
+            reverse("staff:result_release", args=[self.post.pk]),
+            self._release_payload(),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response["Location"].startswith(reverse("accounts:admin_login")))
+        self.assertFalse(ResultRelease.objects.exists())
+
+        login_admin(self.client, self.admin)
+        self.assertEqual(
+            self.client.get(reverse("staff:result_release", args=[self.post.pk])).status_code,
+            405,
+        )
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_admin_can_release_using_path_owned_post(self, closure):
+        login_admin(self.client, self.admin)
+        response = self.client.post(
+            (
+                f"{reverse('staff:result_release', args=[self.post.pk])}"
+                "?post_id=999999&activity_id=999999"
+            ),
+            self._release_payload(),
+        )
+        self.assertEqual(response.status_code, 302)
+        release = ResultRelease.objects.get()
+        self.assertEqual(release.post_id, self.post.pk)
+        self.assertEqual(release.stage_result_id, self.stage_result.pk)
+        self.assertEqual(closure.call_count, 1)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.RELEASE_RESULT,
+                target=f"PublicPost:{self.post.pk}",
+            ).exists()
+        )
+
+    def test_forged_stage_result_from_other_activity_is_rejected(self):
+        other_activity = _create_activity(
+            title="Other HTTP Release Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+        other_ruleset = ContestRuleset.objects.create(
+            activity=other_activity,
+            name="Other HTTP Release Ruleset",
+            stage_key="final",
+        )
+        with authority_write(RULESET_FREEZE):
+            other_version = RulesetVersion.objects.create(
+                ruleset=other_ruleset,
+                version=1,
+                definition=self.version.definition,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                authority_hash="2" * 64,
+            )
+        other_stage = StageResult.objects.create(
+            activity=other_activity,
+            ruleset_version=other_version,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            ruleset_hash=other_version.authority_hash,
+            input_fingerprint="3" * 64,
+            is_test_data=False,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:result_release", args=[self.post.pk]),
+            self._release_payload(stage_result_id=other_stage.pk),
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ResultRelease.objects.exists())
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_active_release_blocks_post_edit_until_revoke(self, closure):
+        login_admin(self.client, self.admin)
+        self.client.post(
+            reverse("staff:result_release", args=[self.post.pk]),
+            self._release_payload(),
+        )
+        response = self.client.post(
+            reverse("staff:post_edit", args=[self.post.pk]),
+            {
+                "title": "Tampered Result",
+                "subtitle": "",
+                "content": "",
+                "post_type": PublicPost.PostType.RESULT_PUBLICATION,
+                "status": PublicPost.Status.PUBLISHED,
+                "sort_order": "0",
+                "related_activity_id": str(self.activity.pk),
+                "base_version": str(self.post.version),
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.post.refresh_from_db()
+        self.assertEqual(self.post.title, "HTTP Final Result")
+        self.assertEqual(closure.call_count, 1)
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_admin_can_revoke_and_history_remains(self, closure):
+        login_admin(self.client, self.admin)
+        self.client.post(
+            reverse("staff:result_release", args=[self.post.pk]),
+            self._release_payload(),
+        )
+        response = self.client.post(
+            reverse("staff:result_release_revoke", args=[self.post.pk]),
+            {"note": "发现结果需要复核"},
+        )
+        self.assertEqual(response.status_code, 302)
+        release = ResultRelease.objects.get()
+        self.assertEqual(release.status, ResultRelease.Status.REVOKED)
+        self.assertEqual(ResultRelease.objects.count(), 1)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.REVOKE_RESULT,
+                target=f"PublicPost:{self.post.pk}",
+            ).exists()
+        )
+        self.assertEqual(closure.call_count, 1)
 
 
 class RoundScoresApiTests(TestCase):

@@ -20,6 +20,7 @@
                     <th class="text-left px-4 py-2 font-medium">标题</th>
                     <th class="text-left px-4 py-2 font-medium">类型</th>
                     <th class="text-left px-4 py-2 font-medium">状态</th>
+                    <th class="text-left px-4 py-2 font-medium">结果发布权威</th>
                     <th class="text-left px-4 py-2 font-medium">更新时间</th>
                     <th class="text-left px-4 py-2 font-medium">操作</th>
                 </tr>
@@ -36,6 +37,38 @@
                         <span class="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded">草稿</span>
                         {% else %}
                         <span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded">已隐藏</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-2.5 text-xs">
+                        {% if post.post_type == "result_publication" %}
+                            {% with release=post.result_releases.all|first %}
+                                {% if release and release.status == "active" %}
+                                <span class="text-green-700">已公示 v{{ release.result_version }}</span>
+                                <form method="post" action="{% url 'staff:result_release_revoke' post.pk %}" class="mt-2 space-y-1">
+                                    {% csrf_token %}
+                                    <input type="text" name="note" required maxlength="1000" placeholder="撤销原因" class="w-40 border border-gray-300 rounded px-2 py-1 text-xs">
+                                    <button type="submit" class="text-red-700 hover:underline">撤销</button>
+                                </form>
+                                {% elif release %}
+                                <span class="text-gray-600">{{ release.get_status_display }} v{{ release.result_version }}</span>
+                                {% endif %}
+                            {% endwith %}
+                            {% with candidates=post.related_activity.release_candidates %}
+                                {% if candidates %}
+                                <form method="post" action="{% url 'staff:result_release' post.pk %}" class="mt-2 space-y-1">
+                                    {% csrf_token %}
+                                    <select name="stage_result_id" required class="w-40 border border-gray-300 rounded px-2 py-1 text-xs">
+                                        {% for stage in candidates %}
+                                        <option value="{{ stage.pk }}">{{ stage.stage_key }} v{{ stage.result_version }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="text" name="note" required maxlength="1000" placeholder="公示原因" class="w-40 border border-gray-300 rounded px-2 py-1 text-xs">
+                                    <button type="submit" class="text-brand hover:underline">发布结果</button>
+                                </form>
+                                {% endif %}
+                            {% endwith %}
+                        {% else %}
+                        <span class="text-gray-400">—</span>
                         {% endif %}
                     </td>
                     <td class="px-4 py-2.5 text-gray-500">{{ post.updated_at|date:"Y-m-d H:i" }}</td>
