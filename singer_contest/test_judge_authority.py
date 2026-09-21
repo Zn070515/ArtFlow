@@ -36,6 +36,7 @@ from .judge_authority import (
     submit_paper_score,
     submit_staff_proxy_score,
 )
+from .services import apply_scores
 from .models import (
     ContestRound,
     CriterionScore,
@@ -717,6 +718,36 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(record.source, ScoreSource.DIRECT_JUDGE)
         self.assertEqual(record.judge_seat_id, seat.pk)
         self.assertEqual(record.panel_snapshot_id, snapshot.pk)
+
+    def test_rapid_score_correction_updates_direct_fact_through_score_authority(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        submit_judge_score(
+            redeemed.token,
+            command_id="judge-correction-original",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+        record = ScoreRecord.objects.get(round=self.round, singer=self.singer, judge=self.judge)
+
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "92.75"},
+            self.operator,
+            note="解锁后通过快速录入更正评分",
+        )
+
+        record.refresh_from_db()
+        self.assertEqual(record.score, Decimal("92.75"))
+        self.assertEqual(record.source, ScoreSource.DIRECT_JUDGE)
+        self.assertEqual(record.source_command_id, "judge-correction-original")
+        receipt = JudgeScoreReceipt.objects.get(score_record=record)
+        receipt.full_clean()
 
     def test_judge_score_rejects_command_reuse_with_changed_payload(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
