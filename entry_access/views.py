@@ -1,24 +1,17 @@
 import json
-from datetime import timedelta
 from typing import Any
 
-from accounts.decorators import staff_required
 from common.audit import client_ip
 from common.rate_limit import allow
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from singer_contest.models import ContestRound
 
-from .models import AccessGrant, EntryPoint, EphemeralSession
+from .models import EphemeralSession
 from .services import (
     AccessRequestMeta,
-    issue_access_grant,
     redeem_access_grant,
-    revoke_access_grant,
-    revoke_ephemeral_session,
 )
 
 REDEEM_BODY_MAX_BYTES = 4096
@@ -78,61 +71,6 @@ def _rate_limited_response(retry_after_seconds: int):
     return _no_store(response)
 
 
-def _required_json_int(payload, key):
-    value = payload[key]
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError
-    return value
-
-
-@staff_required
-@require_POST
-def issue_grant(request):
-    try:
-        payload = _json_payload(request)
-        entry_point_id = _required_json_int(payload, "entry_point_id")
-        ttl_seconds = _required_json_int(payload, "ttl_seconds")
-        round_id = payload.get("round_id")
-        if round_id is not None:
-            if isinstance(round_id, bool) or not isinstance(round_id, int):
-                raise ValueError
-        entry_point = get_object_or_404(EntryPoint, pk=entry_point_id)
-        selected_round = (
-            get_object_or_404(ContestRound, pk=round_id) if round_id is not None else None
-        )
-        result = issue_access_grant(
-            entry_point,
-            actor=request.user,
-            ttl=timedelta(seconds=ttl_seconds),
-            round=selected_round,
-        )
-    except (KeyError, TypeError, ValueError):
-        return _no_store(
-            JsonResponse(
-                {
-                    "detail": "entry_point_id、ttl_seconds 或 round_id 无效。",
-                    "reason_code": "INVALID_REQUEST",
-                },
-                status=400,
-            )
-        )
-    except ValidationError as error:
-        return _invalid_request(error)
-    return _no_store(
-        JsonResponse(
-            {
-                "grant_id": result.grant.pk,
-                "token": result.token,
-                "kind": result.grant.kind,
-                "activity_id": getattr(result.grant, "activity_id", None),
-                "round_id": getattr(result.grant, "round_id", None),
-                "expires_at": result.grant.expires_at.isoformat(),
-            },
-            status=201,
-        )
-    )
-
-
 @csrf_exempt
 @require_POST
 def redeem_grant(request):
@@ -180,32 +118,4 @@ def redeem_grant(request):
                 "expires_at": result.session.expires_at.isoformat(),
             }
         )
-    )
-
-
-@staff_required
-@require_POST
-def revoke_grant(request, grant_id):
-    try:
-        payload = _json_payload(request)
-        grant = get_object_or_404(AccessGrant, pk=grant_id)
-        revoked = revoke_access_grant(grant, actor=request.user, note=payload.get("note"))
-    except ValidationError as error:
-        return _invalid_request(error)
-    return _no_store(
-        JsonResponse({"grant_id": revoked.pk, "revoked_at": revoked.revoked_at.isoformat()})
-    )
-
-
-@staff_required
-@require_POST
-def revoke_session(request, session_id):
-    try:
-        payload = _json_payload(request)
-        session = get_object_or_404(EphemeralSession, pk=session_id)
-        revoked = revoke_ephemeral_session(session, actor=request.user, note=payload.get("note"))
-    except ValidationError as error:
-        return _invalid_request(error)
-    return _no_store(
-        JsonResponse({"session_id": revoked.pk, "revoked_at": revoked.revoked_at.isoformat()})
     )

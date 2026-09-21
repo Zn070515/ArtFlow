@@ -26,7 +26,7 @@ from django.test import (
     TransactionTestCase,
     override_settings,
 )
-from django.urls import get_resolver, reverse
+from django.urls import NoReverseMatch, get_resolver, reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound
 
@@ -561,35 +561,18 @@ class EntryAccessHttpTests(TestCase):
             actor=self.staff,
         )
 
-    def test_staff_can_issue_grant_and_raw_token_is_returned_once(self):
-        self.client.force_login(self.staff)
+    def test_generic_mutation_routes_are_not_public(self):
+        for route_name in (
+            "entry_access:grant_issue",
+            "entry_access:grant_revoke",
+            "entry_access:session_revoke",
+        ):
+            with self.subTest(route_name=route_name), self.assertRaises(NoReverseMatch):
+                reverse(route_name)
 
-        response = self.client.post(
-            reverse("entry_access:grant_issue"),
-            data={"entry_point_id": self.entry_point.pk, "ttl_seconds": 300},
-            content_type="application/json",
-        )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response["Cache-Control"], "no-store")
-        self.assertEqual(response["Pragma"], "no-cache")
-        payload = response.json()
-        grant = AccessGrant.objects.get(pk=payload["grant_id"])
-        self.assertGreaterEqual(len(payload["token"]), 43)
-        self.assertNotEqual(payload["token"], grant.token_digest)
-
-    def test_issue_rejects_fractional_json_values_without_truncating(self):
-        self.client.force_login(self.staff)
-
-        response = self.client.post(
-            reverse("entry_access:grant_issue"),
-            data={"entry_point_id": 1.5, "ttl_seconds": 300.5},
-            content_type="application/json",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["reason_code"], "INVALID_REQUEST")
-        self.assertEqual(AccessGrant.objects.count(), 0)
+        self.assertEqual(self.client.post("/entry-access/grants/issue/").status_code, 404)
+        self.assertEqual(self.client.post("/entry-access/grants/1/revoke/").status_code, 404)
+        self.assertEqual(self.client.post("/entry-access/sessions/1/revoke/").status_code, 404)
 
     def test_redeem_is_explicit_post_and_does_not_put_token_in_url(self):
         issued = issue_access_grant(
@@ -724,37 +707,3 @@ class EntryAccessHttpTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-
-    def test_staff_can_revoke_grant_and_session(self):
-        issued = issue_access_grant(
-            self.entry_point,
-            actor=self.staff,
-            ttl=timedelta(minutes=5),
-        )
-        self.client.force_login(self.staff)
-        revoke_grant_response = self.client.post(
-            reverse("entry_access:grant_revoke", args=[issued.grant.pk]),
-            data={"note": "HTTP revoke"},
-            content_type="application/json",
-        )
-        self.assertEqual(revoke_grant_response.status_code, 200)
-        self.assertIsNotNone(AccessGrant.objects.get(pk=issued.grant.pk).revoked_at)
-
-        redeemed = issue_access_grant(
-            self.entry_point,
-            actor=self.staff,
-            ttl=timedelta(minutes=5),
-        )
-        redeem_response = self.client.post(
-            reverse("entry_access:grant_redeem"),
-            data={"token": redeemed.token},
-            content_type="application/json",
-        )
-        session_id = redeem_response.json()["session_id"]
-        revoke_session_response = self.client.post(
-            reverse("entry_access:session_revoke", args=[session_id]),
-            data={},
-            content_type="application/json",
-        )
-        self.assertEqual(revoke_session_response.status_code, 200)
-        self.assertIsNotNone(EphemeralSession.objects.get(pk=session_id).revoked_at)
