@@ -1953,6 +1953,8 @@ class AudienceScore(models.Model):
 class AwardQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if authority_authorized(TEST_DATA_CLEANUP):
+            if self.filter(is_test_data=False).exists():
+                raise ValidationError("测试数据清理 authority 不能删除正式奖项。")
             return
         if (
             not _award_materialization_authorized()
@@ -2111,7 +2113,10 @@ class Award(models.Model):
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        if not _award_materialization_authorized() and not authority_authorized(TEST_DATA_CLEANUP):
+        if not _award_materialization_authorized() and authority_authorized(TEST_DATA_CLEANUP):
+            if not self.is_test_data:
+                raise ValidationError("测试数据清理 authority 不能删除正式奖项。")
+        elif not _award_materialization_authorized():
             stored = (
                 type(self)
                 ._base_manager.filter(pk=self.pk)
