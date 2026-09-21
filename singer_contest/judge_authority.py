@@ -100,6 +100,18 @@ class JudgeIdempotencyConflict(ValidationError):
     reason_code = "IDEMPOTENCY_CONFLICT"
 
 
+class JudgePanelChanged(PermissionDenied):
+    pass
+
+
+class JudgeRoundOnHold(PermissionDenied):
+    pass
+
+
+class JudgePerformanceNotScorable(PermissionDenied):
+    pass
+
+
 @dataclass(frozen=True)
 class LockedJudgeTransport:
     activity: Activity
@@ -900,14 +912,14 @@ def submit_judge_score(
         .get(pk=session.seat_id)
     )
     if snapshot.state != RoundPanelSnapshot.State.ACTIVE or seat.state != JudgeSeat.State.ASSIGNED:
-        raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
     if run_state.state == PerformanceRunState.State.HOLD:
-        raise PermissionDenied("ROUND_ON_HOLD")
+        raise JudgeRoundOnHold("ROUND_ON_HOLD")
     if run_state.state not in {
         PerformanceRunState.State.PERFORMING,
         PerformanceRunState.State.ACCEPTING_SCORE,
     }:
-        raise PermissionDenied("PERFORMANCE_NOT_SCORABLE")
+        raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
     if (
         run_state.context_version != context_version
         or run_state.current_performance_id != performance_id
@@ -1058,15 +1070,15 @@ def _submit_staff_bound_score(
     )
     snapshot = _active_panel_snapshot(locked.contest_round)
     if snapshot is None:
-        raise PermissionDenied("PANEL_CHANGED_MID_ROUND")
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     if run_state.state == PerformanceRunState.State.HOLD:
-        raise PermissionDenied("ROUND_ON_HOLD")
+        raise JudgeRoundOnHold("ROUND_ON_HOLD")
     if run_state.state not in {
         PerformanceRunState.State.PERFORMING,
         PerformanceRunState.State.ACCEPTING_SCORE,
     }:
-        raise PermissionDenied("PERFORMANCE_NOT_SCORABLE")
+        raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
     if (
         run_state.context_version != context_version
         or run_state.current_performance_id != normalized_performance_id

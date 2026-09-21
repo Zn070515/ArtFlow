@@ -13,6 +13,9 @@ from django.views.decorators.http import require_http_methods
 
 from .judge_authority import (
     JudgeIdempotencyConflict,
+    JudgePanelChanged,
+    JudgePerformanceNotScorable,
+    JudgeRoundOnHold,
     get_judge_context,
     submit_judge_score,
 )
@@ -200,9 +203,14 @@ def judge_score(request: HttpRequest) -> JsonResponse:
         )
     except JudgeIdempotencyConflict:
         return _error("IDEMPOTENCY_CONFLICT", 409)
-    except PermissionDenied as error:
-        reason = str(error)
-        return _error(reason if reason in _KNOWN_REASON_CODES else "SCORE_WINDOW_CLOSED", 403)
+    except JudgePanelChanged:
+        return _error("PANEL_CHANGED_MID_ROUND", 403)
+    except JudgeRoundOnHold:
+        return _error("ROUND_ON_HOLD", 403)
+    except JudgePerformanceNotScorable:
+        return _error("PERFORMANCE_NOT_SCORABLE", 403)
+    except PermissionDenied:
+        return _error("SCORE_WINDOW_CLOSED", 403)
     except ValidationError as error:
         reason = _reason_from_messages(error)
         if reason == "INVALID_REQUEST" and any(
