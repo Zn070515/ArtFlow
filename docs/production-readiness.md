@@ -124,9 +124,10 @@ M2-D1 增加只读的 Staff 闭场预检，统一检查当前冻结赛制、当�
 M2-D1 的本地 PASS 只证明内部 authority 闭合，不证明学校 SSO/MFA、代理 header、TLS/WAF、volumetric DDoS、数据保存期限、备份责任或学校批准接入。上述外部证据仍单独保持 `HOLD`。
 
 本轮恶意彩排的详细矩阵、脚本边界和量化字段见
-[`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。只读 HTTP 脚本不能替代
-确认重放、stale reject、旧来源导出和 PostgreSQL row-lock 证据；这些字段若未执行必须标记
-`BLOCKED`/`NOT EXERCISED`，不能用 0 伪装为通过。
+[`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。历史只读 HTTP 脚本不能替代
+确认重放、stale reject、旧来源导出和 PostgreSQL row-lock 证据；未执行字段必须标记
+`BLOCKED`/`NOT EXERCISED`，不能用 0 伪装为通过。本轮已补执行单线程 mutation/export
+运行时脚本，但不把它解释为 PostgreSQL 并发或学校公网容量证据。
 
 每个新增能力必须保留此前已经建立的门禁，并同步加入自己的边界验证；门禁通过不等于
 已经具备 Production 资格。
@@ -154,6 +155,22 @@ Playwright smoke 为 `7 passed`；HTTP 只读闭场彩排为 27 请求/并发 8�
 备份恢复在隔离目标通过，源数据库与源卷未重置。确认 mutation/export 的独立运行时脚本仍
 未执行，不能把这些字段伪装成 HTTP attack PASS。具体矩阵和边界见
 [`m2-d1-result-closure-matrix.md`](m2-d1-result-closure-matrix.md)。
+
+### 2026-09-21 M2-D1-GATE-CLOSE mutation/export 执行记录
+
+Docker Compose web + PostgreSQL 在 `127.0.0.1:8000` 上执行了 7 个隔离 HTTP 请求：
+2xx=3、3xx=4、4xx=0、5xx=0、timeout=0；p50/p95/p99/max 为
+`67.87/248.80/248.80/248.80ms`。首次确认和重复确认均为 302，数据库 inspector
+报告 `confirm_audit_count=1`、`duplicate_confirm_count=0`；陈旧结果被拒绝，
+`stale_rejection_count=1` 且没有 stale confirm audit。确认后的内层 `award_list.xlsx`
+只含当前活动 Award，不含 foreign marker；带原因 unlock 后旧来源 Award 仍保留 1 行
+供追溯，但正式 queryset 为 0；伪造 query `activity_id` 也未改变结果。正式来源泄漏计数为 0。
+
+彩排期间还发现测试清理服务无法删除“已确认测试赛段”的来源 Award；已在
+`TEST_DATA_CLEANUP` authority scope 下修复并加入回归测试，正式 Award 生成/修改 authority
+没有放宽。彩排 fixture 的 8 个测试活动 runtime residue 已清理，5 个临时 operator 已失活，
+源数据库和 volumes 未 reset。学校 SSO/MFA、TLS/WAF、volumetric DDoS、数据责任和真实
+现场角色仍保持 `HOLD`，PostgreSQL 并发确认仍需独立验收。
 
 ## 发布门禁
 

@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
 from io import BytesIO
+from typing import Any, cast
 from unittest import skipUnless
 
 from accounts.models import User
@@ -2727,9 +2728,9 @@ class ResultClosureContractTests(TestCase):
         )
 
         with self.assertRaises(FrozenInstanceError):
-            closure.closeable = True
+            cast(Any, closure).closeable = True
         with self.assertRaises(FrozenInstanceError):
-            stage.stage_key = "other"
+            cast(Any, stage).stage_key = "other"
 
     def test_result_closure_codes_are_stable_strings(self):
         from .services import ResultClosureCode
@@ -2783,13 +2784,17 @@ class ResultClosureContractTests(TestCase):
         )
 
         payload = result_closure_as_dict(closure)
+        stages = payload["stages"]
+        assert isinstance(stages, list)
+        stage_payload = stages[0]
+        assert isinstance(stage_payload, dict)
         self.assertEqual(payload["activity_id"], 7)
-        self.assertEqual(payload["stages"][0]["blocking_reasons"], [])
+        self.assertEqual(stage_payload["blocking_reasons"], [])
         self.assertNotIn("token", json.dumps(payload, ensure_ascii=False).lower())
         self.assertNotIn("secret", json.dumps(payload, ensure_ascii=False).lower())
         self.assertNotIn("judge_notes", payload)
         self.assertNotIn("request_headers", payload)
-        self.assertEqual(payload["stages"][0]["input_fingerprint_prefix"], "fingerprint-")
+        self.assertEqual(stage_payload["input_fingerprint_prefix"], "fingerprint-")
         self.assertNotIn("fingerprint-prefix", json.dumps(payload, ensure_ascii=False))
 
 
@@ -2849,9 +2854,7 @@ class ResultClosureServiceTests(TestCase):
             "status": StageResult.Status.READY_TO_CONFIRM,
             "reasons": [],
             "ruleset_hash": self.version.authority_hash,
-            "input_fingerprint": _current_input_fingerprint(
-                self.version, self.activity, "final"
-            ),
+            "input_fingerprint": _current_input_fingerprint(self.version, self.activity, "final"),
             "result_version": 1,
             "is_test_data": True,
         }
@@ -2869,9 +2872,7 @@ class ResultClosureServiceTests(TestCase):
         closure = build_result_closure(self.activity)
         self.assertFalse(closure.closeable)
         self.assertEqual(closure.stages, ())
-        self.assertEqual(
-            closure.blocking_reasons, (ResultClosureCode.NO_CURRENT_FROZEN_RULESET,)
-        )
+        self.assertEqual(closure.blocking_reasons, (ResultClosureCode.NO_CURRENT_FROZEN_RULESET,))
 
     def test_closure_reports_ready_candidate_as_confirmation_pending(self):
         stage = self._stage()
@@ -2988,9 +2989,7 @@ class ResultClosureServiceTests(TestCase):
         closure = build_result_closure(self.activity, stage_key="foreign-stage")
         self.assertFalse(closure.closeable)
         self.assertEqual(closure.stages, ())
-        self.assertEqual(
-            closure.blocking_reasons, (ResultClosureCode.RULESET_BINDING_INVALID,)
-        )
+        self.assertEqual(closure.blocking_reasons, (ResultClosureCode.RULESET_BINDING_INVALID,))
 
     def test_closure_marks_operationally_locked_activity(self):
         self._stage()

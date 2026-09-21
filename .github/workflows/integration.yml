@@ -196,8 +196,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           static_url() {
-            docker compose exec -T web python -c \
-              "import django; django.setup(); from django.contrib.staticfiles.storage import staticfiles_storage; print(staticfiles_storage.url('$1'))" \
+            docker compose exec -T web python manage.py shell -c \
+              "from django.contrib.staticfiles.storage import staticfiles_storage; print(staticfiles_storage.url('$1'))" \
               | tr -d '\r' | tail -n 1
           }
           css_url="$(static_url css/app.css)"

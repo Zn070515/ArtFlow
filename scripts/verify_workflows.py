@@ -276,15 +276,18 @@ def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[st
                 None,
             )
             upload_inputs = as_mapping(upload_step.get("with")) if upload_step is not None else None
+            upload_condition = str(upload_step.get("if", "")) if upload_step is not None else ""
             if (
                 upload_step is None
                 or upload_step.get("continue-on-error") is not True
                 or upload_inputs is None
                 or upload_inputs.get("sarif_file") != "codeql-results"
-                or "success()" not in str(upload_step.get("if", ""))
+                or "always()" not in upload_condition
+                or "hashFiles('codeql-results/**/*.sarif')" not in upload_condition
             ):
                 issues.append(
-                    f"{workflow_path.name}: CodeQL must upload evaluated SARIF separately"
+                    f"{workflow_path.name}: CodeQL must upload evaluated SARIF "
+                    "even after evaluator failure"
                 )
 
     gitleaks_job = as_mapping(jobs.get("gitleaks")) if jobs is not None else None

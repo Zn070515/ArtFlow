@@ -272,9 +272,16 @@ def test_verifier_rejects_unenforceable_codeql_and_partial_gitleaks_contracts():
     assert "CodeQL must grant actions: read" in result.stderr
     assert "CodeQL must grant security-events: write" in result.stderr
     assert "CodeQL must generate SARIF locally without continue-on-error" in result.stderr
-    assert "CodeQL must upload evaluated SARIF separately" in result.stderr
+    assert "CodeQL must upload evaluated SARIF even after evaluator failure" in result.stderr
     assert "Gitleaks checkout must use fetch-depth: 0" in result.stderr
     assert "Gitleaks must scan all reachable commits with the pinned CLI" in result.stderr
+
+
+def test_security_upload_preserves_sarif_when_evaluator_fails():
+    workflow = SECURITY_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "if: ${{ always() && hashFiles('codeql-results/**/*.sarif') != '' }}" in workflow
+    assert "if: ${{ success() }}" not in workflow
 
 
 def test_codeql_sarif_evaluator_fails_on_an_unsuppressed_finding():

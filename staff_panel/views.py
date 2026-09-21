@@ -195,6 +195,9 @@ def domain_error_messages(error) -> str:
     return str(error)
 
 
+_AUTO_RESOLVE_WARNING = "该赛段无法自动核定，请人工核定。"
+
+
 def _require_admin(user):
     return require_current_admin(user)
 
@@ -1279,13 +1282,11 @@ def round_scores_api(request, pk):
     if result["matrix_complete"]:
         try:
             maybe_resolve_checkpoints(contest_round.activity, request.user)
-        except (ValidationError, PermissionDenied) as exc:
+        except (ValidationError, PermissionDenied):
             # Surface a ruleset/resolve problem to the operator instead of silently
             # dropping it (M1-INTEGRATION-CLOSE Item 7): the scores are saved but the
             # stage that could not auto-resolve must be visible, not invisible.
-            resolve_warning = domain_error_messages(exc)
-            if not resolve_warning:
-                resolve_warning = "该赛段无法自动核定，请人工核定。"
+            resolve_warning = _AUTO_RESOLVE_WARNING
         # Report the stage's true current status (not just whether this save newly resolved
         # it): a no-op re-save of an already-READY stage must not read as "未计算".
         resolved_status = _current_resolve_status(contest_round.activity)
@@ -1506,10 +1507,8 @@ def audience_scores_api(request, activity_id):
     resolve_warning = None
     try:
         maybe_resolve_checkpoints(activity, request.user)
-    except (ValidationError, PermissionDenied) as exc:
-        resolve_warning = domain_error_messages(exc)
-        if not resolve_warning:
-            resolve_warning = "该赛段无法自动核定，请人工核定。"
+    except (ValidationError, PermissionDenied):
+        resolve_warning = _AUTO_RESOLVE_WARNING
 
     response = {
         "saved": len(rows),

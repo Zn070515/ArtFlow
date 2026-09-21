@@ -2851,9 +2851,9 @@ def official_stage_award_queryset(activity: Activity | None = None) -> QuerySet[
         source_award_decision__stage_result_id=F("source_stage_result_id"),
     )
     base = Award.objects.all() if activity is None else Award.objects.filter(activity=activity)
-    return base.filter(
-        Q(source_stage_result__isnull=True) | Q(pk__in=stage_awards)
-    ).select_related("singer", "source_stage_result", "source_award_decision")
+    return base.filter(Q(source_stage_result__isnull=True) | Q(pk__in=stage_awards)).select_related(
+        "singer", "source_stage_result", "source_award_decision"
+    )
 
 
 def latest_stage_result_queryset(activity: Activity | None = None) -> QuerySet[StageResult]:
@@ -2896,8 +2896,7 @@ def _closure_required_raw_facts(version, activity, stage_key: str) -> dict[str, 
     vote_map = binding.get("vote_keys") or {}
     audience_map = binding.get("audience_keys") or {}
     round_ids = _coerce_bound_ids(
-        [round_map.get(key) for key in round_keys]
-        + [group_map.get(key) for key in group_keys]
+        [round_map.get(key) for key in round_keys] + [group_map.get(key) for key in group_keys]
     )
     audience_keys = {key for key in vote_keys if key in audience_map}
     vote_ids = _coerce_bound_ids([vote_map.get(key) for key in vote_keys - audience_keys])
@@ -2951,9 +2950,10 @@ def _closure_stage(
         votes = VoteSession.objects.filter(activity=activity, pk__in=vote_ids)
         if rounds.count() != len(round_ids) or votes.count() != len(vote_ids):
             blockers.append(ResultClosureCode.RAW_FACTS_INCOMPLETE)
-        raw_facts_locked = not rounds.exclude(is_locked=True).exists() and not votes.exclude(
-            is_locked=True
-        ).exists()
+        raw_facts_locked = (
+            not rounds.exclude(is_locked=True).exists()
+            and not votes.exclude(is_locked=True).exists()
+        )
         if not raw_facts_locked:
             blockers.append(ResultClosureCode.RAW_FACTS_UNLOCKED)
         upstream_keys = _closure_upstream_stage_keys(version, activity, round_ids)
@@ -3006,9 +3006,9 @@ def _closure_stage(
     official_awards = 0
     round_entries = 0
     if latest is not None and latest.status == StageResult.Status.CONFIRMED:
-        official_awards = official_stage_award_queryset(activity).filter(
-            source_stage_result=latest
-        ).count()
+        official_awards = (
+            official_stage_award_queryset(activity).filter(source_stage_result=latest).count()
+        )
         round_entries = RoundEntry.objects.filter(
             round__activity=activity,
             round__roster_source=ContestRound.RosterSource.STAGE,

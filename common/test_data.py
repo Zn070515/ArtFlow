@@ -236,7 +236,8 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         generated_document.delete()
         if stored_name:
             transaction.on_commit(partial(delete_storage_object, storage, stored_name))
-    Award.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
+    with authority_write(TEST_DATA_CLEANUP):
+        Award.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     # StageResult.ruleset_version is PROTECT-ed by RulesetVersion — but a ContestRuleset
     # is *config*, not runtime residue (§7, P0-8): a test rehearsal must leave its
     # ruleset structure behind for the FORMAL successor. So results go first, then manual

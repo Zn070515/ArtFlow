@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase
 from django.urls import reverse
 
@@ -91,6 +91,30 @@ class JudgeRouteContractTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["reason_code"], "RUBRIC_PAYLOAD_INVALID")
+
+    @patch("singer_contest.judge_views.submit_judge_score")
+    def test_score_does_not_stringify_permission_exception_for_public_response(self, submit_mock):
+        class PermissionDeniedWithoutSafeString(PermissionDenied):
+            def __str__(self):
+                raise AssertionError("permission exception must not be stringified")
+
+        submit_mock.side_effect = PermissionDeniedWithoutSafeString("PANEL_CHANGED_MID_ROUND")
+
+        response = self.client.post(
+            reverse("judge:score"),
+            data={
+                "command_id": "judge-http-panel-error",
+                "expected_context_version": 1,
+                "expected_performance_id": 6,
+                "score_payload": {"criteria": []},
+            },
+            content_type="application/json",
+            HTTP_AUTHORIZATION="Bearer test-session",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["reason_code"], "SCORE_WINDOW_CLOSED")
+        self.assertNotIn("permission exception", response.content.decode())
 
     @patch("singer_contest.judge_views.allow")
     def test_score_has_a_shared_application_rate_limit_boundary(self, allow_mock):
