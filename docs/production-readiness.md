@@ -160,7 +160,7 @@ Playwright smoke 为 `7 passed`；HTTP 只读闭场彩排为 27 请求/并发 8�
 
 Docker Compose web + PostgreSQL 在 `127.0.0.1:8000` 上执行了 7 个隔离 HTTP 请求：
 2xx=3、3xx=4、4xx=0、5xx=0、timeout=0；p50/p95/p99/max 为
-`50.96/63.52/63.52/63.52ms`。首次确认和重复确认均为 302，数据库 inspector
+`67.87/248.80/248.80/248.80ms`。首次确认和重复确认均为 302，数据库 inspector
 报告 `confirm_audit_count=1`、`duplicate_confirm_count=0`；陈旧结果被拒绝，
 `stale_rejection_count=1` 且没有 stale confirm audit。确认后的内层 `award_list.xlsx`
 只含当前活动 Award，不含 foreign marker；带原因 unlock 后旧来源 Award 仍保留 1 行
@@ -168,7 +168,7 @@ Docker Compose web + PostgreSQL 在 `127.0.0.1:8000` 上执行了 7 个隔离 HT
 
 彩排期间还发现测试清理服务无法删除“已确认测试赛段”的来源 Award；已在
 `TEST_DATA_CLEANUP` authority scope 下修复并加入回归测试，正式 Award 生成/修改 authority
-没有放宽。彩排 fixture 的 6 个测试活动 runtime residue 已清理，3 个临时 operator 已失活，
+没有放宽。彩排 fixture 的 8 个测试活动 runtime residue 已清理，5 个临时 operator 已失活，
 源数据库和 volumes 未 reset。学校 SSO/MFA、TLS/WAF、volumetric DDoS、数据责任和真实
 现场角色仍保持 `HOLD`，PostgreSQL 并发确认仍需独立验收。
 

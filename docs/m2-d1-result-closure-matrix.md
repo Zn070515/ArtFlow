@@ -59,10 +59,10 @@ IdP/MFA 或真实现场角色流程。测试完成后必须清理 fixture 活动
 
 | 字段 | 值 |
 | --- | --- |
-| 变更 commit | `1ca9171`（彩排工具）；`9893683`、`8ce5b60`（测试 Award cleanup authority） |
+| 变更 commit | `1ca9171`（彩排工具）；`9893683`、`8ce5b60`（测试 Award cleanup authority）；`49863de`、`672aeac`（门禁修复） |
 | 数据库/服务 | Docker Compose web + PostgreSQL，`127.0.0.1:8000` |
 | HTTP 总请求/并发 | 7 / 1（confirm、replay、stale、3 次 archive、unlock） |
-| p50/p95/p99/max、2xx/3xx/4xx/5xx、timeout | 50.96 / 63.52 / 63.52 / 63.52ms；3 / 4 / 0 / 0；0 |
+| p50/p95/p99/max、2xx/3xx/4xx/5xx、timeout | 67.87 / 248.80 / 248.80 / 248.80ms；3 / 4 / 0 / 0；0 |
 | duplicate confirm / stale rejection / official-source leakage | 0 / 1 / 0；数据库 inspector 与内层 XLSX 检查均通过 |
 | token/secret leakage / official-source leakage | 必须为 0；任何非 0 立即 FAIL |
 | PostgreSQL 并发、备份恢复、浏览器流程 | Docker 不可用时 `BLOCKED`，不得以 SQLite PASS 替代 |
@@ -73,13 +73,13 @@ IdP/MFA 或真实现场角色流程。测试完成后必须清理 fixture 活动
 | 指标 | 实际值 | 判定 |
 | --- | --- | --- |
 | HTTP black-box mutation/export | 7 requests；2xx=3、3xx=4、4xx=0、5xx=0、timeout=0 | PASS |
-| latency | p50=50.96ms、p95=63.52ms、p99=63.52ms、max=63.52ms | PASS；本机隔离服务，不外推公网容量 |
+| latency | p50=67.87ms、p95=248.80ms、p99=248.80ms、max=248.80ms | PASS；本机隔离服务，不外推公网容量 |
 | confirm replay | 首次与重复确认均 302；`confirm_audit_count=1`、`duplicate_confirm_count=0` | PASS；幂等且不重复物化 |
 | stale candidate | stale confirm 302；`stale_rejection_count=1`、stale audit=0 | PASS；旧 fingerprint 未被核定 |
 | confirmed archive | 当前 Award marker=true，foreign marker=false | PASS；检查到内层 `award_list.xlsx` |
 | unlock 后旧来源 | 当前/foreign marker 均 false；source Award row=1、official current Award=0 | PASS；旧正式来源 fail closed |
 | forged `activity_id` archive | 当前/foreign marker 均 false | PASS；query 不能改变 path authority |
-| fixture cleanup | 6 个测试活动 runtime residue 清理；3 个临时 operator 失活；source volumes 未 reset | PASS |
+| fixture cleanup | 8 个测试活动 runtime residue 清理；5 个临时 operator 失活；source volumes 未 reset | PASS |
 
 本轮运行中发现并修复一项测试清理 authority 缺口：已确认测试赛段的来源 Award 原先会阻断
 `clear_activity_test_data()`；现在仅在显式 `TEST_DATA_CLEANUP` scope 且由测试数据清理服务
