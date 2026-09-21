@@ -4527,9 +4527,7 @@ class RoundScoresApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["resolve_warning"], "该赛段无法自动核定，请人工核定。"
-        )
+        self.assertEqual(response.json()["resolve_warning"], "该赛段无法自动核定，请人工核定。")
         self.assertNotIn("internal resolver traceback detail", response.content.decode())
 
     def test_post_replays_identical_command_without_second_score_mutation(self):

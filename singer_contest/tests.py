@@ -2849,9 +2849,7 @@ class ResultClosureServiceTests(TestCase):
             "status": StageResult.Status.READY_TO_CONFIRM,
             "reasons": [],
             "ruleset_hash": self.version.authority_hash,
-            "input_fingerprint": _current_input_fingerprint(
-                self.version, self.activity, "final"
-            ),
+            "input_fingerprint": _current_input_fingerprint(self.version, self.activity, "final"),
             "result_version": 1,
             "is_test_data": True,
         }
@@ -2869,9 +2867,7 @@ class ResultClosureServiceTests(TestCase):
         closure = build_result_closure(self.activity)
         self.assertFalse(closure.closeable)
         self.assertEqual(closure.stages, ())
-        self.assertEqual(
-            closure.blocking_reasons, (ResultClosureCode.NO_CURRENT_FROZEN_RULESET,)
-        )
+        self.assertEqual(closure.blocking_reasons, (ResultClosureCode.NO_CURRENT_FROZEN_RULESET,))
 
     def test_closure_reports_ready_candidate_as_confirmation_pending(self):
         stage = self._stage()
@@ -2988,9 +2984,7 @@ class ResultClosureServiceTests(TestCase):
         closure = build_result_closure(self.activity, stage_key="foreign-stage")
         self.assertFalse(closure.closeable)
         self.assertEqual(closure.stages, ())
-        self.assertEqual(
-            closure.blocking_reasons, (ResultClosureCode.RULESET_BINDING_INVALID,)
-        )
+        self.assertEqual(closure.blocking_reasons, (ResultClosureCode.RULESET_BINDING_INVALID,))
 
     def test_closure_marks_operationally_locked_activity(self):
         self._stage()

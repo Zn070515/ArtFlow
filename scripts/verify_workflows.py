@@ -286,7 +286,8 @@ def security_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list[st
                 or "hashFiles('codeql-results/**/*.sarif')" not in upload_condition
             ):
                 issues.append(
-                    f"{workflow_path.name}: CodeQL must upload evaluated SARIF even after evaluator failure"
+                    f"{workflow_path.name}: CodeQL must upload evaluated SARIF "
+                    "even after evaluator failure"
                 )
 
     gitleaks_job = as_mapping(jobs.get("gitleaks")) if jobs is not None else None
