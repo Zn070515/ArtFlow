@@ -1879,6 +1879,9 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
     )
     _create_children(stage, result, singer_by_key, is_test)
     materialize_round_entry_from_stage(stage, operator=computed_by)
+    from public_portal.services import _supersede_releases_for_new_result
+
+    _supersede_releases_for_new_result(stage, computed_by)
     return stage
 
 
@@ -2713,6 +2716,13 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     with authority_write(STAGE_RESULT_CONFIRM):
         locked.save(update_fields=["confirmed_by", "confirmed_at", "status"])
     _release_stage_consumed_facts(locked, operator=current_operator)
+    from public_portal.services import supersede_releases_for_stage_result
+
+    supersede_releases_for_stage_result(
+        locked,
+        current_operator,
+        note=f"解锁赛段结果：{note}",
+    )
     AuditLog.objects.create(
         operator=current_operator,
         action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,

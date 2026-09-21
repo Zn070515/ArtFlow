@@ -3,6 +3,8 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from accounts.models import User
 from common.authority import (
@@ -12,8 +14,9 @@ from common.authority import (
     STAGE_RESULT_CONFIRM,
     authority_write,
 )
+from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
@@ -510,3 +513,199 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         self.client.raise_request_exception = False
         response = self.client.get(reverse("public_portal:post_detail", args=[test_post.pk]))
         self.assertEqual(response.status_code, 404)
+
+
+class ResultReleaseServiceTests(ResultReleaseModelTests):
+    def confirm_stage_result(self):
+        with authority_write(STAGE_RESULT_CONFIRM):
+            self.stage_result.status = StageResult.Status.CONFIRMED
+            self.stage_result.confirmed_by = self.operator
+            self.stage_result.confirmed_at = timezone.now()
+            self.stage_result.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_release_requires_confirmed_closed_current_result(self, closure):
+        self.confirm_stage_result()
+
+        from .services import release_result_post
+
+        release = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="校对完成后正式公示",
+        )
+
+        self.assertEqual(release.status, ResultRelease.Status.ACTIVE)
+        self.assertEqual(release.post_id, self.post.pk)
+        self.assertEqual(release.stage_result_id, self.stage_result.pk)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.RELEASE_RESULT,
+                target=f"PublicPost:{self.post.pk}",
+            ).count(),
+            1,
+        )
+        closure.assert_called_once()
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_duplicate_release_is_idempotent_without_duplicate_audit(self, closure):
+        self.confirm_stage_result()
+
+        from .services import release_result_post
+
+        first = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="首次发布",
+        )
+        second = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="重复点击发布",
+        )
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(
+            ResultRelease.objects.filter(status=ResultRelease.Status.ACTIVE).count(), 1
+        )
+        self.assertEqual(
+            AuditLog.objects.filter(action_type=AuditLog.ActionType.RELEASE_RESULT).count(),
+            1,
+        )
+        self.assertEqual(closure.call_count, 2)
+
+    def test_release_rejects_missing_note_and_non_admin(self):
+        from .services import release_result_post
+
+        with self.assertRaises(ValidationError):
+            release_result_post(self.post, self.stage_result, self.operator, note=" ")
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="result-release-staff",
+                password="pass",
+                role=User.Role.STAFF,
+            )
+        with self.assertRaises(PermissionDenied):
+            release_result_post(
+                self.post,
+                self.stage_result,
+                staff,
+                note="staff cannot release",
+            )
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_revoke_preserves_history_and_hides_result(self, closure):
+        self.confirm_stage_result()
+
+        from .services import release_result_post, revoke_result_release
+
+        release = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="首发",
+        )
+        revoked = revoke_result_release(self.post, self.operator, note="发现内容需修订")
+
+        self.assertEqual(revoked.pk, release.pk)
+        self.assertEqual(revoked.status, ResultRelease.Status.REVOKED)
+        self.assertEqual(revoked.transition_by_id, self.operator.pk)
+        self.assertEqual(ResultRelease.objects.count(), 1)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.REVOKE_RESULT,
+                target=f"PublicPost:{self.post.pk}",
+            ).count(),
+            1,
+        )
+        self.client.raise_request_exception = False
+        self.assertEqual(
+            self.client.get(reverse("public_portal:post_detail", args=[self.post.pk])).status_code,
+            404,
+        )
+        closure.assert_called_once()
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_unlock_supersedes_active_release_in_same_transaction(self, closure):
+        self.confirm_stage_result()
+
+        from singer_contest.services import unlock_stage_result
+
+        from .services import release_result_post
+
+        release = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="首发",
+        )
+        unlocked = unlock_stage_result(
+            self.stage_result,
+            operator=self.operator,
+            note="发现结果需要复核",
+        )
+
+        release.refresh_from_db()
+        self.assertEqual(unlocked.status, StageResult.Status.READY_TO_CONFIRM)
+        self.assertEqual(release.status, ResultRelease.Status.SUPERSEDED)
+        self.assertEqual(release.transition_by_id, self.operator.pk)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.SUPERSEDE_RESULT_RELEASE,
+                target=f"ResultRelease:{release.pk}",
+            ).count(),
+            1,
+        )
+        closure.assert_called_once()
+
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_newer_persisted_result_supersedes_old_release(self, closure):
+        self.confirm_stage_result()
+
+        from ruleset.resolver import ResolveResult, ResolverState
+        from singer_contest.services import persist_stage_result
+
+        from .services import release_result_post
+
+        release = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="首发",
+        )
+        newer = persist_stage_result(
+            self.ruleset_version,
+            self.activity,
+            ResolveResult(
+                status=ResolverState.READY,
+                input_fingerprint="c" * 64,
+                content_hash="d" * 64,
+            ),
+            stage_key=self.stage_result.stage_key,
+            computed_by=self.operator,
+        )
+
+        release.refresh_from_db()
+        self.assertEqual(newer.result_version, self.stage_result.result_version + 1)
+        self.assertEqual(release.status, ResultRelease.Status.SUPERSEDED)
+        self.assertEqual(release.transition_by_id, self.operator.pk)
+        self.assertEqual(closure.call_count, 1)
