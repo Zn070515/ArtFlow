@@ -30,29 +30,61 @@
 
 ## 彩排脚本
 
-启动隔离的本地 web 服务后设置测试活动 ID；如要验证工作人员页面，用一次性测试 Staff cookie 设置 `ARTFLOW_STAFF_COOKIE`。脚本拒绝非回环 HTTP 地址，不打印 cookie：
+`m2_d1_result_closure_mutation_rehearsal.mjs` 是本机 Compose 专用的黑盒彩排：fixture
+命令只在非 production 创建测试活动、管理员会话、当前/陈旧/跨活动结果；Node 脚本随后真实
+调用 confirm、重复 confirm、stale confirm、Award archive、带原因 unlock，以及伪造
+`activity_id` 的 archive。归档检查会继续解包内层 XLSX，不能只检查外层 ZIP 字节；报告中的
+重复确认、陈旧拒绝和正式来源泄漏计数由 web 容器内 inspector 读取数据库后填入。脚本拒绝
+非回环 HTTP 地址，不打印 cookie 或 token：
 
 ```powershell
-$env:ARTFLOW_REHEARSAL_BASE_URL = "http://127.0.0.1:18000"
-$env:ARTFLOW_CLOSURE_ACTIVITY_ID = "<test-activity-id>"
-$env:ARTFLOW_STAFF_COOKIE = "<test-only-cookie>"
-node scripts/m2_d1_result_closure_rehearsal.mjs
+$containerFixture = "/tmp/artflow-m2-d1-result-closure-$PID.json"
+$hostFixture = Join-Path ([IO.Path]::GetTempPath()) "artflow-m2-d1-result-closure-$PID.json"
+docker compose exec -T web python manage.py prepare_result_closure_rehearsal --output-file $containerFixture
+docker compose cp "web:$containerFixture" $hostFixture
+$env:ARTFLOW_CLOSURE_FIXTURE_PATH = $hostFixture
+$env:ARTFLOW_REHEARSAL_BASE_URL = "http://127.0.0.1:8000"
+try { node scripts/m2_d1_result_closure_mutation_rehearsal.mjs }
+finally {
+  [IO.File]::Delete($hostFixture)
+  docker compose exec -T web rm -f -- $containerFixture | Out-Null
+}
 ```
 
-脚本是只读 HTTP 彩排，报告中的 `duplicate_confirm_count`、`stale_rejection_count` 和 `official_source_leakage_count` 在该脚本中固定为 0，并同时列入 `not_exercised_by_read_only_script`；它们不能被解释为确认并发或导出测试已通过。确认 replay、stale reject、旧 Award 导出和 PostgreSQL row-lock 必须以 Django/PostgreSQL 证据补齐。
+该脚本是有限本地彩排，不是公网 DDoS；每个请求超时 5 秒，且不 reset 数据库或 volumes。
+它验证单线程 HTTP mutation/export 边界，不替代 PostgreSQL 并发确认、WAF/边缘 DDoS、学校
+IdP/MFA 或真实现场角色流程。测试完成后必须清理 fixture 活动、会话和临时文件。
 
 ## 本轮证据记录
 
 | 字段 | 值 |
 | --- | --- |
-| 变更 commit | 待 Task 6 提交后填写 |
-| 数据库/服务 | SQLite 单测；Docker/PostgreSQL 状态待记录 |
-| HTTP 总请求/并发 | 脚本执行后填写；默认 27 / 8 |
-| p50/p95/p99、2xx/4xx/5xx、timeout | 脚本 JSON 原样保存后填写 |
-| duplicate confirm / stale rejection / cross-activity rejection | Django 测试与脚本 JSON 分开记录 |
+| 变更 commit | `1ca9171`（彩排工具）；`9893683`、`8ce5b60`（测试 Award cleanup authority） |
+| 数据库/服务 | Docker Compose web + PostgreSQL，`127.0.0.1:8000` |
+| HTTP 总请求/并发 | 7 / 1（confirm、replay、stale、3 次 archive、unlock） |
+| p50/p95/p99/max、2xx/3xx/4xx/5xx、timeout | 50.96 / 63.52 / 63.52 / 63.52ms；3 / 4 / 0 / 0；0 |
+| duplicate confirm / stale rejection / official-source leakage | 0 / 1 / 0；数据库 inspector 与内层 XLSX 检查均通过 |
 | token/secret leakage / official-source leakage | 必须为 0；任何非 0 立即 FAIL |
 | PostgreSQL 并发、备份恢复、浏览器流程 | Docker 不可用时 `BLOCKED`，不得以 SQLite PASS 替代 |
 | 学校 IdP/MFA/TLS/WAF/DDoS/留存 | 外部责任，`HOLD` |
+
+### 2026-09-21 M2-D1-GATE-CLOSE mutation/export 执行记录
+
+| 指标 | 实际值 | 判定 |
+| --- | --- | --- |
+| HTTP black-box mutation/export | 7 requests；2xx=3、3xx=4、4xx=0、5xx=0、timeout=0 | PASS |
+| latency | p50=50.96ms、p95=63.52ms、p99=63.52ms、max=63.52ms | PASS；本机隔离服务，不外推公网容量 |
+| confirm replay | 首次与重复确认均 302；`confirm_audit_count=1`、`duplicate_confirm_count=0` | PASS；幂等且不重复物化 |
+| stale candidate | stale confirm 302；`stale_rejection_count=1`、stale audit=0 | PASS；旧 fingerprint 未被核定 |
+| confirmed archive | 当前 Award marker=true，foreign marker=false | PASS；检查到内层 `award_list.xlsx` |
+| unlock 后旧来源 | 当前/foreign marker 均 false；source Award row=1、official current Award=0 | PASS；旧正式来源 fail closed |
+| forged `activity_id` archive | 当前/foreign marker 均 false | PASS；query 不能改变 path authority |
+| fixture cleanup | 6 个测试活动 runtime residue 清理；3 个临时 operator 失活；source volumes 未 reset | PASS |
+
+本轮运行中发现并修复一项测试清理 authority 缺口：已确认测试赛段的来源 Award 原先会阻断
+`clear_activity_test_data()`；现在仅在显式 `TEST_DATA_CLEANUP` scope 且由测试数据清理服务
+调用时允许清理，正式 Award authority 路径不放宽。新增回归测试覆盖 confirmed StageResult
+及其 Award 的清理。
 
 ### 2026-09-11 Task 6 执行记录
 
@@ -69,7 +101,8 @@ node scripts/m2_d1_result_closure_rehearsal.mjs
 | backup/restore | custom-format dump；隔离恢复目标 `manage.py check` 通过；源库/源卷未重置 | PASS |
 | 学校 IdP/MFA/TLS/WAF/DDoS/留存 | 未在部署方环境执行 | HOLD |
 
-因此本地 M2-D1 authority、PostgreSQL、浏览器、HTTP 只读彩排和恢复证据已通过；确认 mutation/export 的独立运行时恶意脚本仍未执行，学校外部责任项仍是放行前置条件。
+因此本地 M2-D1 authority、PostgreSQL、浏览器、HTTP mutation/export 彩排和恢复证据已通过；
+PostgreSQL 并发确认、学校外部责任项和真实现场角色仍是放行前置条件。
 
 ## 阈值与处置
 
