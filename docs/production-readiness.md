@@ -172,6 +172,22 @@ Docker Compose web + PostgreSQL 在 `127.0.0.1:8000` 上执行了 7 个隔离 HT
 源数据库和 volumes 未 reset。学校 SSO/MFA、TLS/WAF、volumetric DDoS、数据责任和真实
 现场角色仍保持 `HOLD`，PostgreSQL 并发确认仍需独立验收。
 
+### 2026-09-21 M2-D2 entry gate
+
+M2-D2 开始前的恢复门禁已完成修复并重新验证。当前 `main` 为
+`38c25ed`；本地完整 Django 回归为 `1123 tests, OK (skipped=29)`，脚本契约
+为 `31 passed`，Ruff、format、mypy、两个 Pyright 配置、TypeScript client、
+文档、Django check 和 migration check 均通过。应用级备份恢复与 PostgreSQL
+custom-format 隔离恢复均通过，恢复目标上的 Django check 通过，源数据库与
+volumes 未重置。
+
+GitHub Actions 对该 SHA 的 CI、PostgreSQL integration、Compose acceptance、
+Security 和 Workflow lint 全部为 `success`；PostgreSQL integration 记录为
+`1176 passed, 5 skipped`，Compose acceptance 的应用测试与 backup/restore
+也通过。该证据闭合 M2-D2 spec 要求的 restore 前置条件，但不替代学校
+SSO/MFA、TLS/WAF、volumetric DDoS、数据责任、真实角色和部署 ownership 的
+外部 `HOLD`。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：
