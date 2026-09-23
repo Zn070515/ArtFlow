@@ -678,9 +678,7 @@ def render_document_bytes(template: ArticleTemplate, activity: Activity) -> byte
     body = body.replace("{content}", "")
     body = body.replace("{singers}", singer_lines)
     body = body.replace("{programs}", program_lines)
-    body = body.replace(
-        "{sign_off}", settings.ARTFLOW_ORGANIZATION_NAME or "ArtFlow 活动运营平台"
-    )
+    body = body.replace("{sign_off}", settings.ARTFLOW_ORGANIZATION_NAME or "ArtFlow 活动运营平台")
     for para_text in body.split("\n"):
         doc.add_paragraph(para_text)
     buf = io.BytesIO()
