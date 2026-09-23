@@ -15,6 +15,7 @@ from common.test_data import get_test_data_counts, lock_activity_for_runtime_dat
 from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import _enter_archived_phase_locked
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.core.files.base import ContentFile
 from django.db import transaction
@@ -677,7 +678,7 @@ def render_document_bytes(template: ArticleTemplate, activity: Activity) -> byte
     body = body.replace("{content}", "")
     body = body.replace("{singers}", singer_lines)
     body = body.replace("{programs}", program_lines)
-    body = body.replace("{sign_off}", "浙江工业大学 信息工程学院 文艺部")
+    body = body.replace("{sign_off}", settings.ARTFLOW_ORGANIZATION_NAME or "ArtFlow 活动运营平台")
     for para_text in body.split("\n"):
         doc.add_paragraph(para_text)
     buf = io.BytesIO()
