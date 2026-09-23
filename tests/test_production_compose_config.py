@@ -84,6 +84,14 @@ def test_event_compose_exposes_web_only_on_localhost():
     assert "ipv6" not in event_manifest
 
 
+def test_compose_manifests_forward_optional_branding_to_web():
+    for compose_path in (PRODUCTION_COMPOSE_PATH, EVENT_COMPOSE_PATH):
+        compose = load_compose(compose_path)
+        web_environment = compose["services"]["web"]["environment"]
+
+        assert web_environment["ARTFLOW_ORGANIZATION_NAME"] == "${ARTFLOW_ORGANIZATION_NAME:-}"
+
+
 def test_production_web_healthcheck_uses_internal_exempt_health_route():
     compose = load_compose(PRODUCTION_COMPOSE_PATH)
     healthcheck = compose["services"]["web"]["healthcheck"]["test"]
@@ -107,6 +115,7 @@ def test_production_env_example_documents_manifest_fixed_values():
 
     assert values["TRUST_X_FORWARDED_FOR"] == "true"
     assert values["POSTGRES_HOST"] == "db"
+    assert values["ARTFLOW_ORGANIZATION_NAME"] == ""
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
 
 
