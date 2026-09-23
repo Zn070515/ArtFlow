@@ -17,6 +17,7 @@
 | RELEASE-06 | revoke 后重新 release | 只有再次显式管理员操作后恢复可见 |
 | RELEASE-07 | unlock 已公示 StageResult | active release 进入 `SUPERSEDED`，旧文章/媒体立即不可见 |
 | RELEASE-08 | 扫描响应、归档索引和 inspector | 不出现 cookie、CSRF、token、完整 fingerprint、authority hash、评分或学生私密字段 |
+| RELEASE-09 | 直接构造 active release 指向公告或草稿文章 | 模型 `full_clean()` 拒绝；历史 `REVOKED`/`SUPERSEDED` 行仍可保留 |
 
 ## 运行边界与量化字段
 
@@ -37,6 +38,20 @@ Docker Compose PostgreSQL 本地隔离彩排通过：19 个请求，`2xx=5`、`3
 active `0` 条，最终 stage 为 `READY_TO_CONFIRM`。fixture 清理后活动、规则集、版本、
 管理员、文章、release 和专属审计均为零残留；源数据库和 volumes 未重置。该记录仅证明
 应用层 release authority，不证明学校边缘容量、WAF 或 volumetric DDoS 防护。
+
+## 2026-09-21 M2-D2 gate-close 重跑
+
+在代码基线 `ca8490b` 上使用 Docker Compose PostgreSQL、本机回环地址
+`http://127.0.0.1:8000` 重跑。共 19 个 HTTP 请求、20 个断言，`2xx=5`、`3xx=6`、
+`4xx=8`、`5xx=0`、超时 `0`；p50 `26.34 ms`，p95/p99/max `43.43 ms`。20/20
+检查通过：直接 `PUBLISHED`、跨活动伪造、重复 release、active 编辑、撤销、重新发布、
+解锁失效和受控媒体边界均符合 fail-closed 预期。
+
+Inspector 记录 `release_audit=2`、`revoke_audit=1`、`supersede_audit=1`、历史
+release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONFIRM`。
+新增模型边界测试同时证明 active release 不能绑定公告或草稿文章。fixture 已精确清理，
+源数据库与 volumes 未 reset；本次仍不外推学校公网容量，也不替代 SSO/MFA、TLS/WAF、
+volumetric DDoS、留存和部署 ownership 的外部验收。
 
 ## 生产/学校边界
 

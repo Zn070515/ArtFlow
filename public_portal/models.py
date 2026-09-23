@@ -181,6 +181,15 @@ class ResultRelease(models.Model):
                 raise ValidationError(
                     {"post": "A result release post must match the stage result activity."}
                 )
+            if self.status == self.Status.ACTIVE:
+                if self.post.post_type != PublicPost.PostType.RESULT_PUBLICATION:
+                    raise ValidationError(
+                        {"post": "An active result release requires a result publication post."}
+                    )
+                if self.post.status != PublicPost.Status.PUBLISHED:
+                    raise ValidationError(
+                        {"post": "An active result release requires a published post."}
+                    )
 
     def save(self, *args, **kwargs):
         self.full_clean()
