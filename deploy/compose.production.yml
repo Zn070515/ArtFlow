@@ -29,6 +29,7 @@ services:
       DEBUG: "False"
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the deployment environment}
       ADMIN_LOGIN_KEY: ${ADMIN_LOGIN_KEY:?Set ADMIN_LOGIN_KEY in the deployment environment}
+      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
       TRUST_X_FORWARDED_FOR: "true"
