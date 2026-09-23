@@ -49,6 +49,7 @@ from exports.services import (
     archive_activity,
     build_archive_package,
     generate_persistent_document,
+    render_document_bytes,
 )
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, SubmissionFile
@@ -3904,6 +3905,23 @@ class WordGenerateArchiveAuthorityTests(TestCase):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
         super().tearDown()
+
+    def _rendered_document_xml(self):
+        content = render_document_bytes(self.template, self.activity)
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            return archive.read("word/document.xml").decode("utf-8")
+
+    def test_word_signoff_has_generic_default_without_institution_branding(self):
+        self.template.body = "{sign_off}"
+        xml = self._rendered_document_xml()
+        self.assertIn("ArtFlow 活动运营平台", xml)
+        self.assertNotIn("浙江工业大学", xml)
+        self.assertNotIn("信息工程学院", xml)
+
+    @override_settings(ARTFLOW_ORGANIZATION_NAME="示例主办方")
+    def test_word_signoff_uses_configured_organization(self):
+        self.template.body = "{sign_off}"
+        self.assertIn("示例主办方", self._rendered_document_xml())
 
     def test_persistent_generation_creates_document(self):
         doc_obj, content = generate_persistent_document(self.activity, self.template, self.staff)

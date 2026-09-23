@@ -229,6 +229,13 @@ class PublicPortalVisibilityTests(TestCase):
         response = self.client.get(reverse("public_portal:post_detail", args=[formal_post.pk]))
         self.assertEqual(response.status_code, 200)
 
+    @override_settings(ARTFLOW_ORGANIZATION_NAME="示例主办方")
+    def test_home_uses_configured_organization_without_institution_branding(self):
+        response = self.client.get(reverse("public_portal:home"))
+        self.assertContains(response, "示例主办方")
+        self.assertNotContains(response, "浙江工业大学")
+        self.assertNotContains(response, "信息工程学院")
+
 
 class ResultReleaseModelTests(TestCase):
     def setUp(self):

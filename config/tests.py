@@ -121,6 +121,19 @@ class RuntimeTests(SimpleTestCase):
         )
 
 
+class BrandingContextTests(SimpleTestCase):
+    def test_branding_context_exposes_optional_organization_name(self):
+        from config.context_processors import artflow_branding
+
+        with override_settings(ARTFLOW_ORGANIZATION_NAME=""):
+            self.assertEqual(artflow_branding(None)["artflow_organization_name"], "")
+        with override_settings(ARTFLOW_ORGANIZATION_NAME="示例主办方"):
+            self.assertEqual(
+                artflow_branding(None)["artflow_organization_name"],
+                "示例主办方",
+            )
+
+
 class HealthEndpointTests(TestCase):
     def test_healthz_returns_only_a_generic_success_response_to_anonymous_get(self):
         response = self.client.get("/healthz/")
