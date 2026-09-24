@@ -23,7 +23,8 @@ uv run python manage.py runserver
 
 `seed_dev_admin` 从 `DEV_ADMIN_PASSWORD` 读取密码；如果未设置，它会以交互方式要求输入。`seed_demo_data` 是可重复执行的确定性演示数据命令，不是生产初始化步骤。启动后可访问 `http://127.0.0.1:8000/`，并用你在 `.env` 中设置的账户登录。
 
-商业/事件部署的首个管理员使用一次性 provisioning 命令，不使用
+商业/事件部署的首个管理员优先使用启动壳输出的一次性浏览器初始化地址；该入口要求填写
+`ADMIN_LOGIN_KEY`，只允许成功一次。技术人员也可以使用一次性 provisioning 命令，不使用
 `seed_dev_admin`：
 
 ```powershell
@@ -61,7 +62,7 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 ## 环境变量
 
-从 `.env.example` 创建本地 `.env` 并替换其中的占位值。模板包含 `APP_ENV`、`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`DEV_ADMIN_USERNAME`、`DEV_ADMIN_PASSWORD`、`DEBUG` 和 `DATABASE_ENGINE`；`seed_dev_admin` 使用 `DEV_ADMIN_USERNAME` 和 `DEV_ADMIN_PASSWORD`。商业 provisioning 可通过未提交环境中的 `ARTFLOW_INITIAL_ADMIN_USERNAME` 提供用户名，但密码应使用隐藏式交互输入或 stdin，不要保存到 tracked 文件。只有选择 PostgreSQL 时才需要 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_HOST` 和 `POSTGRES_PORT`。
+从 `.env.example` 创建本地 `.env` 并替换其中的占位值。模板包含 `APP_ENV`、`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`DEV_ADMIN_USERNAME`、`DEV_ADMIN_PASSWORD`、`DEBUG` 和 `DATABASE_ENGINE`；`seed_dev_admin` 使用 `DEV_ADMIN_USERNAME` 和 `DEV_ADMIN_PASSWORD`。商业浏览器初始化和 provisioning 命令都使用 `ADMIN_LOGIN_KEY` 作为初始化密钥；管理员密码应使用浏览器密码字段、隐藏式交互输入或 stdin，不要保存到 tracked 文件。只有选择 PostgreSQL 时才需要 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_HOST` 和 `POSTGRES_PORT`。
 
 生产环境使用 `.env.production.example` 作为字段清单：`APP_ENV=production`、`DEBUG=False`、真实的主机名和 CSRF 来源、PostgreSQL 连接配置都是必需的；`TRUST_X_FORWARDED_FOR` 只在可信反向代理覆盖客户端 `X-Forwarded-For` 时才设为 `true`。示例值仅是占位符；不得提交 `.env`、密钥、密码、数据库、媒体文件或生成的导出文件。生产拓扑见 [生产部署说明](docs/deployment-production.md)。
 
