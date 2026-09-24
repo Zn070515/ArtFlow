@@ -66,15 +66,19 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert "reverse_proxy web:8000" in caddyfile
 
 
-def test_event_compose_exposes_web_only_on_localhost():
+def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     compose = load_compose(EVENT_COMPOSE_PATH)
     web_environment = compose["services"]["web"]["environment"]
 
-    assert compose["services"]["web"]["ports"] == ["127.0.0.1:8000:8000"]
+    assert compose["services"]["web"]["ports"] == [
+        "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_EVENT_PORT:-8000}:8000"
+    ]
     assert "ports" not in compose["services"]["db"]
     assert web_environment["DATABASE_ENGINE"] == "postgresql"
     assert web_environment["RATE_LIMIT_BACKEND"] == "database"
-    assert web_environment["ALLOWED_HOSTS"] == "localhost,127.0.0.1"
+    assert web_environment["ALLOWED_HOSTS"] == (
+        "${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}"
+    )
     assert web_environment["CSRF_TRUSTED_ORIGINS"] == ""
     assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
