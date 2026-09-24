@@ -1,6 +1,11 @@
 # Commercial Event Runtime Specification
 
-**Status:** Accepted for P0-B implementation
+**Status:** Accepted for P0-B implementation; first-run setup non-goal superseded by P0-C
+
+> P0-B deliberately shipped without an HTTP first-run setup route. The accepted
+> P0-C specification (`2026-09-24-commercial-first-run.md`) now adds a
+> one-time route protected by `ADMIN_LOGIN_KEY`, CSRF, rate limiting, and the
+> existing account authority service. All other P0-B non-goals remain in force.
 
 ## Goal
 
