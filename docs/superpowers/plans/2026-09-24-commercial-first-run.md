@@ -254,3 +254,33 @@ Keep the feature branch until the final `git status`, remote SHA, and Docker ser
 - Spec coverage: setup UX, key/CSRF/rate-limit protection, one-time service delegation, session behavior, launcher discovery, docs, and full gates are covered by Tasks 1–4.
 - Placeholder scan: no task depends on an unspecified function or a future implementation; exact files, route, fields, commands, and expected outcomes are named.
 - Type consistency: `FirstAdminSetupForm`, `accounts:first_admin_setup`, and the `provision_first_admin()`/`login()`/`mark_admin_verified()` sequence are used consistently throughout.
+
+## Execution record
+
+Implementation was executed inline on `feat/commercial-first-run` with small commits:
+
+- `5d144fa test: define commercial first-run setup contract`
+- `fd71b20 feat: add protected commercial first-run setup`
+- `df7900e docs: document commercial first-run setup`
+- `5358102 docs: specify commercial first-run provisioning`
+- `df6f249 docs: clarify first-run setup supersession`
+
+Verification completed before branch push:
+
+- Focused setup and launcher contract: `11 passed`.
+- Accounts regression: `71 tests`, `OK (skipped=3)`.
+- Full host Django suite: `1189 tests`, `OK (skipped=29)`.
+- `python manage.py check`: no issues; migration check: no changes.
+- Ruff check and format check: passed.
+- Project and entry-access Pyright: `0 errors, 0 warnings, 0 informations` each.
+- Client compile and regression: `25 passed`.
+- Documentation check: `18` user-facing Markdown files passed.
+- PowerShell parser: passed; initialized runtime `/setup/` probe: HTTP `404`.
+- Docker PostgreSQL acceptance: `1189 tests`, `OK (skipped=3)`; services and volumes left intact.
+- Isolated PostgreSQL backup/restore: passed; source database and volumes not reset.
+- Playwright runtime subset: `3 passed`.
+
+Two self-reviews completed:
+
+1. Contract review confirmed that the route is required-state-only, CSRF-protected, rate-limited, constant-time key checked, and delegates all writes to `provision_first_admin()`; P0-B's historical setup non-goal was explicitly superseded by this P0-C spec.
+2. Security/semantic review confirmed no password or setup-key output, no direct account ORM write, no superuser creation, no reset path, no authority/competition changes, no firewall/tunnel/public ingress, and no volume deletion. The live initialized runtime also fails closed with `/setup/` returning `404`.
