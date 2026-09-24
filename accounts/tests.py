@@ -625,6 +625,12 @@ class FirstAdminProvisioningTests(TestCase):
             InstallationState.objects.filter(pk=self.state.pk).update(initialized_at=timezone.now())
 
         with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            InstallationState.objects.bulk_update([self.state], ["initialized_at"])
+
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            InstallationState.objects.bulk_create([InstallationState()])
+
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
             self.state.delete()
 
         self.assertIsNone(InstallationState.objects.get().initialized_at)
