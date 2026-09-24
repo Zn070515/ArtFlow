@@ -126,6 +126,64 @@ class UserAuthorityManager(UserManager.from_queryset(UserAuthorityQuerySet)):  #
             return super().create_superuser(username, email, password, **extra_fields)
 
 
+class InstallationStateQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    """Prevent runtime code from reopening or deleting an installation."""
+
+    _protected_message = "安装状态只能通过账户授权服务修改。"
+
+    def update(self, **kwargs):
+        if kwargs and not authority_authorized(ACCOUNT_AUTHORITY):
+            raise ValidationError(self._protected_message)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        if not authority_authorized(ACCOUNT_AUTHORITY):
+            raise ValidationError(self._protected_message)
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        if not authority_authorized(ACCOUNT_AUTHORITY):
+            raise ValidationError(self._protected_message)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(ACCOUNT_AUTHORITY):
+            raise ValidationError(self._protected_message)
+        return super().delete(*args, **kwargs)
+
+
+class InstallationStateManager(
+    models.Manager.from_queryset(InstallationStateQuerySet)  # type: ignore[misc]
+):
+    pass
+
+
+class InstallationState(models.Model):
+    """The single mutable marker for first-administrator provisioning."""
+
+    SINGLETON_PK = 1
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=SINGLETON_PK, editable=False)
+    initialized_at = models.DateTimeField(null=True, blank=True)
+    objects = InstallationStateManager()
+
+    class Meta:
+        verbose_name = "installation state"
+        verbose_name_plural = "installation state"
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(ACCOUNT_AUTHORITY):
+            raise ValidationError("安装状态只能通过账户授权服务修改。")
+        if self.pk != self.SINGLETON_PK:
+            raise ValidationError("安装状态必须使用固定的单例键。")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(ACCOUNT_AUTHORITY):
+            raise ValidationError("安装状态只能通过账户授权服务修改。")
+        return super().delete(*args, **kwargs)
+
+
 class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "admin", "管理员"

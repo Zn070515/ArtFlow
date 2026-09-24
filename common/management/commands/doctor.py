@@ -42,11 +42,20 @@ class Command(BaseCommand):
             self.stdout.write("Database connection: failed")
             failures.append(DoctorExitCode.DATABASE_FAILURE)
 
-        if self._migrations_are_current():
+        migrations_current = self._migrations_are_current()
+        if migrations_current:
             self.stdout.write("Migration state: up to date")
         else:
             self.stdout.write("Migration state: failed or unapplied")
             failures.append(DoctorExitCode.MIGRATION_FAILURE)
+
+        if database_healthy and migrations_current:
+            from accounts.services import installation_provisioning_status
+
+            provisioning_status = installation_provisioning_status()
+            self.stdout.write(f"Admin provisioning: {provisioning_status}")
+            if provisioning_status == "inconsistent":
+                failures.append(DoctorExitCode.CONFIGURATION_FAILURE)
 
         for setting_name in ("STATIC_ROOT", "MEDIA_ROOT"):
             if Path(getattr(settings, setting_name)).is_dir():

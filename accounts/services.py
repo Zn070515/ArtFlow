@@ -6,12 +6,13 @@ from datetime import timezone as dt_timezone
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
 from django.conf import settings
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
 
-from .models import User
+from .models import InstallationState, User
 
 
 def _current_user(actor) -> User:
@@ -85,6 +86,60 @@ def _effective_admin_queryset() -> QuerySet[User]:
     return User.objects.filter(is_active=True).filter(
         Q(role=User.Role.ADMIN) | Q(is_superuser=True)
     )
+
+
+def installation_provisioning_status() -> str:
+    """Return a non-secret status for the first-admin provisioning boundary."""
+    state = InstallationState.objects.filter(pk=InstallationState.SINGLETON_PK).first()
+    if state is None:
+        return "unavailable"
+    has_effective_admin = _effective_admin_queryset().exists()
+    if state.initialized_at and has_effective_admin:
+        return "complete"
+    if not state.initialized_at and not has_effective_admin:
+        return "required"
+    return "inconsistent"
+
+
+@transaction.atomic
+def provision_first_admin(*, username: str, password: str) -> User:
+    """Create the first role-based admin exactly once.
+
+    This is the commercial/bootstrap authority boundary. It deliberately has
+    no reset or force mode and never creates a superuser.
+    """
+    state = InstallationState.objects.select_for_update().get(pk=InstallationState.SINGLETON_PK)
+    if state.initialized_at:
+        raise ValidationError("首次管理员 provisioning 已完成，不能重置或重复创建。")
+    if _effective_admin_queryset().exists():
+        raise ValidationError("已有有效管理员，不能执行首次管理员 provisioning。")
+
+    normalized_username = username.strip()
+    if not normalized_username:
+        raise ValidationError("用户名不能为空。")
+    if not password:
+        raise ValidationError("密码不能为空。")
+    if User.objects.filter(username=normalized_username).exists():
+        raise ValidationError("用户名已存在。")
+
+    candidate = User(username=normalized_username, role=User.Role.ADMIN, is_active=True)
+    candidate.set_password(password)
+    candidate.full_clean()
+    validate_password(password, user=candidate)
+
+    with authority_write(ACCOUNT_AUTHORITY):
+        candidate.save(force_insert=True)
+        state.initialized_at = timezone.now()
+        state.save(update_fields=["initialized_at"])
+
+    AuditLog.objects.create(
+        operator=None,
+        action_type=AuditLog.ActionType.INITIAL_ADMIN_PROVISION,
+        target=f"User:{candidate.pk}",
+        new_value=f"username={candidate.username}",
+        note="bootstrap_first_admin",
+    )
+    return candidate
 
 
 def _lock_admin_authority_line(*extra_pks: int) -> None:
