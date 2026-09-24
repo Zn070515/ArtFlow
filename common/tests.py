@@ -954,6 +954,7 @@ class DoctorCommandTests(TestCase):
         self.assertIn(f"Environment: {settings.APP_ENV}", diagnostics)
         self.assertIn("Database engine:", diagnostics)
         self.assertIn("Migration state:", diagnostics)
+        self.assertIn("Admin provisioning: required", diagnostics)
         self.assertIn("STATIC_ROOT:", diagnostics)
         self.assertIn("MEDIA_ROOT:", diagnostics)
         self.assertNotIn(settings.SECRET_KEY, diagnostics)

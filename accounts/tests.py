@@ -20,12 +20,14 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .admin import CustomUserAdmin
-from .models import User
+from .models import InstallationState, User
 from .services import (
     admin_verification_is_valid,
     change_user_role,
     expire_admin_verification,
+    installation_provisioning_status,
     mark_admin_verified,
+    provision_first_admin,
     require_current_admin,
     require_current_staff,
     set_user_active,
@@ -547,6 +549,131 @@ class SeedDevAdminCommandTests(TestCase):
         self.assertTrue(user.check_password("hidden-input-password"))
         self.assertEqual(output.getvalue(), "Updated development admin: existing-admin\n")
         self.assertNotIn("hidden-input-password", output.getvalue())
+
+
+class FirstAdminProvisioningTests(TestCase):
+    def setUp(self):
+        self.state = InstallationState.objects.get(pk=InstallationState.SINGLETON_PK)
+
+    def test_provisioning_status_is_required_before_and_complete_after_bootstrap(self):
+        self.assertEqual(installation_provisioning_status(), "required")
+
+        provision_first_admin(username="first-admin", password="a-strong-bootstrap-pass")
+
+        self.assertEqual(installation_provisioning_status(), "complete")
+
+    def test_first_provisioning_creates_a_least_privilege_admin_once(self):
+        user = provision_first_admin(username="first-admin", password="a-strong-bootstrap-pass")
+
+        user.refresh_from_db()
+        self.state.refresh_from_db()
+        self.assertEqual(user.role, User.Role.ADMIN)
+        self.assertTrue(user.is_active)
+        self.assertTrue(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(user.check_password("a-strong-bootstrap-pass"))
+        self.assertIsNotNone(self.state.initialized_at)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.INITIAL_ADMIN_PROVISION,
+                operator__isnull=True,
+                target=f"User:{user.pk}",
+            ).exists()
+        )
+        audit = AuditLog.objects.get(action_type=AuditLog.ActionType.INITIAL_ADMIN_PROVISION)
+        self.assertNotIn("a-strong-bootstrap-pass", audit.new_value + audit.note)
+
+    def test_provisioning_is_one_time_and_never_resets_the_first_admin(self):
+        user = provision_first_admin(username="first-admin", password="a-strong-bootstrap-pass")
+
+        with self.assertRaisesMessage(ValidationError, "首次管理员 provisioning 已完成"):
+            provision_first_admin(username="replacement", password="another-strong-pass")
+
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(User.objects.get().pk, user.pk)
+
+    def test_existing_effective_admin_blocks_uninitialized_state(self):
+        existing = create_provisioned_user(
+            username="legacy-admin",
+            password="a-strong-bootstrap-pass",
+            role=User.Role.ADMIN,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "已有有效管理员"):
+            provision_first_admin(username="replacement", password="another-strong-pass")
+
+        self.state.refresh_from_db()
+        self.assertIsNone(self.state.initialized_at)
+        self.assertEqual(User.objects.get().pk, existing.pk)
+
+    def test_invalid_username_and_password_are_rejected_without_mutation(self):
+        with self.assertRaisesMessage(ValidationError, "用户名不能为空"):
+            provision_first_admin(username="  ", password="a-strong-bootstrap-pass")
+        with self.assertRaisesMessage(ValidationError, "密码不能为空"):
+            provision_first_admin(username="first-admin", password="")
+        with self.assertRaises(ValidationError):
+            provision_first_admin(username="first-admin", password="password")
+
+        self.assertEqual(User.objects.count(), 0)
+        self.assertIsNone(InstallationState.objects.get().initialized_at)
+
+    def test_duplicate_username_is_rejected_without_mutation(self):
+        User.objects.create_user(username="existing-user", password="pass12345")
+
+        with self.assertRaisesMessage(ValidationError, "用户名已存在"):
+            provision_first_admin(username="existing-user", password="a-strong-bootstrap-pass")
+
+        self.assertEqual(User.objects.count(), 1)
+        self.assertIsNone(InstallationState.objects.get().initialized_at)
+
+    def test_installation_state_direct_writes_require_account_authority(self):
+        self.state.initialized_at = timezone.now()
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            self.state.save()
+
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            InstallationState.objects.filter(pk=self.state.pk).update(initialized_at=timezone.now())
+
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            InstallationState.objects.bulk_update([self.state], ["initialized_at"])
+
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            InstallationState.objects.bulk_create([InstallationState()])
+
+        with self.assertRaisesMessage(ValidationError, "安装状态只能通过账户授权服务修改"):
+            self.state.delete()
+
+        self.assertIsNone(InstallationState.objects.get().initialized_at)
+
+
+class ProvisionFirstAdminCommandTests(TestCase):
+    @patch(
+        "accounts.management.commands.provision_first_admin.sys.stdin",
+        StringIO("a-strong-bootstrap-pass\n"),
+    )
+    def test_password_stdin_provisions_without_echoing_secret(self):
+        output = StringIO()
+
+        call_command(
+            "provision_first_admin",
+            "--username",
+            "first-admin",
+            "--password-stdin",
+            stdout=output,
+        )
+
+        self.assertIn("Provisioned first ArtFlow administrator: first-admin", output.getvalue())
+        self.assertNotIn("a-strong-bootstrap-pass", output.getvalue())
+        self.assertTrue(
+            User.objects.get(username="first-admin").check_password("a-strong-bootstrap-pass")
+        )
+
+    @patch.dict(os.environ, {}, clear=False)
+    def test_command_requires_explicit_username(self):
+        os.environ.pop("ARTFLOW_INITIAL_ADMIN_USERNAME", None)
+
+        with self.assertRaisesMessage(CommandError, "A first administrator username is required"):
+            call_command("provision_first_admin", "--password-stdin")
 
 
 class EffectiveAdminAuthorityTests(TestCase):

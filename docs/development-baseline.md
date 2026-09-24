@@ -30,6 +30,20 @@ uv run python manage.py runserver
 
 `scripts\bootstrap.ps1` automates dependency synchronization, local environment preparation, migrations, static collection, `check`, `doctor`, and a local health request. It does not reset data. Add `-SeedDemoData` only to create deterministic demo records.
 
+Commercial or event-style first-admin provisioning is a separate one-time
+operation:
+
+```powershell
+docker compose --env-file .env.event -f deploy/compose.event.yml exec web python manage.py provision_first_admin --username event-admin
+```
+
+The command reads the password without echoing it, refuses to reset or replace
+an initialized installation, and never creates a Django superuser. A launcher
+may use `--password-stdin`; it must not put the password in an argument,
+tracked environment template, image, audit record, or log. `seed_dev_admin`
+remains development-only and is the only command that can reset its local
+development account.
+
 Run diagnostics without mutating data:
 
 ```powershell
@@ -37,7 +51,15 @@ uv run python manage.py doctor
 Invoke-WebRequest http://127.0.0.1:8000/healthz/
 ```
 
-`doctor` checks loaded configuration, database connectivity, unapplied migrations, and static/media directories. When the database is healthy it also reports Ticket row and stale access-session counts; if the database check fails it does not query Ticket tables again. It returns nonzero for failures and does not print secrets or a complete database URL. `/healthz/` accepts only `GET`; it returns a minimal `ok` or generic unavailable status and is safe for container health checks.
+`doctor` checks loaded configuration, database connectivity, unapplied migrations,
+static/media directories, and the non-secret first-admin provisioning status
+(`required`, `complete`, or `inconsistent`). A fresh installation reports
+`required` but is not treated as a failure; `inconsistent` is a configuration
+failure. When the database is healthy it also reports Ticket row and stale
+access-session counts; if the database check fails it does not query Ticket
+tables again. It returns nonzero for failures and does not print secrets or a
+complete database URL. `/healthz/` accepts only `GET`; it returns a minimal
+`ok` or generic unavailable status and is safe for container health checks.
 
 ## Demo data and reset safety
 

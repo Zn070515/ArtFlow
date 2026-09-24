@@ -25,6 +25,7 @@ class AuditLog(models.Model):
         MANUAL_DECISION = "manual_decision", "更新人工选择"
         DUEL_DECISION = "duel_decision", "更新对决决定"
         UPDATE_PERMISSION = "update_permission", "修改用户权限"
+        INITIAL_ADMIN_PROVISION = "initial_admin_provision", "初始化首个管理员"
         ACCESS_GRANT_ISSUE = "access_grant_issue", "签发临时访问授权"
         ACCESS_GRANT_REDEEM = "access_grant_redeem", "兑换临时访问授权"
         ACCESS_GRANT_REVOKE = "access_grant_revoke", "撤销临时访问授权"

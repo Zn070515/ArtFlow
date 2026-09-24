@@ -36,6 +36,22 @@ docker compose --env-file .env.production -f deploy/compose.production.yml up --
 
 `proxy` 是唯一发布 `80/443` 的服务；`web` 和 PostgreSQL 没有主机端口，且数据库只在 `artflow_internal` 中。Caddy 用 `CADDY_SITE_ADDRESS` 申请 TLS 证书，因此该 DNS 名称必须在启动前指向此主机并允许 ACME 流量。不得用根 Compose 或 `docker compose down --volumes` 管理生产卷。
 
+## 首个管理员 provisioning
+
+镜像启动会自动执行迁移，但不会创建管理员，也不会在生产环境运行开发用的
+`seed_dev_admin`。首次部署完成并确认 `doctor` 可以连接数据库后，在一个带交互终端的
+本机执行一次：
+
+```powershell
+docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py provision_first_admin --username <admin-username>
+```
+
+命令在容器内隐藏式读取密码，创建一个 active 的 ArtFlow `ADMIN` 账号（不创建 Django
+superuser），并把安装状态原子地标记为已初始化。重复执行、替换用户名或 reset 都会被拒绝。
+自动化发行 launcher 可以把一次性密码通过 `--password-stdin` 传入；不得把密码放进命令行
+参数、镜像、审计记录、诊断输出或长期环境模板。管理员登录仍需使用部署配置中的
+`ADMIN_LOGIN_KEY`，该密钥应通过未提交的 secret 管理保存。
+
 ## 必填环境项（`.env.production.example` 字段清单）
 
 以 `.env.production.example` 为字段清单，逐项替换为真实值，不能使用占位值（`change-me` / `set-a-` / `example.com` 等，`settings` 的 `validate_production_environment` 会拒绝）：
