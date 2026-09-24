@@ -26,6 +26,7 @@ def test_event_launcher_declares_safe_runtime_contract():
     assert "/healthz/" in launcher
     assert "Test-UsableIpv4" in launcher
     assert "Get-LocalIpv4" in launcher
+    assert "$HostAddress.Trim()" in launcher
 
 
 def test_event_launcher_does_not_add_unsafe_network_or_data_operations():

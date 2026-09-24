@@ -101,7 +101,7 @@ Assert-CommandSucceeded -Description 'Docker Desktop check'
 
 $selectedLanAddress = $null
 if ($Lan) {
-    $selectedLanAddress = if ($HostAddress) { $HostAddress } else { Get-LocalIpv4 }
+    $selectedLanAddress = if ($HostAddress) { $HostAddress.Trim() } else { Get-LocalIpv4 }
     if (-not (Test-UsableIpv4 -Address $selectedLanAddress)) {
         throw "HostAddress '$selectedLanAddress' must be a usable non-loopback IPv4 address."
     }
