@@ -67,10 +67,11 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 ## 事件本机运行
 
-`deploy/compose.event.yml` 是单机现场运行契约：`web` 只绑定 `127.0.0.1:8000`，PostgreSQL 不发布端口，数据库和媒体使用持久化卷。工作人员只能在主机本机通过 `http://127.0.0.1:8000/` 操作；该 manifest 不提供公网入口。比赛期间始终只有这台主机上的一个主数据库/服务器可写。PowerPoint 播放与控制仍独立于 ArtFlow。
+`deploy/compose.event.yml` 是单机现场运行契约：默认只绑定 `127.0.0.1:8000`，PostgreSQL 不发布端口，数据库和媒体使用持久化卷。购买者应使用 [现场事件部署说明](docs/deployment-event.md) 中的启动壳；只有明确传入 `-Lan` 时，手机才能通过同一私人网络访问。该 manifest 不提供公网入口。比赛期间始终只有这台主机上的一个主数据库/服务器可写。PowerPoint 播放与控制仍独立于 ArtFlow。
 
 ```powershell
-docker compose --env-file .env.event -f deploy/compose.event.yml up --build --wait
+Copy-Item .env.event.example .env.event
+pwsh -NoProfile -File scripts\start-event.ps1
 ```
 
 ## 常用维护命令

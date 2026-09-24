@@ -78,11 +78,11 @@ Invoke-WebRequest http://127.0.0.1:8000/healthz/
 
 The database remains on the internal Docker network. The web port is bound to loopback. Compose uses named volumes for PostgreSQL data (`postgres_data`), collected static files (`static_data`), and media (`media_data`). `docker compose down` stops the stack while retaining those volumes. `docker compose down --volumes` permanently removes all three local volumes, so use it only when intentional data loss is acceptable.
 
-This root Compose file is development/integration only. For an event operated from one local Staff machine, use the separate [`deploy/compose.event.yml`](../deploy/compose.event.yml) contract and its loopback-only web port. For production, use [`deploy/compose.production.yml`](../deploy/compose.production.yml), never this root file.
+This root Compose file is development/integration only. For an event operated from one local Staff machine, copy `.env.event.example` to `.env.event` and use [`scripts/start-event.ps1`](../scripts/start-event.ps1) with the separate [`deploy/compose.event.yml`](../deploy/compose.event.yml) contract. It stays loopback-only unless `-Lan` is explicitly selected. For production, use [`deploy/compose.production.yml`](../deploy/compose.production.yml), never this root file.
 
 ### Event/local-only contract
 
-Use `deploy/compose.event.yml` only on the single Staff-operated primary machine. It publishes `web` solely as `127.0.0.1:8000`, hard-codes `ALLOWED_HOSTS` to loopback names, and keeps PostgreSQL private; the event manifest provides no public ingress. Never run a second writable event stack. PowerPoint remains an independent presentation tool.
+Use `scripts/start-event.ps1` for the single Staff-operated primary machine. Its default publishes `web` solely as `127.0.0.1:8000`; `-Lan` is an explicit private-network opt-in that derives `ALLOWED_HOSTS` from one validated IPv4 address. PostgreSQL remains private in both modes; the event manifest provides no public ingress, TLS, WAF, or DDoS protection. Never run a second writable event stack. PowerPoint remains an independent presentation tool. Full purchaser instructions are in [event deployment](deployment-event.md).
 
 ### PostgreSQL acceptance gate
 
