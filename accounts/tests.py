@@ -25,6 +25,7 @@ from .services import (
     admin_verification_is_valid,
     change_user_role,
     expire_admin_verification,
+    installation_provisioning_status,
     mark_admin_verified,
     provision_first_admin,
     require_current_admin,
@@ -554,6 +555,13 @@ class FirstAdminProvisioningTests(TestCase):
     def setUp(self):
         self.state = InstallationState.objects.get(pk=InstallationState.SINGLETON_PK)
 
+    def test_provisioning_status_is_required_before_and_complete_after_bootstrap(self):
+        self.assertEqual(installation_provisioning_status(), "required")
+
+        provision_first_admin(username="first-admin", password="a-strong-bootstrap-pass")
+
+        self.assertEqual(installation_provisioning_status(), "complete")
+
     def test_first_provisioning_creates_a_least_privilege_admin_once(self):
         user = provision_first_admin(username="first-admin", password="a-strong-bootstrap-pass")
 
@@ -572,6 +580,8 @@ class FirstAdminProvisioningTests(TestCase):
                 target=f"User:{user.pk}",
             ).exists()
         )
+        audit = AuditLog.objects.get(action_type=AuditLog.ActionType.INITIAL_ADMIN_PROVISION)
+        self.assertNotIn("a-strong-bootstrap-pass", audit.new_value + audit.note)
 
     def test_provisioning_is_one_time_and_never_resets_the_first_admin(self):
         user = provision_first_admin(username="first-admin", password="a-strong-bootstrap-pass")
