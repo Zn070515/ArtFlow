@@ -92,7 +92,7 @@ def installation_provisioning_status() -> str:
     """Return a non-secret status for the first-admin provisioning boundary."""
     state = InstallationState.objects.filter(pk=InstallationState.SINGLETON_PK).first()
     if state is None:
-        return "unavailable"
+        return "inconsistent"
     has_effective_admin = _effective_admin_queryset().exists()
     if state.initialized_at and has_effective_admin:
         return "complete"
