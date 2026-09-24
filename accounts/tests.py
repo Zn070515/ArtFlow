@@ -15,7 +15,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.models import Q
-from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -549,6 +549,109 @@ class SeedDevAdminCommandTests(TestCase):
         self.assertTrue(user.check_password("hidden-input-password"))
         self.assertEqual(output.getvalue(), "Updated development admin: existing-admin\n")
         self.assertNotIn("hidden-input-password", output.getvalue())
+
+
+class FirstAdminSetupViewTests(TestCase):
+    setup_password = "a-strong-bootstrap-pass"
+
+    def setup_payload(self, **overrides):
+        payload = {
+            "username": "event-admin",
+            "password": self.setup_password,
+            "password_confirm": self.setup_password,
+            "setup_key": "setup-secret",
+        }
+        payload.update(overrides)
+        return payload
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_required_installation_renders_one_time_setup_form(self):
+        response = self.client.get(reverse("accounts:first_admin_setup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "首次初始化")
+        self.assertContains(response, 'name="setup_key"')
+        self.assertContains(response, 'name="password_confirm"')
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_wrong_setup_key_does_not_provision(self):
+        response = self.client.post(
+            reverse("accounts:first_admin_setup"),
+            self.setup_payload(setup_key="wrong"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "管理员密钥错误")
+        self.assertEqual(User.objects.count(), 0)
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_placeholder_setup_key_does_not_provision(self):
+        with self.settings(ADMIN_LOGIN_KEY="change-me-with-a-local-admin-login-key"):
+            response = self.client.post(
+                reverse("accounts:first_admin_setup"),
+                self.setup_payload(setup_key="change-me-with-a-local-admin-login-key"),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "管理员密钥尚未安全配置")
+        self.assertEqual(User.objects.count(), 0)
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_password_confirmation_mismatch_does_not_provision(self):
+        response = self.client.post(
+            reverse("accounts:first_admin_setup"),
+            self.setup_payload(password_confirm="different-password"),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "两次输入的密码不一致")
+        self.assertEqual(User.objects.count(), 0)
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_valid_setup_provisions_and_redirects_to_staff(self):
+        response = self.client.post(
+            reverse("accounts:first_admin_setup"),
+            self.setup_payload(),
+        )
+
+        self.assertRedirects(response, reverse("staff:dashboard"), fetch_redirect_response=False)
+        user = User.objects.get(username="event-admin")
+        self.assertTrue(user.is_admin)
+        self.assertFalse(user.is_superuser)
+        self.assertTrue(self.client.session.get("artflow_admin_verified"))
+        self.assertEqual(InstallationState.objects.get().initialized_at is None, False)
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_completed_installation_hides_setup_endpoint(self):
+        provision_first_admin(username="event-admin", password=self.setup_password)
+
+        response = self.client.get(reverse("accounts:first_admin_setup"))
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_uninitialized_installation_with_existing_admin_hides_setup_endpoint(self):
+        create_provisioned_user(
+            username="legacy-admin",
+            password=self.setup_password,
+            role=User.Role.ADMIN,
+        )
+
+        response = self.client.get(reverse("accounts:first_admin_setup"))
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
+    def test_setup_post_requires_csrf_token(self):
+        client = Client(enforce_csrf_checks=True)
+
+        response = client.post(
+            reverse("accounts:first_admin_setup"),
+            self.setup_payload(),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(User.objects.count(), 0)
 
 
 class FirstAdminProvisioningTests(TestCase):

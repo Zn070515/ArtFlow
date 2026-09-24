@@ -144,6 +144,7 @@ try {
     Write-Host 'ArtFlow event runtime is ready.'
     Write-Host "Mode: $(if ($Lan) { 'LAN' } else { 'local-only' })"
     Write-Host "Staff URL: http://127.0.0.1:$Port/"
+    Write-Host "First-admin setup (before provisioning): http://127.0.0.1:$Port/setup/"
     if ($Lan) {
         Write-Host "LAN URL: http://$selectedLanAddress`:$Port/"
         Write-Host 'If Windows Firewall prompts, allow Docker Desktop on Private networks only.'

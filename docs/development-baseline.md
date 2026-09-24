@@ -30,8 +30,17 @@ uv run python manage.py runserver
 
 `scripts\bootstrap.ps1` automates dependency synchronization, local environment preparation, migrations, static collection, `check`, `doctor`, and a local health request. It does not reset data. Add `-SeedDemoData` only to create deterministic demo records.
 
-Commercial or event-style first-admin provisioning is a separate one-time
-operation:
+Commercial or event-style first-admin provisioning is normally completed from
+the one-time browser route printed by `scripts\start-event.ps1`:
+
+```text
+http://127.0.0.1:8000/setup/
+```
+
+The form requires the deployment's `ADMIN_LOGIN_KEY`, CSRF, and a matching
+password confirmation. It disappears after a successful provisioning and never
+writes users directly; the existing account service remains the authority
+boundary. Technical operators without a browser can use the one-time command:
 
 ```powershell
 docker compose --env-file .env.event -f deploy/compose.event.yml exec web python manage.py provision_first_admin --username event-admin

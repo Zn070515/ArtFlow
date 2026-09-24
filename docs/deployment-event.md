@@ -69,7 +69,17 @@ LAN 模式不是公网部署：不要把端口转发到 Internet，不要为它�
 
 ## 首个管理员
 
-Compose 首次启动只会迁移数据库，不会自动创建管理员。确认启动壳输出的 `doctor` 正常后，在另一个终端执行一次：
+Compose 首次启动只会迁移数据库，不会自动创建管理员。确认启动壳输出的 `doctor` 和健康检查正常后，在本机浏览器打开启动壳输出的：
+
+```text
+http://127.0.0.1:8000/setup/
+```
+
+如果使用了 `-Port`，将 `8000` 替换为实际端口。填写管理员用户名、密码、确认密码，以及 `.env.event` 中的 `ADMIN_LOGIN_KEY` 作为初始化密钥。该入口使用 CSRF、共享限流和一次性安装状态保护；成功后会自动进入工作人员后台，之后 `/setup/` 不再可用。
+
+不要把初始化密钥当作管理员密码，也不要把任一密钥或密码写入截图、日志、导出文件或聊天记录。若页面提示密钥未安全配置，先替换 `.env.event` 中的 `change-me` 占位值并重新启动服务。
+
+技术人员需要在无浏览器环境中操作时，可以使用一次性命令作为后备路径：
 
 ```powershell
 docker compose --env-file .env.event -f deploy/compose.event.yml exec web python manage.py provision_first_admin --username event-admin
