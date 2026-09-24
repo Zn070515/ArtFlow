@@ -4,13 +4,19 @@ from common.rate_limit import allow
 from django import forms
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest
+from django.core.exceptions import ValidationError
+from django.http import Http404, HttpRequest
 from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .forms import AdminLoginForm, ParticipantLoginForm, RegisterForm
-from .services import admin_verification_is_valid, mark_admin_verified
+from .forms import AdminLoginForm, FirstAdminSetupForm, ParticipantLoginForm, RegisterForm
+from .services import (
+    admin_verification_is_valid,
+    installation_provisioning_status,
+    mark_admin_verified,
+    provision_first_admin,
+)
 
 PARTICIPANT_LOGIN_RATE_LIMIT = 10
 PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS = 300
@@ -18,6 +24,8 @@ REGISTRATION_RATE_LIMIT = 10
 REGISTRATION_RATE_WINDOW_SECONDS = 600
 ADMIN_LOGIN_RATE_LIMIT = 10
 ADMIN_LOGIN_RATE_WINDOW_SECONDS = 300
+FIRST_ADMIN_SETUP_RATE_LIMIT = 10
+FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS = 300
 
 
 def _allow_form_submission(
@@ -124,6 +132,38 @@ def admin_login_view(request):
     else:
         form = AdminLoginForm()
     return render(request, "accounts/admin_login.html", {"form": form})
+
+
+def first_admin_setup_view(request):
+    if installation_provisioning_status() != "required":
+        raise Http404
+
+    if request.method == "POST":
+        form = FirstAdminSetupForm(request.POST)
+        if (
+            _allow_form_submission(
+                request,
+                form,
+                key_prefix="first-admin-setup",
+                limit=FIRST_ADMIN_SETUP_RATE_LIMIT,
+                window_seconds=FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS,
+            )
+            and form.is_valid()
+        ):
+            try:
+                user = provision_first_admin(
+                    username=form.cleaned_data["username"],
+                    password=form.cleaned_data["password"],
+                )
+            except ValidationError as error:
+                form.add_error(None, error.messages)
+            else:
+                login(request, user)
+                mark_admin_verified(request.session)
+                return redirect("staff:dashboard")
+    else:
+        form = FirstAdminSetupForm()
+    return render(request, "accounts/first_admin_setup.html", {"form": form})
 
 
 @require_POST
