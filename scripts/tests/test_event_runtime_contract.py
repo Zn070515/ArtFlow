@@ -21,8 +21,8 @@ def test_event_launcher_declares_safe_runtime_contract():
     assert "ARTFLOW_EVENT_PORT" in launcher
     assert "ARTFLOW_EVENT_ALLOWED_HOSTS" in launcher
     assert "docker compose" in launcher
-    assert "up --build --wait" in launcher
-    assert "manage.py doctor" in launcher
+    assert "@('up', '--build', '--wait')" in launcher
+    assert "'manage.py', 'doctor'" in launcher
     assert "/healthz/" in launcher
     assert "Test-UsableIpv4" in launcher
     assert "Get-LocalIpv4" in launcher
