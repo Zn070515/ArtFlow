@@ -8,6 +8,7 @@ from accounts.models import User
 from common.authority import ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, transaction
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
@@ -222,6 +223,9 @@ class ProgramMaterialAuthorityTests(TestCase):
         self.override.enable()
         self.addCleanup(self.override.disable)
         self.addCleanup(shutil.rmtree, self.media_root, True)
+        # The upload throttle lives in the shared cache; clear it so one test's uploads
+        # cannot throttle the next (the same convention files/tests.py uses).
+        cache.clear()
         self.user = User.objects.create_user(username="program-material", password="pass")
         with authority_write(ACTIVITY_STATE):
             self.activity = Activity.objects.create(
