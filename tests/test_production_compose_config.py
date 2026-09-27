@@ -91,6 +91,14 @@ def test_production_images_are_digest_pinned_and_python_base_is_explicit():
     assert "ARG ARTFLOW_PYTHON_IMAGE=python:3.12-slim" in dockerfile
 
 
+def test_dockerfile_uses_the_postgresql_16_client_for_backup_compatibility():
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+
+    assert "apt.postgresql.org/pub/repos/apt" in dockerfile
+    assert "postgresql-client-16" in dockerfile
+    assert "postgresql-client\\n" not in dockerfile
+
+
 def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     compose = load_compose(EVENT_COMPOSE_PATH)
     web_environment = compose["services"]["web"]["environment"]
