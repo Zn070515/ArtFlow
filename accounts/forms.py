@@ -1,7 +1,8 @@
 from config.runtime import is_placeholder_value
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, UserCreationForm
+from django.contrib.auth.password_validation import validate_password
 from django.utils.crypto import constant_time_compare
 
 from .models import User
@@ -88,4 +89,31 @@ class FirstAdminSetupForm(forms.Form):
             raise forms.ValidationError("管理员密钥尚未安全配置。")
         if not constant_time_compare(submitted_key, configured_key):
             raise forms.ValidationError("管理员密钥错误。")
+        return cleaned_data
+
+
+class AdminPasswordResetForm(forms.Form):
+    new_password1 = forms.CharField(
+        label="新密码",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+    new_password2 = forms.CharField(
+        label="确认新密码",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean(self):
+        cleaned_data = super().clean() or {}
+        password = cleaned_data.get("new_password1")
+        confirmation = cleaned_data.get("new_password2")
+        if password and confirmation and password != confirmation:
+            self.add_error("new_password2", "两次输入的密码不一致。")
+        if password:
+            validate_password(password, user=self.user)
         return cleaned_data

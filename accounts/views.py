@@ -1,16 +1,26 @@
 from common.audit import client_ip, log_action
+from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
 from common.rate_limit import allow
 from django import forms
-from django.contrib.auth import login, logout
+from django.contrib.auth import login, logout, update_session_auth_hash
+from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .forms import AdminLoginForm, FirstAdminSetupForm, ParticipantLoginForm, RegisterForm
+from .forms import (
+    AdminLoginForm,
+    AdminPasswordResetForm,
+    FirstAdminSetupForm,
+    ParticipantLoginForm,
+    RegisterForm,
+)
+from .models import User
 from .services import (
     admin_verification_is_valid,
     installation_provisioning_status,
@@ -20,10 +30,12 @@ from .services import (
 
 PARTICIPANT_LOGIN_RATE_LIMIT = 10
 PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS = 300
-REGISTRATION_RATE_LIMIT = 10
+PARTICIPANT_LOGIN_IP_RATE_LIMIT = 100
+REGISTRATION_RATE_LIMIT = 30
 REGISTRATION_RATE_WINDOW_SECONDS = 600
 ADMIN_LOGIN_RATE_LIMIT = 10
 ADMIN_LOGIN_RATE_WINDOW_SECONDS = 300
+ADMIN_LOGIN_IP_RATE_LIMIT = 100
 FIRST_ADMIN_SETUP_RATE_LIMIT = 10
 FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS = 300
 
@@ -35,15 +47,29 @@ def _allow_form_submission(
     key_prefix: str,
     limit: int,
     window_seconds: int,
+    identity: str = "",
+    aggregate_limit: int | None = None,
 ) -> bool:
+    ip = client_ip(request) or "unknown"
+    normalized_identity = identity.strip().casefold()
+    key = f"{key_prefix}:{ip}:{normalized_identity}" if normalized_identity else f"{key_prefix}:{ip}"
     decision = allow(
-        f"{key_prefix}:{client_ip(request) or 'unknown'}",
+        key,
         limit=limit,
         window_seconds=window_seconds,
     )
     if not decision.allowed:
         form.add_error(None, "尝试次数过多，请稍后再试。")
         return False
+    if normalized_identity and aggregate_limit is not None:
+        aggregate_decision = allow(
+            f"{key_prefix}:ip:{ip}",
+            limit=aggregate_limit,
+            window_seconds=window_seconds,
+        )
+        if not aggregate_decision.allowed:
+            form.add_error(None, "尝试次数过多，请稍后再试。")
+            return False
     return True
 
 
@@ -84,6 +110,8 @@ def login_view(request):
                 key_prefix="participant-login",
                 limit=PARTICIPANT_LOGIN_RATE_LIMIT,
                 window_seconds=PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS,
+                identity=str(request.POST.get("username", "")),
+                aggregate_limit=PARTICIPANT_LOGIN_IP_RATE_LIMIT,
             )
             and form.is_valid()
         ):
@@ -117,6 +145,8 @@ def admin_login_view(request):
                 key_prefix="admin-login",
                 limit=ADMIN_LOGIN_RATE_LIMIT,
                 window_seconds=ADMIN_LOGIN_RATE_WINDOW_SECONDS,
+                identity=str(request.POST.get("username", "")),
+                aggregate_limit=ADMIN_LOGIN_IP_RATE_LIMIT,
             )
             and form.is_valid()
         ):
@@ -175,3 +205,46 @@ def logout_view(request):
 @login_required
 def profile_view(request):
     return render(request, "accounts/profile.html")
+
+
+@login_required
+def password_change_view(request):
+    form = PasswordChangeForm(request.user, request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        user = form.save()
+        update_session_auth_hash(request, user)
+        log_action(
+            request,
+            AuditLog.ActionType.OTHER,
+            f"User:{user.pk}",
+            note="password_change",
+        )
+        return redirect("accounts:profile")
+    return render(request, "accounts/password_change.html", {"form": form})
+
+
+@login_required
+def admin_password_reset_view(request, user_id):
+    if not request.user.is_admin or not admin_verification_is_valid(request.session):
+        return redirect(f"{reverse('accounts:admin_login')}?next={request.path}")
+    actor = User.objects.filter(pk=request.user.pk, is_active=True).first()
+    if actor is None or not actor.is_admin:
+        return redirect(f"{reverse('accounts:admin_login')}?next={request.path}")
+    target = get_object_or_404(User, pk=user_id)
+    form = AdminPasswordResetForm(request.POST or None, user=target)
+    if request.method == "POST" and form.is_valid():
+        with authority_write(ACCOUNT_AUTHORITY):
+            target.set_password(form.cleaned_data["new_password1"])
+            target.save(update_fields=["password"])
+        log_action(
+            request,
+            AuditLog.ActionType.OTHER,
+            f"User:{target.pk}",
+            note="admin_password_reset",
+        )
+        return redirect("accounts:profile")
+    return render(
+        request,
+        "accounts/admin_password_reset.html",
+        {"form": form, "target": target},
+    )
