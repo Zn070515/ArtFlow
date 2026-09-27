@@ -123,6 +123,17 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($script:webImage)) {
         throw 'Could not resolve the Compose web image.'
     }
+    $manifestSha = ([string]$manifest.git_sha).Trim()
+    if ($manifestSha -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Backup manifest git_sha must be a full 40-character commit SHA.'
+    }
+    $webImageRevision = (& $script:dockerExecutable inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' $webContainer).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($webImageRevision)) {
+        throw 'The running web image has no OCI release revision label.'
+    }
+    if ($webImageRevision -ne $manifestSha) {
+        throw 'The running web image revision does not match the backup manifest.'
+    }
 
     $dbContainer = (& $script:dockerExecutable compose -p $ComposeProjectName ps -q db).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dbContainer)) {
