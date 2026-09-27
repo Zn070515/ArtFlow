@@ -53,6 +53,7 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 
 ```powershell
 # 备份集合：backups\<tag>\{database.dump, media.tar.gz, manifest.json}
+# 生产 Compose 的 ARTFLOW_RELEASE_SHA 会写入 manifest；不要用操作者本机 checkout 推断 SHA。
 pwsh -NoProfile -File scripts\backup_artflow.ps1 -OutputDirectory backups -ComposeProjectName artflow
 
 # 恢复到隔离库 + 只读媒体，跑 manage.py verify_app_backup --manifest

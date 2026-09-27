@@ -30,6 +30,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the deployment environment}
       ADMIN_LOGIN_KEY: ${ADMIN_LOGIN_KEY:?Set ADMIN_LOGIN_KEY in the deployment environment}
       ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
+      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
       TRUST_X_FORWARDED_FOR: "true"
@@ -43,6 +44,7 @@ services:
     volumes:
       - static_data:/app/staticfiles
       - media_data:/app/media
+      - backup_data:/app/backups
     healthcheck:
       test:
         [
@@ -83,6 +85,7 @@ volumes:
   postgres_data:
   static_data:
   media_data:
+  backup_data:
   caddy_data:
   caddy_config:
 

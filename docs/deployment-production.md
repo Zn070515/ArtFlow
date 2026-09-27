@@ -62,6 +62,7 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 | `DEBUG` | 必须是 `False` |
 | `SECRET_KEY` | 长随机密钥 |
 | `ADMIN_LOGIN_KEY` | ArtFlow 管理员二次认证密钥 |
+| `ARTFLOW_RELEASE_SHA` | 构建当前生产镜像的完整 Git commit SHA；用于备份 manifest 溯源 |
 | `ALLOWED_HOSTS` | 真实主机名（含对外域名） |
 | `CSRF_TRUSTED_ORIGINS` | 真实来源（如 `https://artflow.example.com`） |
 | `CADDY_SITE_ADDRESS` | Caddy 申请 TLS 证书的单个公开 DNS 名称 |
@@ -86,12 +87,19 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 
 - **数据库**：使用持久化的 PostgreSQL 卷，不允许容器重建后数据丢失。
 - **Media**：上传的文件、生成文档、导出档案存放在持久化卷，并纳入备份目标。
+- **应用备份暂存**：生产 manifest 将独立的 `backup_data` 卷挂载到 `/app/backups`，避免备份只留在
+  web 容器可写层；该卷仍不是异地主备份，必须按下文复制到独立存储。
 - **静态资源**：由构建产物（`collectstatic`）提供，并由 Gunicorn 前的 WhiteNoise 中间件
   服务压缩、带 manifest 的静态文件；不依赖运行时 Tailwind CDN。
 
 ## 备份目标
 
 事件资产（数据库、Media 上传、生成文档）必须有独立于运行卷的备份目标，并完成恢复演练。见 [PostgreSQL 备份与恢复演练](postgres-backup-restore.md) 和 [生产准备演练](production-readiness.md) 的「PostgreSQL 恢复」场景。
+
+应用级备份命令默认写入生产 `backup_data` 卷，并从 `ARTFLOW_RELEASE_SHA` 写入
+`manifest.json`；生产容器不依赖镜像内的 `.git`。完成备份后必须复制到异地主机、对象存储
+或其他独立故障域，再执行隔离恢复验证。若临时需要覆盖 manifest provenance，只能显式传入
+`--git-sha`，不得根据操作者本机 checkout 自动推断。
 
 ## 健康检查与大小/超时
 

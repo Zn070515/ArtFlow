@@ -52,12 +52,10 @@ try {
     )
     if ($GitSha) {
         $commandArguments += @('--git-sha', $GitSha)
-    } else {
-        $detectedSha = (& git rev-parse HEAD 2>$null).Trim()
-        if ($LASTEXITCODE -eq 0 -and $detectedSha) {
-            $commandArguments += @('--git-sha', $detectedSha)
-        }
     }
+    # Without an explicit override, backup_artflow reads ARTFLOW_RELEASE_SHA
+    # from the running container. Never infer provenance from a host checkout:
+    # it may not be the source used to build the deployed image.
 
     Write-Host 'Creating application-level backup set in the web container.'
     $commandOutput = & $script:dockerExecutable @commandArguments 2>&1

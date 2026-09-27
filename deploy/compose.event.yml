@@ -31,6 +31,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the event environment}
       ADMIN_LOGIN_KEY: ${ADMIN_LOGIN_KEY:?Set ADMIN_LOGIN_KEY in the event environment}
       ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
+      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:-}
       ALLOWED_HOSTS: ${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}
       CSRF_TRUSTED_ORIGINS: ""
       RATE_LIMIT_BACKEND: database
@@ -45,6 +46,7 @@ services:
     volumes:
       - static_data:/app/staticfiles
       - media_data:/app/media
+      - backup_data:/app/backups
     healthcheck:
       test:
         [
@@ -64,6 +66,7 @@ volumes:
   postgres_data:
   static_data:
   media_data:
+  backup_data:
 
 networks:
   artflow_internal:

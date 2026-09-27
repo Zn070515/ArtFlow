@@ -145,6 +145,10 @@ class Command(BaseCommand):
         parser.add_argument("--git-sha", default=None, help="Commit SHA recorded in the manifest.")
 
     def handle(self, *args: Any, **options: Any) -> None:
+        release_sha = _resolve_release_sha(options.get("git_sha"))
+        if getattr(settings, "APP_ENV", "") == "production" and not release_sha:
+            raise CommandError("Production backups require ARTFLOW_RELEASE_SHA or --git-sha.")
+
         output_base = Path(options["output"]).resolve()
         output_base.mkdir(parents=True, exist_ok=True)
         backup_dir = output_base / f"backup-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
@@ -163,7 +167,7 @@ class Command(BaseCommand):
         head, serialized_heads, applied_count = apply_migration_heads()
         manifest: dict[str, Any] = {
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "git_sha": options.get("git_sha") or _detect_git_sha(),
+            "git_sha": release_sha,
             "django_migration_head": head,
             "django_migrations_applied": serialized_heads,
             "django_migrations_applied_count": applied_count,
@@ -174,6 +178,16 @@ class Command(BaseCommand):
         }
         write_manifest(manifest, manifest_path)
         self.stdout.write(str(backup_dir))
+
+
+def _resolve_release_sha(explicit_sha: Any) -> str | None:
+    for candidate in (explicit_sha, getattr(settings, "ARTFLOW_RELEASE_SHA", "")):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    if getattr(settings, "APP_ENV", "") == "production":
+        return None
+    return _detect_git_sha()
 
 
 def _detect_git_sha() -> str | None:
