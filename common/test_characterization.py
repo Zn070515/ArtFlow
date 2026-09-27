@@ -226,7 +226,7 @@ class MaterialCharacterizationTests(_CharacterizationBase):
     def test_store_submission_file_flips_current_and_bumps_version(self):
         first = store_submission_file(
             owner=self.singer,
-            uploaded_file=ContentFile(b"first", name="track.mp3"),
+            uploaded_file=ContentFile(b"ID3\x04\x00\x00first", name="track.mp3"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.staff,
         )
@@ -235,7 +235,7 @@ class MaterialCharacterizationTests(_CharacterizationBase):
 
         second = store_submission_file(
             owner=self.singer,
-            uploaded_file=ContentFile(b"second", name="track2.mp3"),
+            uploaded_file=ContentFile(b"ID3\x04\x00\x00second", name="track2.mp3"),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.staff,
         )

@@ -272,9 +272,9 @@ class SettingsTests(SimpleTestCase):
         )
         self.assertTrue(settings_module.SESSION_COOKIE_SECURE)
         self.assertTrue(settings_module.CSRF_COOKIE_SECURE)
-        self.assertGreater(settings_module.SECURE_HSTS_SECONDS, 0)
-        self.assertTrue(settings_module.SECURE_HSTS_INCLUDE_SUBDOMAINS)
-        self.assertTrue(settings_module.SECURE_HSTS_PRELOAD)
+        self.assertEqual(settings_module.SECURE_HSTS_SECONDS, 300)
+        self.assertFalse(settings_module.SECURE_HSTS_INCLUDE_SUBDOMAINS)
+        self.assertFalse(settings_module.SECURE_HSTS_PRELOAD)
 
     def test_https_redirect_exempts_healthz_but_not_public_pages(self):
         with (

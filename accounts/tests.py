@@ -191,6 +191,7 @@ class PasswordLifecycleTests(TestCase):
         self.assertEqual(audit.new_value, "")
         self.assertEqual(audit.note, "admin_password_reset")
 
+
 class ParticipantLoginRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -245,7 +246,7 @@ class ParticipantLoginRateLimitTests(TestCase):
             "username": self.participant.username,
             "password": "wrong-password",
         }
-        for _ in range(10):
+        for _ in range(100):
             self.client.post(
                 url,
                 invalid_payload,
@@ -424,8 +425,9 @@ class AdminLoginRateLimitTests(TestCase):
                 REMOTE_ADDR="198.51.100.7",
             )
 
-        bucket = RateLimitBucket.objects.get()
-        self.assertEqual(bucket.count, 11)
+        buckets = list(RateLimitBucket.objects.all())
+        self.assertEqual(len(buckets), 2)
+        self.assertEqual(sorted(bucket.count for bucket in buckets), [10, 11])
 
 
 class DatabaseRateLimitTests(TransactionTestCase):
