@@ -2368,10 +2368,11 @@ def vote_session_detail(request, pk):
             vote_session, test_flag=runtime_is_test(vote_session.activity)
         )
         rates = conversion["support_rate"]
+        counted = conversion["candidate_votes"]
         conversion_rows = [
             {
                 "singer": option.singer,
-                "votes": option.vote_count,
+                "votes": counted.get(option.singer_id, 0),
                 "rate": rates.get(str(option.singer_id)),
             }
             for option in options
