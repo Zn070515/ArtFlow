@@ -27,6 +27,7 @@ CONFIG_ENVIRONMENT = {
     "ARTFLOW_PYTHON_IMAGE": "python:3.12-slim@sha256:" + "b" * 64,
     "ARTFLOW_POSTGRES_IMAGE": "postgres:16-alpine@sha256:" + "c" * 64,
     "ARTFLOW_CADDY_IMAGE": "caddy:2-alpine@sha256:" + "d" * 64,
+    "ARTFLOW_WEB_IMAGE": "artflow-web:" + "a" * 40,
 }
 
 
@@ -71,8 +72,8 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert "max_size 120MB" in caddyfile
     assert "header -Server" in caddyfile
     assert "reverse_proxy web:8000" in caddyfile
-    assert services["web"]["build"]["args"]["ARTFLOW_BUILD_SHA"] == (
-        "${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}"
+    assert services["web"]["image"] == (
+        "${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}"
     )
 
 
@@ -82,8 +83,8 @@ def test_production_images_are_digest_pinned_and_python_base_is_explicit():
 
     assert services["db"]["image"] == "${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}"
     assert services["proxy"]["image"] == "${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}"
-    assert services["web"]["build"]["args"]["ARTFLOW_PYTHON_IMAGE"] == (
-        "${ARTFLOW_PYTHON_IMAGE:?Set ARTFLOW_PYTHON_IMAGE}"
+    assert services["web"]["image"] == (
+        "${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}"
     )
 
     dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
