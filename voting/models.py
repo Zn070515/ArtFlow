@@ -866,7 +866,6 @@ class VoteScoringRule(models.Model):
 
     if TYPE_CHECKING:
         vote_session_id: int
-        vote_session: VoteSession
 
     class Meta:
         base_manager_name = "objects"
