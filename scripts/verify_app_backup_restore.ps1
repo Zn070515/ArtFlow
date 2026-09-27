@@ -102,7 +102,16 @@ try {
         throw 'Could not resolve the Compose web image.'
     }
 
-    Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", 'postgres:17-alpine')
+    $dbContainer = (& $script:dockerExecutable compose -p $ComposeProjectName ps -q db).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dbContainer)) {
+        throw 'The source Compose database service is not running.'
+    }
+    $script:databaseImage = (& $script:dockerExecutable inspect -f '{{.Config.Image}}' $dbContainer).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($script:databaseImage)) {
+        throw 'Could not resolve the running Compose database image.'
+    }
+
+    Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", $script:databaseImage)
     try {
         Wait-ForStableRestoreDatabase -DockerExecutable $script:dockerExecutable -ContainerName $restoreContainer -DatabaseName $RestoreDatabase -TimeoutSeconds 90
 

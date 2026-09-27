@@ -3,7 +3,7 @@ param(
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'backups'),
     [string]$ComposeProjectName = 'artflow',
     [string]$GitSha,
-    [string]$ContainerBackupBase = '/tmp/artflow-backup'
+    [string]$ContainerBackupBase = '/app/backups'
 )
 
 Set-StrictMode -Version Latest

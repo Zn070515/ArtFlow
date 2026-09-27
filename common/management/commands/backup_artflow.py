@@ -22,6 +22,7 @@ from tickets.models import Ticket, TicketAccessSession
 from voting.models import VoteBallot
 
 from common.models import AuditLog
+from config.runtime import is_full_git_sha, is_placeholder_value
 
 COUNT_MODELS: dict[str, Any] = {
     "activities": Activity,
@@ -181,9 +182,14 @@ class Command(BaseCommand):
 
 
 def _resolve_release_sha(explicit_sha: Any) -> str | None:
-    for candidate in (explicit_sha, getattr(settings, "ARTFLOW_RELEASE_SHA", "")):
+    for source, candidate in (
+        ("--git-sha", explicit_sha),
+        ("ARTFLOW_RELEASE_SHA", getattr(settings, "ARTFLOW_RELEASE_SHA", "")),
+    ):
         value = str(candidate or "").strip()
         if value:
+            if is_placeholder_value(value) or not is_full_git_sha(value):
+                raise CommandError(f"{source} must be a full 40-character commit SHA.")
             return value
     if getattr(settings, "APP_ENV", "") == "production":
         return None

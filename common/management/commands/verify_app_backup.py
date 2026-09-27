@@ -9,9 +9,6 @@ from django.core.management.base import BaseCommand, CommandError
 
 from .backup_artflow import FILE_MODELS, collect_counts, media_content_digest
 
-SAMPLE_LIMIT = 5
-
-
 def validate_counts(manifest: dict[str, Any], counts: dict[str, int]) -> list[str]:
     problems: list[str] = []
     expected = manifest.get("counts") or {}
@@ -22,11 +19,11 @@ def validate_counts(manifest: dict[str, Any], counts: dict[str, int]) -> list[st
     return problems
 
 
-def sample_media_files() -> tuple[list[str], dict[str, str]]:
+def verify_media_files() -> tuple[list[str], dict[str, str]]:
     problems: list[str] = []
     verified: dict[str, str] = {}
     for model, field_name in FILE_MODELS:
-        for obj in model.objects.exclude(**{field_name: ""})[:SAMPLE_LIMIT]:
+        for obj in model.objects.exclude(**{field_name: ""}).iterator():
             file = getattr(obj, field_name)
             if not file:
                 continue
@@ -64,7 +61,7 @@ class Command(BaseCommand):
         if manifest.get("media_content_sha256") != media_content_digest(media_root):
             problems.append("media content digest does not match the backup manifest")
 
-        media_problems, verified = sample_media_files()
+        media_problems, verified = verify_media_files()
         problems.extend(media_problems)
 
         if problems:
