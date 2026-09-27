@@ -49,6 +49,17 @@ def test_application_restore_verifies_backup_hashes_before_extracting_or_restori
     )
 
 
+def test_application_restore_requires_the_running_web_image_to_match_manifest_sha():
+    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "$manifest.git_sha" in script
+    assert "org.opencontainers.image.revision" in script
+    assert "webImageRevision" in script
+    assert "does not match the backup manifest" in script
+
+
 def test_restore_wait_helper_requires_stable_final_postgres_server():
     helper = HELPER.read_text(encoding="utf-8")
 
