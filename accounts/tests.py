@@ -284,7 +284,7 @@ class RegistrationRateLimitTests(TestCase):
         }
 
         with patch("accounts.views.RegisterForm.is_valid", return_value=False) as is_valid:
-            for _ in range(10):
+            for _ in range(30):
                 response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
                 self.assertEqual(response.status_code, 200)
 
@@ -293,8 +293,8 @@ class RegistrationRateLimitTests(TestCase):
 
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
+        self.assertEqual(is_valid.call_count, 30)
         self.assertEqual(User.objects.count(), before_throttled_attempt)
-        self.assertEqual(is_valid.call_count, 10)
 
 
 class AdminVerificationTTLTests(TestCase):
