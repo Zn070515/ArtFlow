@@ -74,7 +74,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget --no-verbose --no-check-certificate --tries=1 --spider --header=\"Host: $$CADDY_SITE_ADDRESS\" https://127.0.0.1/healthz/",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:8081/healthz/",
         ]
       interval: 15s
       timeout: 5s
