@@ -1,10 +1,14 @@
+import json
 import os
 import shutil
+import socket
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
 from typing import Any, cast
+from urllib.request import urlopen
 
 import pytest
 import yaml
@@ -23,6 +27,7 @@ CADDY_RUNTIME_TEST_IMAGE = os.environ.get(
     "caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
 )
 REQUIRE_CADDY_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_CADDY_RUNTIME") == "true"
+REQUIRE_EVENT_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_EVENT_RUNTIME") == "true"
 CONFIG_ENVIRONMENT = {
     "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
     "ADMIN_LOGIN_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
@@ -110,6 +115,7 @@ def test_dockerfile_uses_the_postgresql_16_client_for_backup_compatibility():
 
 def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     compose = load_compose(EVENT_COMPOSE_PATH)
+    services = compose["services"]
     web_environment = compose["services"]["web"]["environment"]
 
     assert compose["services"]["web"]["ports"] == [
@@ -122,6 +128,12 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
         "${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}"
     )
     assert web_environment["CSRF_TRUSTED_ORIGINS"] == ""
+    assert set(services["web"]["networks"]) == {
+        "artflow_event_frontend",
+        "artflow_internal",
+    }
+    assert set(services["db"]["networks"]) == {"artflow_internal"}
+    assert compose["networks"]["artflow_event_frontend"]["internal"] is False
     assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
@@ -259,6 +271,146 @@ def test_production_proxy_healthcheck_succeeds_against_a_running_caddy_proxy(
     finally:
         run("rm", "-f", proxy, backend)
         run("network", "rm", network)
+
+
+@pytest.mark.skipif(DOCKER is None, reason="Docker is required for event runtime validation")
+def test_event_runtime_publishes_only_the_loopback_web_port():
+    if not REQUIRE_EVENT_RUNTIME:
+        pytest.skip("event runtime validation is opt-in")
+
+    docker = docker_command()
+    image_check = subprocess.run(
+        [docker, "image", "inspect", CADDY_RUNTIME_TEST_IMAGE],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if image_check.returncode != 0:
+        pytest.fail(f"Pinned Caddy runtime image is not available: {CADDY_RUNTIME_TEST_IMAGE}")
+
+    project_name = f"artflow-event-runtime-{uuid.uuid4().hex[:12]}"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        event_port = probe.getsockname()[1]
+
+    with tempfile.TemporaryDirectory(prefix="artflow-event-runtime-") as temp_dir:
+        env_path = Path(temp_dir) / ".env.event"
+        caddyfile_path = Path(temp_dir) / "Caddyfile"
+        override_path = Path(temp_dir) / "compose.override.yml"
+        env_path.write_text(
+            "\n".join(
+                [
+                    "APP_ENV=development",
+                    "DEBUG=False",
+                    "SECRET_KEY=event-runtime-test-secret",
+                    "ADMIN_LOGIN_KEY=event-runtime-test-admin-key",
+                    "POSTGRES_DB=event_runtime",
+                    "POSTGRES_USER=event_runtime",
+                    "POSTGRES_PASSWORD=event-runtime-test-database-password",
+                    f"ARTFLOW_RELEASE_SHA={'a' * 40}",
+                    "ARTFLOW_EVENT_BIND_ADDRESS=127.0.0.1",
+                    f"ARTFLOW_EVENT_PORT={event_port}",
+                    "ARTFLOW_EVENT_ALLOWED_HOSTS=localhost,127.0.0.1",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        caddyfile_path.write_text(":8000 {\n\trespond /healthz/ 200\n}\n", encoding="utf-8")
+        override_path.write_text(
+            yaml.safe_dump(
+                {
+                    "services": {
+                        "web": {
+                            "image": CADDY_RUNTIME_TEST_IMAGE,
+                            "entrypoint": ["caddy"],
+                            "command": [
+                                "run",
+                                "--config",
+                                "/etc/caddy/Caddyfile",
+                                "--adapter",
+                                "caddyfile",
+                            ],
+                            "volumes": [
+                                f"{caddyfile_path}:/etc/caddy/Caddyfile:ro",
+                            ],
+                            "healthcheck": {
+                                "test": [
+                                    "CMD",
+                                    "wget",
+                                    "--no-verbose",
+                                    "--tries=1",
+                                    "--spider",
+                                    "http://127.0.0.1:8000/healthz/",
+                                ],
+                                "interval": "2s",
+                                "timeout": "3s",
+                                "retries": 12,
+                                "start_period": "2s",
+                            },
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        compose = [
+            docker,
+            "compose",
+            "--project-name",
+            project_name,
+            "--env-file",
+            str(env_path),
+            "-f",
+            str(EVENT_COMPOSE_PATH),
+            "-f",
+            str(override_path),
+        ]
+
+        def run(*arguments: str, timeout: int = 600) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [*compose, *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+
+        try:
+            up = run("up", "--no-build", "--wait")
+            assert up.returncode == 0, "\n".join((up.stdout + up.stderr).splitlines()[-80:])
+
+            web_port = run("port", "web", "8000")
+            assert web_port.returncode == 0, web_port.stderr
+            assert web_port.stdout.strip() == f"127.0.0.1:{event_port}"
+
+            db_container = run("ps", "-q", "db")
+            assert db_container.returncode == 0
+            assert db_container.stdout.strip()
+            db_ports = subprocess.run(
+                [
+                    docker,
+                    "inspect",
+                    db_container.stdout.strip(),
+                    "--format",
+                    "{{json .NetworkSettings.Ports}}",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            assert db_ports.returncode == 0, db_ports.stderr
+            assert json.loads(db_ports.stdout) == {"5432/tcp": None}
+
+            with urlopen(f"http://127.0.0.1:{event_port}/healthz/", timeout=10) as response:
+                assert response.status == 200
+        finally:
+            run("down", "--remove-orphans", "--volumes", timeout=120)
 
 
 def test_production_rehearsal_runbook_names_the_explicit_production_manifest():
