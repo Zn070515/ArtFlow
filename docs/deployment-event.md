@@ -4,6 +4,8 @@
 
 公网 HTTPS 部署不使用本文件的事件 Compose，而使用 [`deploy/compose.production.yml`](../deploy/compose.production.yml) 和 [生产部署说明](deployment-production.md)。事件启动壳不提供 TLS、公网入口或 DDoS 防护。
 
+事件 Compose 将 web 同时连接到一个可发布本机 loopback 端口的 frontend bridge 和一个 `internal: true` backend network；PostgreSQL 只连接 backend network，且不发布 host port。不要把 backend network 改成 frontend network，也不要把 web 端口绑定到 `0.0.0.0`，除非明确选择并遵循下方的 LAN 模式。
+
 ## 首次准备
 
 在仓库目录执行：
