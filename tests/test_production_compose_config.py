@@ -135,6 +135,15 @@ def test_dockerfile_copies_every_runtime_local_app():
     assert "COPY --chown=artflow:artflow tickets ./tickets" in dockerfile
 
 
+def test_dockerfile_prepares_writable_backup_mountpoint():
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+
+    assert "mkdir --parents /app/media /app/staticfiles /app/backups" in dockerfile
+    assert (
+        "chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups" in dockerfile
+    )
+
+
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")
 def test_production_compose_config_renders_without_starting_services(
     monkeypatch: pytest.MonkeyPatch,
