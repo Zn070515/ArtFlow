@@ -44,9 +44,9 @@ COPY --chown=artflow:artflow static ./static
 COPY --chown=artflow:artflow templates ./templates
 COPY --chown=artflow:artflow scripts/docker-entrypoint.sh scripts/wait-for-postgres.sh ./scripts/
 
-RUN mkdir --parents /app/media /app/staticfiles \
+RUN mkdir --parents /app/media /app/staticfiles /app/backups \
     && chmod 0755 /app/scripts/docker-entrypoint.sh /app/scripts/wait-for-postgres.sh \
-    && chown --recursive artflow:artflow /app/media /app/staticfiles /app/scripts
+    && chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups /app/scripts
 
 USER artflow
 
