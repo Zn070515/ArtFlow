@@ -9,6 +9,7 @@ from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
@@ -390,21 +391,16 @@ def _owner_applies_to(owner):
 
 
 def _reset_matching_check(owner, purpose):
-    """A brand-new upload supersedes any prior staff review for that purpose."""
-    applies_to = _owner_applies_to(owner)
-    if applies_to is None or not purpose:
+    """A brand-new upload supersedes any prior staff review of that material type.
+
+    Matching is by the check's own ``file_purpose`` snapshot, not by re-deriving the
+    purpose from the activity's current requirements: renaming or deleting a requirement
+    must not redirect a fresh upload's review reset onto a different material.
+    """
+    if not purpose:
         return
     owner_filter = _owner_filter(owner)
-    fallback = (
-        DEFAULT_SINGER_REQUIREMENTS
-        if applies_to == MaterialRequirement.AppliesTo.SINGER
-        else DEFAULT_PROGRAM_REQUIREMENTS
-    )
-    requirements = _requirements_for(owner.activity, applies_to, fallback)
-    reset_names = [item_name for item_name, file_purpose in requirements if file_purpose == purpose]
-    if not reset_names:
-        return
-    MaterialCheck.objects.filter(**owner_filter, item_name__in=reset_names).update(
+    MaterialCheck.objects.filter(**owner_filter, file_purpose=purpose).update(
         status=MaterialCheck.Status.UPLOADED,
         review_note="",
         reviewed_by=None,
@@ -454,6 +450,110 @@ def review_material_check(check, *, status, note, actor):
     return locked_check
 
 
+UNKNOWN_CHECK_MESSAGE = "该材料项不存在或无权提交。"
+
+# §4.6 phase policy: free editing while registration is open; after it closes, only a
+# staff-designated supplement check remains writable for the participant.
+_PARTICIPANT_FREE_UPLOAD_PHASES = (Activity.Phase.REGISTRATION_OPEN,)
+_PARTICIPANT_SUPPLEMENT_PHASES = (
+    Activity.Phase.REGISTRATION_CLOSED,
+    Activity.Phase.REVIEWING,
+)
+
+
+def participant_uploadable_check_ids(owner) -> set[int]:
+    """The file-backed checks this owner's participant may upload to right now.
+
+    A read-only mirror of :func:`submit_participant_material_for_check`'s phase rule for
+    rendering only. Hiding a button is never the authorization boundary; a crafted POST
+    is judged by the service alone.
+    """
+    activity = owner.activity
+    if activity.is_locked:
+        return set()
+    if activity.phase in _PARTICIPANT_FREE_UPLOAD_PHASES:
+        eligible_status = None
+    elif activity.phase in _PARTICIPANT_SUPPLEMENT_PHASES:
+        eligible_status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+    else:
+        return set()
+    checks = MaterialCheck.objects.filter(**_owner_filter(owner)).exclude(file_purpose="")
+    if eligible_status is not None:
+        checks = checks.filter(status=eligible_status)
+    return set(checks.values_list("pk", flat=True))
+
+
+def _require_owner_actor(actor, owner):
+    """Re-read the acting account and require it to own ``owner``."""
+    actor_pk = getattr(actor, "pk", None)
+    if not actor_pk:
+        raise PermissionDenied("当前操作者无有效账户。")
+    current_actor = get_user_model().objects.filter(pk=actor_pk, is_active=True).first()
+    if current_actor is None:
+        raise PermissionDenied("当前操作者账户无效。")
+    if owner.user_id != current_actor.pk:
+        raise ValidationError(UNKNOWN_CHECK_MESSAGE)
+    return current_actor
+
+
+def _ensure_participant_upload_phase(activity) -> None:
+    allowed = (*_PARTICIPANT_FREE_UPLOAD_PHASES, *_PARTICIPANT_SUPPLEMENT_PHASES)
+    if activity.phase not in allowed:
+        raise ValidationError("当前活动阶段不允许选手提交材料。")
+
+
+@transaction.atomic
+def submit_participant_material_for_check(*, owner, check_id, uploaded_file, actor):
+    """The participant material authority: one file, one staff-designated check.
+
+    A participant upload is addressed by the *check* it fulfils, never by a
+    browser-supplied ``file_purpose``: the purpose is the server-maintained
+    :attr:`MaterialCheck.file_purpose` snapshot, so renaming, reordering or deleting a
+    :class:`MaterialRequirement` cannot redirect a participant's file into a different
+    material type.
+
+    Phase policy (§4.6): while the activity is ``REGISTRATION_OPEN`` the participant may
+    freely (re)upload any of their own file-backed checks; from ``REGISTRATION_CLOSED``
+    and ``REVIEWING`` onward the only upload authority is a check the staff explicitly set
+    to ``NEEDS_SUPPLEMENT``. Everything else — another owner's check, another activity's
+    check, a non-file check, a forged id, a locked or archived activity — writes nothing.
+
+    Lock order follows the repository's Activity-first rule (Activity → owner → check →
+    SubmissionFile), and the check is re-read under its own lock so a concurrent staff
+    review cannot be raced between the read and the write (TOCTOU).
+    """
+    if not uploaded_file:
+        raise ValidationError("请选择要上传的文件。")
+    owner_filter = _owner_filter(owner)
+    locked_activity = lock_activity_for_action(owner.activity)
+    locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
+    if locked_owner.activity_id != locked_activity.pk:
+        raise PermissionDenied("材料检查项不属于当前活动。")
+    current_actor = _require_owner_actor(actor, locked_owner)
+    _ensure_participant_upload_phase(locked_activity)
+    check_token = str(check_id or "").strip()
+    locked_check = None
+    if check_token.isdigit():
+        locked_check = (
+            MaterialCheck.objects.select_for_update()
+            .filter(pk=int(check_token), **owner_filter)
+            .first()
+        )
+    if locked_check is None or not locked_check.file_purpose:
+        raise ValidationError(UNKNOWN_CHECK_MESSAGE)
+    if (
+        locked_activity.phase in _PARTICIPANT_SUPPLEMENT_PHASES
+        and locked_check.status != MaterialCheck.Status.NEEDS_SUPPLEMENT
+    ):
+        raise ValidationError("该材料项当前未要求补交，请联系工作人员。")
+    return store_submission_file(
+        owner=locked_owner,
+        uploaded_file=uploaded_file,
+        purpose=locked_check.file_purpose,
+        uploaded_by=current_actor,
+    )
+
+
 def _reconcile_owner_checks(owner, requirements):
     """Reconcile checks for a single already-locked owner; caller owns authority.
 
@@ -469,23 +569,35 @@ def _reconcile_owner_checks(owner, requirements):
     for index, (item_name, file_purpose) in enumerate(requirements or []):
         present_names.add(item_name)
         existing = current.get(item_name)
-        if file_purpose:
-            has_file = file_queryset.filter(file_purpose=file_purpose, is_current=True).exists()
+        purpose = file_purpose or ""
+        has_file = (
+            bool(purpose) and file_queryset.filter(file_purpose=purpose, is_current=True).exists()
+        )
+        defaults: dict = {"sort_order": index, "file_purpose": purpose}
+        if existing is not None and existing.file_purpose != purpose:
+            # The requirement's material type changed. A staff approval of the old type
+            # must not carry over to a different material (authority leak), so recompute
+            # the status from the files that actually exist and drop the stale review.
+            defaults["status"] = (
+                MaterialCheck.Status.UPLOADED if has_file else MaterialCheck.Status.MISSING
+            )
+            defaults["review_note"] = ""
+            defaults["reviewed_by"] = None
+            defaults["reviewed_at"] = None
+        elif purpose:
             if not has_file:
-                desired: str = MaterialCheck.Status.MISSING
-            elif existing is None:
-                desired = MaterialCheck.Status.UPLOADED
-            elif existing.status == MaterialCheck.Status.MISSING:
-                desired = MaterialCheck.Status.UPLOADED
+                defaults["status"] = MaterialCheck.Status.MISSING
+            elif existing is None or existing.status == MaterialCheck.Status.MISSING:
+                defaults["status"] = MaterialCheck.Status.UPLOADED
             else:
                 # Preserve staff review state; a brand-new upload already resets
                 # to UPLOADED in store_submission_file.
-                desired = existing.status
+                defaults["status"] = existing.status
         else:
-            desired = existing.status if existing else MaterialCheck.Status.UPLOADED
+            defaults["status"] = existing.status if existing else MaterialCheck.Status.UPLOADED
         check, _ = MaterialCheck.objects.update_or_create(
             item_name=item_name,
-            defaults={"status": desired, "sort_order": index},
+            defaults=defaults,
             **owner_filter,
         )
         checks.append(check)

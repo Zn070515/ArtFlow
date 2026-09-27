@@ -11,8 +11,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
 from files.services import (
     large_video_upload_allowed,
+    participant_uploadable_check_ids,
     reconcile_singer_material_checks,
     store_submission_file,
+    submit_participant_material_for_check,
     validate_upload,
 )
 
@@ -152,10 +154,7 @@ SINGER_EDITABLE_FIELDS = (
 def _participant_can_edit(registration):
     if registration.activity.is_locked:
         return False
-    return registration.activity.phase in (
-        Activity.Phase.REGISTRATION_OPEN,
-        Activity.Phase.REVIEWING,
-    )
+    return registration.activity.phase == Activity.Phase.REGISTRATION_OPEN
 
 
 @login_required
@@ -180,46 +179,12 @@ def my_registration_detail(request, pk):
     )
     errors = []
     if request.method == "POST":
-        try:
-            with transaction.atomic():
-                activity = lock_activity_for_action(reg.activity)
-                locked_reg = (
-                    SingerRegistration.objects.select_for_update()
-                    .select_related("activity")
-                    .get(pk=reg.pk, user=request.user)
-                )
-                if locked_reg.activity_id != activity.pk:
-                    raise PermissionDenied("报名信息不属于当前活动。")
-                ensure_participant_can_edit(locked_reg)
-                if request.FILES.get("file"):
-                    submission_file = store_submission_file(
-                        owner=locked_reg,
-                        uploaded_file=request.FILES["file"],
-                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                        uploaded_by=request.user,
-                    )
-                    reconcile_singer_material_checks(locked_reg)
-                    log_action(
-                        request,
-                        AuditLog.ActionType.UPLOAD_FILE,
-                        f"SubmissionFile:{submission_file.pk}",
-                        new_value=submission_file.original_name,
-                    )
-                else:
-                    errors.extend(_update_singer_registration(request, locked_reg))
-        except PermissionDenied as error:
-            errors.append(str(error))
-        except ValidationError as error:
-            errors.extend(error.messages)
+        if "check_id" in request.POST or request.FILES.get("file"):
+            errors.extend(_submit_participant_material(request, reg))
+        else:
+            errors.extend(_update_participant_metadata(request, reg))
         if not errors:
             return redirect("singer_contest:my_registration_detail", pk=reg.pk)
-    file_purposes = SubmissionFile.Purpose.choices
-    if reg.activity.data_lifecycle == Activity.DataLifecycle.FORMAL:
-        video_values = {
-            SubmissionFile.Purpose.PERFORMANCE_VIDEO,
-            SubmissionFile.Purpose.BACKGROUND_VIDEO,
-        }
-        file_purposes = [choice for choice in file_purposes if choice[0] not in video_values]
     return render(
         request,
         "singer_contest/my_submission.html",
@@ -228,10 +193,52 @@ def my_registration_detail(request, pk):
             "can_edit": _participant_can_edit(reg),
             "files": reg.files.all(),
             "checks": reg.material_checks.all(),
-            "file_purposes": file_purposes,
+            "uploadable_check_ids": participant_uploadable_check_ids(reg),
             "errors": errors,
         },
     )
+
+
+def _submit_participant_material(request, reg):
+    """Route a participant upload to the check-addressed material authority."""
+    try:
+        submission_file = submit_participant_material_for_check(
+            owner=reg,
+            check_id=request.POST.get("check_id"),
+            uploaded_file=request.FILES.get("file"),
+            actor=request.user,
+        )
+    except PermissionDenied as error:
+        return [str(error)]
+    except ValidationError as error:
+        return list(error.messages)
+    log_action(
+        request,
+        AuditLog.ActionType.UPLOAD_FILE,
+        f"SubmissionFile:{submission_file.pk}",
+        new_value=submission_file.original_name,
+    )
+    return []
+
+
+def _update_participant_metadata(request, reg):
+    """Apply the participant's own registration edit while the phase still allows it."""
+    try:
+        with transaction.atomic():
+            activity = lock_activity_for_action(reg.activity)
+            locked_reg = (
+                SingerRegistration.objects.select_for_update()
+                .select_related("activity")
+                .get(pk=reg.pk, user=request.user)
+            )
+            if locked_reg.activity_id != activity.pk:
+                raise PermissionDenied("报名信息不属于当前活动。")
+            ensure_participant_can_edit(locked_reg)
+            return _update_singer_registration(request, locked_reg)
+    except PermissionDenied as error:
+        return [str(error)]
+    except ValidationError as error:
+        return list(error.messages)
 
 
 def _update_singer_registration(request, reg):

@@ -61,54 +61,46 @@
     <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
         <h2 class="font-medium text-gray-900 mb-3">材料状态</h2>
         {% if checks %}
-        <div class="space-y-2">
+        <div class="space-y-3">
             {% for check in checks %}
-            <div class="flex items-center justify-between">
-                <span class="text-gray-700">{{ check.item_name }}</span>
-                {% if check.status == "approved" %}
-                <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs">已通过</span>
-                {% elif check.status == "needs_supplement" %}
-                <span class="text-orange-700 bg-orange-50 px-2 py-0.5 rounded text-xs">需补交</span>
-                {% elif check.status == "uploaded" %}
-                <span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">已上传</span>
-                {% else %}
-                <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-xs">缺失</span>
+            <div>
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-700">{{ check.item_name }}</span>
+                    {% if check.status == "approved" %}
+                    <span class="text-green-700 bg-green-50 px-2 py-0.5 rounded text-xs">已通过</span>
+                    {% elif check.status == "needs_supplement" %}
+                    <span class="text-orange-700 bg-orange-50 px-2 py-0.5 rounded text-xs">需补交</span>
+                    {% elif check.status == "uploaded" %}
+                    <span class="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-xs">已上传</span>
+                    {% else %}
+                    <span class="text-red-700 bg-red-50 px-2 py-0.5 rounded text-xs">缺失</span>
+                    {% endif %}
+                </div>
+                {% if check.review_note %}<p class="text-xs text-orange-700 mt-1 ml-1">工作人员说明：{{ check.review_note }}</p>{% endif %}
+                {% if check.pk in uploadable_check_ids %}
+                <form method="post" enctype="multipart/form-data" class="flex gap-2 mt-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="check_id" value="{{ check.pk }}">
+                    <input type="file" name="file" required class="flex-1 text-xs border border-gray-300 rounded px-2 py-1">
+                    <button type="submit" class="bg-gray-100 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-200">上传此项</button>
+                </form>
                 {% endif %}
             </div>
-            {% if check.review_note %}<p class="text-xs text-orange-700 -mt-1 ml-1">原因：{{ check.review_note }}</p>{% endif %}
             {% endfor %}
         </div>
         {% else %}
         <p class="text-gray-400">暂无材料检查项</p>
         {% endif %}
+        {% if not can_edit and uploadable_check_ids %}
+        <p class="text-xs text-gray-500 mt-3">报名已截止，仅可提交工作人员要求补交的材料。</p>
+        {% elif not can_edit %}
+        <p class="text-xs text-gray-500 mt-3">报名已截止，节目资料与材料已锁定；如需补交，请联系工作人员。</p>
+        {% endif %}
     </div>
 
-    {% if can_edit %}
+    {% if files %}
     <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
-        <h2 class="font-medium text-gray-900 mb-3">补交材料</h2>
-        {% if files %}
-        <ul class="mb-4 space-y-1">
-            {% for file in files %}
-            <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }}{% if file.is_current %} <span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ file.get_file_purpose_display }} · v{{ file.version }}</span></li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-        <form method="post" enctype="multipart/form-data" class="flex flex-col gap-2">
-            {% csrf_token %}
-            <div class="flex gap-2">
-                <input type="file" name="file" required class="flex-1 text-xs border border-gray-300 rounded px-2 py-1">
-                <select name="file_purpose" class="text-xs border border-gray-300 rounded px-2 py-1">
-                    {% for value, label in file_purposes %}
-                    <option value="{{ value }}">{{ label }}</option>
-                    {% endfor %}
-                </select>
-                <button type="submit" class="bg-gray-100 text-gray-700 px-3 py-1 rounded text-xs hover:bg-gray-200">上传</button>
-            </div>
-        </form>
-    </div>
-    {% elif files %}
-    <div class="bg-white border border-gray-200 rounded-lg p-6 mt-4 text-sm">
-        <h2 class="font-medium text-gray-900 mb-3">材料</h2>
+        <h2 class="font-medium text-gray-900 mb-3">已提交文件</h2>
         <ul class="space-y-1">
             {% for file in files %}
             <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }}{% if file.is_current %} <span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ file.get_file_purpose_display }} · v{{ file.version }}</span></li>

@@ -41,6 +41,7 @@ class StaffNoteAdmin(admin.ModelAdmin):
 class MaterialCheckAdmin(ObservationOnlyAdmin):
     list_display = [
         "item_name",
+        "file_purpose",
         "status",
         "singer_registration",
         "program",

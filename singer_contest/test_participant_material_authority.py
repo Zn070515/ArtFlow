@@ -20,9 +20,10 @@ import shutil
 import tempfile
 
 from accounts.models import User
-from common.authority import ACTIVITY_STATE, authority_write
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -31,7 +32,6 @@ from files.models import MaterialCheck, SubmissionFile
 from .models import SingerRegistration
 
 MP3_BYTES = b"ID3\x04\x00\x00\x00\x00\x00\x00"
-TXT_BYTES = b"lyrics"
 
 
 def _create_activity(**kwargs):
@@ -49,10 +49,6 @@ def _mp3(name="song.mp3"):
     return SimpleUploadedFile(name, MP3_BYTES, content_type="audio/mpeg")
 
 
-def _txt(name="lyrics.txt"):
-    return SimpleUploadedFile(name, TXT_BYTES, content_type="text/plain")
-
-
 class ParticipantMaterialAuthorityTestCase(TestCase):
     """Shared fixture: one activity, its phase, and one registration with checks."""
 
@@ -64,6 +60,9 @@ class ParticipantMaterialAuthorityTestCase(TestCase):
         self.override.enable()
         self.addCleanup(self.override.disable)
         self.addCleanup(shutil.rmtree, self.media_root, True)
+        # The upload throttle lives in the shared cache and is keyed by owner pk, which
+        # rollback recycles; clear it so one test's uploads cannot throttle the next.
+        cache.clear()
         self.user = User.objects.create_user(username="participant", password="pass")
         self.other = User.objects.create_user(username="other", password="pass")
         self.activity = _create_activity(
@@ -254,7 +253,10 @@ class RegistrationClosedWindowTests(ParticipantMaterialAuthorityTestCase):
         self.assertIn("song.mp3", audit.first().new_value)  # type: ignore[union-attr]
 
     def test_supplement_clears_stale_review_metadata(self):
-        staff = User.objects.create_user(username="staff", password="pass", role=User.Role.STAFF)
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="staff", password="pass", role=User.Role.STAFF
+            )
         check = self.check(
             status=MaterialCheck.Status.NEEDS_SUPPLEMENT,
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
@@ -391,3 +393,55 @@ class ReviewingWindowTests(RegistrationClosedWindowTests):
     """REVIEWING behaves exactly like REGISTRATION_CLOSED for the participant."""
 
     phase = Activity.Phase.REVIEWING
+
+
+class ParticipantUploadThrottleTests(ParticipantMaterialAuthorityTestCase):
+    """The check-addressed path reuses the shared upload throttle (no bypass)."""
+
+    def test_repeated_uploads_to_one_check_are_throttled(self):
+        check = self.check(
+            status=MaterialCheck.Status.MISSING,
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+        )
+        with override_settings(ARTFLOW_UPLOAD_RATE_LIMIT=1):
+            first = self.post_check(check, _mp3("v1.mp3"))
+            before = SubmissionFile.objects.count()
+            second = self.post_check(check, _mp3("v2.mp3"))
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.status_code, 200)
+        self.assertContains(second, "频繁")
+        self.assertEqual(SubmissionFile.objects.count(), before)
+
+
+class ParticipantUploadPolicyTests(ParticipantMaterialAuthorityTestCase):
+    """The designated-supplement path must not bypass the existing upload policy."""
+
+    phase = Activity.Phase.REGISTRATION_CLOSED
+
+    def _video(self, name="clip.mp4"):
+        header = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00"
+        return SimpleUploadedFile(name, header + b"x" * 1024, content_type="video/mp4")
+
+    @override_settings(ARTFLOW_UPLOAD_QUOTA_MB=0)
+    def test_quota_still_applies(self):
+        check = self.check(
+            status=MaterialCheck.Status.NEEDS_SUPPLEMENT,
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+        )
+        response = self.post_check(check, _mp3())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "配额")
+        self.assert_no_new_file(0)
+
+    @override_settings(ARTFLOW_VIDEO_UPLOAD_MAX_MB=0)
+    def test_formal_video_cap_still_applies(self):
+        self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        check = self.check(
+            item_name="背景视频",
+            status=MaterialCheck.Status.NEEDS_SUPPLEMENT,
+            purpose=SubmissionFile.Purpose.BACKGROUND_VIDEO,
+        )
+        response = self.post_check(check, self._video())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "大视频直传")
+        self.assert_no_new_file(0)
