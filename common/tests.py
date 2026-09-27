@@ -1701,6 +1701,28 @@ class AppBackupVerificationTests(TestCase):
         manifest_path = next(output_root.glob("backup-*/manifest.json"))
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["git_sha"], release_sha)
+        self.assertEqual(
+            set(manifest["counts"]),
+            {
+                "activities",
+                "registrations",
+                "programs",
+                "score_records",
+                "stage_results",
+                "awards",
+                "ruleset_versions",
+                "public_posts",
+                "result_releases",
+                "incidents",
+                "generated_documents",
+                "archive_packages",
+                "submission_files",
+                "vote_ballots",
+                "tickets",
+                "ticket_access_sessions",
+                "audit_logs",
+            },
+        )
 
     def test_backup_artflow_holds_and_releases_the_global_write_barrier(self):
         output_root = Path(self._media.name) / "backups"
