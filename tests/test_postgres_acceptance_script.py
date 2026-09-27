@@ -8,6 +8,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = PROJECT_ROOT / "scripts" / "verify_postgres_acceptance.ps1"
 BACKUP_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "verify_postgres_backup_restore.ps1"
+APP_BACKUP_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "backup_artflow.ps1"
 PWSH = shutil.which("pwsh")
 
 
@@ -51,6 +52,15 @@ def test_postgres_backup_restore_script_has_isolated_target_and_safety_contract(
     assert "docker compose down --volumes" not in script
     assert "dropdb" not in script
     assert "down -v" not in script
+
+
+def test_application_backup_script_uses_container_release_metadata():
+    script = APP_BACKUP_SCRIPT_PATH.read_text(encoding="utf-8")
+
+    assert "[string]$GitSha" in script
+    assert "--git-sha" in script
+    assert "ARTFLOW_RELEASE_SHA" in script
+    assert "git rev-parse HEAD" not in script
 
 
 @pytest.mark.skipif(PWSH is None, reason="pwsh is required for PowerShell syntax checks")
