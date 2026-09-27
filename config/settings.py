@@ -205,13 +205,13 @@ CSRF_COOKIE_SECURE = APP_ENV == "production"
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_HSTS_SECONDS = get_int(
-    os.environ, "SECURE_HSTS_SECONDS", 31_536_000 if APP_ENV == "production" else 0
+    os.environ, "SECURE_HSTS_SECONDS", 300 if APP_ENV == "production" else 0
 )
 SECURE_HSTS_INCLUDE_SUBDOMAINS = get_bool(
-    os.environ, "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=APP_ENV == "production"
+    os.environ, "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False
 )
 SECURE_HSTS_PRELOAD = get_bool(
-    os.environ, "SECURE_HSTS_PRELOAD", default=APP_ENV == "production"
+    os.environ, "SECURE_HSTS_PRELOAD", default=False
 )
 SECURE_REFERRER_POLICY = "same-origin"
 
