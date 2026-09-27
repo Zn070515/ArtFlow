@@ -16,8 +16,12 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from exports.models import GeneratedDocument
+from farewell_show.models import Program
 from files.models import SubmissionFile
-from singer_contest.models import ScoreRecord, SingerRegistration
+from incidents.models import IncidentRecord
+from public_portal.models import PublicPost, ResultRelease
+from ruleset.models import RulesetVersion
+from singer_contest.models import Award, ScoreRecord, SingerRegistration, StageResult
 from tickets.models import Ticket, TicketAccessSession
 from voting.models import VoteBallot
 
@@ -28,7 +32,17 @@ from config.runtime import is_full_git_sha, is_placeholder_value
 COUNT_MODELS: dict[str, Any] = {
     "activities": Activity,
     "registrations": SingerRegistration,
+    "programs": Program,
     "score_records": ScoreRecord,
+    "stage_results": StageResult,
+    "awards": Award,
+    "ruleset_versions": RulesetVersion,
+    "public_posts": PublicPost,
+    "result_releases": ResultRelease,
+    "incidents": IncidentRecord,
+    "generated_documents": GeneratedDocument,
+    "archive_packages": ArchivePackage,
+    "submission_files": SubmissionFile,
     "vote_ballots": VoteBallot,
     "tickets": Ticket,
     "ticket_access_sessions": TicketAccessSession,
