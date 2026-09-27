@@ -1860,12 +1860,18 @@ AudienceScoreManager = models.Manager.from_queryset(AudienceScoreQuerySet)
 
 
 class AudienceScore(models.Model):
-    """A staff-entered per-singer audience score for a checkpoint stage (M1-INTEGRATION-2).
+    """A *manually verified* per-singer audience score for a checkpoint stage.
 
-    Unlike a raw vote count, this is a real 0-100 score (scale ``hundred``) that may be
-    combined by weight with judge scores in the resolver's aggregate. It is keyed by an
-    audience-set name (``stage_key``), which the ruleset binding's ``audience_keys`` maps
-    to the definition's vote_source key.
+    This is the manual / external channel: staff record a real 0-100 score (scale
+    ``hundred``) that the resolver's aggregate combines by weight with judge scores, keyed
+    by an audience-set name (``stage_key``) that the ruleset binding's ``audience_keys``
+    maps to the definition's vote_source key.
+
+    It is deliberately **not** the materialization of the QR vote: a native VoteSession
+    converts its locked ballots through an explicit ``VoteScoringRule`` bound to
+    ``vote_keys``, and never writes an AudienceScore row. Using this model for a foreign or
+    degraded audience source (an external form, a paper tally) requires the operator to
+    verify the numbers first — see the audience entry page's source rules.
     """
 
     activity = models.ForeignKey(

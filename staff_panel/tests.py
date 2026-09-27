@@ -5224,6 +5224,17 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(
             StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
         )
+        # §14: a manually verified audience score is a formal fact, so its entry is audited
+        # with the affected sets and row count (never the score values themselves).
+        audit = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.ENTER_SCORE,
+            target=f"AudienceScore:{self.activity.pk}",
+        )
+        self.assertTrue(audit.exists())
+        self.assertIn("aud1set", audit.first().new_value)  # type: ignore[union-attr]
+        self.assertIn("rows=1", audit.first().new_value)  # type: ignore[union-attr]
+        self.assertNotIn("90", audit.first().new_value)  # type: ignore[union-attr]
+
     def test_post_audience_scores_rejects_out_of_range(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 

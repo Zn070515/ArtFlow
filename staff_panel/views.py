@@ -1594,6 +1594,17 @@ def audience_scores_api(request, activity_id):
                         "is_test_data": test_flag,
                     },
                 )
+            # §14: a manually verified fallback score is a formal fact, so entering it must
+            # be traceable. The audit carries the set names and row counts only — never the
+            # score values, which live in the raw fact rows themselves.
+            AuditLog.objects.create(
+                operator=request.user,
+                action_type=AuditLog.ActionType.ENTER_SCORE,
+                target=f"AudienceScore:{activity.pk}",
+                old_value="",
+                new_value=f"sets={sorted(stage_keys)}; rows={len(rows)}",
+                note="人工/外部核验观众分录入",
+            )
     except ValidationError as error:
         return JsonResponse({"detail": error.messages}, status=400)
     except PermissionDenied:
