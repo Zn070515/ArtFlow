@@ -43,7 +43,20 @@ def valid_workflow() -> str:
             timeout-minutes: 25
             steps:
               - name: Start Compose stack
-                run: docker compose up --build --wait
+                shell: bash
+                run: |
+                  set -Eeuo pipefail
+                  for attempt in {{1..3}}; do
+                    printf 'Compose startup attempt %s/3\\n' "$attempt" >&2
+                    if docker compose up --build --wait; then
+                      exit 0
+                    fi
+                    docker compose down --remove-orphans || true
+                    if (( attempt < 3 )); then
+                      sleep 10
+                    fi
+                  done
+                  exit 1
               - name: Verify running container health
                 run: |
                   docker compose ps --status running --services
@@ -225,6 +238,17 @@ def test_verifier_requires_retry_for_published_compose_health_check():
 
     assert result.returncode == 1
     assert "retry" in result.stderr
+
+
+def test_verifier_requires_retry_for_compose_registry_startup():
+    workflow = valid_workflow()
+    workflow = workflow.replace("for attempt in {{1..3}}; do\n", "")
+    workflow = workflow.replace("sleep 10\n", "")
+
+    result = run_verifier(workflow)
+
+    assert result.returncode == 1
+    assert "Compose startup must retry transient registry failures" in result.stderr
 
 
 def test_verifier_rejects_workflow_contract_violations():

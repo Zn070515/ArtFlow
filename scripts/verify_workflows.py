@@ -126,6 +126,20 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
         issues.append(
             f"{workflow_path.name}: Compose smoke must run docker compose up --build --wait"
         )
+    compose_start_commands = "\n".join(
+        str(step.get("run", ""))
+        for step in compose_steps
+        if step.get("name") == "Build and start Compose stack"
+        or step.get("name") == "Start Compose stack"
+    )
+    if (
+        "for attempt in" not in compose_start_commands
+        or "sleep 10" not in compose_start_commands
+        or "docker compose down --remove-orphans" not in compose_start_commands
+    ):
+        issues.append(
+            f"{workflow_path.name}: Compose startup must retry transient registry failures"
+        )
     if (
         "docker compose ps --status running" not in compose_commands
         or "State.Health.Status" not in compose_commands
