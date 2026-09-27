@@ -16,6 +16,8 @@ compose_file="$repository_root/deploy/compose.production.yml"
 command -v docker >/dev/null 2>&1 || die 'docker is required'
 command -v python3 >/dev/null 2>&1 || die 'python3 is required to inspect the rendered manifest'
 command -v curl >/dev/null 2>&1 || die 'curl is required for the external HTTPS smoke check'
+hostname_validator="$repository_root/scripts/validate_production_hostname.py"
+[[ -f "$hostname_validator" ]] || die 'production hostname validator is missing'
 
 is_digest_image() {
     [[ "$1" =~ ^[^[:space:]@]+@sha256:[0-9a-fA-F]{64}$ ]]
@@ -47,7 +49,8 @@ print(
 '
 )
 [[ "$release_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die 'production build must use a full ARTFLOW_RELEASE_SHA'
-[[ -n "$site_address" ]] || die 'production proxy site address is empty'
+python3 "$hostname_validator" "$site_address" \
+    || die 'CADDY_SITE_ADDRESS must be a hostname without a scheme, port, or path'
 is_release_image "$web_image" || die 'ARTFLOW_WEB_IMAGE must carry the deployed release SHA'
 is_digest_image "$postgres_image" || die 'ARTFLOW_POSTGRES_IMAGE must use a verified digest'
 is_digest_image "$caddy_image" || die 'ARTFLOW_CADDY_IMAGE must use a verified digest'
@@ -58,9 +61,6 @@ web_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontai
 "${compose[@]}" up --no-build --pull never --wait
 "${compose[@]}" exec -T web python manage.py doctor
 
-case "$site_address" in
-    http://*|https://*) health_url="$site_address/healthz/" ;;
-    *) health_url="https://$site_address/healthz/" ;;
-esac
+health_url="https://$site_address/healthz/"
 curl --fail --silent --show-error --max-time 20 "$health_url" >/dev/null
 printf 'production deployment and external health check passed for %s\n' "$release_sha"
