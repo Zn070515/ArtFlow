@@ -67,6 +67,7 @@ services:
       retries: 6
       start_period: 15s
     networks:
+      - artflow_event_frontend
       - artflow_internal
 
 volumes:
@@ -76,5 +77,8 @@ volumes:
   backup_data:
 
 networks:
+  artflow_event_frontend:
+    driver: bridge
+    internal: false
   artflow_internal:
     internal: true
