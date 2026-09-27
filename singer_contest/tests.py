@@ -1237,6 +1237,15 @@ class SingerUploadViewTests(TestCase):
         self.assertContains(response, "文件类型")
         self.assertFalse(SingerRegistration.objects.exists())
 
+    def test_apply_page_shows_privacy_notice_before_collection(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("singer_contest:apply"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "隐私与数据保留说明")
+        self.assertContains(response, reverse("public_portal:privacy"))
+
     def test_apply_rejects_duplicate_registration_for_same_user(self):
         self.client.force_login(self.user)
         payload = {

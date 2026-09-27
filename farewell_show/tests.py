@@ -44,6 +44,23 @@ class FarewellUploadViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Program.objects.exists())
 
+    def test_apply_page_shows_privacy_notice_before_collection(self):
+        user = User.objects.create_user(username="program-applicant", password="pass")
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.create(
+                title="Farewell",
+                activity_type=Activity.Type.FAREWELL_SHOW,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("farewell_show:apply"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "隐私与数据保留说明")
+        self.assertContains(response, reverse("public_portal:privacy"))
+
 
 class ProgramMaterialPurityTests(TestCase):
     def setUp(self):

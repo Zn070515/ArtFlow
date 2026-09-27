@@ -135,6 +135,18 @@ class BrandingContextTests(SimpleTestCase):
                 "示例主办方",
             )
 
+    def test_branding_context_exposes_optional_icp_metadata(self):
+        from config.context_processors import artflow_branding
+
+        request = RequestFactory().get("/")
+        with override_settings(
+            ARTFLOW_ICP_NUMBER="浙ICP备00000000号", ARTFLOW_ICP_URL="https://beian.example"
+        ):
+            branding = artflow_branding(request)
+
+        self.assertEqual(branding["artflow_icp_number"], "浙ICP备00000000号")
+        self.assertEqual(branding["artflow_icp_url"], "https://beian.example")
+
 
 class HealthEndpointTests(TestCase):
     def test_healthz_returns_only_a_generic_success_response_to_anonymous_get(self):

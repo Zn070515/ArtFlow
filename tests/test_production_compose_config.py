@@ -11,6 +11,7 @@ PRODUCTION_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.production.yml"
 EVENT_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.event.yml"
 REHEARSAL_RUNBOOK_PATH = PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md"
 PRODUCTION_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.production.example"
+EVENT_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.event.example"
 DOCKER = shutil.which("docker")
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
 CONFIG_ENVIRONMENT = {
@@ -99,6 +100,8 @@ def test_compose_manifests_forward_optional_branding_to_web():
         web_environment = compose["services"]["web"]["environment"]
 
         assert web_environment["ARTFLOW_ORGANIZATION_NAME"] == "${ARTFLOW_ORGANIZATION_NAME:-}"
+        assert web_environment["ARTFLOW_ICP_NUMBER"] == "${ARTFLOW_ICP_NUMBER:-}"
+        assert web_environment["ARTFLOW_ICP_URL"] == "${ARTFLOW_ICP_URL:-}"
 
 
 def test_production_web_healthcheck_uses_internal_exempt_health_route():
@@ -127,6 +130,18 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert values["ARTFLOW_ORGANIZATION_NAME"] == ""
     assert values["ARTFLOW_RELEASE_SHA"] == "replace-me-with-the-deployed-commit-sha"
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+
+
+def test_environment_examples_document_optional_public_metadata_and_staged_hsts():
+    production = PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    event = EVENT_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+
+    for contents in (production, event):
+        assert "ARTFLOW_ICP_NUMBER=" in contents
+        assert "ARTFLOW_ICP_URL=" in contents
+        assert "SECURE_HSTS_SECONDS=" in contents
+        assert "SECURE_HSTS_INCLUDE_SUBDOMAINS=" in contents
+        assert "SECURE_HSTS_PRELOAD=" in contents
 
 
 def test_dockerfile_copies_every_runtime_local_app():

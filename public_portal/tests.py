@@ -236,6 +236,14 @@ class PublicPortalVisibilityTests(TestCase):
         self.assertNotContains(response, "浙江工业大学")
         self.assertNotContains(response, "信息工程学院")
 
+    def test_privacy_page_explains_collection_and_retention(self):
+        response = self.client.get(reverse("public_portal:privacy"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "隐私与数据保留说明")
+        self.assertContains(response, "报名")
+        self.assertContains(response, "匿名化")
+
 
 class ResultReleaseModelTests(TestCase):
     def setUp(self):
