@@ -67,10 +67,12 @@ from singer_contest.models import (
     Performance,
     RoundEntry,
     RoundJudge,
+    RubricCriterion,
     ScoreRecord,
     ScoreSource,
     ScoreSummary,
     ScoreWriteReceipt,
+    ScoringRubric,
     SingerRegistration,
     StageDecision,
     StageResult,
@@ -2947,6 +2949,34 @@ class StaffPanelSmokeTests(TestCase):
         self.assertFalse(VoteBallot.objects.filter(vote_session__activity=clone).exists())
         self.assertFalse(VoteRecord.objects.filter(vote_session__activity=clone).exists())
         self.assertFalse(GeneratedDocument.objects.filter(activity=clone).exists())
+
+    def test_activity_clone_marks_rubric_configuration_as_test_data(self):
+        rubric = ScoringRubric.objects.create(
+            activity=self.singer_activity,
+            name="Formal rubric",
+            description="Formal source configuration",
+            is_test_data=False,
+        )
+        RubricCriterion.objects.create(
+            rubric=rubric,
+            name="Quality",
+            max_score=100,
+            is_test_data=False,
+        )
+
+        login_admin(self.client, self.admin)
+        response = self.client.post(reverse("staff:activity_clone", args=[self.singer_activity.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        clone = Activity.objects.get(title="Singer Contest（副本）")
+        cloned_rubric = ScoringRubric.objects.get(activity=clone, name="Formal rubric")
+        cloned_criterion = RubricCriterion.objects.get(rubric=cloned_rubric, name="Quality")
+
+        self.assertTrue(clone.is_test_mode)
+        self.assertTrue(cloned_rubric.is_test_data)
+        self.assertTrue(cloned_criterion.is_test_data)
+        self.assertFalse(ScoringRubric.objects.get(pk=rubric.pk).is_test_data)
+        self.assertFalse(RubricCriterion.objects.get(rubric=rubric, name="Quality").is_test_data)
 
 
 class RuntimeLifecycleMatrixTests(TestCase):
