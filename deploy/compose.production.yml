@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: ${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
@@ -21,6 +21,7 @@ services:
     build:
       context: ..
       args:
+        ARTFLOW_PYTHON_IMAGE: ${ARTFLOW_PYTHON_IMAGE:?Set ARTFLOW_PYTHON_IMAGE}
         ARTFLOW_BUILD_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
     restart: unless-stopped
     depends_on:
@@ -65,7 +66,7 @@ services:
       - artflow_internal
 
   proxy:
-    image: caddy:2-alpine
+    image: ${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}
     restart: unless-stopped
     depends_on:
       web:

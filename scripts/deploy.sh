@@ -17,10 +17,14 @@ command -v docker >/dev/null 2>&1 || die 'docker is required'
 command -v python3 >/dev/null 2>&1 || die 'python3 is required to inspect the rendered manifest'
 command -v curl >/dev/null 2>&1 || die 'curl is required for the external HTTPS smoke check'
 
+is_digest_image() {
+    [[ "$1" =~ ^[^[:space:]@]+@sha256:[0-9a-fA-F]{64}$ ]]
+}
+
 compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file")
 "${compose[@]}" config --quiet
 rendered="$(${compose[@]} config --format json)"
-read -r release_sha site_address < <(
+read -r release_sha site_address python_image postgres_image caddy_image < <(
     printf '%s' "$rendered" | python3 -c '
 import json
 import sys
@@ -28,11 +32,21 @@ import sys
 config = json.load(sys.stdin)
 web = config["services"]["web"]
 proxy = config["services"]["proxy"]
-print(web["build"]["args"]["ARTFLOW_BUILD_SHA"], proxy["environment"]["CADDY_SITE_ADDRESS"])
+db = config["services"]["db"]
+print(
+    web["build"]["args"]["ARTFLOW_BUILD_SHA"],
+    proxy["environment"]["CADDY_SITE_ADDRESS"],
+    web["build"]["args"]["ARTFLOW_PYTHON_IMAGE"],
+    db["image"],
+    proxy["image"],
+)
 '
 )
 [[ "$release_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die 'production build must use a full ARTFLOW_RELEASE_SHA'
 [[ -n "$site_address" ]] || die 'production proxy site address is empty'
+is_digest_image "$python_image" || die 'ARTFLOW_PYTHON_IMAGE must use a verified digest'
+is_digest_image "$postgres_image" || die 'ARTFLOW_POSTGRES_IMAGE must use a verified digest'
+is_digest_image "$caddy_image" || die 'ARTFLOW_CADDY_IMAGE must use a verified digest'
 
 "${compose[@]}" up --build --wait
 "${compose[@]}" exec -T web python manage.py doctor

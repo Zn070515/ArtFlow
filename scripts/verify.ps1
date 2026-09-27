@@ -102,7 +102,8 @@ function Assert-ContainerContracts {
         }
     }
 
-    Assert-ContentMatch $dockerfile '(?m)^FROM python:3\.12-slim$' 'a Python 3.12 slim base image'
+    Assert-ContentMatch $dockerfile '(?m)^ARG ARTFLOW_PYTHON_IMAGE=python:3\.12-slim$' 'a Python 3.12 slim base image default'
+    Assert-ContentMatch $dockerfile '(?m)^FROM \$\{ARTFLOW_PYTHON_IMAGE\}$' 'an explicit Python base image selector'
     Assert-ContentMatch $dockerfile 'postgresql-client' 'the PostgreSQL client package'
     Assert-ContentMatch $dockerfile 'uv sync --frozen --no-dev --extra production' 'production dependencies'
     Assert-ContentMatch $dockerfile '(?m)^USER artflow$' 'a non-root runtime user'
