@@ -18,6 +18,22 @@ def test_restore_scripts_use_shared_stable_database_wait():
         assert "pg_isready" not in script
 
 
+def test_application_restore_uses_the_running_database_image_instead_of_a_drifted_tag():
+    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "compose -p $ComposeProjectName ps -q db" in script
+    assert "inspect -f '{{.Config.Image}}' $dbContainer" in script
+    assert "postgres:17-alpine" not in script
+
+
+def test_backup_wrapper_targets_the_persistent_backup_mount_by_default():
+    script = (REPOSITORY_ROOT / "scripts/backup_artflow.ps1").read_text(encoding="utf-8")
+
+    assert "[string]$ContainerBackupBase = '/app/backups'" in script
+
+
 def test_restore_wait_helper_requires_stable_final_postgres_server():
     helper = HELPER.read_text(encoding="utf-8")
 

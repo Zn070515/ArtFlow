@@ -64,7 +64,7 @@ from common.management.commands.backup_artflow import (
     create_media_archive,
     media_content_digest,
 )
-from common.management.commands.verify_app_backup import validate_counts
+from common.management.commands.verify_app_backup import validate_counts, verify_media_files
 
 from . import models as common_models
 from .business_rules import ensure_same_activity
@@ -1713,6 +1713,40 @@ class AppBackupVerificationTests(TestCase):
                         "--output",
                         str(Path(self._media.name) / "backups"),
                     )
+
+    def test_backup_artflow_rejects_non_full_explicit_release_sha(self):
+        with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA="a" * 40):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "backup_artflow",
+                    "--output",
+                    str(Path(self._media.name) / "backups"),
+                    "--git-sha",
+                    "not-a-commit",
+                )
+
+    def test_verify_app_backup_checks_media_references_after_the_first_five(self):
+        for index in range(6):
+            name = f"submissions/late-check-{index}.mp3"
+            if index < 5:
+                path = Path(settings.MEDIA_ROOT) / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"audio")
+            SubmissionFile.objects.create(
+                singer_registration=self.registration,
+                file=name,
+                original_name=f"late-check-{index}.mp3",
+                file_size=5,
+                file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+                is_current=False,
+                version=index + 1,
+            )
+
+        problems, verified = verify_media_files()
+
+        self.assertTrue(any("late-check-5.mp3" in problem for problem in problems))
+        self.assertEqual(len(verified), 5)
 
     def test_verify_app_backup_passes_when_manifest_matches(self):
         store_submission_file(
