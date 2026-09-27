@@ -117,8 +117,10 @@ class SubmissionFileLifecycleTests(TestCase):
 
     @override_settings(ARTFLOW_UPLOAD_RATE_LIMIT=1, ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS=60)
     def test_upload_rate_limit_does_not_share_a_bucket_across_owner_types(self):
-        # A singer registration and a program are different tables whose ids both start at
-        # 1; the same actor uploading to both must not have one consume the other's budget.
+        # A singer registration and a program live in different tables, so the same numeric
+        # id can name an owner of each kind; the same actor uploading to both must not have
+        # one consume the other's budget. The id is pinned so the collision is exercised on
+        # every backend (PostgreSQL sequences are not rolled back with the transaction).
         from farewell_show.models import Program
 
         cache.clear()
@@ -129,6 +131,7 @@ class SubmissionFileLifecycleTests(TestCase):
             is_test_mode=False,
         )
         program = Program.objects.create(
+            pk=self.registration.pk,
             activity=activity,
             user=self.user,
             name="Dance",
