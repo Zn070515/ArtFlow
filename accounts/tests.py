@@ -6,6 +6,7 @@ from io import StringIO
 from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
@@ -190,6 +191,20 @@ class PasswordLifecycleTests(TestCase):
         self.assertEqual(audit.old_value, "")
         self.assertEqual(audit.new_value, "")
         self.assertEqual(audit.note, "admin_password_reset")
+
+    def test_admin_reset_preserves_full_return_path_without_manual_redirect_construction(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(
+            f"{reverse('accounts:admin_password_reset', args=[self.participant.pk])}?from=staff"
+        )
+
+        location = urlsplit(response["Location"])
+        self.assertEqual(location.path, reverse("accounts:admin_login"))
+        self.assertEqual(
+            parse_qs(location.query)["next"],
+            [f"{reverse('accounts:admin_password_reset', args=[self.participant.pk])}?from=staff"],
+        )
 
 
 class ParticipantLoginRateLimitTests(TestCase):

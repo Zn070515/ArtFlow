@@ -6,6 +6,7 @@ from django import forms
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
+from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
@@ -228,10 +229,10 @@ def password_change_view(request):
 @login_required
 def admin_password_reset_view(request, user_id):
     if not request.user.is_admin or not admin_verification_is_valid(request.session):
-        return redirect(f"{reverse('accounts:admin_login')}?next={request.path}")
+        return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))
     actor = User.objects.filter(pk=request.user.pk, is_active=True).first()
     if actor is None or not actor.is_admin:
-        return redirect(f"{reverse('accounts:admin_login')}?next={request.path}")
+        return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))
     target = get_object_or_404(User, pk=user_id)
     form = AdminPasswordResetForm(request.POST or None, user=target)
     if request.method == "POST" and form.is_valid():
