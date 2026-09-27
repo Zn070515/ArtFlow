@@ -171,6 +171,13 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 # Above this many MiB, a PERFORMANCE_VIDEO / BACKGROUND_VIDEO direct upload is
 # rejected for a FORMAL activity (test-mode activities keep the larger dev cap).
 ARTFLOW_VIDEO_UPLOAD_MAX_MB = get_int(os.environ, "ARTFLOW_VIDEO_UPLOAD_MAX_MB", 100)
+ARTFLOW_UPLOAD_QUOTA_MB = get_int(os.environ, "ARTFLOW_UPLOAD_QUOTA_MB", 512)
+ARTFLOW_UPLOAD_MAX_VERSIONS = get_int(os.environ, "ARTFLOW_UPLOAD_MAX_VERSIONS", 5)
+ARTFLOW_UPLOAD_RATE_LIMIT = get_int(os.environ, "ARTFLOW_UPLOAD_RATE_LIMIT", 10)
+ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS = get_int(
+    os.environ, "ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS", 60 * 60
+)
+ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 256)
 
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.

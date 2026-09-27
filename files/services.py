@@ -1,3 +1,5 @@
+import shutil
+import zipfile
 from functools import partial
 from pathlib import PurePath
 
@@ -10,8 +12,10 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
 from django.utils import timezone
+from PIL import Image, UnidentifiedImageError
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
+from common.rate_limit import RateLimitExceeded, hit_rate_limit
 
 VIDEO_PURPOSES = (
     SubmissionFile.Purpose.BACKGROUND_VIDEO,
@@ -124,6 +128,68 @@ def validate_upload(uploaded_file, purpose, *, activity=None):
         and content_type not in ALLOWED_CONTENT_TYPES[purpose]
     ):
         raise ValidationError("文件媒体类型不符合该用途的允许列表。")
+    _validate_file_signature(uploaded_file, extension)
+
+
+def _read_upload_header(uploaded_file, limit: int = 4096) -> bytes:
+    try:
+        uploaded_file.seek(0)
+        return uploaded_file.read(limit)
+    finally:
+        uploaded_file.seek(0)
+
+
+def _validate_file_signature(uploaded_file, extension: str) -> None:
+    """Reject renamed/random bytes before a file reaches persistent storage."""
+    header = _read_upload_header(uploaded_file)
+    try:
+        if extension in {".jpg", ".jpeg", ".png", ".webp"}:
+            uploaded_file.seek(0)
+            with Image.open(uploaded_file) as image:
+                image.verify()
+        elif extension == ".mp3":
+            valid = header.startswith(b"ID3") or (
+                len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0
+            )
+            if not valid:
+                raise ValueError("invalid MP3 frame")
+        elif extension == ".wav":
+            if not (header.startswith(b"RIFF") and header[8:12] == b"WAVE"):
+                raise ValueError("invalid WAV header")
+        elif extension == ".flac":
+            if not header.startswith(b"fLaC"):
+                raise ValueError("invalid FLAC header")
+        elif extension == ".m4a":
+            if len(header) < 12 or header[4:8] != b"ftyp":
+                raise ValueError("invalid M4A container")
+        elif extension in {".mp4", ".mov"}:
+            if len(header) < 12 or header[4:8] != b"ftyp":
+                raise ValueError("invalid MP4/MOV container")
+        elif extension == ".webm":
+            if not header.startswith(b"\x1a\x45\xdf\xa3"):
+                raise ValueError("invalid WebM container")
+        elif extension == ".pdf":
+            if not header.startswith(b"%PDF-"):
+                raise ValueError("invalid PDF header")
+        elif extension in {".zip", ".docx"}:
+            uploaded_file.seek(0)
+            with zipfile.ZipFile(uploaded_file) as archive:
+                if archive.testzip() is not None:
+                    raise ValueError("corrupt ZIP entry")
+                if extension == ".docx" and not {
+                    "[Content_Types].xml",
+                    "word/document.xml",
+                }.issubset(archive.namelist()):
+                    raise ValueError("invalid DOCX package")
+        elif extension == ".doc":
+            if not header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+                raise ValueError("invalid legacy Word container")
+        elif extension == ".txt":
+            header.decode("utf-8")
+    except (OSError, ValueError, UnicodeDecodeError, UnidentifiedImageError, zipfile.BadZipFile):
+        raise ValidationError("文件内容与扩展名不匹配或文件已损坏。") from None
+    finally:
+        uploaded_file.seek(0)
 
 
 def _owner_filter(owner):
@@ -137,11 +203,28 @@ def _owner_filter(owner):
 @transaction.atomic
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose, activity=owner.activity)
+    if shutil.disk_usage(settings.MEDIA_ROOT).free < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024:
+        raise ValidationError("存储空间不足，暂时无法接收上传。")
+    try:
+        hit_rate_limit(
+            f"upload:{getattr(uploaded_by, 'pk', 'anonymous')}:{owner.pk}:{purpose}",
+            limit=settings.ARTFLOW_UPLOAD_RATE_LIMIT,
+            window_seconds=settings.ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS,
+        )
+    except RateLimitExceeded:
+        raise ValidationError("上传操作过于频繁，请稍后再试。") from None
     activity = lock_activity_for_action(owner.activity, ActivityAction.UPLOAD_MATERIAL)
     # Serialize all file operations for the same owner, including the first
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
     owner_filter = _owner_filter(locked_owner)
+    existing_bytes = (
+        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose).values_list(
+            "file_size", flat=True
+        )
+    )
+    if sum(existing_bytes) + uploaded_file.size > settings.ARTFLOW_UPLOAD_QUOTA_MB * 1024 * 1024:
+        raise ValidationError("该报名此用途的文件存储配额已用尽。")
     SubmissionFile.objects.select_for_update().filter(
         **owner_filter, file_purpose=purpose, is_current=True
     ).update(is_current=False)
@@ -164,6 +247,19 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
         is_current=True,
         version=latest + 1,
     )
+    max_versions = settings.ARTFLOW_UPLOAD_MAX_VERSIONS
+    if max_versions < 1:
+        raise ValidationError("上传版本保留配置无效。")
+    stale_files = list(
+        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose)
+        .order_by("-version", "-pk")[max_versions:]
+    )
+    for stale_file in stale_files:
+        stale_storage = stale_file.file.storage
+        stale_name = stale_file.file.name
+        stale_file.delete()
+        if stale_name:
+            transaction.on_commit(partial(delete_storage_object, stale_storage, stale_name))
     _reset_matching_check(locked_owner, purpose)
     return created
 
