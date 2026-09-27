@@ -65,6 +65,10 @@ def is_placeholder_value(value: str) -> bool:
     )
 
 
+def is_full_git_sha(value: str) -> bool:
+    return len(value) == 40 and all(character in "0123456789abcdefABCDEF" for character in value)
+
+
 def is_placeholder_host(value: str) -> bool:
     parsed_value = urlparse(value)
     hostname = (parsed_value.hostname or value).rstrip(".").lower()
@@ -89,6 +93,11 @@ def validate_production_environment(env: Mapping[str, str]) -> None:
         raise ImproperlyConfigured(
             "Production configuration cannot use a placeholder ADMIN_LOGIN_KEY."
         )
+
+    release_sha = env.get("ARTFLOW_RELEASE_SHA", "").strip()
+    if release_sha and (is_placeholder_value(release_sha) or not is_full_git_sha(release_sha)):
+        raise ImproperlyConfigured("Production configuration requires a valid ARTFLOW_RELEASE_SHA.")
+
     if get_bool(env, "DEBUG", default=False):
         raise ImproperlyConfigured("Production configuration requires DEBUG to be disabled.")
 
