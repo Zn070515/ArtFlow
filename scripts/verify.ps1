@@ -191,6 +191,9 @@ $temporaryProductionEnvironment = [ordered]@{
     ARTFLOW_POSTGRES_IMAGE = 'postgres:16-alpine@sha256:' + ('b' * 64)
     ARTFLOW_CADDY_IMAGE = 'caddy:2-alpine@sha256:' + ('c' * 64)
     CADDY_SITE_ADDRESS = 'artflow.internal'
+    SECURE_HSTS_SECONDS = '31536000'
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = 'True'
+    SECURE_HSTS_PRELOAD = 'True'
 }
 $originalProductionEnvironment = @{}
 foreach ($name in $temporaryProductionEnvironment.Keys) {
