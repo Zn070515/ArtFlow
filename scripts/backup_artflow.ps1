@@ -74,6 +74,11 @@ try {
         throw 'The copied backup set is missing manifest.json.'
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($env:ARTFLOW_OFFSITE_BUCKET)) {
+        $offsiteScript = Join-Path $PSScriptRoot 'offsite_backup.ps1'
+        & $offsiteScript -BackupSet $localBackupDir
+    }
+
     Write-Host "Backup set created at $localBackupDir"
     Write-Output $localBackupDir
 }

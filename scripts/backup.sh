@@ -37,4 +37,7 @@ local_backup_dir="$output_root/$(basename -- "$container_backup_dir")"
 for required in manifest.json database.dump media.tar.gz; do
     [[ -f "$local_backup_dir/$required" ]] || die "copied backup is missing $required"
 done
+if [[ -n "${ARTFLOW_OFFSITE_BUCKET:-}" ]]; then
+    "$(dirname -- "${BASH_SOURCE[0]}")/offsite_backup.sh" "$local_backup_dir"
+fi
 printf '%s\n' "$local_backup_dir"
