@@ -210,9 +210,7 @@ SECURE_HSTS_SECONDS = get_int(
 SECURE_HSTS_INCLUDE_SUBDOMAINS = get_bool(
     os.environ, "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False
 )
-SECURE_HSTS_PRELOAD = get_bool(
-    os.environ, "SECURE_HSTS_PRELOAD", default=False
-)
+SECURE_HSTS_PRELOAD = get_bool(os.environ, "SECURE_HSTS_PRELOAD", default=False)
 SECURE_REFERRER_POLICY = "same-origin"
 
 # Register system checks only after the runtime environment has been loaded.

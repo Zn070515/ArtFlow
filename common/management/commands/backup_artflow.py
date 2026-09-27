@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from archive.models import ArchivePackage
+from config.runtime import is_full_git_sha, is_placeholder_value
 from core.models import Activity
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -25,9 +26,8 @@ from singer_contest.models import Award, ScoreRecord, SingerRegistration, StageR
 from tickets.models import Ticket, TicketAccessSession
 from voting.models import VoteBallot
 
-from common.models import AuditLog
 from common.maintenance import WriteBarrierBusy, write_barrier
-from config.runtime import is_full_git_sha, is_placeholder_value
+from common.models import AuditLog
 
 COUNT_MODELS: dict[str, Any] = {
     "activities": Activity,

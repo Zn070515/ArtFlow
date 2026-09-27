@@ -183,7 +183,9 @@ def test_compose_manifests_forward_staged_hsts_configuration():
     event = load_compose(EVENT_COMPOSE_PATH)["services"]["web"]["environment"]
 
     assert production["SECURE_HSTS_SECONDS"] == "${SECURE_HSTS_SECONDS:-300}"
-    assert production["SECURE_HSTS_INCLUDE_SUBDOMAINS"] == "${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"
+    assert (
+        production["SECURE_HSTS_INCLUDE_SUBDOMAINS"] == "${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"
+    )
     assert production["SECURE_HSTS_PRELOAD"] == "${SECURE_HSTS_PRELOAD:-false}"
     assert event["SECURE_HSTS_SECONDS"] == "${SECURE_HSTS_SECONDS:-0}"
     assert event["SECURE_HSTS_INCLUDE_SUBDOMAINS"] == "${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"

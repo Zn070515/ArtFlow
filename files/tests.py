@@ -9,8 +9,8 @@ from accounts.models import User
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.cache import cache
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Count
@@ -80,7 +80,9 @@ class SubmissionFileLifecycleTests(TestCase):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
 
     def test_upload_policy_rejects_random_bytes_with_allowed_audio_name(self):
-        upload = SimpleUploadedFile("song.mp3", b"not an audio container", content_type="audio/mpeg")
+        upload = SimpleUploadedFile(
+            "song.mp3", b"not an audio container", content_type="audio/mpeg"
+        )
 
         with self.assertRaises(ValidationError):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
@@ -146,9 +148,7 @@ class SubmissionFileLifecycleTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "存储配额"):
             store_submission_file(
                 owner=self.registration,
-                uploaded_file=SimpleUploadedFile(
-                    "large-2.mp3", audio, content_type="audio/mpeg"
-                ),
+                uploaded_file=SimpleUploadedFile("large-2.mp3", audio, content_type="audio/mpeg"),
                 purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                 uploaded_by=self.user,
             )

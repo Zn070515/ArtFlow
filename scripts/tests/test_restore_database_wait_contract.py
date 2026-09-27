@@ -19,9 +19,7 @@ def test_restore_scripts_use_shared_stable_database_wait():
 
 
 def test_application_restore_uses_the_running_database_image_instead_of_a_drifted_tag():
-    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(
-        encoding="utf-8"
-    )
+    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(encoding="utf-8")
 
     assert "compose -p $ComposeProjectName ps -q db" in script
     assert "inspect -f '{{.Config.Image}}' $dbContainer" in script
@@ -35,9 +33,7 @@ def test_backup_wrapper_targets_the_persistent_backup_mount_by_default():
 
 
 def test_application_restore_verifies_backup_hashes_before_extracting_or_restoring():
-    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(
-        encoding="utf-8"
-    )
+    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(encoding="utf-8")
 
     assert "ConvertFrom-Json" in script
     assert "database_sha256" in script
@@ -50,9 +46,7 @@ def test_application_restore_verifies_backup_hashes_before_extracting_or_restori
 
 
 def test_application_restore_requires_the_running_web_image_to_match_manifest_sha():
-    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(
-        encoding="utf-8"
-    )
+    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(encoding="utf-8")
 
     assert "$manifest.git_sha" in script
     assert "org.opencontainers.image.revision" in script

@@ -1,7 +1,7 @@
 from config.runtime import is_placeholder_value
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import AuthenticationForm, PasswordChangeForm, UserCreationForm
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.contrib.auth.password_validation import validate_password
 from django.utils.crypto import constant_time_compare
 

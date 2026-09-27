@@ -12,13 +12,9 @@ from .models import AuditLog
 def redacted_field_change(before: dict[str, Any], after: dict[str, Any]) -> tuple[str, str]:
     """Describe an edit without copying any of the edited values into audit storage."""
     changed_fields = sorted(
-        field
-        for field in set(before) | set(after)
-        if before.get(field) != after.get(field)
+        field for field in set(before) | set(after) if before.get(field) != after.get(field)
     )
-    old_summary = json.dumps(
-        {"changed_fields": changed_fields}, ensure_ascii=False, sort_keys=True
-    )
+    old_summary = json.dumps({"changed_fields": changed_fields}, ensure_ascii=False, sort_keys=True)
     new_summary = json.dumps(
         {"changed_fields": changed_fields, "values_redacted": True},
         ensure_ascii=False,

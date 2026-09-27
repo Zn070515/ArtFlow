@@ -4,8 +4,8 @@ from common.models import AuditLog
 from common.rate_limit import allow
 from django import forms
 from django.contrib.auth import login, logout, update_session_auth_hash
-from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import PasswordChangeForm
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
@@ -52,7 +52,9 @@ def _allow_form_submission(
 ) -> bool:
     ip = client_ip(request) or "unknown"
     normalized_identity = identity.strip().casefold()
-    key = f"{key_prefix}:{ip}:{normalized_identity}" if normalized_identity else f"{key_prefix}:{ip}"
+    key = (
+        f"{key_prefix}:{ip}:{normalized_identity}" if normalized_identity else f"{key_prefix}:{ip}"
+    )
     decision = allow(
         key,
         limit=limit,

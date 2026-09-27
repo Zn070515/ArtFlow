@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from .backup_artflow import FILE_MODELS, collect_counts, media_content_digest
 
+
 def validate_counts(manifest: dict[str, Any], counts: dict[str, int]) -> list[str]:
     problems: list[str] = []
     expected = manifest.get("counts") or {}

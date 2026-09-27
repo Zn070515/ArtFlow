@@ -69,9 +69,9 @@ from common.management.commands.verify_app_backup import validate_counts, verify
 from . import models as common_models
 from .business_rules import ensure_same_activity
 from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
+from .maintenance import WriteBarrierBusy, write_barrier
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, MaintenanceState, SeedRecord
-from .maintenance import WriteBarrierBusy, write_barrier
 from .test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
 from .views import _media_file_response
 
@@ -1741,9 +1741,7 @@ class AppBackupVerificationTests(TestCase):
                 call_command("backup_artflow", "--output", str(output_root))
 
         self.assertEqual(observed, [True])
-        self.assertFalse(
-            MaintenanceState.objects.get(pk=MaintenanceState.SINGLETON_PK).enabled
-        )
+        self.assertFalse(MaintenanceState.objects.get(pk=MaintenanceState.SINGLETON_PK).enabled)
 
     def test_backup_artflow_production_requires_release_sha(self):
         with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=""):
@@ -1869,7 +1867,9 @@ class RetentionCleanupCommandTests(TestCase):
         Activity.objects.filter(pk=self.activity.pk).update(
             updated_at=timezone.now() - timedelta(days=120)
         )
-        self.participant = User.objects.create_user(username="retention-participant", password="pass")
+        self.participant = User.objects.create_user(
+            username="retention-participant", password="pass"
+        )
         self.registration = SingerRegistration.objects.create(
             activity=self.activity,
             user=self.participant,

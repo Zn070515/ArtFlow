@@ -5,7 +5,6 @@ from datetime import timedelta
 from typing import Any
 
 from accounts.models import User
-from common.models import AuditLog
 from core.models import Activity
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -13,6 +12,8 @@ from django.db import transaction
 from django.utils import timezone
 from farewell_show.models import Program
 from singer_contest.models import SingerRegistration
+
+from common.models import AuditLog
 
 
 class Command(BaseCommand):
@@ -39,7 +40,9 @@ class Command(BaseCommand):
         if actor is None or not actor.is_admin:
             raise CommandError("Retention cleanup requires an active administrator actor.")
         if not options["dry_run"] and not options["confirm"]:
-            raise CommandError("Destructive retention cleanup requires --confirm (or use --dry-run).")
+            raise CommandError(
+                "Destructive retention cleanup requires --confirm (or use --dry-run)."
+            )
 
         cutoff = timezone.now() - timedelta(days=days)
         activities = Activity.objects.filter(
@@ -51,7 +54,9 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             for activity in activities.select_for_update():
-                singers = list(SingerRegistration.objects.select_for_update().filter(activity=activity))
+                singers = list(
+                    SingerRegistration.objects.select_for_update().filter(activity=activity)
+                )
                 programs = list(Program.objects.select_for_update().filter(activity=activity))
                 totals["activities"] += 1
                 totals["singers"] += len(singers)

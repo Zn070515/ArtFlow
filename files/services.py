@@ -4,6 +4,7 @@ from functools import partial
 from pathlib import PurePath
 
 from accounts.services import require_current_staff
+from common.rate_limit import RateLimitExceeded, hit_rate_limit
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
@@ -15,7 +16,6 @@ from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
-from common.rate_limit import RateLimitExceeded, hit_rate_limit
 
 VIDEO_PURPOSES = (
     SubmissionFile.Purpose.BACKGROUND_VIDEO,
@@ -203,7 +203,10 @@ def _owner_filter(owner):
 @transaction.atomic
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose, activity=owner.activity)
-    if shutil.disk_usage(settings.MEDIA_ROOT).free < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024:
+    if (
+        shutil.disk_usage(settings.MEDIA_ROOT).free
+        < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024
+    ):
         raise ValidationError("存储空间不足，暂时无法接收上传。")
     try:
         hit_rate_limit(
@@ -218,11 +221,9 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
     owner_filter = _owner_filter(locked_owner)
-    existing_bytes = (
-        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose).values_list(
-            "file_size", flat=True
-        )
-    )
+    existing_bytes = SubmissionFile.objects.filter(
+        **owner_filter, file_purpose=purpose
+    ).values_list("file_size", flat=True)
     if sum(existing_bytes) + uploaded_file.size > settings.ARTFLOW_UPLOAD_QUOTA_MB * 1024 * 1024:
         raise ValidationError("该报名此用途的文件存储配额已用尽。")
     SubmissionFile.objects.select_for_update().filter(
@@ -251,8 +252,9 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     if max_versions < 1:
         raise ValidationError("上传版本保留配置无效。")
     stale_files = list(
-        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose)
-        .order_by("-version", "-pk")[max_versions:]
+        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose).order_by(
+            "-version", "-pk"
+        )[max_versions:]
     )
     for stale_file in stale_files:
         stale_storage = stale_file.file.storage
