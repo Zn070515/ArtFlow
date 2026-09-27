@@ -2908,7 +2908,7 @@ def activity_clone(request, pk):
             name=rubric.name,
             description=rubric.description,
             sequence=rubric.sequence,
-            is_test_data=rubric.is_test_data,
+            is_test_data=runtime_is_test(new_activity),
         )
         for criterion in rubric.criteria.all():
             RubricCriterion.objects.create(
@@ -2917,7 +2917,7 @@ def activity_clone(request, pk):
                 max_score=criterion.max_score,
                 sequence=criterion.sequence,
                 description=criterion.description,
-                is_test_data=criterion.is_test_data,
+                is_test_data=runtime_is_test(new_activity),
             )
         rubric_map[rubric.pk] = new_rubric
     for contest_round in ContestRound.objects.filter(activity=original):
