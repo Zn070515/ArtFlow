@@ -70,7 +70,8 @@ from . import models as common_models
 from .business_rules import ensure_same_activity
 from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
-from .models import AuditLog, SeedRecord
+from .models import AuditLog, MaintenanceState, SeedRecord
+from .maintenance import WriteBarrierBusy, write_barrier
 from .test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
 from .views import _media_file_response
 
@@ -1701,6 +1702,27 @@ class AppBackupVerificationTests(TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["git_sha"], release_sha)
 
+    def test_backup_artflow_holds_and_releases_the_global_write_barrier(self):
+        output_root = Path(self._media.name) / "backups"
+        release_sha = "b" * 40
+        observed: list[bool] = []
+
+        def fake_pg_dump(_database, dump_path):
+            observed.append(MaintenanceState.objects.get(pk=MaintenanceState.SINGLETON_PK).enabled)
+            dump_path.write_bytes(b"test dump")
+
+        with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=release_sha):
+            with patch(
+                "common.management.commands.backup_artflow.pg_dump",
+                side_effect=fake_pg_dump,
+            ):
+                call_command("backup_artflow", "--output", str(output_root))
+
+        self.assertEqual(observed, [True])
+        self.assertFalse(
+            MaintenanceState.objects.get(pk=MaintenanceState.SINGLETON_PK).enabled
+        )
+
     def test_backup_artflow_production_requires_release_sha(self):
         with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=""):
             with patch(
@@ -1751,7 +1773,9 @@ class AppBackupVerificationTests(TestCase):
     def test_verify_app_backup_passes_when_manifest_matches(self):
         store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x15", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -1772,7 +1796,9 @@ class AppBackupVerificationTests(TestCase):
     def test_verify_app_backup_fails_when_media_digest_differs(self):
         store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x15", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -1785,6 +1811,24 @@ class AppBackupVerificationTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command("verify_app_backup", "--manifest", str(manifest_path))
+
+
+class WriteBarrierMiddlewareTests(TestCase):
+    def test_unsafe_http_methods_fail_closed_during_backup_but_get_remains_available(self):
+        MaintenanceState.objects.update_or_create(
+            pk=MaintenanceState.SINGLETON_PK,
+            defaults={"enabled": True, "reason": "backup", "started_at": timezone.now()},
+        )
+
+        self.assertEqual(self.client.get(reverse("public_portal:home")).status_code, 200)
+        response = self.client.post(reverse("accounts:login"), {})
+        self.assertEqual(response.status_code, 503)
+
+    def test_only_one_barrier_can_be_active(self):
+        with write_barrier("test"):
+            with self.assertRaises(WriteBarrierBusy):
+                with write_barrier("second"):
+                    pass
 
 
 class RetentionCleanupCommandTests(TestCase):
