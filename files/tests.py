@@ -1,13 +1,16 @@
 import shutil
 import tempfile
 import threading
+from types import SimpleNamespace
 from unittest import skipUnless
+from unittest.mock import patch
 
 from accounts.models import User
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Count
@@ -76,16 +79,108 @@ class SubmissionFileLifecycleTests(TestCase):
         with self.assertRaises(ValidationError):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
 
+    def test_upload_policy_rejects_random_bytes_with_allowed_audio_name(self):
+        upload = SimpleUploadedFile("song.mp3", b"not an audio container", content_type="audio/mpeg")
+
+        with self.assertRaises(ValidationError):
+            validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
+
+    def test_upload_policy_rejects_malformed_image_bytes(self):
+        upload = SimpleUploadedFile("poster.png", b"not a png", content_type="image/png")
+
+        with self.assertRaises(ValidationError):
+            validate_upload(upload, SubmissionFile.Purpose.PROGRAM_IMAGE)
+
+    @override_settings(ARTFLOW_UPLOAD_RATE_LIMIT=1, ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS=60)
+    def test_upload_rate_limit_is_scoped_to_owner_and_purpose(self):
+        cache.clear()
+        valid_audio = b"ID3\x04\x00\x00\x00\x00\x00\x00"
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("first.mp3", valid_audio, content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "上传操作过于频繁"):
+            store_submission_file(
+                owner=self.registration,
+                uploaded_file=SimpleUploadedFile(
+                    "second.mp3", valid_audio, content_type="audio/mpeg"
+                ),
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+            )
+
+    @override_settings(ARTFLOW_UPLOAD_MAX_VERSIONS=2)
+    def test_upload_retains_only_the_configured_recent_versions(self):
+        cache.clear()
+        audio = b"ID3\x04\x00\x00\x00\x00\x00\x00"
+        for name in ("first.mp3", "second.mp3", "third.mp3"):
+            store_submission_file(
+                owner=self.registration,
+                uploaded_file=SimpleUploadedFile(name, audio, content_type="audio/mpeg"),
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+            )
+
+        self.assertEqual(
+            SubmissionFile.objects.filter(
+                singer_registration=self.registration,
+                file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            ).count(),
+            2,
+        )
+
+    @override_settings(ARTFLOW_UPLOAD_QUOTA_MB=1)
+    def test_upload_quota_is_scoped_to_owner_and_purpose(self):
+        cache.clear()
+        audio = b"ID3" + b"x" * (700 * 1024)
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("large.mp3", audio, content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "存储配额"):
+            store_submission_file(
+                owner=self.registration,
+                uploaded_file=SimpleUploadedFile(
+                    "large-2.mp3", audio, content_type="audio/mpeg"
+                ),
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+            )
+
+    @patch("files.services.shutil.disk_usage", return_value=SimpleNamespace(free=0))
+    def test_upload_rejects_when_media_disk_is_below_low_water_mark(self, _disk_usage):
+        upload = SimpleUploadedFile(
+            "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+        )
+
+        with self.assertRaisesMessage(ValidationError, "存储空间不足"):
+            store_submission_file(
+                owner=self.registration,
+                uploaded_file=upload,
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+            )
+
     def test_replacing_upload_demotes_previous_file(self):
         first = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("first.mp3", b"first", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "first.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
         second = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("second.mp3", b"second", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "second.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -103,7 +198,9 @@ class SubmissionFileLifecycleTests(TestCase):
         with self.assertRaisesMessage(PermissionDenied, "Activity results are locked."):
             store_submission_file(
                 owner=self.registration,
-                uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+                uploaded_file=SimpleUploadedFile(
+                    "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+                ),
                 purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                 uploaded_by=self.user,
             )
@@ -113,7 +210,9 @@ class SubmissionFileLifecycleTests(TestCase):
     def test_deleting_submission_file_removes_database_row_and_storage_object(self):
         submission = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -129,13 +228,17 @@ class SubmissionFileLifecycleTests(TestCase):
     def test_deleting_current_file_promotes_latest_historical_version(self):
         first = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("first.mp3", b"first", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "first.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
         second = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("second.mp3", b"second", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "second.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -148,7 +251,9 @@ class SubmissionFileLifecycleTests(TestCase):
     def test_deleting_submission_file_defers_storage_removal_until_commit(self):
         submission = store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -256,7 +361,9 @@ class MaterialCheckReviewTests(TestCase):
     def test_sync_preserves_staff_review_state(self):
         store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -297,7 +404,9 @@ class MaterialCheckReviewTests(TestCase):
         )
         store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -320,7 +429,10 @@ class VideoDirectUploadGateTests(TestCase):
         shutil.rmtree(self.media_root, ignore_errors=True)
 
     def _video(self, size):
-        return SimpleUploadedFile("clip.mp4", b"x" * size, content_type="video/mp4")
+        header = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00"
+        return SimpleUploadedFile(
+            "clip.mp4", header + b"x" * max(0, size - len(header)), content_type="video/mp4"
+        )
 
     def test_formal_activity_rejects_oversize_video(self):
         activity = _create_activity(
