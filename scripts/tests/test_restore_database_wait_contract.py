@@ -34,6 +34,21 @@ def test_backup_wrapper_targets_the_persistent_backup_mount_by_default():
     assert "[string]$ContainerBackupBase = '/app/backups'" in script
 
 
+def test_application_restore_verifies_backup_hashes_before_extracting_or_restoring():
+    script = (REPOSITORY_ROOT / "scripts/verify_app_backup_restore.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "ConvertFrom-Json" in script
+    assert "database_sha256" in script
+    assert "media_sha256" in script
+    assert "Get-FileHash" in script
+    assert script.index("Assert-BackupHash -Path") < script.index("$mediaExtractDir =")
+    assert script.index("Assert-BackupHash -Path") < script.index(
+        "Invoke-Docker -Arguments @('exec', $restoreContainer, 'pg_restore'"
+    )
+
+
 def test_restore_wait_helper_requires_stable_final_postgres_server():
     helper = HELPER.read_text(encoding="utf-8")
 
