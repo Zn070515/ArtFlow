@@ -18,11 +18,7 @@ services:
       - artflow_internal
 
   web:
-    build:
-      context: ..
-      args:
-        ARTFLOW_PYTHON_IMAGE: ${ARTFLOW_PYTHON_IMAGE:?Set ARTFLOW_PYTHON_IMAGE}
-        ARTFLOW_BUILD_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
+    image: ${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}
     restart: unless-stopped
     depends_on:
       db:

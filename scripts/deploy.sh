@@ -21,10 +21,14 @@ is_digest_image() {
     [[ "$1" =~ ^[^[:space:]@]+@sha256:[0-9a-fA-F]{64}$ ]]
 }
 
+is_release_image() {
+    [[ "$1" == *":$release_sha" || "$1" == *":$release_sha@sha256:"* ]]
+}
+
 compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file")
 "${compose[@]}" config --quiet
-rendered="$(${compose[@]} config --format json)"
-read -r release_sha site_address python_image postgres_image caddy_image < <(
+rendered="$("${compose[@]}" config --format json)"
+read -r release_sha site_address web_image postgres_image caddy_image < <(
     printf '%s' "$rendered" | python3 -c '
 import json
 import sys
@@ -34,9 +38,9 @@ web = config["services"]["web"]
 proxy = config["services"]["proxy"]
 db = config["services"]["db"]
 print(
-    web["build"]["args"]["ARTFLOW_BUILD_SHA"],
+    web["environment"]["ARTFLOW_RELEASE_SHA"],
     proxy["environment"]["CADDY_SITE_ADDRESS"],
-    web["build"]["args"]["ARTFLOW_PYTHON_IMAGE"],
+    web["image"],
     db["image"],
     proxy["image"],
 )
@@ -44,11 +48,14 @@ print(
 )
 [[ "$release_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die 'production build must use a full ARTFLOW_RELEASE_SHA'
 [[ -n "$site_address" ]] || die 'production proxy site address is empty'
-is_digest_image "$python_image" || die 'ARTFLOW_PYTHON_IMAGE must use a verified digest'
+is_release_image "$web_image" || die 'ARTFLOW_WEB_IMAGE must carry the deployed release SHA'
 is_digest_image "$postgres_image" || die 'ARTFLOW_POSTGRES_IMAGE must use a verified digest'
 is_digest_image "$caddy_image" || die 'ARTFLOW_CADDY_IMAGE must use a verified digest'
+web_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$web_image" 2>/dev/null)" \
+    || die 'the prebuilt web image is not loaded locally'
+[[ "$web_revision" == "$release_sha" ]] || die 'prebuilt web image revision does not match ARTFLOW_RELEASE_SHA'
 
-"${compose[@]}" up --build --wait
+"${compose[@]}" up --no-build --pull never --wait
 "${compose[@]}" exec -T web python manage.py doctor
 
 case "$site_address" in
