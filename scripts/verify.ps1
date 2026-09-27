@@ -186,6 +186,10 @@ $temporaryProductionEnvironment = [ordered]@{
     POSTGRES_PASSWORD = 'artflow-verification-database-password'
     POSTGRES_HOST = 'db.internal'
     POSTGRES_PORT = '5432'
+    ARTFLOW_RELEASE_SHA = 'a' * 40
+    ARTFLOW_WEB_IMAGE = 'artflow-web:' + ('a' * 40)
+    ARTFLOW_POSTGRES_IMAGE = 'postgres:16-alpine@sha256:' + ('b' * 64)
+    ARTFLOW_CADDY_IMAGE = 'caddy:2-alpine@sha256:' + ('c' * 64)
     CADDY_SITE_ADDRESS = 'artflow.internal'
 }
 $originalProductionEnvironment = @{}
