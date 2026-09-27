@@ -114,6 +114,15 @@ def test_production_web_healthcheck_uses_internal_exempt_health_route():
     assert "http://127.0.0.1:8000/healthz/" in healthcheck[-1]
 
 
+def test_production_proxy_healthcheck_reaches_the_https_proxy_boundary():
+    compose = load_compose(PRODUCTION_COMPOSE_PATH)
+    healthcheck = compose["services"]["proxy"]["healthcheck"]["test"]
+
+    assert "https://127.0.0.1/healthz/" in healthcheck[-1]
+    assert "CADDY_SITE_ADDRESS" in healthcheck[-1]
+    assert "no-check-certificate" in healthcheck[-1]
+
+
 def test_production_rehearsal_runbook_names_the_explicit_production_manifest():
     runbook = REHEARSAL_RUNBOOK_PATH.read_text(encoding="utf-8")
 
