@@ -174,6 +174,18 @@ def test_environment_examples_document_optional_public_metadata_and_staged_hsts(
         assert "SECURE_HSTS_PRELOAD=" in contents
 
 
+def test_compose_manifests_forward_staged_hsts_configuration():
+    production = load_compose(PRODUCTION_COMPOSE_PATH)["services"]["web"]["environment"]
+    event = load_compose(EVENT_COMPOSE_PATH)["services"]["web"]["environment"]
+
+    assert production["SECURE_HSTS_SECONDS"] == "${SECURE_HSTS_SECONDS:-300}"
+    assert production["SECURE_HSTS_INCLUDE_SUBDOMAINS"] == "${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"
+    assert production["SECURE_HSTS_PRELOAD"] == "${SECURE_HSTS_PRELOAD:-false}"
+    assert event["SECURE_HSTS_SECONDS"] == "${SECURE_HSTS_SECONDS:-0}"
+    assert event["SECURE_HSTS_INCLUDE_SUBDOMAINS"] == "${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}"
+    assert event["SECURE_HSTS_PRELOAD"] == "${SECURE_HSTS_PRELOAD:-false}"
+
+
 def test_dockerfile_copies_every_runtime_local_app():
     dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
 
