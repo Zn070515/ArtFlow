@@ -87,6 +87,7 @@ from ruleset.services import (
     update_ruleset_binding,
     update_ruleset_definition,
 )
+from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.judge_authority import (
     advance_performance,
     hold_judge_panel,
@@ -155,6 +156,7 @@ from voting.services import (
     lock_vote_session,
     open_vote_session,
     unlock_vote_session,
+    vote_session_configuration_facts,
 )
 
 from staff_panel.forms import (
@@ -1593,6 +1595,17 @@ def audience_scores_api(request, activity_id):
                         "is_test_data": test_flag,
                     },
                 )
+            # §14: a manually verified fallback score is a formal fact, so entering it must
+            # be traceable. The audit carries the set names and row counts only — never the
+            # score values, which live in the raw fact rows themselves.
+            AuditLog.objects.create(
+                operator=request.user,
+                action_type=AuditLog.ActionType.ENTER_SCORE,
+                target=f"AudienceScore:{activity.pk}",
+                old_value="",
+                new_value=f"sets={sorted(stage_keys)}; rows={len(rows)}",
+                note="人工/外部核验观众分录入",
+            )
     except ValidationError as error:
         return JsonResponse({"detail": error.messages}, status=400)
     except PermissionDenied:
@@ -2346,6 +2359,24 @@ def vote_session_detail(request, pk):
     options = options.annotate(vote_count=Count("records"))
     total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
     _, top = _popularity_top_tie(vote_session)
+    # §9: a score-component session must be reconcilable by hand — valid ballot count,
+    # per-candidate votes and support rate next to the conversion mode and lock state.
+    conversion = None
+    conversion_rows = []
+    if vote_session.purpose == VoteSession.Purpose.SCORE_COMPONENT:
+        conversion = vote_session_configuration_facts(
+            vote_session, test_flag=runtime_is_test(vote_session.activity)
+        )
+        rates = conversion["support_rate"]
+        counted = conversion["candidate_votes"]
+        conversion_rows = [
+            {
+                "singer": option.singer,
+                "votes": counted.get(option.singer_id, 0),
+                "rate": rates.get(str(option.singer_id)),
+            }
+            for option in options
+        ]
     return render(
         request,
         "staff_panel/vote_session_detail.html",
@@ -2354,6 +2385,8 @@ def vote_session_detail(request, pk):
             "options": options,
             "total_votes": total_votes,
             "popularity_tie": len(top) > 1,
+            "conversion": conversion,
+            "conversion_rows": conversion_rows,
         },
     )
 
@@ -3368,6 +3401,9 @@ def ruleset_edit(request, pk):
             "binding_json": {
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),
+                "vote_scoring_rule_keys": json.dumps(
+                    ruleset.vote_scoring_rule_keys or {}, ensure_ascii=False
+                ),
                 "group_keys": json.dumps(ruleset.group_keys or {}, ensure_ascii=False),
                 "audience_keys": json.dumps(ruleset.audience_keys or {}, ensure_ascii=False),
                 "announcement_blocks": json.dumps(
@@ -3411,6 +3447,7 @@ def ruleset_bind(request, pk):
                 "stage_key": request.POST.get("stage_key"),
                 "round_keys": _parse_json("round_keys", {}),
                 "vote_keys": _parse_json("vote_keys", {}),
+                "vote_scoring_rule_keys": _parse_json("vote_scoring_rule_keys", {}),
                 "group_keys": _parse_json("group_keys", {}),
                 "audience_keys": _parse_json("audience_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),
@@ -3547,5 +3584,7 @@ def ruleset_clone_from_template(request, template_pk):
 @staff_required
 @require_POST
 def ruleset_clone_last_year(request):
-    template = get_object_or_404(RulesetTemplate, name="院十佳")
+    # Identity, not display name: the 2025 historical template is found by its stable
+    # builtin_key so a future rename can never break "clone last year" (§11.2).
+    template = get_object_or_404(RulesetTemplate, builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
     return ruleset_clone_from_template(request, template.pk)

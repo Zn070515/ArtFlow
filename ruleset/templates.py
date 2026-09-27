@@ -573,10 +573,20 @@ FIRST_BATCH = [
     for (key, name, desc, definition) in _FIRST_BATCH_DEFINITIONS
 ]
 
-_PRODUCTION_TEMPLATE_NAMES = frozenset({"院十佳", "独立人气奖"})
+# The 2025 院十佳 definition is the *historical* fact the current contest is cloned from;
+# it is not this year's rules. The stable machine identity stays ``golden_schidui`` so a
+# display-name change can never fork a second template (§11.1).
+HISTORICAL_SCHIDUI_NAME = "院十佳 2025（历史模板）"
+GOLDEN_SCHIDUI_BUILTIN_KEY = "golden_schidui"
+# Legacy display names that predate the builtin_key identity, mapped to their stable key.
+# Used by the upgrade migration and by the seeder's adoption path; an exact name match on a
+# single keyless row only — never a fuzzy title guess.
+LEGACY_TEMPLATE_NAMES = {"院十佳": GOLDEN_SCHIDUI_BUILTIN_KEY}
+
+_PRODUCTION_TEMPLATE_NAMES = frozenset({HISTORICAL_SCHIDUI_NAME, "独立人气奖"})
 _UNSUPPORTED_TEMPLATE_NAMES = frozenset({"校十佳屏峰_历史未决回退"})
 _BUILTIN_KEYS_BY_NAME = {
-    "院十佳": "golden_schidui",
+    HISTORICAL_SCHIDUI_NAME: GOLDEN_SCHIDUI_BUILTIN_KEY,
     "合成_分组逐组补足演示": "synthetic_xiaofeng_group_fill",
     "校十佳屏峰_历史控制流": "historical_xiaofeng_control_flow",
     "校十佳屏峰_历史未决回退": "historical_xiaofeng_unresolved_fallback",
@@ -596,7 +606,11 @@ def _capability_for_template(name: str):
 
 def _catalog():
     catalog = [
-        ("院十佳", GOLDEN_SCHIDUI, "2025 院十佳：15→10→5→3 加权晋级链"),
+        (
+            HISTORICAL_SCHIDUI_NAME,
+            GOLDEN_SCHIDUI,
+            "2025 院十佳：15→10→5→3 加权晋级链（历史模板，克隆后按今年赛制调整）",
+        ),
         (
             "合成_分组逐组补足演示",
             GOLDEN_XIAOFENG,
@@ -624,12 +638,36 @@ def _catalog():
     return catalog
 
 
+def _adopt_legacy_template_row(name: str, builtin_key: str) -> None:
+    """Give a pre-``builtin_key`` row its stable identity instead of forking a duplicate.
+
+    Only an *exact* name match on a single row that still has an empty key is adopted, and
+    only when no other row already owns that key — a legacy database must upgrade in place
+    rather than end up with two rows for one built-in template (§11.1).
+    """
+    from .models import RulesetTemplate
+
+    if not builtin_key:
+        return
+    if RulesetTemplate.objects.filter(builtin_key=builtin_key).exists():
+        return
+    candidates = RulesetTemplate.objects.filter(name=name, builtin_key="")
+    if candidates.count() != 1:
+        return
+    row = candidates.first()
+    assert row is not None
+    row.builtin_key = builtin_key
+    row.save(update_fields=["builtin_key"])
+
+
 @transaction.atomic
 def seed_ruleset_templates(operator=None, *, status=None):
     """Idempotently upsert the template library into :class:`RulesetTemplate`.
 
-    Keyed by ``name``; each row's canonical ``content_hash`` keeps it current. Returns the
-    number of templates newly created.
+    Built-in templates are keyed by their stable ``builtin_key`` (a display rename updates
+    the row in place and can never fork a duplicate); a custom row without a key is matched
+    by name. Each row's canonical ``content_hash`` keeps it current. Returns the number of
+    templates newly created.
     """
     from .models import RulesetTemplate
 
@@ -640,19 +678,32 @@ def seed_ruleset_templates(operator=None, *, status=None):
     created = 0
     for name, definition, description in catalog:
         parsed = parse_definition(definition)
+        builtin_key = _BUILTIN_KEYS_BY_NAME.get(name, "")
+        if builtin_key:
+            # Legacy keyless rows are adopted before the lookup, so an upgraded database
+            # updates the historical row instead of creating a second one. A row under its
+            # current name and one under a pre-rename legacy name are both candidates.
+            _adopt_legacy_template_row(name, builtin_key)
+            for legacy_name, legacy_key in LEGACY_TEMPLATE_NAMES.items():
+                if legacy_key == builtin_key and legacy_name != name:
+                    _adopt_legacy_template_row(legacy_name, builtin_key)
+            lookup = {"builtin_key": builtin_key}
+        else:
+            lookup = {"name": name}
         _, was_created = RulesetTemplate.objects.update_or_create(
-            name=name,
             defaults={
+                "name": name,
                 "definition": definition,
                 "schema_version": parsed["schema_version"],
                 "description": description,
                 "status": status,
-                "builtin_key": _BUILTIN_KEYS_BY_NAME.get(name, ""),
+                "builtin_key": builtin_key,
                 "capability_status": _capability_for_template(name),
                 "is_available": name in _PRODUCTION_TEMPLATE_NAMES,
                 "content_hash": content_hash(definition),
                 "created_by": operator,
             },
+            **lookup,
         )
         created += 1 if was_created else 0
     # Older installations may still contain a removed built-in. Retire it instead

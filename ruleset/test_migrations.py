@@ -162,3 +162,50 @@ class ConfirmedTrailMigrationTest(TransactionTestCase, MigrationTestMixin):
             self.assertIsNone(row.confirmed_by)
         finally:
             self._restore_latest()
+
+
+class HistoricalTemplateIdentityMigrationTest(TransactionTestCase, MigrationTestMixin):
+    """§11.1 — an existing database upgrades the 2025 template in place, never by fork."""
+
+    before = "0016_contestruleset_vote_scoring_rule_keys"
+    after = "0017_historical_schidui_template_identity"
+
+    def test_keyless_legacy_row_gains_its_key_and_the_display_name(self):
+        try:
+            self._migrate_to([("ruleset", self.before)])
+            apps = self._apps_at(("ruleset", self.before))
+            T = apps.get_model("ruleset", "RulesetTemplate")
+            legacy = T.objects.create(name="院十佳", definition="{}", description="legacy")
+
+            executor = self._migrate_to([("ruleset", self.after)])
+            after_apps = executor.loader.project_state([("ruleset", self.after)]).apps
+            Template = after_apps.get_model("ruleset", "RulesetTemplate")
+
+            self.assertEqual(Template.objects.count(), 1)
+            row = Template.objects.get()
+            self.assertEqual(row.pk, legacy.pk)
+            self.assertEqual(row.builtin_key, "golden_schidui")
+            self.assertEqual(row.name, "院十佳 2025（历史模板）")
+        finally:
+            self._restore_latest()
+
+    def test_keyed_row_is_renamed_without_a_duplicate(self):
+        try:
+            self._migrate_to([("ruleset", self.before)])
+            apps = self._apps_at(("ruleset", self.before))
+            T = apps.get_model("ruleset", "RulesetTemplate")
+            T.objects.create(name="院十佳", definition="{}", builtin_key="golden_schidui")
+            T.objects.create(name="独立人气奖", definition="{}", builtin_key="popularity_award")
+
+            executor = self._migrate_to([("ruleset", self.after)])
+            after_apps = executor.loader.project_state([("ruleset", self.after)]).apps
+            Template = after_apps.get_model("ruleset", "RulesetTemplate")
+
+            self.assertEqual(Template.objects.count(), 2)
+            self.assertEqual(Template.objects.filter(builtin_key="golden_schidui").count(), 1)
+            self.assertEqual(
+                Template.objects.get(builtin_key="golden_schidui").name,
+                "院十佳 2025（历史模板）",
+            )
+        finally:
+            self._restore_latest()

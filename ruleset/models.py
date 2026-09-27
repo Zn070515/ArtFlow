@@ -135,6 +135,15 @@ class ContestRuleset(models.Model):
         blank=True,
         help_text="Maps a ruleset vote_source key to a VoteSession pk, e.g. {'audience1': 7}.",
     )
+    vote_scoring_rule_keys = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Maps a ruleset vote_source key to the VoteScoringRule pk that converts its "
+            "ballots into a score, e.g. {'audience1': 4}. The frozen binding snapshots the "
+            "rule id, mode and output scale."
+        ),
+    )
     group_keys = models.JSONField(
         default=dict,
         blank=True,

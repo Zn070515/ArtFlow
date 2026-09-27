@@ -700,7 +700,13 @@ def _tie_is_supported(node: dict, policy: str) -> bool:
     return policy == "manual"
 
 
-def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[str, dict]) -> None:
+def _check_votes(
+    node: dict,
+    ctx: dict,
+    prov: dict,
+    issues: list[ReportIssue],
+    by_key: dict[str, dict],
+) -> None:
     source = node.get("vote_source")
     if not source:
         return
@@ -747,6 +753,7 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[
     expected_session_purpose = {
         "POPULARITY": "popularity",
         "SELECTION": "selection",
+        "SCORE_COMPONENT": "score_component",
     }.get(vote_purpose)
     actual_session_purpose = vote.get("purpose")
     if (
@@ -805,6 +812,7 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[
         and vote.get("scale") not in (None, "hundred")
         and vote.get("scale") != "votes"
         and not vote.get("normalization")
+        and not vote.get("conversion")
     ):
         issues.append(
             ReportIssue(
@@ -815,6 +823,64 @@ def _check_votes(node: dict, ctx: dict, issues: list[ReportIssue], by_key: dict[
                 f"投票 {source} 量纲 {vote.get('scale')} 混入应归一化。",
             )
         )
+    # §5.7: ticket checking is what makes a ballot a *person in the room*. A score
+    # component sourced from a session without it would let the web at large weight the
+    # official result, so the freeze must fail rather than warn.
+    if (
+        node.get("vote_purpose") == "SCORE_COMPONENT"
+        and "requires_ticket" in vote
+        and not vote.get("requires_ticket")
+    ):
+        issues.append(
+            ReportIssue(
+                "VOTE_SCORE_COMPONENT_REQUIRES_TICKET",
+                Severity.ERROR,
+                node["key"],
+                "vote_source",
+                f"成绩组成投票 {source} 必须启用入场票校验。",
+            )
+        )
+    # §7.3: a score-component vote may not silently drift from the roster it scores — a
+    # missing candidate must not become a 0 and an extra one must not be ignored.
+    if node.get("vote_purpose") == "SCORE_COMPONENT":
+        _check_vote_roster(node, ctx, prov, source, vote, issues)
+
+
+def _check_vote_roster(
+    node: dict, ctx: dict, prov: dict, source: str, vote: dict, issues: list[ReportIssue]
+) -> None:
+    """The bound session's candidates must equal the ASSESS source pool (§7.3).
+
+    Identity is compared when the pool's roster is knowable (the entry pool, or any pool
+    whose membership the bound context supplies); otherwise the pool's known size is used,
+    which still catches a candidate added to or missing from the session. A pool with
+    neither identity nor size is left to the other unverifiable-pool checks.
+    """
+    candidates = vote.get("candidates")
+    if candidates is None:
+        return
+    actual = frozenset(str(c) for c in candidates)
+    if node.get("source") == ENTRY_KEY:
+        expected = ctx.get("entry_candidates")
+        if expected is not None:
+            if actual != frozenset(str(c) for c in expected):
+                issues.append(_vote_roster_issue(node, source, len(actual), len(expected)))
+            return
+    expected_size = (prov.get(node.get("source")) or {}).get("size")
+    if expected_size is None and node.get("source") == ENTRY_KEY:
+        expected_size = ctx.get("entry_size")
+    if expected_size is not None and len(actual) != expected_size:
+        issues.append(_vote_roster_issue(node, source, len(actual), expected_size))
+
+
+def _vote_roster_issue(node: dict, source: str, actual: int, expected: int) -> ReportIssue:
+    return ReportIssue(
+        "VOTE_ROSTER_MISMATCH",
+        Severity.ERROR,
+        node["key"],
+        "vote_source",
+        f"投票 {source} 的候选名单（{actual} 人）与赛段名单（{expected} 人）不一致。",
+    )
 
 
 def _check_scale_binding(node: dict, ctx: dict, issues: list[ReportIssue]) -> None:
@@ -1045,7 +1111,7 @@ def compile_definition(
         _check_quota(node, prov, by_key, ctx, issues)
         _check_pair(node, prov, ctx, issues)
         _check_tie(node, prov, by_key, issues, cutoffs)
-        _check_votes(node, ctx, issues, by_key)
+        _check_votes(node, ctx, prov, issues, by_key)
         _check_scale_binding(node, ctx, issues)
         _check_dependency(node, prov, ctx, by_key, issues)
         node_plans.append(_node_plan(node, prov, outputs))

@@ -8,8 +8,13 @@
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / {{ activity.title }} 观众分</p>
     <h1 class="text-2xl font-bold text-gray-900 mb-4">观众分录入</h1>
 
-    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 text-sm text-gray-600">
-        <p>观众分是 <span class="font-medium">0-100 的成绩分</span>（不是原始票数）。保存后系统会自动尝试计算下一赛段。</p>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 text-sm text-gray-600 space-y-2">
+        <p>观众分是 <span class="font-medium">人工核验后的 0-100 成绩分</span>，不是扫码投票的原始票数，也不是本系统 VoteSession 的自动换算结果。保存后系统会自动尝试计算下一赛段。</p>
+        <p>正式观众分来源有两种，二者互相独立：</p>
+        <ul class="list-disc list-inside space-y-1 text-xs">
+            <li><span class="font-medium">扫码投票</span>：在投票管理中配置「成绩组成」的 VoteSession，并为其绑定成绩换算规则后，由赛制绑定 vote_keys 读取，无需在本页录入。</li>
+            <li><span class="font-medium">人工/外部核验</span>：本页录入。仅用于外部表单 DR、公网不可用或事先定义好的观众分兜底策略；录入前须完成<span class="font-medium">双人核对</span>，并在备注中保留来源（外部表单、纸面统计等）。</li>
+        </ul>
     </div>
 
     <div data-error class="hidden bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4"></div>

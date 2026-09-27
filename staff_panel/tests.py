@@ -58,6 +58,7 @@ from incidents.models import IncidentRecord
 from openpyxl import load_workbook
 from public_portal.models import PublicPost, ResultRelease
 from ruleset.models import ContestRuleset, RulesetVersion
+from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, HISTORICAL_SCHIDUI_NAME
 from singer_contest.models import (
     AudienceScore,
     Award,
@@ -5224,6 +5225,16 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(
             StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
         )
+        # §14: a manually verified audience score is a formal fact, so its entry is audited
+        # with the affected sets and row count (never the score values themselves).
+        audit = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.ENTER_SCORE,
+            target=f"AudienceScore:{self.activity.pk}",
+        )
+        self.assertTrue(audit.exists())
+        self.assertIn("aud1set", audit.first().new_value)  # type: ignore[union-attr]
+        self.assertIn("rows=1", audit.first().new_value)  # type: ignore[union-attr]
+        self.assertNotIn("90", audit.first().new_value)  # type: ignore[union-attr]
 
     def test_post_audience_scores_rejects_out_of_range(self):
         from ruleset.models import ContestRuleset, RulesetVersion
@@ -5783,21 +5794,21 @@ class ResultBoardTests(TestCase):
 
 class RulesetTemplateLibraryTests(TestCase):
     def setUp(self):
+        from ruleset.templates import seed_ruleset_templates
+
         self.staff = _create_provisioned_user(
             username="lib-staff",
             password="pass",
             role=User.Role.STAFF,
         )
         self.client.force_login(self.staff)
-        from ruleset.templates import seed_ruleset_templates
-
         seed_ruleset_templates(self.staff)
 
     def test_template_list_renders_library(self):
         response = self.client.get(reverse("staff:ruleset_template_list"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "赛制模板库")
-        self.assertContains(response, "院十佳")
+        self.assertContains(response, HISTORICAL_SCHIDUI_NAME)
         self.assertContains(response, "校十佳屏峰")
 
     def test_template_list_requires_staff(self):
@@ -5808,7 +5819,7 @@ class RulesetTemplateLibraryTests(TestCase):
     def test_template_detail_renders_definition_nodes(self):
         from ruleset.models import RulesetTemplate
 
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         response = self.client.get(reverse("staff:ruleset_template_detail", args=[template.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, template.name)
@@ -5828,7 +5839,7 @@ class RulesetTemplateLibraryTests(TestCase):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
         activity = self._clone_activity()
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         response = self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
             {"activity": activity.pk, "name": "院十佳2026克隆"},
@@ -5851,7 +5862,7 @@ class RulesetTemplateLibraryTests(TestCase):
             is_test_data=True,
             created_by=self.staff,
         )
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         response = self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
             {"activity": activity.pk, "name": "院十佳2027复制"},
@@ -5868,7 +5879,7 @@ class RulesetTemplateLibraryTests(TestCase):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
         activity = self._clone_activity("院十佳2028")
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
             {"activity": activity.pk, "name": "赛制A"},
@@ -5889,16 +5900,22 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertFalse(latest.is_current)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[latest.pk]))
 
-    def test_clone_last_year_picks_golden_template_by_name(self):
-        from ruleset.models import ContestRuleset, RulesetVersion
+    def test_clone_last_year_picks_the_template_by_builtin_key(self):
+        # §11.2: the display name is UI, the builtin key is identity — even after the row
+        # is renamed, "clone last year" must still find the 2025 historical template.
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
-        activity = self._clone_activity("校十佳2026")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        RulesetTemplate.objects.filter(pk=template.pk).update(name="完全不同的名字")
+
+        activity = self._clone_activity("院十佳2026")
         response = self.client.post(
             reverse("staff:ruleset_clone_last_year"),
-            {"activity": activity.pk, "name": "校十佳2026"},
+            {"activity": activity.pk, "name": "院十佳2026"},
         )
         ruleset = ContestRuleset.objects.get(activity=activity)
-        self.assertEqual(ruleset.source_template.name, "院十佳")  # type: ignore[union-attr]
+        self.assertEqual(ruleset.source_template_id, template.pk)
+        self.assertEqual(ruleset.source_template.definition, template.definition)  # type: ignore[union-attr]
         version = RulesetVersion.objects.get(ruleset=ruleset)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 
@@ -5906,7 +5923,7 @@ class RulesetTemplateLibraryTests(TestCase):
         activity = self._clone_activity()
         from ruleset.models import RulesetTemplate
 
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         self.client.logout()
         response = self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
@@ -6896,3 +6913,113 @@ class StageResultAuthorityDetailTests(TestCase):
         response = self.client.get(reverse("staff:stage_result_detail", args=[old.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+
+class ScoreComponentVoteUiTests(TestCase):
+    """§9 — configuring a score-component vote, and the staff verification panel."""
+
+    def setUp(self):
+        self.activity = _create_activity(
+            title="成绩投票活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.staff = _create_provisioned_user(
+            username="score-component-staff", password="pass", role=User.Role.STAFF
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=_create_provisioned_user(username="score-component-singer", password="pass"),
+            name="成绩选手",
+            student_id="20260901",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.client.force_login(self.staff)
+
+    def _payload(self, **overrides):
+        payload = {
+            "activity_id": self.activity.pk,
+            "name": "成绩投票",
+            "passcode": "1234",
+            "start_time": "2026-08-27T10:00",
+            "end_time": "2026-08-27T11:00",
+            "singers": [str(self.singer.pk)],
+            "purpose": VoteSession.Purpose.SCORE_COMPONENT,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_create_form_requires_ticket_checking_for_score_component(self):
+        response = self.client.post(reverse("staff:vote_session_create"), self._payload())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "必须启用入场票校验")
+        self.assertFalse(VoteSession.objects.filter(name="成绩投票").exists())
+
+    def test_create_form_accepts_score_component_with_ticket_checking(self):
+        response = self.client.post(
+            reverse("staff:vote_session_create"), self._payload(requires_ticket="on")
+        )
+        self.assertEqual(response.status_code, 302)
+        session = VoteSession.objects.get(name="成绩投票")
+        self.assertEqual(session.purpose, VoteSession.Purpose.SCORE_COMPONENT)
+        self.assertTrue(session.requires_ticket)
+
+    def test_detail_panel_shows_ballots_votes_and_support_rate(self):
+        from voting.services import configure_vote_scoring_rule
+
+        session = _create_vote_session(
+            activity=self.activity,
+            name="成绩投票",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(hours=1),
+            purpose=VoteSession.Purpose.SCORE_COMPONENT,
+            requires_ticket=True,
+            is_test_data=True,
+        )
+        option = VoteOption.objects.create(
+            vote_session=session, singer=self.singer, is_test_data=True
+        )
+        configure_vote_scoring_rule(session, self.staff)
+        for index in range(4):
+            ballot = VoteBallot.objects.create(
+                vote_session=session,
+                browser_session_key=f"ui-browser-{index}",
+                ip_address="127.0.0.1",
+                is_test_data=True,
+            )
+            VoteRecord.objects.create(
+                ballot=ballot,
+                vote_session=session,
+                vote_option=option,
+                browser_session_key=f"ui-browser-{index}",
+                ip_address="127.0.0.1",
+                is_test_data=True,
+            )
+
+        response = self.client.get(reverse("staff:vote_session_detail", args=[session.pk]))
+
+        self.assertContains(response, "成绩换算核对")
+        self.assertContains(response, "ballot_share_percent")
+        self.assertContains(response, "100.00")
+        self.assertContains(response, "多选投票时各选手支持率之和可以超过 100%")
+
+    def test_detail_panel_reports_an_empty_session_as_undecided(self):
+        session = _create_vote_session(
+            activity=self.activity,
+            name="空成绩投票",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(hours=1),
+            purpose=VoteSession.Purpose.SCORE_COMPONENT,
+            requires_ticket=True,
+            is_test_data=True,
+        )
+        response = self.client.get(reverse("staff:vote_session_detail", args=[session.pk]))
+        self.assertContains(response, "不产生分数")

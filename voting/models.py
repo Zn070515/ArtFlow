@@ -2,11 +2,13 @@ from typing import TYPE_CHECKING, Any
 
 from common.authority import (
     TEST_DATA_CLEANUP,
+    VOTE_SCORING_RULE,
     VOTE_SESSION_STATE,
     AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
 )
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
@@ -368,6 +370,7 @@ class VoteSession(models.Model):
         SELECTION = "selection", "晋级/选择"
         POPULARITY = "popularity", "人气奖"
         REPECHAGE = "repechage", "复活"
+        SCORE_COMPONENT = "score_component", "成绩组成"
 
     class SelectionType(models.TextChoices):
         SINGLE = "single", "单选"
@@ -765,3 +768,123 @@ class VoteRecord(models.Model):
 
     def __str__(self):
         return f"{self.browser_session_key} → {self.vote_option.singer.name}"
+
+
+def _ensure_scoring_rule_session_mutable(vote_session_id: int | None) -> None:
+    """A conversion rule freezes with its session: open, locked, or already consumed."""
+    if not vote_session_id:
+        return
+    state = (
+        VoteSession._base_manager.filter(pk=vote_session_id).values("is_open", "is_locked").first()
+    )
+    if state is None:
+        return
+    if state["is_open"]:
+        raise ValidationError("投票开放后，成绩换算规则不可修改。")
+    if state["is_locked"]:
+        raise ValidationError("投票锁定后，成绩换算规则不可修改。")
+    _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id)
+
+
+class VoteScoringRuleQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    """Guard: a conversion rule is formal authority, writable only by its service."""
+
+    def _ensure_auth(self):
+        if not authority_authorized(VOTE_SCORING_RULE):
+            raise ValidationError(
+                "成绩换算规则只能通过正式服务配置（configure_vote_scoring_rule）。"
+            )
+        for session_id in self.values_list("vote_session_id", flat=True).distinct():
+            _ensure_scoring_rule_session_mutable(session_id)
+
+    def update(self, **kwargs):
+        self._ensure_auth()
+        if "vote_session" in kwargs or "vote_session_id" in kwargs:
+            _ensure_scoring_rule_session_mutable(
+                _relation_pk(kwargs.get("vote_session", kwargs.get("vote_session_id")))
+            )
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_auth()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
+        if not authority_authorized(VOTE_SCORING_RULE):
+            raise ValidationError(
+                "成绩换算规则只能通过正式服务配置（configure_vote_scoring_rule）。"
+            )
+        objs = list(objs)
+        for obj in objs:
+            _ensure_scoring_rule_session_mutable(obj.vote_session_id)
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_auth()
+        for obj in objs:
+            _ensure_scoring_rule_session_mutable(obj.vote_session_id)
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+VoteScoringRuleManager = models.Manager.from_queryset(VoteScoringRuleQuerySet)
+
+
+class VoteScoringRule(models.Model):
+    """How a SCORE_COMPONENT vote session's ballots become official scores (§5.2).
+
+    The rule states *meaning*, not weight: the aggregate weight stays in the frozen
+    ``RulesetVersion.definition``, and this model only declares how raw ballots convert to
+    a score on a declared output scale. One rule per session, configured through
+    :func:`voting.services.configure_vote_scoring_rule`, immutable once its session opens,
+    locks, or is consumed by a frozen ruleset version.
+    """
+
+    class Mode(models.TextChoices):
+        BALLOT_SHARE_PERCENT = "ballot_share_percent", "有效票支持率（0-100）"
+
+    vote_session = models.OneToOneField(
+        VoteSession, on_delete=models.CASCADE, related_name="scoring_rule"
+    )
+    mode = models.CharField(max_length=32, choices=Mode, default=Mode.BALLOT_SHARE_PERCENT)
+    output_scale = models.CharField(
+        max_length=16,
+        default="hundred",
+        help_text="结果量纲：支持率为 0-100 分制。",
+    )
+    configured_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vote_scoring_rules",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = VoteScoringRuleManager()
+
+    if TYPE_CHECKING:
+        vote_session_id: int
+        vote_session: VoteSession
+
+    class Meta:
+        base_manager_name = "objects"
+        ordering = ["vote_session_id"]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not authority_authorized(VOTE_SCORING_RULE):
+            raise ValidationError(
+                "成绩换算规则只能通过正式服务配置（configure_vote_scoring_rule）。"
+            )
+        _ensure_scoring_rule_session_mutable(self.vote_session_id)
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> Any:
+        if not authority_authorized(VOTE_SCORING_RULE):
+            raise ValidationError("成绩换算规则只能通过正式服务删除。")
+        _ensure_scoring_rule_session_mutable(self.vote_session_id)
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.vote_session_id} → {self.get_mode_display()}"

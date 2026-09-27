@@ -11,8 +11,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from files.models import SubmissionFile
 from files.services import (
     large_video_upload_allowed,
+    participant_uploadable_check_ids,
     reconcile_program_material_checks,
     store_submission_file,
+    submit_participant_material_for_check,
     validate_upload,
 )
 
@@ -116,10 +118,7 @@ PROGRAM_EDITABLE_FIELDS = (
 def _participant_can_edit(program):
     if program.activity.is_locked:
         return False
-    return program.activity.phase in (
-        Activity.Phase.REGISTRATION_OPEN,
-        Activity.Phase.REVIEWING,
-    )
+    return program.activity.phase == Activity.Phase.REGISTRATION_OPEN
 
 
 @login_required
@@ -142,46 +141,12 @@ def my_program_detail(request, pk):
     prog = get_object_or_404(Program.objects.select_related("activity"), pk=pk, user=request.user)
     errors = []
     if request.method == "POST":
-        try:
-            with transaction.atomic():
-                activity = lock_activity_for_action(prog.activity)
-                locked_prog = (
-                    Program.objects.select_for_update()
-                    .select_related("activity")
-                    .get(pk=prog.pk, user=request.user)
-                )
-                if locked_prog.activity_id != activity.pk:
-                    raise PermissionDenied("节目信息不属于当前活动。")
-                ensure_participant_can_edit(locked_prog)
-                if request.FILES.get("file"):
-                    submission_file = store_submission_file(
-                        owner=locked_prog,
-                        uploaded_file=request.FILES["file"],
-                        purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                        uploaded_by=request.user,
-                    )
-                    reconcile_program_material_checks(locked_prog)
-                    log_action(
-                        request,
-                        AuditLog.ActionType.UPLOAD_FILE,
-                        f"SubmissionFile:{submission_file.pk}",
-                        new_value=submission_file.original_name,
-                    )
-                else:
-                    errors.extend(_update_program(request, locked_prog))
-        except PermissionDenied as error:
-            errors.append(str(error))
-        except ValidationError as error:
-            errors.extend(error.messages)
+        if "check_id" in request.POST or request.FILES.get("file"):
+            errors.extend(_submit_participant_material(request, prog))
+        else:
+            errors.extend(_update_participant_program(request, prog))
         if not errors:
             return redirect("farewell_show:my_program_detail", pk=prog.pk)
-    file_purposes = SubmissionFile.Purpose.choices
-    if prog.activity.data_lifecycle == Activity.DataLifecycle.FORMAL:
-        video_values = {
-            SubmissionFile.Purpose.PERFORMANCE_VIDEO,
-            SubmissionFile.Purpose.BACKGROUND_VIDEO,
-        }
-        file_purposes = [choice for choice in file_purposes if choice[0] not in video_values]
     return render(
         request,
         "farewell_show/my_program.html",
@@ -190,11 +155,53 @@ def my_program_detail(request, pk):
             "can_edit": _participant_can_edit(prog),
             "files": prog.files.all(),
             "checks": prog.material_checks.all(),
-            "file_purposes": file_purposes,
+            "uploadable_check_ids": participant_uploadable_check_ids(prog),
             "program_types": Program.ProgramType.choices,
             "errors": errors,
         },
     )
+
+
+def _submit_participant_material(request, prog):
+    """Route a participant upload to the check-addressed material authority."""
+    try:
+        submission_file = submit_participant_material_for_check(
+            owner=prog,
+            check_id=request.POST.get("check_id"),
+            uploaded_file=request.FILES.get("file"),
+            actor=request.user,
+        )
+    except PermissionDenied as error:
+        return [str(error)]
+    except ValidationError as error:
+        return list(error.messages)
+    log_action(
+        request,
+        AuditLog.ActionType.UPLOAD_FILE,
+        f"SubmissionFile:{submission_file.pk}",
+        new_value=submission_file.original_name,
+    )
+    return []
+
+
+def _update_participant_program(request, prog):
+    """Apply the participant's own program edit while the phase still allows it."""
+    try:
+        with transaction.atomic():
+            activity = lock_activity_for_action(prog.activity)
+            locked_prog = (
+                Program.objects.select_for_update()
+                .select_related("activity")
+                .get(pk=prog.pk, user=request.user)
+            )
+            if locked_prog.activity_id != activity.pk:
+                raise PermissionDenied("节目信息不属于当前活动。")
+            ensure_participant_can_edit(locked_prog)
+            return _update_program(request, locked_prog)
+    except PermissionDenied as error:
+        return [str(error)]
+    except ValidationError as error:
+        return list(error.messages)
 
 
 def _update_program(request, prog):

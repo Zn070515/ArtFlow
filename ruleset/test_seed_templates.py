@@ -10,7 +10,9 @@ from ruleset.schema import parse_definition
 from ruleset.templates import (
     FIRST_BATCH,
     GOLDEN_SCHIDUI,
+    GOLDEN_SCHIDUI_BUILTIN_KEY,
     GOLDEN_XIAOFENG,
+    HISTORICAL_SCHIDUI_NAME,
     HISTORICAL_XIAOFENG_CONTROL_FLOW,
     HISTORICAL_XIAOFENG_FALLBACK_UNRESOLVED,
     SYNTHETIC_FILL_TO_QUOTA_DEMO,
@@ -122,8 +124,66 @@ class TemplateLibraryTests(TestCase):
 
     def test_seed_creates_golden_templates(self):
         seed_ruleset_templates(None)
-        self.assertEqual(RulesetTemplate.objects.filter(name="院十佳").count(), 1)
+        self.assertEqual(RulesetTemplate.objects.filter(name=HISTORICAL_SCHIDUI_NAME).count(), 1)
         self.assertEqual(RulesetTemplate.objects.filter(name="合成_分组逐组补足演示").count(), 1)
+
+    def test_fresh_seed_creates_exactly_one_golden_schidui(self):
+        seed_ruleset_templates(None)
+        rows = RulesetTemplate.objects.filter(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        self.assertEqual(rows.count(), 1)
+        row = rows.get()
+        self.assertEqual(row.name, HISTORICAL_SCHIDUI_NAME)
+        self.assertIn("2025", row.description)
+        self.assertEqual(row.capability_status, RulesetTemplate.CapabilityStatus.PRODUCTION)
+        self.assertTrue(row.is_available)
+
+    def test_reseeding_renames_a_builtin_row_in_place(self):
+        seed_ruleset_templates(None)
+        row = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        RulesetTemplate.objects.filter(pk=row.pk).update(name="院十佳", description="旧描述")
+
+        seed_ruleset_templates(None)
+
+        self.assertEqual(
+            RulesetTemplate.objects.filter(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY).count(), 1
+        )
+        row.refresh_from_db()
+        self.assertEqual(row.name, HISTORICAL_SCHIDUI_NAME)
+        self.assertIn("历史模板", row.description)
+        self.assertFalse(RulesetTemplate.objects.filter(name="院十佳").exists())
+
+    def test_keyless_legacy_row_is_adopted_instead_of_duplicated(self):
+        # A pre-builtin_key database holds 院十佳 with an empty key; seeding must adopt that
+        # row (exact name match, single row) rather than fork a second built-in template.
+        RulesetTemplate.objects.create(
+            name="院十佳", definition=GOLDEN_SCHIDUI, description="legacy", is_available=True
+        )
+
+        seed_ruleset_templates(None)
+
+        self.assertEqual(
+            RulesetTemplate.objects.filter(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY).count(), 1
+        )
+        self.assertEqual(RulesetTemplate.objects.filter(name="院十佳 2025（历史模板）").count(), 1)
+        self.assertEqual(RulesetTemplate.objects.count(), 15)
+
+    def test_2025_definition_content_is_unchanged(self):
+        # §11.3: renaming the template must not touch the historical 2025 rules.
+        seed_ruleset_templates(None)
+        row = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        self.assertEqual(row.definition, GOLDEN_SCHIDUI)
+        weights = [
+            component["weight"]
+            for node in parse_definition(row.definition)["nodes"]
+            if node["type"] == "AGGREGATE"
+            for component in node["aggregate"]["components"]
+        ]
+        self.assertIn(0.3, weights)
+        self.assertIn(0.6, weights)
+        self.assertIn(0.1, weights)
+        self.assertIn(0.5, weights)
+        self.assertIn(0.2, weights)
+        self.assertIn(0.4, weights)
 
     def test_xiaofeng_demo_is_not_passed_off_as_historical_golden(self):
         # §23: the each_group control-flow demo must not claim to be the verified

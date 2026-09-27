@@ -157,6 +157,16 @@ class MaterialCheck(models.Model):
         related_name="material_checks",
     )
     item_name = models.CharField(max_length=100)
+    file_purpose = models.CharField(
+        max_length=24,
+        choices=SubmissionFile.Purpose.choices,
+        blank=True,
+        default="",
+        help_text=(
+            "本检查项当前要求的文件用途快照（服务端维护）；非文件项为空。"
+            "选手上传的用途以此为准，浏览器不得指定。"
+        ),
+    )
     status = models.CharField(max_length=20, choices=Status, default=Status.MISSING)
     review_note = models.TextField(blank=True, default="")
     reviewed_by = models.ForeignKey(

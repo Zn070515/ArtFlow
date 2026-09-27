@@ -36,7 +36,13 @@ def ensure_same_activity(expected_activity: Any, related_object: Any, *, label: 
 
 
 def ensure_participant_can_edit(registration: Any) -> None:
-    """Participants may edit their own submission only while it can still change."""
+    """Participants may freely edit their own submission only while registration is open.
+
+    From ``REGISTRATION_CLOSED`` onward the participant's own registration data is frozen.
+    The one remaining participant write is a staff-designated material supplement, which
+    has its own authority (``files.services.submit_participant_material_for_check``) and
+    never runs through this guard.
+    """
     ensure_activity_unlocked(registration.activity)
-    if registration.activity.phase not in {"registration_open", "reviewing"}:
+    if registration.activity.phase != "registration_open":
         raise PermissionDenied("当前活动阶段不允许修改报名。")

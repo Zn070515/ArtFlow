@@ -115,6 +115,49 @@ class SubmissionFileLifecycleTests(TestCase):
                 uploaded_by=self.user,
             )
 
+    @override_settings(ARTFLOW_UPLOAD_RATE_LIMIT=1, ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS=60)
+    def test_upload_rate_limit_does_not_share_a_bucket_across_owner_types(self):
+        # A singer registration and a program are different tables whose ids both start at
+        # 1; the same actor uploading to both must not have one consume the other's budget.
+        from farewell_show.models import Program
+
+        cache.clear()
+        activity = _create_activity(
+            title="Farewell",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        program = Program.objects.create(
+            activity=activity,
+            user=self.user,
+            name="Dance",
+            program_type=Program.ProgramType.DANCE,
+            contact_name="Li Hua",
+            contact_phone="13800000000",
+            class_name="CS1",
+        )
+        self.assertEqual(self.registration.pk, program.pk)
+        valid_audio = b"ID3\x04\x00\x00\x00\x00\x00\x00"
+
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("first.mp3", valid_audio, content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+        store_submission_file(
+            owner=program,
+            uploaded_file=SimpleUploadedFile("second.mp3", valid_audio, content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+
+        self.assertTrue(
+            SubmissionFile.objects.filter(singer_registration=self.registration).exists()
+        )
+        self.assertTrue(SubmissionFile.objects.filter(program=program).exists())
+
     @override_settings(ARTFLOW_UPLOAD_MAX_VERSIONS=2)
     def test_upload_retains_only_the_configured_recent_versions(self):
         cache.clear()
@@ -641,6 +684,102 @@ class MaterialCheckReconcileTests(TestCase):
             .values_list("total", flat=True)
         )
         self.assertTrue(all(total == 1 for total in counts))
+
+    def test_reconcile_records_the_requested_file_purpose(self):
+        reconcile_singer_material_checks(self.registration)
+        self.assertEqual(
+            MaterialCheck.objects.get(
+                singer_registration=self.registration, item_name="伴奏文件"
+            ).file_purpose,
+            SubmissionFile.Purpose.ACCOMPANIMENT,
+        )
+        self.assertEqual(
+            MaterialCheck.objects.get(
+                singer_registration=self.registration, item_name="基本信息"
+            ).file_purpose,
+            "",
+        )
+
+    def test_reconcile_resets_review_when_the_material_type_changes(self):
+        requirement = MaterialRequirement.objects.create(
+            activity=self.activity,
+            applies_to=MaterialRequirement.AppliesTo.SINGER,
+            item_name="歌词",
+            file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
+        )
+        reconcile_singer_material_checks(self.registration)
+        check = MaterialCheck.objects.get(singer_registration=self.registration, item_name="歌词")
+        check.status = MaterialCheck.Status.APPROVED
+        check.review_note = "已核对"
+        check.reviewed_by = self.user
+        check.save(update_fields=["status", "review_note", "reviewed_by"])
+
+        requirement.file_purpose = SubmissionFile.Purpose.ACCOMPANIMENT
+        requirement.save(update_fields=["file_purpose"])
+        reconcile_singer_material_checks(self.registration)
+
+        check.refresh_from_db()
+        self.assertEqual(check.file_purpose, SubmissionFile.Purpose.ACCOMPANIMENT)
+        # The staff approval belonged to a different material type: it must not be
+        # inherited, and no file of the new type exists yet.
+        self.assertEqual(check.status, MaterialCheck.Status.MISSING)
+        self.assertEqual(check.review_note, "")
+        self.assertIsNone(check.reviewed_by)
+        self.assertIsNone(check.reviewed_at)
+
+    def test_reconcile_keeps_review_when_the_material_type_is_unchanged(self):
+        reconcile_singer_material_checks(self.registration)
+        check = MaterialCheck.objects.get(
+            singer_registration=self.registration, item_name="基本信息"
+        )
+        check.status = MaterialCheck.Status.APPROVED
+        check.review_note = "已核对"
+        check.save(update_fields=["status", "review_note"])
+        reconcile_singer_material_checks(self.registration)
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.APPROVED)
+        self.assertEqual(check.review_note, "已核对")
+
+    def test_upload_only_resets_checks_of_that_purpose(self):
+        # A configured requirement list replaces the fallback list wholesale, so both
+        # scopes have to be declared explicitly here.
+        MaterialRequirement.objects.create(
+            activity=self.activity,
+            applies_to=MaterialRequirement.AppliesTo.SINGER,
+            item_name="伴奏文件",
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+        )
+        MaterialRequirement.objects.create(
+            activity=self.activity,
+            applies_to=MaterialRequirement.AppliesTo.SINGER,
+            item_name="歌词",
+            file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
+        )
+        reconcile_singer_material_checks(self.registration)
+        accompaniment = MaterialCheck.objects.get(
+            singer_registration=self.registration, item_name="伴奏文件"
+        )
+        lyrics = MaterialCheck.objects.get(singer_registration=self.registration, item_name="歌词")
+        for check in (accompaniment, lyrics):
+            check.status = MaterialCheck.Status.APPROVED
+            check.review_note = "已核对"
+            check.save(update_fields=["status", "review_note"])
+
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+
+        accompaniment.refresh_from_db()
+        lyrics.refresh_from_db()
+        self.assertEqual(accompaniment.status, MaterialCheck.Status.UPLOADED)
+        self.assertEqual(accompaniment.review_note, "")
+        self.assertEqual(lyrics.status, MaterialCheck.Status.APPROVED)
+        self.assertEqual(lyrics.review_note, "已核对")
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

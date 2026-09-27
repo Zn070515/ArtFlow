@@ -4,7 +4,7 @@ ArtFlow 是面向学院文艺部的 Django 活动运行平台，覆盖公开门�
 
 核心领域分为两条主线：
 
-- **歌手比赛（`singer_contest` + `ruleset`）**：把赛制表达为受 schema 约束的版本化 JSON 规则图（`ContestRuleset` / `RulesetVersion`），经编译器/验证器检查后可 `FROZEN`，再由 resolver 产生 `HOLD / REVIEW / READY_TO_CONFIRM / CONFIRMED` 结果。2025 院十佳与校十佳屏峰有 Golden 模拟，后台提供 Rapid Score Entry 与 Backstage Result Board 抄卡模式。产品目标与领域设计见 [GOAL.md](GOAL.md)。
+- **歌手比赛（`singer_contest` + `ruleset`）**：把赛制表达为受 schema 约束的版本化 JSON 规则图（`ContestRuleset` / `RulesetVersion`），经编译器/验证器检查后可 `FROZEN`，再由 resolver 产生 `HOLD / REVIEW / READY_TO_CONFIRM / CONFIRMED` 结果。2025 院十佳（历史模板 `golden_schidui`）与校十佳屏峰有 Golden 模拟，后台提供 Rapid Score Entry 与 Backstage Result Board 抄卡模式。当年决赛的操作流程见[院十佳决赛生产流程](docs/singer-final-production-flow.md)，产品目标与领域设计见 [GOAL.md](GOAL.md)。
 - **活动运行（`public_portal` / `files` / `farewell_show` / `voting` / `exports` / `archive` …）**：报名、材料槽、审核、投票、导出、归档与审计，遵守 Activity 作为 mutation 边界的锁定与权限规则。
 
 ## Windows 本地启动
