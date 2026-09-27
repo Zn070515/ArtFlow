@@ -27,6 +27,11 @@ secret/session token 不得进入 manifest、日志、导出或演练产物。�
 `pg_restore` 前先验证两个归档 SHA，并拒绝运行 web 镜像的 OCI revision 与 manifest 不一致。
 失败时保留源服务和卷，记录失败原因后重新演练。
 
+当前生产数据库基线是 PostgreSQL 16；Web 镜像内的 `pg_dump`/`pg_restore` 也固定为
+`postgresql-client-16`，避免用更高版本生成数据库 16 无法读取的 custom-format dump。
+如果未来升级 PostgreSQL 主版本，必须同步更新生产数据库镜像、Web 镜像客户端和隔离
+恢复目标，并重新完成整套备份恢复验收。
+
 生产环境还应通过 `scripts/offsite_backup.ps1` 或 `scripts/offsite_backup.sh` 把完整备份集合
 复制到独立对象存储/故障域，并在另一台主机或隔离 PostgreSQL 集群执行同样的恢复验证；
 不要把仓库本地 `backups/` 当作长期备份介质。
