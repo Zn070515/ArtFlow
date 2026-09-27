@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+ARG ARTFLOW_BUILD_SHA=""
+
+LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_NO_CACHE=1 \
@@ -13,6 +17,8 @@ RUN apt-get update \
     && useradd --system --create-home --gid artflow --shell /usr/sbin/nologin artflow
 
 WORKDIR /app
+
+RUN printf '%s\n' "${ARTFLOW_BUILD_SHA}" > /app/ARTFLOW_RELEASE_SHA
 
 RUN python -m pip install --no-cache-dir "uv==0.11.29"
 
@@ -46,7 +52,8 @@ COPY --chown=artflow:artflow scripts/docker-entrypoint.sh scripts/wait-for-postg
 
 RUN mkdir --parents /app/media /app/staticfiles /app/backups \
     && chmod 0755 /app/scripts/docker-entrypoint.sh /app/scripts/wait-for-postgres.sh \
-    && chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups /app/scripts
+    && chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups /app/scripts \
+    && chown artflow:artflow /app/ARTFLOW_RELEASE_SHA
 
 USER artflow
 

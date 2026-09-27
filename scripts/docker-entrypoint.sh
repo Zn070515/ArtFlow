@@ -11,6 +11,18 @@ if [[ "${DATABASE_ENGINE:-}" != "postgresql" ]]; then
     exit 64
 fi
 
+baked_release_sha=""
+if [[ -r /app/ARTFLOW_RELEASE_SHA ]]; then
+    baked_release_sha="$(tr -d '\r\n' < /app/ARTFLOW_RELEASE_SHA)"
+fi
+if [[ "${APP_ENV:-}" == "production" ]]; then
+    configured_release_sha="${ARTFLOW_RELEASE_SHA:-}"
+    if [[ ! "$configured_release_sha" =~ ^[0-9a-fA-F]{40}$ || -z "$baked_release_sha" || "$configured_release_sha" != "$baked_release_sha" ]]; then
+        printf '%s\n' 'ARTFLOW_RELEASE_SHA must match the baked image revision.' >&2
+        exit 64
+    fi
+fi
+
 for required_variable in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HOST POSTGRES_PORT; do
     if [[ -z "${!required_variable:-}" ]]; then
         printf 'Missing required database configuration: %s\n' "$required_variable" >&2

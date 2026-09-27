@@ -21,6 +21,8 @@ services:
   web:
     build:
       context: ..
+      args:
+        ARTFLOW_BUILD_SHA: ${ARTFLOW_RELEASE_SHA:-}
     restart: unless-stopped
     depends_on:
       db:
