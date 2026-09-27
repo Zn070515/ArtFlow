@@ -32,3 +32,13 @@ def test_offsite_backup_adapters_do_not_put_credentials_in_the_command_line_cont
         assert "accesskey" not in script
         assert "secretkey" not in script
         assert "password=" not in script
+
+
+def test_backup_wrappers_can_upload_a_verified_copy_when_offsite_is_configured():
+    powershell = (REPOSITORY_ROOT / "scripts" / "backup_artflow.ps1").read_text(encoding="utf-8")
+    posix = (REPOSITORY_ROOT / "scripts" / "backup.sh").read_text(encoding="utf-8")
+
+    assert "offsite_backup.ps1" in powershell
+    assert "ARTFLOW_OFFSITE_BUCKET" in powershell
+    assert "offsite_backup.sh" in posix
+    assert "ARTFLOW_OFFSITE_BUCKET" in posix
