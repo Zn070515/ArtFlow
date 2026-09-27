@@ -32,6 +32,57 @@ cleanup() {
 }
 trap cleanup EXIT
 
+restore_diagnostics() {
+    printf 'restore container status: %s\n' "$restore_container" >&2
+    docker inspect -f '{{.State.Status}}' "$restore_container" >&2 2>/dev/null || true
+    printf 'restore container logs (last 80 lines):\n' >&2
+    docker logs --tail 80 "$restore_container" >&2 2>/dev/null || true
+}
+
+wait_for_stable_restore_database() {
+    local deadline=$((SECONDS + 90))
+    local init_complete_marker='PostgreSQL init process complete; ready for start up.'
+    local state logs
+
+    while (( SECONDS < deadline )); do
+        state="$(docker inspect -f '{{.State.Status}}' "$restore_container" 2>/dev/null || true)"
+        if [[ "$state" == 'exited' || "$state" == 'dead' ]]; then
+            restore_diagnostics
+            die 'isolated PostgreSQL restore container stopped before becoming stable'
+        fi
+        if [[ "$state" != 'running' ]]; then
+            sleep 1
+            continue
+        fi
+
+        logs="$(docker logs --tail 80 "$restore_container" 2>/dev/null || true)"
+        if [[ "$logs" != *"$init_complete_marker"* ]]; then
+            sleep 1
+            continue
+        fi
+
+        if ! docker exec "$restore_container" psql \
+            --username postgres --dbname "$restore_database" \
+            --tuples-only --no-align --command 'SELECT 1;' \
+            >/dev/null 2>&1; then
+            sleep 1
+            continue
+        fi
+
+        sleep 1
+        if docker exec "$restore_container" psql \
+            --username postgres --dbname "$restore_database" \
+            --tuples-only --no-align --command 'SELECT 1;' \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    restore_diagnostics
+    die 'isolated PostgreSQL restore database did not become stable within 90 seconds'
+}
+
 for required in manifest.json database.dump media.tar.gz; do
     [[ -f "$backup_set/$required" ]] || die "backup set is missing $required"
 done
@@ -67,15 +118,7 @@ tar -xzf "$backup_set/media.tar.gz" -C "$media_extract_dir"
 docker run --rm --network "$network" --name "$restore_container" -d \
     -e POSTGRES_PASSWORD=restore-only -e POSTGRES_DB="$restore_database" \
     "$db_image" >/dev/null
-for attempt in {1..90}; do
-    if docker exec "$restore_container" pg_isready -U postgres -d "$restore_database" >/dev/null 2>&1; then
-        break
-    fi
-    if (( attempt == 90 )); then
-        die 'isolated PostgreSQL restore container did not become ready'
-    fi
-    sleep 1
-done
+wait_for_stable_restore_database
 
 docker cp "$backup_set/database.dump" "$restore_container:/tmp/artflow-verify.dump"
 docker exec "$restore_container" pg_restore --list /tmp/artflow-verify.dump >/dev/null
