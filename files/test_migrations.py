@@ -104,9 +104,7 @@ class MaterialCheckFilePurposeBackfillTests(TransactionTestCase):
                     status="missing",
                 )
 
-            show_activity = Activity.objects.create(
-                title="Farewell", activity_type="farewell_show"
-            )
+            show_activity = Activity.objects.create(title="Farewell", activity_type="farewell_show")
             program = Program.objects.create(
                 activity=show_activity,
                 user=user,

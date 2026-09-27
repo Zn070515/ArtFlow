@@ -665,9 +665,7 @@ class MaterialCheckReconcileTests(TestCase):
             file_purpose=SubmissionFile.Purpose.LYRICS_SCRIPT,
         )
         reconcile_singer_material_checks(self.registration)
-        check = MaterialCheck.objects.get(
-            singer_registration=self.registration, item_name="歌词"
-        )
+        check = MaterialCheck.objects.get(singer_registration=self.registration, item_name="歌词")
         check.status = MaterialCheck.Status.APPROVED
         check.review_note = "已核对"
         check.reviewed_by = self.user
@@ -718,9 +716,7 @@ class MaterialCheckReconcileTests(TestCase):
         accompaniment = MaterialCheck.objects.get(
             singer_registration=self.registration, item_name="伴奏文件"
         )
-        lyrics = MaterialCheck.objects.get(
-            singer_registration=self.registration, item_name="歌词"
-        )
+        lyrics = MaterialCheck.objects.get(singer_registration=self.registration, item_name="歌词")
         for check in (accompaniment, lyrics):
             check.status = MaterialCheck.Status.APPROVED
             check.review_note = "已核对"
