@@ -10,6 +10,7 @@ Year, and the editor all share one copy — no year special-casing lives in Pyth
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from django.db import transaction
 
@@ -679,6 +680,7 @@ def seed_ruleset_templates(operator=None, *, status=None):
     for name, definition, description in catalog:
         parsed = parse_definition(definition)
         builtin_key = _BUILTIN_KEYS_BY_NAME.get(name, "")
+        lookup: dict[str, Any]
         if builtin_key:
             # Legacy keyless rows are adopted before the lookup, so an upgraded database
             # updates the historical row instead of creating a second one. A row under its
