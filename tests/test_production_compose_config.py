@@ -9,6 +9,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.production.yml"
 EVENT_COMPOSE_PATH = PROJECT_ROOT / "deploy" / "compose.event.yml"
+LOCAL_COMPOSE_PATH = PROJECT_ROOT / "docker-compose.yml"
 REHEARSAL_RUNBOOK_PATH = PROJECT_ROOT / "docs" / "production-rehearsal-runbook.md"
 PRODUCTION_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.production.example"
 EVENT_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.event.example"
@@ -131,6 +132,13 @@ def test_compose_manifests_forward_optional_branding_to_web():
         assert web_environment["ARTFLOW_ORGANIZATION_NAME"] == "${ARTFLOW_ORGANIZATION_NAME:-}"
         assert web_environment["ARTFLOW_ICP_NUMBER"] == "${ARTFLOW_ICP_NUMBER:-}"
         assert web_environment["ARTFLOW_ICP_URL"] == "${ARTFLOW_ICP_URL:-}"
+
+
+def test_local_compose_forwards_release_sha_to_the_built_web_image():
+    web = load_compose(LOCAL_COMPOSE_PATH)["services"]["web"]
+
+    assert web["build"]["args"]["ARTFLOW_BUILD_SHA"] == "${ARTFLOW_RELEASE_SHA:-}"
+    assert web["environment"]["ARTFLOW_RELEASE_SHA"] == "${ARTFLOW_RELEASE_SHA:-}"
 
 
 def test_production_web_healthcheck_uses_internal_exempt_health_route():

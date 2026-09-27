@@ -118,6 +118,15 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
         issues.append(f"{workflow_path.name}: missing compose-smoke job")
         return issues
 
+    compose_environment = as_mapping(compose_smoke_job.get("env"))
+    if (
+        compose_environment is None
+        or compose_environment.get("ARTFLOW_RELEASE_SHA") != "${{ github.sha }}"
+    ):
+        issues.append(
+            f"{workflow_path.name}: Compose smoke must pin ARTFLOW_RELEASE_SHA to github.sha"
+        )
+
     compose_steps = steps_for_job(compose_smoke_job)
     compose_commands = "\n".join(
         str(step.get("run", "")) for step in compose_steps if isinstance(step.get("run"), str)
