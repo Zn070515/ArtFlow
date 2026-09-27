@@ -273,8 +273,12 @@ def test_production_proxy_healthcheck_succeeds_against_a_running_caddy_proxy(
         run("network", "rm", network)
 
 
-@pytest.mark.skipif(DOCKER is None, reason="Docker is required for event runtime validation")
 def test_event_runtime_publishes_only_the_loopback_web_port():
+    if DOCKER is None:
+        if REQUIRE_EVENT_RUNTIME:
+            pytest.fail("Docker is required for the mandatory event runtime validation")
+        pytest.skip("Docker is required for event runtime validation")
+
     if not REQUIRE_EVENT_RUNTIME:
         pytest.skip("event runtime validation is opt-in")
 
