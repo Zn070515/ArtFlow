@@ -18,10 +18,9 @@ Copy-Item .env.production.example .env.production
 # 2) 在受控构建机以固定 digest 构建并导出 web 镜像；生产主机只 load，不现场 build
 #    bash scripts/build_release.sh release-artifacts
 #    docker load --input release-artifacts/artflow-web-<sha>.tar
-# 3) 只验证并启动显式生产栈（Postgres + prebuilt web + Caddy proxy），等待健康检查
-docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
-docker compose --env-file .env.production -f deploy/compose.production.yml up --no-build --pull never --wait
-curl --fail https://<公开域名>/healthz/   # 应返回 200（匿名、仅通用状态）
+# 3) 通过唯一 canonical production entrypoint 启动显式生产栈；它会验证镜像 provenance、
+#    等待健康检查、运行 doctor，并执行外部 HTTPS health smoke。
+bash scripts/deploy.sh .env.production
 
 # 4) 运行时诊断（只读）
 docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok

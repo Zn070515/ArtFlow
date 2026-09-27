@@ -21,12 +21,15 @@ command -v docker >/dev/null 2>&1 || die 'docker is required'
 command -v python3 >/dev/null 2>&1 || die 'python3 is required'
 command -v curl >/dev/null 2>&1 || die 'curl is required'
 command -v df >/dev/null 2>&1 || die 'df is required'
+hostname_validator="$repository_root/scripts/validate_production_hostname.py"
+[[ -f "$hostname_validator" ]] || die 'production hostname validator is missing'
 
 compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file")
 "${compose[@]}" config --quiet
 rendered="$("${compose[@]}" config --format json)"
 site_address="$(printf '%s' "$rendered" | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["proxy"]["environment"]["CADDY_SITE_ADDRESS"])')"
-[[ -n "$site_address" ]] || die 'production proxy site address is empty'
+python3 "$hostname_validator" "$site_address" \
+    || die 'CADDY_SITE_ADDRESS must be a hostname without a scheme, port, or path'
 
 for service in db web proxy; do
     container="$("${compose[@]}" ps -q "$service")"
@@ -35,10 +38,7 @@ for service in db web proxy; do
     [[ "$status" == healthy ]] || die "$service health status is $status"
 done
 
-case "$site_address" in
-    http://*|https://*) health_url="$site_address/healthz/" ;;
-    *) health_url="https://$site_address/healthz/" ;;
-esac
+health_url="https://$site_address/healthz/"
 curl --fail --silent --show-error --max-time 20 "$health_url" >/dev/null
 
 free_kb="$(df -Pk "$data_path" | awk 'NR == 2 { print $4 }')"

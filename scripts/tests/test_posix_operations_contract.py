@@ -1,6 +1,9 @@
+import subprocess
+import sys
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+HOSTNAME_VALIDATOR = REPOSITORY_ROOT / "scripts" / "validate_production_hostname.py"
 POSIX_SCRIPTS = (
     REPOSITORY_ROOT / "scripts" / "deploy.sh",
     REPOSITORY_ROOT / "scripts" / "backup.sh",
@@ -49,3 +52,32 @@ def test_posix_restore_waits_for_the_stable_postgres_server():
     assert restore.count("--command 'SELECT 1;'") == 2
     assert "sleep 1" in restore
     assert "pg_isready" not in restore
+
+
+def test_production_hostname_validator_accepts_hostnames_only():
+    valid = ("artflow.example.com", "artflow.internal", "xn--fiq228c.example")
+    invalid = (
+        "",
+        "https://artflow.example.com",
+        "artflow.example.com:443",
+        "artflow.example.com/healthz/",
+        "artflow_example.com",
+        "localhost",
+    )
+
+    for hostname in valid:
+        result = subprocess.run([sys.executable, str(HOSTNAME_VALIDATOR), hostname], check=False)
+        assert result.returncode == 0, hostname
+    for value in invalid:
+        result = subprocess.run([sys.executable, str(HOSTNAME_VALIDATOR), value], check=False)
+        assert result.returncode == 64, value
+
+
+def test_production_operations_require_the_hostname_contract_and_https_smoke():
+    deploy = (REPOSITORY_ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
+    monitor = (REPOSITORY_ROOT / "scripts" / "monitor.sh").read_text(encoding="utf-8")
+
+    for script in (deploy, monitor):
+        assert "validate_production_hostname.py" in script
+        assert 'health_url="https://$site_address/healthz/"' in script
+        assert "http://*|https://*" not in script

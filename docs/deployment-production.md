@@ -38,12 +38,13 @@ bash scripts/build_release.sh release-artifacts
 
 # 在生产主机执行；<sha> 必须与构建产物和 .env.production 一致
 docker load --input release-artifacts/artflow-web-<sha>.tar
-docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
-docker compose --env-file .env.production -f deploy/compose.production.yml up --no-build --pull never --wait
+bash scripts/deploy.sh .env.production
 ```
 
 `.env.production` 的 `ARTFLOW_WEB_IMAGE` 应指向 `artflow-web:<完整 SHA>`（可附带 registry digest）；
-启动前 Compose 会拒绝缺少该变量的配置，容器启动还会把环境中的 `ARTFLOW_RELEASE_SHA`
+`scripts/deploy.sh` 是唯一的 canonical production deployment path：它会渲染配置、校验
+release SHA、web 镜像 OCI revision、PostgreSQL/Caddy digest，使用 `--no-build --pull never --wait`
+启动，并执行 `doctor` 和外部 HTTPS health smoke。容器启动还会把环境中的 `ARTFLOW_RELEASE_SHA`
 与镜像 OCI revision 比较。`proxy` 是唯一发布 `80/443` 的服务；`web` 和 PostgreSQL
 没有主机端口，且数据库只在 `artflow_internal` 中。Caddy 用 `CADDY_SITE_ADDRESS` 申请
 TLS 证书，因此该 DNS 名称必须在启动前指向此主机并允许 ACME 流量。不得用根 Compose
@@ -81,7 +82,7 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 | `ARTFLOW_POSTGRES_IMAGE` / `ARTFLOW_CADDY_IMAGE` | 生产运行时必须使用的 digest-pinned 基础镜像 |
 | `ALLOWED_HOSTS` | 真实主机名（含对外域名） |
 | `CSRF_TRUSTED_ORIGINS` | 真实来源（如 `https://artflow.example.com`） |
-| `CADDY_SITE_ADDRESS` | Caddy 申请 TLS 证书的单个公开 DNS 名称 |
+| `CADDY_SITE_ADDRESS` | Caddy 申请 TLS 证书的单个 hostname（只填 `artflow.example.com`，不含 `http://`、端口或路径） |
 | `DATABASE_ENGINE` | 必须是 `postgresql` |
 | `POSTGRES_DB` / `USER` / `PASSWORD` / `HOST` / `PORT` | 生产数据库连接（口令不能是占位值） |
 | `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
