@@ -68,6 +68,9 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert "max_size 120MB" in caddyfile
     assert "header -Server" in caddyfile
     assert "reverse_proxy web:8000" in caddyfile
+    assert services["web"]["build"]["args"]["ARTFLOW_BUILD_SHA"] == (
+        "${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}"
+    )
 
 
 def test_event_compose_defaults_to_loopback_and_keeps_database_private():
@@ -157,6 +160,18 @@ def test_dockerfile_prepares_writable_backup_mountpoint():
     assert (
         "chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups" in dockerfile
     )
+
+
+def test_production_image_bakes_and_validates_its_release_revision():
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    entrypoint = (PROJECT_ROOT / "scripts" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+
+    assert "ARG ARTFLOW_BUILD_SHA" in dockerfile
+    assert "org.opencontainers.image.revision" in dockerfile
+    assert "/app/ARTFLOW_RELEASE_SHA" in dockerfile
+    assert "ARTFLOW_RELEASE_SHA" in entrypoint
+    assert "APP_ENV" in entrypoint
+    assert "must match the baked image revision" in entrypoint
 
 
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")
