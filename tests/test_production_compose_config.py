@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 import time
@@ -17,6 +18,11 @@ PRODUCTION_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.production.example"
 EVENT_ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.event.example"
 DOCKER = shutil.which("docker")
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
+CADDY_RUNTIME_TEST_IMAGE = os.environ.get(
+    "ARTFLOW_CADDY_TEST_IMAGE",
+    "caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+)
+REQUIRE_CADDY_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_CADDY_RUNTIME") == "true"
 CONFIG_ENVIRONMENT = {
     "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
     "ADMIN_LOGIN_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
@@ -159,19 +165,25 @@ def test_production_proxy_healthcheck_uses_the_internal_http_listener():
     assert "no-check-certificate" not in healthcheck[-1]
 
 
-@pytest.mark.skipif(DOCKER is None, reason="Docker is required for Caddy runtime validation")
 def test_production_proxy_healthcheck_succeeds_against_a_running_caddy_proxy(
     tmp_path: Path,
 ):
+    if DOCKER is None:
+        if REQUIRE_CADDY_RUNTIME:
+            pytest.fail("Docker is required for the mandatory Caddy runtime validation")
+        pytest.skip("Docker is required for Caddy runtime validation")
+
     docker = docker_command()
     image_check = subprocess.run(
-        [docker, "image", "inspect", "caddy:2-alpine"],
+        [docker, "image", "inspect", CADDY_RUNTIME_TEST_IMAGE],
         check=False,
         capture_output=True,
         text=True,
     )
     if image_check.returncode != 0:
-        pytest.skip("caddy:2-alpine image is not available locally")
+        if REQUIRE_CADDY_RUNTIME:
+            pytest.fail(f"Pinned Caddy runtime image is not available: {CADDY_RUNTIME_TEST_IMAGE}")
+        pytest.skip("pinned Caddy runtime image is not available locally")
 
     network = f"artflow-caddy-health-{uuid.uuid4().hex[:12]}"
     backend = f"{network}-web"
@@ -203,7 +215,7 @@ def test_production_proxy_healthcheck_succeeds_against_a_running_caddy_proxy(
             "web",
             "--mount",
             f"type=bind,source={backend_caddyfile},target=/etc/caddy/Caddyfile,readonly",
-            "caddy:2-alpine",
+            CADDY_RUNTIME_TEST_IMAGE,
             "caddy",
             "run",
             "--config",
@@ -223,7 +235,7 @@ def test_production_proxy_healthcheck_succeeds_against_a_running_caddy_proxy(
             "CADDY_SITE_ADDRESS=localhost",
             "--mount",
             f"type=bind,source={caddyfile},target=/etc/caddy/Caddyfile,readonly",
-            "caddy:2-alpine",
+            CADDY_RUNTIME_TEST_IMAGE,
             "caddy",
             "run",
             "--config",
@@ -253,7 +265,14 @@ def test_production_rehearsal_runbook_names_the_explicit_production_manifest():
     runbook = REHEARSAL_RUNBOOK_PATH.read_text(encoding="utf-8")
 
     assert "deploy/compose.production.yml" in runbook
-    assert "docker compose -f deploy/compose.production.yml" in runbook
+    assert "bash scripts/deploy.sh .env.production" in runbook
+
+
+def test_production_documentation_uses_the_canonical_deploy_entrypoint():
+    deployment = (PROJECT_ROOT / "docs" / "deployment-production.md").read_text(encoding="utf-8")
+
+    assert "bash scripts/deploy.sh .env.production" in deployment
+    assert "canonical production deployment path" in deployment
 
 
 def test_production_env_example_documents_manifest_fixed_values():
@@ -371,7 +390,7 @@ def test_rendered_production_compose_preserves_caddy_environment_placeholder(
     caddyfile_path = PRODUCTION_COMPOSE_PATH.parent / rendered["configs"]["caddyfile"]["file"]
     caddyfile = caddyfile_path.read_text(encoding="utf-8")
     assert "http://127.0.0.1:8081 {" in caddyfile
-    assert "{$CADDY_SITE_ADDRESS} {" in caddyfile
+    assert "https://{$CADDY_SITE_ADDRESS} {" in caddyfile
     assert "{artflow.internal}" not in caddyfile
 
 
@@ -384,13 +403,13 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
     docker = docker_command()
 
     image_check = subprocess.run(
-        [docker, "image", "inspect", "caddy:2-alpine"],
+        [docker, "image", "inspect", CADDY_RUNTIME_TEST_IMAGE],
         check=False,
         capture_output=True,
         text=True,
     )
     if image_check.returncode != 0:
-        pytest.skip("caddy:2-alpine image is not available locally")
+        pytest.skip("pinned Caddy runtime image is not available locally")
 
     compose_result = subprocess.run(
         [docker, "compose", "-f", str(PRODUCTION_COMPOSE_PATH), "config"],
@@ -412,7 +431,7 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
             "none",
             "-e",
             "CADDY_SITE_ADDRESS=artflow.internal",
-            "caddy:2-alpine",
+            CADDY_RUNTIME_TEST_IMAGE,
             "caddy",
             "adapt",
             "--config",

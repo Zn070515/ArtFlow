@@ -6,7 +6,7 @@ http://127.0.0.1:8081 {
 	}
 }
 
-{$CADDY_SITE_ADDRESS} {
+https://{$CADDY_SITE_ADDRESS} {
 	request_body {
 		max_size 120MB
 	}
