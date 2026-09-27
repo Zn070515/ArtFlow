@@ -23,6 +23,7 @@ if APP_ENV == "production":
 SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
 ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
 ARTFLOW_ORGANIZATION_NAME = os.environ.get("ARTFLOW_ORGANIZATION_NAME", "").strip()
+ARTFLOW_RELEASE_SHA = os.environ.get("ARTFLOW_RELEASE_SHA", "").strip()
 
 DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
 

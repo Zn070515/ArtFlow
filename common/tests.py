@@ -1683,6 +1683,37 @@ class AppBackupVerificationTests(TestCase):
         with self.assertRaises(CommandError):
             call_command("backup_artflow", "--output", str(Path(self._media.name) / "bk"))
 
+    def test_backup_artflow_manifest_uses_configured_release_sha(self):
+        output_root = Path(self._media.name) / "backups"
+        release_sha = "a" * 40
+
+        def fake_pg_dump(_database, dump_path):
+            dump_path.write_bytes(b"test dump")
+
+        with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=release_sha):
+            with patch(
+                "common.management.commands.backup_artflow.pg_dump",
+                side_effect=fake_pg_dump,
+            ):
+                call_command("backup_artflow", "--output", str(output_root))
+
+        manifest_path = next(output_root.glob("backup-*/manifest.json"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["git_sha"], release_sha)
+
+    def test_backup_artflow_production_requires_release_sha(self):
+        with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=""):
+            with patch(
+                "common.management.commands.backup_artflow._detect_git_sha",
+                return_value=None,
+            ):
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "backup_artflow",
+                        "--output",
+                        str(Path(self._media.name) / "backups"),
+                    )
+
     def test_verify_app_backup_passes_when_manifest_matches(self):
         store_submission_file(
             owner=self.registration,

@@ -22,6 +22,7 @@ CONFIG_ENVIRONMENT = {
     "POSTGRES_USER": "artflow",
     "POSTGRES_PASSWORD": "artflow-compose-config-test-database-password",
     "CADDY_SITE_ADDRESS": "artflow.internal",
+    "ARTFLOW_RELEASE_SHA": "a" * 40,
 }
 
 
@@ -55,6 +56,8 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
+    assert "backup_data" in compose["volumes"]
+    assert "backup_data:/app/backups" in web["volumes"]
     assert "artflow-local-container-password" not in PRODUCTION_COMPOSE_PATH.read_text(
         encoding="utf-8"
     )
@@ -83,6 +86,8 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
+    assert "backup_data" in compose["volumes"]
+    assert "backup_data:/app/backups" in compose["services"]["web"]["volumes"]
     event_manifest = EVENT_COMPOSE_PATH.read_text(encoding="utf-8").lower()
     assert "tunnel" not in event_manifest
     assert "ipv6" not in event_manifest
@@ -120,6 +125,7 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert values["TRUST_X_FORWARDED_FOR"] == "true"
     assert values["POSTGRES_HOST"] == "db"
     assert values["ARTFLOW_ORGANIZATION_NAME"] == ""
+    assert values["ARTFLOW_RELEASE_SHA"] == "replace-me-with-the-deployed-commit-sha"
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
 
 
@@ -127,6 +133,15 @@ def test_dockerfile_copies_every_runtime_local_app():
     dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
 
     assert "COPY --chown=artflow:artflow tickets ./tickets" in dockerfile
+
+
+def test_dockerfile_prepares_writable_backup_mountpoint():
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+
+    assert "mkdir --parents /app/media /app/staticfiles /app/backups" in dockerfile
+    assert (
+        "chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups" in dockerfile
+    )
 
 
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")
