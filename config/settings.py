@@ -180,6 +180,7 @@ ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS = get_int(
     os.environ, "ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS", 60 * 60
 )
 ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 256)
+ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 365)
 
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.
