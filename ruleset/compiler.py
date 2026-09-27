@@ -866,9 +866,11 @@ def _check_vote_roster(
             if actual != frozenset(str(c) for c in expected):
                 issues.append(_vote_roster_issue(node, source, len(actual), len(expected)))
             return
-    size = (prov.get(node.get("source")) or {}).get("size")
-    if size is not None and len(actual) != size:
-        issues.append(_vote_roster_issue(node, source, len(actual), size))
+    expected_size = (prov.get(node.get("source")) or {}).get("size")
+    if expected_size is None and node.get("source") == ENTRY_KEY:
+        expected_size = ctx.get("entry_size")
+    if expected_size is not None and len(actual) != expected_size:
+        issues.append(_vote_roster_issue(node, source, len(actual), expected_size))
 
 
 def _vote_roster_issue(node: dict, source: str, actual: int, expected: int) -> ReportIssue:
