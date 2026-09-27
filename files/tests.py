@@ -115,6 +115,49 @@ class SubmissionFileLifecycleTests(TestCase):
                 uploaded_by=self.user,
             )
 
+    @override_settings(ARTFLOW_UPLOAD_RATE_LIMIT=1, ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS=60)
+    def test_upload_rate_limit_does_not_share_a_bucket_across_owner_types(self):
+        # A singer registration and a program are different tables whose ids both start at
+        # 1; the same actor uploading to both must not have one consume the other's budget.
+        from farewell_show.models import Program
+
+        cache.clear()
+        activity = _create_activity(
+            title="Farewell",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        program = Program.objects.create(
+            activity=activity,
+            user=self.user,
+            name="Dance",
+            program_type=Program.ProgramType.DANCE,
+            contact_name="Li Hua",
+            contact_phone="13800000000",
+            class_name="CS1",
+        )
+        self.assertEqual(self.registration.pk, program.pk)
+        valid_audio = b"ID3\x04\x00\x00\x00\x00\x00\x00"
+
+        store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile("first.mp3", valid_audio, content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+        store_submission_file(
+            owner=program,
+            uploaded_file=SimpleUploadedFile("second.mp3", valid_audio, content_type="audio/mpeg"),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+
+        self.assertTrue(
+            SubmissionFile.objects.filter(singer_registration=self.registration).exists()
+        )
+        self.assertTrue(SubmissionFile.objects.filter(program=program).exists())
+
     @override_settings(ARTFLOW_UPLOAD_MAX_VERSIONS=2)
     def test_upload_retains_only_the_configured_recent_versions(self):
         cache.clear()

@@ -209,8 +209,12 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     if shutil.disk_usage(media_root).free < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024:
         raise ValidationError("存储空间不足，暂时无法接收上传。")
     try:
+        # The owner is identified by model *and* pk: a singer registration and a farewell
+        # show program are separate tables whose ids both start at 1, so a pk-only key let
+        # one owner type consume another's throttle budget for the same actor.
+        owner_key = f"{type(owner).__name__.lower()}:{owner.pk}"
         hit_rate_limit(
-            f"upload:{getattr(uploaded_by, 'pk', 'anonymous')}:{owner.pk}:{purpose}",
+            f"upload:{getattr(uploaded_by, 'pk', 'anonymous')}:{owner_key}:{purpose}",
             limit=settings.ARTFLOW_UPLOAD_RATE_LIMIT,
             window_seconds=settings.ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS,
         )
