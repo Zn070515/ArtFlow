@@ -22,6 +22,7 @@ from tickets.models import Ticket, TicketAccessSession
 from voting.models import VoteBallot
 
 from common.models import AuditLog
+from common.maintenance import WriteBarrierBusy, write_barrier
 from config.runtime import is_full_git_sha, is_placeholder_value
 
 COUNT_MODELS: dict[str, Any] = {
@@ -150,35 +151,39 @@ class Command(BaseCommand):
         if getattr(settings, "APP_ENV", "") == "production" and not release_sha:
             raise CommandError("Production backups require ARTFLOW_RELEASE_SHA or --git-sha.")
 
-        output_base = Path(options["output"]).resolve()
-        output_base.mkdir(parents=True, exist_ok=True)
-        backup_dir = output_base / f"backup-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
-        backup_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            with write_barrier("application backup"):
+                output_base = Path(options["output"]).resolve()
+                output_base.mkdir(parents=True, exist_ok=True)
+                backup_dir = output_base / f"backup-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
+                backup_dir.mkdir(parents=True, exist_ok=False)
 
-        dump_path = backup_dir / "database.dump"
-        media_archive_path = backup_dir / "media.tar.gz"
-        manifest_path = backup_dir / "manifest.json"
-        media_root = Path(settings.MEDIA_ROOT)
+                dump_path = backup_dir / "database.dump"
+                media_archive_path = backup_dir / "media.tar.gz"
+                manifest_path = backup_dir / "manifest.json"
+                media_root = Path(settings.MEDIA_ROOT)
 
-        pg_dump(connection.settings_dict, dump_path)
-        if not dump_path.exists() or dump_path.stat().st_size == 0:
-            raise CommandError("The created database dump is missing or empty.")
-        create_media_archive(media_root, media_archive_path, backup_dir)
+                pg_dump(connection.settings_dict, dump_path)
+                if not dump_path.exists() or dump_path.stat().st_size == 0:
+                    raise CommandError("The created database dump is missing or empty.")
+                create_media_archive(media_root, media_archive_path, backup_dir)
 
-        head, serialized_heads, applied_count = apply_migration_heads()
-        manifest: dict[str, Any] = {
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "git_sha": release_sha,
-            "django_migration_head": head,
-            "django_migrations_applied": serialized_heads,
-            "django_migrations_applied_count": applied_count,
-            "database_sha256": sha256_file(dump_path),
-            "media_sha256": sha256_file(media_archive_path),
-            "media_content_sha256": media_content_digest(media_root),
-            "counts": collect_counts(),
-        }
-        write_manifest(manifest, manifest_path)
-        self.stdout.write(str(backup_dir))
+                head, serialized_heads, applied_count = apply_migration_heads()
+                manifest: dict[str, Any] = {
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "git_sha": release_sha,
+                    "django_migration_head": head,
+                    "django_migrations_applied": serialized_heads,
+                    "django_migrations_applied_count": applied_count,
+                    "database_sha256": sha256_file(dump_path),
+                    "media_sha256": sha256_file(media_archive_path),
+                    "media_content_sha256": media_content_digest(media_root),
+                    "counts": collect_counts(),
+                }
+                write_manifest(manifest, manifest_path)
+                self.stdout.write(str(backup_dir))
+        except WriteBarrierBusy as error:
+            raise CommandError(str(error)) from error
 
 
 def _resolve_release_sha(explicit_sha: Any) -> str | None:
