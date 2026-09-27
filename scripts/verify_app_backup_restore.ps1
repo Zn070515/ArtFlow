@@ -49,6 +49,21 @@ function Get-TarExecutable {
     return 'tar'
 }
 
+function Assert-BackupHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Expected,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    if ($Expected -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "Manifest field $Label is not a SHA-256 digest."
+    }
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $Expected.ToLowerInvariant()) {
+        throw "$Label does not match the manifest."
+    }
+}
+
 function Invoke-RestoreWeb {
     param([Parameter(Mandatory = $true)][string[]]$Command)
     $arguments = @(
@@ -84,6 +99,13 @@ try {
             throw "Backup set is missing $required."
         }
     }
+
+    $manifestPath = Join-Path $backupSetResolved 'manifest.json'
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    Assert-BackupHash -Path (Join-Path $backupSetResolved 'database.dump') `
+        -Expected ([string]$manifest.database_sha256) -Label 'database_sha256'
+    Assert-BackupHash -Path (Join-Path $backupSetResolved 'media.tar.gz') `
+        -Expected ([string]$manifest.media_sha256) -Label 'media_sha256'
 
     $mediaExtractDir = Join-Path $outputRoot ("media-" + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Force -Path $mediaExtractDir | Out-Null
