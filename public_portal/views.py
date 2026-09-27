@@ -74,3 +74,7 @@ def result_list(request):
         post_type=PublicPost.PostType.RESULT_PUBLICATION,
     )
     return render(request, "public_portal/result_list.html", {"posts": posts})
+
+
+def privacy(request):
+    return render(request, "public_portal/privacy.html")

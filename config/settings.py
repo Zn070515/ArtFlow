@@ -24,6 +24,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
 ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
 ARTFLOW_ORGANIZATION_NAME = os.environ.get("ARTFLOW_ORGANIZATION_NAME", "").strip()
 ARTFLOW_RELEASE_SHA = os.environ.get("ARTFLOW_RELEASE_SHA", "").strip()
+ARTFLOW_ICP_NUMBER = os.environ.get("ARTFLOW_ICP_NUMBER", "").strip()
+ARTFLOW_ICP_URL = os.environ.get("ARTFLOW_ICP_URL", "").strip()
 
 DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
 
@@ -200,9 +202,15 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = APP_ENV == "production"
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = "Lax"
-SECURE_HSTS_SECONDS = 31_536_000 if APP_ENV == "production" else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = APP_ENV == "production"
-SECURE_HSTS_PRELOAD = APP_ENV == "production"
+SECURE_HSTS_SECONDS = get_int(
+    os.environ, "SECURE_HSTS_SECONDS", 31_536_000 if APP_ENV == "production" else 0
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = get_bool(
+    os.environ, "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=APP_ENV == "production"
+)
+SECURE_HSTS_PRELOAD = get_bool(
+    os.environ, "SECURE_HSTS_PRELOAD", default=APP_ENV == "production"
+)
 SECURE_REFERRER_POLICY = "same-origin"
 
 # Register system checks only after the runtime environment has been loaded.

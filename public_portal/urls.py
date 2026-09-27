@@ -10,4 +10,5 @@ urlpatterns = [
     path("showcase/", views.showcase_list, name="showcase_list"),
     path("announcements/", views.announcement_list, name="announcement_list"),
     path("results/", views.result_list, name="result_list"),
+    path("privacy/", views.privacy, name="privacy"),
 ]
