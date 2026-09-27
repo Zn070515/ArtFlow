@@ -13,7 +13,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}"
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes postgresql-client \
+    && apt-get install --no-install-recommends --yes ca-certificates curl gnupg \
+    && install --directory --mode=0755 /usr/share/postgresql-common/pgdg \
+    && curl --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor --output /usr/share/keyrings/postgresql.gpg \
+    && . /etc/os-release \
+    && printf 'deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt %s-pgdg main\n' "$VERSION_CODENAME" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install --no-install-recommends --yes postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system artflow \
     && useradd --system --create-home --gid artflow --shell /usr/sbin/nologin artflow
