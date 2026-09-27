@@ -382,14 +382,6 @@ def _requirements_for(activity, applies_to, fallback):
     return configured or fallback
 
 
-def _owner_applies_to(owner):
-    if hasattr(owner, "student_id"):
-        return MaterialRequirement.AppliesTo.SINGER
-    if hasattr(owner, "program_type"):
-        return MaterialRequirement.AppliesTo.PROGRAM
-    return None
-
-
 def _reset_matching_check(owner, purpose):
     """A brand-new upload supersedes any prior staff review of that material type.
 
