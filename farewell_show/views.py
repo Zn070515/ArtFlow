@@ -1,4 +1,4 @@
-from common.audit import log_action
+from common.audit import log_action, redacted_field_change
 from common.business_rules import ensure_activity_unlocked, ensure_participant_can_edit
 from common.models import AuditLog
 from core.models import Activity
@@ -207,11 +207,12 @@ def _update_program(request, prog):
         return []
     prog.save(update_fields=list(old))
     new = {field: getattr(prog, field) for field in old}
+    old_summary, new_summary = redacted_field_change(old, new)
     log_action(
         request,
         AuditLog.ActionType.UPDATE_REGISTRATION,
         f"Program:{prog.pk}",
-        old_value=str(old),
-        new_value=str(new),
+        old_value=old_summary,
+        new_value=new_summary,
     )
     return []

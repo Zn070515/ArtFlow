@@ -117,6 +117,28 @@ def _registration_list_workbook(activity: Activity) -> Workbook:
     return wb
 
 
+def _registration_archive_workbook(activity: Activity) -> Workbook:
+    """Build a permanent registration index without direct contact identifiers."""
+    wb = Workbook()
+    ws = _active_worksheet(wb)
+    ws.title = "Registration Archive"
+    ws.append(["Name", "College", "Class", "Song", "Original", "Pre Status", "Live Status"])
+    for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
+        ws.append(
+            [
+                r.name,
+                r.college,
+                r.class_name,
+                r.song_name,
+                "yes" if r.is_original else "no",
+                r.get_pre_status_display(),
+                r.get_live_status_display(),
+            ]
+        )
+    _autosize_sheet(ws)
+    return wb
+
+
 def _contact_list_workbook(activity: Activity) -> Workbook:
     wb = Workbook()
     ws = _active_worksheet(wb)
@@ -177,6 +199,30 @@ def _program_list_workbook(activity: Activity) -> Workbook:
                 p.mic_requirements,
                 p.prop_requirements,
                 p.special_notes,
+            ]
+        )
+    _autosize_sheet(ws)
+    return wb
+
+
+def _program_archive_workbook(activity: Activity) -> Workbook:
+    """Build a permanent program index without contact identity or phone data."""
+    wb = Workbook()
+    ws = _active_worksheet(wb)
+    ws.title = "Program Archive"
+    ws.append(["Order", "Name", "Type", "Class/Dept", "Performers", "Duration", "Status"])
+    for p in scope_runtime(Program.objects.filter(activity=activity), activity).order_by(
+        "sort_order", "pk"
+    ):
+        ws.append(
+            [
+                p.sort_order,
+                p.name,
+                p.get_program_type_display(),
+                p.class_name,
+                p.performers,
+                p.estimated_duration,
+                p.get_status_display(),
             ]
         )
     _autosize_sheet(ws)
@@ -631,9 +677,9 @@ def build_archive_package(activity: Activity) -> list[PackageArtifact]:
     """Build the post-event archive package (authoritative record)."""
     artifacts = [
         _xlsx("activity_info", _activity_info_workbook(activity)),
-        _xlsx("registration_list", _registration_list_workbook(activity)),
+        _xlsx("registration_list", _registration_archive_workbook(activity)),
         _xlsx("material_checklist", _material_checklist_workbook(activity)),
-        _xlsx("program_list", _program_list_workbook(activity)),
+        _xlsx("program_list", _program_archive_workbook(activity)),
         _xlsx("score_results", _score_results_workbook(activity)),
         _xlsx("vote_results", _vote_results_workbook(activity)),
         _xlsx("award_list", _award_list_workbook(activity)),
