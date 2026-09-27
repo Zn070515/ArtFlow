@@ -87,6 +87,7 @@ from ruleset.services import (
     update_ruleset_binding,
     update_ruleset_definition,
 )
+from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.judge_authority import (
     advance_performance,
     hold_judge_panel,
@@ -3582,5 +3583,7 @@ def ruleset_clone_from_template(request, template_pk):
 @staff_required
 @require_POST
 def ruleset_clone_last_year(request):
-    template = get_object_or_404(RulesetTemplate, name="院十佳")
+    # Identity, not display name: the 2025 historical template is found by its stable
+    # builtin_key so a future rename can never break "clone last year" (§11.2).
+    template = get_object_or_404(RulesetTemplate, builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
     return ruleset_clone_from_template(request, template.pk)

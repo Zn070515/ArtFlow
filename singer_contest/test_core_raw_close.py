@@ -237,7 +237,7 @@ class CapabilityAndPairContractTests(TestCase):
         seed_ruleset_templates()
         from ruleset.models import RulesetTemplate
 
-        production = RulesetTemplate.objects.get(name="院十佳")
+        production = RulesetTemplate.objects.get(builtin_key="golden_schidui")
         unsupported = RulesetTemplate.objects.get(name="校十佳屏峰_历史未决回退")
         self.assertEqual(production.capability_status, RulesetTemplate.CapabilityStatus.PRODUCTION)
         self.assertEqual(

@@ -58,6 +58,7 @@ from incidents.models import IncidentRecord
 from openpyxl import load_workbook
 from public_portal.models import PublicPost, ResultRelease
 from ruleset.models import ContestRuleset, RulesetVersion
+from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, HISTORICAL_SCHIDUI_NAME
 from singer_contest.models import (
     AudienceScore,
     Award,
@@ -5793,21 +5794,21 @@ class ResultBoardTests(TestCase):
 
 class RulesetTemplateLibraryTests(TestCase):
     def setUp(self):
+        from ruleset.templates import seed_ruleset_templates
+
         self.staff = _create_provisioned_user(
             username="lib-staff",
             password="pass",
             role=User.Role.STAFF,
         )
         self.client.force_login(self.staff)
-        from ruleset.templates import seed_ruleset_templates
-
         seed_ruleset_templates(self.staff)
 
     def test_template_list_renders_library(self):
         response = self.client.get(reverse("staff:ruleset_template_list"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "赛制模板库")
-        self.assertContains(response, "院十佳")
+        self.assertContains(response, HISTORICAL_SCHIDUI_NAME)
         self.assertContains(response, "校十佳屏峰")
 
     def test_template_list_requires_staff(self):
@@ -5818,7 +5819,7 @@ class RulesetTemplateLibraryTests(TestCase):
     def test_template_detail_renders_definition_nodes(self):
         from ruleset.models import RulesetTemplate
 
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         response = self.client.get(reverse("staff:ruleset_template_detail", args=[template.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, template.name)
@@ -5838,7 +5839,7 @@ class RulesetTemplateLibraryTests(TestCase):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
         activity = self._clone_activity()
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         response = self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
             {"activity": activity.pk, "name": "院十佳2026克隆"},
@@ -5861,7 +5862,7 @@ class RulesetTemplateLibraryTests(TestCase):
             is_test_data=True,
             created_by=self.staff,
         )
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         response = self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
             {"activity": activity.pk, "name": "院十佳2027复制"},
@@ -5878,7 +5879,7 @@ class RulesetTemplateLibraryTests(TestCase):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
         activity = self._clone_activity("院十佳2028")
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
             {"activity": activity.pk, "name": "赛制A"},
@@ -5899,16 +5900,22 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertFalse(latest.is_current)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[latest.pk]))
 
-    def test_clone_last_year_picks_golden_template_by_name(self):
-        from ruleset.models import ContestRuleset, RulesetVersion
+    def test_clone_last_year_picks_the_template_by_builtin_key(self):
+        # §11.2: the display name is UI, the builtin key is identity — even after the row
+        # is renamed, "clone last year" must still find the 2025 historical template.
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 
-        activity = self._clone_activity("校十佳2026")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        RulesetTemplate.objects.filter(pk=template.pk).update(name="完全不同的名字")
+
+        activity = self._clone_activity("院十佳2026")
         response = self.client.post(
             reverse("staff:ruleset_clone_last_year"),
-            {"activity": activity.pk, "name": "校十佳2026"},
+            {"activity": activity.pk, "name": "院十佳2026"},
         )
         ruleset = ContestRuleset.objects.get(activity=activity)
-        self.assertEqual(ruleset.source_template.name, "院十佳")  # type: ignore[union-attr]
+        self.assertEqual(ruleset.source_template_id, template.pk)
+        self.assertEqual(ruleset.source_template.definition, template.definition)  # type: ignore[union-attr]
         version = RulesetVersion.objects.get(ruleset=ruleset)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 
@@ -5916,7 +5923,7 @@ class RulesetTemplateLibraryTests(TestCase):
         activity = self._clone_activity()
         from ruleset.models import RulesetTemplate
 
-        template = RulesetTemplate.objects.get(name="院十佳")
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
         self.client.logout()
         response = self.client.post(
             reverse("staff:ruleset_clone_from_template", args=[template.pk]),
