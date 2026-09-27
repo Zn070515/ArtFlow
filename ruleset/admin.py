@@ -68,6 +68,7 @@ class ContestRulesetAdmin(MaintenanceMetadataAdmin):
         "announcement_blocks",
         "announcement_blocks_by_checkpoint",
         "vote_keys",
+        "vote_scoring_rule_keys",
         "group_keys",
         "audience_keys",
         "created_by",

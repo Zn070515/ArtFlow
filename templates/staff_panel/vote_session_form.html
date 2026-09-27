@@ -50,10 +50,11 @@
                 {% for val, label in purposes %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
             </select>
             <p class="text-xs text-gray-500 mt-1">锁定投票只记录原始事实；正式奖项必须由赛制 AWARD 核定发布。</p>
+            <p class="text-xs text-gray-500 mt-1">选择「成绩组成」时：正式成绩来源必须启用入场票校验；观众分 = 支持该选手的有效 ballot 数 ÷ 有效 ballot 总数 × 100；多选时各选手支持率之和可以超过 100%。</p>
         </div>
         <label class="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" name="requires_ticket" class="rounded border-gray-300">
-            仅允许已核验入场票参与
+            仅允许已核验入场票参与（「成绩组成」必须勾选）
         </label>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">候选选手（可多选）</label>

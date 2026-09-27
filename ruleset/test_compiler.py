@@ -107,6 +107,7 @@ class RulesetAdminAuthoritySurfaceTests(SimpleTestCase):
                 "announcement_blocks",
                 "announcement_blocks_by_checkpoint",
                 "vote_keys",
+                "vote_scoring_rule_keys",
                 "group_keys",
                 "audience_keys",
                 "created_by",
@@ -1354,6 +1355,7 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
                 "stage_key": "院十佳",
                 "round_keys": {"r1": round_.pk},
                 "vote_keys": {},
+                "vote_scoring_rule_keys": {},
                 "group_keys": {},
                 "audience_keys": {},
                 "announcement_blocks": [{"label": "晋级", "outcome_codes": ["direct"]}],
@@ -1568,7 +1570,12 @@ class BindingValidationTests(_RulesetModelBase):
 
         self.assertEqual(
             _vote_binding(vote.pk),
-            {"scale": "votes", "purpose": vote.purpose, "requires_ticket": True},
+            {
+                "scale": "votes",
+                "purpose": vote.purpose,
+                "requires_ticket": True,
+                "candidates": [],
+            },
         )
 
     def test_accepts_and_normalizes_pk_map(self):

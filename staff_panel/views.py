@@ -155,6 +155,7 @@ from voting.services import (
     lock_vote_session,
     open_vote_session,
     unlock_vote_session,
+    vote_session_configuration_facts,
 )
 
 from staff_panel.forms import (
@@ -2346,6 +2347,23 @@ def vote_session_detail(request, pk):
     options = options.annotate(vote_count=Count("records"))
     total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
     _, top = _popularity_top_tie(vote_session)
+    # §9: a score-component session must be reconcilable by hand — valid ballot count,
+    # per-candidate votes and support rate next to the conversion mode and lock state.
+    conversion = None
+    conversion_rows = []
+    if vote_session.purpose == VoteSession.Purpose.SCORE_COMPONENT:
+        conversion = vote_session_configuration_facts(
+            vote_session, test_flag=runtime_is_test(vote_session.activity)
+        )
+        rates = conversion["support_rate"]
+        conversion_rows = [
+            {
+                "singer": option.singer,
+                "votes": option.vote_count,
+                "rate": rates.get(str(option.singer_id)),
+            }
+            for option in options
+        ]
     return render(
         request,
         "staff_panel/vote_session_detail.html",
@@ -2354,6 +2372,8 @@ def vote_session_detail(request, pk):
             "options": options,
             "total_votes": total_votes,
             "popularity_tie": len(top) > 1,
+            "conversion": conversion,
+            "conversion_rows": conversion_rows,
         },
     )
 
@@ -3368,6 +3388,9 @@ def ruleset_edit(request, pk):
             "binding_json": {
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),
+                "vote_scoring_rule_keys": json.dumps(
+                    ruleset.vote_scoring_rule_keys or {}, ensure_ascii=False
+                ),
                 "group_keys": json.dumps(ruleset.group_keys or {}, ensure_ascii=False),
                 "audience_keys": json.dumps(ruleset.audience_keys or {}, ensure_ascii=False),
                 "announcement_blocks": json.dumps(
@@ -3411,6 +3434,7 @@ def ruleset_bind(request, pk):
                 "stage_key": request.POST.get("stage_key"),
                 "round_keys": _parse_json("round_keys", {}),
                 "vote_keys": _parse_json("vote_keys", {}),
+                "vote_scoring_rule_keys": _parse_json("vote_scoring_rule_keys", {}),
                 "group_keys": _parse_json("group_keys", {}),
                 "audience_keys": _parse_json("audience_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),

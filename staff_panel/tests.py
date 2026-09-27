@@ -5224,7 +5224,6 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(
             StageResult.objects.filter(stage_key="快速赛段", status="ready_to_confirm").exists()
         )
-
     def test_post_audience_scores_rejects_out_of_range(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
@@ -6896,3 +6895,113 @@ class StageResultAuthorityDetailTests(TestCase):
         response = self.client.get(reverse("staff:stage_result_detail", args=[old.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+
+class ScoreComponentVoteUiTests(TestCase):
+    """§9 — configuring a score-component vote, and the staff verification panel."""
+
+    def setUp(self):
+        self.activity = _create_activity(
+            title="成绩投票活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.staff = _create_provisioned_user(
+            username="score-component-staff", password="pass", role=User.Role.STAFF
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=_create_provisioned_user(username="score-component-singer", password="pass"),
+            name="成绩选手",
+            student_id="20260901",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.client.force_login(self.staff)
+
+    def _payload(self, **overrides):
+        payload = {
+            "activity_id": self.activity.pk,
+            "name": "成绩投票",
+            "passcode": "1234",
+            "start_time": "2026-08-27T10:00",
+            "end_time": "2026-08-27T11:00",
+            "singers": [str(self.singer.pk)],
+            "purpose": VoteSession.Purpose.SCORE_COMPONENT,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_create_form_requires_ticket_checking_for_score_component(self):
+        response = self.client.post(reverse("staff:vote_session_create"), self._payload())
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "必须启用入场票校验")
+        self.assertFalse(VoteSession.objects.filter(name="成绩投票").exists())
+
+    def test_create_form_accepts_score_component_with_ticket_checking(self):
+        response = self.client.post(
+            reverse("staff:vote_session_create"), self._payload(requires_ticket="on")
+        )
+        self.assertEqual(response.status_code, 302)
+        session = VoteSession.objects.get(name="成绩投票")
+        self.assertEqual(session.purpose, VoteSession.Purpose.SCORE_COMPONENT)
+        self.assertTrue(session.requires_ticket)
+
+    def test_detail_panel_shows_ballots_votes_and_support_rate(self):
+        from voting.services import configure_vote_scoring_rule
+
+        session = _create_vote_session(
+            activity=self.activity,
+            name="成绩投票",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(hours=1),
+            purpose=VoteSession.Purpose.SCORE_COMPONENT,
+            requires_ticket=True,
+            is_test_data=True,
+        )
+        option = VoteOption.objects.create(
+            vote_session=session, singer=self.singer, is_test_data=True
+        )
+        configure_vote_scoring_rule(session, self.staff)
+        for index in range(4):
+            ballot = VoteBallot.objects.create(
+                vote_session=session,
+                browser_session_key=f"ui-browser-{index}",
+                ip_address="127.0.0.1",
+                is_test_data=True,
+            )
+            VoteRecord.objects.create(
+                ballot=ballot,
+                vote_session=session,
+                vote_option=option,
+                browser_session_key=f"ui-browser-{index}",
+                ip_address="127.0.0.1",
+                is_test_data=True,
+            )
+
+        response = self.client.get(reverse("staff:vote_session_detail", args=[session.pk]))
+
+        self.assertContains(response, "成绩换算核对")
+        self.assertContains(response, "ballot_share_percent")
+        self.assertContains(response, "100.00")
+        self.assertContains(response, "多选投票时各选手支持率之和可以超过 100%")
+
+    def test_detail_panel_reports_an_empty_session_as_undecided(self):
+        session = _create_vote_session(
+            activity=self.activity,
+            name="空成绩投票",
+            passcode="1234",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(hours=1),
+            purpose=VoteSession.Purpose.SCORE_COMPONENT,
+            requires_ticket=True,
+            is_test_data=True,
+        )
+        response = self.client.get(reverse("staff:vote_session_detail", args=[session.pk]))
+        self.assertContains(response, "不产生分数")

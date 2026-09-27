@@ -1701,19 +1701,29 @@ def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
 def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     """Source the ``vote_scores`` ResolveInput from the binding's ``vote_keys``.
 
-    Each ``vote_source`` key resolves to a VoteSession; per-singer RAW vote count is
-    returned (an authoritative fact). The loader never fabricates a normalized 0-10/100
-    score from votes — converting votes to points belongs to an explicit VoteScoringRule,
-    not the data loader. An empty session is left unbound so the resolver holds.
+    Each ``vote_source`` key resolves to a VoteSession. Without an explicitly frozen
+    conversion the loader returns the per-singer RAW vote count (an authoritative fact) and
+    never fabricates a normalized score. When the frozen binding carries a conversion
+    snapshot (``vote_scoring_rule_keys``), the loader applies exactly that conversion —
+    identity, mode and output scale all come from the snapshot, never from "whichever rule
+    the session has now". An empty session is left unbound so the resolver holds rather than
+    publishing a fabricated 0.
     """
     from voting.models import VoteOption, VoteRecord
 
     vote_keys = binding.get("vote_keys") or {}
     if not vote_keys:
         return {}
+    scoring_rules = binding.get("vote_scoring_rule_keys") or {}
     test_flag = runtime_is_test(activity)
     out: dict[str, dict[str, Decimal]] = {}
     for source, vs_pk in vote_keys.items():
+        rule_snapshot = scoring_rules.get(source)
+        if rule_snapshot:
+            converted = _convert_vote_session(vs_pk, rule_snapshot, test_flag=test_flag)
+            if converted is not None:
+                out[source] = converted
+            continue
         # M1-R9-Final: initialise every candidate in the session to 0 first, so a zero-vote
         # candidate is a legal 0 rather than a "missing" result (the resolver would otherwise
         # HOLD on an absent entry). An orphan entry cast against a deleted option still counts.
@@ -1730,6 +1740,27 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
             continue
         out[source] = {sid: Decimal(n) for sid, n in counts.items()}
     return out
+
+
+def _convert_vote_session(
+    vs_pk, rule_snapshot: Mapping, *, test_flag: bool
+) -> dict[str, Decimal] | None:
+    """Apply the frozen conversion snapshot to one session's locked ballots.
+
+    Only the declared conversion is honoured; an unknown mode is refused rather than
+    guessed (a silent wrong denominator is exactly what the frozen snapshot exists to
+    prevent). Returns ``None`` when there is no valid ballot — 0/0 is not a zero score.
+    """
+    from voting.models import VoteSession
+    from voting.services import ballot_share_percentages
+
+    mode = rule_snapshot.get("mode")
+    if mode != "ballot_share_percent":
+        raise ValidationError(f"未知的投票换算方式：{mode}")
+    vote_session = VoteSession.objects.filter(pk=vs_pk).first()
+    if vote_session is None:
+        raise ValidationError(f"赛制绑定的投票不存在：{vs_pk}")
+    return ballot_share_percentages(vote_session, test_flag=test_flag)
 
 
 def _source_audience_scores(activity, binding) -> dict[str, dict[str, Decimal]]:

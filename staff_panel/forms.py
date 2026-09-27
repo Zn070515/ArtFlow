@@ -363,6 +363,8 @@ class VoteSessionForm(forms.Form):
         if cleaned.get("start_time") and cleaned.get("end_time"):
             if cleaned["end_time"] <= cleaned["start_time"]:
                 raise forms.ValidationError("结束时间必须晚于开始时间。")
+        if purpose == VoteSession.Purpose.SCORE_COMPONENT and not cleaned.get("requires_ticket"):
+            raise forms.ValidationError("「成绩组成」投票必须启用入场票校验。")
         cleaned["selection_type"] = selection_type
         cleaned["max_selections"] = max_selections
         cleaned["purpose"] = purpose

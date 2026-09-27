@@ -61,11 +61,38 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
         "stage_key": ruleset.stage_key or "",
         "round_keys": dict(ruleset.round_keys or {}),
         "vote_keys": dict(ruleset.vote_keys or {}),
+        "vote_scoring_rule_keys": dict(ruleset.vote_scoring_rule_keys or {}),
         "group_keys": dict(ruleset.group_keys or {}),
         "audience_keys": dict(ruleset.audience_keys or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
         "announcement_blocks_by_checkpoint": dict(ruleset.announcement_blocks_by_checkpoint or {}),
     }
+
+
+def vote_scoring_binding_snapshot(rule_keys) -> dict:
+    """The canonical frozen form of the ``{vote_source: rule pk}`` conversion binding.
+
+    Freezing records the conversion's *identity and meaning* — rule id, mode and output
+    scale — so a replay (and the staff verification panel) never has to ask the database
+    which rule the session "has now". Refuses a rule that does not exist.
+    """
+    from voting.models import VoteScoringRule
+
+    normalized = _normalize_pk_map(rule_keys, label="vote_scoring_rule_keys")
+    if not normalized:
+        return {}
+    rules = {rule.pk: rule for rule in VoteScoringRule.objects.filter(pk__in=normalized.values())}
+    snapshot: dict[str, dict] = {}
+    for source, rule_pk in normalized.items():
+        rule = rules.get(rule_pk)
+        if rule is None:
+            raise ValidationError(f"成绩换算规则不存在：{rule_pk}")
+        snapshot[str(source)] = {
+            "rule": rule.pk,
+            "mode": rule.mode,
+            "scale": rule.output_scale,
+        }
+    return snapshot
 
 
 def _binding_signature(ruleset: ContestRuleset) -> str:
@@ -80,6 +107,7 @@ def _binding_signature(ruleset: ContestRuleset) -> str:
             "stage_key": ruleset.stage_key or "",
             "round_keys": dict(ruleset.round_keys or {}),
             "vote_keys": dict(ruleset.vote_keys or {}),
+            "vote_scoring_rule_keys": dict(ruleset.vote_scoring_rule_keys or {}),
             "group_keys": dict(ruleset.group_keys or {}),
             "audience_keys": dict(ruleset.audience_keys or {}),
             "announcement_blocks": list(ruleset.announcement_blocks or []),
@@ -165,6 +193,9 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     binding = dict(binding or {})
     normalized_round_keys = _normalize_pk_map(binding.get("round_keys"), label="round_keys")
     vote_keys = _normalize_pk_map(binding.get("vote_keys"), label="vote_keys")
+    scoring_rule_keys = _normalize_pk_map(
+        binding.get("vote_scoring_rule_keys"), label="vote_scoring_rule_keys"
+    )
     group_keys = _normalize_pk_map(binding.get("group_keys"), label="group_keys")
     audience_keys = _normalize_string_map(binding.get("audience_keys"), label="audience_keys")
     announcement_blocks = binding.get("announcement_blocks") or []
@@ -206,6 +237,25 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     if missing_groups:
         raise ValidationError(f"赛制绑定的分组成员轮次不属于该活动：{missing_groups}")
 
+    # §6.1: a conversion rule is only meaningful for the vote source it converts, so the
+    # binding must name an existing rule of exactly that bound session.
+    if scoring_rule_keys:
+        from voting.models import VoteScoringRule
+
+        rules = {
+            rule.pk: rule
+            for rule in VoteScoringRule.objects.filter(pk__in=scoring_rule_keys.values())
+        }
+        for source, rule_pk in scoring_rule_keys.items():
+            rule = rules.get(rule_pk)
+            if rule is None:
+                raise ValidationError(f"赛制绑定的成绩换算规则不存在：{rule_pk}")
+            bound_session = vote_keys.get(source)
+            if bound_session is None:
+                raise ValidationError(f"成绩换算规则 {rule_pk} 未绑定对应的投票源 {source}。")
+            if rule.vote_session_id != bound_session:
+                raise ValidationError(f"成绩换算规则 {rule_pk} 不属于投票 {bound_session}。")
+
     # A source key must not bind as both a raw-count vote and a staff-entered audience
     # score: `_combined_vote_scores` would silently let audience overwrite the counts, and
     # `_stage_consumed_facts` already splits them — so reject the ambiguity at freeze time.
@@ -217,6 +267,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         "stage_key": str(binding.get("stage_key") or "").strip(),
         "round_keys": normalized_round_keys,
         "vote_keys": vote_keys,
+        "vote_scoring_rule_keys": scoring_rule_keys,
         "group_keys": group_keys,
         "audience_keys": audience_keys,
         "announcement_blocks": announcement_blocks,
@@ -281,6 +332,7 @@ def update_ruleset_binding(
     locked.stage_key = normalized["stage_key"]
     locked.round_keys = normalized["round_keys"]
     locked.vote_keys = normalized["vote_keys"]
+    locked.vote_scoring_rule_keys = normalized["vote_scoring_rule_keys"]
     locked.group_keys = normalized["group_keys"]
     locked.audience_keys = normalized["audience_keys"]
     locked.announcement_blocks = normalized["announcement_blocks"]
@@ -290,6 +342,7 @@ def update_ruleset_binding(
             "stage_key",
             "round_keys",
             "vote_keys",
+            "vote_scoring_rule_keys",
             "group_keys",
             "audience_keys",
             "announcement_blocks",
@@ -334,9 +387,12 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
             item["scale"] = scale
         round_ctx[rkey] = item
 
+    # §6.2: a bound session only reports a hundred-mark score when the binding names the
+    # VoteScoringRule that converts it; a purpose alone never implies a conversion.
+    scoring_rules = binding.get("vote_scoring_rule_keys") or {}
     votes = {}
     for source, vs_pk in (binding.get("vote_keys") or {}).items():
-        vote = _vote_binding(vs_pk)
+        vote = _vote_binding(vs_pk, scoring_rules.get(source))
         if vote:
             votes[source] = vote
     for source, _set_name in (binding.get("audience_keys") or {}).items():
@@ -350,7 +406,25 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
         if caps:
             groups[by] = {"capacity": caps}
 
-    return {"entry_size": entry_size, "rounds": round_ctx, "votes": votes, "groups": groups}
+    return {
+        "entry_size": entry_size,
+        "entry_candidates": _entry_candidates(version, activity),
+        "rounds": round_ctx,
+        "votes": votes,
+        "groups": groups,
+    }
+
+
+def _entry_candidates(version, activity) -> list[str]:
+    """The entry roster's candidate ids, exactly as the runtime resolver loads them.
+
+    §7.3 needs the real pool identity (not just its size) to refuse a score-component vote
+    whose roster drifted from the roster the stage actually scores. Read through the same
+    helper the resolver uses so a freeze-time comparison cannot disagree with runtime.
+    """
+    from singer_contest.services import _stage_entry_roster
+
+    return [str(pk) for pk in _stage_entry_roster(version, activity, {})]
 
 
 def _scoped_entry_count(activity) -> int:
@@ -381,26 +455,42 @@ def _round_scale(contest_round) -> str | None:
     return str(int(Decimal(total)))
 
 
-def _vote_binding(vs_pk) -> dict:
-    from voting.models import VoteSession
+def _vote_binding(vs_pk, rule_snapshot: dict | None = None) -> dict:
+    """The bound vote facts a freeze compiles against.
+
+    Without an explicitly bound conversion rule a session yields RAW vote counts (unit
+    ``votes``), never a pre-normalized hundred-mark score: the compiler rejects a
+    SCORE_COMPONENT source in that state (``VOTE_SCORE_COMPONENT_RAW``). With a bound rule
+    the conversion's *meaning* comes from the frozen snapshot (mode + output scale), so the
+    rule's current row is never consulted at replay. Candidate ids ride along for the
+    §7.3 roster-equality gate.
+
+    Runtime vote readiness (ballots cast / locked / result ready) remains a resolver HOLD
+    condition, never a Freeze gate — so no ``result_ready`` fact is produced here.
+    """
+    from voting.models import VoteOption, VoteSession
 
     vs = VoteSession.objects.filter(pk=vs_pk).first()
     if vs is None:
         return {}
-    # M1-R9 (§一/三 "Vote/Score Source Truth"): a bound VoteSession yields RAW vote counts
-    # (unit ``votes``), never a pre-normalized hundred-mark score. The loader
-    # ``_source_vote_scores`` returns raw counts; there is no VoteScoringRule to convert
-    # votes -> points yet. Declaring ``hundred + normalization`` here was the "lie" that
-    # let a SCORE_COMPONENT audience vote mix raw counts into a weighted sum as if they
-    # were already a 0-100 score. The compiler now rejects a SCORE_COMPONENT source with
-    # unit ``votes`` (VOTE_SCORE_COMPONENT_RAW) until an explicit conversion rule exists.
-    # Runtime vote readiness (ballots cast / locked / result ready) remains a resolver HOLD
-    # condition, never a Freeze gate — so no ``result_ready`` fact is produced here.
-    return {
-        "scale": "votes",
+    candidates = [
+        str(singer_id)
+        for singer_id in VoteOption.objects.filter(vote_session_id=vs_pk)
+        .order_by("pk")
+        .values_list("singer_id", flat=True)
+    ]
+    binding = {
         "purpose": vs.purpose,
         "requires_ticket": vs.requires_ticket,
+        "candidates": candidates,
     }
+    if rule_snapshot:
+        binding["scale"] = rule_snapshot.get("scale") or "hundred"
+        binding["conversion"] = rule_snapshot.get("mode")
+        binding["scoring_rule"] = rule_snapshot.get("rule")
+    else:
+        binding["scale"] = "votes"
+    return binding
 
 
 def _annotated_capacity(rpk, activity):
@@ -458,6 +548,12 @@ def freeze_ruleset_version(
 
     freeze_binding = _snapshot_binding(locked.ruleset) if binding is None else binding
     normalized_binding = validate_binding(locked.ruleset, freeze_binding)
+    # §6.1: freeze the conversion authority itself (rule id + mode + output scale). The
+    # editable surface only names the rule; the snapshot records what it meant, so a replay
+    # reads the frozen identity instead of asking the DB which rule the session "has now".
+    normalized_binding["vote_scoring_rule_keys"] = vote_scoring_binding_snapshot(
+        normalized_binding.get("vote_scoring_rule_keys")
+    )
     bound_context = build_bound_context(locked, normalized_binding)
     report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
     if not report.passes():

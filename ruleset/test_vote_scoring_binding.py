@@ -72,6 +72,40 @@ def _definition(*, purpose="SCORE_COMPONENT"):
     )
 
 
+def _select_sourced_definition():
+    """A score-component vote that scores a SELECT roster rather than the entry pool."""
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {"key": "top1", "type": "SELECT", "source": "rank1", "count": 1},
+                {
+                    "key": "assess_a1",
+                    "type": "ASSESS",
+                    "source": "top1",
+                    "vote_source": "audience1",
+                    "vote_purpose": "SCORE_COMPONENT",
+                },
+                {
+                    "key": "stage1",
+                    "type": "AGGREGATE",
+                    "within": "top1",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.9},
+                            {"source": "assess_a1", "weight": 0.1},
+                        ],
+                    },
+                },
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
 def _context(*, vote, candidates=("1", "2"), entry_size=2):
     return {
         "entry_size": entry_size,
@@ -127,14 +161,17 @@ class VoteScoringBindingCompilerGateTests(SimpleTestCase):
         self.assertIn("VOTE_PURPOSE_MISMATCH", codes)
 
     def test_candidate_roster_must_equal_the_source_pool_size(self):
-        codes, _ = self._codes(
-            vote=_converted_vote(candidates=["1"]),
-            candidates=("1",),
-            entry_size=2,
+        # A non-entry source has a known size (the SELECT count) but no bound identity, so
+        # the check falls back to counting: 2 candidates cannot score a 1-person roster.
+        report, _plan = compile_definition(
+            _select_sourced_definition(),
+            context=_context(vote=_converted_vote(candidates=["1", "2"]), candidates=("1",)),
+            bound=True,
         )
-        self.assertIn("VOTE_ROSTER_MISMATCH", codes)
+        self.assertIn("VOTE_ROSTER_MISMATCH", report.codes())
 
     def test_candidate_roster_must_equal_the_source_pool_identity(self):
+        # Same size, different people: identity is what makes a roster drift real.
         codes, _ = self._codes(
             vote=_converted_vote(candidates=["1", "9"]),
             candidates=("1", "2"),
@@ -170,6 +207,7 @@ class FrozenVoteScoringBindingTests(_RulesetModelBase):
         requires_ticket=True,
         with_rule=True,
         with_options=True,
+        weaken_ticket_after_rule=False,
     ):
         admin = self._admin()
         activity = self.make_activity(is_test_mode=True)
@@ -203,6 +241,11 @@ class FrozenVoteScoringBindingTests(_RulesetModelBase):
         if with_options:
             VoteOption.objects.create(vote_session=session, singer=singer, is_test_data=True)
         rule = configure_vote_scoring_rule(session, admin) if with_rule else None
+        if weaken_ticket_after_rule:
+            # The rule service refuses to configure a session without ticket checking, so a
+            # weakened session is only reachable by editing the (still closed, still
+            # unbound) configuration afterwards. The freeze must catch that state.
+            VoteSession.objects.filter(pk=session.pk).update(requires_ticket=False)
         ruleset.round_keys = {"r1": contest_round.pk}
         ruleset.vote_keys = {"audience1": session.pk}
         ruleset.vote_scoring_rule_keys = {"audience1": rule.pk} if rule else {}
@@ -236,7 +279,7 @@ class FrozenVoteScoringBindingTests(_RulesetModelBase):
         self.assertIn("VOTE_SCORE_COMPONENT_RAW", caught.exception.report.codes())
 
     def test_freeze_refuses_a_score_component_without_ticket_checking(self):
-        admin, _ruleset, _session, _rule, version = self._fixture(requires_ticket=False)
+        admin, _ruleset, _session, _rule, version = self._fixture(weaken_ticket_after_rule=True)
         with self.assertRaises(RulesetInvalidError) as caught:
             freeze_ruleset_version(version, admin)
         self.assertIn("VOTE_SCORE_COMPONENT_REQUIRES_TICKET", caught.exception.report.codes())

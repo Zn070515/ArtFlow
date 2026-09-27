@@ -122,10 +122,28 @@ class BallotShareConversionTests(TestCase):
     # --- denominator truth ------------------------------------------------
 
     def test_single_select_ballot_share(self):
-        # 200 valid ballots: A=136, B=101, C=76 -> 68.00 / 50.50 / 38.00
+        # 200 valid ballots, one choice each: A=136, B=41, C=23 -> 68.00 / 20.50 / 11.50.
         self._cast(0, ballot_selections=[0], ballot_count=136)
-        self._cast(1, ballot_selections=[1], ballot_count=101)
-        self._cast(2, ballot_selections=[2], ballot_count=76)
+        self._cast(1, ballot_selections=[1], ballot_count=41)
+        self._cast(2, ballot_selections=[2], ballot_count=23)
+
+        scores = self._scores()["audience1"]
+
+        self.assertEqual(self._valid_ballots(), 200)
+        self.assertEqual(scores[str(self.singers[0].pk)], Decimal("68.00"))
+        self.assertEqual(scores[str(self.singers[1].pk)], Decimal("20.50"))
+        self.assertEqual(scores[str(self.singers[2].pk)], Decimal("11.50"))
+
+    def test_multi_select_shares_may_sum_above_one_hundred(self):
+        # The §2.5 example, rebuilt as real ballots: 200 valid ballots over three
+        # candidates where some ballots select more than one singer, giving
+        # A=136, B=101, C=76 -> 68.00 / 50.50 / 38.00 (sum 156.50, legitimately > 100).
+        self._cast(0, ballot_selections=[0, 1, 2], ballot_count=40)
+        self._cast(1, ballot_selections=[0, 1], ballot_count=30)
+        self._cast(2, ballot_selections=[0], ballot_count=66)
+        self._cast(3, ballot_selections=[1, 2], ballot_count=3)
+        self._cast(4, ballot_selections=[2], ballot_count=33)
+        self._cast(5, ballot_selections=[1], ballot_count=28)
 
         scores = self._scores()["audience1"]
 
@@ -133,20 +151,7 @@ class BallotShareConversionTests(TestCase):
         self.assertEqual(scores[str(self.singers[0].pk)], Decimal("68.00"))
         self.assertEqual(scores[str(self.singers[1].pk)], Decimal("50.50"))
         self.assertEqual(scores[str(self.singers[2].pk)], Decimal("38.00"))
-
-    def test_multi_select_shares_may_sum_above_one_hundred(self):
-        # 100 ballots, up to 3 selections each: A=80, B=60, C=40 -> 80/60/40 (sum 180).
-        self._cast(0, ballot_selections=[0, 1, 2], ballot_count=40)
-        self._cast(1, ballot_selections=[0, 1], ballot_count=40)
-        self._cast(2, ballot_selections=[0], ballot_count=20)
-
-        scores = self._scores()["audience1"]
-
-        self.assertEqual(self._valid_ballots(), 100)
-        self.assertEqual(scores[str(self.singers[0].pk)], Decimal("80.00"))
-        self.assertEqual(scores[str(self.singers[1].pk)], Decimal("60.00"))
-        self.assertEqual(scores[str(self.singers[2].pk)], Decimal("40.00"))
-        self.assertEqual(sum(scores.values()), Decimal("180.00"))
+        self.assertEqual(sum(scores.values()), Decimal("156.50"))
 
     def test_denominator_is_ballots_not_vote_records(self):
         # 10 ballots, 3 of which select A while every ballot selects two singers:
