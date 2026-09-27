@@ -159,6 +159,10 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert values["POSTGRES_HOST"] == "db"
     assert values["ARTFLOW_ORGANIZATION_NAME"] == ""
     assert values["ARTFLOW_RELEASE_SHA"] == "replace-me-with-the-deployed-commit-sha"
+    assert values["ARTFLOW_WEB_IMAGE"] == "artflow-web:replace-me-with-the-release-sha"
+    assert "ARTFLOW_POSTGRES_IMAGE" in values
+    assert "ARTFLOW_CADDY_IMAGE" in values
+    assert "ARTFLOW_PYTHON_IMAGE" in values
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
 
 
