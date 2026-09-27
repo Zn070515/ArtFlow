@@ -1713,9 +1713,11 @@ class StaffPanelSmokeTests(TestCase):
             registration_workbook = load_workbook(BytesIO(archive.read("registration_list.xlsx")))
             program_workbook = load_workbook(BytesIO(archive.read("program_list.xlsx")))
         registration_values = [
-            cell.value for row in registration_workbook.active.iter_rows() for cell in row
+            cell.value for row in registration_workbook.worksheets[0].iter_rows() for cell in row
         ]
-        program_values = [cell.value for row in program_workbook.active.iter_rows() for cell in row]
+        program_values = [
+            cell.value for row in program_workbook.worksheets[0].iter_rows() for cell in row
+        ]
         self.assertNotIn("20260001", registration_values)
         self.assertNotIn("13800000000", registration_values)
         self.assertNotIn("Archive Contact", program_values)

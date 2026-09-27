@@ -1,5 +1,7 @@
+from collections.abc import Callable
+
 from django.db import DatabaseError
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase
 
 from .models import MaintenanceState
 
@@ -7,10 +9,10 @@ from .models import MaintenanceState
 class WriteBarrierMiddleware:
     """Reject new HTTP mutations while a consistent backup is being captured."""
 
-    def __init__(self, get_response):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             try:
                 blocked = MaintenanceState.objects.filter(
