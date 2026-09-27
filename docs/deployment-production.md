@@ -27,14 +27,27 @@ PostgreSQL（持久化）+ Media 持久化卷
 
 关键约束：**Gunicorn 不能直接暴露给客户端**，必须经过一个可信反向代理。理由见「来源 IP 与 X-Forwarded-For」一节。
 
-生产启动前，把 `.env.production.example` 复制为未提交的 `.env.production`，替换全部占位值，然后仅启动显式 manifest：
+生产启动前，把 `.env.production.example` 复制为未提交的 `.env.production`，替换全部占位值。
+生产主机不现场构建：在受控构建机用固定的 Python 基础镜像 digest 构建并导出 web
+镜像，再把 tar 导入生产主机。然后仅启动显式 manifest：
 
-```powershell
+```bash
+# 在受控构建机（WSL/Git Bash/CI）执行；ARTFLOW_PYTHON_IMAGE 必须是 digest 引用
+export ARTFLOW_PYTHON_IMAGE='python:3.12-slim@sha256:<verified-digest>'
+bash scripts/build_release.sh release-artifacts
+
+# 在生产主机执行；<sha> 必须与构建产物和 .env.production 一致
+docker load --input release-artifacts/artflow-web-<sha>.tar
 docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
-docker compose --env-file .env.production -f deploy/compose.production.yml up --build --wait
+docker compose --env-file .env.production -f deploy/compose.production.yml up --no-build --pull never --wait
 ```
 
-`proxy` 是唯一发布 `80/443` 的服务；`web` 和 PostgreSQL 没有主机端口，且数据库只在 `artflow_internal` 中。Caddy 用 `CADDY_SITE_ADDRESS` 申请 TLS 证书，因此该 DNS 名称必须在启动前指向此主机并允许 ACME 流量。不得用根 Compose 或 `docker compose down --volumes` 管理生产卷。
+`.env.production` 的 `ARTFLOW_WEB_IMAGE` 应指向 `artflow-web:<完整 SHA>`（可附带 registry digest）；
+启动前 Compose 会拒绝缺少该变量的配置，容器启动还会把环境中的 `ARTFLOW_RELEASE_SHA`
+与镜像 OCI revision 比较。`proxy` 是唯一发布 `80/443` 的服务；`web` 和 PostgreSQL
+没有主机端口，且数据库只在 `artflow_internal` 中。Caddy 用 `CADDY_SITE_ADDRESS` 申请
+TLS 证书，因此该 DNS 名称必须在启动前指向此主机并允许 ACME 流量。不得用根 Compose
+或 `docker compose down --volumes` 管理生产卷。
 
 ## 首个管理员 provisioning
 
@@ -63,6 +76,9 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 | `SECRET_KEY` | 长随机密钥 |
 | `ADMIN_LOGIN_KEY` | ArtFlow 管理员二次认证密钥 |
 | `ARTFLOW_RELEASE_SHA` | 构建当前生产镜像的完整 Git commit SHA；用于备份 manifest 溯源 |
+| `ARTFLOW_WEB_IMAGE` | 已导入的、带该 SHA tag 的预构建 ArtFlow web 镜像；生产不现场 build |
+| `ARTFLOW_PYTHON_IMAGE` | 构建机使用的 digest-pinned Python 基础镜像；不在生产 Compose 中现场拉取 |
+| `ARTFLOW_POSTGRES_IMAGE` / `ARTFLOW_CADDY_IMAGE` | 生产运行时必须使用的 digest-pinned 基础镜像 |
 | `ALLOWED_HOSTS` | 真实主机名（含对外域名） |
 | `CSRF_TRUSTED_ORIGINS` | 真实来源（如 `https://artflow.example.com`） |
 | `CADDY_SITE_ADDRESS` | Caddy 申请 TLS 证书的单个公开 DNS 名称 |
@@ -101,11 +117,18 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 或其他独立故障域，再执行隔离恢复验证。若临时需要覆盖 manifest provenance，只能显式传入
 `--git-sha`，不得根据操作者本机 checkout 自动推断。
 
+仓库提供 `scripts/backup_artflow.ps1` 与 `scripts/backup.sh` 两套包装器。它们默认使用
+`/app/backups` 持久卷；设置 `ARTFLOW_OFFSITE_BUCKET` 和 `ARTFLOW_OFFSITE_PREFIX` 后，
+会调用 `ossutil`（凭据由主机上的 ossutil 配置或实例角色提供，不进入命令行/仓库），在上传
+前校验 database/media SHA，在对象存储中再确认 manifest 存在。生产必须配置私有 bucket、
+服务端加密、生命周期和跨故障域权限，并在另一目标执行 `verify_app_backup_restore`；
+没有这些外部证据时，异地备份状态仍为 HOLD。
+
 ## 健康检查与大小/超时
 
 - 健康检查使用匿名 `GET /healthz/`，只返回通用状态，不泄露配置细节。
 - 上传最大值按用途在 `files/services.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB）。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
-- 生产 Caddy manifest 固定 `request_body max_size 520MB`，覆盖应用允许的最大 500MB 测试活动视频并留出 multipart 余量；正式活动仍由 `ARTFLOW_VIDEO_UPLOAD_MAX_MB`（默认 100MB）在应用层收紧。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
+- 生产 Caddy manifest 固定 `request_body max_size 120MB`；现场/event profile 才可使用更高的本地上限。应用层还会执行用途上限、文件 magic/container 校验、每报名配额、版本保留、上传限流和磁盘低水位检查。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
 - 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。
 - 内部提交文件和生成文档由 Django 受控媒体视图流式返回，当前没有独立的媒体下载 worker。
   正式活动前必须按最大文件尺寸和并发下载量做一次负载演练；若下载占满 Gunicorn worker，
@@ -117,6 +140,14 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 - Caddy 删除上游 `Server` 指纹并拒绝超过 manifest 体积上限的请求；应用仍会再次按业务用途校验文件大小、扩展名和媒体类型。
 - volumetric DDoS、TLS 握手洪泛、慢客户端连接和公网连接数保护必须由学校网络、云负载均衡或 WAF/边缘服务提供，并在正式接入前完成限速、连接超时、黑名单/挑战和告警契约验证。仅依赖 Django/Caddy 或本机 Gunicorn 不满足学校公网接入条件。
 - Ticket redeem 的应用层 JSON 上限、IP 限流和 HttpOnly cookie 只保护应用边界；它们不替代边缘 DDoS/WAF/连接保护。正式接入学校前还必须演练 Ticket 重放、跨活动票、未检票票和并发投票，并确认边缘层不会把原始 secret/token 写入访问日志、trace 或告警载荷。
+
+## 宿主机日志与运行监控
+
+宿主机应按 [`deploy/docker-daemon.json.example`](../deploy/docker-daemon.json.example) 配置
+Docker 日志轮转（`local` driver、20 MiB、5 个文件），再按发行版规范重启 Docker；这不是
+应用容器内的配置。可以用 `scripts/monitor.sh .env.production` 接入 cron/CloudMonitor，
+它检查 db/web/proxy 健康状态、外部 HTTPS `/healthz/`、宿主机低水位和最新应用备份年龄。
+监控脚本只读，不会停止服务、删除卷或打印凭据。
 
 ## 发布门禁
 

@@ -64,13 +64,14 @@ from common.management.commands.backup_artflow import (
     create_media_archive,
     media_content_digest,
 )
-from common.management.commands.verify_app_backup import validate_counts
+from common.management.commands.verify_app_backup import validate_counts, verify_media_files
 
 from . import models as common_models
 from .business_rules import ensure_same_activity
 from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
+from .maintenance import WriteBarrierBusy, write_barrier
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
-from .models import AuditLog, SeedRecord
+from .models import AuditLog, MaintenanceState, SeedRecord
 from .test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
 from .views import _media_file_response
 
@@ -1700,6 +1701,47 @@ class AppBackupVerificationTests(TestCase):
         manifest_path = next(output_root.glob("backup-*/manifest.json"))
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["git_sha"], release_sha)
+        self.assertEqual(
+            set(manifest["counts"]),
+            {
+                "activities",
+                "registrations",
+                "programs",
+                "score_records",
+                "stage_results",
+                "awards",
+                "ruleset_versions",
+                "public_posts",
+                "result_releases",
+                "incidents",
+                "generated_documents",
+                "archive_packages",
+                "submission_files",
+                "vote_ballots",
+                "tickets",
+                "ticket_access_sessions",
+                "audit_logs",
+            },
+        )
+
+    def test_backup_artflow_holds_and_releases_the_global_write_barrier(self):
+        output_root = Path(self._media.name) / "backups"
+        release_sha = "b" * 40
+        observed: list[bool] = []
+
+        def fake_pg_dump(_database, dump_path):
+            observed.append(MaintenanceState.objects.get(pk=MaintenanceState.SINGLETON_PK).enabled)
+            dump_path.write_bytes(b"test dump")
+
+        with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=release_sha):
+            with patch(
+                "common.management.commands.backup_artflow.pg_dump",
+                side_effect=fake_pg_dump,
+            ):
+                call_command("backup_artflow", "--output", str(output_root))
+
+        self.assertEqual(observed, [True])
+        self.assertFalse(MaintenanceState.objects.get(pk=MaintenanceState.SINGLETON_PK).enabled)
 
     def test_backup_artflow_production_requires_release_sha(self):
         with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA=""):
@@ -1714,10 +1756,46 @@ class AppBackupVerificationTests(TestCase):
                         str(Path(self._media.name) / "backups"),
                     )
 
+    def test_backup_artflow_rejects_non_full_explicit_release_sha(self):
+        with override_settings(APP_ENV="production", ARTFLOW_RELEASE_SHA="a" * 40):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "backup_artflow",
+                    "--output",
+                    str(Path(self._media.name) / "backups"),
+                    "--git-sha",
+                    "not-a-commit",
+                )
+
+    def test_verify_app_backup_checks_media_references_after_the_first_five(self):
+        for index in range(6):
+            name = f"submissions/late-check-{index}.mp3"
+            if index < 5:
+                path = Path(settings.MEDIA_ROOT) / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"audio")
+            SubmissionFile.objects.create(
+                singer_registration=self.registration,
+                file=name,
+                original_name=f"late-check-{index}.mp3",
+                file_size=5,
+                file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+                is_current=False,
+                version=index + 1,
+            )
+
+        problems, verified = verify_media_files()
+
+        self.assertTrue(any("late-check-5.mp3" in problem for problem in problems))
+        self.assertEqual(len(verified), 5)
+
     def test_verify_app_backup_passes_when_manifest_matches(self):
         store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x15", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -1738,7 +1816,9 @@ class AppBackupVerificationTests(TestCase):
     def test_verify_app_backup_fails_when_media_digest_differs(self):
         store_submission_file(
             owner=self.registration,
-            uploaded_file=SimpleUploadedFile("song.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x15", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.user,
         )
@@ -1751,6 +1831,104 @@ class AppBackupVerificationTests(TestCase):
 
         with self.assertRaises(CommandError):
             call_command("verify_app_backup", "--manifest", str(manifest_path))
+
+
+class WriteBarrierMiddlewareTests(TestCase):
+    def test_unsafe_http_methods_fail_closed_during_backup_but_get_remains_available(self):
+        MaintenanceState.objects.update_or_create(
+            pk=MaintenanceState.SINGLETON_PK,
+            defaults={"enabled": True, "reason": "backup", "started_at": timezone.now()},
+        )
+
+        self.assertEqual(self.client.get(reverse("public_portal:home")).status_code, 200)
+        response = self.client.post(reverse("accounts:login"), {})
+        self.assertEqual(response.status_code, 503)
+
+    def test_only_one_barrier_can_be_active(self):
+        with write_barrier("test"):
+            with self.assertRaises(WriteBarrierBusy):
+                with write_barrier("second"):
+                    pass
+
+
+class RetentionCleanupCommandTests(TestCase):
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="retention-admin", password="pass", role=User.Role.ADMIN
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Old formal activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.ARCHIVED,
+                is_test_mode=False,
+            )
+        Activity.objects.filter(pk=self.activity.pk).update(
+            updated_at=timezone.now() - timedelta(days=120)
+        )
+        self.participant = User.objects.create_user(
+            username="retention-participant", password="pass"
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Private Singer",
+            student_id="PRIVATE-001",
+            college="Private College",
+            class_name="Private Class",
+            phone="13800000000",
+            wechat="private-wechat",
+            song_name="Public Song",
+            description="Private description",
+            remark="Private remark",
+        )
+
+    def test_retention_cleanup_requires_admin_confirmation_and_preserves_authority_row(self):
+        with self.assertRaises(CommandError):
+            call_command(
+                "purge_retained_pii",
+                "--older-than-days",
+                "30",
+                "--actor-username",
+                self.admin.username,
+            )
+
+        call_command(
+            "purge_retained_pii",
+            "--older-than-days",
+            "30",
+            "--actor-username",
+            self.admin.username,
+            "--confirm",
+        )
+
+        self.registration.refresh_from_db()
+        self.assertTrue(self.registration.name.startswith("已匿名化-"))
+        self.assertEqual(self.registration.student_id, f"REDACTED-{self.registration.pk}")
+        self.assertEqual(self.registration.phone, "")
+        self.assertEqual(self.registration.wechat, "")
+        self.assertEqual(self.registration.song_name, "Public Song")
+        self.assertTrue(SingerRegistration.objects.filter(pk=self.registration.pk).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(target=f"RetentionCleanup:Activity:{self.activity.pk}").exists()
+        )
+
+    def test_retention_cleanup_rejects_non_admin_actor(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="retention-staff", password="pass", role=User.Role.STAFF
+            )
+
+        with self.assertRaises(CommandError):
+            call_command(
+                "purge_retained_pii",
+                "--older-than-days",
+                "30",
+                "--actor-username",
+                staff.username,
+                "--confirm",
+            )
 
 
 class ClientIpTests(TestCase):

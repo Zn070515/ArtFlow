@@ -3,6 +3,7 @@ import threading
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from io import StringIO
+from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
 
@@ -136,6 +137,61 @@ class LoginModeTests(TestCase):
         self.assertContains(response, "管理员登录")
 
 
+class PasswordLifecycleTests(TestCase):
+    def setUp(self):
+        self.participant = User.objects.create_user(
+            username="password-participant", password="old-pass-123", role=User.Role.PARTICIPANT
+        )
+        self.admin = create_provisioned_user(
+            username="password-admin", password="admin-pass-123", role=User.Role.ADMIN
+        )
+
+    def test_authenticated_user_can_change_password_and_audit_excludes_password_values(self):
+        self.client.force_login(self.participant)
+
+        response = self.client.post(
+            reverse("accounts:password_change"),
+            {
+                "old_password": "old-pass-123",
+                "new_password1": "new-pass-456",
+                "new_password2": "new-pass-456",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.participant.refresh_from_db()
+        self.assertTrue(self.participant.check_password("new-pass-456"))
+        audit = AuditLog.objects.get(target=f"User:{self.participant.pk}")
+        self.assertEqual(audit.old_value, "")
+        self.assertEqual(audit.new_value, "")
+        self.assertEqual(audit.note, "password_change")
+
+    def test_admin_reset_requires_elevated_verification_and_audits_without_password_values(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse("accounts:admin_password_reset", args=[self.participant.pk]),
+            {"new_password1": "reset-pass-789", "new_password2": "reset-pass-789"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("accounts:admin_login"), response["Location"])
+
+        session = self.client.session
+        mark_admin_verified(session)
+        session.save()
+        response = self.client.post(
+            reverse("accounts:admin_password_reset", args=[self.participant.pk]),
+            {"new_password1": "reset-pass-789", "new_password2": "reset-pass-789"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.participant.refresh_from_db()
+        self.assertTrue(self.participant.check_password("reset-pass-789"))
+        audit = AuditLog.objects.get(target=f"User:{self.participant.pk}")
+        self.assertEqual(audit.old_value, "")
+        self.assertEqual(audit.new_value, "")
+        self.assertEqual(audit.note, "admin_password_reset")
+
+
 class ParticipantLoginRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -167,6 +223,21 @@ class ParticipantLoginRateLimitTests(TestCase):
         self.assertContains(throttled, "尝试次数过多")
         self.assertEqual(is_valid.call_count, 10)
 
+    def test_participant_login_uses_username_bucket_and_ip_aggregate_bucket(self):
+        with (
+            patch("accounts.views.allow", return_value=SimpleNamespace(allowed=True)) as allow,
+            patch("accounts.views.ParticipantLoginForm.is_valid", return_value=False),
+        ):
+            self.client.post(
+                reverse("accounts:login"),
+                {"login_mode": "normal", "username": "alice", "password": "wrong"},
+                REMOTE_ADDR="198.51.100.10",
+            )
+
+        keys = [call.args[0] for call in allow.call_args_list]
+        self.assertIn("participant-login:198.51.100.10:alice", keys)
+        self.assertIn("participant-login:ip:198.51.100.10", keys)
+
     @override_settings(TRUST_X_FORWARDED_FOR=True)
     def test_participant_login_uses_the_forwarded_client_ip_when_trusted(self):
         url = reverse("accounts:login")
@@ -175,7 +246,7 @@ class ParticipantLoginRateLimitTests(TestCase):
             "username": self.participant.username,
             "password": "wrong-password",
         }
-        for _ in range(10):
+        for _ in range(100):
             self.client.post(
                 url,
                 invalid_payload,
@@ -213,7 +284,7 @@ class RegistrationRateLimitTests(TestCase):
         }
 
         with patch("accounts.views.RegisterForm.is_valid", return_value=False) as is_valid:
-            for _ in range(10):
+            for _ in range(30):
                 response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
                 self.assertEqual(response.status_code, 200)
 
@@ -222,8 +293,8 @@ class RegistrationRateLimitTests(TestCase):
 
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
+        self.assertEqual(is_valid.call_count, 30)
         self.assertEqual(User.objects.count(), before_throttled_attempt)
-        self.assertEqual(is_valid.call_count, 10)
 
 
 class AdminVerificationTTLTests(TestCase):
@@ -354,8 +425,9 @@ class AdminLoginRateLimitTests(TestCase):
                 REMOTE_ADDR="198.51.100.7",
             )
 
-        bucket = RateLimitBucket.objects.get()
-        self.assertEqual(bucket.count, 11)
+        buckets = list(RateLimitBucket.objects.all())
+        self.assertEqual(len(buckets), 2)
+        self.assertEqual(sorted(bucket.count for bucket in buckets), [10, 11])
 
 
 class DatabaseRateLimitTests(TransactionTestCase):

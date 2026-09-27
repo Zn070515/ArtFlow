@@ -102,7 +102,8 @@ function Assert-ContainerContracts {
         }
     }
 
-    Assert-ContentMatch $dockerfile '(?m)^FROM python:3\.12-slim$' 'a Python 3.12 slim base image'
+    Assert-ContentMatch $dockerfile '(?m)^ARG ARTFLOW_PYTHON_IMAGE=python:3\.12-slim$' 'a Python 3.12 slim base image default'
+    Assert-ContentMatch $dockerfile '(?m)^FROM \$\{ARTFLOW_PYTHON_IMAGE\}$' 'an explicit Python base image selector'
     Assert-ContentMatch $dockerfile 'postgresql-client' 'the PostgreSQL client package'
     Assert-ContentMatch $dockerfile 'uv sync --frozen --no-dev --extra production' 'production dependencies'
     Assert-ContentMatch $dockerfile '(?m)^USER artflow$' 'a non-root runtime user'
@@ -185,7 +186,14 @@ $temporaryProductionEnvironment = [ordered]@{
     POSTGRES_PASSWORD = 'artflow-verification-database-password'
     POSTGRES_HOST = 'db.internal'
     POSTGRES_PORT = '5432'
+    ARTFLOW_RELEASE_SHA = 'a' * 40
+    ARTFLOW_WEB_IMAGE = 'artflow-web:' + ('a' * 40)
+    ARTFLOW_POSTGRES_IMAGE = 'postgres:16-alpine@sha256:' + ('b' * 64)
+    ARTFLOW_CADDY_IMAGE = 'caddy:2-alpine@sha256:' + ('c' * 64)
     CADDY_SITE_ADDRESS = 'artflow.internal'
+    SECURE_HSTS_SECONDS = '31536000'
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = 'True'
+    SECURE_HSTS_PRELOAD = 'True'
 }
 $originalProductionEnvironment = @{}
 foreach ($name in $temporaryProductionEnvironment.Keys) {

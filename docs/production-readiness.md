@@ -229,6 +229,34 @@ release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONF
 volumes 未 reset。本次证据只覆盖应用层 authority，不替代学校 SSO/MFA、TLS/WAF、
 volumetric DDoS、留存审批和部署 ownership 的外部 `HOLD`。
 
+### 2026-09-27 Production release-readiness 收口
+
+本轮按发布审查意见收口了仓库内可验证的投产风险，且没有改动评分、结果、投票或
+发布 authority。当前代码已具备以下边界：
+
+- 应用级备份在 `pg_dump`、media 归档、manifest 计数和摘要生成期间启用全局写屏障；
+  HTTP mutation 在屏障期间 fail closed，GET 诊断仍可用。
+- 生产备份默认写入持久化 `/app/backups`，manifest 覆盖关键业务模型的完整计数、
+  database/media SHA、媒体内容 digest、迁移 provenance 和发布 SHA；恢复前会遍历
+  所有数据库文件引用，不使用前 N 条样本。
+- 恢复脚本使用运行中的 PostgreSQL 镜像，先校验 database/media SHA，再要求运行中的
+  web 镜像 OCI revision 与 manifest SHA 一致；恢复目标是隔离容器，不重置源数据库或
+  volumes。生产发布只允许预构建镜像、digest-pinned 基础镜像和 `--pull never`。
+- PowerShell 与 POSIX 均有备份、发布、恢复、异地上传和只读监控入口；异地适配器在
+  上传前校验完整备份集合与 SHA，并在对象存储中复核 manifest 存在，不接受命令行凭据。
+- 审计和永久归档不保存联系方式明文；上传具备用途、扩展名、声明类型、magic/container、
+  配额、版本保留、限流和磁盘低水位边界；生产 Caddy body 上限为 120MB。
+- 首次管理员 provisioning、改密/审计式重置、隐私与 retention、组织/备案展示配置、
+  分阶段 HSTS、Caddy healthcheck、Docker 日志轮转和宿主机只读监控均已进入运行层契约。
+
+以下事项不是仓库静态代码可以伪造的“已通过”证据，仍保持明确 `HOLD`：真实 OSS/另一
+故障域上传及独立恢复、真实 DNS/ACME/443 外部 smoke、WAF/连接保护/volumetric DDoS、
+学校 SSO/IdP/MFA、备案审批、数据保存责任和部署 ownership。只有完成对应环境的实测并
+保存报告后，才能把它们从 `HOLD` 改为 `PASS`。
+
+最终发布 SHA 的 GitHub CI 也必须在本轮所有本地门禁通过后由合并到 `main` 的 push
+触发并观察；本地测试结果不得替代该远端证据。
+
 ## 发布门禁
 
 本地静态资源必须从锁定的 npm 依赖构建，运行时 HTML 不得依赖 Tailwind CDN：

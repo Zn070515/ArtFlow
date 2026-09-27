@@ -1237,6 +1237,15 @@ class SingerUploadViewTests(TestCase):
         self.assertContains(response, "文件类型")
         self.assertFalse(SingerRegistration.objects.exists())
 
+    def test_apply_page_shows_privacy_notice_before_collection(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("singer_contest:apply"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "隐私与数据保留说明")
+        self.assertContains(response, reverse("public_portal:privacy"))
+
     def test_apply_rejects_duplicate_registration_for_same_user(self):
         self.client.force_login(self.user)
         payload = {
@@ -1510,6 +1519,14 @@ class ParticipantRegistrationFlowTests(TestCase):
                 target=f"SingerRegistration:{registration.pk}",
             ).exists()
         )
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+            target=f"SingerRegistration:{registration.pk}",
+        )
+        self.assertNotIn("13800000000", audit.old_value)
+        self.assertNotIn("13900000000", audit.new_value)
+        self.assertIn("phone", audit.old_value)
+        self.assertIn("song_name", audit.new_value)
 
     def test_participant_cannot_edit_when_phase_is_live(self):
         self.activity.phase = Activity.Phase.LIVE

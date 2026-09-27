@@ -5,6 +5,9 @@
 {% block content %}
 <div class="max-w-xl mx-auto px-4 py-10">
     <h1 class="text-2xl font-bold text-gray-900 mb-6">毕晚节目征集</h1>
+    <p class="mb-6 rounded border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
+        提交节目即表示你已阅读<a class="underline" href="{% url 'public_portal:privacy' %}">隐私与数据保留说明</a>，了解信息收集、用途、保存与匿名化安排。
+    </p>
     {% if errors %}
     <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
         {% for error in errors %}<p>{{ error }}</p>{% endfor %}

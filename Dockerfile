@@ -1,4 +1,10 @@
-FROM python:3.12-slim
+ARG ARTFLOW_PYTHON_IMAGE=python:3.12-slim
+
+FROM ${ARTFLOW_PYTHON_IMAGE}
+
+ARG ARTFLOW_BUILD_SHA=""
+
+LABEL org.opencontainers.image.revision="${ARTFLOW_BUILD_SHA}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,12 +13,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}"
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes postgresql-client \
+    && apt-get install --no-install-recommends --yes ca-certificates curl gnupg \
+    && install --directory --mode=0755 /usr/share/postgresql-common/pgdg \
+    && curl --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --dearmor --output /usr/share/keyrings/postgresql.gpg \
+    && . /etc/os-release \
+    && printf 'deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt %s-pgdg main\n' "$VERSION_CODENAME" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install --no-install-recommends --yes postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system artflow \
     && useradd --system --create-home --gid artflow --shell /usr/sbin/nologin artflow
 
 WORKDIR /app
+
+RUN printf '%s\n' "${ARTFLOW_BUILD_SHA}" > /app/ARTFLOW_RELEASE_SHA
 
 RUN python -m pip install --no-cache-dir "uv==0.11.29"
 
@@ -46,7 +62,8 @@ COPY --chown=artflow:artflow scripts/docker-entrypoint.sh scripts/wait-for-postg
 
 RUN mkdir --parents /app/media /app/staticfiles /app/backups \
     && chmod 0755 /app/scripts/docker-entrypoint.sh /app/scripts/wait-for-postgres.sh \
-    && chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups /app/scripts
+    && chown --recursive artflow:artflow /app/media /app/staticfiles /app/backups /app/scripts \
+    && chown artflow:artflow /app/ARTFLOW_RELEASE_SHA
 
 USER artflow
 

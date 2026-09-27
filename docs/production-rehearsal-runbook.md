@@ -15,12 +15,15 @@ Copy-Item .env.production.example .env.production
 #    DATABASE_ENGINE=postgresql + POSTGRES_*（生产 manifest 固定
 #    TRUST_X_FORWARDED_FOR=true、POSTGRES_HOST=db）
 
-# 2) 只验证并启动显式生产栈（Postgres + web + Caddy proxy），等待健康检查
+# 2) 在受控构建机以固定 digest 构建并导出 web 镜像；生产主机只 load，不现场 build
+#    bash scripts/build_release.sh release-artifacts
+#    docker load --input release-artifacts/artflow-web-<sha>.tar
+# 3) 只验证并启动显式生产栈（Postgres + prebuilt web + Caddy proxy），等待健康检查
 docker compose --env-file .env.production -f deploy/compose.production.yml config --quiet
-docker compose --env-file .env.production -f deploy/compose.production.yml up --build --wait
-Invoke-WebRequest https://<公开域名>/healthz/   # 应返回 200（匿名、仅通用状态）
+docker compose --env-file .env.production -f deploy/compose.production.yml up --no-build --pull never --wait
+curl --fail https://<公开域名>/healthz/   # 应返回 200（匿名、仅通用状态）
 
-# 3) 运行时诊断（只读）
+# 4) 运行时诊断（只读）
 docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok
 ```
 
@@ -29,7 +32,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 ```powershell
 pwsh -NoProfile -File scripts/verify.ps1
 ```
-涵盖：根开发 Compose 容器契约、显式 `deploy/compose.production.yml` 的生产契约与 `docker compose -f deploy/compose.production.yml config --quiet`（只验证配置，不启动或销毁生产服务）、CI workflow 契约、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。
+涵盖：根开发 Compose 容器契约、显式 `deploy/compose.production.yml` 的生产契约与 `docker compose -f deploy/compose.production.yml config --quiet`（只验证配置，不启动或销毁生产服务）、CI workflow 契约、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。生产部署另需使用已导入的 digest-pinned 镜像并执行外部 HTTPS smoke。
 
 ## 2. PostgreSQL 验收（自动化）
 
@@ -55,9 +58,13 @@ pwsh -NoProfile -File scripts\verify_postgres_backup_restore.ps1 -ComposeProject
 # 备份集合：backups\<tag>\{database.dump, media.tar.gz, manifest.json}
 # 生产 Compose 的 ARTFLOW_RELEASE_SHA 会写入 manifest；不要用操作者本机 checkout 推断 SHA。
 pwsh -NoProfile -File scripts\backup_artflow.ps1 -OutputDirectory backups -ComposeProjectName artflow
+# 配置 ARTFLOW_OFFSITE_BUCKET 后，上一步会自动上传并复核 OSS 副本；也可单独执行：
+pwsh -NoProfile -File scripts\offsite_backup.ps1 -BackupSet backups\<tag>
 
 # 恢复到隔离库 + 只读媒体，跑 manage.py verify_app_backup --manifest
 pwsh -NoProfile -File scripts\verify_app_backup_restore.ps1 -ComposeProjectName artflow
+# Linux/WSL 等价入口：
+bash scripts/restore-verify.sh backups/<tag>
 ```
 
 ## 4. 事件日检查矩阵（13 场景）

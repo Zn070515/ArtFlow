@@ -108,3 +108,18 @@ class RateLimitBucket(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["expires_at"], name="common_rate_limit_expiry_idx")]
+
+
+class MaintenanceState(models.Model):
+    """Singleton application write barrier used for consistent backups."""
+
+    SINGLETON_PK = 1
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=SINGLETON_PK, editable=False)
+    enabled = models.BooleanField(default=False)
+    reason = models.CharField(max_length=120, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "maintenance state"
+        verbose_name_plural = "maintenance state"

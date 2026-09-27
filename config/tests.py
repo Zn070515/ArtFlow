@@ -135,6 +135,18 @@ class BrandingContextTests(SimpleTestCase):
                 "示例主办方",
             )
 
+    def test_branding_context_exposes_optional_icp_metadata(self):
+        from config.context_processors import artflow_branding
+
+        request = RequestFactory().get("/")
+        with override_settings(
+            ARTFLOW_ICP_NUMBER="浙ICP备00000000号", ARTFLOW_ICP_URL="https://beian.example"
+        ):
+            branding = artflow_branding(request)
+
+        self.assertEqual(branding["artflow_icp_number"], "浙ICP备00000000号")
+        self.assertEqual(branding["artflow_icp_url"], "https://beian.example")
+
 
 class HealthEndpointTests(TestCase):
     def test_healthz_returns_only_a_generic_success_response_to_anonymous_get(self):
@@ -260,9 +272,9 @@ class SettingsTests(SimpleTestCase):
         )
         self.assertTrue(settings_module.SESSION_COOKIE_SECURE)
         self.assertTrue(settings_module.CSRF_COOKIE_SECURE)
-        self.assertGreater(settings_module.SECURE_HSTS_SECONDS, 0)
-        self.assertTrue(settings_module.SECURE_HSTS_INCLUDE_SUBDOMAINS)
-        self.assertTrue(settings_module.SECURE_HSTS_PRELOAD)
+        self.assertEqual(settings_module.SECURE_HSTS_SECONDS, 300)
+        self.assertFalse(settings_module.SECURE_HSTS_INCLUDE_SUBDOMAINS)
+        self.assertFalse(settings_module.SECURE_HSTS_PRELOAD)
 
     def test_https_redirect_exempts_healthz_but_not_public_pages(self):
         with (

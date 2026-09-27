@@ -3,7 +3,7 @@ param(
     [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'backups'),
     [string]$ComposeProjectName = 'artflow',
     [string]$GitSha,
-    [string]$ContainerBackupBase = '/tmp/artflow-backup'
+    [string]$ContainerBackupBase = '/app/backups'
 )
 
 Set-StrictMode -Version Latest
@@ -72,6 +72,11 @@ try {
     $localBackupDir = Join-Path $outputRoot (Split-Path -Leaf $containerBackupDir)
     if (-not (Test-Path -LiteralPath (Join-Path $localBackupDir 'manifest.json') -PathType Leaf)) {
         throw 'The copied backup set is missing manifest.json.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:ARTFLOW_OFFSITE_BUCKET)) {
+        $offsiteScript = Join-Path $PSScriptRoot 'offsite_backup.ps1'
+        & $offsiteScript -BackupSet $localBackupDir
     }
 
     Write-Host "Backup set created at $localBackupDir"

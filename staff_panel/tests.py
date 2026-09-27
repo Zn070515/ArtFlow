@@ -460,7 +460,7 @@ class StaffPanelSmokeTests(TestCase):
                 "phone": "13800000000",
                 "song_name": "Song",
                 "accompaniment": SimpleUploadedFile(
-                    "song.mp3", b"audio", content_type="audio/mpeg"
+                    "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
                 ),
             },
         )
@@ -489,7 +489,7 @@ class StaffPanelSmokeTests(TestCase):
                 "contact_phone": "13800000000",
                 "class_name": "CS1",
                 "accompaniment": SimpleUploadedFile(
-                    "dance.mp3", b"audio", content_type="audio/mpeg"
+                    "dance.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
                 ),
             },
         )
@@ -1515,7 +1515,9 @@ class StaffPanelSmokeTests(TestCase):
 
         submission = store_submission_file(
             owner=registration,
-            uploaded_file=SimpleUploadedFile("formal.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "formal.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.participant,
         )
@@ -1567,7 +1569,9 @@ class StaffPanelSmokeTests(TestCase):
         )
         submission = store_submission_file(
             owner=test_registration,
-            uploaded_file=SimpleUploadedFile("test.mp3", b"audio", content_type="audio/mpeg"),
+            uploaded_file=SimpleUploadedFile(
+                "test.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
             purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
             uploaded_by=self.participant,
         )
@@ -1684,6 +1688,16 @@ class StaffPanelSmokeTests(TestCase):
             published_at=timezone.now(),
         )
         self.client.force_login(self.staff)
+        Program.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Archive Program",
+            program_type=Program.ProgramType.DANCE,
+            contact_name="Archive Contact",
+            contact_phone="13800000001",
+            class_name="CS1",
+            sort_order=1,
+        )
         response = self.client.post(
             reverse("staff:archive_package_create", args=[self.singer_activity.pk])
         )
@@ -1695,6 +1709,19 @@ class StaffPanelSmokeTests(TestCase):
         self.assertIn("award_list.xlsx", names)
         self.assertIn("attachment_index.xlsx", names)
         self.assertIn("public_content_index.xlsx", names)
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            registration_workbook = load_workbook(BytesIO(archive.read("registration_list.xlsx")))
+            program_workbook = load_workbook(BytesIO(archive.read("program_list.xlsx")))
+        registration_values = [
+            cell.value for row in registration_workbook.worksheets[0].iter_rows() for cell in row
+        ]
+        program_values = [
+            cell.value for row in program_workbook.worksheets[0].iter_rows() for cell in row
+        ]
+        self.assertNotIn("20260001", registration_values)
+        self.assertNotIn("13800000000", registration_values)
+        self.assertNotIn("Archive Contact", program_values)
+        self.assertNotIn("13800000001", program_values)
 
         Program.objects.create(
             activity=self.farewell_activity,

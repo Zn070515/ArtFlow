@@ -49,6 +49,21 @@ function Get-TarExecutable {
     return 'tar'
 }
 
+function Assert-BackupHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Expected,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    if ($Expected -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "Manifest field $Label is not a SHA-256 digest."
+    }
+    $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $Expected.ToLowerInvariant()) {
+        throw "$Label does not match the manifest."
+    }
+}
+
 function Invoke-RestoreWeb {
     param([Parameter(Mandatory = $true)][string[]]$Command)
     $arguments = @(
@@ -85,6 +100,13 @@ try {
         }
     }
 
+    $manifestPath = Join-Path $backupSetResolved 'manifest.json'
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    Assert-BackupHash -Path (Join-Path $backupSetResolved 'database.dump') `
+        -Expected ([string]$manifest.database_sha256) -Label 'database_sha256'
+    Assert-BackupHash -Path (Join-Path $backupSetResolved 'media.tar.gz') `
+        -Expected ([string]$manifest.media_sha256) -Label 'media_sha256'
+
     $mediaExtractDir = Join-Path $outputRoot ("media-" + [Guid]::NewGuid().ToString('N').Substring(0, 12))
     New-Item -ItemType Directory -Force -Path $mediaExtractDir | Out-Null
     $mediaArchive = Join-Path $backupSetResolved 'media.tar.gz'
@@ -101,8 +123,28 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($script:webImage)) {
         throw 'Could not resolve the Compose web image.'
     }
+    $manifestSha = ([string]$manifest.git_sha).Trim()
+    if ($manifestSha -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Backup manifest git_sha must be a full 40-character commit SHA.'
+    }
+    $webImageRevision = (& $script:dockerExecutable inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' $webContainer).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($webImageRevision)) {
+        throw 'The running web image has no OCI release revision label.'
+    }
+    if ($webImageRevision -ne $manifestSha) {
+        throw 'The running web image revision does not match the backup manifest.'
+    }
 
-    Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", 'postgres:17-alpine')
+    $dbContainer = (& $script:dockerExecutable compose -p $ComposeProjectName ps -q db).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dbContainer)) {
+        throw 'The source Compose database service is not running.'
+    }
+    $script:databaseImage = (& $script:dockerExecutable inspect -f '{{.Config.Image}}' $dbContainer).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($script:databaseImage)) {
+        throw 'Could not resolve the running Compose database image.'
+    }
+
+    Invoke-Docker -Arguments @('run', '--rm', '--network', $composeNetwork, '--name', $restoreContainer, '-d', '-e', 'POSTGRES_PASSWORD=restore-only', '-e', "POSTGRES_DB=$RestoreDatabase", $script:databaseImage)
     try {
         Wait-ForStableRestoreDatabase -DockerExecutable $script:dockerExecutable -ContainerName $restoreContainer -DatabaseName $RestoreDatabase -TimeoutSeconds 90
 

@@ -4,6 +4,7 @@ from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import ACTIVITY_STATE, authority_write
+from common.models import AuditLog
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, transaction
@@ -42,6 +43,23 @@ class FarewellUploadViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Program.objects.exists())
+
+    def test_apply_page_shows_privacy_notice_before_collection(self):
+        user = User.objects.create_user(username="program-applicant", password="pass")
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.create(
+                title="Farewell",
+                activity_type=Activity.Type.FAREWELL_SHOW,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+                is_test_mode=False,
+            )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("farewell_show:apply"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "隐私与数据保留说明")
+        self.assertContains(response, reverse("public_portal:privacy"))
 
 
 class ProgramMaterialPurityTests(TestCase):
@@ -96,6 +114,23 @@ class ProgramMaterialPurityTests(TestCase):
         response = self.client.get(reverse("farewell_show:my_program_detail", args=[self.prog.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.prog.material_checks.count(), before)
+
+    def test_program_contact_update_audit_redacts_old_and_new_values(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("farewell_show:my_program_detail", args=[self.prog.pk]),
+            {"contact_phone": "13900000000"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+            target=f"Program:{self.prog.pk}",
+        )
+        self.assertNotIn("13800000000", audit.old_value)
+        self.assertNotIn("13900000000", audit.new_value)
+        self.assertIn("contact_phone", audit.old_value)
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

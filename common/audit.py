@@ -9,6 +9,20 @@ from django.http import HttpRequest
 from .models import AuditLog
 
 
+def redacted_field_change(before: dict[str, Any], after: dict[str, Any]) -> tuple[str, str]:
+    """Describe an edit without copying any of the edited values into audit storage."""
+    changed_fields = sorted(
+        field for field in set(before) | set(after) if before.get(field) != after.get(field)
+    )
+    old_summary = json.dumps({"changed_fields": changed_fields}, ensure_ascii=False, sort_keys=True)
+    new_summary = json.dumps(
+        {"changed_fields": changed_fields, "values_redacted": True},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return old_summary, new_summary
+
+
 def client_ip(request: HttpRequest) -> str | None:
     # X-Forwarded-For is spoofable if clients can reach the app directly. Only
     # trust it when a known reverse proxy that overwrites the client-supplied

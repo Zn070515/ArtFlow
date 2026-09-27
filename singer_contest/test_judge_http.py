@@ -1,13 +1,13 @@
 from unittest.mock import patch
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import SimpleTestCase
+from django.test import TestCase
 from django.urls import reverse
 
 from .judge_authority import JudgeContext
 
 
-class JudgeRouteContractTests(SimpleTestCase):
+class JudgeRouteContractTests(TestCase):
     def test_judge_context_route_is_mounted(self):
         self.assertEqual(reverse("judge:context"), "/judge/context/")
 

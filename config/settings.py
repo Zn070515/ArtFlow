@@ -24,6 +24,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
 ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
 ARTFLOW_ORGANIZATION_NAME = os.environ.get("ARTFLOW_ORGANIZATION_NAME", "").strip()
 ARTFLOW_RELEASE_SHA = os.environ.get("ARTFLOW_RELEASE_SHA", "").strip()
+ARTFLOW_ICP_NUMBER = os.environ.get("ARTFLOW_ICP_NUMBER", "").strip()
+ARTFLOW_ICP_URL = os.environ.get("ARTFLOW_ICP_URL", "").strip()
 
 DEBUG = get_bool(os.environ, "DEBUG", default=APP_ENV == "development")
 
@@ -75,6 +77,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "common.middleware.WriteBarrierMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -171,6 +174,14 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024  # 20 MB
 # Above this many MiB, a PERFORMANCE_VIDEO / BACKGROUND_VIDEO direct upload is
 # rejected for a FORMAL activity (test-mode activities keep the larger dev cap).
 ARTFLOW_VIDEO_UPLOAD_MAX_MB = get_int(os.environ, "ARTFLOW_VIDEO_UPLOAD_MAX_MB", 100)
+ARTFLOW_UPLOAD_QUOTA_MB = get_int(os.environ, "ARTFLOW_UPLOAD_QUOTA_MB", 512)
+ARTFLOW_UPLOAD_MAX_VERSIONS = get_int(os.environ, "ARTFLOW_UPLOAD_MAX_VERSIONS", 5)
+ARTFLOW_UPLOAD_RATE_LIMIT = get_int(os.environ, "ARTFLOW_UPLOAD_RATE_LIMIT", 10)
+ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS = get_int(
+    os.environ, "ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS", 60 * 60
+)
+ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 256)
+ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 365)
 
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.
@@ -193,9 +204,13 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = APP_ENV == "production"
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = "Lax"
-SECURE_HSTS_SECONDS = 31_536_000 if APP_ENV == "production" else 0
-SECURE_HSTS_INCLUDE_SUBDOMAINS = APP_ENV == "production"
-SECURE_HSTS_PRELOAD = APP_ENV == "production"
+SECURE_HSTS_SECONDS = get_int(
+    os.environ, "SECURE_HSTS_SECONDS", 300 if APP_ENV == "production" else 0
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = get_bool(
+    os.environ, "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=False
+)
+SECURE_HSTS_PRELOAD = get_bool(os.environ, "SECURE_HSTS_PRELOAD", default=False)
 SECURE_REFERRER_POLICY = "same-origin"
 
 # Register system checks only after the runtime environment has been loaded.

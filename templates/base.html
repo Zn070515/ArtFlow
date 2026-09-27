@@ -15,7 +15,7 @@
                     <span class="inline-flex h-9 w-9 items-center justify-center rounded bg-brand text-white font-semibold">AF</span>
                     <span>
                         <span class="block text-base font-semibold text-gray-950">ArtFlow</span>
-                        <span class="block text-xs text-gray-500">{% if artflow_organization_name %}{{ artflow_organization_name }}{% else %}ArtFlow 活动运营平台{% endif %}</span>
+                        <span class="block text-xs text-gray-500">{% if artflow_organization_name %}{{ artflow_organization_name }}{% else %}昕序活动管理系统 - ArtFlow{% endif %}</span>
                     </span>
                 </a>
 
@@ -58,8 +58,8 @@
 
     <footer class="bg-white border-t border-gray-200 mt-12">
         <div class="max-w-6xl mx-auto px-4 py-8 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-sm text-gray-500">
-            <p>{% if artflow_organization_name %}{{ artflow_organization_name }}{% else %}ArtFlow 活动运营平台{% endif %}</p>
-            <p>ArtFlow 活动运行平台</p>
+            <p>{% if artflow_organization_name %}{{ artflow_organization_name }}{% else %}昕序活动管理系统 - ArtFlow{% endif %}</p>
+            <p><a href="{% url 'public_portal:privacy' %}" class="hover:text-gray-800">隐私与数据保留说明</a>{% if artflow_icp_number %} · <a href="{{ artflow_icp_url|default:'https://beian.miit.gov.cn/' }}" rel="noopener" target="_blank" class="hover:text-gray-800">{{ artflow_icp_number }}</a>{% endif %}</p>
         </div>
     </footer>
     {% block extra_js %}{% endblock %}

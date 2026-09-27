@@ -10,23 +10,39 @@ from pathlib import Path
 from typing import Any
 
 from archive.models import ArchivePackage
+from config.runtime import is_full_git_sha, is_placeholder_value
 from core.models import Activity
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from exports.models import GeneratedDocument
+from farewell_show.models import Program
 from files.models import SubmissionFile
-from singer_contest.models import ScoreRecord, SingerRegistration
+from incidents.models import IncidentRecord
+from public_portal.models import PublicPost, ResultRelease
+from ruleset.models import RulesetVersion
+from singer_contest.models import Award, ScoreRecord, SingerRegistration, StageResult
 from tickets.models import Ticket, TicketAccessSession
 from voting.models import VoteBallot
 
+from common.maintenance import WriteBarrierBusy, write_barrier
 from common.models import AuditLog
 
 COUNT_MODELS: dict[str, Any] = {
     "activities": Activity,
     "registrations": SingerRegistration,
+    "programs": Program,
     "score_records": ScoreRecord,
+    "stage_results": StageResult,
+    "awards": Award,
+    "ruleset_versions": RulesetVersion,
+    "public_posts": PublicPost,
+    "result_releases": ResultRelease,
+    "incidents": IncidentRecord,
+    "generated_documents": GeneratedDocument,
+    "archive_packages": ArchivePackage,
+    "submission_files": SubmissionFile,
     "vote_ballots": VoteBallot,
     "tickets": Ticket,
     "ticket_access_sessions": TicketAccessSession,
@@ -149,41 +165,50 @@ class Command(BaseCommand):
         if getattr(settings, "APP_ENV", "") == "production" and not release_sha:
             raise CommandError("Production backups require ARTFLOW_RELEASE_SHA or --git-sha.")
 
-        output_base = Path(options["output"]).resolve()
-        output_base.mkdir(parents=True, exist_ok=True)
-        backup_dir = output_base / f"backup-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
-        backup_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            with write_barrier("application backup"):
+                output_base = Path(options["output"]).resolve()
+                output_base.mkdir(parents=True, exist_ok=True)
+                backup_dir = output_base / f"backup-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"
+                backup_dir.mkdir(parents=True, exist_ok=False)
 
-        dump_path = backup_dir / "database.dump"
-        media_archive_path = backup_dir / "media.tar.gz"
-        manifest_path = backup_dir / "manifest.json"
-        media_root = Path(settings.MEDIA_ROOT)
+                dump_path = backup_dir / "database.dump"
+                media_archive_path = backup_dir / "media.tar.gz"
+                manifest_path = backup_dir / "manifest.json"
+                media_root = Path(settings.MEDIA_ROOT)
 
-        pg_dump(connection.settings_dict, dump_path)
-        if not dump_path.exists() or dump_path.stat().st_size == 0:
-            raise CommandError("The created database dump is missing or empty.")
-        create_media_archive(media_root, media_archive_path, backup_dir)
+                pg_dump(connection.settings_dict, dump_path)
+                if not dump_path.exists() or dump_path.stat().st_size == 0:
+                    raise CommandError("The created database dump is missing or empty.")
+                create_media_archive(media_root, media_archive_path, backup_dir)
 
-        head, serialized_heads, applied_count = apply_migration_heads()
-        manifest: dict[str, Any] = {
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "git_sha": release_sha,
-            "django_migration_head": head,
-            "django_migrations_applied": serialized_heads,
-            "django_migrations_applied_count": applied_count,
-            "database_sha256": sha256_file(dump_path),
-            "media_sha256": sha256_file(media_archive_path),
-            "media_content_sha256": media_content_digest(media_root),
-            "counts": collect_counts(),
-        }
-        write_manifest(manifest, manifest_path)
-        self.stdout.write(str(backup_dir))
+                head, serialized_heads, applied_count = apply_migration_heads()
+                manifest: dict[str, Any] = {
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "git_sha": release_sha,
+                    "django_migration_head": head,
+                    "django_migrations_applied": serialized_heads,
+                    "django_migrations_applied_count": applied_count,
+                    "database_sha256": sha256_file(dump_path),
+                    "media_sha256": sha256_file(media_archive_path),
+                    "media_content_sha256": media_content_digest(media_root),
+                    "counts": collect_counts(),
+                }
+                write_manifest(manifest, manifest_path)
+                self.stdout.write(str(backup_dir))
+        except WriteBarrierBusy as error:
+            raise CommandError(str(error)) from error
 
 
 def _resolve_release_sha(explicit_sha: Any) -> str | None:
-    for candidate in (explicit_sha, getattr(settings, "ARTFLOW_RELEASE_SHA", "")):
+    for source, candidate in (
+        ("--git-sha", explicit_sha),
+        ("ARTFLOW_RELEASE_SHA", getattr(settings, "ARTFLOW_RELEASE_SHA", "")),
+    ):
         value = str(candidate or "").strip()
         if value:
+            if is_placeholder_value(value) or not is_full_git_sha(value):
+                raise CommandError(f"{source} must be a full 40-character commit SHA.")
             return value
     if getattr(settings, "APP_ENV", "") == "production":
         return None
