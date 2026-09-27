@@ -130,6 +130,19 @@ class VoteScoringRuleAuthorityTests(TestCase):
         with self.assertRaises(ValidationError):
             configure_vote_scoring_rule(self.session, self.staff)
 
+    def test_test_data_cleanup_removes_the_rule_with_its_session(self):
+        # Clearing rehearsable TEST data must stay possible with a conversion rule present:
+        # the rule is not a protected formal fact, it goes away with its session.
+        from common.test_data import clear_activity_test_data
+
+        rule = configure_vote_scoring_rule(self.session, self.staff)
+        session_pk, rule_pk = self.session.pk, rule.pk
+
+        clear_activity_test_data(self.activity, operator=self.staff)
+
+        self.assertFalse(VoteScoringRule.objects.filter(pk=rule_pk).exists())
+        self.assertFalse(VoteSession.objects.filter(pk=session_pk).exists())
+
     def test_conversion_cannot_change_after_a_frozen_ruleset_consumed_it(self):
         configure_vote_scoring_rule(self.session, self.staff)
         ruleset = ContestRuleset.objects.create(
