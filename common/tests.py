@@ -1787,6 +1787,84 @@ class AppBackupVerificationTests(TestCase):
             call_command("verify_app_backup", "--manifest", str(manifest_path))
 
 
+class RetentionCleanupCommandTests(TestCase):
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="retention-admin", password="pass", role=User.Role.ADMIN
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Old formal activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.ARCHIVED,
+                is_test_mode=False,
+            )
+        Activity.objects.filter(pk=self.activity.pk).update(
+            updated_at=timezone.now() - timedelta(days=120)
+        )
+        self.participant = User.objects.create_user(username="retention-participant", password="pass")
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="Private Singer",
+            student_id="PRIVATE-001",
+            college="Private College",
+            class_name="Private Class",
+            phone="13800000000",
+            wechat="private-wechat",
+            song_name="Public Song",
+            description="Private description",
+            remark="Private remark",
+        )
+
+    def test_retention_cleanup_requires_admin_confirmation_and_preserves_authority_row(self):
+        with self.assertRaises(CommandError):
+            call_command(
+                "purge_retained_pii",
+                "--older-than-days",
+                "30",
+                "--actor-username",
+                self.admin.username,
+            )
+
+        call_command(
+            "purge_retained_pii",
+            "--older-than-days",
+            "30",
+            "--actor-username",
+            self.admin.username,
+            "--confirm",
+        )
+
+        self.registration.refresh_from_db()
+        self.assertTrue(self.registration.name.startswith("已匿名化-"))
+        self.assertEqual(self.registration.student_id, f"REDACTED-{self.registration.pk}")
+        self.assertEqual(self.registration.phone, "")
+        self.assertEqual(self.registration.wechat, "")
+        self.assertEqual(self.registration.song_name, "Public Song")
+        self.assertTrue(SingerRegistration.objects.filter(pk=self.registration.pk).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(target=f"RetentionCleanup:Activity:{self.activity.pk}").exists()
+        )
+
+    def test_retention_cleanup_rejects_non_admin_actor(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="retention-staff", password="pass", role=User.Role.STAFF
+            )
+
+        with self.assertRaises(CommandError):
+            call_command(
+                "purge_retained_pii",
+                "--older-than-days",
+                "30",
+                "--actor-username",
+                staff.username,
+                "--confirm",
+            )
+
+
 class ClientIpTests(TestCase):
     @staticmethod
     def _request(**meta):
