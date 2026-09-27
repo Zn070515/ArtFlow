@@ -92,6 +92,7 @@ class RuntimeTests(SimpleTestCase):
         placeholders = {
             "SECRET_KEY": "set-a-long-random-production-secret",
             "ADMIN_LOGIN_KEY": "set-a-long-random-admin-login-key",
+            "ARTFLOW_RELEASE_SHA": "replace-me-with-the-deployed-commit-sha",
             "ALLOWED_HOSTS": "artflow.example.com",
             "CSRF_TRUSTED_ORIGINS": "https://artflow.example.com",
             "POSTGRES_PASSWORD": "set-a-strong-database-password",
