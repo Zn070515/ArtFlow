@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
@@ -166,6 +167,27 @@ class SubmissionFileLifecycleTests(TestCase):
                 purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                 uploaded_by=self.user,
             )
+
+    def test_upload_recreates_missing_media_root_before_disk_check(self):
+        shutil.rmtree(self.media_root)
+        upload = SimpleUploadedFile(
+            "song.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+        )
+
+        def assert_media_root_exists(path):
+            self.assertTrue(Path(path).is_dir())
+            return SimpleNamespace(free=1024**3)
+
+        with patch("files.services.shutil.disk_usage", side_effect=assert_media_root_exists):
+            created = store_submission_file(
+                owner=self.registration,
+                uploaded_file=upload,
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.user,
+            )
+
+        self.assertTrue(Path(self.media_root).is_dir())
+        self.assertTrue(created.file.name)
 
     def test_replacing_upload_demotes_previous_file(self):
         first = store_submission_file(

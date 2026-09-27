@@ -1,7 +1,7 @@
 import shutil
 import zipfile
 from functools import partial
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 from accounts.services import require_current_staff
 from common.rate_limit import RateLimitExceeded, hit_rate_limit
@@ -203,10 +203,9 @@ def _owner_filter(owner):
 @transaction.atomic
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     validate_upload(uploaded_file, purpose, activity=owner.activity)
-    if (
-        shutil.disk_usage(settings.MEDIA_ROOT).free
-        < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024
-    ):
+    media_root = Path(settings.MEDIA_ROOT)
+    media_root.mkdir(parents=True, exist_ok=True)
+    if shutil.disk_usage(media_root).free < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024:
         raise ValidationError("存储空间不足，暂时无法接收上传。")
     try:
         hit_rate_limit(

@@ -41,6 +41,8 @@ def valid_workflow() -> str:
           compose-smoke:
             runs-on: ubuntu-latest
             timeout-minutes: 25
+            env:
+              ARTFLOW_RELEASE_SHA: ${{{{ github.sha }}}}
             steps:
               - name: Start Compose stack
                 shell: bash
@@ -249,6 +251,18 @@ def test_verifier_requires_retry_for_compose_registry_startup():
 
     assert result.returncode == 1
     assert "Compose startup must retry transient registry failures" in result.stderr
+
+
+def test_verifier_requires_compose_release_provenance():
+    workflow = valid_workflow().replace(
+        "    env:\n      ARTFLOW_RELEASE_SHA: ${{ github.sha }}\n",
+        "",
+    )
+
+    result = run_verifier(workflow)
+
+    assert result.returncode == 1
+    assert "Compose smoke must pin ARTFLOW_RELEASE_SHA to github.sha" in result.stderr
 
 
 def test_verifier_rejects_workflow_contract_violations():

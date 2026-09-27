@@ -19,6 +19,8 @@ services:
   web:
     build:
       context: .
+      args:
+        ARTFLOW_BUILD_SHA: ${ARTFLOW_RELEASE_SHA:-}
     depends_on:
       db:
         condition: service_healthy
@@ -32,6 +34,7 @@ services:
       POSTGRES_PASSWORD: artflow-local-container-password
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
+      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:-}
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
