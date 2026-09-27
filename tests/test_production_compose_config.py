@@ -1,5 +1,7 @@
 import shutil
 import subprocess
+import time
+import uuid
 from pathlib import Path
 from typing import Any, cast
 
@@ -148,13 +150,103 @@ def test_production_web_healthcheck_uses_internal_exempt_health_route():
     assert "http://127.0.0.1:8000/healthz/" in healthcheck[-1]
 
 
-def test_production_proxy_healthcheck_reaches_the_https_proxy_boundary():
+def test_production_proxy_healthcheck_uses_the_internal_http_listener():
     compose = load_compose(PRODUCTION_COMPOSE_PATH)
     healthcheck = compose["services"]["proxy"]["healthcheck"]["test"]
 
-    assert "https://127.0.0.1/healthz/" in healthcheck[-1]
-    assert "CADDY_SITE_ADDRESS" in healthcheck[-1]
-    assert "no-check-certificate" in healthcheck[-1]
+    assert "http://127.0.0.1:8081/healthz/" in healthcheck[-1]
+    assert "https://127.0.0.1" not in healthcheck[-1]
+    assert "no-check-certificate" not in healthcheck[-1]
+
+
+@pytest.mark.skipif(DOCKER is None, reason="Docker is required for Caddy runtime validation")
+def test_production_proxy_healthcheck_succeeds_against_a_running_caddy_proxy(
+    tmp_path: Path,
+):
+    docker = docker_command()
+    image_check = subprocess.run(
+        [docker, "image", "inspect", "caddy:2-alpine"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if image_check.returncode != 0:
+        pytest.skip("caddy:2-alpine image is not available locally")
+
+    network = f"artflow-caddy-health-{uuid.uuid4().hex[:12]}"
+    backend = f"{network}-web"
+    proxy = f"{network}-proxy"
+    backend_caddyfile = tmp_path / "backend.Caddyfile"
+    backend_caddyfile.write_text(":8000 {\n\trespond /healthz/ 200\n}\n", encoding="utf-8")
+    caddyfile = (PRODUCTION_COMPOSE_PATH.parent / "Caddyfile").resolve()
+
+    def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [docker, *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    try:
+        assert run("network", "create", network).returncode == 0
+        backend_result = run(
+            "run",
+            "-d",
+            "--name",
+            backend,
+            "--network",
+            network,
+            "--network-alias",
+            "web",
+            "--mount",
+            f"type=bind,source={backend_caddyfile},target=/etc/caddy/Caddyfile,readonly",
+            "caddy:2-alpine",
+            "caddy",
+            "run",
+            "--config",
+            "/etc/caddy/Caddyfile",
+            "--adapter",
+            "caddyfile",
+        )
+        assert backend_result.returncode == 0, backend_result.stderr
+        proxy_result = run(
+            "run",
+            "-d",
+            "--name",
+            proxy,
+            "--network",
+            network,
+            "-e",
+            "CADDY_SITE_ADDRESS=localhost",
+            "--mount",
+            f"type=bind,source={caddyfile},target=/etc/caddy/Caddyfile,readonly",
+            "caddy:2-alpine",
+            "caddy",
+            "run",
+            "--config",
+            "/etc/caddy/Caddyfile",
+            "--adapter",
+            "caddyfile",
+        )
+        assert proxy_result.returncode == 0, proxy_result.stderr
+
+        healthcheck = "wget --no-verbose --tries=1 --spider http://127.0.0.1:8081/healthz/"
+        last_result = ""
+        for _ in range(20):
+            health_result = run("exec", proxy, "sh", "-ec", healthcheck)
+            if health_result.returncode == 0:
+                break
+            last_result = health_result.stderr or health_result.stdout
+            time.sleep(1)
+        else:
+            logs = run("logs", "--tail", "80", proxy)
+            pytest.fail(f"Caddy healthcheck did not pass: {last_result}\n{logs.stdout}")
+    finally:
+        run("rm", "-f", proxy, backend)
+        run("network", "rm", network)
 
 
 def test_production_rehearsal_runbook_names_the_explicit_production_manifest():
@@ -278,7 +370,8 @@ def test_rendered_production_compose_preserves_caddy_environment_placeholder(
     rendered = cast(dict[str, Any], yaml.safe_load(result.stdout))
     caddyfile_path = PRODUCTION_COMPOSE_PATH.parent / rendered["configs"]["caddyfile"]["file"]
     caddyfile = caddyfile_path.read_text(encoding="utf-8")
-    assert caddyfile.startswith("{$CADDY_SITE_ADDRESS} {")
+    assert "http://127.0.0.1:8081 {" in caddyfile
+    assert "{$CADDY_SITE_ADDRESS} {" in caddyfile
     assert "{artflow.internal}" not in caddyfile
 
 

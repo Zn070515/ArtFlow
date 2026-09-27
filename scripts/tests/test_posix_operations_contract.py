@@ -39,3 +39,13 @@ def test_posix_deploy_and_restore_scripts_keep_release_and_backup_boundaries():
     assert "pg_restore" in restore
     assert "verify_app_backup" in restore
     assert "org.opencontainers.image.revision" in restore
+
+
+def test_posix_restore_waits_for_the_stable_postgres_server():
+    restore = (REPOSITORY_ROOT / "scripts" / "restore-verify.sh").read_text(encoding="utf-8")
+
+    assert "PostgreSQL init process complete; ready for start up." in restore
+    assert "docker logs --tail 80" in restore
+    assert restore.count("--command 'SELECT 1;'") == 2
+    assert "sleep 1" in restore
+    assert "pg_isready" not in restore
