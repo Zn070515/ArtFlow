@@ -4,6 +4,7 @@ from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import ACTIVITY_STATE, authority_write
+from common.models import AuditLog
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, transaction
@@ -96,6 +97,23 @@ class ProgramMaterialPurityTests(TestCase):
         response = self.client.get(reverse("farewell_show:my_program_detail", args=[self.prog.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.prog.material_checks.count(), before)
+
+    def test_program_contact_update_audit_redacts_old_and_new_values(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("farewell_show:my_program_detail", args=[self.prog.pk]),
+            {"contact_phone": "13900000000"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+            target=f"Program:{self.prog.pk}",
+        )
+        self.assertNotIn("13800000000", audit.old_value)
+        self.assertNotIn("13900000000", audit.new_value)
+        self.assertIn("contact_phone", audit.old_value)
 
 
 @skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")

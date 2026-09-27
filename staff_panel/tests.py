@@ -1684,6 +1684,16 @@ class StaffPanelSmokeTests(TestCase):
             published_at=timezone.now(),
         )
         self.client.force_login(self.staff)
+        Program.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Archive Program",
+            program_type=Program.ProgramType.DANCE,
+            contact_name="Archive Contact",
+            contact_phone="13800000001",
+            class_name="CS1",
+            sort_order=1,
+        )
         response = self.client.post(
             reverse("staff:archive_package_create", args=[self.singer_activity.pk])
         )
@@ -1695,6 +1705,21 @@ class StaffPanelSmokeTests(TestCase):
         self.assertIn("award_list.xlsx", names)
         self.assertIn("attachment_index.xlsx", names)
         self.assertIn("public_content_index.xlsx", names)
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            registration_workbook = load_workbook(BytesIO(archive.read("registration_list.xlsx")))
+            program_workbook = load_workbook(BytesIO(archive.read("program_list.xlsx")))
+        registration_values = [
+            cell.value
+            for row in registration_workbook.active.iter_rows()
+            for cell in row
+        ]
+        program_values = [
+            cell.value for row in program_workbook.active.iter_rows() for cell in row
+        ]
+        self.assertNotIn("20260001", registration_values)
+        self.assertNotIn("13800000000", registration_values)
+        self.assertNotIn("Archive Contact", program_values)
+        self.assertNotIn("13800000001", program_values)
 
         Program.objects.create(
             activity=self.farewell_activity,

@@ -1510,6 +1510,14 @@ class ParticipantRegistrationFlowTests(TestCase):
                 target=f"SingerRegistration:{registration.pk}",
             ).exists()
         )
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+            target=f"SingerRegistration:{registration.pk}",
+        )
+        self.assertNotIn("13800000000", audit.old_value)
+        self.assertNotIn("13900000000", audit.new_value)
+        self.assertIn("phone", audit.old_value)
+        self.assertIn("song_name", audit.new_value)
 
     def test_participant_cannot_edit_when_phase_is_live(self):
         self.activity.phase = Activity.Phase.LIVE
