@@ -1,3 +1,5 @@
+import shutil
+import tempfile
 import threading
 import time
 from unittest import skipUnless
@@ -8,9 +10,9 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connection, transaction
-from django.test import RequestFactory, TestCase, TransactionTestCase
+from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
-from files.models import MaterialCheck
+from files.models import MaterialCheck, SubmissionFile
 
 from .models import Program
 from .views import my_program_detail
@@ -207,3 +209,104 @@ class ProgramLockOrderConcurrencyTests(TransactionTestCase):
         self.assertTrue(self.activity.is_locked)
         self.assertEqual(self.prog.contact_phone, "13800000000")
         self.assertEqual(edit_result.get("done"), True, edit_result)
+
+
+class ProgramMaterialAuthorityTests(TestCase):
+    """§2.3 / §4 — the program surface follows the same participant material authority."""
+
+    phase = Activity.Phase.REGISTRATION_OPEN
+
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.addCleanup(shutil.rmtree, self.media_root, True)
+        self.user = User.objects.create_user(username="program-material", password="pass")
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Farewell Material",
+                activity_type=Activity.Type.FAREWELL_SHOW,
+                phase=self.phase,
+                is_test_mode=False,
+            )
+        self.prog = Program.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Dance",
+            program_type=Program.ProgramType.DANCE,
+            contact_name="Li Hua",
+            contact_phone="13800000000",
+            class_name="CS1",
+            status=Program.Status.SUBMITTED,
+        )
+        self.client.force_login(self.user)
+
+    def _check(self, *, status, purpose=SubmissionFile.Purpose.ACCOMPANIMENT):
+        return MaterialCheck.objects.create(
+            program=self.prog,
+            item_name="伴奏文件",
+            status=status,
+            file_purpose=purpose,
+            sort_order=0,
+        )
+
+    def _url(self):
+        return reverse("farewell_show:my_program_detail", args=[self.prog.pk])
+
+    def _upload(self, name="song.mp3"):
+        return SimpleUploadedFile(
+            name, b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+        )
+
+    def test_participant_uploads_to_own_open_check(self):
+        check = self._check(status=MaterialCheck.Status.MISSING)
+        response = self.client.post(self._url(), {"check_id": check.pk, "file": self._upload()})
+        self.assertEqual(response.status_code, 302)
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.UPLOADED)
+        stored = SubmissionFile.objects.get(program=self.prog)
+        self.assertEqual(stored.file_purpose, SubmissionFile.Purpose.ACCOMPANIMENT)
+
+    def test_crafted_file_purpose_is_ignored(self):
+        check = self._check(status=MaterialCheck.Status.MISSING)
+        self.client.post(
+            self._url(),
+            {
+                "check_id": check.pk,
+                "file": self._upload(),
+                "file_purpose": SubmissionFile.Purpose.LYRICS_SCRIPT,
+            },
+        )
+        stored = SubmissionFile.objects.get(program=self.prog)
+        self.assertEqual(stored.file_purpose, SubmissionFile.Purpose.ACCOMPANIMENT)
+
+    def test_metadata_edit_is_refused_after_registration_closes(self):
+        self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        response = self.client.post(self._url(), {"contact_phone": "13900000000"})
+        self.assertEqual(response.status_code, 200)
+        self.prog.refresh_from_db()
+        self.assertEqual(self.prog.contact_phone, "13800000000")
+
+    def test_free_upload_is_refused_after_registration_closes(self):
+        self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        check = self._check(status=MaterialCheck.Status.MISSING)
+        response = self.client.post(self._url(), {"check_id": check.pk, "file": self._upload()})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(SubmissionFile.objects.filter(program=self.prog).exists())
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.MISSING)
+
+    def test_designated_supplement_is_accepted_after_registration_closes(self):
+        self.activity.phase = Activity.Phase.REVIEWING
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        check = self._check(status=MaterialCheck.Status.NEEDS_SUPPLEMENT)
+        response = self.client.post(self._url(), {"check_id": check.pk, "file": self._upload()})
+        self.assertEqual(response.status_code, 302)
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.UPLOADED)
