@@ -26,6 +26,10 @@ def test_posix_deploy_and_restore_scripts_keep_release_and_backup_boundaries():
     restore = (REPOSITORY_ROOT / "scripts" / "restore-verify.sh").read_text(encoding="utf-8")
 
     assert "ARTFLOW_RELEASE_SHA" in deploy
+    assert "ARTFLOW_PYTHON_IMAGE" in deploy
+    assert "ARTFLOW_POSTGRES_IMAGE" in deploy
+    assert "ARTFLOW_CADDY_IMAGE" in deploy
+    assert "@sha256:" in deploy
     assert "--wait" in deploy
     assert "/healthz/" in deploy
     assert "backup_artflow" in backup

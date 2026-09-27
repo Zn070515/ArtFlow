@@ -24,6 +24,9 @@ CONFIG_ENVIRONMENT = {
     "POSTGRES_PASSWORD": "artflow-compose-config-test-database-password",
     "CADDY_SITE_ADDRESS": "artflow.internal",
     "ARTFLOW_RELEASE_SHA": "a" * 40,
+    "ARTFLOW_PYTHON_IMAGE": "python:3.12-slim@sha256:" + "b" * 64,
+    "ARTFLOW_POSTGRES_IMAGE": "postgres:16-alpine@sha256:" + "c" * 64,
+    "ARTFLOW_CADDY_IMAGE": "caddy:2-alpine@sha256:" + "d" * 64,
 }
 
 
@@ -71,6 +74,20 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert services["web"]["build"]["args"]["ARTFLOW_BUILD_SHA"] == (
         "${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}"
     )
+
+
+def test_production_images_are_digest_pinned_and_python_base_is_explicit():
+    compose = load_compose(PRODUCTION_COMPOSE_PATH)
+    services = compose["services"]
+
+    assert services["db"]["image"] == "${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}"
+    assert services["proxy"]["image"] == "${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}"
+    assert services["web"]["build"]["args"]["ARTFLOW_PYTHON_IMAGE"] == (
+        "${ARTFLOW_PYTHON_IMAGE:?Set ARTFLOW_PYTHON_IMAGE}"
+    )
+
+    dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
+    assert "ARG ARTFLOW_PYTHON_IMAGE=python:3.12-slim" in dockerfile
 
 
 def test_event_compose_defaults_to_loopback_and_keeps_database_private():
