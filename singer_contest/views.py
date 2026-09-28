@@ -21,6 +21,18 @@ from files.services import (
 from .models import SingerRegistration
 
 
+def _apply_form_context(request, activities, *, errors=None, video_upload_allowed=False):
+    return {
+        "activities": activities,
+        "errors": errors or [],
+        "video_upload_allowed": video_upload_allowed,
+        "form_data": request.POST if request.method == "POST" else {},
+        "selected_activity_id": request.POST.get("activity_id", "")
+        if request.method == "POST"
+        else "",
+    }
+
+
 @login_required
 def apply_view(request):
     activities = Activity.objects.filter(
@@ -52,21 +64,23 @@ def apply_view(request):
             return render(
                 request,
                 "singer_contest/apply.html",
-                {
-                    "activities": activities,
-                    "errors": errors,
-                    "video_upload_allowed": video_upload_allowed,
-                },
+                _apply_form_context(
+                    request,
+                    activities,
+                    errors=errors,
+                    video_upload_allowed=video_upload_allowed,
+                ),
             )
         if SingerRegistration.objects.filter(activity=activity, user=request.user).exists():
             return render(
                 request,
                 "singer_contest/apply.html",
-                {
-                    "activities": activities,
-                    "errors": ["您已报名该活动，请勿重复提交。"],
-                    "video_upload_allowed": video_upload_allowed,
-                },
+                _apply_form_context(
+                    request,
+                    activities,
+                    errors=["您已报名该活动，请勿重复提交。"],
+                    video_upload_allowed=video_upload_allowed,
+                ),
             )
         if SingerRegistration.objects.filter(
             activity=activity, student_id=request.POST["student_id"]
@@ -74,11 +88,12 @@ def apply_view(request):
             return render(
                 request,
                 "singer_contest/apply.html",
-                {
-                    "activities": activities,
-                    "errors": ["该学号已报名本活动。"],
-                    "video_upload_allowed": video_upload_allowed,
-                },
+                _apply_form_context(
+                    request,
+                    activities,
+                    errors=["该学号已报名本活动。"],
+                    video_upload_allowed=video_upload_allowed,
+                ),
             )
         try:
             with transaction.atomic():
@@ -127,16 +142,20 @@ def apply_view(request):
             return render(
                 request,
                 "singer_contest/apply.html",
-                {
-                    "activities": activities,
-                    "errors": ["报名失败：该账号或学号已报名本活动。"],
-                },
+                _apply_form_context(
+                    request,
+                    activities,
+                    errors=["报名失败：该账号或学号已报名本活动。"],
+                    video_upload_allowed=video_upload_allowed,
+                ),
             )
         return redirect("singer_contest:my_submission")
     return render(
         request,
         "singer_contest/apply.html",
-        {"activities": activities, "video_upload_allowed": video_upload_allowed},
+        _apply_form_context(
+            request, activities, video_upload_allowed=video_upload_allowed
+        ),
     )
 
 

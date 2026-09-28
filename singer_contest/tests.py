@@ -1235,6 +1235,13 @@ class SingerUploadViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "文件类型")
+        self.assertContains(response, 'value="Singer"')
+        self.assertContains(response, 'value="20260001"')
+        self.assertContains(response, 'value="College"')
+        self.assertContains(response, 'value="Class"')
+        self.assertContains(response, 'value="13800000000"')
+        self.assertContains(response, 'value="Song"')
+        self.assertContains(response, f'value="{self.activity.pk}" selected')
         self.assertFalse(SingerRegistration.objects.exists())
 
     def test_apply_page_shows_privacy_notice_before_collection(self):
