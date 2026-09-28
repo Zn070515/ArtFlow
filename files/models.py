@@ -37,6 +37,18 @@ class SubmissionFile(models.Model):
     file_size = models.IntegerField()
     file_purpose = models.CharField(max_length=24, choices=Purpose, default=Purpose.OTHER)
     is_public = models.BooleanField(default=False)
+    # Questionnaire identity (§P5). A legacy upload has an empty ``question_key`` and is
+    # still identified by its purpose; a questionnaire upload is identified by the question
+    # it answers — which is what lets R1/R2/R3/R4 accompaniments exist at once, and why a
+    # replacement demotes only its own question's previous file.
+    question_key = models.CharField(max_length=100, blank=True, default="")
+    source_ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submission_files",
+    )
     is_test_data = models.BooleanField(default=False)
     is_current = models.BooleanField(default=True)
     version = models.PositiveIntegerField(default=1)
@@ -51,10 +63,21 @@ class SubmissionFile(models.Model):
 
     class Meta:
         constraints = [
+            # Two slots, not one: a legacy upload is unique per purpose, a questionnaire
+            # upload is unique per question. Keeping them separate is what stops a second
+            # accompaniment from replacing the first.
             models.UniqueConstraint(
                 fields=["singer_registration", "file_purpose"],
-                condition=models.Q(is_current=True, singer_registration__isnull=False),
+                condition=models.Q(
+                    is_current=True, singer_registration__isnull=False, question_key=""
+                ),
                 name="files_one_current_singer_purpose",
+            ),
+            models.UniqueConstraint(
+                fields=["singer_registration", "question_key"],
+                condition=models.Q(is_current=True, singer_registration__isnull=False)
+                & ~models.Q(question_key=""),
+                name="files_one_current_singer_question",
             ),
             models.UniqueConstraint(
                 fields=["program", "file_purpose"],
@@ -157,6 +180,18 @@ class MaterialCheck(models.Model):
         related_name="material_checks",
     )
     item_name = models.CharField(max_length=100)
+    # Questionnaire identity (§P5): the question this check is about, empty for a legacy
+    # requirement-driven check. It exists from the moment questionnaire uploads do, because
+    # a replacement has to reset the review of *its own* question — matching on purpose
+    # alone would clear the review of all four rounds' accompaniments at once.
+    question_key = models.CharField(max_length=100, blank=True, default="")
+    source_ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="material_checks",
+    )
     file_purpose = models.CharField(
         max_length=24,
         choices=SubmissionFile.Purpose.choices,

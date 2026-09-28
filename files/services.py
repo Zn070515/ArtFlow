@@ -15,6 +15,7 @@ from django.core.files.storage import Storage
 from django.db import transaction
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
+from questionnaire.schema import FILE_TYPE
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 
@@ -201,9 +202,40 @@ def _owner_filter(owner):
     raise ValidationError("文件必须关联到有效的报名或节目。")
 
 
+def _slot_filter(owner_filter, *, purpose, question_key):
+    """Which uploaded file this one replaces.
+
+    A legacy upload occupies the ``(owner, purpose)`` slot — the one it has always
+    occupied. A questionnaire upload occupies its own question's slot, so replacing the
+    second round's accompaniment demotes the second round's and nothing else.
+    """
+    if question_key:
+        return {**owner_filter, "question_key": question_key}
+    return {**owner_filter, "file_purpose": purpose, "question_key": ""}
+
+
 @transaction.atomic
-def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
+def _store_file(
+    *,
+    owner,
+    uploaded_file,
+    purpose,
+    uploaded_by,
+    question_key="",
+    source_ruleset_version=None,
+    max_mb=None,
+    owner_total_quota=False,
+):
+    """The one storage path both the legacy and the questionnaire uploads go through.
+
+    Callers differ in two places only: which slot the new file occupies, and whether the
+    storage quota is counted per slot (legacy, unchanged) or across everything the owner
+    has (questionnaire — otherwise every question would hand out a fresh copy of the whole
+    per-purpose budget and multiply the disk ceiling by the number of questions).
+    """
     validate_upload(uploaded_file, purpose, activity=owner.activity)
+    if max_mb is not None and uploaded_file.size > max_mb * 1024 * 1024:
+        raise ValidationError(f"文件超过该题目的上限 {max_mb} MB。")
     media_root = Path(settings.MEDIA_ROOT)
     media_root.mkdir(parents=True, exist_ok=True)
     if shutil.disk_usage(media_root).free < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024:
@@ -211,7 +243,9 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     try:
         # The owner is identified by model *and* pk: a singer registration and a farewell
         # show program are separate tables whose ids both start at 1, so a pk-only key let
-        # one owner type consume another's throttle budget for the same actor.
+        # one owner type consume another's throttle budget for the same actor. The throttle
+        # stays keyed on the *purpose*: keying it per question would hand a participant one
+        # full upload budget per question they happen to be asked.
         owner_key = f"{type(owner).__name__.lower()}:{owner.pk}"
         hit_rate_limit(
             f"upload:{getattr(uploaded_by, 'pk', 'anonymous')}:{owner_key}:{purpose}",
@@ -225,16 +259,22 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
     owner_filter = _owner_filter(locked_owner)
-    existing_bytes = SubmissionFile.objects.filter(
-        **owner_filter, file_purpose=purpose
-    ).values_list("file_size", flat=True)
+    slot = _slot_filter(owner_filter, purpose=purpose, question_key=question_key)
+    quota_filter = owner_filter if owner_total_quota else slot
+    existing_bytes = SubmissionFile.objects.filter(**quota_filter).values_list(
+        "file_size", flat=True
+    )
     if sum(existing_bytes) + uploaded_file.size > settings.ARTFLOW_UPLOAD_QUOTA_MB * 1024 * 1024:
-        raise ValidationError("该报名此用途的文件存储配额已用尽。")
-    SubmissionFile.objects.select_for_update().filter(
-        **owner_filter, file_purpose=purpose, is_current=True
-    ).update(is_current=False)
+        raise ValidationError(
+            "该报名的文件存储配额已用尽。"
+            if owner_total_quota
+            else "该报名此用途的文件存储配额已用尽。"
+        )
+    SubmissionFile.objects.select_for_update().filter(**slot, is_current=True).update(
+        is_current=False
+    )
     latest = (
-        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose)
+        SubmissionFile.objects.filter(**slot)
         .order_by("-version")
         .values_list("version", flat=True)
         .first()
@@ -243,10 +283,12 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     original_name = PurePath(str(uploaded_file.name)).name
     created = SubmissionFile.objects.create(
         **owner_filter,
+        question_key=question_key,
+        file_purpose=purpose,
         file=uploaded_file,
         original_name=original_name,
         file_size=uploaded_file.size,
-        file_purpose=purpose,
+        source_ruleset_version=source_ruleset_version,
         uploaded_by=uploaded_by,
         is_test_data=activity.is_test_mode,
         is_current=True,
@@ -256,9 +298,7 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     if max_versions < 1:
         raise ValidationError("上传版本保留配置无效。")
     stale_files = list(
-        SubmissionFile.objects.filter(**owner_filter, file_purpose=purpose).order_by(
-            "-version", "-pk"
-        )[max_versions:]
+        SubmissionFile.objects.filter(**slot).order_by("-version", "-pk")[max_versions:]
     )
     for stale_file in stale_files:
         stale_storage = stale_file.file.storage
@@ -266,8 +306,63 @@ def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
         stale_file.delete()
         if stale_name:
             transaction.on_commit(partial(delete_storage_object, stale_storage, stale_name))
-    _reset_matching_check(locked_owner, purpose)
+    _reset_matching_check(locked_owner, purpose, question_key=question_key)
     return created
+
+
+@transaction.atomic
+def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
+    """Store a legacy, purpose-identified upload (unchanged behaviour)."""
+    return _store_file(
+        owner=owner,
+        uploaded_file=uploaded_file,
+        purpose=purpose,
+        uploaded_by=uploaded_by,
+    )
+
+
+@transaction.atomic
+def store_questionnaire_file(
+    *,
+    registration,
+    question_key,
+    uploaded_file,
+    actor,
+    expected_schema_hash="",
+):
+    """Store one questionnaire answer file, deriving its technical purpose from the question.
+
+    The caller names a *question*, never a purpose: the current FROZEN questionnaire decides
+    which file purpose that question accepts, so a forged ``file_purpose`` is not a case to
+    defend against — it is not an input. The schema hash is checked too, so a browser
+    holding a form from before the questionnaire changed cannot file an answer under a
+    question that means something else now.
+    """
+    from questionnaire.registration import questionnaire_plan
+    from ruleset.services import current_frozen_version
+
+    version = current_frozen_version(registration.activity)
+    if version is None:
+        raise ValidationError("当前活动没有已确认的赛制，无法上传材料。")
+    plan = questionnaire_plan(version)
+    if expected_schema_hash and expected_schema_hash != plan.schema_hash:
+        raise ValidationError("问卷已更新，请刷新后重试。")
+    question = plan.question(question_key)
+    if question is None:
+        raise ValidationError(f"问卷中没有这一题：{question_key!r}。")
+    if question["type"] != FILE_TYPE:
+        raise ValidationError(f"这一题不是文件题：{question_key!r}。")
+    config = question["file"]
+    return _store_file(
+        owner=registration,
+        uploaded_file=uploaded_file,
+        purpose=config["purpose"],
+        uploaded_by=actor,
+        question_key=question_key,
+        source_ruleset_version=version,
+        max_mb=config["max_mb"],
+        owner_total_quota=True,
+    )
 
 
 @transaction.atomic
@@ -386,17 +481,23 @@ def _requirements_for(activity, applies_to, fallback):
     return configured or fallback
 
 
-def _reset_matching_check(owner, purpose):
-    """A brand-new upload supersedes any prior staff review of that material type.
+def _reset_matching_check(owner, purpose, *, question_key=""):
+    """A brand-new upload supersedes any prior staff review of that material.
 
     Matching is by the check's own ``file_purpose`` snapshot, not by re-deriving the
     purpose from the activity's current requirements: renaming or deleting a requirement
     must not redirect a fresh upload's review reset onto a different material.
+
+    A questionnaire upload narrows that to its own question. Matching on purpose alone
+    would be a real bug the moment four rounds share the accompaniment purpose — replacing
+    the second round's file would clear the review of all four.
     """
     if not purpose:
         return
     owner_filter = _owner_filter(owner)
-    MaterialCheck.objects.filter(**owner_filter, file_purpose=purpose).update(
+    matching = MaterialCheck.objects.filter(**owner_filter, file_purpose=purpose)
+    matching = matching.filter(question_key=question_key)
+    matching.update(
         status=MaterialCheck.Status.UPLOADED,
         review_note="",
         reviewed_by=None,

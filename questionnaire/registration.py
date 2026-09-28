@@ -53,6 +53,22 @@ def build_submission_context(*, version, registration) -> dict:
     return context
 
 
+def current_answer_files(registration) -> dict:
+    """The current file answering each question, keyed by question key.
+
+    Read through the same ``is_current`` flag the storage service maintains, so "what does
+    this participant's second-round accompaniment hold right now" has one answer.
+    """
+    from files.models import SubmissionFile
+
+    return {
+        row.question_key: row
+        for row in SubmissionFile.objects.filter(
+            singer_registration=registration, is_current=True
+        ).exclude(question_key="")
+    }
+
+
 def split_answers(plan: QuestionnairePlan, answers) -> tuple[dict, dict]:
     """Split posted answers into ``(binding -> value, question key -> value)``.
 
@@ -173,7 +189,7 @@ def submit_registration(
         answers=merged,
         context=context,
         due_rounds=due_rounds,
-        files=files,
+        files=current_answer_files(registration) if files is None else files,
     )
     if missing:
         raise ValidationError(f"以下必填项尚未填写：{'、'.join(missing)}。")

@@ -6,7 +6,7 @@
     "accounts/urls.py",
     "accounts/views.py",
     "common/authority.py",
-    "core/services.py",
+    "files/services.py",
     "questionnaire/compiler.py",
     "questionnaire/conditions.py",
     "questionnaire/cross_domain.py",
