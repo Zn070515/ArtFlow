@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import timedelta
@@ -54,6 +55,11 @@ from voting.services import (
 
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, CONTEST_ROUND_STATE, authority_write
 from common.private_test_fixture import PrivateTestFixture
+from common.private_test_questionnaire import (
+    check_answers_landed,
+    fill_registrations,
+    historical_2025_questionnaire,
+)
 
 
 class PrivateTestLoadError(ValueError):
@@ -145,10 +151,14 @@ def _create_registrations(
                 class_name="Synthetic Test Class",
                 phone=row["mobile"],
                 wechat="synthetic-only",
-                song_name=source.get("round1_group_song") or "Synthetic rehearsal song",
                 description="SYNTHETIC_TEST_ONLY",
                 remark="private rehearsal fixture",
-                pre_status=SingerRegistration.PreStatus.APPROVED,
+                # A draft, not an approval: this participant has not filled anything in
+                # yet. The four rounds' songs go into the questionnaire (see
+                # common.private_test_questionnaire) and the registration is approved only
+                # once it has actually been submitted -- approving a draft would put
+                # somebody in the roster who never finished their form.
+                pre_status=SingerRegistration.PreStatus.DRAFT,
                 is_test_data=True,
             )
         elif (
@@ -591,8 +601,6 @@ def apply_private_fixture(
     registrations = _create_registrations(activity, fixture)
     judges = _create_judges(activity, fixture)
     rounds = _create_rounds_and_rubrics(activity, fixture, registrations, operator)
-    for key in ("round1", "round2"):
-        prepare_round(rounds[key], operator)
     sessions = _create_vote_sessions(activity, fixture, registrations, operator)
     template_count = seed_ruleset_templates(operator)
     from ruleset.models import RulesetTemplate
@@ -620,8 +628,26 @@ def apply_private_fixture(
         "group_keys": {"initial_group": rounds["round1"].pk},
     }
     update_ruleset_binding(ruleset, binding=binding, operator=operator)
-    version = create_ruleset_version(ruleset, definition=template.definition, created_by=operator)
+    # The frozen ruleset carries the 2025 historical questionnaire, so the fixture rehearses
+    # the real flow: the frozen form is what the participants fill in.
+    definition = json.loads(template.definition)
+    definition["questionnaire"] = historical_2025_questionnaire()
+    version = create_ruleset_version(
+        ruleset, definition=json.dumps(definition, ensure_ascii=False), created_by=operator
+    )
     freeze_ruleset_version(version, operator)
+    responses = fill_registrations(
+        version=version,
+        registrations=registrations,
+        reference_by_code={row["legacy_code"]: row for row in fixture.reference["contestants"]},
+        operator=operator,
+    )
+    check_answers_landed(responses=responses, registrations=registrations)
+    # A round can only be prepared once the roster it draws from exists, and the runtime
+    # readiness gate on prepare_round needs a current FROZEN authority -- so preparation
+    # follows the freeze and the submissions, not the other way round.
+    for key in ("round1", "round2"):
+        prepare_round(rounds[key], operator)
     _create_tickets_and_votes(activity, fixture, sessions, registrations, operator)
     _load_media(fixture, registrations, operator)
     result = _load_scores_and_results(activity, fixture, rounds, registrations, judges, operator)
