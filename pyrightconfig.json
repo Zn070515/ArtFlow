@@ -1,5 +1,10 @@
 {
   "include": [
+    "accounts/forms.py",
+    "accounts/models.py",
+    "accounts/services.py",
+    "accounts/urls.py",
+    "accounts/views.py",
     "common/authority.py",
     "core/services.py",
     "staff_panel/views.py",

@@ -197,7 +197,7 @@ class User(AbstractUser):
 
         def get_role_display(self) -> str: ...
 
-    class Meta:
+    class Meta(AbstractUser.Meta):
         base_manager_name = "objects"
 
     @property
