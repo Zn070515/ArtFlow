@@ -22,7 +22,7 @@ from .builder import (
     move_question,
     referenced_keys,
 )
-from .schema import parse_questionnaire
+from .schema import FILE_PURPOSES, parse_questionnaire
 
 QUESTIONNAIRE = {
     "schema_version": 1,
@@ -199,3 +199,12 @@ class ReferencedKeysTests(SimpleTestCase):
 
     def test_a_document_with_no_conditions_references_nothing(self):
         self.assertEqual(referenced_keys(parse_questionnaire(QUESTIONNAIRE)), set())
+
+
+class FilePurposeAgreementTests(SimpleTestCase):
+    def test_the_questionnaire_purpose_list_is_exactly_what_files_can_police(self):
+        """A questionnaire may name a technical file type the upload path knows how to
+        check, and may not invent one the ``files`` app would refuse at upload time."""
+        from files.models import SubmissionFile
+
+        self.assertEqual(FILE_PURPOSES, {value for value, _label in SubmissionFile.Purpose.choices})

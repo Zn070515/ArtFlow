@@ -67,15 +67,22 @@ BINDING_WHITELIST = frozenset(
     }
 )
 
-# File purposes the ``files`` app can police. A question names one of these; it never
-# invents a new technical file type.
+# File purposes the ``files`` app can police. These are exactly
+# ``files.models.SubmissionFile.Purpose`` — a questionnaire may name a technical file type
+# the upload path knows how to check, and may not invent one. Kept as a literal rather than
+# imported because ``files.services`` reads this module; a test pins the equality instead,
+# so drift fails loudly rather than silently accepting a purpose nothing can police.
 FILE_PURPOSES = frozenset(
     {
         "accompaniment",
+        "background_video",
         "performance_video",
-        "program_material",
+        "program_image",
+        "lyrics_script",
+        "host_material",
         "public_image",
-        "attachment",
+        "showcase_image",
+        "other",
     }
 )
 # The server's own ceiling. A question may ask for less, never more.

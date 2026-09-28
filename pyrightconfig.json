@@ -17,6 +17,7 @@
     "questionnaire/schema.py",
     "questionnaire/services.py",
     "questionnaire/staff_views.py",
+    "questionnaire/successor.py",
     "questionnaire/views.py",
     "singer_contest/services.py",
     "staff_panel/views.py"

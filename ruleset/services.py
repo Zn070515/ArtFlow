@@ -28,7 +28,7 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
-from questionnaire.compiler import compile_questionnaire
+from questionnaire.compiler import QuestionnairePlan, compile_questionnaire
 from questionnaire.cross_domain import validate_questionnaire_rounds
 from questionnaire.schema import parse_questionnaire
 
@@ -623,6 +623,73 @@ def _annotated_capacity(rpk, activity):
     )
 
 
+def _questionnaire_plan_of(version: RulesetVersion) -> QuestionnairePlan | None:
+    """The compiled questionnaire of a version, or ``None`` when it carries none."""
+    try:
+        root = json.loads(version.definition)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(root, dict):
+        return None
+    raw = root.get("questionnaire")
+    return compile_questionnaire(raw) if raw is not None else None
+
+
+def _validate_successor_questionnaire(
+    previous: RulesetVersion | None, version: RulesetVersion
+) -> None:
+    """A successor may add or drop questions, but may not silently redefine one.
+
+    Reusing ``r2.accompaniment`` for a background video would keep every participant's
+    stored answer in a slot whose meaning changed under it. Adding a new key is the edit
+    that says what the operator means.
+    """
+    if previous is None:
+        return
+    from questionnaire.successor import validate_successor
+
+    before = _questionnaire_plan_of(previous)
+    after = _questionnaire_plan_of(version)
+    if before is None or after is None:
+        return
+    validate_successor(before, after)
+
+
+def _carry_questionnaire_answers(
+    previous: RulesetVersion | None, version: RulesetVersion, plan: QuestionnairePlan | None
+) -> int:
+    """Open a response on the new version for everyone who answered the old one.
+
+    Only free-text answers move: bound answers already live on the registration, and file
+    answers are read by ``question_key`` through ``is_current``, so both carry themselves.
+    A participant who never filled anything in gets no row — a response means someone
+    answered something, and blank rows would be noise rather than migration.
+    """
+    if previous is None or plan is None:
+        return 0
+    from questionnaire.models import QuestionnaireResponse
+    from questionnaire.successor import carry_answers
+
+    before = _questionnaire_plan_of(previous)
+    if before is None:
+        return 0
+    carried = 0
+    for old in QuestionnaireResponse.objects.filter(ruleset_version=previous):
+        answers = carry_answers(before, plan, old.answers)
+        QuestionnaireResponse.objects.update_or_create(
+            singer_registration_id=old.singer_registration_id,
+            ruleset_version=version,
+            questionnaire_key=plan.key,
+            defaults={
+                "schema_hash": plan.schema_hash,
+                "answers": answers,
+                "is_test_data": old.is_test_data,
+            },
+        )
+        carried += 1
+    return carried
+
+
 def _validate_frozen_questionnaire(definition, binding: dict) -> None:
     """The questionnaire freezes with the ruleset, so it must clear its own gate here.
 
@@ -723,6 +790,7 @@ def freeze_ruleset_version(
         raise RulesetInvalidError(report, plan)
     assert plan is not None
     _validate_frozen_questionnaire(locked.definition, normalized_binding)
+    _validate_successor_questionnaire(prior, locked)
 
     old_status = "draft"
     with authority_write(RULESET_FREEZE):
@@ -762,6 +830,8 @@ def freeze_ruleset_version(
             ensure_ascii=False,
         ),
     )
+    # Everybody who answered the previous version keeps their answers, under the new one.
+    _carry_questionnaire_answers(prior, locked, _questionnaire_plan_of(locked))
     return locked
 
 
