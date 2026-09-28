@@ -5683,6 +5683,11 @@ class ResultBoardTests(TestCase):
         )
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
         login_admin(self.client, self.admin)
+        detail = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+        self.assertContains(
+            detail,
+            "onsubmit=\"return confirm('确认核定并锁定该赛段结果？确认后将成为正式手卡依据。');\"",
+        )
         response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))  # type: ignore[union-attr]
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))  # type: ignore[union-attr]
         ready.refresh_from_db()  # type: ignore[union-attr]
