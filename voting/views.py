@@ -48,6 +48,18 @@ def _vote_rate_limit_decision(request, pk):
     return allow(f"vote-passcode:{pk}:{session_key}", limit=10, window_seconds=300)
 
 
+def _vote_ui_state(vote_session, now):
+    if vote_session.is_locked:
+        return "locked", "投票已锁定", False
+    if not vote_session.is_open:
+        return "closed", "投票未开放", False
+    if now < vote_session.start_time:
+        return "not_started", "投票尚未开始", False
+    if now > vote_session.end_time:
+        return "ended", "投票已结束", False
+    return "open", "投票进行中", True
+
+
 def vote_entry(request, pk):
     vote_session = _get_vote_session_for_public_request(request, pk)
     now = timezone.now()
@@ -91,16 +103,14 @@ def vote_cast(request, pk):
     if request.session.get("vote_passcode_ok") != str(pk):
         return redirect("voting:vote_entry", pk=pk)
 
+    vote_ui_state, vote_ui_label, can_submit = _vote_ui_state(vote_session, now)
     error = None
     ticket_session = _ticket_session_for_request(request, vote_session)
     if vote_session.requires_ticket and ticket_session is None:
         error = "请先核验入场票。"
-    if not vote_session.is_open or vote_session.is_locked:
-        error = "投票尚未开放或已锁定"
-    elif now < vote_session.start_time:
-        error = "投票尚未开始"
-    elif now > vote_session.end_time:
-        error = "投票已结束"
+        can_submit = False
+    elif not can_submit:
+        error = vote_ui_label
     elif (
         ticket_session is not None
         and VoteBallot.objects.filter(
@@ -148,6 +158,9 @@ def vote_cast(request, pk):
             "max_selections": max_sel,
             "is_multi": vote_session.selection_type == VoteSession.SelectionType.MULTI,
             "error": error,
+            "vote_ui_state": vote_ui_state,
+            "vote_ui_label": vote_ui_label,
+            "can_submit": can_submit,
         },
     )
 

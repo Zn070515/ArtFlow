@@ -4,11 +4,12 @@
 {% block title %}投票 — {{ vote_session.name }} — ArtFlow{% endblock %}
 
 {% block content %}
-<div class="max-w-lg mx-auto px-4 py-10" data-vote-cast data-max-selections="{{ max_selections }}">
+<div class="max-w-lg mx-auto px-4 py-10" data-vote-cast data-vote-state="{{ vote_ui_state }}" data-max-selections="{{ max_selections }}">
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ vote_session.name }}</h1>
     <p class="text-sm text-gray-500 mb-6">
         {% if is_multi %}请选择最多 {{ max_selections }} 位选手{% else %}请选择一位选手{% endif %}
     </p>
+    <p class="mb-4 rounded border px-3 py-2 text-sm {% if can_submit %}border-green-200 bg-green-50 text-green-800{% else %}border-amber-200 bg-amber-50 text-amber-800{% endif %}" data-vote-state-label>投票状态：{{ vote_ui_label }}</p>
 
     {% if error %}
     <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded mb-4">{{ error }}</div>
@@ -17,11 +18,11 @@
     <form method="post" class="space-y-3" data-vote-form data-confirm-message="投票提交后不可修改，确定提交吗？">
         {% csrf_token %}
         {% for opt in options %}
-        <label class="flex items-center gap-3 border border-gray-200 rounded-lg px-4 py-3 hover:border-gray-300 cursor-pointer transition-colors">
+        <label class="flex items-center gap-3 border border-gray-200 rounded-lg px-4 py-3 hover:border-gray-300 {% if can_submit %}cursor-pointer{% else %}cursor-not-allowed opacity-60{% endif %} transition-colors">
             {% if is_multi %}
-            <input type="checkbox" name="selected_option" value="{{ opt.pk }}" data-vote-option class="h-4 w-4 text-brand border-gray-300">
+            <input type="checkbox" name="selected_option" value="{{ opt.pk }}" data-vote-option{% if not can_submit %} disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
             {% else %}
-            <input type="radio" name="selected_option" value="{{ opt.pk }}" data-vote-option class="h-4 w-4 text-brand border-gray-300">
+            <input type="radio" name="selected_option" value="{{ opt.pk }}" data-vote-option{% if not can_submit %} disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
             {% endif %}
             <span class="text-sm font-medium">{{ opt.singer.name }}</span>
             <span class="text-xs text-gray-400">{{ opt.singer.song_name }}</span>
@@ -32,7 +33,7 @@
 
         {% if options %}
         <p class="text-sm text-gray-600" data-selection-count aria-live="polite">已选择 0 / {{ max_selections }}</p>
-        <button type="submit" data-vote-submit class="w-full bg-brand text-white py-2.5 rounded text-sm hover:bg-brand-light transition-colors">提交投票</button>
+        <button type="submit" data-vote-submit{% if not can_submit %} disabled{% endif %} class="w-full bg-brand text-white py-2.5 rounded text-sm hover:bg-brand-light transition-colors disabled:cursor-not-allowed disabled:opacity-50">{% if can_submit %}提交投票{% else %}当前不可提交{% endif %}</button>
         {% endif %}
     </form>
 </div>
