@@ -6,6 +6,7 @@ test("ticket scan is a read-only entry page", async ({ page }) => {
   expect(response).not.toBeNull();
   expect(response?.status()).toBe(200);
   await expect(page).toHaveTitle(/票据验证/);
+  await expect(page.locator("[data-ticket-manual-form]")).toBeVisible();
   expect(page.url()).not.toContain("#");
   await expect(page.locator("body")).not.toContainText("secret_digest");
 });

@@ -159,6 +159,18 @@ class VotePublicStagingBoundaryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Popularity")
 
+    def test_vote_cast_exposes_selection_count_and_irreversible_confirmation(self):
+        session, option = self._make_session(is_test_mode=False)
+        self.client.post(reverse("voting:vote_entry", args=[session.pk]), {"passcode": "1234"})
+        response = self.client.get(reverse("voting:vote_cast", args=[session.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-vote-cast')
+        self.assertContains(response, 'data-selection-count')
+        self.assertContains(response, 'data-confirm-message="投票提交后不可修改，确定提交吗？"')
+        self.assertContains(response, f'data-vote-option')
+        self.assertContains(response, f'value="{option.pk}"')
+
     def test_formal_valid_passcode_cast_still_works(self):
         session, option = self._make_session(is_test_mode=False)
         self.client.post(reverse("voting:vote_entry", args=[session.pk]), {"passcode": "1234"})

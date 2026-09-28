@@ -388,7 +388,10 @@
         label.appendChild(description);
       }
       const input = document.createElement("input");
-      input.type = "text";
+      input.type = "number";
+      input.min = "0";
+      input.max = criterion.max_score;
+      input.step = "0.01";
       input.inputMode = "decimal";
       input.autocomplete = "off";
       input.dataset.criterionId = String(criterion.criterion_id);
