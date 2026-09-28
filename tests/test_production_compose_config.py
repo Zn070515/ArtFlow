@@ -409,7 +409,11 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
                 errors="replace",
             )
             assert db_ports.returncode == 0, db_ports.stderr
-            assert json.loads(db_ports.stdout) == {"5432/tcp": None}
+            db_port_bindings = json.loads(db_ports.stdout)
+            assert isinstance(db_port_bindings, dict)
+            # Docker may report an unbound declared port as null or omit it.
+            # Either representation is safe; any non-empty binding is not.
+            assert all(not bindings for bindings in db_port_bindings.values())
 
             with urlopen(f"http://127.0.0.1:{event_port}/healthz/", timeout=10) as response:
                 assert response.status == 200
