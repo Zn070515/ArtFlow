@@ -153,9 +153,7 @@ def apply_view(request):
     return render(
         request,
         "singer_contest/apply.html",
-        _apply_form_context(
-            request, activities, video_upload_allowed=video_upload_allowed
-        ),
+        _apply_form_context(request, activities, video_upload_allowed=video_upload_allowed),
     )
 
 

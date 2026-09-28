@@ -185,7 +185,7 @@ class VotePublicStagingBoundaryTests(TestCase):
         self.assertContains(response, 'data-vote-state="closed"')
         self.assertContains(response, "投票未开放")
         self.assertContains(response, f'value="{option.pk}" data-vote-option')
-        self.assertContains(response, 'data-vote-option disabled')
+        self.assertContains(response, "data-vote-option disabled")
         self.assertContains(response, '<button type="submit" data-vote-submit disabled')
 
     def test_formal_valid_passcode_cast_still_works(self):

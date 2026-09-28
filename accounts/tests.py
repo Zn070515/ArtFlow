@@ -309,13 +309,9 @@ class ParticipantLoginRateLimitTests(TestCase):
             patch("accounts.views.StaffLoginForm.is_valid", return_value=False),
         ):
             for _ in range(10):
-                response = self.client.post(
-                    participant_url, payload, REMOTE_ADDR="198.51.100.12"
-                )
+                response = self.client.post(participant_url, payload, REMOTE_ADDR="198.51.100.12")
                 self.assertEqual(response.status_code, 200)
-            throttled = self.client.post(
-                staff_url, payload, REMOTE_ADDR="198.51.100.12"
-            )
+            throttled = self.client.post(staff_url, payload, REMOTE_ADDR="198.51.100.12")
 
         self.assertContains(throttled, "尝试次数过多")
 
