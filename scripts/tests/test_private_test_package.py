@@ -3,11 +3,24 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
+from scripts.verify_private_test_package import (
+    PackageValidationError,
+    verify_manifest,
+)
 
-from scripts.verify_private_test_package import PackageValidationError, verify_manifest
+
+def test_manifest_path_normalization_is_linux_compatible(monkeypatch: pytest.MonkeyPatch):
+    import scripts.verify_private_test_package as verifier
+
+    monkeypatch.setattr(verifier, "Path", PurePosixPath)
+
+    assert verifier._safe_relative_path("media/sample.txt").parts == (
+        "media",
+        "sample.txt",
+    )
 
 
 def _write_manifest(root: Path, files: dict[str, bytes]) -> None:
