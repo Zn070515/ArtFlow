@@ -200,8 +200,13 @@ def _parse_due(question: dict, where: str, key: str) -> dict:
     return normalized
 
 
-def _parse_question(question: dict, *, where: str, prior_keys: frozenset[str]) -> dict | None:
-    """Validate one block. Returns the normalized block, or ``None`` for a NOTICE."""
+def _parse_question(question: dict, *, where: str, prior_keys: frozenset[str]) -> dict:
+    """Validate one block and return its normalized form.
+
+    A NOTICE comes back too, and stays *in place* among the questions: it is display-only,
+    but where it appears is part of the document, and a renderer has to see it in order.
+    Consumers that want only answerable questions filter on the type — the compiler does.
+    """
     key = _as_key(question.get("key"), f"{where}：非法题目 key {question.get('key')!r}。")
     label = question.get("label")
     _require(isinstance(label, str) and bool(label.strip()), f"{where}：题目 {key!r} 缺少 label。")
@@ -212,7 +217,7 @@ def _parse_question(question: dict, *, where: str, prior_keys: frozenset[str]) -
         description = question.get("description")
         if isinstance(description, str) and description:
             notice["description"] = description
-        return None
+        return notice
 
     _require(
         isinstance(qtype, str) and qtype in ANSWERABLE_TYPES,
@@ -300,6 +305,7 @@ def parse_questionnaire(questionnaire: dict | str | None) -> dict:
     _require(bool(pages_raw), "问卷必须包含非空 'pages' 列表。")
 
     seen_question_keys: set[str] = set()
+    notice_keys: set[str] = set()
     seen_section_keys: set[str] = set()
     seen_page_keys: set[str] = set()
     pages: list[dict] = []
@@ -341,18 +347,18 @@ def parse_questionnaire(questionnaire: dict | str | None) -> dict:
                     block_key not in seen_question_keys,
                     f"{block_where}：题目 key 重复：{block_key!r}。",
                 )
-                # Forward-only: a condition may only name blocks that already appeared.
+                # Forward-only: a condition may only name *answerable* blocks that already
+                # appeared — a notice has no answer to compare against.
                 normalized = _parse_question(
-                    block, where=block_where, prior_keys=frozenset(seen_question_keys)
+                    block,
+                    where=block_where,
+                    prior_keys=frozenset(seen_question_keys - notice_keys),
                 )
                 seen_question_keys.add(block_key)
-                if normalized is None:
-                    notice = {"key": block_key, "type": NOTICE_TYPE, "label": block["label"]}
-                    if isinstance(block.get("description"), str) and block["description"]:
-                        notice["description"] = block["description"]
-                    notices.append(notice)
-                else:
-                    blocks.append(normalized)
+                if normalized["type"] == NOTICE_TYPE:
+                    notice_keys.add(block_key)
+                    notices.append(normalized)
+                blocks.append(normalized)
             sections.append(
                 {
                     "key": section_key,

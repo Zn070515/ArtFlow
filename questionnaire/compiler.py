@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from .schema import FILE_TYPE, parse_questionnaire, schema_hash
+from .schema import FILE_TYPE, NOTICE_TYPE, parse_questionnaire, schema_hash
 
 
 @dataclass(frozen=True)
@@ -62,11 +62,14 @@ class QuestionnairePlan:
 def compile_questionnaire(questionnaire: dict | str | None) -> QuestionnairePlan:
     """Validate ``questionnaire`` and return its canonical plan."""
     parsed = parse_questionnaire(questionnaire)
+    # Notices stay in the document where they appear, but they are not answerable and so
+    # never appear among the plan's questions.
     questions = [
         question
         for page in parsed["pages"]
         for section in page["sections"]
         for question in section["questions"]
+        if question["type"] != NOTICE_TYPE
     ]
     bindings: dict[str, str] = {}
     for question in questions:

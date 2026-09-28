@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}报名资料 — {{ activity.title }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10"
+     data-questionnaire-form
+     data-autosave-url="{{ autosave_url }}"
+     data-upload-url-template="{{ upload_url_template }}"
+     data-schema-hash="{{ schema_hash }}"
+     data-editable="{% if editable %}1{% else %}0{% endif %}">
+
+    <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
+    <p class="text-sm text-gray-500 mb-6">资料完成度</p>
+
+    <p class="mb-4 text-sm text-gray-700" data-completion aria-live="polite">
+        目前需要完成 <span data-completion-required>{{ completion.required }}</span> 项，已完成
+        <span data-completion-answered>{{ completion.answered }}</span> 项
+        {% if completion.upcoming %}<span class="text-gray-400">（另有 {{ completion.upcoming }} 项稍后开放）</span>{% endif %}
+    </p>
+
+    {% if not editable %}
+    <div class="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2 rounded mb-4">
+        {% if preview %}工作人员预览：此页面以选手视角展示已确认赛制的报名问卷。{% else %}当前阶段不可修改，仅供查看。{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded mb-4 hidden" data-form-error></div>
+
+    {% for page in pages %}
+    <section class="mb-8">
+        <h2 class="text-base font-semibold text-gray-900 mb-3">{{ page.title }}</h2>
+        {% for section in page.sections %}
+        <div class="mb-5">
+            <h3 class="text-sm font-medium text-gray-500 mb-2">{{ section.title }}</h3>
+            {% for q in section.questions %}
+            <div class="mb-4" data-question="{{ q.key }}" data-question-type="{{ q.type }}"
+                 {% if not q.visible %}hidden{% endif %}>
+                <label class="block text-sm font-medium text-gray-800 mb-1" for="q-{{ q.key }}">
+                    {{ q.label }}{% if q.required and q.due %}<span class="text-red-600"> *</span>{% endif %}
+                    {% if not q.due %}<span class="text-xs text-gray-400">（稍后开放）</span>{% endif %}
+                </label>
+                {% if q.description %}
+                <p class="text-xs text-gray-500 mb-1">{{ q.description }}</p>
+                {% endif %}
+
+                {% if q.type == 'notice' %}
+                <p class="text-sm text-gray-600">{{ q.description }}</p>
+                {% elif q.type == 'textarea' %}
+                <textarea id="q-{{ q.key }}" name="{{ q.key }}" rows="3" data-answer="{{ q.key }}"
+                          {% if not editable %}disabled{% endif %}
+                          class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ q.value_text }}</textarea>
+                {% elif q.type == 'boolean' %}
+                <input type="checkbox" id="q-{{ q.key }}" name="{{ q.key }}" value="1" data-answer="{{ q.key }}"
+                       {% if q.checked %}checked{% endif %}{% if not editable %} disabled{% endif %}
+                       class="h-4 w-4 text-brand border-gray-300">
+                {% elif q.type == 'single_choice' or q.type == 'select' %}
+                <select id="q-{{ q.key }}" name="{{ q.key }}" data-answer="{{ q.key }}"
+                        {% if not editable %}disabled{% endif %}
+                        class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                    <option value="">请选择</option>
+                    {% for option in q.options %}
+                    <option value="{{ option.value }}"{% if q.value == option.value %} selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+                {% elif q.type == 'file' %}
+                <div class="flex items-center gap-3">
+                    <input type="file" id="q-{{ q.key }}" name="{{ q.key }}" data-file-answer="{{ q.key }}"
+                           {% if not editable %}disabled{% endif %}
+                           class="text-sm text-gray-600">
+                    <span class="text-xs text-gray-500" data-file-name="{{ q.key }}">{{ q.file_name }}</span>
+                </div>
+                <p class="text-xs text-gray-400 mt-1">
+                    支持 {{ q.file.extensions|join:"、" }}，单个文件不超过 {{ q.file.max_mb }} MB
+                </p>
+                {% elif q.type == 'multiple_choice' %}
+                {% for option in q.options %}
+                <label class="flex items-center gap-2 mb-1 text-sm text-gray-700">
+                    <input type="checkbox" name="{{ q.key }}" value="{{ option.value }}" data-answer="{{ q.key }}"
+                           {% if not editable %}disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
+                    {{ option.label }}
+                </label>
+                {% endfor %}
+                {% else %}
+                <input type="{% if q.type == 'number' %}number{% else %}text{% endif %}"
+                       id="q-{{ q.key }}" name="{{ q.key }}" value="{{ q.value_text }}" data-answer="{{ q.key }}"
+                       {% if not editable %}disabled{% endif %}
+                       class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </section>
+    {% endfor %}
+
+    <p class="text-sm text-gray-500" data-save-state aria-live="polite"></p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'dist/questionnaire_form.js' %}" defer></script>
+{% endblock %}

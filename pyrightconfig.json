@@ -15,8 +15,9 @@
     "questionnaire/runtime.py",
     "questionnaire/schema.py",
     "questionnaire/services.py",
-    "staff_panel/views.py",
-    "singer_contest/services.py"
+    "questionnaire/views.py",
+    "singer_contest/services.py",
+    "staff_panel/views.py"
   ],
   "exclude": [
     "**/migrations",

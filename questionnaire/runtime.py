@@ -99,6 +99,48 @@ def resolve_questions(
     return tuple(resolved)
 
 
+def completion_summary(
+    plan: QuestionnairePlan,
+    *,
+    registration,
+    answers,
+    context,
+    due_rounds: frozenset[str] | set[str] = frozenset(),
+    files=None,
+) -> dict:
+    """How far along one participant is, per group and overall.
+
+    Counted over the questions the participant can actually see, and split into what is
+    owed now and what is merely shown early. "Answered / total questions" would be wrong in
+    both directions: it would mark next month's material as missing today, and it would
+    count questions hidden by their own condition — which the participant has never been
+    asked and cannot answer.
+    """
+    groups: dict[str, dict[str, int]] = {}
+    totals = {"answered": 0, "required": 0, "upcoming": 0}
+    for resolved in resolve_questions(
+        plan, answers=answers, context=context, due_rounds=due_rounds
+    ):
+        if not resolved.visible:
+            continue
+        question = resolved.question
+        group = question.get("round") or "basic"
+        bucket = groups.setdefault(group, {"answered": 0, "required": 0, "upcoming": 0})
+        value = resolve_question_value(
+            question, answers=answers, registration=registration, files=files
+        )
+        if not is_blank(value):
+            bucket["answered"] += 1
+            totals["answered"] += 1
+        if resolved.required and resolved.due:
+            bucket["required"] += 1
+            totals["required"] += 1
+        elif resolved.required:
+            bucket["upcoming"] += 1
+            totals["upcoming"] += 1
+    return {"groups": groups, **totals}
+
+
 def missing_required(
     plan: QuestionnairePlan,
     *,
