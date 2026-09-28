@@ -13,7 +13,6 @@ class PrivateFixtureError(ValueError):
     """Raised when a private rehearsal row is unsafe to load."""
 
 
-
 @dataclass(frozen=True)
 class PrivateTestFixture:
     root: Path
@@ -35,8 +34,9 @@ class PrivateTestFixture:
         try:
             verify_private_test_package(package_root, require_sanitized_votes=True)
             reference = json.loads(
-                (package_root / "02_私测夹具" / "artflow_2025_full_reference_fixture.json")
-                .read_text(encoding="utf-8")
+                (
+                    package_root / "02_私测夹具" / "artflow_2025_full_reference_fixture.json"
+                ).read_text(encoding="utf-8")
             )
             paths = {
                 "identities": addendum_root / "synthetic_identities.csv",
@@ -80,7 +80,9 @@ def parse_fixture_rows(rows: list[Mapping[str, object]]) -> tuple[dict[str, str]
     for row in rows:
         if not isinstance(row, Mapping):
             raise PrivateFixtureError("fixture row must be a mapping")
-        normalized.append({str(key): "" if value is None else str(value) for key, value in row.items()})
+        normalized.append(
+            {str(key): "" if value is None else str(value) for key, value in row.items()}
+        )
     return tuple(normalized)
 
 
@@ -92,7 +94,9 @@ def read_fixture_csv(path: Path) -> tuple[dict[str, str], ...]:
         raise PrivateFixtureError(f"cannot read fixture CSV: {path}") from error
 
 
-def ensure_synthetic_provenance(rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...], *, source: Path) -> None:
+def ensure_synthetic_provenance(
+    rows: list[Mapping[str, object]] | tuple[Mapping[str, object], ...], *, source: Path
+) -> None:
     allowed = {"SYNTHETIC_TEST_ONLY"}
     if "sanitized" in source.name:
         allowed.add("SANITIZED_SOURCE_EXPORT_FOR_TEST_ONLY")
@@ -100,5 +104,7 @@ def ensure_synthetic_provenance(rows: list[Mapping[str, object]] | tuple[Mapping
         provenance = str(row.get("provenance", "")).strip()
         if provenance not in allowed:
             raise PrivateFixtureError(
-                f"fixture row {index} in {source.name} has unsafe provenance: {provenance or '<empty>'}"
+                "fixture row "
+                f"{index} in {source.name} has unsafe provenance: "
+                f"{provenance or '<empty>'}"
             )
