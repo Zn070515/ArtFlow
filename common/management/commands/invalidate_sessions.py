@@ -11,6 +11,7 @@ class Command(BaseCommand):
         deleted_count, _ = Session.objects.all().delete()
         self.stdout.write(
             self.style.SUCCESS(
-                f"All active application sessions invalidated ({deleted_count} session rows removed)."
+                "All active application sessions invalidated "
+                f"({deleted_count} session rows removed)."
             )
         )

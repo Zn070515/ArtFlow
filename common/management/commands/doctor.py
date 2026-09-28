@@ -2,14 +2,13 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Any
 
+from config.runtime import is_placeholder_value
 from django.conf import settings
 from django.core.checks import ERROR, run_checks
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
-
-from config.runtime import is_placeholder_value
 
 
 class DoctorExitCode(IntEnum):
