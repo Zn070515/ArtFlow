@@ -66,6 +66,7 @@ class LockedJudgeRound:
 @dataclass(frozen=True)
 class JudgeContext:
     activity_id: int
+    activity_name: str
     round_id: int
     round_name: str
     seat_id: int
@@ -1299,6 +1300,7 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
         }
     return JudgeContext(
         activity_id=session.panel_snapshot.activity_id,
+        activity_name=session.panel_snapshot.activity.title,
         round_id=session.panel_snapshot.round_id,
         round_name=contest_round.name or contest_round.get_round_type_display(),
         seat_id=session.seat_id,

@@ -7,8 +7,9 @@
       data-context-url="{% url 'judge:context' %}"
       data-score-url="{% url 'judge:score' %}">
   <h1 class="text-2xl font-semibold">评委评分终端</h1>
-  <p data-status class="mt-3" role="status" aria-live="polite">正在准备评委会话……</p>
+  <p data-status class="mt-3 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-gray-700" role="status" aria-live="polite">正在准备评委会话……</p>
   <section class="mt-6 rounded border p-4" aria-live="polite">
+    <p>活动：<span data-activity>—</span></p>
     <p>轮次：<span data-round>—</span></p>
     <p>表演：<span data-performance-label>—</span></p>
     <p>选手：<span data-singer>—</span></p>

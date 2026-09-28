@@ -11,6 +11,7 @@
 
   interface JudgeContext {
     activity_id: number;
+    activity_name: string;
     round_id: number;
     round_name: string;
     seat_id: number;
@@ -71,6 +72,7 @@
     const candidate = value.context;
     if (
       !positiveInteger(candidate.activity_id) ||
+      typeof candidate.activity_name !== "string" ||
       !positiveInteger(candidate.round_id) ||
       typeof candidate.round_name !== "string" ||
       !positiveInteger(candidate.seat_id) ||
@@ -103,6 +105,7 @@
 
     return {
       activity_id: candidate.activity_id,
+      activity_name: candidate.activity_name,
       round_id: candidate.round_id,
       round_name: candidate.round_name,
       seat_id: candidate.seat_id,
@@ -169,9 +172,22 @@
     }
   }
 
-  function statusText(root: HTMLElement, message: string): void {
+  function statusText(
+    root: HTMLElement,
+    message: string,
+    tone: "info" | "success" | "error" = "info",
+  ): void {
     const element = root.querySelector<HTMLElement>("[data-status]");
-    if (element) element.textContent = message;
+    if (!element) return;
+    element.textContent = message;
+    element.dataset.statusTone = tone;
+    element.classList.remove("border-gray-200", "bg-gray-50", "text-gray-700", "border-green-200", "bg-green-50", "text-green-800", "border-red-200", "bg-red-50", "text-red-800");
+    const classes = tone === "success"
+      ? ["border-green-200", "bg-green-50", "text-green-800"]
+      : tone === "error"
+        ? ["border-red-200", "bg-red-50", "text-red-800"]
+        : ["border-gray-200", "bg-gray-50", "text-gray-700"];
+    element.classList.add(...classes);
   }
 
   const root = document.querySelector<HTMLElement>("[data-judge-terminal]");
@@ -185,6 +201,7 @@
   const notesField = notesInput;
   const submitControl = submitButton;
   const roundField = root.querySelector<HTMLElement>("[data-round]");
+  const activityField = root.querySelector<HTMLElement>("[data-activity]");
   const performanceField = root.querySelector<HTMLElement>("[data-performance-label]");
   const singerField = root.querySelector<HTMLElement>("[data-singer]");
   const songField = root.querySelector<HTMLElement>("[data-song]");
@@ -365,6 +382,7 @@
   }
 
   function renderContext(value: JudgeContext): void {
+    if (activityField) activityField.textContent = value.activity_name;
     if (roundField) roundField.textContent = value.round_name;
     if (performanceField) performanceField.textContent = value.performance_label || "暂无";
     if (singerField) singerField.textContent = value.singer_name || "暂无";
@@ -564,7 +582,11 @@
       if (response.ok && parseReceipt(data)) {
         clearDraft(current);
         if (draft?.command_id === current.command_id) draft = null;
-        statusText(terminalRoot, "评分已确认。");
+        statusText(
+          terminalRoot,
+          `评分已确认：${context.singer_name || "当前选手"}，等待现场切换下一位选手。`,
+          "success",
+        );
       } else if (isRecord(data) && data.reason_code === "STALE_CONTEXT") {
         statusText(terminalRoot, "现场上下文已变化，当前草稿未提交。");
         void refreshContext();

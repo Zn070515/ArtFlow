@@ -25,6 +25,7 @@ class JudgeRouteContractTests(TestCase):
     def test_context_returns_server_owned_display_and_criterion_fields(self, context_mock):
         context_mock.return_value = JudgeContext(
             activity_id=1,
+            activity_name="校园歌手赛",
             round_id=2,
             round_name="决赛",
             seat_id=3,
@@ -56,6 +57,7 @@ class JudgeRouteContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["context"]["round_name"], "决赛")
+        self.assertEqual(response.json()["context"]["activity_name"], "校园歌手赛")
         self.assertEqual(
             response.json()["context"]["rubric_payload"]["criteria"][0]["criterion_id"],
             12,
@@ -137,6 +139,7 @@ class JudgeRouteContractTests(TestCase):
         allow_mock.return_value.retry_after_seconds = 0
         context_mock.return_value = JudgeContext(
             activity_id=1,
+            activity_name="校园歌手赛",
             round_id=2,
             round_name="决赛",
             seat_id=3,
