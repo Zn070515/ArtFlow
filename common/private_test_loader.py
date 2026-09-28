@@ -103,10 +103,44 @@ def _activity_for_fixture(
             title=title,
             subtitle=marker,
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.TESTING,
+            # Registration is open, because that is where the fixture actually starts: the
+            # ruleset is frozen before anyone has submitted, and the participants then fill
+            # the frozen form. Starting at TESTING would be wrong for a reason that is easy
+            # to miss -- TESTING counts as a *settled* roster, so an empty one becomes a
+            # real zero and a top10 selection then fails the freeze with QUOTA_EXCEEDED.
+            phase=Activity.Phase.REGISTRATION_OPEN,
             description="SYNTHETIC_TEST_ONLY private rehearsal; never publish.",
             is_test_mode=True,
         )
+
+
+# The phases the fixture walks, in order. Every transition goes through
+# ``transition_activity_phase``, so the repository's legal-edge map stays the authority.
+FIXTURE_LIFECYCLE = (
+    Activity.Phase.REGISTRATION_OPEN,
+    Activity.Phase.REGISTRATION_CLOSED,
+    Activity.Phase.REVIEWING,
+    Activity.Phase.REHEARSAL,
+    Activity.Phase.LIVE,
+    Activity.Phase.RESULTS_PENDING,
+)
+
+
+def _advance_to(activity: Activity, target: str, operator: User) -> Activity:
+    """Walk the phase ladder up to and including ``target``.
+
+    Only forward from where the activity already is: ``transition_activity_phase`` refuses
+    a move backwards, and re-requesting a phase already passed would be exactly that.
+    """
+    if target not in FIXTURE_LIFECYCLE:
+        raise PrivateTestLoadError(f"unknown fixture phase: {target}")
+    start = FIXTURE_LIFECYCLE.index(activity.phase) if activity.phase in FIXTURE_LIFECYCLE else 0
+    for phase in FIXTURE_LIFECYCLE[start : FIXTURE_LIFECYCLE.index(target) + 1]:
+        activity = transition_activity_phase(
+            activity, phase, actor=operator, note="private rehearsal lifecycle"
+        )
+    activity.refresh_from_db()
+    return activity
 
 
 def _get_or_create_participant(row: dict[str, str]) -> User:
@@ -505,18 +539,7 @@ def _load_media(fixture, registrations, operator):
 def _load_scores_and_results(activity, fixture, rounds, registrations, judges, operator):
     _score_round(rounds["round1"], "round1", fixture, registrations, judges, operator)
     _score_round(rounds["round2"], "round2", fixture, registrations, judges, operator)
-    for phase in (
-        Activity.Phase.REGISTRATION_OPEN,
-        Activity.Phase.REGISTRATION_CLOSED,
-        Activity.Phase.REVIEWING,
-        Activity.Phase.REHEARSAL,
-        Activity.Phase.LIVE,
-        Activity.Phase.RESULTS_PENDING,
-    ):
-        activity = transition_activity_phase(
-            activity, phase, actor=operator, note="private rehearsal lifecycle"
-        )
-    activity.refresh_from_db()
+    activity = _advance_to(activity, Activity.Phase.RESULTS_PENDING, operator)
     resolved = maybe_resolve_checkpoints(activity, operator)
     stage1 = activity.stage_results.get(stage_key="stage1")
     if stage1.status != "ready_to_confirm":
@@ -643,9 +666,10 @@ def apply_private_fixture(
         operator=operator,
     )
     check_answers_landed(responses=responses, registrations=registrations)
-    # A round can only be prepared once the roster it draws from exists, and the runtime
-    # readiness gate on prepare_round needs a current FROZEN authority -- so preparation
-    # follows the freeze and the submissions, not the other way round.
+    # Close registration and move into rehearsal: the roster is only settled from here,
+    # which is what lets prepare_round's runtime readiness gate prove it. Preparing a round
+    # before this would ask a registration-phase activity to have a final roster.
+    activity = _advance_to(activity, Activity.Phase.REHEARSAL, operator)
     for key in ("round1", "round2"):
         prepare_round(rounds[key], operator)
     _create_tickets_and_votes(activity, fixture, sessions, registrations, operator)
