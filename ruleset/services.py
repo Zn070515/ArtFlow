@@ -313,6 +313,56 @@ def update_ruleset_definition(
     return locked
 
 
+# The definition root's operator-editable sections. Each editor owns exactly one of them;
+# replacing the whole document is reserved for the advanced JSON editor, which goes through
+# ``update_ruleset_definition``.
+DEFINITION_SECTIONS: tuple[str, ...] = ("nodes", "checkpoints", "context", "questionnaire")
+
+
+@transaction.atomic
+def update_ruleset_definition_section(
+    version: RulesetVersion,
+    *,
+    section: str,
+    value,
+    operator,
+    base_content_hash: str | None = None,
+) -> RulesetVersion:
+    """Replace one top-level ``definition`` section, leaving every sibling untouched.
+
+    The root is a document, not a node list: ``checkpoints`` and ``context`` are already
+    written beside ``nodes``, and the Ruleset-driven Questionnaire phase adds
+    ``questionnaire`` next to them. An editor that rebuilds the whole root from the one
+    section it edits deletes the others on every save — so each editor patches its own
+    section through here and every sibling is handed back byte-identical.
+
+    The version is re-read under the Activity-first lock, so the patch applies to the root
+    as it exists at write time rather than to a document the caller loaded earlier.
+    ``base_content_hash`` carries the same stale-editor contract as
+    :func:`update_ruleset_definition`, and the complete document is re-validated before the
+    save, so a section patch can never persist a graph that ``parse_definition`` rejects.
+    """
+    require_current_staff(operator)
+    if section not in DEFINITION_SECTIONS:
+        raise ValidationError(f"未知的 definition section：{section!r}")
+    locked = _lock_version_for_write(version)
+    if locked.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    if base_content_hash is not None and locked.content_hash != base_content_hash:
+        raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
+    try:
+        root = json.loads(locked.definition)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制定义不是合法 JSON，无法按 section 保存。") from exc
+    if not isinstance(root, dict):
+        raise ValidationError("赛制定义的根必须是对象。")
+    root[section] = value
+    parse_definition(root)
+    locked.definition = json.dumps(root, ensure_ascii=False)
+    locked.save(update_fields=["definition"])
+    return locked
+
+
 @transaction.atomic
 def update_ruleset_binding(
     ruleset: ContestRuleset, *, binding: dict, operator, base_binding: str | None = None

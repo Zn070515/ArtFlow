@@ -88,6 +88,7 @@ from ruleset.services import (
     supersede_ruleset_version,
     update_ruleset_binding,
     update_ruleset_definition,
+    update_ruleset_definition_section,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.judge_authority import (
@@ -3183,7 +3184,14 @@ def _swap_nodes(nodes, key, delta):
     return nodes
 
 
-def _edit_nodes(post, nodes):
+def _edit_nodes(post, nodes) -> list[dict]:
+    """Return the new ``nodes`` list for one editor action.
+
+    Only the node list: the caller patches ``definition.nodes`` as a single section via
+    ``update_ruleset_definition_section``, so the root's other sections survive. Returning
+    a rebuilt ``{"schema_version", "nodes"}`` document here is what used to delete
+    ``checkpoints`` / ``context`` / ``questionnaire`` on every save.
+    """
     action = post.get("action")
     if action == "add":
         new_type = post.get("new_type", "ASSESS")
@@ -3198,10 +3206,10 @@ def _edit_nodes(post, nodes):
     elif action == "move_down":
         nodes = _swap_nodes(nodes, post.get("key"), +1)
     elif action == "save":
-        return ruleset_editor.definition_from_form(post)
+        return ruleset_editor.nodes_from_form(post)
     else:
         raise ValueError(f"unknown action {action!r}")
-    return {"schema_version": 1, "nodes": nodes}
+    return nodes
 
 
 def _node_field_entries(node, index, sources):
@@ -3388,16 +3396,17 @@ def ruleset_edit(request, pk):
         raise PermissionDenied("已冻结赛制版本不可编辑。")
     if request.method == "POST":
         try:
-            current = parse_definition(version.definition)["nodes"]
-            definition = _edit_nodes(request.POST, current)
-            parse_definition(definition)
+            current = ruleset_editor.definition_nodes(version.definition)
+            nodes = _edit_nodes(request.POST, current)
+            parse_definition({"nodes": nodes})
         except (ValueError, ValidationError) as exc:
             messages.error(request, f"保存失败：{exc}")
             return redirect("staff:ruleset_edit", pk=pk)
         try:
-            update_ruleset_definition(
+            update_ruleset_definition_section(
                 version,
-                definition=json.dumps(definition, ensure_ascii=False),
+                section="nodes",
+                value=nodes,
                 operator=request.user,
                 base_content_hash=request.POST.get("base_content_hash") or None,
             )
