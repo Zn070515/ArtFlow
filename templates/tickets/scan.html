@@ -7,8 +7,8 @@
 <div class="max-w-lg mx-auto px-4 py-10" data-ticket-scan-root>
     <h1 class="text-2xl font-bold text-gray-900">票据验证</h1>
     <p class="mt-2 text-sm text-gray-600">请使用活动现场提供的二维码完成票据验证。</p>
-    <p class="mt-6 text-sm text-gray-700" data-ticket-scan-status role="status" aria-live="polite">正在读取二维码……</p>
-    <form class="mt-8 space-y-3" data-ticket-manual-form>
+    <p class="mt-6 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" data-ticket-scan-status role="status" aria-live="polite">正在读取二维码……</p>
+    <form method="post" action="{% url 'tickets:redeem' %}" class="mt-8 space-y-3" data-ticket-manual-form>
         <label for="ticket-secret" class="block text-sm font-medium text-gray-700">无法扫码？输入票据码</label>
         <div class="flex gap-2">
             <input id="ticket-secret" name="secret" type="text" inputmode="text" autocomplete="off" required class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-sm">

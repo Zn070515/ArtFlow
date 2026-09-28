@@ -10,7 +10,15 @@ function boot({
   response = { ok: true, status: 200 },
   ticketState = "issued",
 } = {}) {
-  const status = { textContent: "" };
+  const status = {
+    textContent: "",
+    dataset: {},
+    classList: {
+      values: new Set(),
+      remove(...names) { names.forEach((name) => this.values.delete(name)); },
+      add(...names) { names.forEach((name) => this.values.add(name)); },
+    },
+  };
   const manualInput = { value: "" };
   const manualForm = {
     listeners: new Map(),
@@ -69,6 +77,8 @@ test("ticket scan scrubs the fragment before body-only redemption", async () => 
   assert.equal(result.requests[0].options.headers["X-CSRFToken"], "csrf-token");
   assert.deepEqual(JSON.parse(result.requests[0].options.body), { secret: "ticket-secret" });
   assert.equal(result.status.textContent, "票据已识别。完成现场检票后获得投票资格。");
+  assert.equal(result.status.dataset.statusTone, "success");
+  assert.equal(result.status.classList.values.has("text-green-800"), true);
 });
 
 test("ticket scan explains when a checked-in ticket is eligible", async () => {
@@ -79,6 +89,7 @@ test("ticket scan explains when a checked-in ticket is eligible", async () => {
     result.status.textContent,
     "已完成现场检票。你已具备票券投票资格，具体以当前投票场次状态为准。",
   );
+  assert.equal(result.status.dataset.statusTone, "success");
 });
 
 test("ticket scan shows a generic failure without echoing the secret", async () => {
@@ -87,6 +98,8 @@ test("ticket scan shows a generic failure without echoing the secret", async () 
 
   assert.equal(result.status.textContent, "票据验证失败，请重新扫描现场二维码。");
   assert.equal(result.status.textContent.includes("ticket-secret"), false);
+  assert.equal(result.status.dataset.statusTone, "error");
+  assert.equal(result.status.classList.values.has("text-red-800"), true);
 });
 
 test("ticket scan does not make a request without a fragment", async () => {
@@ -95,6 +108,7 @@ test("ticket scan does not make a request without a fragment", async () => {
 
   assert.deepEqual(result.requests, []);
   assert.equal(result.status.textContent, "请扫描现场二维码，或输入票据码。");
+  assert.equal(result.status.dataset.statusTone, "info");
 });
 
 test("ticket scan accepts a manual code through the same body-only endpoint", async () => {
