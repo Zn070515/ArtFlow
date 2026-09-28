@@ -23,6 +23,11 @@ class FakeElement {
     this.listeners = new Map();
     this.children = new Map();
     this.childList = [];
+    this.classList = {
+      values: new Set(),
+      remove: (...names) => names.forEach((name) => this.classList.values.delete(name)),
+      add: (...names) => names.forEach((name) => this.classList.values.add(name)),
+    };
   }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
   dispatch(type) { return this.listeners.get(type)?.({ target: this }); }
@@ -60,6 +65,7 @@ function boot(fetchImpl) {
   const notes = new FakeElement();
   const submit = new FakeElement();
   const round = new FakeElement();
+  const activity = new FakeElement();
   const performance = new FakeElement();
   const singer = new FakeElement();
   const song = new FakeElement();
@@ -70,6 +76,7 @@ function boot(fetchImpl) {
   root.children.set("[data-notes]", notes);
   root.children.set("[data-submit]", submit);
   root.children.set("[data-round]", round);
+  root.children.set("[data-activity]", activity);
   root.children.set("[data-performance-label]", performance);
   root.children.set("[data-singer]", singer);
   root.children.set("[data-song]", song);
@@ -123,7 +130,7 @@ function boot(fetchImpl) {
   };
   vm.runInNewContext(source, context, { filename: "judge_terminal.js" });
   return {
-    root, status, score, notes, submit, round, performance, singer, song, criteria, total,
+    root, status, score, notes, submit, activity, round, performance, singer, song, criteria, total,
     storage, window, listeners, advance,
   };
 }
@@ -131,6 +138,7 @@ function boot(fetchImpl) {
 const contextPayload = {
   context: {
     activity_id: 1,
+    activity_name: "校园歌手赛",
     round_id: 2,
     seat_id: 3,
     panel_snapshot_id: 4,
@@ -181,6 +189,7 @@ test("redeems the fragment in memory and never stores the session token", async 
   await settle();
 
   assert.equal(runtime.status.textContent, "评委终端已就绪。");
+  assert.equal(runtime.activity.textContent, "校园歌手赛");
   assert.equal(runtime.window.location.hash, "");
   assert.equal(runtime.storage.value("artflow:judge:draft"), null);
   assert.deepEqual(JSON.parse(calls[0].options.body), { token: "grant-secret" });
@@ -322,5 +331,6 @@ test("a fast successful submit cancels the pending draft timer", async () => {
   await runtime.advance(250);
 
   assert.equal(scoreCalls, 1);
+  assert.match(runtime.status.textContent, /评分已确认：参赛者.*等待现场切换下一位选手/);
   assert.equal(runtime.storage.value("artflow:judge:draft"), null);
 });

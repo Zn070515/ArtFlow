@@ -46,6 +46,16 @@ test.describe("result closure UI authority", () => {
     await expect(detailStage).toHaveAttribute("data-stage-status", "ready_to_confirm");
     const confirmForm = page.locator(`form[action="${fixture.confirm_path}"]`);
     await expect(confirmForm).toHaveCount(1);
+    let confirmationMessage = "";
+    page.once("dialog", async (dialog) => {
+      confirmationMessage = dialog.message();
+      await dialog.dismiss();
+    });
+    await confirmForm.locator("button[type=submit]").click();
+    expect(confirmationMessage).toContain("核定并锁定");
+    await expect(page.locator('[data-stage-status="ready_to_confirm"]')).toHaveCount(1);
+
+    page.once("dialog", (dialog) => dialog.accept());
     await confirmForm.locator("button[type=submit]").click();
     await expect(page).toHaveURL(new RegExp(`${fixture.detail_path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
     await expect(page.locator('[data-stage-status="confirmed"]')).toHaveCount(1);

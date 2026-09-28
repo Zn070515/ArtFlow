@@ -4,6 +4,7 @@ from base64 import b64encode
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from urllib.parse import quote
+from uuid import uuid4
 
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
@@ -30,6 +31,7 @@ from common.lifecycle import (
 from common.models import AuditLog
 from common.test_data import (
     clear_activity_test_data,
+    get_test_data_counts,
     leave_test_mode,
     lock_activity_for_runtime_data,
 )
@@ -1956,7 +1958,20 @@ def _judge_control_context(
                 "context_version": run_state.context_version if run_state else 0,
             },
         ),
-        "score_actions": ("proxy", "paper"),
+        "score_actions": (
+            {
+                "kind": "proxy",
+                "title": "工作人员代录",
+                "reference_label": "故障记录或来源编号",
+                "command_id": f"staff-proxy-{uuid4().hex}",
+            },
+            {
+                "kind": "paper",
+                "title": "纸面评分补录",
+                "reference_label": "纸面评分编号",
+                "command_id": f"staff-paper-{uuid4().hex}",
+            },
+        ),
         "error": error,
         "qr_data_uri": qr_data_uri,
         "qr_seat_id": qr_seat_id,
@@ -2537,13 +2552,24 @@ def qr_image(request, pk, kind):
 
 @staff_required
 def export_center(request):
-    activities = Activity.objects.all()
+    activities = list(Activity.objects.all())
+    activity_rows = []
+    for activity in activities:
+        counts = get_test_data_counts(activity) if activity.is_test_mode else {}
+        activity_rows.append(
+            {
+                "activity": activity,
+                "test_data_counts": counts,
+                "test_data_total": sum(counts.values()),
+            }
+        )
     templates = ArticleTemplate.objects.all()
     return render(
         request,
         "staff_panel/export_center.html",
         {
             "activities": activities,
+            "activity_rows": activity_rows,
             "templates": templates,
         },
     )
@@ -2846,7 +2872,8 @@ def activity_clear_test_data(request, pk):
     activity = get_object_or_404(Activity, pk=pk)
     if not activity.is_test_mode:
         raise PermissionDenied("Test data can only be cleared while the activity is in test mode.")
-    clear_activity_test_data(activity, operator=request.user)
+    counts = clear_activity_test_data(activity, operator=request.user)
+    messages.success(request, f"测试数据已清理，共 {sum(counts.values())} 条记录。")
     return redirect("staff:export_center")
 
 

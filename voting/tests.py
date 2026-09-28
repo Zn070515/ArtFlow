@@ -171,6 +171,23 @@ class VotePublicStagingBoundaryTests(TestCase):
         self.assertContains(response, "data-vote-option")
         self.assertContains(response, f'value="{option.pk}"')
 
+    def test_vote_cast_disables_submission_when_session_is_closed(self):
+        session, option = self._make_session(is_test_mode=False)
+        with authority_write(VOTE_SESSION_STATE):
+            VoteSession.objects.filter(pk=session.pk).update(is_open=False)
+        session_data = self.client.session
+        session_data["vote_passcode_ok"] = str(session.pk)
+        session_data.save()
+
+        response = self.client.get(reverse("voting:vote_cast", args=[session.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-vote-state="closed"')
+        self.assertContains(response, "投票未开放")
+        self.assertContains(response, f'value="{option.pk}" data-vote-option')
+        self.assertContains(response, 'data-vote-option disabled')
+        self.assertContains(response, '<button type="submit" data-vote-submit disabled')
+
     def test_formal_valid_passcode_cast_still_works(self):
         session, option = self._make_session(is_test_mode=False)
         self.client.post(reverse("voting:vote_entry", args=[session.pk]), {"passcode": "1234"})
@@ -357,7 +374,9 @@ class VoteActivityLockOverlayTests(TestCase):
         response = self._cast_ballot()
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "尚未开放或已锁定")
+        self.assertContains(response, 'data-vote-state="activity_locked"')
+        self.assertContains(response, "活动已锁定")
+        self.assertContains(response, "data-vote-option disabled")
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
 
     def test_activity_unlock_resumes_voting_on_open_session(self):

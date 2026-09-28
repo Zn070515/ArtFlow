@@ -12,9 +12,18 @@
         }
         return failureMessage;
     }
-    function setStatus(status, message) {
-        if (status)
-            status.textContent = message;
+    function setStatus(status, message, tone = "info") {
+        if (!status)
+            return;
+        status.textContent = message;
+        status.dataset.statusTone = tone;
+        status.classList.remove("border-gray-200", "bg-gray-50", "text-gray-700", "border-green-200", "bg-green-50", "text-green-800", "border-red-200", "bg-red-50", "text-red-800");
+        const classes = tone === "success"
+            ? ["border-green-200", "bg-green-50", "text-green-800"]
+            : tone === "error"
+                ? ["border-red-200", "bg-red-50", "text-red-800"]
+                : ["border-gray-200", "bg-gray-50", "text-gray-700"];
+        status.classList.add(...classes);
     }
     function readSecretFromFragment() {
         const fragment = window.location.hash.slice(1);
@@ -39,10 +48,10 @@
                 body: JSON.stringify({ secret }),
             });
             const payload = response.ok ? await response.json() : null;
-            setStatus(status, response.ok ? ticketStateMessage(payload?.ticket_state) : failureMessage);
+            setStatus(status, response.ok ? ticketStateMessage(payload?.ticket_state) : failureMessage, response.ok ? "success" : "error");
         }
         catch {
-            setStatus(status, failureMessage);
+            setStatus(status, failureMessage, "error");
         }
     }
     const root = document.querySelector("[data-ticket-scan-root]");
@@ -54,7 +63,7 @@
     const startRedeem = (secret, scrubFragment) => {
         const normalized = secret.trim();
         if (!normalized) {
-            setStatus(status, "请输入票据码，或扫描现场二维码。");
+            setStatus(status, "请输入票据码，或扫描现场二维码。", "error");
             return;
         }
         if (scrubFragment)

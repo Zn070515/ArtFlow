@@ -433,6 +433,31 @@ class StaffPanelSmokeTests(TestCase):
             reverse("staff:activity_clear_test_data", args=[formal_activity.pk]),
         )
 
+    def test_export_center_shows_test_cleanup_impact_count(self):
+        test_activity = _create_activity(
+            title="Rehearsal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        SingerRegistration.objects.create(
+            activity=test_activity,
+            user=self.participant,
+            name="Demo Singer",
+            student_id="TEST-001",
+            college="Demo",
+            class_name="Demo",
+            phone="13800000000",
+            song_name="Demo Song",
+            is_test_data=True,
+        )
+        login_admin(self.client, self.admin)
+
+        response = self.client.get(reverse("staff:export_center"))
+
+        self.assertContains(response, 'data-test-data-count="1"')
+        self.assertContains(response, "确认清空 1 条测试记录")
+
     def test_staff_cannot_create_activity(self):
         self.client.force_login(self.staff)
         response = self.client.get(reverse("staff:activity_create"))
@@ -5683,6 +5708,11 @@ class ResultBoardTests(TestCase):
         )
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
         login_admin(self.client, self.admin)
+        detail = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+        self.assertContains(
+            detail,
+            "onsubmit=\"return confirm('确认核定并锁定该赛段结果？确认后将成为正式手卡依据。');\"",
+        )
         response = self.client.post(reverse("staff:stage_result_confirm", args=[ready.pk]))  # type: ignore[union-attr]
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))  # type: ignore[union-attr]
         ready.refresh_from_db()  # type: ignore[union-attr]
@@ -6511,6 +6541,14 @@ class JudgeControlHTTPTests(TestCase):
             prepared,
             reverse("staff:judge_control", args=[self.contest_round.pk]),
         )
+        idle_page = self.client.get(
+            reverse("staff:judge_control", args=[self.contest_round.pk])
+        )
+        self.assertContains(idle_page, "暂无当前表演，不可暂停")
+        self.assertNotContains(
+            idle_page,
+            f'action="{reverse("staff:judge_performance_hold", args=[self.contest_round.pk])}"',
+        )
         from singer_contest.models import JudgeSeat, PerformanceRunState, RoundPanelSnapshot
 
         snapshot = RoundPanelSnapshot.objects.get(round=self.contest_round)
@@ -6601,6 +6639,12 @@ class JudgeControlHTTPTests(TestCase):
         run_state = PerformanceRunState.objects.get(round=self.contest_round)
         self.assertEqual(run_state.current_performance_id, self.performance.pk)
         self.assertEqual(run_state.context_version, 1)
+        page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertNotContains(page, "表演 ID")
+        self.assertNotContains(page, "Context version")
+        self.assertContains(page, 'type="hidden" name="performance_id"')
+        self.assertContains(page, 'type="hidden" name="context_version"')
+        self.assertContains(page, 'type="hidden" name="command_id"')
 
         score_data = {
             "performance_id": self.performance.pk,

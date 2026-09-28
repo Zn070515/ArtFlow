@@ -8,13 +8,19 @@
     <p class="text-sm text-gray-500 mb-8"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 导出中心</p>
 
     <div class="grid sm:grid-cols-2 gap-6">
-        {% for a in activities %}
+        {% for row in activity_rows %}
+        {% with a=row.activity %}
         <div class="border border-gray-200 bg-white rounded-lg p-5">
             <h3 class="font-medium text-gray-900">{{ a.title }}</h3>
             <p class="text-xs text-gray-500 mb-3">{{ a.get_activity_type_display }} · {{ a.get_phase_display }}
                 {% if a.is_test_mode %}<span class="text-yellow-600">· 测试模式</span>{% endif %}
                 {% if a.is_locked %}<span class="text-red-500">· 已锁定</span>{% endif %}
             </p>
+            {% if a.is_test_mode %}
+            <p class="mb-3 rounded border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800" data-test-data-count="{{ row.test_data_total }}">
+                待清理：{{ row.test_data_total }} 条测试记录（报名 {{ row.test_data_counts.singer_registrations }}、评分 {{ row.test_data_counts.scores }}、投票 {{ row.test_data_counts.vote_records }}、票据 {{ row.test_data_counts.tickets }}）
+            </p>
+            {% endif %}
 
             <div class="flex flex-wrap gap-1.5 mb-3">
                 <a href="{% url 'staff:execution_package' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">执行包</a>
@@ -45,7 +51,7 @@
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-yellow-300 {% if a.is_test_mode %}bg-yellow-100 text-yellow-700{% else %}text-yellow-600{% endif %} px-2 py-1 rounded hover:bg-yellow-100">{% if a.is_test_mode %}退出测试{% else %}测试模式{% endif %}</button>
                 </form>
-                <form method="post" action="{% url 'staff:activity_clear_test_data' a.pk %}" onsubmit="return confirm('确认清空测试数据？此操作不可恢复。')">
+                <form method="post" action="{% url 'staff:activity_clear_test_data' a.pk %}" onsubmit="return confirm('确认清空 {{ row.test_data_total }} 条测试记录？此操作不可恢复。')">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">清空测试</button>
                 </form>
@@ -70,6 +76,7 @@
                 </form>
             </div>
         </div>
+        {% endwith %}
         {% endfor %}
     </div>
 

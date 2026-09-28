@@ -36,6 +36,7 @@ test("judge terminal never exposes a credential without a QR fragment", async ({
   expect(response?.status()).toBe(200);
   await expect(page.locator("[data-status]")).toHaveText(/二维码/);
   await expect(page.locator("[data-round]")).toBeVisible();
+  await expect(page.locator("[data-activity]")).toBeVisible();
   await expect(page.locator("[data-performance-label]")).toBeVisible();
   await expect(page.locator("[data-singer]")).toBeVisible();
   await expect(page.locator("[data-song]")).toBeVisible();
@@ -96,7 +97,7 @@ test("judge browser completes redeem, context, ACK-loss retry, and idempotent re
 
   await expect(submit).toBeEnabled();
   await submit.click();
-  await expect(page.locator("[data-status]")).toHaveText("评分已确认。");
+  await expect(page.locator("[data-status]")).toHaveText(/评分已确认：.*等待现场切换下一位选手/);
   expect(scoreRequests).toBe(2);
   const finalUrl = new URL(page.url());
   expect(finalUrl.pathname).toBe("/judge/terminal/");

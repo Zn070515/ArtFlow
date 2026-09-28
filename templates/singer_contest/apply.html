@@ -26,56 +26,56 @@
             <label class="block text-sm font-medium text-gray-700 mb-1">选择活动</label>
             <select name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand">
                 {% for a in activities %}
-                <option value="{{ a.pk }}">{{ a.title }}</option>
+                <option value="{{ a.pk }}"{% if selected_activity_id == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>
                 {% endfor %}
             </select>
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">姓名</label>
-                <input type="text" name="name" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <input type="text" name="name" value="{{ form_data.name|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">学号</label>
-                <input type="text" name="student_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <input type="text" name="student_id" value="{{ form_data.student_id|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
             </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">学院</label>
-                <input type="text" name="college" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <input type="text" name="college" value="{{ form_data.college|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">班级</label>
-                <input type="text" name="class_name" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <input type="text" name="class_name" value="{{ form_data.class_name|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
             </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">手机号</label>
-                <input type="text" name="phone" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <input type="text" name="phone" value="{{ form_data.phone|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
             </div>
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">微信号（选填）</label>
-                <input type="text" name="wechat" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                <input type="text" name="wechat" value="{{ form_data.wechat|default:'' }}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
             </div>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">曲目名称</label>
-            <input type="text" name="song_name" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <input type="text" name="song_name" value="{{ form_data.song_name|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
         </div>
         <div>
             <label class="flex items-center gap-2 text-sm text-gray-700">
-                <input type="checkbox" name="is_original" class="rounded"> 原创作品
+                <input type="checkbox" name="is_original" class="rounded"{% if form_data.is_original %} checked{% endif %}> 原创作品
             </label>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">节目简介</label>
-            <textarea name="description" rows="3" class="w-full border border-gray-300 rounded px-3 py-2 text-sm"></textarea>
+            <textarea name="description" rows="3" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ form_data.description|default:'' }}</textarea>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
-            <textarea name="remark" rows="2" class="w-full border border-gray-300 rounded px-3 py-2 text-sm"></textarea>
+            <textarea name="remark" rows="2" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ form_data.remark|default:'' }}</textarea>
         </div>
         <div class="border-t border-gray-200 pt-4 space-y-3">
             <h2 class="text-sm font-medium text-gray-900">报名材料</h2>

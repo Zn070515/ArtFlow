@@ -296,8 +296,28 @@ class ParticipantLoginRateLimitTests(TestCase):
             )
 
         keys = [call.args[0] for call in allow.call_args_list]
-        self.assertIn("participant-login:198.51.100.10:alice", keys)
-        self.assertIn("participant-login:ip:198.51.100.10", keys)
+        self.assertIn("credential-login:198.51.100.10:alice", keys)
+        self.assertIn("credential-login:ip:198.51.100.10", keys)
+
+    def test_login_roles_share_the_same_credential_bucket(self):
+        participant_url = reverse("accounts:participant_login")
+        staff_url = reverse("accounts:staff_login")
+        payload = {"username": "same-credential", "password": "wrong-password"}
+
+        with (
+            patch("accounts.views.ParticipantLoginForm.is_valid", return_value=False),
+            patch("accounts.views.StaffLoginForm.is_valid", return_value=False),
+        ):
+            for _ in range(10):
+                response = self.client.post(
+                    participant_url, payload, REMOTE_ADDR="198.51.100.12"
+                )
+                self.assertEqual(response.status_code, 200)
+            throttled = self.client.post(
+                staff_url, payload, REMOTE_ADDR="198.51.100.12"
+            )
+
+        self.assertContains(throttled, "尝试次数过多")
 
     @override_settings(TRUST_X_FORWARDED_FOR=True)
     def test_participant_login_uses_the_forwarded_client_ip_when_trusted(self):

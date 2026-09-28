@@ -124,12 +124,16 @@
                 <button class="rounded bg-green-600 px-3 py-2 text-sm text-white" type="submit">恢复表演</button>
             </form>
             {% else %}
+            {% if run_state.current_performance_id %}
             <form method="post" action="{% url 'staff:judge_performance_hold' round.pk %}" class="flex gap-2">
                 {% csrf_token %}
-                <input type="hidden" name="performance_id" value="{{ run_state.current_performance_id|default:1 }}">
+                <input type="hidden" name="performance_id" value="{{ run_state.current_performance_id }}">
                 <input class="rounded border border-gray-300 px-3 py-2 text-sm" name="reason" required maxlength="240" placeholder="暂停表演原因">
                 <button class="rounded bg-amber-600 px-3 py-2 text-sm text-white" type="submit">暂停表演</button>
             </form>
+            {% else %}
+            <button class="rounded bg-gray-200 px-3 py-2 text-sm text-gray-500" type="button" disabled>暂无当前表演，不可暂停</button>
+            {% endif %}
             {% endif %}
         </div>
         {% endif %}
@@ -137,21 +141,22 @@
 
     <section class="rounded-lg border border-gray-200 bg-white p-5">
         <h2 class="text-lg font-semibold text-gray-900">工作人员代录 / 纸面录入</h2>
-        <p class="mt-1 text-sm text-gray-500">必须填写当前 context、席位、来源凭据、原因和唯一 command_id；所有写入走 authority service。</p>
+        <p class="mt-1 text-sm text-gray-500">仅填写当前评委席位、分数、来源编号和原因；当前表演与现场上下文由系统自动绑定，所有写入走 authority service。</p>
         {% if policy_state == 'ACTIVE' and run_state and run_state.state != 'hold' and run_state.current_performance_id %}
         <div class="mt-4 grid gap-6 lg:grid-cols-2">
             {% for score_action in score_actions %}
-            <form method="post" action="{% if score_action == 'proxy' %}{% url 'staff:judge_score_proxy' round.pk %}{% else %}{% url 'staff:judge_score_paper' round.pk %}{% endif %}" class="space-y-3 rounded border border-gray-200 p-4">
+            <form method="post" action="{% if score_action.kind == 'proxy' %}{% url 'staff:judge_score_proxy' round.pk %}{% else %}{% url 'staff:judge_score_paper' round.pk %}{% endif %}" class="space-y-3 rounded border border-gray-200 p-4">
                 {% csrf_token %}
-                <h3 class="font-medium text-gray-900">{% if score_action == 'proxy' %}工作人员代录{% else %}纸面评分补录{% endif %}</h3>
-                <label class="block text-sm">表演 ID<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="performance_id" value="{{ run_state.current_performance_id|default:'' }}" required></label>
+                <h3 class="font-medium text-gray-900">{{ score_action.title }}</h3>
+                <input type="hidden" name="performance_id" value="{{ run_state.current_performance_id }}">
+                <input type="hidden" name="context_version" value="{{ run_state.context_version }}">
+                <input type="hidden" name="command_id" value="{{ score_action.command_id }}">
                 <label class="block text-sm">席位
                     <select class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="seat_id" required>
                         <option value="">选择席位</option>
                         {% for row in seat_rows %}<option value="{{ row.seat.pk }}">{{ row.member.seat_key }} · {{ row.member.judge.name }}</option>{% endfor %}
                     </select>
                 </label>
-                <label class="block text-sm">Context version<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="context_version" value="{{ run_state.context_version|default:0 }}" required></label>
                 {% if round.rubric %}
                 <p class="text-sm text-gray-600">评分标准：{{ round.rubric.name }}；必须完整填写分项，系统将计算总分。</p>
                 {% for criterion in round.rubric.criteria.all %}
@@ -161,9 +166,8 @@
                 <label class="block text-sm">分数<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="score" inputmode="decimal" required></label>
                 {% endif %}
                 <label class="block text-sm">备注<textarea class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="notes" maxlength="200"></textarea></label>
-                <label class="block text-sm">来源凭据<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="source_reference" required maxlength="120"></label>
+                <label class="block text-sm">{{ score_action.reference_label }}<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="source_reference" required maxlength="120"></label>
                 <label class="block text-sm">原因<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="reason" required maxlength="240"></label>
-                <label class="block text-sm">command_id<input class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="command_id" required maxlength="64"></label>
                 <button class="rounded bg-brand px-4 py-2 text-sm text-white" type="submit">提交评分</button>
             </form>
             {% endfor %}
