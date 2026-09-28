@@ -23,10 +23,14 @@ import json
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import RULESET_FREEZE, authority_write
 from common.models import AuditLog
+from core.models import Activity
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
+from questionnaire.compiler import QuestionnairePlan, compile_questionnaire
+from questionnaire.cross_domain import validate_questionnaire_rounds
+from questionnaire.schema import parse_questionnaire
 
 from .compiler import ExecutionPlan, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
@@ -313,6 +317,60 @@ def update_ruleset_definition(
     return locked
 
 
+# The definition root's operator-editable sections. Each editor owns exactly one of them;
+# replacing the whole document is reserved for the advanced JSON editor, which goes through
+# ``update_ruleset_definition``.
+DEFINITION_SECTIONS: tuple[str, ...] = ("nodes", "checkpoints", "context", "questionnaire")
+
+
+@transaction.atomic
+def update_ruleset_definition_section(
+    version: RulesetVersion,
+    *,
+    section: str,
+    value,
+    operator,
+    base_content_hash: str | None = None,
+) -> RulesetVersion:
+    """Replace one top-level ``definition`` section, leaving every sibling untouched.
+
+    The root is a document, not a node list: ``checkpoints`` and ``context`` are already
+    written beside ``nodes``, and the Ruleset-driven Questionnaire phase adds
+    ``questionnaire`` next to them. An editor that rebuilds the whole root from the one
+    section it edits deletes the others on every save — so each editor patches its own
+    section through here and every sibling is handed back byte-identical.
+
+    The version is re-read under the Activity-first lock, so the patch applies to the root
+    as it exists at write time rather than to a document the caller loaded earlier.
+    ``base_content_hash`` carries the same stale-editor contract as
+    :func:`update_ruleset_definition`, and the complete document is re-validated before the
+    save, so a section patch can never persist a graph that ``parse_definition`` rejects.
+    """
+    require_current_staff(operator)
+    if section not in DEFINITION_SECTIONS:
+        raise ValidationError(f"未知的 definition section：{section!r}")
+    locked = _lock_version_for_write(version)
+    if locked.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    if base_content_hash is not None and locked.content_hash != base_content_hash:
+        raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
+    try:
+        root = json.loads(locked.definition)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制定义不是合法 JSON，无法按 section 保存。") from exc
+    if not isinstance(root, dict):
+        raise ValidationError("赛制定义的根必须是对象。")
+    root[section] = value
+    parse_definition(root)
+    if "questionnaire" in root:
+        # The questionnaire editor's save is a schema gate too, so a broken question is
+        # refused where it was written rather than at freeze.
+        parse_questionnaire(root["questionnaire"])
+    locked.definition = json.dumps(root, ensure_ascii=False)
+    locked.save(update_fields=["definition"])
+    return locked
+
+
 @transaction.atomic
 def update_ruleset_binding(
     ruleset: ContestRuleset, *, binding: dict, operator, base_binding: str | None = None
@@ -353,6 +411,62 @@ def update_ruleset_binding(
     return locked
 
 
+# Phases in which the approved-singer roster is settled. Before these the roster genuinely
+# does not exist yet, so every fact derived from it is UNKNOWN rather than zero — which is
+# what lets a ruleset be confirmed before registration opens (see
+# :func:`validate_ruleset_runtime_readiness`).
+ROSTER_FINAL_PHASES = frozenset(
+    {
+        Activity.Phase.TESTING,  # a rehearsal runs on an already-materialised roster
+        Activity.Phase.REHEARSAL,
+        Activity.Phase.LIVE,
+        Activity.Phase.RESULTS_PENDING,
+        Activity.Phase.RESULTS_PUBLISHED,
+        Activity.Phase.ARCHIVED,
+    }
+)
+
+
+def entry_roster_is_final(activity) -> bool:
+    """Whether the approved-singer roster is settled enough to prove roster facts."""
+    return activity.phase in ROSTER_FINAL_PHASES
+
+
+def current_frozen_version(activity) -> RulesetVersion | None:
+    """The activity's current official FROZEN ruleset authority, if it has one."""
+    return (
+        RulesetVersion._base_manager.filter(
+            ruleset__activity=activity,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        .order_by("-pk")
+        .first()
+    )
+
+
+def require_runtime_readiness(activity) -> ValidationReport | None:
+    """The unified runtime boundary for every "start running the contest" entry point.
+
+    A ruleset is confirmed before registration opens, so the facts that depend on the
+    final roster are DEFERRED at Freeze and proven here — the last moment before they
+    become load-bearing. Returns ``None`` when the activity has no current FROZEN
+    authority (those call sites already refuse to run without one); raises otherwise.
+
+    Attached at :func:`singer_contest.services.prepare_round` (start scoring a round) and
+    :func:`voting.services.open_vote_session` (start collecting ballots) — the two points
+    that actually begin execution. It is deliberately *not* attached to
+    ``maybe_resolve_checkpoints``: that is a result-publishing step downstream of both,
+    it runs after every onsite input batch, and a full bound compile per batch is a heavy
+    price on the hottest path. The rounds whose results it publishes were already gated
+    when they were prepared.
+    """
+    version = current_frozen_version(activity)
+    if version is None:
+        return None
+    return validate_ruleset_runtime_readiness(version)
+
+
 def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
     """Construct the §39 bound freeze context from the DB for a ContestRuleset.
 
@@ -371,7 +485,8 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
 
     activity = version.ruleset.activity
     round_keys = binding.get("round_keys") or {}
-    entry_size = _scoped_entry_count(activity)
+    roster_final = entry_roster_is_final(activity)
+    entry_size = _scoped_entry_count(activity) if roster_final else None
 
     round_ctx: dict[str, dict] = {}
     for rkey, rpk in round_keys.items():
@@ -379,9 +494,12 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
         if contest_round is None:
             continue
         judge_count = contest_round.round_judges.count()
-        entry_count = contest_round.entries.count()
-        scope = "full" if entry_count and entry_size and entry_count >= entry_size else "subset"
-        item: dict = {"judge_count": judge_count, "scope": scope}
+        item: dict = {"judge_count": judge_count}
+        if roster_final:
+            entry_count = contest_round.entries.count()
+            item["scope"] = (
+                "full" if entry_count and entry_size and entry_count >= entry_size else "subset"
+            )
         scale = _round_scale(contest_round)
         if scale:
             item["scale"] = scale
@@ -392,7 +510,7 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
     scoring_rules = binding.get("vote_scoring_rule_keys") or {}
     votes = {}
     for source, vs_pk in (binding.get("vote_keys") or {}).items():
-        vote = _vote_binding(vs_pk, scoring_rules.get(source))
+        vote = _vote_binding(vs_pk, scoring_rules.get(source), roster_final=roster_final)
         if vote:
             votes[source] = vote
     for source, _set_name in (binding.get("audience_keys") or {}).items():
@@ -407,8 +525,9 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
             groups[by] = {"capacity": caps}
 
     return {
+        "entry_roster_final": roster_final,
         "entry_size": entry_size,
-        "entry_candidates": _entry_candidates(version, activity),
+        "entry_candidates": _entry_candidates(version, activity) if roster_final else None,
         "rounds": round_ctx,
         "votes": votes,
         "groups": groups,
@@ -455,7 +574,7 @@ def _round_scale(contest_round) -> str | None:
     return str(int(Decimal(total)))
 
 
-def _vote_binding(vs_pk, rule_snapshot: dict | None = None) -> dict:
+def _vote_binding(vs_pk, rule_snapshot: dict | None = None, *, roster_final: bool = True) -> dict:
     """The bound vote facts a freeze compiles against.
 
     Without an explicitly bound conversion rule a session yields RAW vote counts (unit
@@ -473,17 +592,17 @@ def _vote_binding(vs_pk, rule_snapshot: dict | None = None) -> dict:
     vs = VoteSession.objects.filter(pk=vs_pk).first()
     if vs is None:
         return {}
-    candidates = [
-        str(singer_id)
-        for singer_id in VoteOption.objects.filter(vote_session_id=vs_pk)
-        .order_by("pk")
-        .values_list("singer_id", flat=True)
-    ]
     binding = {
         "purpose": vs.purpose,
         "requires_ticket": vs.requires_ticket,
-        "candidates": candidates,
     }
+    if roster_final:
+        binding["candidates"] = [
+            str(singer_id)
+            for singer_id in VoteOption.objects.filter(vote_session_id=vs_pk)
+            .order_by("pk")
+            .values_list("singer_id", flat=True)
+        ]
     if rule_snapshot:
         binding["scale"] = rule_snapshot.get("scale") or "hundred"
         binding["conversion"] = rule_snapshot.get("mode")
@@ -502,6 +621,117 @@ def _annotated_capacity(rpk, activity):
         .annotate(n=Count("performances"))
         .values_list("n", flat=True)
     )
+
+
+def _questionnaire_plan_of(version: RulesetVersion) -> QuestionnairePlan | None:
+    """The compiled questionnaire of a version, or ``None`` when it carries none."""
+    try:
+        root = json.loads(version.definition)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(root, dict):
+        return None
+    raw = root.get("questionnaire")
+    return compile_questionnaire(raw) if raw is not None else None
+
+
+def _validate_successor_questionnaire(
+    previous: RulesetVersion | None, version: RulesetVersion
+) -> None:
+    """A successor may add or drop questions, but may not silently redefine one.
+
+    Reusing ``r2.accompaniment`` for a background video would keep every participant's
+    stored answer in a slot whose meaning changed under it. Adding a new key is the edit
+    that says what the operator means.
+    """
+    if previous is None:
+        return
+    from questionnaire.successor import validate_successor
+
+    before = _questionnaire_plan_of(previous)
+    after = _questionnaire_plan_of(version)
+    if before is None or after is None:
+        return
+    validate_successor(before, after)
+
+
+def _carry_questionnaire_answers(
+    previous: RulesetVersion | None, version: RulesetVersion, plan: QuestionnairePlan | None
+) -> int:
+    """Open a response on the new version for everyone who answered the old one.
+
+    Only free-text answers move: bound answers already live on the registration, and file
+    answers are read by ``question_key`` through ``is_current``, so both carry themselves.
+    A participant who never filled anything in gets no row — a response means someone
+    answered something, and blank rows would be noise rather than migration.
+    """
+    if previous is None or plan is None:
+        return 0
+    from questionnaire.models import QuestionnaireResponse
+    from questionnaire.successor import carry_answers
+
+    before = _questionnaire_plan_of(previous)
+    if before is None:
+        return 0
+    carried = 0
+    for old in QuestionnaireResponse.objects.filter(ruleset_version=previous):
+        answers = carry_answers(before, plan, old.answers)
+        QuestionnaireResponse.objects.update_or_create(
+            singer_registration_id=old.singer_registration_id,
+            ruleset_version=version,
+            questionnaire_key=plan.key,
+            defaults={
+                "schema_hash": plan.schema_hash,
+                "answers": answers,
+                "is_test_data": old.is_test_data,
+            },
+        )
+        carried += 1
+    return carried
+
+
+def _validate_frozen_questionnaire(definition, binding: dict) -> None:
+    """The questionnaire freezes with the ruleset, so it must clear its own gate here.
+
+    It lives inside ``definition``, so ``content_hash`` already canonicalises it — which is
+    why editing one question moves the authority hash a StageResult is audited under, with
+    no separate questionnaire authority to keep in sync. What freeze adds is the one fact
+    neither compiler can see alone: every round a question binds must be a round this
+    ruleset binds to a ContestRound of the activity.
+    """
+    try:
+        root = json.loads(definition)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制定义不是合法 JSON。") from exc
+    if not isinstance(root, dict):
+        raise ValidationError("赛制定义的根必须是对象。")
+    raw = root.get("questionnaire")
+    if raw is None:
+        return
+    plan = compile_questionnaire(raw)
+    validate_questionnaire_rounds(plan, binding.get("round_keys") or {})
+
+
+def validate_ruleset_runtime_readiness(version: RulesetVersion) -> ValidationReport:
+    """Re-run a frozen ruleset's deferred roster checks against the settled roster.
+
+    A ruleset may be frozen before registration opens: its *definition* is provable then,
+    its *roster* is not. Every check that had to wait is recorded as a DEFERRED issue at
+    Freeze time and re-run here, where the roster is finally the authority. This is the
+    last gate before the competition runs, so it fails closed in both directions — a roster
+    that still does not exist is refused outright rather than read as an empty pass, and a
+    roster that cannot support the frozen plan raises :class:`RulesetInvalidError`.
+    """
+    if version.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("只有已冻结赛制可以核定运行时名单。")
+    activity = version.ruleset.activity
+    if not entry_roster_is_final(activity):
+        raise ValidationError("报名名单尚未确定，无法核定运行时名单。")
+    context = build_bound_context(version, version.binding or {})
+    report, plan = compile_definition(version.definition, context=context, bound=True)
+    if not report.passes():
+        raise RulesetInvalidError(report, plan)
+    return report
 
 
 @transaction.atomic
@@ -559,6 +789,8 @@ def freeze_ruleset_version(
     if not report.passes():
         raise RulesetInvalidError(report, plan)
     assert plan is not None
+    _validate_frozen_questionnaire(locked.definition, normalized_binding)
+    _validate_successor_questionnaire(prior, locked)
 
     old_status = "draft"
     with authority_write(RULESET_FREEZE):
@@ -598,6 +830,8 @@ def freeze_ruleset_version(
             ensure_ascii=False,
         ),
     )
+    # Everybody who answered the previous version keeps their answers, under the new one.
+    _carry_questionnaire_answers(prior, locked, _questionnaire_plan_of(locked))
     return locked
 
 

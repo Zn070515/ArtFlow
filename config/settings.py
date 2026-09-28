@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "public_portal",
     "files",
     "ruleset",
+    "questionnaire",
     "singer_contest",
     "farewell_show",
     "voting",

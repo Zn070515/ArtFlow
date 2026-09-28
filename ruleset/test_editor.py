@@ -1,10 +1,12 @@
+import json
 from decimal import Decimal
 
 from django.test import SimpleTestCase
 
 from ruleset.editor import (
     available_sources,
-    definition_from_form,
+    definition_nodes,
+    nodes_from_form,
     preview_definition,
     synthetic_resolve_input,
 )
@@ -20,7 +22,21 @@ class EditorSerializeTests(SimpleTestCase):
         self.assertEqual(available_sources(nodes, 0), [ENTRY_KEY])
         self.assertEqual(available_sources(nodes, 1), [ENTRY_KEY, "a"])
 
-    def test_definition_from_form_roundtrips_an_assess_node(self):
+    def test_definition_nodes_reads_the_raw_root(self):
+        """The editor round-trips what was written, not ``parse_definition``'s normalized view."""
+        raw = {
+            "schema_version": 1,
+            "nodes": [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}],
+            "context": {"kept": True},
+        }
+        self.assertEqual(definition_nodes(json.dumps(raw)), raw["nodes"])
+        self.assertEqual(definition_nodes(raw), raw["nodes"])
+
+    def test_definition_nodes_rejects_a_root_without_nodes(self):
+        self.assertRaises(Exception, definition_nodes, '{"schema_version": 1}')
+        self.assertRaises(Exception, definition_nodes, "not json")
+
+    def test_nodes_from_form_roundtrips_an_assess_node(self):
         form = {
             "schema_version": "1",
             "node_0_key": "assess_r1",
@@ -32,12 +48,13 @@ class EditorSerializeTests(SimpleTestCase):
             "node_0_descending": "",
             "node_order": "node_0",
         }
-        definition = definition_from_form(form)
-        self.assertEqual(parse_definition(definition)["schema_version"], 1)
-        self.assertEqual(definition["nodes"][0]["round"], "r1")
-        self.assertEqual(definition["nodes"][0]["scale"], "hundred")
+        nodes = nodes_from_form(form)
+        self.assertIsInstance(nodes, list)
+        self.assertEqual(parse_definition({"nodes": nodes})["schema_version"], 1)
+        self.assertEqual(nodes[0]["round"], "r1")
+        self.assertEqual(nodes[0]["scale"], "hundred")
 
-    def test_definition_from_form_roundtrips_aggregate_within_node_level(self):
+    def test_nodes_from_form_roundtrips_aggregate_within_node_level(self):
         form = {
             "schema_version": "1",
             "node_0_key": "assess_r1",
@@ -52,13 +69,13 @@ class EditorSerializeTests(SimpleTestCase):
             "node_1_within": ENTRY_KEY,
             "node_order": "node_0,node_1",
         }
-        definition = definition_from_form(form)
-        node = definition["nodes"][1]
+        nodes = nodes_from_form(form)
+        node = nodes[1]
         self.assertEqual(node["within"], ENTRY_KEY)
         self.assertEqual(node["aggregate"]["type"], "weighted_sum")
         self.assertEqual(node["aggregate"]["components"][0]["source"], "assess_r1")
 
-    def test_definition_from_form_rejects_forward_reference(self):
+    def test_nodes_from_form_rejects_forward_reference(self):
         form = {
             "schema_version": "1",
             "node_0_key": "a",
@@ -66,7 +83,7 @@ class EditorSerializeTests(SimpleTestCase):
             "node_0_source": "b",
             "node_order": "node_0",
         }
-        self.assertRaises(Exception, definition_from_form, form)
+        self.assertRaises(Exception, nodes_from_form, form)
 
     def test_synthetic_resolve_input_has_scores_for_each_round(self):
         definition = {

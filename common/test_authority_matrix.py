@@ -361,10 +361,15 @@ class AuthorityMutationMatrixTests(TestCase):
         with authority_write(RULESET_FREEZE):
             self.version = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
+                # A node the bound compiler accepts: an audience source is a staff-entered
+                # hundred-mark score, so it must declare that, and it must declare a
+                # purpose. The fixture builds a FROZEN row directly rather than freezing,
+                # so this is the only place that requirement shows up for it.
                 definition=(
                     '{"schema_version": 1, "nodes": ['
-                    '{"key": "assess-audience", "type": "ASSESS", '
-                    '"source": "entry", "vote_source": "matrix-audience"}]}'
+                    '{"key": "assess-audience", "type": "ASSESS", "source": "entry", '
+                    '"vote_source": "matrix-audience", "vote_purpose": "SCORE_COMPONENT", '
+                    '"scale": "hundred"}]}'
                 ),
                 binding={"audience_keys": {"matrix-audience": "matrix-audience"}},
                 status=RulesetVersion.Status.FROZEN,

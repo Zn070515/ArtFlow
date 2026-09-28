@@ -1,9 +1,15 @@
 """Pure form <-> definition serialization for the M1-I ruleset editor.
 
 This module is deliberately DB-free. It converts the editor's self-submitting POST
-payload into a typed ``definition`` dict (reusing :data:`~ruleset.schema.NODE_TYPE_SPEC`),
+payload into the typed ``nodes`` list (reusing :data:`~ruleset.schema.NODE_TYPE_SPEC`),
 and builds a synthetic :class:`~ruleset.resolver.ResolveInput` so a DRAFT ruleset can be
 Preview'd before it is ever wired to real rounds.
+
+It never assembles a whole definition document. The root is owned by
+:func:`ruleset.services.update_ruleset_definition_section`, which replaces the single
+section an editor owns and returns every sibling section byte-identical; a helper here
+that returned ``{"schema_version", "nodes"}`` would delete ``checkpoints`` /
+``context`` / ``questionnaire`` on each save.
 """
 
 from __future__ import annotations
@@ -105,8 +111,29 @@ def _coerce(field, raw):
     return raw
 
 
-def definition_from_form(form) -> dict:
-    """Rebuild a typed ``definition`` dict from the editor's POST payload.
+def definition_nodes(definition) -> list[dict]:
+    """Return the ``nodes`` list of a stored definition, unnormalized.
+
+    The editor round-trips what the operator actually wrote, so this reads the raw root
+    rather than :func:`~ruleset.schema.parse_definition`'s normalized view (which also
+    stamps derived keys such as ``outputs``). Accepts a JSON string or a parsed mapping.
+    """
+    if isinstance(definition, str):
+        try:
+            definition = json.loads(definition)
+        except ValueError as exc:
+            raise ValueError("赛制定义不是合法 JSON。") from exc
+    nodes = definition.get("nodes") if isinstance(definition, dict) else None
+    if not isinstance(nodes, list):
+        raise ValueError("赛制定义缺少 nodes 列表。")
+    return nodes
+
+
+def nodes_from_form(form) -> list[dict]:
+    """Rebuild the ``nodes`` list from the editor's POST payload.
+
+    Returns the node list alone — the caller patches ``definition.nodes`` as one section,
+    so ``checkpoints`` / ``context`` / ``questionnaire`` are never touched by a node edit.
 
     ``node_order`` is a comma-listed set of ``node_<index>`` form prefixes; each
     prefix carries ``<token>_<field>`` name/value pairs. Raises on a forward
@@ -144,9 +171,8 @@ def definition_from_form(form) -> dict:
             if raw:
                 node[field] = _coerce(field, raw)
         nodes.append(node)
-    definition = {"schema_version": 1, "nodes": nodes}
-    parse_definition(definition)
-    return definition
+    parse_definition({"nodes": nodes})
+    return nodes
 
 
 def synthetic_resolve_input(definition):

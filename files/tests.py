@@ -35,8 +35,21 @@ def _create_activity(**kwargs):
         return Activity.objects.create(**kwargs)
 
 
+def _clear_upload_rate_limit():
+    """Drop the upload rate-limit counters before a class's tests run.
+
+    The limiter is keyed on ``(user, owner, purpose)`` in the locmem cache, and TestCase
+    rollback lets SQLite hand the same pks out again — so a counter left behind by an
+    earlier class lands on this class's first upload and the class fails depending on
+    which apps ran before it. Clearing per test costs nothing and removes the ordering
+    dependence.
+    """
+    cache.clear()
+
+
 class SubmissionFileLifecycleTests(TestCase):
     def setUp(self):
+        _clear_upload_rate_limit()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
@@ -342,6 +355,7 @@ class SubmissionFileLifecycleTests(TestCase):
 
 class MaterialCheckReviewTests(TestCase):
     def setUp(self):
+        _clear_upload_rate_limit()
         self.media_root = tempfile.mkdtemp()
         self.override = override_settings(MEDIA_ROOT=self.media_root)
         self.override.enable()
@@ -598,6 +612,7 @@ class VideoDirectUploadGateTests(TestCase):
 
 class MaterialCheckReconcileTests(TestCase):
     def setUp(self):
+        _clear_upload_rate_limit()
         self.user = User.objects.create_user(username="participant", password="pass")
         self.activity = _create_activity(
             title="Contest",

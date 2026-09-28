@@ -147,6 +147,26 @@ def _save_round_state(round_, fields=None):
             round_.save(update_fields=fields)
 
 
+def _attach_hundred_mark_rubric(contest_round):
+    """Give a fixture round the real rubric a frozen ruleset's bound compile expects.
+
+    ``build_bound_context`` derives each round's scale from its rubric, so a round without
+    one leaves every composite scale undeclared. That is tolerated at a template compile
+    but is a hard ERROR in bound mode — which the P0-B runtime readiness gate now runs on
+    the stage-result path, catching fixtures that build a FROZEN row directly instead of
+    going through ``freeze_ruleset_version``.
+    """
+    from singer_contest.models import RubricCriterion, ScoringRubric
+
+    rubric = ScoringRubric.objects.create(
+        activity=contest_round.activity, name=f"{contest_round.name}评分", is_test_data=True
+    )
+    RubricCriterion.objects.create(rubric=rubric, name="总分", max_score=100, is_test_data=True)
+    contest_round.rubric = rubric
+    _save_round_state(contest_round, ["rubric"])
+    return contest_round
+
+
 def _save_activity_state(activity, fields=None):
     with authority_write(ACTIVITY_STATE):
         if fields is None:
@@ -4134,7 +4154,7 @@ class RoundEntryBridgeTests(TestCase):
         self.activity = _create_activity(
             title="Roster Bridge",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
+            phase=Activity.Phase.TESTING,
             is_test_mode=True,
         )
         self.ruleset = ContestRuleset.objects.create(
@@ -6009,7 +6029,7 @@ class AutoResolveCheckpointTests(TestCase):
         self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
+            phase=Activity.Phase.TESTING,
             is_test_mode=True,
         )
         self.ruleset = ContestRuleset.objects.create(
@@ -6019,12 +6039,14 @@ class AutoResolveCheckpointTests(TestCase):
         self.singers = [self._singer(i) for i in range(1, 16)]
         self.rounds = {}
         for idx in range(1, 5):
-            self.rounds[f"r{idx}"] = ContestRound.objects.create(
-                activity=self.activity,
-                round_type=ContestRound.RoundType.PRELIMINARY,
-                name=f"轮次{idx}",
-                sequence=idx,
-                roster_source=ContestRound.RosterSource.APPROVED,
+            self.rounds[f"r{idx}"] = _attach_hundred_mark_rubric(
+                ContestRound.objects.create(
+                    activity=self.activity,
+                    round_type=ContestRound.RoundType.PRELIMINARY,
+                    name=f"轮次{idx}",
+                    sequence=idx,
+                    roster_source=ContestRound.RosterSource.APPROVED,
+                )
             )
         from ruleset.templates import GOLDEN_SCHIDUI
 
@@ -6122,7 +6144,7 @@ class AudienceCompositeFlowTests(TestCase):
         self.activity = _create_activity(
             title="院十佳",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
+            phase=Activity.Phase.TESTING,
             is_test_mode=True,
         )
         self.ruleset = ContestRuleset.objects.create(
@@ -6130,12 +6152,14 @@ class AudienceCompositeFlowTests(TestCase):
         )
         self.judge = Judge.objects.create(activity=self.activity, name="评委A")
         self.singers = [self._singer(i) for i in range(1, 11)]
-        self.round = ContestRound.objects.create(
-            activity=self.activity,
-            round_type=ContestRound.RoundType.PRELIMINARY,
-            name="初赛",
-            sequence=1,
-            roster_source=ContestRound.RosterSource.APPROVED,
+        self.round = _attach_hundred_mark_rubric(
+            ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="初赛",
+                sequence=1,
+                roster_source=ContestRound.RosterSource.APPROVED,
+            )
         )
         definition = json.dumps(
             {
@@ -6363,13 +6387,15 @@ class ShadowRehearsalTests(TestCase):
         )
 
     def _round(self, sequence, roster_source, roster_source_stage=None):
-        return ContestRound.objects.create(
-            activity=self.activity,
-            round_type=ContestRound.RoundType.PRELIMINARY,
-            name=f"轮次{sequence}",
-            sequence=sequence,
-            roster_source=roster_source,
-            roster_source_stage=roster_source_stage or "",
+        return _attach_hundred_mark_rubric(
+            ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name=f"轮次{sequence}",
+                sequence=sequence,
+                roster_source=roster_source,
+                roster_source_stage=roster_source_stage or "",
+            )
         )
 
     def _seed_scores(self, round_, base, limit=None):

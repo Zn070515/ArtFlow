@@ -12,6 +12,7 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
+from ruleset.services import require_runtime_readiness
 from tickets.models import Ticket, TicketAccessSession
 
 from .models import (
@@ -304,6 +305,9 @@ def open_vote_session(vote_session, operator):
             raise PermissionDenied("投票已锁定，无法开放。")
         if locked.is_open:
             return locked
+        # P0-B runtime boundary: a score-component vote's candidate roster is a deferred
+        # roster fact — it is proven here, before ballots can be cast against it.
+        require_runtime_readiness(locked.activity)
         locked.is_open = True
         with authority_write(VOTE_SESSION_STATE):
             locked.save(update_fields=["is_open"])

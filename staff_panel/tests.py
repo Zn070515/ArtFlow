@@ -6082,6 +6082,273 @@ def _invalid_definition_json():
     )
 
 
+def _golden_with_root_sections_json():
+    """Golden 院十佳 definition carrying every non-``nodes`` root section.
+
+    ``RulesetVersion.definition`` is a JSON *document*, not a node list. The template
+    library already writes ``checkpoints`` beside ``nodes`` (``ruleset.templates``), and
+    the Ruleset-driven Questionnaire phase adds ``context`` and ``questionnaire`` next to
+    them. A definition root is only safe if every editor action replaces the one section
+    it owns and hands the other sections back untouched.
+
+    The extra ASSESS tail is a dead-end probe: nothing consumes it and no checkpoint
+    targets it, so it can be deleted without disturbing the real three-stage graph.
+    """
+    from ruleset.schema import ENTRY_KEY
+    from ruleset.templates import golden_schidui
+
+    definition = json.loads(golden_schidui())
+    definition["nodes"].append(
+        {"key": "probe_unused", "type": "ASSESS", "source": ENTRY_KEY, "round": "rx"}
+    )
+    definition["context"] = {"root_preservation_probe": "context"}
+    definition["questionnaire"] = _valid_questionnaire()
+    return json.dumps(definition, ensure_ascii=False)
+
+
+def _save_form_definition_json():
+    """Three-node graph (assess → rank → select) plus one checkpoint, context, questionnaire."""
+    from ruleset.schema import ENTRY_KEY
+
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+            ],
+            "checkpoints": [{"key": "stage1", "output": "top10"}],
+            "context": {"root_preservation_probe": "context"},
+            "questionnaire": _valid_questionnaire(),
+        },
+        ensure_ascii=False,
+    )
+
+
+def _valid_questionnaire(*, key="singer_submission"):
+    """A minimal questionnaire that clears the P1 gate.
+
+    Fixtures that carry a ``questionnaire`` section must carry a *valid* one: the section
+    patch re-validates the whole definition root, so a placeholder with empty ``pages``
+    would be rejected on any edit rather than merely preserved.
+    """
+    return {
+        "schema_version": 1,
+        "key": key,
+        "pages": [
+            {
+                "key": "basic",
+                "title": "基本信息",
+                "sections": [
+                    {
+                        "key": "identity",
+                        "title": "身份",
+                        "questions": [{"key": "name", "type": "text", "label": "姓名"}],
+                    }
+                ],
+            }
+        ],
+    }
+
+
+class RulesetDefinitionRootPreservationTests(TestCase):
+    """Q0 — a node edit must never rewrite the definition root.
+
+    Every editor action funnels through ``staff_panel.views._edit_nodes``, which rebuilds
+    the root as ``{"schema_version", "nodes"}``. On a definition that carries
+    ``checkpoints`` / ``context`` / ``questionnaire`` that is silent data loss: the
+    Questionnaire work cannot start until a node edit stops deleting its section.
+
+    The first five cases reproduce that defect (they fail until Q1). The last two pin
+    behaviour the Q1 fix must not regress.
+
+    See ``ruleset/test_editor.py`` for the DB-free form ⇄ definition serialization tests.
+    """
+
+    def setUp(self):
+        self.admin = _create_provisioned_user(
+            username="root-preserve-admin",
+            password="pass",
+            role=User.Role.ADMIN,
+        )
+        login_admin(self.client, self.admin)
+        self._seq = 0
+
+    def _make_version(self, definition_json):
+        """One fresh activity + ruleset + DRAFT version, so §16's single-ruleset
+        invariant is never strained by a shared fixture."""
+        self._seq += 1
+        activity = _create_activity(
+            title=f"根保留-{self._seq}",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=activity,
+            name=f"根保留规则-{self._seq}",
+            is_test_data=True,
+            created_by=self.admin,
+        )
+        return RulesetVersion.objects.create(
+            ruleset=ruleset,
+            definition=definition_json,
+            created_by=self.admin,
+        )
+
+    def _stored_root(self, version):
+        version.refresh_from_db()
+        return json.loads(version.definition)
+
+    def _post(self, version, payload):
+        return self.client.post(reverse("staff:ruleset_edit", args=[version.pk]), payload)
+
+    def _assert_root_sections_survived(self, before, after):
+        self.assertEqual(
+            sorted(after),
+            sorted(before),
+            "a node edit must not add or drop top-level definition sections",
+        )
+        for section in ("checkpoints", "context", "questionnaire"):
+            self.assertEqual(
+                after.get(section),
+                before.get(section),
+                f"a node edit destroyed the {section!r} section",
+            )
+
+    def test_node_add_preserves_other_root_sections(self):
+        version = self._make_version(_golden_with_root_sections_json())
+        before = self._stored_root(version)
+        self._post(version, {"action": "add", "new_type": "ASSESS"})
+        after = self._stored_root(version)
+        self.assertEqual(
+            len(after["nodes"]), len(before["nodes"]) + 1, "node was not added; case is vacuous"
+        )
+        self._assert_root_sections_survived(before, after)
+
+    def test_node_move_preserves_other_root_sections(self):
+        version = self._make_version(_golden_with_root_sections_json())
+        before = self._stored_root(version)
+        # assess_r1 and assess_r2 both source `entry`, so swapping them stays forward-only.
+        self._post(version, {"action": "move_down", "key": "assess_r1"})
+        after = self._stored_root(version)
+        self.assertNotEqual(
+            [n["key"] for n in after["nodes"]],
+            [n["key"] for n in before["nodes"]],
+            "node was not reordered; case is vacuous",
+        )
+        self._assert_root_sections_survived(before, after)
+
+    def test_node_delete_preserves_other_root_sections(self):
+        version = self._make_version(_golden_with_root_sections_json())
+        before = self._stored_root(version)
+        self._post(version, {"action": "delete", "key": "probe_unused"})
+        after = self._stored_root(version)
+        self.assertEqual(
+            len(after["nodes"]), len(before["nodes"]) - 1, "node was not deleted; case is vacuous"
+        )
+        self._assert_root_sections_survived(before, after)
+
+    def test_node_save_preserves_other_root_sections(self):
+        """The ``action=save`` path rebuilds the root through ``definition_from_form``."""
+        version = self._make_version(_save_form_definition_json())
+        before = self._stored_root(version)
+        self._post(
+            version,
+            {
+                "action": "save",
+                "node_order": "node_0,node_1,node_2",
+                "node_0_key": "assess_r1",
+                "node_0_type": "ASSESS",
+                "node_0_source": "entry",
+                "node_0_round": "r1",
+                "node_0_scale": "hundred",
+                "node_0_mode": "mean",
+                "node_1_key": "rank1",
+                "node_1_type": "RANK",
+                "node_1_source": "assess_r1",
+                "node_1_descending": "on",
+                "node_2_key": "top10",
+                "node_2_type": "SELECT",
+                "node_2_source": "rank1",
+                "node_2_count": "10",
+            },
+        )
+        after = self._stored_root(version)
+        self.assertEqual(
+            [n["key"] for n in after["nodes"]],
+            ["assess_r1", "rank1", "top10"],
+            "the save did not persist; case is vacuous",
+        )
+        self._assert_root_sections_survived(before, after)
+
+    def test_clone_last_year_then_node_edit_preserves_checkpoints(self):
+        """Clone Last Year → edit a node → the 2025 template's three progressive
+        checkpoints must still be there. This is the path operators actually take."""
+        from ruleset.templates import seed_ruleset_templates
+
+        seed_ruleset_templates(self.admin)
+        self._seq += 1
+        activity = _create_activity(
+            title=f"根保留克隆-{self._seq}",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        response = self.client.post(
+            reverse("staff:ruleset_clone_last_year"),
+            {"activity": activity.pk, "name": f"根保留克隆-{self._seq}"},
+        )
+        self.assertEqual(response.status_code, 302)
+        version = RulesetVersion.objects.get(ruleset__activity=activity)
+        before = self._stored_root(version)
+        self.assertEqual(
+            [c["key"] for c in before["checkpoints"]],
+            ["stage1", "stage2", "stage3"],
+            "clone did not carry the golden checkpoints; case is vacuous",
+        )
+        self._post(version, {"action": "add", "new_type": "ASSESS"})
+        after = self._stored_root(version)
+        self.assertEqual(
+            len(after["nodes"]), len(before["nodes"]) + 1, "node was not added; case is vacuous"
+        )
+        self.assertEqual(after["checkpoints"], before["checkpoints"])
+
+    def test_node_edit_does_not_inject_derived_root_keys(self):
+        """``parse_definition`` normalizes ``outputs``; a fix that re-serializes its output
+        would add a key the operator never wrote. The stored root must stay exactly what
+        the operator authored, plus nothing."""
+        version = self._make_version(_save_form_definition_json())
+        self._post(version, {"action": "add", "new_type": "ASSESS"})
+        self.assertNotIn("outputs", self._stored_root(version))
+
+    def test_frozen_version_rejects_node_edit(self):
+        """A FROZEN definition is immutable through the editor (guard, not a defect)."""
+        version = self._make_version(_save_form_definition_json())
+        version.status = RulesetVersion.Status.FROZEN
+        with authority_write(RULESET_FREEZE):
+            version.save(update_fields=["status"])
+        response = self._post(version, {"action": "add", "new_type": "ASSESS"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self._stored_root(version), json.loads(_save_form_definition_json()))
+
+    def test_stale_content_hash_rejects_node_edit(self):
+        """Concurrent-edit contract: a save built on a stale hash must not overwrite."""
+        version = self._make_version(_save_form_definition_json())
+        before = self._stored_root(version)
+        response = self._post(
+            version,
+            {
+                "action": "add",
+                "new_type": "ASSESS",
+                "base_content_hash": "0" * 64,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._stored_root(version), before)
+
+
 class RulesetEditorTests(TestCase):
     def setUp(self):
         from ruleset.models import ContestRuleset, RulesetVersion

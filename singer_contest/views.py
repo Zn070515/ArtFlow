@@ -35,6 +35,14 @@ def _apply_form_context(request, activities, *, errors=None, video_upload_allowe
 
 @login_required
 def apply_view(request):
+    """The legacy fixed registration form.
+
+    Superseded by the questionnaire page (``questionnaire.views.form_view``), which renders
+    the frozen ruleset's own questions instead of a hardcoded field list. Kept routed, and
+    deliberately not deleted: it is on the *Contract* step of the Expand → Migrate → Switch
+    → Contract sequence and retires only once a rehearsal has confirmed the new path. See
+    ``docs/singer-questionnaire-workflow.md``.
+    """
     activities = Activity.objects.filter(
         activity_type=Activity.Type.SINGER_CONTEST,
         phase=Activity.Phase.REGISTRATION_OPEN,
