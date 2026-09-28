@@ -35,7 +35,9 @@ from .services import (
 CREDENTIAL_LOGIN_RATE_LIMIT = 10
 CREDENTIAL_LOGIN_RATE_WINDOW_SECONDS = 300
 CREDENTIAL_LOGIN_IP_RATE_LIMIT = 100
-REGISTRATION_RATE_LIMIT = 30
+# Campus and event Wi-Fi often shares one egress IP across many participants;
+# keep abuse bounded without making a normal group registration burst fail.
+REGISTRATION_RATE_LIMIT = 120
 REGISTRATION_RATE_WINDOW_SECONDS = 600
 
 
