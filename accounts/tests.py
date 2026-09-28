@@ -752,6 +752,8 @@ class RoleRegistrationViewTests(TestCase):
         self.assertContains(response, reverse("accounts:register"))
         self.assertContains(response, reverse("accounts:staff_register"))
         self.assertContains(response, reverse("accounts:admin_register"))
+        self.assertContains(response, "评委无需注册或登录账号")
+        self.assertContains(response, "评委二维码")
 
     def test_participant_registration_creates_participant_and_logs_in(self):
         response = self.client.post(
@@ -778,7 +780,15 @@ class RoleRegistrationViewTests(TestCase):
             self.registration_payload("new-staff", access_key="staff-secret"),
         )
         self.assertRedirects(valid, reverse("staff:dashboard"), fetch_redirect_response=False)
-        self.assertEqual(User.objects.get(username="new-staff").role, User.Role.STAFF)
+        user = User.objects.get(username="new-staff")
+        self.assertEqual(user.role, User.Role.STAFF)
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.ACCOUNT_REGISTER,
+            target=f"User:{user.pk}",
+        )
+        self.assertIsNone(audit.operator)
+        self.assertEqual(audit.new_value, "role=staff")
+        self.assertEqual(audit.note, "self_registration_with_access_key")
 
     def test_admin_registration_uses_public_role_flow_for_first_admin(self):
         response = self.client.post(
@@ -803,6 +813,13 @@ class RoleRegistrationViewTests(TestCase):
 
         self.assertRedirects(response, reverse("staff:dashboard"), fetch_redirect_response=False)
         self.assertEqual(User.objects.get(username="second-admin").role, User.Role.ADMIN)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.ACCOUNT_REGISTER,
+                target=f"User:{User.objects.get(username='second-admin').pk}",
+                new_value="role=admin",
+            ).exists()
+        )
 
     def test_legacy_setup_route_is_not_available(self):
         self.assertEqual(self.client.get("/setup/").status_code, 404)
@@ -842,6 +859,12 @@ class RoleRegistrationServiceTests(TestCase):
         self.assertEqual(admin.role, User.Role.ADMIN)
         self.assertTrue(staff.is_staff)
         self.assertTrue(admin.is_staff)
+        staff_audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.ACCOUNT_REGISTER,
+            target=f"User:{staff.pk}",
+        )
+        self.assertIsNone(staff_audit.operator)
+        self.assertEqual(staff_audit.new_value, "role=staff")
         self.assertIsNone(AuditLog.objects.filter(new_value__contains="staff-secret").first())
         self.assertIsNone(AuditLog.objects.filter(new_value__contains="admin-secret").first())
 

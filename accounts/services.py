@@ -117,6 +117,7 @@ def _validate_registration_access_key(
         raise ValidationError(invalid_message)
 
 
+@transaction.atomic
 def _create_registered_account(*, username: str, password: str, role: str) -> User:
     normalized_username = username.strip()
     if not normalized_username:
@@ -132,6 +133,14 @@ def _create_registered_account(*, username: str, password: str, role: str) -> Us
     validate_password(password, user=candidate)
     with authority_write(ACCOUNT_AUTHORITY):
         candidate.save(force_insert=True)
+    if role in {User.Role.STAFF, User.Role.ADMIN}:
+        AuditLog.objects.create(
+            operator=None,
+            action_type=AuditLog.ActionType.ACCOUNT_REGISTER,
+            target=f"User:{candidate.pk}",
+            new_value=f"role={role}",
+            note="self_registration_with_access_key",
+        )
     return candidate
 
 

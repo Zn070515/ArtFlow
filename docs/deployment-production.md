@@ -50,22 +50,32 @@ release SHA、web 镜像 OCI revision、PostgreSQL/Caddy digest，使用 `--no-b
 TLS 证书，因此该 DNS 名称必须在启动前指向此主机并允许 ACME 流量。不得用根 Compose
 或 `docker compose down --volumes` 管理生产卷。
 
-## 首个管理员 provisioning
+## 首个管理员注册
 
 镜像启动会自动执行迁移，但不会创建管理员，也不会在生产环境运行开发用的
-`seed_dev_admin`。首次部署完成并确认 `doctor` 可以连接数据库后，在一个带交互终端的
-本机执行一次：
+`seed_dev_admin`。首次部署完成并确认 `doctor --require-access-keys` 通过后，在浏览器打开：
 
-```powershell
-docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py provision_first_admin --username <admin-username>
+```text
+https://<CADDY_SITE_ADDRESS>/register/admin/
 ```
 
-命令在容器内隐藏式读取密码，创建一个 active 的 ArtFlow `ADMIN` 账号（不创建 Django
-superuser），并把安装状态原子地标记为已初始化。重复执行、替换用户名或 reset 都会被拒绝。
-自动化发行 launcher 可以把一次性密码通过 `--password-stdin` 传入；不得把密码放进命令行
-参数、镜像、审计记录、诊断输出或长期环境模板。管理员注册和登录使用部署配置中的
-`ADMIN_ACCESS_KEY`；工作人员注册和登录使用 `STAFF_ACCESS_KEY`。两个密钥都应通过未提交的
-secret 管理保存。
+使用管理员用户名、密码和部署配置中的 `ADMIN_ACCESS_KEY` 完成首个管理员注册。该页面在
+首次安装时仍由同一个 `InstallationState` / `provision_first_admin` authority 原子完成初始化，
+不会创建 Django superuser；后续管理员也可以使用同一密钥注册。工作人员使用
+`/register/staff/` 和 `STAFF_ACCESS_KEY` 注册。两个密钥都应通过未提交的 secret 管理保存，
+不能写入审计记录、诊断输出或长期环境模板。
+
+无浏览器的受控恢复场景仍可使用 `provision_first_admin --password-stdin`，但它不是普通部署
+流程；不得把密码放进命令行参数、镜像或长期环境模板。
+
+如果轮换 `STAFF_ACCESS_KEY` 或 `ADMIN_ACCESS_KEY`，修改 secret 后重启 web，再执行：
+
+```bash
+docker compose --env-file .env.production -f deploy/compose.production.yml exec -T web \
+  python manage.py invalidate_sessions
+```
+
+该命令会让所有当前浏览器会话失效，所有用户必须使用新配置重新登录。
 
 ## 必填环境项（`.env.production.example` 字段清单）
 

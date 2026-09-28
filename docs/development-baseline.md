@@ -64,7 +64,7 @@ Invoke-WebRequest http://127.0.0.1:8000/healthz/
 ```
 
 `doctor` checks loaded configuration, database connectivity, unapplied migrations,
-static/media directories, and the non-secret first-admin provisioning status
+static/media directories, non-secret access-key readiness, and the non-secret first-admin provisioning status
 (`required`, `complete`, or `inconsistent`). A fresh installation reports
 `required` but is not treated as a failure; `inconsistent` is a configuration
 failure. When the database is healthy it also reports Ticket row and stale
@@ -72,6 +72,11 @@ access-session counts; if the database check fails it does not query Ticket
 tables again. It returns nonzero for failures and does not print secrets or a
 complete database URL. `/healthz/` accepts only `GET`; it returns a minimal
 `ok` or generic unavailable status and is safe for container health checks.
+Event and production launchers pass `doctor --require-access-keys`, which turns
+missing or placeholder `STAFF_ACCESS_KEY` / `ADMIN_ACCESS_KEY` into a
+configuration failure. After rotating either key, run
+`python manage.py invalidate_sessions` in the target web container so every
+browser must authenticate again.
 
 ## Demo data and reset safety
 

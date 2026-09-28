@@ -23,7 +23,7 @@ Copy-Item .env.production.example .env.production
 bash scripts/deploy.sh .env.production
 
 # 4) 运行时诊断（只读）
-docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py doctor    # Configuration/Database/Migration/Directory 全 ok
+docker compose --env-file .env.production -f deploy/compose.production.yml exec web python manage.py doctor --require-access-keys    # Configuration/Database/Migration/Directory/Access key 全 ok
 ```
 
 ## 1. 发布门禁（自动化）
