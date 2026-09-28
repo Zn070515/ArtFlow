@@ -37,6 +37,7 @@ from .services import (
     require_current_staff,
     set_user_active,
 )
+from .views import REGISTRATION_RATE_LIMIT
 
 
 def create_provisioned_user(*args, **kwargs):
@@ -394,7 +395,7 @@ class RegistrationRateLimitTests(TestCase):
         with patch(
             "accounts.views.ParticipantRegisterForm.is_valid", return_value=False
         ) as is_valid:
-            for _ in range(30):
+            for _ in range(REGISTRATION_RATE_LIMIT):
                 response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
                 self.assertEqual(response.status_code, 200)
 
@@ -403,7 +404,7 @@ class RegistrationRateLimitTests(TestCase):
 
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
-        self.assertEqual(is_valid.call_count, 30)
+        self.assertEqual(is_valid.call_count, REGISTRATION_RATE_LIMIT)
         self.assertEqual(User.objects.count(), before_throttled_attempt)
 
 
