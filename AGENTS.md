@@ -4,29 +4,33 @@
 ArtFlow is a Django monolith for student arts department activity operations. Core project settings live in `config/`; feature apps are split by domain:
 
 - `accounts/`: custom user model, roles, login/register flows.
+- `entry_access/`: entry points, access grants, and ephemeral entry sessions.
+- `tickets/`: tickets and ticket access sessions for the operator/check-in flow.
 - `core/`: shared `Activity` model and activity phase/lock state.
+- `ruleset/`: ruleset templates, contest rulesets, and versioned rulesets.
+- `common/`: audit, authority, business-rule, lifecycle, and maintenance helpers.
 - `public_portal/`: public homepage, announcements, showcases, result posts.
 - `files/`: submission files, material requirements, material checks.
 - `singer_contest/`: singer registrations, rounds, judges, scores, awards.
 - `farewell_show/`: graduation show program submissions and program order.
 - `voting/`: audience vote sessions, options, records.
 - `staff_panel/`: staff/admin dashboard views and operational workflows.
-- `exports/`, `archive/`, `incidents/`, `common/`: export, archive, incident, audit, and shared utilities.
+- `exports/`, `archive/`, `incidents/`: export, archive, and incident records.
 
-Templates are under `templates/`. Tests are app-level `tests.py` files. Local media under `media/` must not be committed.
+Templates are under `templates/`. Tests live in the app that owns the behavior, either in `tests.py` or in `test_*.py` modules beside it. Local media under `media/` must not be committed.
 
 ## Build, Test, and Development Commands
 Prefix shell commands with `rtk` in agent workflows when `rtk` is installed. If the command is unavailable on the current machine, run the command directly and report that fallback; do not block repository work on an optional wrapper.
 
 ```bash
 uv sync --locked --extra dev
-python manage.py migrate
-python manage.py runserver
-python manage.py check
-python manage.py makemigrations --check --dry-run
-python manage.py test
-python manage.py test staff_panel
-python manage.py doctor
+uv run python manage.py migrate --noinput
+uv run python manage.py runserver
+uv run python manage.py check
+uv run python manage.py makemigrations --check --dry-run
+uv run python manage.py test
+uv run python manage.py test staff_panel
+uv run python manage.py doctor
 pwsh -NoProfile -File scripts/check_docs.ps1
 pwsh -NoProfile -File scripts/verify_postgres_acceptance.ps1 -StartCompose -VerifyResetSafety
 npm ci
