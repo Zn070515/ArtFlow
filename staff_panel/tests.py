@@ -3252,7 +3252,7 @@ class AdminAuthBoundaryTests(TestCase):
     def test_unauthenticated_staff_redirects_to_artflow_login(self):
         response = self.client.get(reverse("staff:dashboard"))
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response["Location"].startswith(reverse("accounts:login")))
+        self.assertTrue(response["Location"].startswith(reverse("accounts:staff_login")))
 
     def test_unauthenticated_staff_does_not_redirect_to_django_admin(self):
         response = self.client.get(reverse("staff:dashboard"))

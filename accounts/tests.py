@@ -53,12 +53,28 @@ class LoginModeTests(TestCase):
             password="pass12345",
             role=User.Role.ADMIN,
         )
+        self.staff = create_provisioned_user(
+            username="staff",
+            password="pass12345",
+            role=User.Role.STAFF,
+        )
 
-    def test_normal_login_allows_non_admin_user(self):
+    def test_login_selector_is_get_only_and_exposes_explicit_roles(self):
+        response = self.client.get(reverse("accounts:login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("accounts:participant_login"))
+        self.assertContains(response, reverse("accounts:staff_login"))
+        self.assertContains(response, reverse("accounts:admin_login"))
+        self.assertContains(response, "选手注册")
+
+        post_response = self.client.post(reverse("accounts:login"), {})
+        self.assertEqual(post_response.status_code, 405)
+
+    def test_participant_login_allows_participant_user(self):
         response = self.client.post(
-            reverse("accounts:login"),
+            reverse("accounts:participant_login"),
             {
-                "login_mode": "normal",
                 "username": "participant",
                 "password": "pass12345",
             },
@@ -66,17 +82,48 @@ class LoginModeTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("public_portal:home"))
 
-    def test_normal_login_rejects_admin_user(self):
+    def test_participant_login_rejects_admin_after_valid_credentials(self):
         response = self.client.post(
-            reverse("accounts:login"),
+            reverse("accounts:participant_login"),
             {
-                "login_mode": "normal",
                 "username": "admin",
                 "password": "pass12345",
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "管理员账号请使用管理员登录入口。")
+        self.assertContains(response, "不属于选手登录入口")
+
+    def test_staff_login_allows_staff_user_and_rejects_participant(self):
+        response = self.client.post(
+            reverse("accounts:staff_login"),
+            {"username": "staff", "password": "pass12345"},
+        )
+        self.assertRedirects(response, reverse("staff:dashboard"))
+
+        self.client.logout()
+        response = self.client.post(
+            reverse("accounts:staff_login"),
+            {"username": "participant", "password": "pass12345"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "不属于工作人员登录入口")
+
+    def test_login_redirects_only_to_a_same_host_next(self):
+        response = self.client.post(
+            f"{reverse('accounts:participant_login')}?next=/contest/",
+            {"username": "participant", "password": "pass12345"},
+        )
+        self.assertRedirects(response, "/contest/", fetch_redirect_response=False)
+
+        self.client.logout()
+        response = self.client.post(
+            f"{reverse('accounts:participant_login')}?next=https://evil.example/steal",
+            {"username": "participant", "password": "pass12345"},
+        )
+        self.assertRedirects(response, reverse("public_portal:home"))
+
+    def test_old_admin_login_route_is_removed(self):
+        self.assertEqual(self.client.get("/admin-login/").status_code, 404)
 
     @override_settings(ADMIN_LOGIN_KEY="secret-key")
     def test_admin_login_requires_correct_key(self):
@@ -132,7 +179,7 @@ class LoginModeTests(TestCase):
         self.assertTrue(session.get("artflow_admin_verified"))
         self.assertIsNotNone(session.get("artflow_admin_verified_at"))
 
-    def test_normal_login_page_links_to_admin_login(self):
+    def test_login_selector_links_to_admin_login(self):
         response = self.client.get(reverse("accounts:login"))
         self.assertContains(response, reverse("accounts:admin_login"))
         self.assertContains(response, "管理员登录")
@@ -220,9 +267,8 @@ class ParticipantLoginRateLimitTests(TestCase):
         cache.clear()
 
     def test_participant_login_is_throttled_before_authentication(self):
-        url = reverse("accounts:login")
+        url = reverse("accounts:participant_login")
         payload = {
-            "login_mode": "normal",
             "username": self.participant.username,
             "password": "wrong-password",
         }
@@ -244,8 +290,8 @@ class ParticipantLoginRateLimitTests(TestCase):
             patch("accounts.views.ParticipantLoginForm.is_valid", return_value=False),
         ):
             self.client.post(
-                reverse("accounts:login"),
-                {"login_mode": "normal", "username": "alice", "password": "wrong"},
+                reverse("accounts:participant_login"),
+                {"username": "alice", "password": "wrong"},
                 REMOTE_ADDR="198.51.100.10",
             )
 
@@ -255,9 +301,8 @@ class ParticipantLoginRateLimitTests(TestCase):
 
     @override_settings(TRUST_X_FORWARDED_FOR=True)
     def test_participant_login_uses_the_forwarded_client_ip_when_trusted(self):
-        url = reverse("accounts:login")
+        url = reverse("accounts:participant_login")
         invalid_payload = {
-            "login_mode": "normal",
             "username": self.participant.username,
             "password": "wrong-password",
         }

@@ -14,19 +14,34 @@ class RegisterForm(UserCreationForm):
         fields = ["username", "password1", "password2"]
 
 
-class ParticipantLoginForm(AuthenticationForm):
+class RoleLoginForm(AuthenticationForm):
+    expected_role = ""
+    role_mismatch_message = "该账号不属于此登录入口。"
+
     error_messages = {
         **AuthenticationForm.error_messages,
-        "admin_requires_key": "管理员账号请使用管理员登录入口。",
+        "role_mismatch": "该账号不属于此登录入口。",
     }
 
     def confirm_login_allowed(self, user):
         super().confirm_login_allowed(user)
-        if user.is_admin:
+        if user.role != self.expected_role or (
+            self.expected_role == User.Role.PARTICIPANT and user.is_admin
+        ):
             raise forms.ValidationError(
-                self.error_messages["admin_requires_key"],
-                code="admin_requires_key",
+                self.role_mismatch_message,
+                code="role_mismatch",
             )
+
+
+class ParticipantLoginForm(RoleLoginForm):
+    expected_role = User.Role.PARTICIPANT
+    role_mismatch_message = "该账号不属于选手登录入口。"
+
+
+class StaffLoginForm(RoleLoginForm):
+    expected_role = User.Role.STAFF
+    role_mismatch_message = "该账号不属于工作人员登录入口。"
 
 
 class AdminLoginForm(AuthenticationForm):

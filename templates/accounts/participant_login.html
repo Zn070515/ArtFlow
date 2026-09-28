@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}选手登录 - ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-sm mx-auto mt-16 px-4">
+    <h1 class="text-2xl font-bold text-gray-900 mb-2">选手登录</h1>
+    <p class="text-sm text-gray-600 mb-6">使用选手账号继续报名或查看活动资料。</p>
+    {% include "accounts/_credential_login_form.html" %}
+    <p class="mt-4 text-sm text-center text-gray-500">工作人员？<a href="{% url 'accounts:staff_login' %}" class="text-brand hover:underline">工作人员登录</a></p>
+    <p class="mt-2 text-sm text-center text-gray-500">管理员？<a href="{% url 'accounts:admin_login' %}" class="text-brand hover:underline">管理员登录</a></p>
+</div>
+{% endblock %}

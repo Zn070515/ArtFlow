@@ -11,7 +11,23 @@ function boot({
   ticketState = "issued",
 } = {}) {
   const status = { textContent: "" };
-  const root = {};
+  const manualInput = { value: "" };
+  const manualForm = {
+    listeners: new Map(),
+    addEventListener(type, listener) { this.listeners.set(type, listener); },
+    dispatch(type) {
+      const event = { prevented: false, preventDefault() { this.prevented = true; } };
+      this.listeners.get(type)?.(event);
+      return event;
+    },
+  };
+  const root = {
+    querySelector(selector) {
+      if (selector === "[data-ticket-manual-form]") return manualForm;
+      if (selector === "[name='secret']") return manualInput;
+      return null;
+    },
+  };
   const csrf = { value: "csrf-token" };
   const requests = [];
   const historyCalls = [];
@@ -40,7 +56,7 @@ function boot({
     console,
   };
   vm.runInNewContext(source, context);
-  return { status, requests, historyCalls };
+  return { status, requests, historyCalls, manualForm, manualInput };
 }
 
 test("ticket scan scrubs the fragment before body-only redemption", async () => {
@@ -78,5 +94,17 @@ test("ticket scan does not make a request without a fragment", async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(result.requests, []);
-  assert.equal(result.status.textContent, "请扫描现场二维码。");
+  assert.equal(result.status.textContent, "请扫描现场二维码，或输入票据码。");
+});
+
+test("ticket scan accepts a manual code through the same body-only endpoint", async () => {
+  const result = boot({ hash: "" });
+  result.manualInput.value = "manual-ticket-secret";
+  const event = result.manualForm.dispatch("submit");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(event.prevented, true);
+  assert.equal(result.requests[0].url, "/tickets/redeem/");
+  assert.deepEqual(JSON.parse(result.requests[0].options.body), { secret: "manual-ticket-secret" });
+  assert.equal(result.manualInput.value, "");
 });

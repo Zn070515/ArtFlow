@@ -10,7 +10,7 @@ def staff_required(view_func):
     @wraps(view_func)
     def wrapped(request, *args, **kwargs):
         if not request.user.is_authenticated:
-            return redirect_to_login(request.get_full_path(), reverse("accounts:login"))
+            return redirect_to_login(request.get_full_path(), reverse("accounts:staff_login"))
         request.user = require_current_staff(request.user)
         return view_func(request, *args, **kwargs)
 
@@ -21,7 +21,7 @@ def admin_required(view_func):
     @wraps(view_func)
     def wrapped(request, *args, **kwargs):
         if not request.user.is_authenticated:
-            return redirect_to_login(request.get_full_path(), reverse("accounts:login"))
+            return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))
         request.user = require_current_admin(request.user)
         if not admin_verification_is_valid(request.session):
             return redirect_to_login(request.get_full_path(), reverse("accounts:admin_login"))

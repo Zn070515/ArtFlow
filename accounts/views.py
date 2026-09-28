@@ -12,7 +12,7 @@ from django.http import Http404, HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .forms import (
     AdminLoginForm,
@@ -20,6 +20,7 @@ from .forms import (
     FirstAdminSetupForm,
     ParticipantLoginForm,
     RegisterForm,
+    StaffLoginForm,
 )
 from .models import User
 from .services import (
@@ -37,6 +38,9 @@ REGISTRATION_RATE_WINDOW_SECONDS = 600
 ADMIN_LOGIN_RATE_LIMIT = 10
 ADMIN_LOGIN_RATE_WINDOW_SECONDS = 300
 ADMIN_LOGIN_IP_RATE_LIMIT = 100
+STAFF_LOGIN_RATE_LIMIT = 10
+STAFF_LOGIN_RATE_WINDOW_SECONDS = 300
+STAFF_LOGIN_IP_RATE_LIMIT = 100
 FIRST_ADMIN_SETUP_RATE_LIMIT = 10
 FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS = 300
 
@@ -99,46 +103,102 @@ def register_view(request):
     return render(request, "accounts/register.html", {"form": form})
 
 
-def login_view(request):
+def _safe_next_url(request: HttpRequest) -> str:
+    candidate = request.POST.get("next", "") or request.GET.get("next", "")
+    if candidate and url_has_allowed_host_and_scheme(
+        candidate,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return candidate
+    return ""
+
+
+def _redirect_after_login(request: HttpRequest, default_url: str):
+    return redirect(_safe_next_url(request) or default_url)
+
+
+def _role_login_view(
+    request: HttpRequest,
+    *,
+    form_class,
+    template_name: str,
+    key_prefix: str,
+    limit: int,
+    window_seconds: int,
+    aggregate_limit: int,
+    default_url: str,
+):
     if request.user.is_authenticated:
         return redirect("public_portal:home")
 
-    next_url = request.GET.get("next", "")
     if request.method == "POST":
-        form = ParticipantLoginForm(request, data=request.POST)
+        form = form_class(request, data=request.POST)
         if (
             _allow_form_submission(
                 request,
                 form,
-                key_prefix="participant-login",
-                limit=PARTICIPANT_LOGIN_RATE_LIMIT,
-                window_seconds=PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS,
+                key_prefix=key_prefix,
+                limit=limit,
+                window_seconds=window_seconds,
                 identity=str(request.POST.get("username", "")),
-                aggregate_limit=PARTICIPANT_LOGIN_IP_RATE_LIMIT,
+                aggregate_limit=aggregate_limit,
             )
             and form.is_valid()
         ):
             user = form.get_user()
             login(request, user)
             log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}")
-            if next_url and url_has_allowed_host_and_scheme(
-                next_url, allowed_hosts={request.get_host()}
-            ):
-                return redirect(next_url)
-            return redirect("staff:dashboard" if user.is_staff_or_admin else "public_portal:home")
+            return _redirect_after_login(request, default_url)
     else:
-        form = ParticipantLoginForm()
-    return render(request, "accounts/login.html", {"form": form})
+        form = form_class()
+    return render(
+        request,
+        template_name,
+        {"form": form, "next": _safe_next_url(request)},
+    )
+
+
+@require_GET
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect("public_portal:home")
+    return render(request, "accounts/login.html", {"next": _safe_next_url(request)})
+
+
+def participant_login_view(request):
+    return _role_login_view(
+        request,
+        form_class=ParticipantLoginForm,
+        template_name="accounts/participant_login.html",
+        key_prefix="participant-login",
+        limit=PARTICIPANT_LOGIN_RATE_LIMIT,
+        window_seconds=PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS,
+        aggregate_limit=PARTICIPANT_LOGIN_IP_RATE_LIMIT,
+        default_url=reverse("public_portal:home"),
+    )
+
+
+def staff_login_view(request):
+    return _role_login_view(
+        request,
+        form_class=StaffLoginForm,
+        template_name="accounts/staff_login.html",
+        key_prefix="staff-login",
+        limit=STAFF_LOGIN_RATE_LIMIT,
+        window_seconds=STAFF_LOGIN_RATE_WINDOW_SECONDS,
+        aggregate_limit=STAFF_LOGIN_IP_RATE_LIMIT,
+        default_url=reverse("staff:dashboard"),
+    )
 
 
 def admin_login_view(request):
     if request.user.is_authenticated:
         if request.user.is_admin and admin_verification_is_valid(request.session):
-            return redirect("staff:dashboard")
+            return _redirect_after_login(request, reverse("staff:dashboard"))
         if not request.user.is_admin:
             return redirect("public_portal:home")
 
-    next_url = request.GET.get("next", "")
     if request.method == "POST":
         form = AdminLoginForm(request, data=request.POST)
         if (
@@ -157,14 +217,14 @@ def admin_login_view(request):
             login(request, user)
             mark_admin_verified(request.session)
             log_action(request, AuditLog.ActionType.LOGIN, f"User:{user.pk}", note="admin_login")
-            if next_url and url_has_allowed_host_and_scheme(
-                next_url, allowed_hosts={request.get_host()}
-            ):
-                return redirect(next_url)
-            return redirect("staff:dashboard")
+            return _redirect_after_login(request, reverse("staff:dashboard"))
     else:
         form = AdminLoginForm()
-    return render(request, "accounts/admin_login.html", {"form": form})
+    return render(
+        request,
+        "accounts/admin_login.html",
+        {"form": form, "next": _safe_next_url(request)},
+    )
 
 
 def first_admin_setup_view(request):

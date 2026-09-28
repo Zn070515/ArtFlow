@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}没有权限 — ArtFlow{% endblock %}
+
+{% block content %}
+<main class="mx-auto max-w-xl px-4 py-16 text-center">
+    <p class="text-sm font-semibold text-brand">403</p>
+    <h1 class="mt-2 text-2xl font-bold text-gray-900">没有权限访问此页面</h1>
+    <p class="mt-3 text-sm text-gray-600">请确认使用了正确的工作人员或管理员入口。</p>
+    <a href="{% url 'public_portal:home' %}" class="mt-6 inline-block rounded bg-brand px-4 py-2 text-sm text-white">返回首页</a>
+</main>
+{% endblock %}

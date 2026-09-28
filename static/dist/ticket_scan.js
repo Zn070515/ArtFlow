@@ -49,11 +49,29 @@
     if (!root)
         return;
     const status = document.querySelector("[data-ticket-scan-status]");
-    const secret = readSecretFromFragment();
-    if (!secret) {
-        setStatus(status, "请扫描现场二维码。");
-        return;
+    const manualForm = root.querySelector("[data-ticket-manual-form]");
+    const manualInput = root.querySelector("[name='secret']");
+    const startRedeem = (secret, scrubFragment) => {
+        const normalized = secret.trim();
+        if (!normalized) {
+            setStatus(status, "请输入票据码，或扫描现场二维码。");
+            return;
+        }
+        if (scrubFragment)
+            window.history.replaceState(null, "", window.location.pathname);
+        if (manualInput)
+            manualInput.value = "";
+        void redeem(normalized, status);
+    };
+    manualForm?.addEventListener("submit", (event) => {
+        event.preventDefault();
+        startRedeem(manualInput?.value || "", false);
+    });
+    const fragmentSecret = readSecretFromFragment();
+    if (fragmentSecret) {
+        startRedeem(fragmentSecret, true);
     }
-    window.history.replaceState(null, "", window.location.pathname);
-    void redeem(secret, status);
+    else {
+        setStatus(status, "请扫描现场二维码，或输入票据码。");
+    }
 })();
