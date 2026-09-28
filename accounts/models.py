@@ -197,7 +197,7 @@ class User(AbstractUser):
 
         def get_role_display(self) -> str: ...
 
-    class Meta(AbstractUser.Meta):
+    class Meta:  # pyright: ignore[reportIncompatibleVariableOverride]
         base_manager_name = "objects"
 
     @property
