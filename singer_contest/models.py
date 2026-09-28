@@ -372,7 +372,10 @@ class SingerRegistration(models.Model):
     class_name = models.CharField(max_length=100)
     phone = models.CharField(max_length=20)
     wechat = models.CharField(max_length=50, blank=True)
-    song_name = models.CharField(max_length=200)
+    # Legacy "the single song" semantics. A draft registration now exists before the
+    # participant has typed anything, so this may be empty; the per-round songs live in
+    # the questionnaire (§P3), and this column stays as a legacy/historical field.
+    song_name = models.CharField(max_length=200, blank=True, default="")
     is_original = models.BooleanField(default=False)
     description = models.TextField(blank=True)
     remark = models.TextField(blank=True)
@@ -404,8 +407,12 @@ class SingerRegistration(models.Model):
                 fields=["activity", "user"],
                 name="singer_one_registration_per_account_per_activity",
             ),
+            # Conditional: a draft registration exists before the participant has entered
+            # a student id, and every open draft would otherwise collide on the empty
+            # string, locking the whole activity to one simultaneous sign-up.
             models.UniqueConstraint(
                 fields=["activity", "student_id"],
+                condition=~Q(student_id=""),
                 name="singer_one_registration_per_student_per_activity",
             ),
         ]

@@ -11,6 +11,8 @@
     "questionnaire/conditions.py",
     "questionnaire/cross_domain.py",
     "questionnaire/models.py",
+    "questionnaire/registration.py",
+    "questionnaire/runtime.py",
     "questionnaire/schema.py",
     "questionnaire/services.py",
     "staff_panel/views.py",

@@ -28,6 +28,55 @@ SOURCES = frozenset({"answer", "context"})
 COMBINATORS = ("all", "any")
 
 
+def is_blank(value) -> bool:
+    """Whether an answer counts as not given.
+
+    An empty string, an empty list and an empty mapping are all "not answered" — which is
+    what makes ``empty`` usable as "this question is still open" rather than forcing every
+    caller to know which container the question type happens to use.
+    """
+    return value is None or value == "" or value == [] or value == {}
+
+
+def evaluate_condition(condition, *, answers, context) -> bool:
+    """Evaluate a parsed condition tree against one participant's current answers.
+
+    ``answers`` are the participant's stored answers and ``context`` is server-generated;
+    a condition names one source or the other, and there is no way for a browser to supply
+    a ``context`` value. A missing condition is satisfied (nothing was asked for).
+    """
+    if not condition:
+        return True
+    if "all" in condition:
+        return all(
+            evaluate_condition(c, answers=answers, context=context) for c in condition["all"]
+        )
+    if "any" in condition:
+        return any(
+            evaluate_condition(c, answers=answers, context=context) for c in condition["any"]
+        )
+
+    source = answers if condition["source"] == "answer" else context
+    value = source.get(condition["key"])
+    op = condition["op"]
+    expected = condition.get("value")
+    if op == "empty":
+        return is_blank(value)
+    if op == "not_empty":
+        return not is_blank(value)
+    if op == "eq":
+        return bool(value == expected)
+    if op == "neq":
+        return bool(value != expected)
+    if op == "in":
+        return value in (expected or ())
+    if op == "not_in":
+        return value not in (expected or ())
+    if op == "contains":
+        return isinstance(value, (list, tuple, set, str)) and expected in value
+    raise ValidationError(f"未知条件运算符 {op!r}。")
+
+
 def parse_condition(node, *, prior_keys: frozenset[str] | set[str], where: str) -> dict:
     """Validate and normalize one condition node.
 
