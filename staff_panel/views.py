@@ -87,7 +87,6 @@ from ruleset.services import (
     freeze_ruleset_version,
     supersede_ruleset_version,
     update_ruleset_binding,
-    update_ruleset_definition,
     update_ruleset_definition_section,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY

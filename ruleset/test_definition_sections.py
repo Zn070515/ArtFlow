@@ -45,7 +45,7 @@ class DefinitionSectionPatchTests(TestCase):
 
     @staticmethod
     def _root_with_sections():
-        """The real 2025 golden graph (stage1/stage2/stage3 checkpoints) plus both extra sections."""
+        """The real 2025 golden graph (stage1/stage2/stage3) plus both extra sections."""
         root = json.loads(golden_schidui())
         root["context"] = {"audience_rule": "2026"}
         root["questionnaire"] = {"schema_version": 1, "key": "singer_submission", "pages": []}
