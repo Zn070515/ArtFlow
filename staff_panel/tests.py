@@ -6511,6 +6511,14 @@ class JudgeControlHTTPTests(TestCase):
             prepared,
             reverse("staff:judge_control", args=[self.contest_round.pk]),
         )
+        idle_page = self.client.get(
+            reverse("staff:judge_control", args=[self.contest_round.pk])
+        )
+        self.assertContains(idle_page, "暂无当前表演，不可暂停")
+        self.assertNotContains(
+            idle_page,
+            f'action="{reverse("staff:judge_performance_hold", args=[self.contest_round.pk])}"',
+        )
         from singer_contest.models import JudgeSeat, PerformanceRunState, RoundPanelSnapshot
 
         snapshot = RoundPanelSnapshot.objects.get(round=self.contest_round)
@@ -6601,6 +6609,12 @@ class JudgeControlHTTPTests(TestCase):
         run_state = PerformanceRunState.objects.get(round=self.contest_round)
         self.assertEqual(run_state.current_performance_id, self.performance.pk)
         self.assertEqual(run_state.context_version, 1)
+        page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+        self.assertNotContains(page, "表演 ID")
+        self.assertNotContains(page, "Context version")
+        self.assertContains(page, 'type="hidden" name="performance_id"')
+        self.assertContains(page, 'type="hidden" name="context_version"')
+        self.assertContains(page, 'type="hidden" name="command_id"')
 
         score_data = {
             "performance_id": self.performance.pk,

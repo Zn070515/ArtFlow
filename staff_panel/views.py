@@ -4,6 +4,7 @@ from base64 import b64encode
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from urllib.parse import quote
+from uuid import uuid4
 
 from accounts.decorators import admin_required, staff_required
 from accounts.models import User
@@ -1956,7 +1957,20 @@ def _judge_control_context(
                 "context_version": run_state.context_version if run_state else 0,
             },
         ),
-        "score_actions": ("proxy", "paper"),
+        "score_actions": (
+            {
+                "kind": "proxy",
+                "title": "工作人员代录",
+                "reference_label": "故障记录或来源编号",
+                "command_id": f"staff-proxy-{uuid4().hex}",
+            },
+            {
+                "kind": "paper",
+                "title": "纸面评分补录",
+                "reference_label": "纸面评分编号",
+                "command_id": f"staff-paper-{uuid4().hex}",
+            },
+        ),
         "error": error,
         "qr_data_uri": qr_data_uri,
         "qr_seat_id": qr_seat_id,
