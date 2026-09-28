@@ -30,6 +30,9 @@ from .services import (
     installation_provisioning_status,
     mark_admin_verified,
     provision_first_admin,
+    register_admin_account,
+    register_participant_account,
+    register_staff_account,
     require_current_admin,
     require_current_staff,
     set_user_active,
@@ -93,10 +96,15 @@ class LoginModeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "不属于选手登录入口")
 
+    @override_settings(STAFF_ACCESS_KEY="staff-secret")
     def test_staff_login_allows_staff_user_and_rejects_participant(self):
         response = self.client.post(
             reverse("accounts:staff_login"),
-            {"username": "staff", "password": "pass12345"},
+            {
+                "username": "staff",
+                "password": "pass12345",
+                "access_key": "staff-secret",
+            },
         )
         self.assertRedirects(response, reverse("staff:dashboard"))
 
@@ -125,53 +133,53 @@ class LoginModeTests(TestCase):
     def test_old_admin_login_route_is_removed(self):
         self.assertEqual(self.client.get("/admin-login/").status_code, 404)
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_requires_correct_key(self):
         response = self.client.post(
             reverse("accounts:admin_login"),
             {
                 "username": "admin",
                 "password": "pass12345",
-                "admin_key": "wrong-key",
+                "access_key": "wrong-key",
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "管理员密钥错误。")
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_redirects_admin_to_staff_dashboard(self):
         response = self.client.post(
             reverse("accounts:admin_login"),
             {
                 "username": "admin",
                 "password": "pass12345",
-                "admin_key": "secret-key",
+                "access_key": "admin-secret",
             },
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("staff:dashboard"))
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_rejects_non_admin_user(self):
         response = self.client.post(
             reverse("accounts:admin_login"),
             {
                 "username": "participant",
                 "password": "pass12345",
-                "admin_key": "secret-key",
+                "access_key": "admin-secret",
             },
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "该账号不是管理员账号。")
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_sets_verified_session_marker(self):
         response = self.client.post(
             reverse("accounts:admin_login"),
             {
                 "username": "admin",
                 "password": "pass12345",
-                "admin_key": "secret-key",
+                "access_key": "admin-secret",
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -359,7 +367,9 @@ class RegistrationRateLimitTests(TestCase):
             "password2": "different-password",
         }
 
-        with patch("accounts.views.RegisterForm.is_valid", return_value=False) as is_valid:
+        with patch(
+            "accounts.views.ParticipantRegisterForm.is_valid", return_value=False
+        ) as is_valid:
             for _ in range(30):
                 response = self.client.post(url, payload, REMOTE_ADDR="198.51.100.20")
                 self.assertEqual(response.status_code, 200)
@@ -383,7 +393,7 @@ class AdminVerificationTTLTests(TestCase):
             role=User.Role.ADMIN,
         )
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
     def test_mark_admin_verified_sets_marker_and_timestamp(self):
         session: dict = {}
         mark_admin_verified(session)
@@ -391,13 +401,13 @@ class AdminVerificationTTLTests(TestCase):
         self.assertIsNotNone(session["artflow_admin_verified_at"])
         self.assertTrue(admin_verification_is_valid(session))
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
     def test_verification_is_invalid_without_marker(self):
         self.assertFalse(admin_verification_is_valid({}))
         self.assertFalse(admin_verification_is_valid({"artflow_admin_verified": True}))
         self.assertFalse(admin_verification_is_valid({"artflow_admin_verified_at": "x"}))
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
     def test_verification_expires_after_ttl_window(self):
         session = {"artflow_admin_verified": True}
         with patch("accounts.services.timezone.now") as mock_now:
@@ -409,7 +419,7 @@ class AdminVerificationTTLTests(TestCase):
             mock_now.return_value = mid + timedelta(seconds=3601)
             self.assertFalse(admin_verification_is_valid(session))
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
     def test_expire_admin_verification_drops_marker(self):
         session = {
             "artflow_admin_verified": True,
@@ -420,7 +430,7 @@ class AdminVerificationTTLTests(TestCase):
         self.assertNotIn("artflow_admin_verified_at", session)
         self.assertFalse(admin_verification_is_valid(session))
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
     def test_admin_required_redirects_when_verification_expired(self):
         # Log in as admin, clear the elevated marker, then hit an @admin_required view.
         self.client.force_login(self.admin)
@@ -433,11 +443,11 @@ class AdminVerificationTTLTests(TestCase):
         self.assertTrue(response["Location"].startswith(f"{reverse('accounts:admin_login')}?"))
         self.assertIn(f"next={target}", response["Location"])
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_uses_mark_verified_helper(self):
         response = self.client.post(
             reverse("accounts:admin_login"),
-            {"username": "admin", "password": "pass12345", "admin_key": "secret-key"},
+            {"username": "admin", "password": "pass12345", "access_key": "admin-secret"},
         )
         self.assertEqual(response.status_code, 302)
         session = self.client.session
@@ -457,39 +467,39 @@ class AdminLoginRateLimitTests(TestCase):
     def tearDown(self):
         cache.clear()
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_throttles_after_many_failures(self):
         url = reverse("accounts:admin_login")
         for _ in range(10):
             response = self.client.post(
                 url,
-                {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+                {"username": "admin", "password": "pass12345", "access_key": "wrong"},
             )
             self.assertEqual(response.status_code, 200)
 
         throttled = self.client.post(
             url,
-            {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+            {"username": "admin", "password": "pass12345", "access_key": "wrong"},
         )
         self.assertEqual(throttled.status_code, 200)
         self.assertContains(throttled, "尝试次数过多")
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_correct_credentials_still_log_in_when_under_limit(self):
         url = reverse("accounts:admin_login")
         for _ in range(3):
             self.client.post(
                 url,
-                {"username": "admin", "password": "wrong", "admin_key": "wrong"},
+                {"username": "admin", "password": "wrong", "access_key": "wrong"},
             )
         response = self.client.post(
             url,
-            {"username": "admin", "password": "pass12345", "admin_key": "secret-key"},
+            {"username": "admin", "password": "pass12345", "access_key": "admin-secret"},
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["Location"], reverse("staff:dashboard"))
 
-    @override_settings(ADMIN_LOGIN_KEY="secret-key", RATE_LIMIT_BACKEND="database")
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", RATE_LIMIT_BACKEND="database")
     def test_admin_login_uses_shared_database_throttle(self):
         from common.models import RateLimitBucket
 
@@ -497,7 +507,7 @@ class AdminLoginRateLimitTests(TestCase):
         for _ in range(11):
             self.client.post(
                 url,
-                {"username": "admin", "password": "pass12345", "admin_key": "wrong"},
+                {"username": "admin", "password": "pass12345", "access_key": "wrong"},
                 REMOTE_ADDR="198.51.100.7",
             )
 
@@ -699,107 +709,142 @@ class SeedDevAdminCommandTests(TestCase):
         self.assertNotIn("hidden-input-password", output.getvalue())
 
 
-class FirstAdminSetupViewTests(TestCase):
-    setup_password = "a-strong-bootstrap-pass"
+@override_settings(STAFF_ACCESS_KEY="staff-secret", ADMIN_ACCESS_KEY="admin-secret")
+class RoleRegistrationViewTests(TestCase):
+    password = "a-strong-registration-pass"
 
-    def setup_payload(self, **overrides):
+    def registration_payload(self, username, **extra):
         payload = {
-            "username": "event-admin",
-            "password": self.setup_password,
-            "password_confirm": self.setup_password,
-            "setup_key": "setup-secret",
+            "username": username,
+            "password1": self.password,
+            "password2": self.password,
         }
-        payload.update(overrides)
+        payload.update(extra)
         return payload
 
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_required_installation_renders_one_time_setup_form(self):
-        response = self.client.get(reverse("accounts:first_admin_setup"))
+    def test_login_selector_exposes_all_registration_roles(self):
+        response = self.client.get(reverse("accounts:login"))
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "首次初始化")
-        self.assertContains(response, 'name="setup_key"')
-        self.assertContains(response, 'name="password_confirm"')
+        self.assertContains(response, reverse("accounts:register"))
+        self.assertContains(response, reverse("accounts:staff_register"))
+        self.assertContains(response, reverse("accounts:admin_register"))
 
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_wrong_setup_key_does_not_provision(self):
+    def test_participant_registration_creates_participant_and_logs_in(self):
         response = self.client.post(
-            reverse("accounts:first_admin_setup"),
-            self.setup_payload(setup_key="wrong"),
+            reverse("accounts:register"),
+            self.registration_payload("new-participant"),
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "管理员密钥错误")
-        self.assertEqual(User.objects.count(), 0)
+        self.assertRedirects(response, reverse("public_portal:home"), fetch_redirect_response=False)
+        user = User.objects.get(username="new-participant")
+        self.assertEqual(user.role, User.Role.PARTICIPANT)
+        self.assertTrue(user.check_password(self.password))
 
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_placeholder_setup_key_does_not_provision(self):
-        with self.settings(ADMIN_LOGIN_KEY="change-me-with-a-local-admin-login-key"):
-            response = self.client.post(
-                reverse("accounts:first_admin_setup"),
-                self.setup_payload(setup_key="change-me-with-a-local-admin-login-key"),
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "管理员密钥尚未安全配置")
-        self.assertEqual(User.objects.count(), 0)
-
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_password_confirmation_mismatch_does_not_provision(self):
-        response = self.client.post(
-            reverse("accounts:first_admin_setup"),
-            self.setup_payload(password_confirm="different-password"),
+    def test_staff_registration_requires_staff_key(self):
+        wrong = self.client.post(
+            reverse("accounts:staff_register"),
+            self.registration_payload("blocked-staff", access_key="wrong"),
         )
+        self.assertEqual(wrong.status_code, 200)
+        self.assertContains(wrong, "工作人员密钥错误")
+        self.assertFalse(User.objects.filter(username="blocked-staff").exists())
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "两次输入的密码不一致")
-        self.assertEqual(User.objects.count(), 0)
+        valid = self.client.post(
+            reverse("accounts:staff_register"),
+            self.registration_payload("new-staff", access_key="staff-secret"),
+        )
+        self.assertRedirects(valid, reverse("staff:dashboard"), fetch_redirect_response=False)
+        self.assertEqual(User.objects.get(username="new-staff").role, User.Role.STAFF)
 
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_valid_setup_provisions_and_redirects_to_staff(self):
+    def test_admin_registration_uses_public_role_flow_for_first_admin(self):
         response = self.client.post(
-            reverse("accounts:first_admin_setup"),
-            self.setup_payload(),
+            reverse("accounts:admin_register"),
+            self.registration_payload("first-admin", access_key="admin-secret"),
         )
 
         self.assertRedirects(response, reverse("staff:dashboard"), fetch_redirect_response=False)
-        user = User.objects.get(username="event-admin")
+        user = User.objects.get(username="first-admin")
         self.assertTrue(user.is_admin)
         self.assertFalse(user.is_superuser)
         self.assertTrue(self.client.session.get("artflow_admin_verified"))
-        self.assertEqual(InstallationState.objects.get().initialized_at is None, False)
+        self.assertIsNotNone(InstallationState.objects.get().initialized_at)
 
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_completed_installation_hides_setup_endpoint(self):
-        provision_first_admin(username="event-admin", password=self.setup_password)
+    def test_admin_registration_allows_another_admin_after_bootstrap(self):
+        provision_first_admin(username="first-admin", password=self.password)
 
-        response = self.client.get(reverse("accounts:first_admin_setup"))
-
-        self.assertEqual(response.status_code, 404)
-
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_uninitialized_installation_with_existing_admin_hides_setup_endpoint(self):
-        create_provisioned_user(
-            username="legacy-admin",
-            password=self.setup_password,
-            role=User.Role.ADMIN,
+        response = self.client.post(
+            reverse("accounts:admin_register"),
+            self.registration_payload("second-admin", access_key="admin-secret"),
         )
 
-        response = self.client.get(reverse("accounts:first_admin_setup"))
+        self.assertRedirects(response, reverse("staff:dashboard"), fetch_redirect_response=False)
+        self.assertEqual(User.objects.get(username="second-admin").role, User.Role.ADMIN)
 
-        self.assertEqual(response.status_code, 404)
+    def test_legacy_setup_route_is_not_available(self):
+        self.assertEqual(self.client.get("/setup/").status_code, 404)
 
-    @override_settings(ADMIN_LOGIN_KEY="setup-secret")
-    def test_setup_post_requires_csrf_token(self):
+    def test_registration_post_requires_csrf_token(self):
         client = Client(enforce_csrf_checks=True)
 
         response = client.post(
-            reverse("accounts:first_admin_setup"),
-            self.setup_payload(),
+            reverse("accounts:staff_register"),
+            self.registration_payload("csrf-staff", access_key="staff-secret"),
         )
 
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(User.objects.count(), 0)
+        self.assertFalse(User.objects.filter(username="csrf-staff").exists())
+
+
+@override_settings(STAFF_ACCESS_KEY="staff-secret", ADMIN_ACCESS_KEY="admin-secret")
+class RoleRegistrationServiceTests(TestCase):
+    def test_services_create_the_declared_roles_through_account_authority(self):
+        participant = register_participant_account(
+            username="service-participant",
+            password="safe-pass-12345",
+        )
+        staff = register_staff_account(
+            username="service-staff",
+            password="safe-pass-12345",
+            access_key="staff-secret",
+        )
+        admin = register_admin_account(
+            username="service-admin",
+            password="safe-pass-12345",
+            access_key="admin-secret",
+        )
+
+        self.assertEqual(participant.role, User.Role.PARTICIPANT)
+        self.assertEqual(staff.role, User.Role.STAFF)
+        self.assertEqual(admin.role, User.Role.ADMIN)
+        self.assertTrue(staff.is_staff)
+        self.assertTrue(admin.is_staff)
+        self.assertIsNone(AuditLog.objects.filter(new_value__contains="staff-secret").first())
+        self.assertIsNone(AuditLog.objects.filter(new_value__contains="admin-secret").first())
+
+    def test_invalid_service_keys_do_not_create_accounts(self):
+        with self.assertRaisesMessage(ValidationError, "工作人员密钥错误"):
+            register_staff_account(
+                username="blocked-staff-service",
+                password="safe-pass-12345",
+                access_key="wrong",
+            )
+        with self.assertRaisesMessage(ValidationError, "管理员密钥错误"):
+            register_admin_account(
+                username="blocked-admin-service",
+                password="safe-pass-12345",
+                access_key="wrong",
+            )
+
+        self.assertFalse(User.objects.filter(username__startswith="blocked-").exists())
+
+    def test_access_key_is_not_persisted_on_user_or_session(self):
+        user = register_staff_account(
+            username="secret-free-staff",
+            password="safe-pass-12345",
+            access_key="staff-secret",
+        )
+        self.assertNotIn("staff-secret", user.__dict__.values())
+        self.assertNotIn("staff-secret", str(user.__dict__))
 
 
 class FirstAdminProvisioningTests(TestCase):

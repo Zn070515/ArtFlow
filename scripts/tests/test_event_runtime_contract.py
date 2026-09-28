@@ -27,7 +27,7 @@ def test_event_launcher_declares_safe_runtime_contract():
     assert "Test-UsableIpv4" in launcher
     assert "Get-LocalIpv4" in launcher
     assert "$HostAddress.Trim()" in launcher
-    assert "First-admin setup (before provisioning):" in launcher
+    assert "Admin registration URL:" in launcher
 
 
 def test_event_launcher_does_not_add_unsafe_network_or_data_operations():
@@ -46,7 +46,8 @@ def test_event_environment_example_is_non_secret_and_loopback_neutral():
 
     assert EVENT_ENV_EXAMPLE_PATH.is_file()
     assert "SECRET_KEY=change-me" in environment
-    assert "ADMIN_LOGIN_KEY=change-me" in environment
+    assert "STAFF_ACCESS_KEY=change-me" in environment
+    assert "ADMIN_ACCESS_KEY=change-me" in environment
     assert "POSTGRES_PASSWORD=change-me" in environment
     assert "ARTFLOW_ORGANIZATION_NAME=" in environment
     assert "ARTFLOW_EVENT_BIND_ADDRESS=0.0.0.0" not in environment
