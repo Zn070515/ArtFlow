@@ -52,6 +52,7 @@ from ruleset.resolver import (
     stage_consumed_duel_keys,
     stage_consumed_scopes,
 )
+from ruleset.services import require_runtime_readiness
 from voting.models import VoteSession
 
 from .models import (
@@ -324,6 +325,10 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
         raise PermissionDenied("轮次不属于当前活动。")
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
+    # P0-B runtime boundary: the frozen ruleset's deferred roster facts (SELECT quotas,
+    # vote candidate rosters, group capacity, full/subset coverage) are proven here — the
+    # last moment before they become load-bearing. Fail closed.
+    require_runtime_readiness(locked_activity)
 
     source = locked_round.effective_roster_source()
     singers = _round_source_singers(locked_round)

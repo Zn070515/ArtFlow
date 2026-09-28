@@ -578,9 +578,11 @@ class SchemaCheckpointTests(SimpleTestCase):
 class _RulesetModelBase(_CharacterizationBase):
     def make_ruleset(self, *, is_test_mode=False):
         activity = self.make_activity(is_test_mode=is_test_mode)
-        # A bound activity freeze (§39) must prove its entry roster: an unverifiable
-        # candidate-pool size is escalated to a hard ERROR. Give the activity one approved
-        # singer so ruleset freezes in these tests can actually pass bound validation.
+        # A settled roster (REHEARSAL) is a real, provable fact, and a top-N SELECT over a
+        # genuinely empty one is a QUOTA_EXCEEDED error. Give the activity one approved
+        # singer so ruleset freezes in these tests can pass bound validation. An *unsettled*
+        # roster would need no singer: those checks defer instead (see
+        # ruleset/test_deferred_roster.py).
         self.make_singer(
             activity,
             username=f"entry-{activity.pk}",

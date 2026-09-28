@@ -23,6 +23,7 @@ import json
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import RULESET_FREEZE, authority_write
 from common.models import AuditLog
+from core.models import Activity
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -403,6 +404,62 @@ def update_ruleset_binding(
     return locked
 
 
+# Phases in which the approved-singer roster is settled. Before these the roster genuinely
+# does not exist yet, so every fact derived from it is UNKNOWN rather than zero — which is
+# what lets a ruleset be confirmed before registration opens (see
+# :func:`validate_ruleset_runtime_readiness`).
+ROSTER_FINAL_PHASES = frozenset(
+    {
+        Activity.Phase.TESTING,  # a rehearsal runs on an already-materialised roster
+        Activity.Phase.REHEARSAL,
+        Activity.Phase.LIVE,
+        Activity.Phase.RESULTS_PENDING,
+        Activity.Phase.RESULTS_PUBLISHED,
+        Activity.Phase.ARCHIVED,
+    }
+)
+
+
+def entry_roster_is_final(activity) -> bool:
+    """Whether the approved-singer roster is settled enough to prove roster facts."""
+    return activity.phase in ROSTER_FINAL_PHASES
+
+
+def current_frozen_version(activity) -> RulesetVersion | None:
+    """The activity's current official FROZEN ruleset authority, if it has one."""
+    return (
+        RulesetVersion._base_manager.filter(
+            ruleset__activity=activity,
+            is_current=True,
+            status=RulesetVersion.Status.FROZEN,
+        )
+        .order_by("-pk")
+        .first()
+    )
+
+
+def require_runtime_readiness(activity) -> ValidationReport | None:
+    """The unified runtime boundary for every "start running the contest" entry point.
+
+    A ruleset is confirmed before registration opens, so the facts that depend on the
+    final roster are DEFERRED at Freeze and proven here — the last moment before they
+    become load-bearing. Returns ``None`` when the activity has no current FROZEN
+    authority (those call sites already refuse to run without one); raises otherwise.
+
+    Attached at :func:`singer_contest.services.prepare_round` (start scoring a round) and
+    :func:`voting.services.open_vote_session` (start collecting ballots) — the two points
+    that actually begin execution. It is deliberately *not* attached to
+    ``maybe_resolve_checkpoints``: that is a result-publishing step downstream of both,
+    it runs after every onsite input batch, and a full bound compile per batch is a heavy
+    price on the hottest path. The rounds whose results it publishes were already gated
+    when they were prepared.
+    """
+    version = current_frozen_version(activity)
+    if version is None:
+        return None
+    return validate_ruleset_runtime_readiness(version)
+
+
 def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
     """Construct the §39 bound freeze context from the DB for a ContestRuleset.
 
@@ -421,7 +478,8 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
 
     activity = version.ruleset.activity
     round_keys = binding.get("round_keys") or {}
-    entry_size = _scoped_entry_count(activity)
+    roster_final = entry_roster_is_final(activity)
+    entry_size = _scoped_entry_count(activity) if roster_final else None
 
     round_ctx: dict[str, dict] = {}
     for rkey, rpk in round_keys.items():
@@ -429,9 +487,12 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
         if contest_round is None:
             continue
         judge_count = contest_round.round_judges.count()
-        entry_count = contest_round.entries.count()
-        scope = "full" if entry_count and entry_size and entry_count >= entry_size else "subset"
-        item: dict = {"judge_count": judge_count, "scope": scope}
+        item: dict = {"judge_count": judge_count}
+        if roster_final:
+            entry_count = contest_round.entries.count()
+            item["scope"] = (
+                "full" if entry_count and entry_size and entry_count >= entry_size else "subset"
+            )
         scale = _round_scale(contest_round)
         if scale:
             item["scale"] = scale
@@ -442,7 +503,7 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
     scoring_rules = binding.get("vote_scoring_rule_keys") or {}
     votes = {}
     for source, vs_pk in (binding.get("vote_keys") or {}).items():
-        vote = _vote_binding(vs_pk, scoring_rules.get(source))
+        vote = _vote_binding(vs_pk, scoring_rules.get(source), roster_final=roster_final)
         if vote:
             votes[source] = vote
     for source, _set_name in (binding.get("audience_keys") or {}).items():
@@ -457,8 +518,9 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
             groups[by] = {"capacity": caps}
 
     return {
+        "entry_roster_final": roster_final,
         "entry_size": entry_size,
-        "entry_candidates": _entry_candidates(version, activity),
+        "entry_candidates": _entry_candidates(version, activity) if roster_final else None,
         "rounds": round_ctx,
         "votes": votes,
         "groups": groups,
@@ -505,7 +567,7 @@ def _round_scale(contest_round) -> str | None:
     return str(int(Decimal(total)))
 
 
-def _vote_binding(vs_pk, rule_snapshot: dict | None = None) -> dict:
+def _vote_binding(vs_pk, rule_snapshot: dict | None = None, *, roster_final: bool = True) -> dict:
     """The bound vote facts a freeze compiles against.
 
     Without an explicitly bound conversion rule a session yields RAW vote counts (unit
@@ -523,17 +585,17 @@ def _vote_binding(vs_pk, rule_snapshot: dict | None = None) -> dict:
     vs = VoteSession.objects.filter(pk=vs_pk).first()
     if vs is None:
         return {}
-    candidates = [
-        str(singer_id)
-        for singer_id in VoteOption.objects.filter(vote_session_id=vs_pk)
-        .order_by("pk")
-        .values_list("singer_id", flat=True)
-    ]
     binding = {
         "purpose": vs.purpose,
         "requires_ticket": vs.requires_ticket,
-        "candidates": candidates,
     }
+    if roster_final:
+        binding["candidates"] = [
+            str(singer_id)
+            for singer_id in VoteOption.objects.filter(vote_session_id=vs_pk)
+            .order_by("pk")
+            .values_list("singer_id", flat=True)
+        ]
     if rule_snapshot:
         binding["scale"] = rule_snapshot.get("scale") or "hundred"
         binding["conversion"] = rule_snapshot.get("mode")
@@ -552,6 +614,28 @@ def _annotated_capacity(rpk, activity):
         .annotate(n=Count("performances"))
         .values_list("n", flat=True)
     )
+
+
+def validate_ruleset_runtime_readiness(version: RulesetVersion) -> ValidationReport:
+    """Re-run a frozen ruleset's deferred roster checks against the settled roster.
+
+    A ruleset may be frozen before registration opens: its *definition* is provable then,
+    its *roster* is not. Every check that had to wait is recorded as a DEFERRED issue at
+    Freeze time and re-run here, where the roster is finally the authority. This is the
+    last gate before the competition runs, so it fails closed in both directions — a roster
+    that still does not exist is refused outright rather than read as an empty pass, and a
+    roster that cannot support the frozen plan raises :class:`RulesetInvalidError`.
+    """
+    if version.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("只有已冻结赛制可以核定运行时名单。")
+    activity = version.ruleset.activity
+    if not entry_roster_is_final(activity):
+        raise ValidationError("报名名单尚未确定，无法核定运行时名单。")
+    context = build_bound_context(version, version.binding or {})
+    report, plan = compile_definition(version.definition, context=context, bound=True)
+    if not report.passes():
+        raise RulesetInvalidError(report, plan)
+    return report
 
 
 @transaction.atomic

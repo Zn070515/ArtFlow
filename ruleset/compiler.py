@@ -46,6 +46,7 @@ POOL_FULL, POOL_SUBSET, POOL_UNKNOWN = "full", "subset", "unknown"
 
 class Severity(StrEnum):
     ERROR = "error"  # hard violation; freeze must abort
+    DEFERRED = "deferred"  # provable only once the runtime roster exists (P0-B)
     WARN = "warn"  # advisory / unverifiable-until-bound; non-blocking
     REVIEW = "review"  # M1-E must stop and ask a human at a decisive cutoff
     INFO = "info"  # informational (e.g. "count check skipped: no binding")
@@ -858,6 +859,18 @@ def _check_vote_roster(
     """
     candidates = vote.get("candidates")
     if candidates is None:
+        if ctx.get("entry_roster_final", True) is False:
+            # The session is bound, but its candidate list cannot exist before the roster
+            # does. Record the obligation rather than letting the check vanish.
+            issues.append(
+                ReportIssue(
+                    "VOTE_ROSTER_DEFERRED",
+                    Severity.WARN,
+                    node["key"],
+                    "vote_source",
+                    f"报名名单未确定，投票 {source} 的候选名单一致性待运行时核定。",
+                )
+            )
         return
     actual = frozenset(str(c) for c in candidates)
     if node.get("source") == ENTRY_KEY:
@@ -1037,21 +1050,40 @@ _BOUND_STRICT_CODES = {
     "ODD_UNVERIFIABLE",
     "SCORE_DEPENDENCY_UNVERIFIABLE",
     "VOTE_UNVERIFIABLE",
+    "VOTE_ROSTER_DEFERRED",
     "SCALE_UNDECLARED",
 }
 
 
-def _escalate_unverifiable(issues: tuple[ReportIssue, ...]) -> tuple[ReportIssue, ...]:
+# Roster-dependent facts. Before registration closes the approved-singer roster does not
+# exist, so these are unknown rather than violated — a pre-registration Freeze must not read
+# the missing roster as 0 (a false QUOTA_EXCEEDED) nor treat the check as satisfied. They
+# escalate to DEFERRED instead of ERROR and are re-run by
+# ``ruleset.services.validate_ruleset_runtime_readiness`` once the roster is settled.
+_ROSTER_DEFERRED_CODES = frozenset(
+    {
+        "QUOTA_UNVERIFIABLE",
+        "ODD_UNVERIFIABLE",
+        "SCORE_DEPENDENCY_UNVERIFIABLE",
+        "VOTE_ROSTER_DEFERRED",
+    }
+)
+
+
+def _escalate_unverifiable(
+    issues: tuple[ReportIssue, ...], *, roster_final: bool = True
+) -> tuple[ReportIssue, ...]:
     out = []
     for issue in issues:
         if issue.code in _BOUND_STRICT_CODES and issue.severity is Severity.WARN:
+            deferred = not roster_final and issue.code in _ROSTER_DEFERRED_CODES
             out.append(
                 ReportIssue(
                     issue.code,
-                    Severity.ERROR,
+                    Severity.DEFERRED if deferred else Severity.ERROR,
                     issue.node_key,
                     issue.path,
-                    f"绑定模式：{issue.message}",
+                    ("待运行时核定：" if deferred else "绑定模式：") + issue.message,
                     issue.context,
                 )
             )
@@ -1124,7 +1156,10 @@ def compile_definition(
                 }
             )
 
-    report = ValidationReport(_escalate_unverifiable(tuple(issues)) if bound else tuple(issues))
+    roster_final = ctx.get("entry_roster_final", True) is not False
+    report = ValidationReport(
+        _escalate_unverifiable(tuple(issues), roster_final=roster_final) if bound else tuple(issues)
+    )
 
     summary = {
         "total_nodes": len(nodes),
