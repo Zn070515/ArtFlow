@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}问卷预览 — {{ activity.title }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-8">
+    <div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-2 rounded mb-4">
+        工作人员预览：{{ context_label }}。这里展示的是选手在已冻结赛制下会看到的页面。
+    </div>
+
+    <p class="text-sm text-gray-500 mb-2">
+        {% for key, label in preview_contexts.items %}
+        <a href="{% url 'staff:ruleset_questionnaire_preview' version.pk key %}"
+           class="mr-2 {% if key == context_key %}font-semibold text-brand{% else %}text-gray-500 hover:text-gray-800{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </p>
+
+    <h1 class="text-lg font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
+    <p class="text-sm text-gray-600 mb-4">
+        目前需要完成 {{ completion.required }} 项，已完成 {{ completion.answered }} 项
+        {% if completion.upcoming %}（另有 {{ completion.upcoming }} 项稍后开放）{% endif %}
+    </p>
+
+    {% for page in pages %}
+    <section class="mb-6">
+        <h2 class="text-base font-semibold text-gray-900 mb-2">{{ page.title }}</h2>
+        {% for section in page.sections %}
+        <div class="mb-4">
+            <h3 class="text-sm text-gray-500 mb-2">{{ section.title }}</h3>
+            {% for q in section.questions %}
+            <div class="mb-3 rounded border {% if q.supplement %}border-amber-300 bg-amber-50{% elif not q.visible %}border-dashed border-gray-200{% else %}border-gray-200{% endif %} px-3 py-2">
+                <p class="text-sm font-medium text-gray-800">
+                    {{ q.label }}
+                    {% if q.required and q.due %}<span class="text-red-600">*</span>{% endif %}
+                </p>
+                {% if q.type == 'notice' %}
+                <p class="text-sm text-gray-600">{{ q.description }}</p>
+                {% elif not q.visible %}
+                <p class="text-xs text-gray-400">当前条件下隐藏，选手看不到这一题</p>
+                {% else %}
+                <p class="text-sm text-gray-700">
+                    {% if q.type == 'boolean' %}{% if q.checked %}是{% else %}否{% endif %}
+                    {% elif q.type == 'file' %}{% if q.file_name %}{{ q.file_name }}{% else %}尚未上传{% endif %}
+                    {% elif q.value_text %}{{ q.value_text }}
+                    {% else %}<span class="text-gray-400">尚未填写</span>{% endif %}
+                </p>
+                {% if not q.due %}<p class="text-xs text-gray-400">稍后开放</p>{% endif %}
+                {% if q.supplement %}<p class="text-xs text-amber-800">⚠ 需补交</p>{% endif %}
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </section>
+    {% endfor %}
+
+    <a href="{% url 'staff:ruleset_questionnaire' version.pk %}" class="text-sm text-brand hover:underline">返回设计器</a>
+</div>
+{% endblock %}

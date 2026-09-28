@@ -1,4 +1,5 @@
 from django.urls import path
+from questionnaire import staff_views as questionnaire_staff_views
 
 from . import views
 
@@ -204,6 +205,16 @@ urlpatterns = [
     ),
     path("rulesets/create/", views.contest_ruleset_create, name="contest_ruleset_create"),
     path("rulesets/<int:pk>/edit/", views.ruleset_edit, name="ruleset_edit"),
+    path(
+        "rulesets/<int:pk>/questionnaire/",
+        questionnaire_staff_views.builder_view,
+        name="ruleset_questionnaire",
+    ),
+    path(
+        "rulesets/<int:pk>/questionnaire/preview/<str:context>/",
+        questionnaire_staff_views.preview_view,
+        name="ruleset_questionnaire_preview",
+    ),
     path("rulesets/<int:pk>/bind/", views.ruleset_bind, name="ruleset_bind"),
     path("rulesets/<int:pk>/validate/", views.ruleset_validate, name="ruleset_validate"),
     path("rulesets/<int:pk>/preview/", views.ruleset_preview, name="ruleset_preview"),

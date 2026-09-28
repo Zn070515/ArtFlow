@@ -7,6 +7,7 @@
     "accounts/views.py",
     "common/authority.py",
     "files/services.py",
+    "questionnaire/builder.py",
     "questionnaire/compiler.py",
     "questionnaire/conditions.py",
     "questionnaire/cross_domain.py",
@@ -15,6 +16,7 @@
     "questionnaire/runtime.py",
     "questionnaire/schema.py",
     "questionnaire/services.py",
+    "questionnaire/staff_views.py",
     "questionnaire/views.py",
     "singer_contest/services.py",
     "staff_panel/views.py"
