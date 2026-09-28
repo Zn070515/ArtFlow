@@ -135,7 +135,7 @@ class AdminLoginForm(AuthenticationForm):
     error_messages = {
         **AuthenticationForm.error_messages,
         "not_admin": "该账号不是管理员账号。",
-        "missing_key": "系统尚未配置管理员登录密钥。",
+        "missing_key": "系统尚未安全配置管理员密钥。",
         "invalid_key": "管理员密钥错误。",
     }
 

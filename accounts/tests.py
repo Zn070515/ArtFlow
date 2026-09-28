@@ -116,6 +116,30 @@ class LoginModeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "不属于工作人员登录入口")
 
+    @override_settings(STAFF_ACCESS_KEY="staff-secret", ADMIN_ACCESS_KEY="admin-secret")
+    def test_staff_and_admin_login_keys_are_not_interchangeable(self):
+        response = self.client.post(
+            reverse("accounts:staff_login"),
+            {
+                "username": "staff",
+                "password": "pass12345",
+                "access_key": "admin-secret",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "工作人员密钥错误")
+
+        response = self.client.post(
+            reverse("accounts:admin_login"),
+            {
+                "username": "admin",
+                "password": "pass12345",
+                "access_key": "staff-secret",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "管理员密钥错误")
+
     def test_login_redirects_only_to_a_same_host_next(self):
         response = self.client.post(
             f"{reverse('accounts:participant_login')}?next=/contest/",
