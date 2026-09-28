@@ -5706,6 +5706,7 @@ class ResultBoardTests(TestCase):
             computed_by=self.staff,
             round_keys={"r1": contest_round},
         )
+        assert isinstance(ready, StageResult)
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
         login_admin(self.client, self.admin)
         detail = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
