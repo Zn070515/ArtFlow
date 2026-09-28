@@ -2526,7 +2526,9 @@ def qr_generate(request, pk):
 def qr_image(request, pk, kind):
     activity = get_object_or_404(Activity, pk=pk)
     if kind == "registration":
-        path = f"{reverse('singer_contest:apply')}?activity={activity.pk}"
+        # The QR points at the activity's *real* entry, which resolves to the questionnaire
+        # or the legacy form depending on what that activity's frozen ruleset carries.
+        path = reverse("register:activity", args=[activity.pk])
     elif kind == "vote":
         vote_session = activity.vote_sessions.order_by("-created_at").first()
         if not vote_session:

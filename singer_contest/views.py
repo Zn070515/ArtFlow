@@ -42,7 +42,15 @@ def apply_view(request):
     deliberately not deleted: it is on the *Contract* step of the Expand → Migrate → Switch
     → Contract sequence and retires only once a rehearsal has confirmed the new path. See
     ``docs/singer-questionnaire-workflow.md``.
+
+    A deep link naming an activity is resolved rather than rendered: a QR code has to land
+    on that activity's real entry, and if the activity's frozen ruleset carries a
+    questionnaire then this form is the wrong one.
     """
+    if request.method == "GET" and request.GET.get("activity"):
+        from questionnaire.views import register_entry
+
+        return register_entry(request, int(request.GET["activity"]))
     activities = Activity.objects.filter(
         activity_type=Activity.Type.SINGER_CONTEST,
         phase=Activity.Phase.REGISTRATION_OPEN,

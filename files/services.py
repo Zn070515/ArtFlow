@@ -520,6 +520,98 @@ def _reset_matching_check(owner, purpose, *, question_key=""):
 
 
 @transaction.atomic
+def reconcile_questionnaire_material_checks(*, registration, version, plan):
+    """One material check per questionnaire question, identified by its question key.
+
+    This is the questionnaire's counterpart to :func:`_reconcile_owner_checks`, and it is
+    what makes a staff review possible at all: without it a questionnaire registration has
+    no checks, so the staff detail page shows nothing and a supplement can never be granted.
+
+    ``question_key`` is the identity. ``item_name`` is only a label snapshot for display and
+    history — matching on it would drift the moment a question was renamed. A file question
+    carries the technical purpose it accepts; a text question carries none, because its
+    check stands for "was this answered" rather than "was this uploaded".
+
+    Staff review state survives a reconcile, and is dropped only when the material the check
+    stands for actually changes: an approval of the old thing must not carry over to a new
+    one.
+    """
+    from questionnaire.models import QuestionnaireResponse
+    from questionnaire.runtime import resolve_question_value
+    from questionnaire.schema import NOTICE_TYPE
+
+    owner_filter = _owner_filter(registration)
+    response = QuestionnaireResponse.objects.filter(
+        singer_registration=registration, ruleset_version=version
+    ).first()
+    answers = (response.answers if response else {}) or {}
+    present = {
+        row.question_key: row
+        for row in SubmissionFile.objects.filter(**owner_filter, is_current=True).exclude(
+            question_key=""
+        )
+    }
+    current = {
+        check.question_key: check
+        for check in MaterialCheck.objects.filter(**owner_filter).exclude(question_key="")
+    }
+
+    seen = set()
+    checks = []
+    for index, question in enumerate(plan.questions):
+        if question["type"] == NOTICE_TYPE:
+            continue
+        key = question["key"]
+        seen.add(key)
+        purpose = (question.get("file") or {}).get("purpose") or ""
+        value = resolve_question_value(
+            question, answers=answers, registration=registration, files=present
+        )
+        # A file question is satisfied by a stored file; anything else by a non-blank
+        # answer, using the same rule that decides whether a required question is missing.
+        from questionnaire.conditions import is_blank
+
+        satisfied = bool(purpose) and key in present
+        if not purpose:
+            satisfied = not is_blank(value)
+        existing = current.get(key)
+        defaults: dict = {
+            "sort_order": index,
+            "item_name": question["label"],
+            "file_purpose": purpose,
+            "source_ruleset_version": version,
+        }
+        if existing is not None and existing.file_purpose != purpose:
+            # The question no longer asks for the material the check was approved for.
+            defaults["status"] = (
+                MaterialCheck.Status.UPLOADED if satisfied else MaterialCheck.Status.MISSING
+            )
+            defaults["review_note"] = ""
+            defaults["reviewed_by"] = None
+            defaults["reviewed_at"] = None
+        elif existing is None:
+            defaults["status"] = (
+                MaterialCheck.Status.UPLOADED if satisfied else MaterialCheck.Status.MISSING
+            )
+        elif existing.status == MaterialCheck.Status.MISSING and satisfied:
+            defaults["status"] = MaterialCheck.Status.UPLOADED
+        elif existing.status != MaterialCheck.Status.MISSING and not satisfied:
+            # Something that was there is gone. The participant's own edits reset their
+            # review in the storage services; this catches the rest.
+            defaults["status"] = MaterialCheck.Status.MISSING
+        else:
+            defaults["status"] = existing.status
+        check, _created = MaterialCheck.objects.update_or_create(
+            question_key=key, defaults=defaults, **owner_filter
+        )
+        checks.append(check)
+    stale = [check for key, check in current.items() if key not in seen]
+    if stale:
+        MaterialCheck.objects.filter(pk__in=[check.pk for check in stale]).delete()
+    return checks
+
+
+@transaction.atomic
 def review_material_check(check, *, status, note, actor):
     """Record a staff review decision on a material check and audit it.
 

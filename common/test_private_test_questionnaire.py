@@ -116,8 +116,12 @@ class FillRegistrationTests(_CharacterizationBase):
         return user
 
     def frozen_version(self):
+        # Registration is open: this fixture rehearses registering, and the write authority
+        # for a questionnaire answer is the phase. TESTING would refuse the submission.
         activity = self.make_activity(
-            is_test_mode=True, phase=Activity.Phase.TESTING, title=f"priv-{uuid4().hex[:6]}"
+            is_test_mode=True,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            title=f"priv-{uuid4().hex[:6]}",
         )
         ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=True)
         binding = {}

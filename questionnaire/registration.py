@@ -21,6 +21,7 @@ from common.lifecycle import runtime_is_test
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from files.services import reconcile_questionnaire_material_checks
 from singer_contest.models import RoundEntry, SingerRegistration
 
 from .compiler import QuestionnairePlan, compile_questionnaire
@@ -158,6 +159,9 @@ def get_or_create_draft_registration(*, version, user):
         user=user,
         defaults={"is_test_data": runtime_is_test(activity)},
     )
+    first_open = not QuestionnaireResponse.objects.filter(
+        singer_registration=registration, ruleset_version=version, questionnaire_key=plan.key
+    ).exists()
     response = get_or_create_response(
         registration=registration,
         ruleset_version=version,
@@ -165,6 +169,13 @@ def get_or_create_draft_registration(*, version, user):
         schema_hash=plan.schema_hash,
         is_test_data=registration.is_test_data,
     )
+    if first_open:
+        # One material check per question, so staff have something to review and to send
+        # back. Done on the first open rather than on every request: this is called from
+        # every autosave, upload and page view.
+        reconcile_questionnaire_material_checks(
+            registration=registration, version=version, plan=plan
+        )
     return registration, response
 
 
@@ -257,6 +268,9 @@ def submit_registration(
 
     _save_bound_fields(registration, fields)
     saved = save_draft_answers(response, answers=unbound, schema_hash=plan.schema_hash)
+    # Re-reconcile on the way in: a question added by a successor, or a file that arrived
+    # since the last reconcile, has to be visible to staff from the moment it is submitted.
+    reconcile_questionnaire_material_checks(registration=registration, version=version, plan=plan)
     registration.pre_status = SingerRegistration.PreStatus.SUBMITTED
     registration.save(update_fields=["pre_status", "updated_at"])
     return mark_submitted(saved)

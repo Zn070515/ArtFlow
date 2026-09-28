@@ -417,14 +417,17 @@ class ClosedRegistrationTests(_FormBase):
             self.activity.save(update_fields=["phase"])
 
     def _grant_supplement(self, question_key):
+        """Send one question back. The check already exists — opening the form created one
+        per question — so this flips its status rather than adding a second."""
         from files.models import MaterialCheck
 
-        MaterialCheck.objects.create(
+        check, _created = MaterialCheck.objects.get_or_create(
             singer_registration=self.registration,
-            item_name=question_key,
             question_key=question_key,
-            status=MaterialCheck.Status.NEEDS_SUPPLEMENT,
+            defaults={"item_name": question_key},
         )
+        check.status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+        check.save(update_fields=["status"])
 
     def _post(self, answers):
         return self.client.post(

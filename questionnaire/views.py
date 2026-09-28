@@ -22,7 +22,8 @@ from core.models import Activity
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 from ruleset.services import current_frozen_version
 from singer_contest.models import ContestRound, SingerRegistration
@@ -319,6 +320,55 @@ def autosave_view(request: HttpRequest, activity_pk: int):
             "schema_hash": saved.schema_hash,
         }
     )
+
+
+def _has_questionnaire(version) -> bool:
+    try:
+        root = json.loads(version.definition)
+    except (TypeError, ValueError):
+        return False
+    return isinstance(root, dict) and root.get("questionnaire") is not None
+
+
+@login_required
+def register_entry(request: HttpRequest, activity_pk: int | None = None):
+    """The one place every registration link lands.
+
+    Resolves to the questionnaire when the activity's current FROZEN ruleset carries one,
+    and to the legacy fixed form when it does not. Both paths are live during the Switch
+    step, and a *participant* should never have to know which one an activity uses — least
+    of all from a QR code, which has to point at that activity's real entry rather than at
+    whichever form happened to be written first.
+    """
+    if activity_pk is None:
+        activities = Activity.objects.filter(
+            activity_type=CONTEST_TYPE, phase=Activity.Phase.REGISTRATION_OPEN
+        ).order_by("-created_at")
+        if not _is_staff(request.user):
+            # The public path shows FORMAL activities only; a test activity is reachable
+            # by staff and by nobody who merely guessed a primary key.
+            activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+        return render(
+            request,
+            "questionnaire/register.html",
+            {
+                "activities": [
+                    {
+                        "activity": activity,
+                        "uses_questionnaire": (
+                            (version := current_frozen_version(activity)) is not None
+                            and _has_questionnaire(version)
+                        ),
+                    }
+                    for activity in activities
+                ]
+            },
+        )
+    activity = _activity_or_404(activity_pk)
+    version = current_frozen_version(activity)
+    if version is not None and _has_questionnaire(version):
+        return redirect("questionnaire:form", activity_pk=activity.pk)
+    return redirect(f"{reverse('singer_contest:apply')}?activity={activity.pk}")
 
 
 @login_required
