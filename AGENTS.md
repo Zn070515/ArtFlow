@@ -8,6 +8,7 @@ ArtFlow is a Django monolith for student arts department activity operations. Co
 - `tickets/`: tickets and ticket access sessions for the operator/check-in flow.
 - `core/`: shared `Activity` model and activity phase/lock state.
 - `ruleset/`: ruleset templates, contest rulesets, and versioned rulesets.
+- `questionnaire/`: the participant questionnaire DSL, its compiled plan, registration drafts and submissions, and the staff designer. Frozen with the ruleset it belongs to.
 - `common/`: audit, authority, business-rule, lifecycle, and maintenance helpers.
 - `public_portal/`: public homepage, announcements, showcases, result posts.
 - `files/`: submission files, material requirements, material checks.

@@ -387,6 +387,10 @@ def delete_submission_file(submission_file: SubmissionFile) -> None:
         transaction.on_commit(partial(delete_storage_object, storage, stored_name))
 
 
+# Legacy. The fallback material table for a singer activity that has neither configured
+# requirements nor a frozen questionnaire. A ruleset that carries a questionnaire is the
+# authority on what a singer must submit; this remains for the activities that do not have
+# one yet, and is not the place to add a new requirement.
 DEFAULT_SINGER_REQUIREMENTS = [
     ("基本信息", ""),
     ("联系方式", ""),
