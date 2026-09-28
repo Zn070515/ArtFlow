@@ -18,6 +18,7 @@ restore_database="${ARTFLOW_RESTORE_DATABASE:-artflow_restore}"
 network="${compose_project}_artflow_internal"
 restore_container="${compose_project}-backup-restore-${RANDOM}${RANDOM}"
 media_extract_dir="$(mktemp -d)"
+chmod 0755 "$media_extract_dir"
 
 [[ "$compose_project" =~ ^[A-Za-z0-9_-]+$ ]] || die 'invalid Compose project name'
 [[ "$restore_database" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || die 'invalid restore database name'

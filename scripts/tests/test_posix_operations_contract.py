@@ -47,6 +47,7 @@ def test_posix_deploy_and_restore_scripts_keep_release_and_backup_boundaries():
 def test_posix_restore_waits_for_the_stable_postgres_server():
     restore = (REPOSITORY_ROOT / "scripts" / "restore-verify.sh").read_text(encoding="utf-8")
 
+    assert 'chmod 0755 "$media_extract_dir"' in restore
     assert "PostgreSQL init process complete; ready for start up." in restore
     assert "docker logs --tail 80" in restore
     assert restore.count("--command 'SELECT 1;'") == 2
