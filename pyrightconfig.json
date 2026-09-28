@@ -7,6 +7,9 @@
     "accounts/views.py",
     "common/authority.py",
     "core/services.py",
+    "questionnaire/compiler.py",
+    "questionnaire/conditions.py",
+    "questionnaire/schema.py",
     "staff_panel/views.py",
     "singer_contest/services.py"
   ],
