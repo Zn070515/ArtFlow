@@ -27,6 +27,32 @@ from ruleset.templates import golden_schidui
 SIBLINGS = ("checkpoints", "context", "questionnaire")
 
 
+def _valid_questionnaire(*, key="singer_submission"):
+    """A minimal questionnaire that clears the P1 gate.
+
+    Fixtures that carry a ``questionnaire`` section must carry a *valid* one: the section
+    patch re-validates the whole definition root, so a placeholder with empty ``pages``
+    would be rejected on any edit rather than merely preserved.
+    """
+    return {
+        "schema_version": 1,
+        "key": key,
+        "pages": [
+            {
+                "key": "basic",
+                "title": "基本信息",
+                "sections": [
+                    {
+                        "key": "identity",
+                        "title": "身份",
+                        "questions": [{"key": "name", "type": "text", "label": "姓名"}],
+                    }
+                ],
+            }
+        ],
+    }
+
+
 class DefinitionSectionPatchTests(TestCase):
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
@@ -48,7 +74,7 @@ class DefinitionSectionPatchTests(TestCase):
         """The real 2025 golden graph (stage1/stage2/stage3) plus both extra sections."""
         root = json.loads(golden_schidui())
         root["context"] = {"audience_rule": "2026"}
-        root["questionnaire"] = {"schema_version": 1, "key": "singer_submission", "pages": []}
+        root["questionnaire"] = _valid_questionnaire()
         return root
 
     def _make_activity(self, title):
@@ -99,7 +125,7 @@ class DefinitionSectionPatchTests(TestCase):
         """The gate row the Questionnaire phase depends on: a questionnaire save is a
         one-section patch, so it can never delete the flow graph or its checkpoints."""
         stale = self._stored()
-        self._patch("questionnaire", {"schema_version": 1, "key": "q2", "pages": []})
+        self._patch("questionnaire", _valid_questionnaire(key="q2"))
         self.assertEqual(self._stored()["questionnaire"]["key"], "q2")
         self._assert_siblings_untouched(stale, "questionnaire")
 
@@ -130,7 +156,7 @@ class DefinitionSectionPatchTests(TestCase):
         """P2's prerequisite: the questionnaire lives inside ``definition``, so editing a
         question already moves ``content_hash`` — no separate questionnaire authority."""
         before = self._stored()
-        self._patch("questionnaire", {"schema_version": 1, "key": "q2", "pages": []})
+        self._patch("questionnaire", _valid_questionnaire(key="q2"))
         self.version.refresh_from_db()
         self.assertNotEqual(self.version.content_hash, content_hash(before))
         self.assertEqual(self.version.content_hash, content_hash(self._stored()))
@@ -141,7 +167,7 @@ class DefinitionSectionPatchTests(TestCase):
             ValidationError,
             self._patch,
             "questionnaire",
-            {"schema_version": 1, "key": "q2", "pages": []},
+            _valid_questionnaire(key="q2"),
             base_content_hash="0" * 64,
         )
         self.assertEqual(self._stored(), stale)

@@ -28,6 +28,9 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
+from questionnaire.compiler import compile_questionnaire
+from questionnaire.cross_domain import validate_questionnaire_rounds
+from questionnaire.schema import parse_questionnaire
 
 from .compiler import ExecutionPlan, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
@@ -359,6 +362,10 @@ def update_ruleset_definition_section(
         raise ValidationError("赛制定义的根必须是对象。")
     root[section] = value
     parse_definition(root)
+    if "questionnaire" in root:
+        # The questionnaire editor's save is a schema gate too, so a broken question is
+        # refused where it was written rather than at freeze.
+        parse_questionnaire(root["questionnaire"])
     locked.definition = json.dumps(root, ensure_ascii=False)
     locked.save(update_fields=["definition"])
     return locked
@@ -616,6 +623,28 @@ def _annotated_capacity(rpk, activity):
     )
 
 
+def _validate_frozen_questionnaire(definition, binding: dict) -> None:
+    """The questionnaire freezes with the ruleset, so it must clear its own gate here.
+
+    It lives inside ``definition``, so ``content_hash`` already canonicalises it — which is
+    why editing one question moves the authority hash a StageResult is audited under, with
+    no separate questionnaire authority to keep in sync. What freeze adds is the one fact
+    neither compiler can see alone: every round a question binds must be a round this
+    ruleset binds to a ContestRound of the activity.
+    """
+    try:
+        root = json.loads(definition)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制定义不是合法 JSON。") from exc
+    if not isinstance(root, dict):
+        raise ValidationError("赛制定义的根必须是对象。")
+    raw = root.get("questionnaire")
+    if raw is None:
+        return
+    plan = compile_questionnaire(raw)
+    validate_questionnaire_rounds(plan, binding.get("round_keys") or {})
+
+
 def validate_ruleset_runtime_readiness(version: RulesetVersion) -> ValidationReport:
     """Re-run a frozen ruleset's deferred roster checks against the settled roster.
 
@@ -693,6 +722,7 @@ def freeze_ruleset_version(
     if not report.passes():
         raise RulesetInvalidError(report, plan)
     assert plan is not None
+    _validate_frozen_questionnaire(locked.definition, normalized_binding)
 
     old_status = "draft"
     with authority_write(RULESET_FREEZE):

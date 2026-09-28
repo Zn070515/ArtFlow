@@ -6102,7 +6102,7 @@ def _golden_with_root_sections_json():
         {"key": "probe_unused", "type": "ASSESS", "source": ENTRY_KEY, "round": "rx"}
     )
     definition["context"] = {"root_preservation_probe": "context"}
-    definition["questionnaire"] = {"schema_version": 1, "key": "singer_submission", "pages": []}
+    definition["questionnaire"] = _valid_questionnaire()
     return json.dumps(definition, ensure_ascii=False)
 
 
@@ -6120,10 +6120,36 @@ def _save_form_definition_json():
             ],
             "checkpoints": [{"key": "stage1", "output": "top10"}],
             "context": {"root_preservation_probe": "context"},
-            "questionnaire": {"schema_version": 1, "key": "singer_submission", "pages": []},
+            "questionnaire": _valid_questionnaire(),
         },
         ensure_ascii=False,
     )
+
+
+def _valid_questionnaire(*, key="singer_submission"):
+    """A minimal questionnaire that clears the P1 gate.
+
+    Fixtures that carry a ``questionnaire`` section must carry a *valid* one: the section
+    patch re-validates the whole definition root, so a placeholder with empty ``pages``
+    would be rejected on any edit rather than merely preserved.
+    """
+    return {
+        "schema_version": 1,
+        "key": key,
+        "pages": [
+            {
+                "key": "basic",
+                "title": "基本信息",
+                "sections": [
+                    {
+                        "key": "identity",
+                        "title": "身份",
+                        "questions": [{"key": "name", "type": "text", "label": "姓名"}],
+                    }
+                ],
+            }
+        ],
+    }
 
 
 class RulesetDefinitionRootPreservationTests(TestCase):
