@@ -22,7 +22,8 @@ def test_judge_browser_gate_covers_positive_redeem_context_and_retry_flow():
         "judge browser completes redeem, context, ACK-loss retry, and idempotent receipt",
         "judge/terminal/#",
         "网络暂时不可用",
-        "评分已确认。",
+        "评分已确认：",
+        "等待现场切换下一位选手",
         "expect(scoreRequests).toBe(2)",
     ):
         assert marker in JUDGE_FLOW
