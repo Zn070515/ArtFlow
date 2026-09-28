@@ -21,7 +21,8 @@ if APP_ENV == "production":
     validate_production_environment(os.environ)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
-ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
+STAFF_ACCESS_KEY = os.environ.get("STAFF_ACCESS_KEY", "")
+ADMIN_ACCESS_KEY = os.environ.get("ADMIN_ACCESS_KEY", "")
 ARTFLOW_ORGANIZATION_NAME = os.environ.get("ARTFLOW_ORGANIZATION_NAME", "").strip()
 ARTFLOW_RELEASE_SHA = os.environ.get("ARTFLOW_RELEASE_SHA", "").strip()
 ARTFLOW_ICP_NUMBER = os.environ.get("ARTFLOW_ICP_NUMBER", "").strip()
@@ -184,7 +185,7 @@ ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 2
 ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 365)
 
 # How long (seconds) an admin's elevated second-factor verification stays valid.
-# After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.
+# After this window the admin must re-enter ADMIN_ACCESS_KEY on sensitive actions.
 ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 15 * 60)
 
 # Ticket-backed audience sessions are intentionally short-lived. The raw session

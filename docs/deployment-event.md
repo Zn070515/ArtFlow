@@ -17,7 +17,8 @@ Copy-Item .env.event.example .env.event
 编辑未提交的 `.env.event`，至少替换：
 
 - `SECRET_KEY`
-- `ADMIN_LOGIN_KEY`
+- `STAFF_ACCESS_KEY`
+- `ADMIN_ACCESS_KEY`
 - `POSTGRES_PASSWORD`
 
 可以设置 `ARTFLOW_ORGANIZATION_NAME` 作为页面和导出文件的展示名称。它只影响展示，不参与 authority、权限、租户或赛制。
@@ -69,17 +70,21 @@ pwsh -NoProfile -File scripts/start-event.ps1 -Lan -Port 18180
 
 LAN 模式不是公网部署：不要把端口转发到 Internet，不要为它配置公网 DNS，也不要把它当作 DDoS/WAF/TLS 方案。
 
-## 首个管理员
+## 账号注册
 
-Compose 首次启动只会迁移数据库，不会自动创建管理员。确认启动壳输出的 `doctor` 和健康检查正常后，在本机浏览器打开启动壳输出的：
+Compose 首次启动只会迁移数据库，不会自动创建账号。确认启动壳输出的 `doctor` 和健康检查正常后，在本机浏览器打开：
 
 ```text
-http://127.0.0.1:8000/setup/
+http://127.0.0.1:8000/register/admin/
 ```
 
-如果使用了 `-Port`，将 `8000` 替换为实际端口。填写管理员用户名、密码、确认密码，以及 `.env.event` 中的 `ADMIN_LOGIN_KEY` 作为初始化密钥。该入口使用 CSRF、共享限流和一次性安装状态保护；成功后会自动进入工作人员后台，之后 `/setup/` 不再可用。
+管理员注册需要用户名、密码、确认密码和 `.env.event` 中的 `ADMIN_ACCESS_KEY`。工作人员使用：
 
-不要把初始化密钥当作管理员密码，也不要把任一密钥或密码写入截图、日志、导出文件或聊天记录。若页面提示密钥未安全配置，先替换 `.env.event` 中的 `change-me` 占位值并重新启动服务。
+```text
+http://127.0.0.1:8000/register/staff/
+```
+
+并填写 `STAFF_ACCESS_KEY`。选手使用普通的 `/register/`。登录时三种角色也必须分别使用对应密钥。不要把任一密钥或密码写入截图、日志、导出文件或聊天记录；若页面提示密钥未安全配置，先替换 `.env.event` 中的 `change-me` 占位值并重新启动服务。
 
 技术人员需要在无浏览器环境中操作时，可以使用一次性命令作为后备路径：
 

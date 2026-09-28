@@ -107,7 +107,7 @@ python manage.py test
 PRs should summarize behavior changes, list migrations, note verification, and include screenshots for UI changes.
 
 ## Security & Configuration Tips
-Never commit `.env`, SQLite databases, generated exports, archives, or uploaded files. Use `.env.example` for required variables such as `SECRET_KEY`, `ADMIN_LOGIN_KEY`, database settings, and `ALLOWED_HOSTS`. Internal submission files must go through controlled access views; do not reintroduce direct static media serving for private files.
+Never commit `.env`, SQLite databases, generated exports, archives, or uploaded files. Use `.env.example` for required variables such as `SECRET_KEY`, `STAFF_ACCESS_KEY`, `ADMIN_ACCESS_KEY`, database settings, and `ALLOWED_HOSTS`. Internal submission files must go through controlled access views; do not reintroduce direct static media serving for private files.
 
 ## Authority Baseline
 Raw scoring, criterion scores, vote ballots/records, and round performance/group facts are

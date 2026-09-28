@@ -76,7 +76,7 @@ from .test_data import clear_activity_test_data, get_test_data_counts, leave_tes
 from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
-DOCTOR_ADMIN_LOGIN_KEY_SENTINEL = "doctor-admin-login-key-sentinel"
+DOCTOR_ADMIN_ACCESS_KEY_SENTINEL = "doctor-admin-access-key-sentinel"
 DOCTOR_DATABASE_PASSWORD_SENTINEL = "doctor-database-password-sentinel"
 
 
@@ -998,7 +998,8 @@ class DoctorCommandTests(TestCase):
                     STATIC_ROOT=root / "staticfiles",
                     MEDIA_ROOT=root / "media",
                     SECRET_KEY=DOCTOR_SECRET_KEY_SENTINEL,
-                    ADMIN_LOGIN_KEY=DOCTOR_ADMIN_LOGIN_KEY_SENTINEL,
+                    STAFF_ACCESS_KEY="doctor-staff-access-key-sentinel",
+                    ADMIN_ACCESS_KEY=DOCTOR_ADMIN_ACCESS_KEY_SENTINEL,
                 ),
                 patch.dict(
                     "common.management.commands.doctor.connection.settings_dict",
@@ -1016,7 +1017,7 @@ class DoctorCommandTests(TestCase):
         diagnostics = output.getvalue()
         self.assertIn("Migration state: failed or unapplied", diagnostics)
         self.assertNotIn(DOCTOR_SECRET_KEY_SENTINEL, diagnostics)
-        self.assertNotIn(DOCTOR_ADMIN_LOGIN_KEY_SENTINEL, diagnostics)
+        self.assertNotIn(DOCTOR_ADMIN_ACCESS_KEY_SENTINEL, diagnostics)
         self.assertNotIn(DOCTOR_DATABASE_PASSWORD_SENTINEL, diagnostics)
 
     def test_doctor_reports_missing_runtime_directories_with_explicit_exit_code(self):
@@ -1029,7 +1030,8 @@ class DoctorCommandTests(TestCase):
                     STATIC_ROOT=root / "staticfiles",
                     MEDIA_ROOT=root / "media",
                     SECRET_KEY=DOCTOR_SECRET_KEY_SENTINEL,
-                    ADMIN_LOGIN_KEY=DOCTOR_ADMIN_LOGIN_KEY_SENTINEL,
+                    STAFF_ACCESS_KEY="doctor-staff-access-key-sentinel",
+                    ADMIN_ACCESS_KEY=DOCTOR_ADMIN_ACCESS_KEY_SENTINEL,
                 ),
                 patch.dict(
                     "common.management.commands.doctor.connection.settings_dict",
@@ -1044,7 +1046,7 @@ class DoctorCommandTests(TestCase):
         self.assertIn("STATIC_ROOT: missing", diagnostics)
         self.assertIn("MEDIA_ROOT: missing", diagnostics)
         self.assertNotIn(DOCTOR_SECRET_KEY_SENTINEL, diagnostics)
-        self.assertNotIn(DOCTOR_ADMIN_LOGIN_KEY_SENTINEL, diagnostics)
+        self.assertNotIn(DOCTOR_ADMIN_ACCESS_KEY_SENTINEL, diagnostics)
         self.assertNotIn(DOCTOR_DATABASE_PASSWORD_SENTINEL, diagnostics)
 
 

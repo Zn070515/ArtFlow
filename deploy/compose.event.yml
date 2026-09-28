@@ -31,7 +31,8 @@ services:
       APP_ENV: development
       DEBUG: "False"
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the event environment}
-      ADMIN_LOGIN_KEY: ${ADMIN_LOGIN_KEY:?Set ADMIN_LOGIN_KEY in the event environment}
+      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the event environment}
+      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the event environment}
       ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
       ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
       ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}

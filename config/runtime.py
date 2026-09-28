@@ -86,13 +86,14 @@ def validate_production_environment(env: Mapping[str, str]) -> None:
     if is_placeholder_value(secret_key):
         raise ImproperlyConfigured("Production configuration cannot use a placeholder SECRET_KEY.")
 
-    admin_login_key = env.get("ADMIN_LOGIN_KEY", "").strip()
-    if not admin_login_key:
-        raise ImproperlyConfigured("Production configuration requires ADMIN_LOGIN_KEY.")
-    if is_placeholder_value(admin_login_key):
-        raise ImproperlyConfigured(
-            "Production configuration cannot use a placeholder ADMIN_LOGIN_KEY."
-        )
+    for key_name in ("STAFF_ACCESS_KEY", "ADMIN_ACCESS_KEY"):
+        access_key = env.get(key_name, "").strip()
+        if not access_key:
+            raise ImproperlyConfigured(f"Production configuration requires {key_name}.")
+        if is_placeholder_value(access_key):
+            raise ImproperlyConfigured(
+                f"Production configuration cannot use a placeholder {key_name}."
+            )
 
     release_sha = env.get("ARTFLOW_RELEASE_SHA", "").strip()
     if release_sha and (is_placeholder_value(release_sha) or not is_full_git_sha(release_sha)):
