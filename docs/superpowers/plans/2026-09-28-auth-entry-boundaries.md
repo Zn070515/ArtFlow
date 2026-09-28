@@ -8,8 +8,8 @@
 
 ## Tasks
 
-1. Add failing tests for the GET-only selector, participant/staff/admin destinations, legacy `/admin-login/` redirect, same-host `next=`, and role mismatch behavior after valid credentials.
-2. Add canonical participant and staff login routes, keep `accounts:login` as the selector, and make legacy admin login redirect to the canonical admin form while preserving a safe `next=` value.
+1. Add failing tests for the GET-only selector, participant/staff/admin destinations, removal of the old `/admin-login/` route, same-host `next=`, and role mismatch behavior after valid credentials.
+2. Add canonical participant, staff, and admin login routes, keep `accounts:login` as the selector, and remove the old admin login route instead of preserving a compatibility alias.
 3. Implement role-specific authentication forms/views and decorator redirects. Keep invalid credentials generic; only a valid credential pair may reveal that the selected role is wrong.
 4. Replace auth templates' implicit form rendering with explicit accessible fields and role-specific copy, including the registration label “选手注册”.
 5. Run focused Django auth/decorator tests, inspect redirect targets and audit behavior, then commit the independently verified change.

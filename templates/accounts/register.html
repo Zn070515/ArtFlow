@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}注册 — ArtFlow{% endblock %}
+{% block title %}选手注册 — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-sm mx-auto mt-16 px-4">
-    <h2 class="text-2xl font-bold text-gray-900 mb-6">注册</h2>
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">选手注册</h2>
     <form method="post" class="space-y-4">
         {% csrf_token %}
         {% if form.errors %}
@@ -28,6 +28,6 @@
         </div>
         <button type="submit" class="w-full bg-brand text-white py-2 rounded text-sm hover:bg-brand-light transition-colors">注册</button>
     </form>
-    <p class="mt-4 text-sm text-center text-gray-500">已有账号？<a href="{% url 'accounts:login' %}" class="text-brand hover:underline">登录</a></p>
+    <p class="mt-4 text-sm text-center text-gray-500">已有账号？<a href="{% url 'accounts:login' %}" class="text-brand hover:underline">选择登录入口</a></p>
 </div>
 {% endblock %}
