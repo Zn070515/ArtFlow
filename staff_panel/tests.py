@@ -6541,9 +6541,7 @@ class JudgeControlHTTPTests(TestCase):
             prepared,
             reverse("staff:judge_control", args=[self.contest_round.pk]),
         )
-        idle_page = self.client.get(
-            reverse("staff:judge_control", args=[self.contest_round.pk])
-        )
+        idle_page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertContains(idle_page, "暂无当前表演，不可暂停")
         self.assertNotContains(
             idle_page,
