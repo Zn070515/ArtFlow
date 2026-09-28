@@ -38,7 +38,7 @@ pwsh -NoProfile -File scripts/start-event.ps1
 1. 检查 Docker Desktop、`.env.event` 和 Compose 文件；
 2. 以 `127.0.0.1:8000` 启动事件 Compose；
 3. 等待 web/PostgreSQL 健康；
-4. 在容器内运行只读 `manage.py doctor`；
+4. 在容器内运行只读 `manage.py doctor --require-access-keys`；
 5. 检查 `/healthz/`；
 6. 输出工作人员访问地址。
 
@@ -100,7 +100,7 @@ docker compose --env-file .env.event -f deploy/compose.event.yml exec web python
 
 - `Missing .env.event`：从 `.env.event.example` 复制并替换占位值。
 - Docker Desktop 检查失败：启动 Docker Desktop 后重试。
-- `doctor` 失败：按输出修复配置、迁移、数据库或 `static/media` 目录问题，再重试。
+- `doctor` 失败：按输出修复配置、迁移、数据库、访问密钥或 `static/media` 目录问题，再重试。
 - `/healthz/` 失败：查看 `docker compose --env-file .env.event -f deploy/compose.event.yml logs web`，不要把日志直接公开。
 - LAN 手机访问失败：确认使用了 `-Lan`，并使用脚本打印的 LAN URL，而不是 `localhost`。
 

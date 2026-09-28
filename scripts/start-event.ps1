@@ -126,7 +126,7 @@ try {
 
     $null = Invoke-ComposeStep -Arguments ($composeArguments + @('up', '--build', '--wait'))
     $doctorOutput = Invoke-ComposeStep -Arguments (
-        $composeArguments + @('exec', '-T', 'web', 'python', 'manage.py', 'doctor')
+        $composeArguments + @('exec', '-T', 'web', 'python', 'manage.py', 'doctor', '--require-access-keys')
     )
     $doctorOutput | ForEach-Object { Write-Host $_ }
 

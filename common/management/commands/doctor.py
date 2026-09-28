@@ -9,6 +9,8 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 
+from config.runtime import is_placeholder_value
+
 
 class DoctorExitCode(IntEnum):
     SUCCESS = 0
@@ -23,6 +25,13 @@ class Command(BaseCommand):
     requires_system_checks = []
     requires_migrations_checks = False
 
+    def add_arguments(self, parser: Any) -> None:
+        parser.add_argument(
+            "--require-access-keys",
+            action="store_true",
+            help="Fail when the staff or admin access key is missing or a placeholder.",
+        )
+
     def handle(self, *args: Any, **options: Any) -> None:
         failures: list[DoctorExitCode] = []
 
@@ -33,6 +42,10 @@ class Command(BaseCommand):
             self.stdout.write("Configuration: ok")
         else:
             self.stdout.write("Configuration: failed")
+            failures.append(DoctorExitCode.CONFIGURATION_FAILURE)
+
+        access_keys_ready = self._report_access_key_readiness()
+        if options["require_access_keys"] and not access_keys_ready:
             failures.append(DoctorExitCode.CONFIGURATION_FAILURE)
 
         database_healthy = self._database_is_healthy()
@@ -84,6 +97,19 @@ class Command(BaseCommand):
             return not any(check.level >= ERROR for check in run_checks())
         except Exception:
             return False
+
+    def _report_access_key_readiness(self) -> bool:
+        statuses: list[bool] = []
+        for label, setting_name in (
+            ("Staff access key", "STAFF_ACCESS_KEY"),
+            ("Admin access key", "ADMIN_ACCESS_KEY"),
+        ):
+            configured_key = str(getattr(settings, setting_name, ""))
+            ready = bool(configured_key.strip()) and not is_placeholder_value(configured_key)
+            statuses.append(ready)
+            status = "configured" if ready else "missing or placeholder"
+            self.stdout.write(f"{label}: {status}")
+        return all(statuses)
 
     @staticmethod
     def _database_is_healthy() -> bool:

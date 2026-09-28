@@ -59,7 +59,7 @@ web_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontai
 [[ "$web_revision" == "$release_sha" ]] || die 'prebuilt web image revision does not match ARTFLOW_RELEASE_SHA'
 
 "${compose[@]}" up --no-build --pull never --wait
-"${compose[@]}" exec -T web python manage.py doctor
+"${compose[@]}" exec -T web python manage.py doctor --require-access-keys
 
 health_url="https://$site_address/healthz/"
 curl --fail --silent --show-error --max-time 20 "$health_url" >/dev/null

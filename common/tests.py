@@ -14,6 +14,7 @@ from accounts.models import User
 from core.models import Activity
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.sessions.models import Session
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -956,10 +957,37 @@ class DoctorCommandTests(TestCase):
         self.assertIn("Database engine:", diagnostics)
         self.assertIn("Migration state:", diagnostics)
         self.assertIn("Admin provisioning: required", diagnostics)
+        self.assertIn("Staff access key: missing or placeholder", diagnostics)
+        self.assertIn("Admin access key: missing or placeholder", diagnostics)
         self.assertIn("STATIC_ROOT:", diagnostics)
         self.assertIn("MEDIA_ROOT:", diagnostics)
         self.assertNotIn(settings.SECRET_KEY, diagnostics)
         self.assertNotIn(str(settings.DATABASES["default"].get("NAME", "")), diagnostics)
+
+    def test_doctor_requires_safe_access_keys_when_requested(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = StringIO()
+            (root / "staticfiles").mkdir()
+            (root / "media").mkdir()
+
+            with (
+                override_settings(
+                    STATIC_ROOT=root / "staticfiles",
+                    MEDIA_ROOT=root / "media",
+                    STAFF_ACCESS_KEY="change-me-with-a-local-staff-access-key",
+                    ADMIN_ACCESS_KEY="safe-admin-key",
+                ),
+                self.assertRaises(CommandError) as error,
+            ):
+                call_command("doctor", "--require-access-keys", stdout=output)
+
+        self.assertEqual(error.exception.returncode, 2)
+        diagnostics = output.getvalue()
+        self.assertIn("Staff access key: missing or placeholder", diagnostics)
+        self.assertIn("Admin access key: configured", diagnostics)
+        self.assertNotIn("change-me-with-a-local-staff-access-key", diagnostics)
+        self.assertNotIn("safe-admin-key", diagnostics)
 
     def test_doctor_reports_database_failure_with_explicit_exit_code_and_safe_output(self):
         with TemporaryDirectory() as directory:
@@ -1048,6 +1076,22 @@ class DoctorCommandTests(TestCase):
         self.assertNotIn(DOCTOR_SECRET_KEY_SENTINEL, diagnostics)
         self.assertNotIn(DOCTOR_ADMIN_ACCESS_KEY_SENTINEL, diagnostics)
         self.assertNotIn(DOCTOR_DATABASE_PASSWORD_SENTINEL, diagnostics)
+
+
+class InvalidateSessionsCommandTests(TestCase):
+    def test_invalidate_sessions_removes_active_session_rows_without_secret_output(self):
+        Session.objects.create(
+            session_key="active-session-row",
+            session_data="e30=",
+            expire_date=timezone.now() + timedelta(hours=1),
+        )
+        output = StringIO()
+
+        call_command("invalidate_sessions", stdout=output)
+
+        self.assertEqual(Session.objects.count(), 0)
+        self.assertIn("All active application sessions invalidated", output.getvalue())
+        self.assertNotIn("e30=", output.getvalue())
 
 
 class SeedRecordTests(TestCase):
