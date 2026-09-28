@@ -18,7 +18,9 @@ test.describe("authentication entry boundaries", () => {
   test("anonymous staff access is redirected to the staff entry", async ({ page }) => {
     await page.goto("/staff/");
 
-    await expect(page).toHaveURL(/\/login\/staff\/\?next=%2Fstaff%2F$/);
+    const redirectedUrl = new URL(page.url());
+    expect(redirectedUrl.pathname).toBe("/login/staff/");
+    expect(redirectedUrl.searchParams.get("next")).toBe("/staff/");
     await expect(page.getByRole("heading", { name: "工作人员登录" })).toBeVisible();
   });
 });
