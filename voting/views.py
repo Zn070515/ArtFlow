@@ -49,6 +49,8 @@ def _vote_rate_limit_decision(request, pk):
 
 
 def _vote_ui_state(vote_session, now):
+    if vote_session.activity.is_locked:
+        return "activity_locked", "活动已锁定", False
     if vote_session.is_locked:
         return "locked", "投票已锁定", False
     if not vote_session.is_open:

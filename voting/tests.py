@@ -374,7 +374,9 @@ class VoteActivityLockOverlayTests(TestCase):
         response = self._cast_ballot()
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "尚未开放或已锁定")
+        self.assertContains(response, 'data-vote-state="activity_locked"')
+        self.assertContains(response, "活动已锁定")
+        self.assertContains(response, "data-vote-option disabled")
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
 
     def test_activity_unlock_resumes_voting_on_open_session(self):
