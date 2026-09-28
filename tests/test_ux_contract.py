@@ -38,7 +38,7 @@ class GlobalUxContractTests(SimpleTestCase):
         self.assertIn("bg-red-50", rendered)
         self.assertIn("bg-sky-50", rendered)
         self.assertEqual(rendered.count('role="alert"'), 4)
-        self.assertIn("aria-hidden=\"true\"", rendered)
+        self.assertIn('aria-hidden="true"', rendered)
 
     def test_base_template_has_a_no_script_mobile_navigation(self):
         rendered = self._render_base()
