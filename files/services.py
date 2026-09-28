@@ -643,11 +643,17 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         and locked_check.status != MaterialCheck.Status.NEEDS_SUPPLEMENT
     ):
         raise ValidationError("该材料项当前未要求补交，请联系工作人员。")
-    return store_submission_file(
+    # A questionnaire check carries its question, so the replacement occupies that
+    # question's slot: uploading the second round's accompaniment must not demote the
+    # first round's, which is exactly what a purpose-scoped write would do.
+    return _store_file(
         owner=locked_owner,
         uploaded_file=uploaded_file,
         purpose=locked_check.file_purpose,
         uploaded_by=current_actor,
+        question_key=locked_check.question_key,
+        source_ruleset_version=locked_check.source_ruleset_version,
+        owner_total_quota=bool(locked_check.question_key),
     )
 
 

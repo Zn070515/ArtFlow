@@ -160,8 +160,11 @@ class StaffNote(models.Model):
 
 class MaterialCheck(models.Model):
     class Status(models.TextChoices):
-        MISSING = "missing", "未上传"
-        UPLOADED = "uploaded", "已上传，待审核"
+        # "Not submitted" rather than "not uploaded": a check can now stand for a text
+        # answer or a guest's name as easily as for a file, and the label is what the
+        # participant reads. The stored value is unchanged.
+        MISSING = "missing", "未提交"
+        UPLOADED = "uploaded", "已提交，待审核"
         APPROVED = "approved", "已审核通过"
         NEEDS_SUPPLEMENT = "needs_supplement", "需补交"
 
@@ -224,10 +227,18 @@ class MaterialCheck(models.Model):
                 ),
                 name="materialcheck_owner_singer_program_xor",
             ),
+            # Two identities, like the files they track: a legacy requirement check is
+            # unique per item name, a questionnaire check is unique per question. Without
+            # the split, four rounds sharing one item name could not each hold a check.
             models.UniqueConstraint(
                 fields=["singer_registration", "item_name"],
-                condition=Q(singer_registration__isnull=False),
+                condition=Q(singer_registration__isnull=False, question_key=""),
                 name="materialcheck_unique_singer_item",
+            ),
+            models.UniqueConstraint(
+                fields=["singer_registration", "question_key"],
+                condition=Q(singer_registration__isnull=False) & ~Q(question_key=""),
+                name="materialcheck_unique_singer_question",
             ),
             models.UniqueConstraint(
                 fields=["program", "item_name"],

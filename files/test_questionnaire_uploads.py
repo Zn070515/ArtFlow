@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.test_characterization import _CharacterizationBase
+from core.models import Activity
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -374,6 +375,119 @@ class QuestionnaireUploadReviewTests(_QuestionnaireUploadBase):
             MaterialCheck.objects.get(question_key="r1.accompaniment").status,
             MaterialCheck.Status.APPROVED,
         )
+
+
+class MaterialCheckQuestionIdentityTests(_QuestionnaireUploadBase):
+    def _check(self, registration, *, question_key="", item_name="伴奏", status=None, **kwargs):
+        return MaterialCheck.objects.create(
+            singer_registration=registration,
+            item_name=item_name,
+            question_key=question_key,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            status=status or MaterialCheck.Status.MISSING,
+            **kwargs,
+        )
+
+    def test_a_questionnaire_check_is_unique_per_question(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+        self._check(registration, question_key="r1.accompaniment")
+        self._check(registration, question_key="r2.accompaniment")
+        self.assertEqual(MaterialCheck.objects.filter(singer_registration=registration).count(), 2)
+
+    def test_the_same_question_cannot_carry_two_checks(self):
+        from django.db import IntegrityError, transaction
+
+        version = self.frozen_version()
+        registration = self.registration(version)
+        self._check(registration, question_key="r1.accompaniment")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._check(registration, question_key="r1.accompaniment")
+
+    def test_a_legacy_check_is_still_unique_per_item_name(self):
+        from django.db import IntegrityError, transaction
+
+        version = self.frozen_version()
+        registration = self.registration(version)
+        self._check(registration)
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                self._check(registration)
+
+    def test_a_questionnaire_check_does_not_collide_with_a_legacy_one(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+        self._check(registration)
+        self._check(registration, question_key="r1.accompaniment")
+        self.assertEqual(MaterialCheck.objects.filter(singer_registration=registration).count(), 2)
+
+    def test_the_missing_label_reads_as_unsubmitted(self):
+        """A check can stand for a text answer, so neither label may say "uploaded"."""
+        self.assertEqual(MaterialCheck.Status.MISSING.label, "未提交")
+        self.assertEqual(MaterialCheck.Status.UPLOADED.label, "已提交，待审核")
+
+
+class ParticipantQuestionnaireUploadTests(_QuestionnaireUploadBase):
+    def _supplement_scenario(self):
+        from common.authority import ACTIVITY_STATE
+
+        version = self.frozen_version()
+        registration = self.registration(version)
+        checks = {}
+        for key in ("r1.accompaniment", "r2.accompaniment"):
+            checks[key] = MaterialCheck.objects.create(
+                singer_registration=registration,
+                item_name=key,
+                question_key=key,
+                file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                status=MaterialCheck.Status.APPROVED,
+            )
+        activity = version.ruleset.activity
+        with authority_write(ACTIVITY_STATE):
+            activity.phase = Activity.Phase.REGISTRATION_CLOSED
+            activity.save(update_fields=["phase"])
+        return version, registration, checks, activity
+
+    def test_a_supplement_on_one_question_opens_only_that_question(self):
+        from files.services import participant_uploadable_check_ids
+
+        _version, registration, checks, _activity = self._supplement_scenario()
+        checks["r2.accompaniment"].status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+        checks["r2.accompaniment"].save(update_fields=["status"])
+        self.assertEqual(
+            participant_uploadable_check_ids(registration),
+            {checks["r2.accompaniment"].pk},
+        )
+
+    def test_a_crafted_post_against_an_ungranted_question_writes_nothing(self):
+        from files.services import submit_participant_material_for_check
+
+        _version, registration, checks, _activity = self._supplement_scenario()
+        checks["r2.accompaniment"].status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+        checks["r2.accompaniment"].save(update_fields=["status"])
+        with self.assertRaises(ValidationError):
+            submit_participant_material_for_check(
+                owner=registration,
+                check_id=checks["r1.accompaniment"].pk,
+                uploaded_file=_upload(),
+                actor=registration.user,
+            )
+        self.assertEqual(SubmissionFile.objects.filter(singer_registration=registration).count(), 0)
+
+    def test_a_granted_question_accepts_the_replacement(self):
+        from files.services import submit_participant_material_for_check
+
+        _version, registration, checks, _activity = self._supplement_scenario()
+        checks["r2.accompaniment"].status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+        checks["r2.accompaniment"].save(update_fields=["status"])
+        created = submit_participant_material_for_check(
+            owner=registration,
+            check_id=checks["r2.accompaniment"].pk,
+            uploaded_file=_upload(),
+            actor=registration.user,
+        )
+        self.assertEqual(created.question_key, "r2.accompaniment")
 
 
 class LegacyUploadUnchangedTests(_QuestionnaireUploadBase):
