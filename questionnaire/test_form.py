@@ -249,11 +249,15 @@ class QuestionnaireFormViewTests(_FormBase):
         response = self.client.get(self._url())
         self.assertContains(response, "左手指月")
 
-    def test_a_participant_cannot_open_a_closed_activity(self):
+    def test_a_participant_can_still_read_their_form_after_registration_closes(self):
+        """Closing registration takes away the right to *edit*, not the right to see what
+        was submitted — and the supplement flow needs the page to exist."""
         with authority_write(ACTIVITY_STATE):
             self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
             self.activity.save(update_fields=["phase"])
-        self.assertEqual(self.client.get(self._url()).status_code, 403)
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["editable"])
 
     def test_staff_may_preview_a_closed_activity(self):
         with authority_write(ACTIVITY_STATE):
@@ -303,7 +307,8 @@ class QuestionnaireAutosaveTests(_FormBase):
         response = self._post({"answers": {"name": "改"}, "schema_hash": "0" * 64})
         self.assertEqual(response.status_code, 409)
 
-    def test_autosave_is_refused_once_submitted(self):
+    def test_autosave_still_works_after_submitting_while_registration_is_open(self):
+        """A participant who has submitted may correct their details until the deadline."""
         from .registration import get_or_create_draft_registration
         from .services import mark_submitted
 
@@ -311,7 +316,9 @@ class QuestionnaireAutosaveTests(_FormBase):
             version=self.version, user=self.user
         )
         mark_submitted(response)
-        self.assertEqual(self._post({"answers": {"name": "改"}}).status_code, 409)
+        self.assertEqual(self._post({"answers": {"name": "改"}}).status_code, 200)
+        registration.refresh_from_db()
+        self.assertEqual(registration.name, "改")
 
     def test_autosave_needs_a_json_body(self):
         response = self.client.post(
@@ -325,4 +332,128 @@ class QuestionnaireAutosaveTests(_FormBase):
         with authority_write(ACTIVITY_STATE):
             self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
             self.activity.save(update_fields=["phase"])
-        self.assertEqual(self._post({"answers": {"name": "陈"}}).status_code, 403)
+        self.assertEqual(self._post({"answers": {"name": "陈"}}).status_code, 409)
+
+
+class QuestionnaireSubmitTests(_FormBase):
+    def setUp(self):
+        super().setUp()
+        self.version = self.frozen_version()
+        self.activity = self.version.ruleset.activity
+        self.user = self.participant(self.version)
+        self.client.force_login(self.user)
+
+    def _submit(self, payload):
+        return self.client.post(
+            reverse("questionnaire:submit", args=[self.activity.pk]),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _filled(self, **extra):
+        return {
+            "answers": {"name": "陈昭艺", "r3.song": "左手指月", **extra},
+            "schema_hash": schema_hash(QUESTIONNAIRE),
+        }
+
+    def test_the_form_carries_a_submit_button_pointing_at_the_route(self):
+        body = self.client.get(
+            reverse("questionnaire:form", args=[self.activity.pk])
+        ).content.decode()
+        self.assertIn("data-submit-questionnaire", body)
+        self.assertIn(reverse("questionnaire:submit", args=[self.activity.pk]), body)
+
+    def test_submit_finishes_the_registration(self):
+        response = self._submit({**self._filled(), "schema_hash": schema_hash(QUESTIONNAIRE)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "submitted")
+        registration = SingerRegistration.objects.get(activity=self.activity, user=self.user)
+        self.assertEqual(registration.pre_status, SingerRegistration.PreStatus.SUBMITTED)
+        self.assertEqual(registration.name, "陈昭艺")
+
+    def test_submit_refuses_while_a_required_answer_is_missing(self):
+        response = self._submit(
+            {"answers": {"r3.song": "歌"}, "schema_hash": schema_hash(QUESTIONNAIRE)}
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("name", response.json()["error"])
+
+    def test_submit_refuses_a_stale_schema_hash(self):
+        self.assertEqual(self._submit({**self._filled(), "schema_hash": "0" * 64}).status_code, 409)
+
+    def test_submit_refuses_a_request_that_omits_the_schema_hash(self):
+        """An HTTP caller always has one; accepting a submission without it would let a
+        page that cannot see the current questionnaire write into it."""
+        response = self._submit({"answers": {"name": "陈", "r3.song": "歌"}})
+        self.assertEqual(response.status_code, 400)
+
+    def test_submitting_again_after_an_edit_is_allowed_while_registration_is_open(self):
+        self._submit(self._filled())
+        changed = {
+            "answers": {"name": "改过的名字", "r3.song": "左手指月"},
+            "schema_hash": schema_hash(QUESTIONNAIRE),
+        }
+        self.assertEqual(self._submit(changed).status_code, 200)
+        registration = SingerRegistration.objects.get(activity=self.activity, user=self.user)
+        self.assertEqual(registration.name, "改过的名字")
+
+
+class ClosedRegistrationTests(_FormBase):
+    def setUp(self):
+        super().setUp()
+        self.version = self.frozen_version()
+        self.activity = self.version.ruleset.activity
+        self.user = self.participant(self.version)
+        self.client.force_login(self.user)
+        from .registration import get_or_create_draft_registration
+
+        self.registration, _response = get_or_create_draft_registration(
+            version=self.version, user=self.user
+        )
+
+    def _close(self):
+        with authority_write(ACTIVITY_STATE):
+            self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+            self.activity.save(update_fields=["phase"])
+
+    def _grant_supplement(self, question_key):
+        from files.models import MaterialCheck
+
+        MaterialCheck.objects.create(
+            singer_registration=self.registration,
+            item_name=question_key,
+            question_key=question_key,
+            status=MaterialCheck.Status.NEEDS_SUPPLEMENT,
+        )
+
+    def _post(self, answers):
+        return self.client.post(
+            reverse("questionnaire:autosave", args=[self.activity.pk]),
+            data=json.dumps({"answers": answers}),
+            content_type="application/json",
+        )
+
+    def test_an_ordinary_edit_is_refused_once_registration_closes(self):
+        self._close()
+        self.assertEqual(self._post({"r3.song": "改"}).status_code, 409)
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.name, "")
+
+    def test_a_supplement_reopens_only_the_question_it_was_granted_for(self):
+        self._close()
+        self._grant_supplement("r3.song")
+        self.assertEqual(self._post({"r3.song": "重新提交的曲目"}).status_code, 200)
+        self.assertEqual(self._post({"name": "偷改的名字"}).status_code, 409)
+
+    def test_the_closed_page_marks_the_supplemented_question_editable(self):
+        self._close()
+        self._grant_supplement("r3.song")
+        response = self.client.get(reverse("questionnaire:form", args=[self.activity.pk]))
+        rows = {
+            row["key"]: row
+            for page in response.context["pages"]
+            for section in page["sections"]
+            for row in section["questions"]
+        }
+        self.assertTrue(rows["r3.song"]["editable"])
+        self.assertFalse(rows["name"]["editable"])

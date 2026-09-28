@@ -148,4 +148,50 @@
         });
     });
   });
+
+  const submitUrl = root.dataset.submitUrl || "";
+  const submitButton = root.querySelector<HTMLButtonElement>("[data-submit-questionnaire]");
+  const submitState = root.querySelector<HTMLElement>("[data-submit-state]");
+  if (!submitUrl || !submitButton) return;
+
+  submitButton.addEventListener("click", () => {
+    // A submission carries the whole form, so a save still in flight would only be
+    // overwritten. Let it land first, then submit what is actually on screen.
+    if (timer !== undefined) window.clearTimeout(timer);
+    submitButton.disabled = true;
+    setSaveState("");
+    void fetch(submitUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+      body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
+    })
+      .then(async (response) => {
+        const body = (await response.json()) as {
+          status?: string;
+          error?: string;
+          completion?: { required?: number; answered?: number };
+        };
+        if (!response.ok) {
+          showError(body.error || "提交失败，请检查后重试。");
+          return;
+        }
+        clearError();
+        if (body.completion) {
+          if (requiredCount) requiredCount.textContent = String(body.completion.required ?? 0);
+          if (answeredCount) answeredCount.textContent = String(body.completion.answered ?? 0);
+        }
+        if (submitState) {
+          submitState.textContent = "已提交。报名开放期间仍可修改；截止后将锁定。";
+          submitState.classList.remove("text-gray-500");
+          submitState.classList.add("text-green-700");
+        }
+        submitButton.textContent = "更新报名";
+      })
+      .catch(() => {
+        showError("网络错误，提交失败。");
+      })
+      .finally(() => {
+        submitButton.disabled = false;
+      });
+  });
 })();

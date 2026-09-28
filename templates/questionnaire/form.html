@@ -9,7 +9,9 @@
      data-autosave-url="{{ autosave_url }}"
      data-upload-url-template="{{ upload_url_template }}"
      data-schema-hash="{{ schema_hash }}"
-     data-editable="{% if editable %}1{% else %}0{% endif %}">
+     data-editable="{% if editable %}1{% else %}0{% endif %}"
+     data-submit-url="{{ submit_url }}"
+     data-submitted="{% if submitted %}1{% else %}0{% endif %}">
 
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
     <p class="text-sm text-gray-500 mb-6">资料完成度</p>
@@ -49,15 +51,15 @@
                 <p class="text-sm text-gray-600">{{ q.description }}</p>
                 {% elif q.type == 'textarea' %}
                 <textarea id="q-{{ q.key }}" name="{{ q.key }}" rows="3" data-answer="{{ q.key }}"
-                          {% if not editable %}disabled{% endif %}
+                          {% if not q.editable %}disabled{% endif %}
                           class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ q.value_text }}</textarea>
                 {% elif q.type == 'boolean' %}
                 <input type="checkbox" id="q-{{ q.key }}" name="{{ q.key }}" value="1" data-answer="{{ q.key }}"
-                       {% if q.checked %}checked{% endif %}{% if not editable %} disabled{% endif %}
+                       {% if q.checked %}checked{% endif %}{% if not q.editable %} disabled{% endif %}
                        class="h-4 w-4 text-brand border-gray-300">
                 {% elif q.type == 'single_choice' or q.type == 'select' %}
                 <select id="q-{{ q.key }}" name="{{ q.key }}" data-answer="{{ q.key }}"
-                        {% if not editable %}disabled{% endif %}
+                        {% if not q.editable %}disabled{% endif %}
                         class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
                     <option value="">请选择</option>
                     {% for option in q.options %}
@@ -67,7 +69,7 @@
                 {% elif q.type == 'file' %}
                 <div class="flex items-center gap-3">
                     <input type="file" id="q-{{ q.key }}" name="{{ q.key }}" data-file-answer="{{ q.key }}"
-                           {% if not editable %}disabled{% endif %}
+                           {% if not q.editable %}disabled{% endif %}
                            class="text-sm text-gray-600">
                     <span class="text-xs text-gray-500" data-file-name="{{ q.key }}">{{ q.file_name }}</span>
                 </div>
@@ -78,14 +80,14 @@
                 {% for option in q.options %}
                 <label class="flex items-center gap-2 mb-1 text-sm text-gray-700">
                     <input type="checkbox" name="{{ q.key }}" value="{{ option.value }}" data-answer="{{ q.key }}"
-                           {% if not editable %}disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
+                           {% if not q.editable %}disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
                     {{ option.label }}
                 </label>
                 {% endfor %}
                 {% else %}
                 <input type="{% if q.type == 'number' %}number{% else %}text{% endif %}"
                        id="q-{{ q.key }}" name="{{ q.key }}" value="{{ q.value_text }}" data-answer="{{ q.key }}"
-                       {% if not editable %}disabled{% endif %}
+                       {% if not q.editable %}disabled{% endif %}
                        class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
                 {% endif %}
             </div>
@@ -96,6 +98,18 @@
     {% endfor %}
 
     <p class="text-sm text-gray-500" data-save-state aria-live="polite"></p>
+
+    {% if editable and not preview %}
+    <div class="mt-6 border-t border-gray-200 pt-4">
+        <p class="mb-2 text-sm {% if submitted %}text-green-700{% else %}text-gray-500{% endif %}" data-submit-state>
+            {% if submitted %}已提交。报名开放期间仍可修改；截止后将锁定。{% else %}提交后仍可在报名开放期间修改。{% endif %}
+        </p>
+        <button type="button" data-submit-questionnaire
+                class="rounded bg-brand px-4 py-2 text-sm text-white hover:bg-brand-light">
+            {% if submitted %}更新报名{% else %}提交报名{% endif %}
+        </button>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 

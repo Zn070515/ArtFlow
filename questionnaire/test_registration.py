@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.test_characterization import _CharacterizationBase
+from core.models import Activity
 from django.core.exceptions import ValidationError
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import freeze_ruleset_version
@@ -197,7 +198,13 @@ class _RegistrationBase(_CharacterizationBase):
         return user
 
     def frozen_version(self):
-        activity = self.make_activity(is_test_mode=True, title=f"报名-{uuid4().hex[:6]}")
+        # Registration is open, because these tests are about registering: submitting a
+        # form during rehearsal is not a thing the lifecycle allows.
+        activity = self.make_activity(
+            is_test_mode=True,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            title=f"报名-{uuid4().hex[:6]}",
+        )
         ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=True)
         binding = {}
         for key in ("r1", "r3"):

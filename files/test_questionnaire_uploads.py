@@ -116,7 +116,13 @@ class _QuestionnaireUploadBase(_CharacterizationBase):
         return user
 
     def frozen_version(self):
-        activity = self.make_activity(is_test_mode=True, title=f"上传-{uuid4().hex[:6]}")
+        # Registration is open: a questionnaire answer file is a registration-time upload,
+        # and the write authority is the phase, not the response's status.
+        activity = self.make_activity(
+            is_test_mode=True,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            title=f"上传-{uuid4().hex[:6]}",
+        )
         ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=True)
         binding = {}
         for key in ("r1", "r2", "r3", "r4"):

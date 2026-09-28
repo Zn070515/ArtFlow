@@ -352,6 +352,16 @@ def store_questionnaire_file(
         raise ValidationError(f"问卷中没有这一题：{question_key!r}。")
     if question["type"] != FILE_TYPE:
         raise ValidationError(f"这一题不是文件题：{question_key!r}。")
+    # Files obey the same phase and supplement authority as text answers. Without this the
+    # rules disagreed: after submitting, a participant could not correct their phone number
+    # but could still replace their accompaniment.
+    from questionnaire.registration import writable_question_keys
+
+    writable = writable_question_keys(
+        activity=registration.activity, registration=registration, plan=plan
+    )
+    if writable is not None and question_key not in writable:
+        raise ValidationError(f"当前阶段不可上传该题目的材料：{question_key!r}。")
     config = question["file"]
     return _store_file(
         owner=registration,

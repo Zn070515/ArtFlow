@@ -33,6 +33,8 @@ from .registration import (
     get_or_create_draft_registration,
     questionnaire_plan,
     save_draft,
+    submit_registration,
+    writable_question_keys,
 )
 from .runtime import completion_summary, resolve_question_value, resolve_questions
 from .schema import NOTICE_TYPE
@@ -60,11 +62,24 @@ def _frozen_plan(activity: Activity):
     return version, questionnaire_plan(version)
 
 
-def _require_participant_editable(activity: Activity) -> None:
+# Phases in which a participant may open their own questionnaire. Reading it stays open
+# after registration closes -- a participant who has submitted is entitled to see what they
+# submitted, and the supplement flow needs the page to exist. What they may *write* is a
+# per-question question, decided by ``writable_question_keys`` and enforced by the services.
+PARTICIPANT_PHASES = frozenset(
+    {
+        Activity.Phase.REGISTRATION_OPEN,
+        Activity.Phase.REGISTRATION_CLOSED,
+        Activity.Phase.REVIEWING,
+    }
+)
+
+
+def _require_participant_page(activity: Activity) -> None:
     if activity.is_locked:
-        raise PermissionDenied("活动已锁定，无法填写报名问卷。")
-    if activity.phase != Activity.Phase.REGISTRATION_OPEN:
-        raise PermissionDenied("当前活动阶段不允许填写报名问卷。")
+        raise PermissionDenied("活动已锁定，无法打开报名问卷。")
+    if activity.phase not in PARTICIPANT_PHASES:
+        raise PermissionDenied("当前活动阶段不允许打开报名问卷。")
 
 
 def _due_rounds(version) -> frozenset[str]:
@@ -98,14 +113,19 @@ NOTICE_ROW = {
     "value_text": "",
     "checked": False,
     "file_name": "",
+    "editable": False,
 }
 
 
-def _question_rows(plan, *, registration, answers, context, due_rounds, files) -> list[dict]:
+def _question_rows(
+    plan, *, registration, answers, context, due_rounds, files, writable=None
+) -> list[dict]:
     """One row per block, in document order.
 
     Walks the plan's own structure rather than ``plan.questions`` so a NOTICE keeps its
-    place among the questions around it.
+    place among the questions around it. ``writable`` is the set of question keys the
+    participant may currently write, or ``None`` for all of them; it feeds the row's
+    ``editable`` flag, which is a rendering hint — the services are what enforce it.
     """
     resolved_by_key = {
         resolved.question["key"]: resolved
@@ -150,6 +170,7 @@ def _question_rows(plan, *, registration, answers, context, due_rounds, files) -
                         "value_text": value if isinstance(value, str) else "",
                         "checked": value is True,
                         "file_name": getattr(value, "original_name", ""),
+                        "editable": writable is None or key in writable,
                     }
                 )
     return rows
@@ -187,18 +208,22 @@ def form_view(request: HttpRequest, activity_pk: int):
     activity = _activity_or_404(activity_pk)
     version, plan = _frozen_plan(activity)
     staff = _is_staff(request.user)
-    editable = False
     if staff:
         # A preview: an unsaved registration, so opening the page never creates a draft
         # for a staff account that is not actually entering the contest.
         registration = SingerRegistration(activity=activity, user=request.user)
         response = None
     else:
-        _require_participant_editable(activity)
+        _require_participant_page(activity)
         registration, response = get_or_create_draft_registration(
             version=version, user=request.user
         )
-        editable = activity.phase == Activity.Phase.REGISTRATION_OPEN
+    writable = (
+        None
+        if staff
+        else writable_question_keys(activity=activity, registration=registration, plan=plan)
+    )
+    editable = writable is None or bool(writable)
 
     answers = (response.answers if response else {}) or {}
     # A staff preview holds an unsaved registration, which has no files to look up.
@@ -216,6 +241,7 @@ def form_view(request: HttpRequest, activity_pk: int):
         context=context,
         due_rounds=due_rounds,
         files=files,
+        writable=writable,
     )
     return render(
         request,
@@ -237,8 +263,10 @@ def form_view(request: HttpRequest, activity_pk: int):
                 files=files,
             ),
             "form_url": request.path,
+            "submitted": bool(response and response.status == "submitted"),
             "autosave_url": f"/questionnaire/{activity.pk}/autosave/",
             "upload_url_template": f"/questionnaire/{activity.pk}/file/__KEY__/",
+            "submit_url": f"/questionnaire/{activity.pk}/submit/",
         },
     )
 
@@ -257,7 +285,7 @@ def autosave_view(request: HttpRequest, activity_pk: int):
     activity = _activity_or_404(activity_pk)
     version, _plan = _frozen_plan(activity)
     if not _is_staff(request.user):
-        _require_participant_editable(activity)
+        _require_participant_page(activity)
     payload = _json_body(request)
     if payload is None:
         return JsonResponse({"error": "请求体必须是 JSON 对象。"}, status=400)
@@ -295,6 +323,58 @@ def autosave_view(request: HttpRequest, activity_pk: int):
 
 @login_required
 @require_POST
+def submit_view(request: HttpRequest, activity_pk: int):
+    """Finish a registration.
+
+    The page's own schema hash is required here even though the service treats it as
+    optional: an HTTP caller always has one, and accepting a submission without it would
+    let a page that cannot see the current questionnaire write into it.
+    """
+    activity = _activity_or_404(activity_pk)
+    version, plan = _frozen_plan(activity)
+    if not _is_staff(request.user):
+        _require_participant_page(activity)
+    payload = _json_body(request)
+    if payload is None:
+        return JsonResponse({"error": "请求体必须是 JSON 对象。"}, status=400)
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        return JsonResponse({"error": "answers 必须是对象。"}, status=400)
+    expected = str(payload.get("schema_hash") or "")
+    if not expected:
+        return JsonResponse({"error": "缺少问卷版本标识，请刷新后重试。"}, status=400)
+    if expected != plan.schema_hash:
+        return JsonResponse({"error": "问卷已更新，请刷新后重试。"}, status=409)
+
+    registration, _response = get_or_create_draft_registration(version=version, user=request.user)
+    try:
+        response = submit_registration(
+            version=version,
+            registration=registration,
+            answers=answers,
+            due_rounds=_due_rounds(version),
+            expected_schema_hash=expected,
+        )
+    except ValidationError as exc:
+        messages = getattr(exc, "messages", None) or [str(exc)]
+        return JsonResponse({"error": "；".join(messages)}, status=409)
+    return JsonResponse(
+        {
+            "status": response.status,
+            "submitted_at": response.submitted_at.isoformat() if response.submitted_at else "",
+            "completion": _completion(
+                version,
+                registration,
+                answers=response.answers or {},
+                due_rounds=_due_rounds(version),
+                files=current_answer_files(registration),
+            ),
+        }
+    )
+
+
+@login_required
+@require_POST
 def upload_view(request: HttpRequest, activity_pk: int, question_key: str):
     """Store one answer file. The question is the address; the purpose is not an input."""
     from files.services import store_questionnaire_file
@@ -302,7 +382,7 @@ def upload_view(request: HttpRequest, activity_pk: int, question_key: str):
     activity = _activity_or_404(activity_pk)
     version, _plan = _frozen_plan(activity)
     if not _is_staff(request.user):
-        _require_participant_editable(activity)
+        _require_participant_page(activity)
     uploaded = request.FILES.get("file")
     if not uploaded:
         return JsonResponse({"error": "请选择要上传的文件。"}, status=400)

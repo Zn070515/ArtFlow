@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 from common.lifecycle import runtime_is_test
+from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from singer_contest.models import RoundEntry, SingerRegistration
@@ -67,6 +68,43 @@ def current_answer_files(registration) -> dict:
             singer_registration=registration, is_current=True
         ).exclude(question_key="")
     }
+
+
+# Phases in which the questionnaire is closed to ordinary editing: only a question staff
+# explicitly sent back may be touched.
+SUPPLEMENT_PHASES = frozenset({Activity.Phase.REGISTRATION_CLOSED, Activity.Phase.REVIEWING})
+
+
+def writable_question_keys(*, activity, registration, plan) -> frozenset[str] | None:
+    """Which questions this participant may write right now, or ``None`` for all of them.
+
+    Authority is the activity's phase plus the staff supplement grants — **never** the
+    response's status. A response marked SUBMITTED records that the participant completed
+    a formal submission; it does not mean they forfeited the right to correct their own
+    details while registration is still open. Making the status the gate locked people out
+    of their own form the moment they submitted, until the deadline — while leaving file
+    uploads open, which was neither the intended rule nor a coherent one.
+    """
+    from files.models import MaterialCheck
+
+    if activity.is_locked:
+        return frozenset()
+    if activity.phase == Activity.Phase.REGISTRATION_OPEN:
+        return None
+    if activity.phase not in SUPPLEMENT_PHASES:
+        return frozenset()
+    return frozenset(
+        MaterialCheck.objects.filter(
+            singer_registration=registration,
+            status=MaterialCheck.Status.NEEDS_SUPPLEMENT,
+        )
+        .exclude(question_key="")
+        .values_list("question_key", flat=True)
+    )
+
+
+def _keys_of(plan: QuestionnairePlan, answers) -> set[str]:
+    return {key for key in (answers or {}) if plan.question(key) is not None}
 
 
 def split_answers(plan: QuestionnairePlan, answers) -> tuple[dict, dict]:
@@ -134,6 +172,7 @@ def get_or_create_draft_registration(*, version, user):
 def save_draft(*, version, registration, answers, schema_hash: str = "") -> QuestionnaireResponse:
     """Persist one autosave: bound answers onto the registration, the rest into the response."""
     plan = questionnaire_plan(version)
+    activity = version.ruleset.activity
     response = get_or_create_response(
         registration=registration,
         ruleset_version=version,
@@ -141,6 +180,13 @@ def save_draft(*, version, registration, answers, schema_hash: str = "") -> Ques
         schema_hash=plan.schema_hash,
         is_test_data=registration.is_test_data,
     )
+    writable = writable_question_keys(activity=activity, registration=registration, plan=plan)
+    if writable is not None:
+        rejected = sorted(_keys_of(plan, answers) - writable)
+        if rejected:
+            # A crafted POST is judged here, not by whether the form rendered the field as
+            # disabled: hiding an input has never been the authorization boundary.
+            raise ValidationError(f"以下题目当前不可修改：{'、'.join(rejected)}。")
     bound, unbound = split_answers(plan, answers)
     _save_bound_fields(registration, _apply_bound_fields(registration, bound))
     return save_draft_answers(response, answers=unbound, schema_hash=schema_hash)
@@ -154,6 +200,7 @@ def submit_registration(
     answers,
     due_rounds: frozenset[str] | set[str] = frozenset(),
     files=None,
+    expected_schema_hash: str = "",
 ) -> QuestionnaireResponse:
     """Re-check and finish a registration.
 
@@ -162,10 +209,16 @@ def submit_registration(
     re-evaluated, and the due-now required questions are proven answered before anything
     is marked submitted. A refusal leaves the draft exactly as it was, so a participant
     who is missing one field loses nothing else.
+
+    Submitting more than once is ordinary, not exceptional: while registration is open a
+    participant who has submitted may correct their details and submit again, and the
+    first ``submitted_at`` is kept as the statement-of-record timestamp.
     """
     if version.status != type(version).Status.FROZEN or not version.is_current:
         raise ValidationError("只有当前已冻结赛制可以提交报名。")
     plan = questionnaire_plan(version)
+    if expected_schema_hash and expected_schema_hash != plan.schema_hash:
+        raise ValidationError("问卷已更新，请刷新后重试。")
     response = get_or_create_response(
         registration=registration,
         ruleset_version=version,
@@ -173,8 +226,16 @@ def submit_registration(
         schema_hash=plan.schema_hash,
         is_test_data=registration.is_test_data,
     )
-    if response.status != QuestionnaireResponse.Status.DRAFT:
-        raise ValidationError("报名已提交。")
+    writable = writable_question_keys(
+        activity=version.ruleset.activity, registration=registration, plan=plan
+    )
+    if writable is not None and not writable:
+        raise ValidationError("当前阶段不可提交报名资料。")
+    if writable is not None:
+        # A submission carries the whole form, so a locked question is normally just the
+        # browser re-sending what it already had — it is *dropped* rather than refused, or
+        # a participant sent back to fix one question could not re-submit at all.
+        answers = {key: value for key, value in (answers or {}).items() if key in writable}
 
     bound, unbound = split_answers(plan, answers)
     merged = dict(response.answers or {})
