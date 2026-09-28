@@ -17,5 +17,10 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "mobile-chromium",
+      testMatch: /(?:auth-entry|ticket-boundary)\.spec\.ts/,
+      use: { ...devices["Pixel 5"] },
+    },
   ],
 });
