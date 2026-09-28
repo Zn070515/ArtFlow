@@ -23,7 +23,11 @@ class ManifestVerification:
 def _safe_relative_path(value: object) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise PackageValidationError("manifest path must be a non-empty string")
-    path = Path(value.replace("/", "\\"))
+    # Manifest paths are portable POSIX-style paths even when the verifier
+    # runs on Windows.  Do not rewrite them to backslashes before handing
+    # them to pathlib: on Linux that would turn a nested path into one
+    # literal filename component.
+    path = Path(value.replace("\\", "/"))
     if path.is_absolute() or ".." in path.parts:
         raise PackageValidationError(f"path is outside package root: {value}")
     return path
@@ -141,7 +145,9 @@ def _find_package_roots(root: Path) -> tuple[Path, Path]:
     raise PackageValidationError("cannot find 07_realistic_test_addendum package root")
 
 
-def verify_private_test_package(root: Path, *, require_sanitized_votes: bool = True) -> dict[str, Any]:
+def verify_private_test_package(
+    root: Path, *, require_sanitized_votes: bool = True
+) -> dict[str, Any]:
     package_root, addendum_root = _find_package_roots(root)
     manifest = verify_manifest(addendum_root / "ADDENDUM_MANIFEST.json")
     fixture = _load_json(package_root / "02_私测夹具" / "artflow_2025_full_reference_fixture.json")
