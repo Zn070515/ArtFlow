@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import ValidationError
-from django.http import Http404, HttpRequest
+from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -17,17 +17,19 @@ from django.views.decorators.http import require_GET, require_POST
 from .forms import (
     AdminLoginForm,
     AdminPasswordResetForm,
-    FirstAdminSetupForm,
+    AdminRegisterForm,
     ParticipantLoginForm,
-    RegisterForm,
+    ParticipantRegisterForm,
     StaffLoginForm,
+    StaffRegisterForm,
 )
 from .models import User
 from .services import (
     admin_verification_is_valid,
-    installation_provisioning_status,
     mark_admin_verified,
-    provision_first_admin,
+    register_admin_account,
+    register_participant_account,
+    register_staff_account,
 )
 
 CREDENTIAL_LOGIN_RATE_LIMIT = 10
@@ -35,8 +37,6 @@ CREDENTIAL_LOGIN_RATE_WINDOW_SECONDS = 300
 CREDENTIAL_LOGIN_IP_RATE_LIMIT = 100
 REGISTRATION_RATE_LIMIT = 30
 REGISTRATION_RATE_WINDOW_SECONDS = 600
-FIRST_ADMIN_SETUP_RATE_LIMIT = 10
-FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS = 300
 
 
 def _allow_form_submission(
@@ -74,11 +74,19 @@ def _allow_form_submission(
     return True
 
 
-def register_view(request):
+def _registration_view(
+    request: HttpRequest,
+    *,
+    form_class,
+    account_service,
+    role_title: str,
+    role_description: str,
+    login_url_name: str,
+):
     if request.user.is_authenticated:
         return redirect("public_portal:home")
     if request.method == "POST":
-        form = RegisterForm(request.POST)
+        form = form_class(request.POST)
         if (
             _allow_form_submission(
                 request,
@@ -89,12 +97,70 @@ def register_view(request):
             )
             and form.is_valid()
         ):
-            user = form.save()
-            login(request, user)
-            return redirect("public_portal:home")
+            try:
+                user = account_service(
+                    username=form.cleaned_data["username"],
+                    password=form.cleaned_data["password1"],
+                    **(
+                        {"access_key": form.cleaned_data["access_key"]}
+                        if "access_key" in form.cleaned_data
+                        else {}
+                    ),
+                )
+            except ValidationError as error:
+                form.add_error(None, error.messages)
+            else:
+                login(request, user)
+                if user.is_admin:
+                    mark_admin_verified(request.session)
+                return redirect(
+                    "staff:dashboard" if user.is_staff_or_admin else "public_portal:home"
+                )
     else:
-        form = RegisterForm()
-    return render(request, "accounts/register.html", {"form": form})
+        form = form_class()
+    return render(
+        request,
+        "accounts/register.html",
+        {
+            "form": form,
+            "role_title": role_title,
+            "role_description": role_description,
+            "login_url": reverse(login_url_name),
+        },
+    )
+
+
+def participant_register_view(request):
+    return _registration_view(
+        request,
+        form_class=ParticipantRegisterForm,
+        account_service=register_participant_account,
+        role_title="选手注册",
+        role_description="创建账号后即可报名并管理自己的活动资料。",
+        login_url_name="accounts:participant_login",
+    )
+
+
+def staff_register_view(request):
+    return _registration_view(
+        request,
+        form_class=StaffRegisterForm,
+        account_service=register_staff_account,
+        role_title="工作人员注册",
+        role_description="使用活动负责人提供的工作人员密钥创建运营账号。",
+        login_url_name="accounts:staff_login",
+    )
+
+
+def admin_register_view(request):
+    return _registration_view(
+        request,
+        form_class=AdminRegisterForm,
+        account_service=register_admin_account,
+        role_title="管理员注册",
+        role_description="使用系统负责人提供的管理员密钥创建管理账号。",
+        login_url_name="accounts:admin_login",
+    )
 
 
 def _safe_next_url(request: HttpRequest) -> str:
@@ -219,38 +285,6 @@ def admin_login_view(request):
         "accounts/admin_login.html",
         {"form": form, "next": _safe_next_url(request)},
     )
-
-
-def first_admin_setup_view(request):
-    if installation_provisioning_status() != "required":
-        raise Http404
-
-    if request.method == "POST":
-        form = FirstAdminSetupForm(request.POST)
-        if (
-            _allow_form_submission(
-                request,
-                form,
-                key_prefix="first-admin-setup",
-                limit=FIRST_ADMIN_SETUP_RATE_LIMIT,
-                window_seconds=FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS,
-            )
-            and form.is_valid()
-        ):
-            try:
-                user = provision_first_admin(
-                    username=form.cleaned_data["username"],
-                    password=form.cleaned_data["password"],
-                )
-            except ValidationError as error:
-                form.add_error(None, error.messages)
-            else:
-                login(request, user)
-                mark_admin_verified(request.session)
-                return redirect("staff:dashboard")
-    else:
-        form = FirstAdminSetupForm()
-    return render(request, "accounts/first_admin_setup.html", {"form": form})
 
 
 @require_POST

@@ -185,7 +185,7 @@ ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 2
 ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 365)
 
 # How long (seconds) an admin's elevated second-factor verification stays valid.
-# After this window the admin must re-enter ADMIN_LOGIN_KEY on sensitive actions.
+# After this window the admin must re-enter ADMIN_ACCESS_KEY on sensitive actions.
 ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 15 * 60)
 
 # Ticket-backed audience sessions are intentionally short-lived. The raw session

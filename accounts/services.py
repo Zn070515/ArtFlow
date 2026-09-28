@@ -5,12 +5,14 @@ from datetime import timezone as dt_timezone
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.models import AuditLog
+from config.runtime import is_placeholder_value
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare
 
 from .models import InstallationState, User
 
@@ -99,6 +101,86 @@ def installation_provisioning_status() -> str:
     if not state.initialized_at and not has_effective_admin:
         return "required"
     return "inconsistent"
+
+
+def _validate_registration_access_key(
+    access_key: str,
+    *,
+    setting_name: str,
+    missing_message: str,
+    invalid_message: str,
+) -> None:
+    configured_key = getattr(settings, setting_name, "")
+    if not configured_key or is_placeholder_value(configured_key):
+        raise ValidationError(missing_message)
+    if not constant_time_compare(access_key, configured_key):
+        raise ValidationError(invalid_message)
+
+
+def _create_registered_account(*, username: str, password: str, role: str) -> User:
+    normalized_username = username.strip()
+    if not normalized_username:
+        raise ValidationError("用户名不能为空。")
+    if not password:
+        raise ValidationError("密码不能为空。")
+    if User.objects.filter(username=normalized_username).exists():
+        raise ValidationError("用户名已存在。")
+
+    candidate = User(username=normalized_username, role=role, is_active=True)
+    candidate.set_password(password)
+    candidate.full_clean()
+    validate_password(password, user=candidate)
+    with authority_write(ACCOUNT_AUTHORITY):
+        candidate.save(force_insert=True)
+    return candidate
+
+
+def register_participant_account(*, username: str, password: str) -> User:
+    """Create a participant through the account authority boundary."""
+    return _create_registered_account(
+        username=username,
+        password=password,
+        role=User.Role.PARTICIPANT,
+    )
+
+
+def register_staff_account(*, username: str, password: str, access_key: str) -> User:
+    """Validate the staff access key and create a staff account."""
+    _validate_registration_access_key(
+        access_key,
+        setting_name="STAFF_ACCESS_KEY",
+        missing_message="工作人员密钥尚未安全配置。",
+        invalid_message="工作人员密钥错误。",
+    )
+    return _create_registered_account(
+        username=username,
+        password=password,
+        role=User.Role.STAFF,
+    )
+
+
+def register_admin_account(*, username: str, password: str, access_key: str) -> User:
+    """Validate the admin access key and create an admin account.
+
+    The first account keeps the existing one-time installation-state invariant;
+    later accounts use the same account authority without opening a reset path.
+    """
+    _validate_registration_access_key(
+        access_key,
+        setting_name="ADMIN_ACCESS_KEY",
+        missing_message="管理员密钥尚未安全配置。",
+        invalid_message="管理员密钥错误。",
+    )
+    provisioning_status = installation_provisioning_status()
+    if provisioning_status == "required":
+        return provision_first_admin(username=username, password=password)
+    if provisioning_status != "complete":
+        raise ValidationError("安装状态不一致，暂时不能注册管理员。")
+    return _create_registered_account(
+        username=username,
+        password=password,
+        role=User.Role.ADMIN,
+    )
 
 
 @transaction.atomic
