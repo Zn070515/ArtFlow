@@ -30,7 +30,8 @@ REQUIRE_CADDY_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_CADDY_RUNTIME") == "true
 REQUIRE_EVENT_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_EVENT_RUNTIME") == "true"
 CONFIG_ENVIRONMENT = {
     "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
-    "ADMIN_LOGIN_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
+    "STAFF_ACCESS_KEY": "artflow-compose-config-test-staff-key-not-for-deployment-2026",
+    "ADMIN_ACCESS_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
     "ALLOWED_HOSTS": "artflow.internal",
     "CSRF_TRUSTED_ORIGINS": "https://artflow.internal",
     "POSTGRES_DB": "artflow",
@@ -89,6 +90,9 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert services["web"]["image"] == (
         "${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}"
     )
+    assert services["web"]["environment"]["STAFF_ACCESS_KEY"].startswith("${STAFF_ACCESS_KEY:?")
+    assert services["web"]["environment"]["ADMIN_ACCESS_KEY"].startswith("${ADMIN_ACCESS_KEY:?")
+    assert "ADMIN_LOGIN_KEY" not in str(services["web"]["environment"])
 
 
 def test_production_images_are_digest_pinned_and_python_base_is_explicit():
@@ -307,7 +311,8 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
                     "APP_ENV=development",
                     "DEBUG=False",
                     "SECRET_KEY=event-runtime-test-secret",
-                    "ADMIN_LOGIN_KEY=event-runtime-test-admin-key",
+                    "STAFF_ACCESS_KEY=event-runtime-test-staff-key",
+                    "ADMIN_ACCESS_KEY=event-runtime-test-admin-key",
                     "POSTGRES_DB=event_runtime",
                     "POSTGRES_USER=event_runtime",
                     "POSTGRES_PASSWORD=event-runtime-test-database-password",

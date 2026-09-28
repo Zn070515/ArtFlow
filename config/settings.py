@@ -21,7 +21,8 @@ if APP_ENV == "production":
     validate_production_environment(os.environ)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
-ADMIN_LOGIN_KEY = os.environ.get("ADMIN_LOGIN_KEY", "")
+STAFF_ACCESS_KEY = os.environ.get("STAFF_ACCESS_KEY", "")
+ADMIN_ACCESS_KEY = os.environ.get("ADMIN_ACCESS_KEY", "")
 ARTFLOW_ORGANIZATION_NAME = os.environ.get("ARTFLOW_ORGANIZATION_NAME", "").strip()
 ARTFLOW_RELEASE_SHA = os.environ.get("ARTFLOW_RELEASE_SHA", "").strip()
 ARTFLOW_ICP_NUMBER = os.environ.get("ARTFLOW_ICP_NUMBER", "").strip()

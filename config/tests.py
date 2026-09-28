@@ -20,7 +20,8 @@ def production_environment(**overrides):
         "APP_ENV": "production",
         "DEBUG": "False",
         "SECRET_KEY": "production-secret-key",
-        "ADMIN_LOGIN_KEY": "production-admin-key",
+        "STAFF_ACCESS_KEY": "production-staff-key",
+        "ADMIN_ACCESS_KEY": "production-admin-key",
         "ALLOWED_HOSTS": "artflow.internal",
         "CSRF_TRUSTED_ORIGINS": "https://artflow.internal",
         "DATABASE_ENGINE": "postgresql",
@@ -62,11 +63,26 @@ class RuntimeTests(SimpleTestCase):
 
         self.assertNotIn(DEVELOPMENT_SECRET_KEY, str(error.exception))
 
-    def test_production_rejects_empty_admin_login_key(self):
+    def test_production_rejects_empty_staff_access_key(self):
         from config.runtime import validate_production_environment
 
         with self.assertRaises(ImproperlyConfigured):
-            validate_production_environment(production_environment(ADMIN_LOGIN_KEY=""))
+            validate_production_environment(production_environment(STAFF_ACCESS_KEY=""))
+
+    def test_production_rejects_empty_admin_access_key(self):
+        from config.runtime import validate_production_environment
+
+        with self.assertRaises(ImproperlyConfigured):
+            validate_production_environment(production_environment(ADMIN_ACCESS_KEY=""))
+
+    def test_production_does_not_accept_legacy_admin_login_key_as_a_substitute(self):
+        from config.runtime import validate_production_environment
+
+        environment = production_environment(ADMIN_LOGIN_KEY="legacy-admin-key")
+        environment.pop("STAFF_ACCESS_KEY")
+        environment.pop("ADMIN_ACCESS_KEY")
+        with self.assertRaises(ImproperlyConfigured):
+            validate_production_environment(environment)
 
     def test_production_rejects_missing_allowed_hosts(self):
         from config.runtime import validate_production_environment
@@ -91,7 +107,8 @@ class RuntimeTests(SimpleTestCase):
 
         placeholders = {
             "SECRET_KEY": "set-a-long-random-production-secret",
-            "ADMIN_LOGIN_KEY": "set-a-long-random-admin-login-key",
+            "STAFF_ACCESS_KEY": "set-a-long-random-staff-access-key",
+            "ADMIN_ACCESS_KEY": "set-a-long-random-admin-access-key",
             "ARTFLOW_RELEASE_SHA": "replace-me-with-the-deployed-commit-sha",
             "ALLOWED_HOSTS": "artflow.example.com",
             "CSRF_TRUSTED_ORIGINS": "https://artflow.example.com",
@@ -307,7 +324,8 @@ class SettingsTests(SimpleTestCase):
             "APP_ENV",
             "DEBUG",
             "SECRET_KEY",
-            "ADMIN_LOGIN_KEY",
+            "STAFF_ACCESS_KEY",
+            "ADMIN_ACCESS_KEY",
             "ALLOWED_HOSTS",
             "CSRF_TRUSTED_ORIGINS",
             "DATABASE_ENGINE",

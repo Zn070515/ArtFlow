@@ -10,7 +10,7 @@
 ```powershell
 # 1) 复制生产环境变量清单，逐项替换为真实值（生产配置校验会拒绝占位值）
 Copy-Item .env.production.example .env.production
-#    APP_ENV=production, DEBUG=False, 非占位 SECRET_KEY/ADMIN_LOGIN_KEY,
+#    APP_ENV=production, DEBUG=False, 非占位 SECRET_KEY/STAFF_ACCESS_KEY/ADMIN_ACCESS_KEY,
 #    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, CADDY_SITE_ADDRESS,
 #    DATABASE_ENGINE=postgresql + POSTGRES_*（生产 manifest 固定
 #    TRUST_X_FORWARDED_FOR=true、POSTGRES_HOST=db）

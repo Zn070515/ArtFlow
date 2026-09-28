@@ -63,8 +63,9 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 命令在容器内隐藏式读取密码，创建一个 active 的 ArtFlow `ADMIN` 账号（不创建 Django
 superuser），并把安装状态原子地标记为已初始化。重复执行、替换用户名或 reset 都会被拒绝。
 自动化发行 launcher 可以把一次性密码通过 `--password-stdin` 传入；不得把密码放进命令行
-参数、镜像、审计记录、诊断输出或长期环境模板。管理员登录仍需使用部署配置中的
-`ADMIN_LOGIN_KEY`，该密钥应通过未提交的 secret 管理保存。
+参数、镜像、审计记录、诊断输出或长期环境模板。管理员注册和登录使用部署配置中的
+`ADMIN_ACCESS_KEY`；工作人员注册和登录使用 `STAFF_ACCESS_KEY`。两个密钥都应通过未提交的
+secret 管理保存。
 
 ## 必填环境项（`.env.production.example` 字段清单）
 
@@ -75,7 +76,8 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 | `APP_ENV` | 必须是 `production` |
 | `DEBUG` | 必须是 `False` |
 | `SECRET_KEY` | 长随机密钥 |
-| `ADMIN_LOGIN_KEY` | ArtFlow 管理员二次认证密钥 |
+| `STAFF_ACCESS_KEY` | ArtFlow 工作人员注册与登录密钥 |
+| `ADMIN_ACCESS_KEY` | ArtFlow 管理员注册、登录与高风险操作认证密钥 |
 | `ARTFLOW_RELEASE_SHA` | 构建当前生产镜像的完整 Git commit SHA；用于备份 manifest 溯源 |
 | `ARTFLOW_WEB_IMAGE` | 已导入的、带该 SHA tag 的预构建 ArtFlow web 镜像；生产不现场 build |
 | `ARTFLOW_PYTHON_IMAGE` | 构建机使用的 digest-pinned Python 基础镜像；不在生产 Compose 中现场拉取 |
@@ -88,7 +90,7 @@ superuser），并把安装状态原子地标记为已初始化。重复执行�
 | `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
 | `RATE_LIMIT_BACKEND` | 生产 manifest 固定为 `database`，保证多 worker 共享限流桶 |
 
-`DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`ADMIN_LOGIN_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
+`DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
 
 ## 来源 IP 与 X-Forwarded-For
 
