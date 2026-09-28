@@ -30,17 +30,11 @@ from .services import (
     provision_first_admin,
 )
 
-PARTICIPANT_LOGIN_RATE_LIMIT = 10
-PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS = 300
-PARTICIPANT_LOGIN_IP_RATE_LIMIT = 100
+CREDENTIAL_LOGIN_RATE_LIMIT = 10
+CREDENTIAL_LOGIN_RATE_WINDOW_SECONDS = 300
+CREDENTIAL_LOGIN_IP_RATE_LIMIT = 100
 REGISTRATION_RATE_LIMIT = 30
 REGISTRATION_RATE_WINDOW_SECONDS = 600
-ADMIN_LOGIN_RATE_LIMIT = 10
-ADMIN_LOGIN_RATE_WINDOW_SECONDS = 300
-ADMIN_LOGIN_IP_RATE_LIMIT = 100
-STAFF_LOGIN_RATE_LIMIT = 10
-STAFF_LOGIN_RATE_WINDOW_SECONDS = 300
-STAFF_LOGIN_IP_RATE_LIMIT = 100
 FIRST_ADMIN_SETUP_RATE_LIMIT = 10
 FIRST_ADMIN_SETUP_RATE_WINDOW_SECONDS = 300
 
@@ -171,10 +165,10 @@ def participant_login_view(request):
         request,
         form_class=ParticipantLoginForm,
         template_name="accounts/participant_login.html",
-        key_prefix="participant-login",
-        limit=PARTICIPANT_LOGIN_RATE_LIMIT,
-        window_seconds=PARTICIPANT_LOGIN_RATE_WINDOW_SECONDS,
-        aggregate_limit=PARTICIPANT_LOGIN_IP_RATE_LIMIT,
+        key_prefix="credential-login",
+        limit=CREDENTIAL_LOGIN_RATE_LIMIT,
+        window_seconds=CREDENTIAL_LOGIN_RATE_WINDOW_SECONDS,
+        aggregate_limit=CREDENTIAL_LOGIN_IP_RATE_LIMIT,
         default_url=reverse("public_portal:home"),
     )
 
@@ -184,10 +178,10 @@ def staff_login_view(request):
         request,
         form_class=StaffLoginForm,
         template_name="accounts/staff_login.html",
-        key_prefix="staff-login",
-        limit=STAFF_LOGIN_RATE_LIMIT,
-        window_seconds=STAFF_LOGIN_RATE_WINDOW_SECONDS,
-        aggregate_limit=STAFF_LOGIN_IP_RATE_LIMIT,
+        key_prefix="credential-login",
+        limit=CREDENTIAL_LOGIN_RATE_LIMIT,
+        window_seconds=CREDENTIAL_LOGIN_RATE_WINDOW_SECONDS,
+        aggregate_limit=CREDENTIAL_LOGIN_IP_RATE_LIMIT,
         default_url=reverse("staff:dashboard"),
     )
 
@@ -205,11 +199,11 @@ def admin_login_view(request):
             _allow_form_submission(
                 request,
                 form,
-                key_prefix="admin-login",
-                limit=ADMIN_LOGIN_RATE_LIMIT,
-                window_seconds=ADMIN_LOGIN_RATE_WINDOW_SECONDS,
+                key_prefix="credential-login",
+                limit=CREDENTIAL_LOGIN_RATE_LIMIT,
+                window_seconds=CREDENTIAL_LOGIN_RATE_WINDOW_SECONDS,
                 identity=str(request.POST.get("username", "")),
-                aggregate_limit=ADMIN_LOGIN_IP_RATE_LIMIT,
+                aggregate_limit=CREDENTIAL_LOGIN_IP_RATE_LIMIT,
             )
             and form.is_valid()
         ):
