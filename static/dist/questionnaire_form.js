@@ -10,6 +10,8 @@
     const autosaveUrl = root.dataset.autosaveUrl || "";
     const uploadTemplate = root.dataset.uploadUrlTemplate || "";
     const schemaHash = root.dataset.schemaHash || "";
+    const csrfField = root.querySelector('input[name="csrfmiddlewaretoken"]');
+    const pageCsrfToken = csrfField?.value || "";
     const saveState = root.querySelector("[data-save-state]");
     const errorBox = root.querySelector("[data-form-error]");
     const requiredCount = root.querySelector("[data-completion-required]");
@@ -118,8 +120,7 @@
         }, TYPING_SETTLE_MS);
     };
     const csrfToken = () => {
-        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-        return match && match[1] ? decodeURIComponent(match[1]) : "";
+        return pageCsrfToken;
     };
     root.querySelectorAll("[data-answer]").forEach((field) => {
         field.addEventListener(field instanceof HTMLSelectElement ? "change" : "input", schedule);

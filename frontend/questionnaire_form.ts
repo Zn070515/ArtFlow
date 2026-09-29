@@ -9,6 +9,8 @@
   const autosaveUrl = root.dataset.autosaveUrl || "";
   const uploadTemplate = root.dataset.uploadUrlTemplate || "";
   const schemaHash = root.dataset.schemaHash || "";
+  const csrfField = root.querySelector<HTMLInputElement>('input[name="csrfmiddlewaretoken"]');
+  const pageCsrfToken = csrfField?.value || "";
   const saveState = root.querySelector<HTMLElement>("[data-save-state]");
   const errorBox = root.querySelector<HTMLElement>("[data-form-error]");
   const requiredCount = root.querySelector<HTMLElement>("[data-completion-required]");
@@ -118,8 +120,7 @@
   };
 
   const csrfToken = (): string => {
-    const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-    return match && match[1] ? decodeURIComponent(match[1]) : "";
+    return pageCsrfToken;
   };
 
   root.querySelectorAll<HTMLElement>("[data-answer]").forEach((field) => {

@@ -12,6 +12,7 @@
      data-editable="{% if editable %}1{% else %}0{% endif %}"
      data-submit-url="{{ submit_url }}"
      data-submitted="{% if submitted %}1{% else %}0{% endif %}">
+    {% csrf_token %}
 
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
     <p class="text-sm text-gray-500 mb-6">资料完成度</p>
