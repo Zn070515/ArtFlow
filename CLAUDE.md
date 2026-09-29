@@ -2,7 +2,7 @@
 
 ## Project overview
 
-ArtFlow is a Django monolith for university arts-department activity operations. Domain apps live in `entry_access/`, `tickets/`, `accounts/`, `core/`, `ruleset/`, `questionnaire/`, `common/`, `public_portal/`, `files/`, `singer_contest/`, `farewell_show/`, `voting/`, `exports/`, `archive/`, `incidents/`, and `staff_panel/`. Read `GOAL.md` for product scope and [the development baseline](docs/development-baseline.md) for the current, verified operating procedures.
+ArtFlow is a Django monolith for university arts-department activity operations. Read `GOAL.md` for product scope, [`AGENTS.md`](AGENTS.md) for the per-app module breakdown, and [the development baseline](docs/development-baseline.md) for the current, verified operating procedures.
 
 ## Development environment
 
