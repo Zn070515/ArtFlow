@@ -368,14 +368,14 @@ def _create_rounds_and_rubrics(
                     is_locked=False,
                 )
         else:
-            rubric = round_obj.rubric
-            if rubric is None:
+            existing_rubric = round_obj.rubric
+            if existing_rubric is None:
                 raise PrivateTestLoadError(f"existing round configuration mismatch: {key}")
             expected_criteria = [
                 (item["name"], Decimal(item["max_score"])) for item in criteria_by_round[key]
             ]
             actual_criteria = list(
-                rubric.criteria.order_by("sequence", "pk").values_list("name", "max_score")
+                existing_rubric.criteria.order_by("sequence", "pk").values_list("name", "max_score")
             )
             if (
                 round_obj.activity_id != activity.pk
@@ -394,8 +394,8 @@ def _create_rounds_and_rubrics(
                 or round_obj.roster_source != source
                 or round_obj.roster_source_stage
                 != ("stage1" if key == "round3" else "stage2" if key == "round4" else "")
-                or not rubric.is_test_data
-                or rubric.name != f"{name}评分标准"
+                or not existing_rubric.is_test_data
+                or existing_rubric.name != f"{name}评分标准"
                 or actual_criteria != expected_criteria
             ):
                 raise PrivateTestLoadError(f"existing round configuration mismatch: {key}")

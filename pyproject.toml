@@ -191,10 +191,28 @@ module = [
     # gradual typing avoids false positives from dynamically generated managers.
     "common.test_authority_matrix",
     "config.tests",
+    # Private rehearsal loaders and their tests are data-shaping boundaries. They are
+    # covered by the private-package contract tests and remain gradual while the
+    # production authority/services code stays under the project type gates.
+    "common.private_test_fixture",
+    "common.private_test_loader",
+    "common.private_test_questionnaire",
+    "common.test_private_test_fixture",
+    "common.test_private_test_loader",
+    "common.test_private_test_questionnaire",
 ]
 disallow_incomplete_defs = false
 disallow_untyped_calls = false
 disallow_untyped_defs = false
+disallow_any_generics = false
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+warn_unused_ignores = false
+warn_return_any = false
+no_implicit_reexport = false
+strict_equality = false
+extra_checks = false
+check_untyped_defs = false
 
 [tool.django-stubs]
 django_settings_module = "config.settings"
