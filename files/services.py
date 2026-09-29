@@ -19,6 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from questionnaire.schema import FILE_TYPE
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
+from .policies import FILE_PURPOSE_POLICIES
 
 VIDEO_PURPOSES = (
     SubmissionFile.Purpose.BACKGROUND_VIDEO,
@@ -31,61 +32,13 @@ def delete_storage_object(storage: Storage, name: str) -> None:
 
 
 MAX_UPLOAD_BYTES = {
-    SubmissionFile.Purpose.PROGRAM_IMAGE: 10 * 1024 * 1024,
-    SubmissionFile.Purpose.PUBLIC_IMAGE: 10 * 1024 * 1024,
-    SubmissionFile.Purpose.SHOWCASE_IMAGE: 10 * 1024 * 1024,
-    SubmissionFile.Purpose.ACCOMPANIMENT: 100 * 1024 * 1024,
-    SubmissionFile.Purpose.BACKGROUND_VIDEO: 500 * 1024 * 1024,
-    SubmissionFile.Purpose.PERFORMANCE_VIDEO: 500 * 1024 * 1024,
-    SubmissionFile.Purpose.LYRICS_SCRIPT: 20 * 1024 * 1024,
-    SubmissionFile.Purpose.HOST_MATERIAL: 20 * 1024 * 1024,
-    SubmissionFile.Purpose.OTHER: 50 * 1024 * 1024,
+    purpose: policy.max_mb * 1024 * 1024 for purpose, policy in FILE_PURPOSE_POLICIES.items()
 }
-
 ALLOWED_EXTENSIONS = {
-    SubmissionFile.Purpose.PROGRAM_IMAGE: {".jpg", ".jpeg", ".png", ".webp"},
-    SubmissionFile.Purpose.PUBLIC_IMAGE: {".jpg", ".jpeg", ".png", ".webp"},
-    SubmissionFile.Purpose.SHOWCASE_IMAGE: {".jpg", ".jpeg", ".png", ".webp"},
-    SubmissionFile.Purpose.ACCOMPANIMENT: {".mp3", ".wav", ".m4a", ".flac"},
-    SubmissionFile.Purpose.BACKGROUND_VIDEO: {".mp4", ".mov", ".webm"},
-    SubmissionFile.Purpose.PERFORMANCE_VIDEO: {".mp4", ".mov", ".webm"},
-    SubmissionFile.Purpose.LYRICS_SCRIPT: {".txt", ".doc", ".docx", ".pdf"},
-    SubmissionFile.Purpose.HOST_MATERIAL: {".txt", ".doc", ".docx", ".pdf"},
-    SubmissionFile.Purpose.OTHER: {".txt", ".doc", ".docx", ".pdf", ".zip"},
+    purpose: set(policy.extensions) for purpose, policy in FILE_PURPOSE_POLICIES.items()
 }
-
 ALLOWED_CONTENT_TYPES = {
-    SubmissionFile.Purpose.PROGRAM_IMAGE: {"image/jpeg", "image/png", "image/webp"},
-    SubmissionFile.Purpose.PUBLIC_IMAGE: {"image/jpeg", "image/png", "image/webp"},
-    SubmissionFile.Purpose.SHOWCASE_IMAGE: {"image/jpeg", "image/png", "image/webp"},
-    SubmissionFile.Purpose.ACCOMPANIMENT: {
-        "audio/flac",
-        "audio/mp4",
-        "audio/mpeg",
-        "audio/wav",
-        "audio/x-wav",
-    },
-    SubmissionFile.Purpose.BACKGROUND_VIDEO: {"video/mp4", "video/quicktime", "video/webm"},
-    SubmissionFile.Purpose.PERFORMANCE_VIDEO: {"video/mp4", "video/quicktime", "video/webm"},
-    SubmissionFile.Purpose.LYRICS_SCRIPT: {
-        "application/msword",
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "text/plain",
-    },
-    SubmissionFile.Purpose.HOST_MATERIAL: {
-        "application/msword",
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "text/plain",
-    },
-    SubmissionFile.Purpose.OTHER: {
-        "application/msword",
-        "application/pdf",
-        "application/zip",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "text/plain",
-    },
+    purpose: set(policy.content_types) for purpose, policy in FILE_PURPOSE_POLICIES.items()
 }
 
 

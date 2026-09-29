@@ -755,6 +755,8 @@ class QuestionnaireMaterialCheckReconcileTests(_QuestionnaireUploadBase):
         for question in document["pages"][0]["sections"][0]["questions"]:
             if question["key"] == "r1.accompaniment":
                 question["file"]["purpose"] = "background_video"
+                question["file"]["extensions"] = [".mp4"]
+                question["file"]["max_mb"] = 500
         reconcile_questionnaire_material_checks(
             registration=registration,
             version=version,

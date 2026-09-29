@@ -16,8 +16,9 @@ import copy
 from typing import Iterable
 
 from django.core.exceptions import ValidationError
+from files.policies import file_purpose_policy
 
-from .schema import FILE_PURPOSES, NOTICE_TYPE, parse_questionnaire
+from .schema import NOTICE_TYPE, parse_questionnaire
 
 # The blocks the designer offers, with the shape each starts life with. The defaults are
 # deliberately valid documents so adding a block never creates a save-then-fail dead end.
@@ -119,12 +120,11 @@ def default_question(question_type: str, *, key: str) -> dict:
             {"value": "option_2", "label": "选项二"},
         ]
     elif question_type == "file":
+        policy = file_purpose_policy("accompaniment")
         question["file"] = {
-            "purpose": (
-                "accompaniment" if "accompaniment" in FILE_PURPOSES else sorted(FILE_PURPOSES)[0]
-            ),
-            "extensions": [".mp3", ".wav", ".mp4"],
-            "max_mb": 500,
+            "purpose": "accompaniment",
+            "extensions": sorted(policy.extensions),
+            "max_mb": policy.max_mb,
             "max_files": 1,
         }
     return question

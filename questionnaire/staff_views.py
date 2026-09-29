@@ -22,6 +22,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
+from files.policies import FILE_PURPOSE_POLICIES
 from ruleset.models import RulesetVersion
 from ruleset.services import update_ruleset_definition_section
 
@@ -355,6 +356,14 @@ def builder_view(request: HttpRequest, pk: int):
                 ("notice", "说明"),
             ],
             "file_purposes": sorted(FILE_PURPOSES),
+            "file_policies": [
+                {
+                    "purpose": purpose,
+                    "extensions": sorted(policy.extensions),
+                    "max_mb": policy.max_mb,
+                }
+                for purpose, policy in sorted(FILE_PURPOSE_POLICIES.items())
+            ],
             "round_choices": round_choices,
         },
     )
