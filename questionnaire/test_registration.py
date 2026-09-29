@@ -204,6 +204,16 @@ class AnswerNormalizationTests(_CharacterizationBase):
         with self.assertRaises(ValidationError):
             normalize_answer(question, "138001380001")
 
+    def test_email_domain_is_validated_without_backtracking(self):
+        question = {
+            "key": "email",
+            "type": "text",
+            "validation": {"format": "email"},
+        }
+        self.assertEqual(normalize_answer(question, "person@example.com"), "person@example.com")
+        with self.assertRaises(ValidationError):
+            normalize_answer(question, "person@example")
+
 
 class ResolvedConditionSourceTests(_CharacterizationBase):
     def test_conditions_read_bound_and_file_answers_in_document_order(self):

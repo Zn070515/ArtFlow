@@ -124,13 +124,13 @@ def normalize_answer(question: dict, raw):
             raise ValidationError(f"题目 {question['key']} 少于最小长度。")
         if "max_length" in validation and len(value) > validation["max_length"]:
             raise ValidationError(f"题目 {question['key']} 超过最大长度。")
-        if value and validation.get("format") == "phone_cn" and not re.fullmatch(
-            r"1[3-9]\d{9}", value
+        if (
+            value
+            and validation.get("format") == "phone_cn"
+            and not re.fullmatch(r"1[3-9]\d{9}", value)
         ):
             raise ValidationError(f"题目 {question['key']} 不是有效的中国大陆手机号。")
-        if value and validation.get("format") == "email" and not re.fullmatch(
-            r"[^\s@]+@[^\s@]+\.[^\s@]+", value
-        ):
+        if value and validation.get("format") == "email" and not _is_simple_email(value):
             raise ValidationError(f"题目 {question['key']} 不是有效的邮箱地址。")
         return value
     if qtype == "number":
@@ -176,6 +176,17 @@ def normalize_answer(question: dict, raw):
     if qtype == "file":
         raise ValidationError(f"题目 {question['key']} 必须通过文件上传入口提交。")
     raise ValidationError(f"题目 {question['key']} 类型不受支持。")
+
+
+def _is_simple_email(value: str) -> bool:
+    """Validate the supported email shape without a backtracking regex."""
+    local, separator, domain = value.partition("@")
+    if not separator or value.count("@") != 1 or not local or not domain:
+        return False
+    if any(character.isspace() for character in value):
+        return False
+    labels = domain.split(".")
+    return "." in domain and all(labels)
 
 
 def normalize_answers(plan: QuestionnairePlan, answers) -> dict:
