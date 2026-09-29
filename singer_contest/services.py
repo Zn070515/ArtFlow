@@ -260,6 +260,44 @@ def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistratio
     return [singers[singer_id] for singer_id in advancing_ids if singer_id in singers]
 
 
+def round_roster_stage_choices(activity) -> list[tuple[str, str]]:
+    """Return stage/checkpoint keys available for a round's STAGE roster source."""
+    from ruleset.models import ContestRuleset, RulesetVersion
+
+    ruleset = ContestRuleset.objects.filter(activity=activity).first()
+    if ruleset is None:
+        return []
+    version = (
+        ruleset.versions.filter(status=RulesetVersion.Status.FROZEN, is_current=True)
+        .order_by("-version")
+        .first()
+        or ruleset.versions.order_by("-version").first()
+    )
+    keys: list[str] = []
+    if version is not None:
+        try:
+            definition = version.definition
+            if isinstance(definition, str):
+                definition = json.loads(definition)
+            keys.extend(
+                str(checkpoint["key"])
+                for checkpoint in (definition.get("checkpoints") or [])
+                if checkpoint.get("key")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            keys = []
+    if ruleset.stage_key and ruleset.stage_key not in keys:
+        keys.append(ruleset.stage_key)
+    return [(key, f"{key}（结果赛段）") for key in keys]
+
+
+def validate_roster_source_stage(activity, stage_key: str) -> None:
+    """Reject a STAGE roster reference not declared by the activity ruleset."""
+    choices = round_roster_stage_choices(activity)
+    if stage_key not in {value for value, _label in choices}:
+        raise ValidationError("上游赛段必须选择当前活动赛制中已声明的结果赛段。")
+
+
 def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration]:
     """Return the authoritative singer roster currently usable by operator controls.
 

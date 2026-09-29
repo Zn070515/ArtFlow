@@ -111,10 +111,16 @@ class ContestRoundForm(forms.Form):
         label="评分规则", queryset=ScoringRubric.objects.none(), required=False
     )
 
-    def __init__(self, *args, rubrics=None, **kwargs):
+    def __init__(self, *args, rubrics=None, stage_choices=None, **kwargs):
         super().__init__(*args, **kwargs)
         if rubrics is not None:
             cast(forms.ModelChoiceField, self.fields["rubric"]).queryset = rubrics
+        if stage_choices is not None:
+            self.fields["roster_source_stage"] = forms.ChoiceField(
+                label="上游赛段（赛段晋级时必填）",
+                choices=[("", "请选择上游赛段"), *stage_choices],
+                required=False,
+            )
 
     def clean_advance_count(self):
         return self.cleaned_data.get("advance_count") or 0

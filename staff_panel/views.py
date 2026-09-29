@@ -153,12 +153,14 @@ from singer_contest.services import (
     prepare_round,
     reset_round_to_draft,
     result_closure_as_dict,
+    round_roster_stage_choices,
     set_manual_decision,
     set_round_groups,
     set_round_running_order,
     stage_decisions_by_blocks,
     unlock_round,
     unlock_stage_result,
+    validate_roster_source_stage,
 )
 from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
 from voting.services import (
@@ -329,6 +331,21 @@ def activity_edit(request, pk):
                 },
             )
         data = dict(form.cleaned_data)
+        if data["activity_type"] != activity.activity_type:
+            form.add_error("activity_type", "活动类型创建后不可修改。")
+            return render(
+                request,
+                "staff_panel/activity_form.html",
+                {
+                    "error": _form_error(form),
+                    "activity": activity,
+                    "activity_types": _choices(Activity.Type),
+                    "phases": phase_choices_for_activity(activity),
+                    "data": request.POST,
+                    "form_data_present": True,
+                },
+                status=400,
+            )
         target_phase = data.pop("phase")
         if target_phase != activity.phase:
             activity = transition_activity_phase(activity, target_phase, actor=request.user)
@@ -339,6 +356,7 @@ def activity_edit(request, pk):
         try:
             activity.save()
         except ValidationError as error:
+            transaction.set_rollback(True)
             form.add_error(None, domain_error_messages(error))
             return render(
                 request,
@@ -1140,8 +1158,11 @@ def round_create(request):
             pk=request.POST.get("activity_id"),
             activity_type=Activity.Type.SINGER_CONTEST,
         )
+        stage_choices = round_roster_stage_choices(activity)
         form = ContestRoundForm(
-            request.POST, rubrics=ScoringRubric.objects.filter(activity=activity)
+            request.POST,
+            rubrics=ScoringRubric.objects.filter(activity=activity),
+            stage_choices=stage_choices,
         )
         if not form.is_valid():
             return render(
@@ -1164,6 +1185,31 @@ def round_create(request):
                     "selected_activity_id": activity.pk,
                 },
             )
+        if form.cleaned_data["roster_source"] == ContestRound.RosterSource.STAGE:
+            try:
+                validate_roster_source_stage(activity, form.cleaned_data["roster_source_stage"])
+            except ValidationError as error:
+                form.add_error("roster_source_stage", domain_error_messages(error))
+                return render(
+                    request,
+                    "staff_panel/round_form.html",
+                    {
+                        "form": form,
+                        "error": _form_error(form),
+                        "activities": Activity.objects.filter(
+                            activity_type=Activity.Type.SINGER_CONTEST
+                        ),
+                        "round_types": _choices(ContestRound.RoundType),
+                        "scoring_modes": _choices(ContestRound.ScoringMode),
+                        "order_policies": _choices(ContestRound.OrderPolicy),
+                        "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+                        "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                        "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                            activity=activity
+                        ),
+                        "selected_activity_id": activity.pk,
+                    },
+                )
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
             sequence = form.cleaned_data["sequence"]
@@ -1249,7 +1295,13 @@ def round_create(request):
         if selected_activity_id.isdigit()
         else ScoringRubric.objects.none()
     )
-    form = ContestRoundForm(rubrics=rubrics)
+    selected_activity = activities.filter(pk=selected_activity_id).first()
+    form = ContestRoundForm(
+        rubrics=rubrics,
+        stage_choices=round_roster_stage_choices(selected_activity)
+        if selected_activity is not None
+        else (),
+    )
     return render(
         request,
         "staff_panel/round_form.html",
@@ -3238,7 +3290,14 @@ def ruleset_template_list(request):
     # Show the catalog with explicit capability status. Only production templates
     # expose cloning; experimental/unsupported entries must never look production-ready.
     templates = RulesetTemplate.objects.all()
-    activities = Activity.objects.all().order_by("-created_at")
+    activities = (
+        Activity.objects.filter(
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        .exclude(phase=Activity.Phase.ARCHIVED)
+        .order_by("-created_at")
+    )
     return render(
         request,
         "staff_panel/ruleset_template_list.html",
@@ -3250,7 +3309,14 @@ def ruleset_template_list(request):
 def ruleset_template_detail(request, pk):
     template = get_object_or_404(RulesetTemplate, pk=pk)
     nodes = parse_definition(template.definition)["nodes"] if template.definition else []
-    activities = Activity.objects.all().order_by("-created_at")
+    activities = (
+        Activity.objects.filter(
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        .exclude(phase=Activity.Phase.ARCHIVED)
+        .order_by("-created_at")
+    )
     return render(
         request,
         "staff_panel/ruleset_template_detail.html",
@@ -3703,8 +3769,16 @@ def _node_type_options(nodes):
 @staff_required
 @transaction.atomic
 def contest_ruleset_create(request):
+    activities = (
+        Activity.objects.filter(
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        .exclude(phase=Activity.Phase.ARCHIVED)
+        .order_by("-created_at")
+    )
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+        activity = get_object_or_404(activities, pk=request.POST.get("activity"))
         activity = lock_activity_for_action(activity)
         name = (request.POST.get("name") or "").strip()
         if not name:
@@ -3766,7 +3840,6 @@ def contest_ruleset_create(request):
         version = create_ruleset_version(ruleset, definition=definition, created_by=request.user)
         messages.success(request, "赛制已创建，进入编辑。")
         return redirect("staff:ruleset_edit", pk=version.pk)
-    activities = Activity.objects.all().order_by("-created_at")
     templates = RulesetTemplate.objects.filter(
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION
     ).order_by("name")

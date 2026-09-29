@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase
 
 from staff_panel.forms import (
+    ContestRoundForm,
     RoundGroupsForm,
     RoundRunningOrderForm,
     ScoringRubricProvisionForm,
@@ -22,6 +23,19 @@ class StructuredOperatorFormTests(SimpleTestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["singer_ids"], ["3", "1", "2"])
         self.assertNotIn("ID", form.fields["singer_ids"].help_text or "")
+
+    def test_round_stage_source_uses_controlled_choices(self):
+        form = ContestRoundForm(
+            {
+                "round_type": "semi_final",
+                "roster_source": "stage",
+                "roster_source_stage": "not-a-checkpoint",
+            },
+            stage_choices=[("stage1", "第一阶段")],
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("选择一个有效的选项", str(form.errors["roster_source_stage"]))
 
     def test_groups_normalize_repeated_fields_without_json(self):
         form = RoundGroupsForm(

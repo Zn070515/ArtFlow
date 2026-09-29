@@ -3552,6 +3552,35 @@ class ActivityPhaseEditTests(TestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.activity_type, Activity.Type.SINGER_CONTEST)
 
+    def test_invalid_activity_type_does_not_commit_phase_transition(self):
+        activity = _create_activity(
+            title="Atomic contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.DRAFT,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Atomic contest",
+                "activity_type": Activity.Type.FAREWELL_SHOW,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.DRAFT)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.PHASE_TRANSITION,
+                operator=self.admin,
+                target=f"Activity:{activity.pk}",
+            ).exists()
+        )
+
     def test_archived_activity_list_exposes_only_unarchive(self):
         activity = _create_activity(
             title="Archived Contest",
@@ -6617,6 +6646,26 @@ class RulesetEditorTests(TestCase):
             {"activity": self.activity.pk, "name": "锁定活动禁止建赛制"},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_ruleset_create_only_offers_unlocked_singer_contest_activities(self):
+        farewell = _create_activity(
+            title="Farewell show",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.DRAFT,
+            is_test_mode=True,
+        )
+        archived = _create_activity(
+            title="Archived contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_test_mode=True,
+        )
+        response = self.client.get(reverse("staff:contest_ruleset_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.activity.title)
+        self.assertNotContains(response, farewell.title)
+        self.assertNotContains(response, archived.title)
 
     def test_rule_edit_requires_unlocked_activity(self):
         """R0: ruleset edit must re-validate the activity lock before mutating."""
