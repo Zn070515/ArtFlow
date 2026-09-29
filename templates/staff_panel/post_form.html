@@ -11,18 +11,18 @@
         {% if post %}<input type="hidden" name="base_version" value="{{ post.version }}">{% endif %}
         <div>
             <label for="id_title" class="block text-sm font-medium text-gray-700 mb-1">标题</label>
-            <input id="id_title" type="text" name="title" value="{{ post.title|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <input id="id_title" type="text" name="title" value="{% if form_data_present %}{{ form_data.title }}{% else %}{{ post.title|default:'' }}{% endif %}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
         </div>
         <div>
             <label for="id_subtitle" class="block text-sm font-medium text-gray-700 mb-1">副标题</label>
-            <input id="id_subtitle" type="text" name="subtitle" value="{{ post.subtitle|default:'' }}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <input id="id_subtitle" type="text" name="subtitle" value="{% if form_data_present %}{{ form_data.subtitle }}{% else %}{{ post.subtitle|default:'' }}{% endif %}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
                 <label for="id_post_type" class="block text-sm font-medium text-gray-700 mb-1">类型</label>
                 <select id="id_post_type" name="post_type" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
                     {% for value, label in post_types %}
-                    <option value="{{ value }}" {% if post.post_type == value %}selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}" {% if form_data_present and form_data.post_type == value %}selected{% elif not form_data_present and post.post_type == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -30,25 +30,25 @@
                 <label for="id_status" class="block text-sm font-medium text-gray-700 mb-1">状态</label>
                 <select id="id_status" name="status" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
                     {% for value, label in statuses %}
-                    <option value="{{ value }}" {% if post.status == value %}selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}" {% if form_data_present and form_data.status == value %}selected{% elif not form_data_present and post.status == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
         </div>
         <div class="flex items-center gap-2">
-            <input type="checkbox" name="is_pinned" id="id_is_pinned" {% if post.is_pinned %}checked{% endif %} class="h-4 w-4 text-brand border-gray-300">
+            <input type="checkbox" name="is_pinned" id="id_is_pinned" {% if form_data_present and form_data.is_pinned or not form_data_present and post.is_pinned %}checked{% endif %} class="h-4 w-4 text-brand border-gray-300">
             <label for="id_is_pinned" class="text-sm text-gray-700">置顶</label>
         </div>
         <div>
             <label for="id_sort_order" class="block text-sm font-medium text-gray-700 mb-1">排序（数字越小越靠前）</label>
-            <input id="id_sort_order" type="number" name="sort_order" value="{{ post.sort_order|default:'0' }}" class="w-24 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <input id="id_sort_order" type="number" name="sort_order" value="{% if form_data_present %}{{ form_data.sort_order }}{% else %}{{ post.sort_order|default:'0' }}{% endif %}" class="w-24 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
         </div>
         <div>
             <label for="id_related_activity_id" class="block text-sm font-medium text-gray-700 mb-1">关联活动</label>
             <select id="id_related_activity_id" name="related_activity_id" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
                 <option value="">—— 不关联活动 ——</option>
                 {% for a in activities %}
-                <option value="{{ a.pk }}" {% if post.related_activity_id == a.pk %}selected{% endif %}>{{ a.title }}</option>
+                <option value="{{ a.pk }}" {% if form_data_present and form_data.related_activity_id|stringformat:"s" == a.pk|stringformat:"s" %}selected{% elif not form_data_present and post.related_activity_id == a.pk %}selected{% endif %}>{{ a.title }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -59,7 +59,7 @@
         </div>
         <div>
             <label for="id_content" class="block text-sm font-medium text-gray-700 mb-1">正文</label>
-            <textarea id="id_content" name="content" rows="8" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">{{ post.content|default:'' }}</textarea>
+            <textarea id="id_content" name="content" rows="8" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">{% if form_data_present %}{{ form_data.content }}{% else %}{{ post.content|default:'' }}{% endif %}</textarea>
         </div>
         <div class="flex gap-3">
             <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light transition-colors">保存</button>

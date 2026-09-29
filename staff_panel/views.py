@@ -428,6 +428,13 @@ def post_list(request):
     return render(request, "staff_panel/post_list.html", {"posts": posts})
 
 
+def _post_status_choices(request):
+    choices = _choices(PublicPost.Status)
+    if request.user.is_admin:
+        return choices
+    return [choice for choice in choices if choice[0] != PublicPost.Status.PUBLISHED]
+
+
 @staff_required
 def post_create(request):
     if request.method == "POST":
@@ -438,8 +445,10 @@ def post_create(request):
                 "staff_panel/post_form.html",
                 {
                     "error": _form_error(form),
+                    "form_data": request.POST,
+                    "form_data_present": True,
                     "post_types": _choices(PublicPost.PostType),
-                    "statuses": _choices(PublicPost.Status),
+                    "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
                 },
             )
@@ -487,8 +496,9 @@ def post_create(request):
         "staff_panel/post_form.html",
         {
             "post_types": _choices(PublicPost.PostType),
-            "statuses": _choices(PublicPost.Status),
+            "statuses": _post_status_choices(request),
             "activities": Activity.objects.all(),
+            "form_data_present": False,
         },
     )
 
@@ -517,8 +527,10 @@ def post_edit(request, pk):
                 {
                     "error": _form_error(form),
                     "post": post,
+                    "form_data": request.POST,
+                    "form_data_present": True,
                     "post_types": _choices(PublicPost.PostType),
-                    "statuses": _choices(PublicPost.Status),
+                    "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
                 },
             )
@@ -559,7 +571,7 @@ def post_edit(request, pk):
                     "error": "该内容已被其他人更新，请刷新后重新编辑。",
                     "post": post,
                     "post_types": _choices(PublicPost.PostType),
-                    "statuses": _choices(PublicPost.Status),
+                    "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
                 },
             )
@@ -615,8 +627,9 @@ def post_edit(request, pk):
         {
             "post": post,
             "post_types": _choices(PublicPost.PostType),
-            "statuses": _choices(PublicPost.Status),
+            "statuses": _post_status_choices(request),
             "activities": Activity.objects.all(),
+            "form_data_present": False,
         },
     )
 

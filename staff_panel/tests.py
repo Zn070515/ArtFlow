@@ -4795,6 +4795,38 @@ class PublicPortalPublicationTests(TestCase):
         self.assertTrue(response["Location"].startswith(reverse("accounts:admin_login")))
         self.assertFalse(PublicPost.objects.filter(title="A Post").exists())
 
+    def test_staff_post_form_does_not_offer_published_status(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:post_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, f'value="{PublicPost.Status.PUBLISHED}"')
+
+    def test_invalid_post_create_preserves_submitted_values(self):
+        self.client.force_login(self.staff)
+        payload = self._post_payload(
+            status=PublicPost.Status.DRAFT, related_activity_id=self.testing.pk
+        )
+        payload.update({"title": "保留这个标题", "post_type": "not-a-post-type"})
+        response = self.client.post(reverse("staff:post_create"), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "保留这个标题")
+
+    def test_invalid_post_edit_preserves_submitted_values(self):
+        post = PublicPost.objects.create(
+            title="Old title", related_activity=self.testing, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        payload = self._post_payload(
+            status=PublicPost.Status.DRAFT, related_activity_id=self.testing.pk
+        )
+        payload.update({"title": "编辑中的标题", "post_type": "not-a-post-type"})
+        response = self.client.post(reverse("staff:post_edit", args=[post.pk]), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "编辑中的标题")
+
     def test_admin_can_publish_formal_post(self):
         login_admin(self.client, self.admin)
         response = self.client.post(
