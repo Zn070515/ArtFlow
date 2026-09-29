@@ -49,6 +49,8 @@ _FIELD_LABELS = {
     "conversion": "换算",
     "aggregate": "加权合成",
     "within": "限定范围",
+    "tie_break_source": "平局参考成绩",
+    "ranking_source": "排名依据",
 }
 
 _FIELD_ALLOWED = {
@@ -166,6 +168,19 @@ def nodes_from_form(form) -> list[dict]:
                 raw = form.get(f"{token}_{field}_json", "").strip()
                 if raw:
                     node[field] = json.loads(raw)
+                continue
+            if field == "sources":
+                values = form.getlist(f"{token}_{field}") if hasattr(form, "getlist") else []
+                if not values:
+                    values = [form.get(f"{token}_{field}", "")]
+                raw_sources = [
+                    item.strip()
+                    for value in values
+                    for item in value.split(",")
+                    if item.strip()
+                ]
+                if raw_sources:
+                    node[field] = raw_sources
                 continue
             raw = form.get(f"{token}_{field}", "").strip()
             if raw:

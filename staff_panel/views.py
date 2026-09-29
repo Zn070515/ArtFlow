@@ -261,7 +261,7 @@ def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
         form = ActivityForm(
-            request.POST, include_lifecycle=True, phase_choices=CREATE_PHASE_CHOICES
+            request.POST, include_lifecycle=True, include_phase=False
         )
         if not form.is_valid():
             return render(
@@ -274,10 +274,12 @@ def activity_create(request):
                     "data": request.POST,
                 },
             )
-        # A new activity always starts as a draft; the selected phase on the
-        # create form is never trusted to start the activity mid-lifecycle.
-        form.cleaned_data["phase"] = Activity.Phase.DRAFT
-        activity = Activity.objects.create(**form.cleaned_data)
+        # A new activity always starts as a draft.  The create form deliberately does
+        # not expose a lifecycle selector: entering a live phase is a later, explicit
+        # transition from the activity editor.
+        data = dict(form.cleaned_data)
+        data["phase"] = Activity.Phase.DRAFT
+        activity = Activity.objects.create(**data)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
             activity.save(update_fields=["cover_image"])
@@ -3235,16 +3237,58 @@ def _default_node(new_type, nodes):
     return node
 
 
-def _swap_nodes(nodes, key, delta):
+def _humanize_ruleset_editor_error(error):
+    """Turn schema/compiler vocabulary into an operator-facing message."""
+    raw = " ".join(getattr(error, "messages", None) or [str(error)])
+    import re
+
+    forward = re.search(
+        r"Node (?P<node>[^:]+): source '(?P<source>[^']+)' is not defined before this node",
+        raw,
+    )
+    if forward:
+        return (
+            f"节点“{forward.group('node')}”依赖“{forward.group('source')}”，"
+            "当前顺序或引用不合法，请先调整依赖关系。"
+        )
+    missing = re.search(
+        r"Node (?P<node>[^:]+): source '(?P<source>[^']+)' is not defined",
+        raw,
+    )
+    if missing:
+        return (
+            f"节点“{missing.group('node')}”仍引用不存在的“{missing.group('source')}”，"
+            "请先修改引用或删除下游节点。"
+        )
+    if "unknown node type" in raw:
+        return "这个节点类型暂不支持，请从可用节点类型中选择。"
+    if "duplicate node key" in raw:
+        return "节点键不能重复，请修改节点名称。"
+    if raw.startswith(("当前", "该", "找不到", "这个节点")):
+        return raw
+    return "赛制定义未通过校验，请检查节点顺序、来源和字段填写。"
+
+
+def _try_parse_nodes(nodes):
+    try:
+        parse_definition({"nodes": nodes})
+    except ValidationError:
+        return False
+    return True
+
+
+def _move_node_to_nearest_valid_slot(nodes, key, delta):
     index = next((i for i, n in enumerate(nodes) if n["key"] == key), None)
     if index is None:
-        return nodes
-    target = index + delta
-    if target < 0 or target >= len(nodes):
-        return nodes
-    nodes = list(nodes)
-    nodes[index], nodes[target] = nodes[target], nodes[index]
-    return nodes
+        return list(nodes), index
+    targets = range(index - 1, -1, -1) if delta < 0 else range(index + 1, len(nodes))
+    for target in targets:
+        candidate = list(nodes)
+        item = candidate.pop(index)
+        candidate.insert(target, item)
+        if _try_parse_nodes(candidate):
+            return candidate, target
+    return list(nodes), index
 
 
 def _edit_nodes(post, nodes) -> list[dict]:
@@ -3259,15 +3303,29 @@ def _edit_nodes(post, nodes) -> list[dict]:
     if action == "add":
         new_type = post.get("new_type", "ASSESS")
         if new_type == "BRANCH":
-            raise ValueError(f"node type {new_type!r} is not supported at runtime")
-        nodes = nodes + [_default_node(new_type, nodes)]
+            raise ValueError("这个节点类型暂不支持，请从可用节点类型中选择。")
+        candidate = nodes + [_default_node(new_type, nodes)]
+        if not _try_parse_nodes(candidate):
+            raise ValueError(f"当前节点结构不能新增“{new_type}”，请先补齐可用的上游节点。")
+        nodes = candidate
     elif action == "delete":
         key = post.get("key")
-        nodes = [n for n in nodes if n["key"] != key]
+        candidate = [n for n in nodes if n["key"] != key]
+        if len(candidate) == len(nodes):
+            raise ValueError("找不到要删除的节点，请刷新页面后重试。")
+        if not _try_parse_nodes(candidate):
+            raise ValueError("该节点仍被其他节点引用，请先调整下游节点的来源。")
+        nodes = candidate
     elif action == "move_up":
-        nodes = _swap_nodes(nodes, post.get("key"), -1)
+        original_index = next((i for i, n in enumerate(nodes) if n["key"] == post.get("key")), None)
+        nodes, target = _move_node_to_nearest_valid_slot(nodes, post.get("key"), -1)
+        if target == original_index:
+            raise ValueError("该节点不能再向上移动：它的上游依赖必须保持在前面。")
     elif action == "move_down":
-        nodes = _swap_nodes(nodes, post.get("key"), +1)
+        original_index = next((i for i, n in enumerate(nodes) if n["key"] == post.get("key")), None)
+        nodes, target = _move_node_to_nearest_valid_slot(nodes, post.get("key"), +1)
+        if target == original_index:
+            raise ValueError("该节点不能再向下移动：后续节点仍依赖它。")
     elif action == "save":
         return ruleset_editor.nodes_from_form(post)
     else:
@@ -3275,7 +3333,23 @@ def _edit_nodes(post, nodes) -> list[dict]:
     return nodes
 
 
-def _node_field_entries(node, index, sources):
+def _source_options(nodes, index, field, current=None):
+    spec = NODE_TYPE_SPEC.get(nodes[index].get("type"))
+    expected = (spec.expects or {}).get(field) if spec else None
+    options = []
+    if expected and OutputType.ROSTER in expected:
+        options.append(ENTRY_KEY)
+    for prior in nodes[:index]:
+        prior_spec = NODE_TYPE_SPEC.get(prior.get("type"))
+        if prior_spec is None or (expected and prior_spec.output_type not in expected):
+            continue
+        options.append(prior["key"])
+    if current and current not in options:
+        options.append(current)
+    return options
+
+
+def _node_field_entries(node, index, nodes):
     """Render data-driven edit fields for one node card (select/text/checkbox/json/aggregate)."""
     labels = ruleset_editor.field_labels()
     allowed = ruleset_editor.field_allowed()
@@ -3283,6 +3357,16 @@ def _node_field_entries(node, index, sources):
     fields: list[dict] = []
     if spec is None:
         return fields
+    reference_fields = {
+        "source",
+        "within",
+        "minuend",
+        "subtrahend",
+        "from",
+        "into",
+        "ranking_source",
+        "tie_break_source",
+    }
     for field in list(spec.required) + list(spec.optional):
         label = labels.get(field, field)
         base = f"node_{index}_{field}"
@@ -3296,7 +3380,13 @@ def _node_field_entries(node, index, sources):
                     "index": index,
                     "aggregate_type": aggregate.get("type", "weighted_sum"),
                     "components": [
-                        {"source": c.get("source", ""), "weight": c.get("weight", 1.0)}
+                        {
+                            "source": c.get("source", ""),
+                            "weight": c.get("weight", 1.0),
+                            "options": _source_options(
+                                nodes, index, "aggregate.components[].source", c.get("source")
+                            ),
+                        }
                         for c in aggregate.get("components", [])
                     ],
                 }
@@ -3308,7 +3398,7 @@ def _node_field_entries(node, index, sources):
                     "label": label,
                     "name": base,
                     "value": value or "",
-                    "options": sources,
+                    "options": _source_options(nodes, index, field, value),
                 }
             )
         elif field in ("branches", "conversion"):
@@ -3332,24 +3422,24 @@ def _node_field_entries(node, index, sources):
                     "options": allowed[field],
                 }
             )
-        elif field in ("source", "by", "minuend", "subtrahend", "from", "into", "round"):
-            options = sources if field == "source" else ([value] if value else [""])
+        elif field in reference_fields:
             fields.append(
                 {
                     "kind": "select",
                     "label": label,
                     "name": base,
                     "value": value or "",
-                    "options": options,
+                    "options": _source_options(nodes, index, field, value),
                 }
             )
         elif field == "sources":
             fields.append(
                 {
-                    "kind": "text",
+                    "kind": "multi_select",
                     "label": label,
                     "name": base,
-                    "value": ", ".join(value) if value else "",
+                    "value": value or [],
+                    "options": _source_options(nodes, index, field),
                 }
             )
         else:
@@ -3364,14 +3454,48 @@ def _node_field_entries(node, index, sources):
     return fields
 
 
-def _build_card(node, index, sources):
+def _build_card(node, index, nodes):
+    sources = ruleset_editor.available_sources(nodes, index)
+    _up_preview, up_target = _move_node_to_nearest_valid_slot(nodes, node["key"], -1)
+    _down_preview, down_target = _move_node_to_nearest_valid_slot(nodes, node["key"], 1)
+    delete_candidate = [item for item in nodes if item["key"] != node["key"]]
+    delete_allowed = len(delete_candidate) != len(nodes) and _try_parse_nodes(delete_candidate)
     return {
         "node": node,
         "index": index,
         "type": node.get("type"),
         "sources": sources,
-        "fields": _node_field_entries(node, index, sources),
+        "fields": _node_field_entries(node, index, nodes),
+        "can_move_up": up_target != index,
+        "can_move_down": down_target != index,
+        "can_delete": delete_allowed,
+        "move_up_reason": "该节点的上游依赖必须保持在前面。",
+        "move_down_reason": "后续节点仍依赖该节点。",
+        "delete_reason": "该节点仍被其他节点引用。",
     }
+
+
+def _node_type_options(nodes):
+    options = []
+    for node_type in sorted(t for t in NODE_TYPE_SPEC if t != "BRANCH"):
+        try:
+            candidate = nodes + [_default_node(node_type, nodes)]
+            if not _try_parse_nodes(candidate):
+                raise ValueError
+        except (ValueError, ValidationError):
+            options.append(
+                {
+                    "value": node_type,
+                    "label": node_type,
+                    "enabled": False,
+                    "reason": "当前缺少可用的上游节点。",
+                }
+            )
+        else:
+            options.append(
+                {"value": node_type, "label": node_type, "enabled": True, "reason": ""}
+            )
+    return options
 
 
 @staff_required
@@ -3463,7 +3587,7 @@ def ruleset_edit(request, pk):
             nodes = _edit_nodes(request.POST, current)
             parse_definition({"nodes": nodes})
         except (ValueError, ValidationError) as exc:
-            messages.error(request, f"保存失败：{exc}")
+            messages.error(request, f"保存失败：{_humanize_ruleset_editor_error(exc)}")
             return redirect("staff:ruleset_edit", pk=pk)
         try:
             update_ruleset_definition_section(
@@ -3482,10 +3606,7 @@ def ruleset_edit(request, pk):
         nodes = parse_definition(version.definition)["nodes"]
     except ValidationError:
         nodes = []
-    cards = [
-        _build_card(node, i, ruleset_editor.available_sources(nodes, i))
-        for i, node in enumerate(nodes)
-    ]
+    cards = [_build_card(node, i, nodes) for i, node in enumerate(nodes)]
     ruleset = version.ruleset
     return render(
         request,
@@ -3495,8 +3616,10 @@ def ruleset_edit(request, pk):
             "ruleset": ruleset,
             "cards": cards,
             # §28 capability matrix: BRANCH remains unsupported at runtime and is
-            # not offered; DUEL/AWARD are executable primitives.
+            # not offered. Other types are shown but disabled when their default
+            # configuration cannot be valid with the current upstream graph.
             "node_types": sorted(t for t in NODE_TYPE_SPEC if t != "BRANCH"),
+            "node_type_options": _node_type_options(nodes),
             "binding_json": {
                 "round_keys": json.dumps(ruleset.round_keys or {}, ensure_ascii=False),
                 "vote_keys": json.dumps(ruleset.vote_keys or {}, ensure_ascii=False),

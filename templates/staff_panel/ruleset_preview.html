@@ -36,7 +36,7 @@
             <li class="px-4 py-2 text-sm flex items-center gap-3">
                 <span class="text-gray-400 text-xs w-6 text-right">{{ forloop.counter }}</span>
                 <span class="font-mono text-gray-900">{{ decision.contestant }}</span>
-                <span class="text-xs bg-brand border border-brand/20 text-brand px-2 py-0.5 rounded">{{ decision.outcome_code }}</span>
+                <span class="ruleset-node-badge">{{ decision.outcome_code }}</span>
                 {% if decision.rank %}<span class="text-xs text-gray-400">第 {{ decision.rank }} 名</span>{% endif %}
             </li>
             {% endfor %}

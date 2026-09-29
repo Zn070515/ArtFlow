@@ -29,14 +29,21 @@
                     {% endfor %}
                 </select>
             </div>
+            {% if activity %}
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">活动阶段</label>
                 <select name="phase" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
                     {% for value, label in phases %}
-                    <option value="{{ value }}" {% if activity and activity.phase == value or data.phase == value %}selected{% endif %}>{{ label }}</option>
+                    <option value="{{ value }}" {% if activity.phase == value or data.phase == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
+            {% else %}
+            <div class="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                <p class="font-medium">新活动将从草稿开始</p>
+                <p class="mt-1 text-blue-700">保存后请在活动管理中按流程推进报名、审核和彩排阶段。</p>
+            </div>
+            {% endif %}
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">封面图</label>

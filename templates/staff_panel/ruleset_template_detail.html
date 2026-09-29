@@ -47,7 +47,7 @@
             <li class="flex items-center gap-4 px-5 py-3">
                 <span class="text-gray-400 text-xs w-6 text-right">{{ forloop.counter }}</span>
                 <span class="font-mono text-sm text-gray-900">{{ node.key }}</span>
-                <span class="text-xs bg-brand border border-brand/20 text-brand px-2 py-0.5 rounded">{{ node.type }}</span>
+                <span class="ruleset-node-badge">{{ node.type }}</span>
                 {% if node.source %}<span class="text-xs text-gray-500">← {{ node.source }}</span>{% endif %}
                 {% if node.round %}<span class="text-xs text-gray-400">{{ node.round }}</span>{% endif %}
                 {% if node.count %}<span class="text-xs text-gray-400">取 {{ node.count }}</span>{% endif %}
