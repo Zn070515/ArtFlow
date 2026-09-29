@@ -127,7 +127,7 @@ def completion_summary(
     asked and cannot answer.
     """
     groups: dict[str, dict[str, int]] = {}
-    totals = {"answered": 0, "required": 0, "upcoming": 0}
+    totals = {"answered": 0, "required": 0, "required_answered": 0, "upcoming": 0}
     for resolved in resolve_questions(
         plan,
         answers=answers,
@@ -147,6 +147,8 @@ def completion_summary(
         if not is_blank(value):
             bucket["answered"] += 1
             totals["answered"] += 1
+            if resolved.required and resolved.due:
+                totals["required_answered"] += 1
         if resolved.required and resolved.due:
             bucket["required"] += 1
             totals["required"] += 1

@@ -13,6 +13,7 @@
     const saveState = root.querySelector("[data-save-state]");
     const errorBox = root.querySelector("[data-form-error]");
     const requiredCount = root.querySelector("[data-completion-required]");
+    const requiredAnsweredCount = root.querySelector("[data-completion-required-answered]");
     const answeredCount = root.querySelector("[data-completion-answered]");
     if (!autosaveUrl || !uploadTemplate)
         return;
@@ -89,6 +90,9 @@
             if (body.completion) {
                 if (requiredCount)
                     requiredCount.textContent = String(body.completion.required ?? 0);
+                if (requiredAnsweredCount) {
+                    requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+                }
                 if (answeredCount)
                     answeredCount.textContent = String(body.completion.answered ?? 0);
             }
@@ -184,6 +188,9 @@
             if (body.completion) {
                 if (requiredCount)
                     requiredCount.textContent = String(body.completion.required ?? 0);
+                if (requiredAnsweredCount) {
+                    requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+                }
                 if (answeredCount)
                     answeredCount.textContent = String(body.completion.answered ?? 0);
             }

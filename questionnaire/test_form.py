@@ -217,6 +217,7 @@ class CompletionSummaryTests(_CharacterizationBase):
         )
         self.assertEqual(summary["answered"], 1)
         self.assertEqual(summary["required"], 2)
+        self.assertEqual(summary["required_answered"], 1)
 
 
 class QuestionnaireFormViewTests(_FormBase):

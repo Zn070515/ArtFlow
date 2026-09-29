@@ -12,6 +12,7 @@
   const saveState = root.querySelector<HTMLElement>("[data-save-state]");
   const errorBox = root.querySelector<HTMLElement>("[data-form-error]");
   const requiredCount = root.querySelector<HTMLElement>("[data-completion-required]");
+  const requiredAnsweredCount = root.querySelector<HTMLElement>("[data-completion-required-answered]");
   const answeredCount = root.querySelector<HTMLElement>("[data-completion-answered]");
   if (!autosaveUrl || !uploadTemplate) return;
 
@@ -78,7 +79,7 @@
         body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
       });
       const body = (await response.json()) as {
-        completion?: { required?: number; answered?: number };
+        completion?: { required?: number; required_answered?: number; answered?: number };
         error?: string;
       };
       if (!response.ok) {
@@ -91,6 +92,9 @@
       clearError();
       if (body.completion) {
         if (requiredCount) requiredCount.textContent = String(body.completion.required ?? 0);
+        if (requiredAnsweredCount) {
+          requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+        }
         if (answeredCount) answeredCount.textContent = String(body.completion.answered ?? 0);
       }
       setSaveState("已保存");
@@ -178,7 +182,7 @@
         const body = (await response.json()) as {
           status?: string;
           error?: string;
-          completion?: { required?: number; answered?: number };
+          completion?: { required?: number; required_answered?: number; answered?: number };
         };
         if (!response.ok) {
           showError(body.error || "提交失败，请检查后重试。");
@@ -187,6 +191,9 @@
         clearError();
         if (body.completion) {
           if (requiredCount) requiredCount.textContent = String(body.completion.required ?? 0);
+          if (requiredAnsweredCount) {
+            requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+          }
           if (answeredCount) answeredCount.textContent = String(body.completion.answered ?? 0);
         }
         if (submitState) {

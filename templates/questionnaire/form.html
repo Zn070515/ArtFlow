@@ -17,7 +17,8 @@
     <p class="text-sm text-gray-500 mb-6">资料完成度</p>
 
     <p class="mb-4 text-sm text-gray-700" data-completion aria-live="polite">
-        目前需要完成 <span data-completion-required>{{ completion.required }}</span> 项，已完成
+        当前必填 <span data-completion-required>{{ completion.required }}</span> 项，已完成
+        <span data-completion-required-answered>{{ completion.required_answered }}</span> 项；已填写
         <span data-completion-answered>{{ completion.answered }}</span> 项
         {% if completion.upcoming %}<span class="text-gray-400">（另有 {{ completion.upcoming }} 项稍后开放）</span>{% endif %}
     </p>
