@@ -102,7 +102,6 @@ urlpatterns = [
     ),
     path("rubrics/new/", views.rubric_create, name="rubric_create"),
     path("awards/", views.award_list, name="award_list"),
-    path("awards/new/", views.award_create, name="award_create"),
     path("vote-sessions/", views.vote_session_list, name="vote_session_list"),
     path("vote-sessions/new/", views.vote_session_create, name="vote_session_create"),
     path("vote-sessions/<int:pk>/", views.vote_session_detail, name="vote_session_detail"),

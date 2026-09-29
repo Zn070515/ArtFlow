@@ -204,13 +204,16 @@ class MoveTests(SimpleTestCase):
         moved = move_question(document, key="r3.song", delta=2)
         self.assertEqual(_keys(moved, "round3"), ["r3.has_guest", "r3.guest_name", "r3.song"])
 
-    def test_moving_a_conditioned_question_above_its_source_is_refused(self):
-        """Forward-only is what makes cyclic visibility impossible, so the editor cannot
-        let the operator create the cycle and then blame the compiler."""
+    def test_moving_a_conditioned_question_past_its_source_stops_at_legal_boundary(self):
+        """The editor does not submit a forward-reference just to show a schema error."""
         document = _with_condition()
         # Pushing the gate below its dependent makes the dependent forward-reference it.
-        with self.assertRaises(ValidationError):
-            move_question(document, key="r3.has_guest", delta=1)
+        moved = move_question(document, key="r3.has_guest", delta=1)
+        self.assertEqual(
+            _keys(moved, "round3"),
+            ["r3.has_guest", "r3.guest_name"],
+        )
+        parse_questionnaire(moved)
 
     def test_moving_past_the_edge_is_a_no_op(self):
         document = _with_condition()

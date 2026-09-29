@@ -17,12 +17,12 @@
     {% if user.is_admin %}
     <div class="mt-5 flex gap-3">
         {% if ticket.state == "created" or ticket.state == "issued" %}
-        <form method="post" action="{% url 'ticket_staff:action' ticket.pk %}">
+        <form method="post" action="{% url 'ticket_staff:action' ticket.pk %}" onsubmit="return confirm('确认作废这张票？此操作会保留审计记录。');">
             {% csrf_token %}<input type="hidden" name="action" value="void"><button class="rounded border border-red-300 px-3 py-2 text-sm text-red-700" type="submit">作废</button>
         </form>
         {% endif %}
         {% if ticket.state == "issued" or ticket.state == "checked_in" %}
-        <form method="post" action="{% url 'ticket_staff:action' ticket.pk %}">
+        <form method="post" action="{% url 'ticket_staff:action' ticket.pk %}" onsubmit="return confirm('确认撤销这张票？此操作会保留审计记录。');">
             {% csrf_token %}<input type="hidden" name="action" value="revoke"><button class="rounded border border-red-300 px-3 py-2 text-sm text-red-700" type="submit">撤销</button>
         </form>
         {% endif %}

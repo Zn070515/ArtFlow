@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import cast
 
 from core.models import Activity
@@ -67,37 +68,48 @@ class ActivityForm(forms.Form):
 
 
 class ContestRoundForm(forms.Form):
-    name = forms.CharField(max_length=100, required=False)
-    round_type = forms.ChoiceField(choices=ContestRound.RoundType.choices)
+    name = forms.CharField(label="轮次名称", max_length=100, required=False)
+    round_type = forms.ChoiceField(label="轮次类型", choices=ContestRound.RoundType.choices)
     scoring_mode = forms.ChoiceField(
+        label="计分方式",
         choices=ContestRound.ScoringMode.choices,
         required=False,
         initial=ContestRound.ScoringMode.AVERAGE,
     )
     minimum_judge_count = forms.IntegerField(
+        label="最低有效到场评委数",
         min_value=1,
         required=False,
         help_text="留空时按准备名单人数作为最低人数。",
     )
-    advance_count = forms.IntegerField(min_value=0, required=False, initial=0)
-    sequence = forms.IntegerField(min_value=1, required=False)
+    advance_count = forms.IntegerField(
+        label="晋级人数（0 表示不限制）", min_value=0, required=False, initial=0
+    )
+    sequence = forms.IntegerField(label="轮次序号", min_value=1, required=False)
     order_policy = forms.ChoiceField(
+        label="出场顺序",
         choices=ContestRound.OrderPolicy.choices,
         required=False,
         initial=ContestRound.OrderPolicy.REGISTRATION_ORDER,
     )
     tie_order_policy = forms.ChoiceField(
+        label="上一轮同分处理",
         choices=ContestRound.TieOrderPolicy.choices,
         required=False,
         initial=ContestRound.TieOrderPolicy.REVIEW,
     )
     roster_source = forms.ChoiceField(
+        label="晋级名单来源",
         choices=[("", "自动判定"), *ContestRound.RosterSource.choices],
         required=False,
         initial="",
     )
-    roster_source_stage = forms.CharField(max_length=100, required=False)
-    rubric = forms.ModelChoiceField(queryset=ScoringRubric.objects.none(), required=False)
+    roster_source_stage = forms.CharField(
+        label="上游赛段（赛段晋级时必填）", max_length=100, required=False
+    )
+    rubric = forms.ModelChoiceField(
+        label="评分规则", queryset=ScoringRubric.objects.none(), required=False
+    )
 
     def __init__(self, *args, rubrics=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -223,33 +235,127 @@ class RapidScoreCommandForm(forms.Form):
 
 
 class RoundRunningOrderForm(forms.Form):
-    singer_ids = forms.CharField(
+    """A controlled ordered selection; the browser never asks staff for database IDs."""
+
+    singer_ids = forms.MultipleChoiceField(
         label="出场顺序",
-        help_text="按顺序填写选手 ID，以逗号、空格或换行分隔。",
-        widget=forms.Textarea(attrs={"rows": 4}),
+        required=False,
+        widget=forms.MultipleHiddenInput,
     )
 
+    def __init__(self, *args, singers=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = [(str(singer.pk), singer.name) for singer in singers]
+        cast(forms.MultipleChoiceField, self.fields["singer_ids"]).choices = choices
+
     def clean_singer_ids(self):
-        raw = self.cleaned_data["singer_ids"]
-        return [item for item in raw.replace(",", " ").split() if item]
+        return list(self.cleaned_data.get("singer_ids") or [])
 
 
 class RoundGroupsForm(forms.Form):
-    groups = forms.JSONField(
-        label="分组定义",
-        help_text='JSON 示例：[{"name":"A组","singer_ids":["1","2"]}]',
-        widget=forms.Textarea(attrs={"rows": 8}),
-    )
+    """Render a bounded set of group name/member fieldsets and normalize to service JSON."""
+
+    MAX_GROUP_SLOTS = 8
+
+    def __init__(self, *args, singers=(), initial_groups=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = [(str(singer.pk), singer.name) for singer in singers]
+        initial_by_slot = {
+            index: group
+            for index, group in enumerate(initial_groups, start=1)
+            if isinstance(group, dict)
+        }
+        for index in range(1, self.MAX_GROUP_SLOTS + 1):
+            group = initial_by_slot.get(index, {})
+            self.fields[f"group_name_{index}"] = forms.CharField(
+                label=f"第 {index} 组名称",
+                required=False,
+                max_length=100,
+                initial=group.get("name", ""),
+            )
+            self.fields[f"group_singer_ids_{index}"] = forms.MultipleChoiceField(
+                label=f"第 {index} 组选手",
+                required=False,
+                choices=choices,
+                widget=forms.CheckboxSelectMultiple,
+                initial=[str(value) for value in group.get("singer_ids", [])],
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        groups = []
+        for index in range(1, self.MAX_GROUP_SLOTS + 1):
+            name = str(cleaned.get(f"group_name_{index}") or "").strip()
+            singer_ids = list(cleaned.get(f"group_singer_ids_{index}") or [])
+            if not name and not singer_ids:
+                continue
+            if not name:
+                self.add_error(f"group_name_{index}", "请填写分组名称。")
+            if not singer_ids:
+                self.add_error(f"group_singer_ids_{index}", "请选择至少一名选手。")
+            groups.append({"name": name, "singer_ids": singer_ids})
+        if not groups and not self.errors:
+            raise forms.ValidationError("至少需要一个分组，并为每组选择选手。")
+        cleaned["groups"] = groups
+        return cleaned
 
 
 class ScoringRubricProvisionForm(forms.Form):
+    MAX_CRITERION_SLOTS = 10
+
     name = forms.CharField(max_length=100)
     description = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 3}))
-    criteria = forms.JSONField(
-        label="评分项",
-        help_text='JSON 示例：[{"name":"音准","max_score":40},{"name":"表现","max_score":60}]',
-        widget=forms.Textarea(attrs={"rows": 8}),
-    )
+
+    def __init__(self, *args, initial_criteria=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        initial_by_slot = {
+            index: criterion
+            for index, criterion in enumerate(initial_criteria, start=1)
+            if isinstance(criterion, dict)
+        }
+        for index in range(1, self.MAX_CRITERION_SLOTS + 1):
+            criterion = initial_by_slot.get(index, {})
+            self.fields[f"criterion_name_{index}"] = forms.CharField(
+                label=f"评分项 {index}",
+                required=False,
+                max_length=100,
+                initial=criterion.get("name", ""),
+            )
+            self.fields[f"criterion_max_score_{index}"] = forms.DecimalField(
+                label="满分",
+                required=False,
+                min_value=Decimal("0.01"),
+                max_digits=5,
+                decimal_places=2,
+                initial=criterion.get("max_score", ""),
+            )
+            self.fields[f"criterion_description_{index}"] = forms.CharField(
+                label="说明",
+                required=False,
+                max_length=240,
+                initial=criterion.get("description", ""),
+            )
+
+    def clean(self):
+        cleaned = super().clean()
+        criteria = []
+        for index in range(1, self.MAX_CRITERION_SLOTS + 1):
+            name = str(cleaned.get(f"criterion_name_{index}") or "").strip()
+            max_score = cleaned.get(f"criterion_max_score_{index}")
+            description = str(cleaned.get(f"criterion_description_{index}") or "").strip()
+            if not name and max_score in (None, "") and not description:
+                continue
+            if not name:
+                self.add_error(f"criterion_name_{index}", "请填写评分项名称。")
+            if max_score in (None, ""):
+                self.add_error(f"criterion_max_score_{index}", "请填写满分。")
+            criteria.append(
+                {"name": name, "max_score": max_score, "description": description}
+            )
+        if not criteria and not self.errors:
+            raise forms.ValidationError("至少需要一个评分项。")
+        cleaned["criteria"] = criteria
+        return cleaned
 
 
 class ManualDecisionForm(forms.Form):
@@ -336,22 +442,28 @@ class IncidentForm(forms.Form):
 
 
 class VoteSessionForm(forms.Form):
-    name = forms.CharField(max_length=100)
-    passcode = forms.CharField(max_length=20)
-    start_time = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
-    end_time = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
+    name = forms.CharField(label="场次名称", max_length=100)
+    passcode = forms.CharField(label="现场口令", max_length=20)
+    start_time = forms.DateTimeField(label="开始时间", input_formats=DATETIME_INPUT_FORMATS)
+    end_time = forms.DateTimeField(label="结束时间", input_formats=DATETIME_INPUT_FORMATS)
     selection_type = forms.ChoiceField(
+        label="投票方式",
         choices=VoteSession.SelectionType.choices,
         required=False,
         initial=VoteSession.SelectionType.SINGLE,
     )
-    max_selections = forms.IntegerField(min_value=1, required=False, initial=1)
+    max_selections = forms.IntegerField(
+        label="最多可选项数（多选时有效）", min_value=1, required=False, initial=1
+    )
     purpose = forms.ChoiceField(
+        label="投票用途",
         choices=VoteSession.Purpose.choices,
         required=False,
         initial=VoteSession.Purpose.SELECTION,
     )
-    requires_ticket = forms.BooleanField(required=False, initial=False)
+    requires_ticket = forms.BooleanField(
+        label="仅允许已核验入场票参与", required=False, initial=False
+    )
 
     def _posted_singer_ids(self):
         data = cast(QueryDict, self.data)

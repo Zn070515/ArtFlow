@@ -41,7 +41,7 @@
         <div class="bg-white border border-gray-200 rounded-lg mb-3 overflow-hidden">
             <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center justify-between">
                 <span class="font-mono text-sm font-medium">{{ card.node.key }}</span>
-                <span class="ruleset-node-badge">{{ card.type }}</span>
+                <span class="ruleset-node-badge">{{ card.type_label }}</span>
             </div>
             <div class="px-4 py-3">
                 <input type="hidden" name="node_{{ card.index }}_key" value="{{ card.node.key }}">
@@ -50,43 +50,45 @@
                     {% for f in card.fields %}
                         {% if f.kind == "select" %}
                         <div>
-                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
-                            <select name="{{ f.name }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
-                                {% for opt in f.options %}<option value="{{ opt }}" {% if f.value == opt %}selected{% endif %}>{{ opt }}</option>{% endfor %}
+                            <label for="{{ f.name|slugify }}" class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
+                            <select id="{{ f.name|slugify }}" name="{{ f.name }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                {% for opt in f.display_options %}<option value="{{ opt.value }}" {% if f.value == opt.value %}selected{% endif %}>{{ opt.label }}</option>{% endfor %}
                             </select>
                         </div>
                         {% elif f.kind == "text" %}
                         <div>
-                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
-                            <input name="{{ f.name }}" value="{{ f.value }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                            <label for="{{ f.name|slugify }}" class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
+                            <input id="{{ f.name|slugify }}" name="{{ f.name }}" value="{{ f.value }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                         </div>
                         {% elif f.kind == "checkbox" %}
                         <div class="flex items-center gap-2 pt-5">
-                            <input type="checkbox" name="{{ f.name }}" value="1" {% if f.value %}checked{% endif %} class="rounded border-gray-300">
-                            <span class="text-xs text-gray-600">{{ f.label }}</span>
+                            <input id="{{ f.name|slugify }}" type="checkbox" name="{{ f.name }}" value="1" {% if f.value %}checked{% endif %} class="rounded border-gray-300">
+                            <label for="{{ f.name|slugify }}" class="text-xs text-gray-600">{{ f.label }}</label>
                         </div>
                         {% elif f.kind == "multi_select" %}
                         <div>
-                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
-                            <select name="{{ f.name }}" multiple size="3" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
-                                {% for opt in f.options %}<option value="{{ opt }}"{% if opt in f.value %} selected{% endif %}>{{ opt }}</option>{% endfor %}
+                            <label for="{{ f.name|slugify }}" class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
+                            <select id="{{ f.name|slugify }}" name="{{ f.name }}" multiple size="3" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                {% for opt in f.display_options %}<option value="{{ opt.value }}"{% if opt.value in f.value %} selected{% endif %}>{{ opt.label }}</option>{% endfor %}
                             </select>
                             <p class="mt-1 text-xs text-gray-500">按住 Ctrl（Windows）或 Command（macOS）可多选来源。</p>
                         </div>
                         {% elif f.kind == "json" %}
-                        <div>
-                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}（高级配置）</label>
-                            <textarea name="{{ f.name }}" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ f.value }}</textarea>
-                        </div>
+                        <details class="rounded border border-gray-200 p-2">
+                            <summary class="cursor-pointer text-xs font-medium text-gray-700">{{ f.label }}（高级配置）</summary>
+                            <label for="{{ f.name|slugify }}" class="sr-only">{{ f.label }}</label>
+                            <textarea id="{{ f.name|slugify }}" name="{{ f.name }}" rows="2" class="mt-2 w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ f.value }}</textarea>
+                            <p class="mt-1 text-xs text-amber-700">普通流程不需要修改；保存时会进行完整赛制校验。</p>
+                        </details>
                         {% elif f.kind == "aggregate" %}
                         <div class="sm:col-span-2">
-                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</label>
+                            <p class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</p>
                             <input type="hidden" name="node_{{ f.index }}_aggregate_type" value="{{ f.aggregate_type }}">
                             {% for comp in f.components %}
                             <div class="flex items-center gap-2 mb-1">
                                 <select name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_source"
                                         class="border border-gray-300 rounded px-2 py-1 text-sm flex-1">
-                                    {% for option in comp.options %}<option value="{{ option }}" {% if comp.source == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+                                    {% for option in comp.display_options %}<option value="{{ option.value }}" {% if comp.source == option.value %}selected{% endif %}>{{ option.label }}</option>{% endfor %}
                                 </select>
                                 <input name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_weight"
                                        value="{{ comp.weight }}" placeholder="权重"
@@ -95,6 +97,7 @@
                             {% endfor %}
                         </div>
                         {% endif %}
+                        {% if f.help %}<p class="mt-1 text-xs text-gray-500 sm:col-span-2">{{ f.help }}</p>{% endif %}
                     {% endfor %}
                 </div>
             </div>
@@ -108,41 +111,71 @@
     <form method="post" action="{% url 'staff:ruleset_bind' version.pk %}" class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
         {% csrf_token %}
         <input type="hidden" name="base_binding" value="{{ binding_signature }}">
-        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">生产绑定</div>
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">活动绑定</div>
         <div class="px-4 py-3 grid sm:grid-cols-2 gap-3">
             <div>
-                <label class="block text-xs text-gray-500 mb-0.5">stage_key（赛段标识）</label>
-                <input name="stage_key" value="{{ ruleset.stage_key }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                <label for="id_stage_key" class="block text-xs text-gray-700 mb-0.5">结果赛段名称</label>
+                <input id="id_stage_key" name="stage_key" value="{{ ruleset.stage_key }}" placeholder="如：院十佳总决赛" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                <p class="text-xs text-gray-500 mt-1">用于结果闭场和正式结果识别。</p>
             </div>
+            {% for row in binding_maps.rounds %}
             <div>
-                <label class="block text-xs text-gray-500 mb-0.5">round_keys（轮次绑定，JSON）</label>
-                <textarea name="round_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.round_keys|default:"{}" }}</textarea>
+                <label for="id_round_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">轮次「{{ row.key }}」</label>
+                <input type="hidden" name="round_binding_key" value="{{ row.key }}">
+                <select id="id_round_binding_{{ forloop.counter }}" name="round_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="">暂不绑定</option>
+                    {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">把问卷/节点中的轮次键绑定到当前活动的实际轮次。</p>
             </div>
+            {% endfor %}
+            {% for row in binding_maps.votes %}
             <div>
-                <label class="block text-xs text-gray-500 mb-0.5">vote_keys（投票绑定，JSON）</label>
-                <textarea name="vote_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.vote_keys|default:"{}" }}</textarea>
+                <label for="id_vote_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">投票「{{ row.key }}」</label>
+                <input type="hidden" name="vote_binding_key" value="{{ row.key }}">
+                <select id="id_vote_binding_{{ forloop.counter }}" name="vote_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="">暂不绑定</option>
+                    {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">把赛制中的投票键绑定到当前活动的投票场次。</p>
             </div>
+            {% endfor %}
+            {% for row in binding_maps.scoring_rules %}
             <div>
-                <label class="block text-xs text-gray-500 mb-0.5">vote_scoring_rule_keys（成绩换算规则绑定，JSON：vote_source → VoteScoringRule id）</label>
-                <textarea name="vote_scoring_rule_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.vote_scoring_rule_keys|default:"{}" }}</textarea>
-                <p class="text-xs text-gray-400 mt-1">「成绩组成」投票必须绑定换算规则，否则冻结时报 VOTE_SCORE_COMPONENT_RAW；冻结会快照规则 id、方式与量纲。</p>
+                <label for="id_scoring_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">投票「{{ row.key }}」的成绩换算</label>
+                <input type="hidden" name="scoring_binding_key" value="{{ row.key }}">
+                <select id="id_scoring_binding_{{ forloop.counter }}" name="scoring_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="">暂不绑定</option>
+                    {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">仅在投票结果参与成绩换算时选择对应的换算规则。</p>
             </div>
+            {% endfor %}
+            {% for row in binding_maps.groups %}
             <div>
-                <label class="block text-xs text-gray-500 mb-0.5">group_keys（分组绑定，JSON）</label>
-                <textarea name="group_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.group_keys|default:"{}" }}</textarea>
+                <label for="id_group_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">分组「{{ row.key }}」</label>
+                <input type="hidden" name="group_binding_key" value="{{ row.key }}">
+                <select id="id_group_binding_{{ forloop.counter }}" name="group_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="">暂不绑定</option>
+                    {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">把节点中的分组键绑定到当前活动轮次的分组结果。</p>
             </div>
-            <div>
-                <label class="block text-xs text-gray-500 mb-0.5">audience_keys（人工/外部核验观众分绑定，JSON：audience_key → stage_key；不读取扫码投票）</label>
-                <textarea name="audience_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.audience_keys|default:"{}" }}</textarea>
-            </div>
-            <div class="sm:col-span-2">
-                <label class="block text-xs text-gray-500 mb-0.5">announcement_blocks（公告分块，JSON）</label>
-                <textarea name="announcement_blocks" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks|default:"[]" }}</textarea>
-            </div>
-            <div class="sm:col-span-2">
-                <label class="block text-xs text-gray-500 mb-0.5">announcement_blocks_by_checkpoint（按赛段公告分块，JSON）</label>
-                <textarea name="announcement_blocks_by_checkpoint" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks_by_checkpoint|default:"{}" }}</textarea>
-            </div>
+            {% endfor %}
+            <details class="sm:col-span-2 border border-gray-200 rounded p-3">
+                <summary class="cursor-pointer text-sm font-medium text-gray-700">高级观众分绑定（JSON，仅人工/外部观众分需要）</summary>
+                <label for="id_audience_keys" class="block text-xs text-gray-700 mt-3 mb-0.5">观众分映射</label>
+                <textarea id="id_audience_keys" name="audience_keys" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.audience_keys|default:"{}" }}</textarea>
+                <p class="text-xs text-gray-500 mt-1">高级配置：只有使用外部/人工观众分映射时才需要；扫码投票优先使用上方投票绑定。</p>
+            </details>
+            <details class="sm:col-span-2 border border-gray-200 rounded p-3">
+                <summary class="cursor-pointer text-sm font-medium text-gray-700">高级公告配置（JSON，仅在需要时使用）</summary>
+                <p class="text-xs text-amber-700 mt-2">高级配置仍会经过服务层校验；普通活动不需要修改这里。</p>
+                <label for="id_announcement_blocks" class="block text-xs text-gray-700 mt-3 mb-0.5">结果公告分块</label>
+                <textarea id="id_announcement_blocks" name="announcement_blocks" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks|default:"[]" }}</textarea>
+                <label for="id_announcement_blocks_by_checkpoint" class="block text-xs text-gray-700 mt-3 mb-0.5">按赛段的公告分块</label>
+                <textarea id="id_announcement_blocks_by_checkpoint" name="announcement_blocks_by_checkpoint" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ binding_json.announcement_blocks_by_checkpoint|default:"{}" }}</textarea>
+            </details>
         </div>
         <div class="px-4 pb-3">
             <button class="bg-gray-900 text-white px-4 py-2 rounded text-sm">保存绑定</button>
@@ -157,22 +190,22 @@
             <div class="flex flex-wrap items-center gap-3 text-sm">
                 <span class="font-mono text-gray-700 w-28">{{ card.node.key }}</span>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
-                    {% csrf_token %}<input type="hidden" name="action" value="move_up"><input type="hidden" name="key" value="{{ card.node.key }}">
+                    {% csrf_token %}<input type="hidden" name="action" value="move_up"><input type="hidden" name="key" value="{{ card.node.key }}"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                     <button class="staff-touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_up %}{{ card.move_up_reason }}{% endif %}"{% if not card.can_move_up %} disabled{% endif %}>上移</button>
                 </form>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
-                    {% csrf_token %}<input type="hidden" name="action" value="move_down"><input type="hidden" name="key" value="{{ card.node.key }}">
+                    {% csrf_token %}<input type="hidden" name="action" value="move_down"><input type="hidden" name="key" value="{{ card.node.key }}"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                     <button class="staff-touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_down %}{{ card.move_down_reason }}{% endif %}"{% if not card.can_move_down %} disabled{% endif %}>下移</button>
                 </form>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" onsubmit="return confirm('确认删除这个节点吗？');">
-                    {% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{ card.node.key }}">
+                    {% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{ card.node.key }}"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                     <button class="staff-touch-target text-xs text-red-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_delete %}{{ card.delete_reason }}{% endif %}"{% if not card.can_delete %} disabled{% endif %}>删除</button>
                 </form>
                 {% if not card.can_delete %}<span class="text-xs text-amber-700">{{ card.delete_reason }}</span>{% endif %}
             </div>
             {% endfor %}
             <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" class="flex items-center gap-2 pt-2">
-                {% csrf_token %}<input type="hidden" name="action" value="add">
+                {% csrf_token %}<input type="hidden" name="action" value="add"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                 <select name="new_type" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
                     {% for option in node_type_options %}<option value="{{ option.value }}"{% if not option.enabled %} disabled title="{{ option.reason }}"{% endif %}>{{ option.label }}{% if not option.enabled %}（暂不可用）{% endif %}</option>{% endfor %}
                 </select>

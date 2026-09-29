@@ -46,9 +46,9 @@
                         {% if r.status == "draft" %}
                         <a href="{% url 'staff:round_groups' r.pk %}" class="text-gray-500 hover:underline text-xs">分组</a>
                         {% if r.order_policy == "manual" %}<a href="{% url 'staff:round_running_order' r.pk %}" class="text-gray-500 hover:underline text-xs">人工顺序</a>{% endif %}
-                        <form method="post" action="{% url 'staff:round_prepare' r.pk %}" class="inline">
+                        <form method="post" action="{% url 'staff:round_prepare' r.pk %}" class="inline" onsubmit="return confirm('确认准备本轮？准备后会冻结出场/分组快照。');">
                             {% csrf_token %}
-                            <button type="submit" class="text-brand hover:underline text-xs">准备轮次</button>
+                            <button type="submit" class="staff-touch-target text-brand hover:underline text-xs">准备轮次</button>
                         </form>
                         {% else %}
                         <a href="{% url 'staff:round_score_entry' r.pk %}" class="text-brand hover:underline text-xs">录分</a>

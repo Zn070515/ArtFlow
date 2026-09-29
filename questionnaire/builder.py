@@ -229,16 +229,30 @@ def _dependents(questionnaire: dict, key: str) -> set[str]:
 def move_question(questionnaire: dict, *, key: str, delta: int) -> dict:
     """Reorder a block within its own section.
 
-    The result is re-validated, so a move that would put a question above the question its
-    condition names is refused here — forward-only is what makes cyclic visibility
-    impossible, and the editor cannot let the operator build the cycle and blame the
-    compiler for it.
+    Forward-only conditions remain the schema contract.  Instead of swapping one adjacent
+    pair and handing a schema exception to the operator, try each destination in the requested
+    direction and use the nearest one that still validates.  A direction with no legal
+    destination is a no-op; the view can explain that the question is already at its legal
+    boundary without changing the stored document.
     """
     document = _clone(questionnaire)
     section, _question, index = _find(document, key)
-    target = index + delta
-    if target < 0 or target >= len(section["questions"]):
+    if delta == 0:
         return parse_questionnaire(document)
     questions = section["questions"]
-    questions[index], questions[target] = questions[target], questions[index]
+    targets = (
+        range(index - 1, -1, -1)
+        if delta < 0
+        else range(index + 1, len(questions))
+    )
+    for target in targets:
+        candidate = _clone(document)
+        candidate_section, _candidate_question, candidate_index = _find(candidate, key)
+        candidate_questions = candidate_section["questions"]
+        item = candidate_questions.pop(candidate_index)
+        candidate_questions.insert(target, item)
+        try:
+            return parse_questionnaire(candidate)
+        except ValidationError:
+            continue
     return parse_questionnaire(document)

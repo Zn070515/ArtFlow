@@ -55,6 +55,7 @@ def apply_view(request):
                     "activities": activities,
                     "errors": errors,
                     "video_upload_allowed": video_upload_allowed,
+                    "form_data": request.POST,
                 },
             )
         with transaction.atomic():
@@ -97,7 +98,11 @@ def apply_view(request):
     return render(
         request,
         "farewell_show/apply.html",
-        {"activities": activities, "video_upload_allowed": video_upload_allowed},
+        {
+            "activities": activities,
+            "video_upload_allowed": video_upload_allowed,
+            "form_data": {},
+        },
     )
 
 

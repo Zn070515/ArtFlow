@@ -11,50 +11,46 @@
     <form method="post" class="space-y-4">
         {% csrf_token %}
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">活动</label>
-            <select name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <label for="id_activity_id" class="block text-sm font-medium text-gray-700 mb-1">活动</label>
+            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
                 {% for a in activities %}<option value="{{ a.pk }}"{% if selected_activity_id|stringformat:"s" == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>{% endfor %}
             </select>
             <p class="text-xs text-gray-500 mt-1">候选选手只显示所选活动中已审核通过的选手；切换活动后请重新打开本页。</p>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">场次名称</label>
-            <input type="text" name="name" required placeholder="如：最佳人气奖投票" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            {{ form.name.label_tag }}{{ form.name }}
+            {% for error in form.name.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">现场口令</label>
-            <input type="text" name="passcode" required placeholder="观众入场时输入的口令" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            {{ form.passcode.label_tag }}{{ form.passcode }}
+            {% for error in form.passcode.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">开始时间</label>
-                <input type="datetime-local" name="start_time" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {{ form.start_time.label_tag }}{{ form.start_time }}
+                {% for error in form.start_time.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
             </div>
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">结束时间</label>
-                <input type="datetime-local" name="end_time" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {{ form.end_time.label_tag }}{{ form.end_time }}
+                {% for error in form.end_time.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
             </div>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">投票方式</label>
-            <select name="selection_type" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                {% for val, label in selection_types %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
-            </select>
+            {{ form.selection_type.label_tag }}{{ form.selection_type }}
+            {% for error in form.selection_type.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">最多可选项数（多选时有效）</label>
-            <input type="number" name="max_selections" value="1" min="1" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            {{ form.max_selections.label_tag }}{{ form.max_selections }}
+            {% for error in form.max_selections.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">投票用途</label>
-            <select name="purpose" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                {% for val, label in purposes %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
-            </select>
+            {{ form.purpose.label_tag }}{{ form.purpose }}
+            {% for error in form.purpose.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
             <p class="text-xs text-gray-500 mt-1">锁定投票只记录原始事实；正式奖项必须由赛制 AWARD 核定发布。</p>
             <p class="text-xs text-gray-500 mt-1">选择「成绩组成」时：正式成绩来源必须启用入场票校验；观众分 = 支持该选手的有效 ballot 数 ÷ 有效 ballot 总数 × 100；多选时各选手支持率之和可以超过 100%。</p>
         </div>
-        <label class="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" name="requires_ticket" class="rounded border-gray-300">
+        <label for="id_requires_ticket" class="flex items-center gap-2 text-sm text-gray-700">
+            {{ form.requires_ticket }}
             仅允许已核验入场票参与（「成绩组成」必须勾选）
         </label>
         <div>
@@ -62,7 +58,7 @@
             <div class="border border-gray-300 rounded px-3 py-2 max-h-48 overflow-y-auto space-y-1">
                 {% for s in singers %}
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" name="singers" value="{{ s.pk }}">
+                    <input type="checkbox" name="singers" value="{{ s.pk }}"{% if s.pk|stringformat:"s" in submitted_singer_ids %} checked{% endif %}>
                     {{ s.name }} — {{ s.song_label }}
                 </label>
                 {% empty %}

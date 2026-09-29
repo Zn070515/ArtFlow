@@ -26,7 +26,6 @@ from common.authority import (
 )
 from common.business_rules import (
     ensure_activity_unlocked,
-    ensure_lifecycle_consistent,
     ensure_round_unlocked,
 )
 from common.lifecycle import runtime_approved_singers, runtime_is_test, scope_runtime
@@ -2558,33 +2557,16 @@ def delete_manual_decision(
 
 @transaction.atomic
 def create_manual_award(activity, *, singer, name: str, operator) -> Award:
-    """Create an explicitly manual official award under admin authority."""
-    current_operator = require_current_admin(operator)
-    locked_activity = lock_activity_for_action(activity, ActivityAction.MANAGE_AWARD)
-    award_name = str(name or "").strip()
-    if not award_name:
-        raise ValidationError("奖项名称不能为空。")
-    locked_singer = SingerRegistration.objects.select_for_update().get(pk=singer.pk)
-    if locked_singer.activity_id != locked_activity.pk:
-        raise ValidationError("奖项选手必须属于当前活动。")
-    ensure_lifecycle_consistent(locked_activity, locked_singer, label="Award 选手")
-    award = Award.objects.create(
-        activity=locked_activity,
-        singer=locked_singer,
-        name=award_name,
-        source_node="MANUAL",
-        is_test_data=locked_activity.is_test_mode,
+    """Reject the retired arbitrary-award path without creating any row.
+
+    The symbol remains for callers from older integrations so they receive a domain error
+    instead of an import failure.  New official awards must come from a declared AWARD node,
+    a resolved StageAwardDecision, and a confirmed StageResult.
+    """
+    raise ValidationError(
+        "不能直接手工发放正式奖项。请在冻结赛制中声明 AWARD 节点，"
+        "通过人工决策重新解析并核定结果后生成奖项。"
     )
-    AuditLog.objects.create(
-        operator=current_operator,
-        action_type=AuditLog.ActionType.OTHER,
-        target=f"Award:{award.pk}",
-        new_value=json.dumps(
-            {"name": award.name, "source": "MANUAL", "activity": locked_activity.pk},
-            ensure_ascii=False,
-        ),
-    )
-    return award
 
 
 @transaction.atomic
@@ -2886,7 +2868,11 @@ def _definition_checkpoints_ordered(version) -> tuple[str, ...]:
 
 
 def official_stage_award_queryset(activity: Activity | None = None) -> QuerySet[Award]:
-    """Return manual Awards plus only current confirmed stage-sourced Awards."""
+    """Return legacy awards plus only current confirmed stage-sourced Awards.
+
+    Rows without stage provenance are retained for historical compatibility, but no current
+    service path creates new arbitrary/manual rows.
+    """
     from ruleset.models import RulesetVersion
 
     latest_version = (

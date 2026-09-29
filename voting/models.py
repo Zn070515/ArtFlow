@@ -867,6 +867,8 @@ class VoteScoringRule(models.Model):
     if TYPE_CHECKING:
         vote_session_id: int
 
+        def get_mode_display(self) -> str: ...
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["vote_session_id"]

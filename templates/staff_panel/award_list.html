@@ -9,7 +9,10 @@
             <h1 class="text-2xl font-bold text-gray-900">奖项管理</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 奖项管理</p>
         </div>
-        <a href="{% url 'staff:award_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">颁发奖项</a>
+    </div>
+
+    <div class="mb-6 bg-blue-50 border border-blue-200 text-blue-900 rounded-lg p-4 text-sm">
+        正式奖项由已冻结赛制中的 AWARD 节点经过结果解析、管理员核定后自动生成。需要人工纠偏时，请先在赛制结果流程中完成 MANUAL_SELECT 决策；本页面不接受任意选手和奖项名称的直接录入。
     </div>
 
     {% if awards %}

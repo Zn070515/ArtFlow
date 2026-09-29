@@ -10,25 +10,25 @@
         {% if error %}<div class="rounded border border-red-300 bg-red-50 text-red-800 px-4 py-3 text-sm">{{ error }}</div>{% endif %}
         {% if post %}<input type="hidden" name="base_version" value="{{ post.version }}">{% endif %}
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">标题</label>
-            <input type="text" name="title" value="{{ post.title|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <label for="id_title" class="block text-sm font-medium text-gray-700 mb-1">标题</label>
+            <input id="id_title" type="text" name="title" value="{{ post.title|default:'' }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">副标题</label>
-            <input type="text" name="subtitle" value="{{ post.subtitle|default:'' }}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <label for="id_subtitle" class="block text-sm font-medium text-gray-700 mb-1">副标题</label>
+            <input id="id_subtitle" type="text" name="subtitle" value="{{ post.subtitle|default:'' }}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
         </div>
         <div class="grid grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">类型</label>
-                <select name="post_type" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+                <label for="id_post_type" class="block text-sm font-medium text-gray-700 mb-1">类型</label>
+                <select id="id_post_type" name="post_type" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
                     {% for value, label in post_types %}
                     <option value="{{ value }}" {% if post.post_type == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">状态</label>
-                <select name="status" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+                <label for="id_status" class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                <select id="id_status" name="status" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
                     {% for value, label in statuses %}
                     <option value="{{ value }}" {% if post.status == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
@@ -40,12 +40,12 @@
             <label for="id_is_pinned" class="text-sm text-gray-700">置顶</label>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">排序（数字越小越靠前）</label>
-            <input type="number" name="sort_order" value="{{ post.sort_order|default:'0' }}" class="w-24 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <label for="id_sort_order" class="block text-sm font-medium text-gray-700 mb-1">排序（数字越小越靠前）</label>
+            <input id="id_sort_order" type="number" name="sort_order" value="{{ post.sort_order|default:'0' }}" class="w-24 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">关联活动</label>
-            <select name="related_activity_id" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
+            <label for="id_related_activity_id" class="block text-sm font-medium text-gray-700 mb-1">关联活动</label>
+            <select id="id_related_activity_id" name="related_activity_id" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">
                 <option value="">—— 不关联活动 ——</option>
                 {% for a in activities %}
                 <option value="{{ a.pk }}" {% if post.related_activity_id == a.pk %}selected{% endif %}>{{ a.title }}</option>
@@ -53,13 +53,13 @@
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">封面图片</label>
+            <label for="id_cover_image" class="block text-sm font-medium text-gray-700 mb-1">封面图片</label>
             {% if post.cover_image %}<p class="text-xs text-gray-500 mb-1">当前：{{ post.cover_image.name }}</p>{% endif %}
-            <input type="file" name="cover_image" class="text-sm">
+            <input id="id_cover_image" type="file" name="cover_image" class="text-sm">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">正文</label>
-            <textarea name="content" rows="8" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">{{ post.content|default:'' }}</textarea>
+            <label for="id_content" class="block text-sm font-medium text-gray-700 mb-1">正文</label>
+            <textarea id="id_content" name="content" rows="8" class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand focus:border-brand">{{ post.content|default:'' }}</textarea>
         </div>
         <div class="flex gap-3">
             <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light transition-colors">保存</button>

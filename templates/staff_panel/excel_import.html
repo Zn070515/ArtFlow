@@ -18,9 +18,9 @@
     <form method="post" enctype="multipart/form-data" class="space-y-4">
         {% csrf_token %}
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">上传 Excel 评分表</label>
+            <label for="id_score_file" class="block text-sm font-medium text-gray-700 mb-1">上传 Excel 评分表</label>
             <p class="text-xs text-gray-400 mb-2">第一列为选手姓名，第一行为评委姓名，单元格为分数。仅导入非空单元格。</p>
-            <input type="file" name="file" required accept=".xlsx" class="text-sm">
+            <input id="id_score_file" type="file" name="file" required accept=".xlsx" class="text-sm">
         </div>
         <div class="flex gap-3">
             <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">导入</button>

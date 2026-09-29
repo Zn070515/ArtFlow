@@ -12,20 +12,20 @@
     <form method="post" class="space-y-4">
         {% csrf_token %}
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">所属活动</label>
-            <select name="activity" required class="w-full border border-gray-300 rounded px-3 py-2">
+            <label for="id_activity" class="block text-sm font-medium text-gray-700 mb-1">所属活动</label>
+            <select id="id_activity" name="activity" required class="w-full border border-gray-300 rounded px-3 py-2">
                 {% for activity in activities %}
                 <option value="{{ activity.pk }}">{{ activity.title }}</option>
                 {% endfor %}
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">赛制名称</label>
-            <input name="name" required class="w-full border border-gray-300 rounded px-3 py-2">
+            <label for="id_name" class="block text-sm font-medium text-gray-700 mb-1">赛制名称</label>
+            <input id="id_name" name="name" required class="w-full border border-gray-300 rounded px-3 py-2">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">来源模板（可选）</label>
-            <select name="template" class="w-full border border-gray-300 rounded px-3 py-2">
+            <label for="id_template" class="block text-sm font-medium text-gray-700 mb-1">来源模板（可选）</label>
+            <select id="id_template" name="template" class="w-full border border-gray-300 rounded px-3 py-2">
                 <option value="">（从空白开始）</option>
                 {% for template in templates %}
                 <option value="{{ template.pk }}">{{ template.name }}（v{{ template.schema_version }}）</option>

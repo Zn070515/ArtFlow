@@ -24,7 +24,7 @@
 
             <div class="flex flex-wrap gap-1.5 mb-3">
                 <a href="{% url 'staff:execution_package' a.pk %}" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">执行包</a>
-                <form method="post" action="{% url 'staff:archive_package_create' a.pk %}" class="inline">
+                <form method="post" action="{% url 'staff:archive_package_create' a.pk %}" class="inline" onsubmit="return confirm('确认生成该活动的归档包？');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 px-2 py-1 rounded hover:bg-gray-50">归档包</button>
                 </form>
@@ -47,7 +47,7 @@
 
             <div class="flex flex-wrap gap-1.5">
                 {% if not a.is_locked and a.is_test_mode %}
-                <form method="post" action="{% url 'staff:activity_test_toggle' a.pk %}">
+                <form method="post" action="{% url 'staff:activity_test_toggle' a.pk %}" onsubmit="return confirm('确认切换测试模式？请确认当前活动数据生命周期仍符合预期。');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-yellow-300 {% if a.is_test_mode %}bg-yellow-100 text-yellow-700{% else %}text-yellow-600{% endif %} px-2 py-1 rounded hover:bg-yellow-100">{% if a.is_test_mode %}退出测试{% else %}测试模式{% endif %}</button>
                 </form>
@@ -64,20 +64,20 @@
                 </form>
                 {% endif %}
                 {% elif not a.is_locked %}
-                <form method="post" action="{% url 'staff:activity_lock' a.pk %}">
+                <form method="post" action="{% url 'staff:activity_lock' a.pk %}" onsubmit="return confirm('确认锁定活动？锁定后运行数据不能直接修改。');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">锁定活动</button>
                 </form>
                 {% else %}
                 {% if user.is_admin and a.phase != 'archived' %}
-                <form method="post" action="{% url 'staff:activity_unlock' a.pk %}">
+                <form method="post" action="{% url 'staff:activity_unlock' a.pk %}" onsubmit="return confirm('确认解锁活动？请先填写解锁原因。');">
                     {% csrf_token %}
                     <input type="text" name="note" placeholder="解锁原因（选填）" class="text-xs border border-red-200 rounded px-2 py-1">
                     <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">解锁活动</button>
                 </form>
                 {% endif %}
                 {% endif %}
-                <form method="post" action="{% url 'staff:activity_clone' a.pk %}">
+                <form method="post" action="{% url 'staff:activity_clone' a.pk %}" onsubmit="return confirm('确认克隆该活动？将创建新的测试活动副本。');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">克隆活动</button>
                 </form>

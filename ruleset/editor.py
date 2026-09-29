@@ -63,6 +63,76 @@ _FIELD_ALLOWED = {
     "decision_source": ["manual_recorded_result"],
 }
 
+_FIELD_HELP = {
+    "source": "选择本节点读取的上游结果；只会显示当前顺序中合法的来源。",
+    "round": "填写活动绑定中的轮次键，评分节点会读取该轮次的原始分。",
+    "scale": "决定这个节点的数值单位，例如百分制、十分制或名次。",
+    "mode": "选择多个评委分数如何合成为一个选手分数。",
+    "trim_high": "去掉的最高分数量；不需要时留空。",
+    "trim_low": "去掉的最低分数量；不需要时留空。",
+    "min_judges": "至少收到多少名有效评委的分数才允许进入计算。",
+    "descending": "勾选后数值越大排名越靠前。",
+    "tie_policy": "出现同分时采用的处理方式；人工裁定会停在人工决策环节。",
+    "by": "按哪个分组结果处理；分组节点本身填写业务上的分组依据。",
+    "count": "从来源中选出的名额数量。",
+    "quota": "希望补足到的名额数量。",
+    "groups": "人工决策或分组要处理的组数。",
+    "odd_policy": "遇到人数为奇数时如何处理。",
+    "pairing_policy": "决定选手如何组成配对。",
+    "decision_source": "对决结果从哪里记录；当前只支持人工记录。",
+    "vote_source": "选择绑定中的投票来源键，不要填写数据库编号。",
+    "vote_purpose": "说明投票数据用于人气、成绩组成还是晋级选择。",
+    "award": "填写面向工作人员和公示使用的奖项名称。",
+    "minuend": "选择需要被排除项的名单来源。",
+    "subtrahend": "选择要从被减数中排除的名单来源。",
+    "sources": "选择要合并的多个名单来源。",
+    "within": "把计算范围限制在某个上游结果内；不需要时留空。",
+    "tie_break_source": "同分时参考的上游成绩来源；不需要时留空。",
+    "ranking_source": "补足名额时使用的排名来源；不需要时留空。",
+    "branches": "高级分支配置；普通赛制不需要编辑。",
+    "conversion": "高级分数换算配置；普通赛制不需要编辑。",
+    "aggregate": "选择需要合成的上游成绩及权重，权重会由服务层校验。",
+}
+
+_FIELD_OPTION_LABELS = {
+    "scale": {
+        "hundred": "百分制",
+        "ten": "十分制",
+        "raw": "原始分",
+        "ordinal": "名次",
+        "votes": "票数",
+    },
+    "mode": {
+        "mean": "平均分",
+        "trimmed_mean": "去极值平均分",
+    },
+    "tie_policy": {
+        "auto_break": "按规则自动处理",
+        "extra_round": "加赛",
+        "manual": "人工裁定",
+        "score_fallback": "按备用成绩",
+    },
+    "odd_policy": {
+        "bye": "轮空",
+        "wildcard": "候补晋级",
+        "manual": "人工安排",
+        "reject": "不允许奇数",
+    },
+    "pairing_policy": {
+        "ADJACENT": "相邻配对",
+        "HIGH_LOW": "高低配对",
+    },
+    "vote_purpose": {
+        "POPULARITY": "人气投票",
+        "SCORE_COMPONENT": "成绩组成部分",
+        "SELECTION": "晋级选择",
+        "OTHER": "其他用途",
+    },
+    "decision_source": {
+        "manual_recorded_result": "人工记录结果",
+    },
+}
+
 # Numeric node fields coerced to int when present (schema enforces non-negative int).
 _INT_FIELDS = frozenset({"trim_high", "trim_low", "min_judges", "count", "quota", "groups"})
 _BOOL_FIELDS = frozenset({"descending"})
@@ -83,8 +153,16 @@ def field_labels():
     return dict(_FIELD_LABELS)
 
 
+def field_help():
+    return dict(_FIELD_HELP)
+
+
 def field_allowed():
     return {k: list(v) for k, v in _FIELD_ALLOWED.items()}
+
+
+def field_option_labels():
+    return {key: dict(value) for key, value in _FIELD_OPTION_LABELS.items()}
 
 
 def _bool(payload) -> bool:
