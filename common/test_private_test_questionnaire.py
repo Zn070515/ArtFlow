@@ -33,9 +33,9 @@ from common.test_characterization import _CharacterizationBase
 
 from .private_test_loader import PrivateTestLoadError
 from .private_test_questionnaire import (
-    ACCOMPANIMENT_QUESTIONS,
     answers_from_reference_row,
     check_answers_landed,
+    due_rounds_for_reference_row,
     fill_registrations,
     historical_2025_questionnaire,
 )
@@ -65,7 +65,20 @@ class HistoricalQuestionnaireTests(SimpleTestCase):
             with self.subTest(round=round_key):
                 self.assertIsNotNone(plan.question(f"{round_key}.song"))
                 self.assertIsNotNone(plan.question(f"{round_key}.accompaniment"))
-        self.assertEqual(tuple(q["key"] for q in plan.file_questions), ACCOMPANIMENT_QUESTIONS)
+        self.assertEqual(
+            tuple(q["key"] for q in plan.file_questions),
+            tuple(
+                f"{round_key}.{purpose}"
+                for round_key in ("r1", "r2", "r3", "r4")
+                for purpose in (
+                    "accompaniment",
+                    "performance_video",
+                    "background_video",
+                    "program_image",
+                    "lyrics_script",
+                )
+            ),
+        )
 
     def test_the_third_round_carries_the_guest_singer(self):
         from questionnaire.compiler import compile_questionnaire
@@ -101,6 +114,20 @@ class ReferenceRowTests(SimpleTestCase):
     def test_blank_fields_are_skipped_rather_than_written_empty(self):
         answers = answers_from_reference_row({**ROW, "round2_song": "   "})
         self.assertNotIn("r2.song", answers)
+
+    def test_due_rounds_follow_the_real_advancement_roster(self):
+        self.assertEqual(
+            due_rounds_for_reference_row({"advanced_top10": "YES", "advanced_top5": "YES"}),
+            frozenset({"r1", "r2", "r3", "r4"}),
+        )
+        self.assertEqual(
+            due_rounds_for_reference_row({"advanced_top10": "YES", "advanced_top5": "NO"}),
+            frozenset({"r1", "r2", "r3"}),
+        )
+        self.assertEqual(
+            due_rounds_for_reference_row({"advanced_top10": "NO", "advanced_top5": "NO"}),
+            frozenset({"r1", "r2"}),
+        )
 
 
 class FillRegistrationTests(_CharacterizationBase):

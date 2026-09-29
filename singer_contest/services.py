@@ -682,7 +682,8 @@ def reset_round_snapshots(
         round=locked_round,
         is_test_data=True,
     )
-    if activity.is_test_mode and test_panel_snapshots.exists():
+    has_test_panel_snapshots = activity.is_test_mode and test_panel_snapshots.exists()
+    if has_test_panel_snapshots:
         from entry_access.models import AccessGrant, EphemeralSession
 
         # Judge panel snapshots retain their source RoundJudge rows with PROTECT.  Test
@@ -693,6 +694,7 @@ def reset_round_snapshots(
         with authority_write(JUDGE_SESSION_STATE):
             JudgeSession.objects.filter(panel_snapshot__in=test_panel_snapshots).delete()
             JudgeSeatGrant.objects.filter(panel_snapshot__in=test_panel_snapshots).delete()
+        ScoreRecord.objects.filter(round=locked_round).delete()
         with authority_write(JUDGE_PANEL_STATE):
             JudgeSeat.objects.filter(panel_member__panel_snapshot__in=test_panel_snapshots).delete()
             RoundPanelSnapshotMember.objects.filter(
@@ -707,7 +709,8 @@ def reset_round_snapshots(
             PerformanceRunState.objects.filter(round=locked_round).delete()
         Performance.objects.filter(round=locked_round).delete()
         PerformanceGroup.objects.filter(round=locked_round).delete()
-    ScoreRecord.objects.filter(round=locked_round).delete()
+    if not has_test_panel_snapshots:
+        ScoreRecord.objects.filter(round=locked_round).delete()
     with authority_write(SCORE_SUMMARY_RECALCULATE):
         ScoreSummary.objects.filter(round=locked_round).delete()
     RoundEntry.objects.filter(round=locked_round).delete()

@@ -25,15 +25,16 @@ REASON_FIELDS = (
     ("actual_final_song_raw", "r4.song"),
 )
 
-ACCOMPANIMENT_QUESTIONS = (
-    "r1.accompaniment",
-    "r2.accompaniment",
-    "r3.accompaniment",
-    "r4.accompaniment",
+MEDIA_FILE_SPECS = (
+    ("accompaniment", "伴奏", [".mp3", ".wav"]),
+    ("performance_video", "演出视频", [".mp4"]),
+    ("background_video", "背景视频", [".mp4"]),
+    ("program_image", "节目图片", [".png", ".jpg", ".jpeg"]),
+    ("lyrics_script", "歌词文稿", [".txt", ".pdf"]),
 )
 
 
-def _file_question(key: str, round_key: str, label: str) -> dict:
+def _file_question(key: str, round_key: str, label: str, purpose: str, extensions) -> dict:
     return {
         "key": key,
         "type": "file",
@@ -41,12 +42,25 @@ def _file_question(key: str, round_key: str, label: str) -> dict:
         "round": round_key,
         "required": False,
         "file": {
-            "purpose": "accompaniment",
-            "extensions": [".mp3", ".wav"],
+            "purpose": purpose,
+            "extensions": extensions,
             "max_mb": 100,
             "max_files": 1,
         },
     }
+
+
+def _round_media_questions(round_key: str, round_label: str) -> list[dict]:
+    return [
+        _file_question(
+            f"{round_key}.{purpose}",
+            round_key,
+            f"{round_label}{label}",
+            purpose,
+            extensions,
+        )
+        for purpose, label, extensions in MEDIA_FILE_SPECS
+    ]
 
 
 def historical_2025_questionnaire() -> dict:
@@ -93,7 +107,7 @@ def historical_2025_questionnaire() -> dict:
                                 "label": "第一轮曲目",
                                 "round": "r1",
                             },
-                            _file_question("r1.accompaniment", "r1", "第一轮伴奏"),
+                            *_round_media_questions("r1", "第一轮"),
                         ],
                     },
                     {
@@ -106,7 +120,7 @@ def historical_2025_questionnaire() -> dict:
                                 "label": "第二轮曲目",
                                 "round": "r2",
                             },
-                            _file_question("r2.accompaniment", "r2", "第二轮伴奏"),
+                            *_round_media_questions("r2", "第二轮"),
                         ],
                     },
                     {
@@ -125,7 +139,7 @@ def historical_2025_questionnaire() -> dict:
                                 "label": "帮帮唱嘉宾姓名",
                                 "round": "r3",
                             },
-                            _file_question("r3.accompaniment", "r3", "第三轮伴奏"),
+                            *_round_media_questions("r3", "第三轮"),
                         ],
                     },
                     {
@@ -138,7 +152,7 @@ def historical_2025_questionnaire() -> dict:
                                 "label": "第四轮曲目",
                                 "round": "r4",
                             },
-                            _file_question("r4.accompaniment", "r4", "第四轮伴奏"),
+                            *_round_media_questions("r4", "第四轮"),
                         ],
                     },
                 ],
@@ -155,6 +169,16 @@ def answers_from_reference_row(row) -> dict:
         if isinstance(value, str) and value.strip():
             answers[question_key] = value.strip()
     return answers
+
+
+def due_rounds_for_reference_row(row) -> frozenset[str]:
+    """Return the rounds this contestant actually reaches in the rehearsal."""
+    due = {"r1", "r2"}
+    if str((row or {}).get("advanced_top10") or "").strip().upper() == "YES":
+        due.add("r3")
+    if str((row or {}).get("advanced_top5") or "").strip().upper() == "YES":
+        due.add("r4")
+    return frozenset(due)
 
 
 def fill_registrations(
@@ -187,7 +211,7 @@ def fill_registrations(
             version=version,
             registration=registration,
             answers=answers,
-            due_rounds=frozenset({"r1", "r2", "r3", "r4"}),
+            due_rounds=due_rounds_for_reference_row(row),
         )
         if approve:
             registration.pre_status = SingerRegistration.PreStatus.APPROVED
@@ -196,11 +220,12 @@ def fill_registrations(
     return responses
 
 
-def check_answers_landed(*, responses, registrations) -> None:
-    """Every participant's four songs must be readable through the questionnaire.
+def check_answers_landed(*, responses, registrations, reference_by_code=None) -> None:
+    """Every contestant's due songs must be readable through the questionnaire.
 
-    The point of the migration is that four rounds coexist, so the check is that all four
-    are present — not that one of them is.
+    Four rounds coexist in the questionnaire, but only contestants who advance reach the
+    later rounds. Checking the reference roster's advancement flags avoids manufacturing
+    answers for a round a contestant never entered.
     """
     from questionnaire.registration import questionnaire_plan
     from questionnaire.runtime import resolve_question_value
@@ -209,7 +234,12 @@ def check_answers_landed(*, responses, registrations) -> None:
         registration = registrations[code]
         plan = questionnaire_plan(response.ruleset_version)
         answers = response.answers or {}
-        for question_key in ("r1.song", "r2.song", "r3.song", "r4.song"):
+        due_rounds = (
+            due_rounds_for_reference_row(reference_by_code[code])
+            if reference_by_code is not None
+            else frozenset({"r1", "r2", "r3", "r4"})
+        )
+        for question_key in (f"{round_key}.song" for round_key in sorted(due_rounds)):
             question = plan.question(question_key)
             if question is None:
                 continue

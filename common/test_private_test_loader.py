@@ -1,10 +1,14 @@
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest import skipUnless
 
 from accounts.models import User
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from ruleset.compiler import Severity, compile_definition
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import build_bound_context
@@ -12,11 +16,13 @@ from ruleset.templates import GOLDEN_SCHIDUI
 from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric
 
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.private_test_fixture import PrivateTestFixture
 from common.private_test_loader import (
     FIXTURE_LIFECYCLE,
     PrivateTestLoadError,
     _activity_for_fixture,
     _advance_to,
+    apply_private_fixture,
 )
 
 
@@ -63,6 +69,98 @@ class PrivateTestLoaderBoundaryTests(TestCase):
         )
         activity = _activity_for_fixture(fixture, "phase-choice-fixture", self.operator)
         self.assertEqual(activity.phase, Activity.Phase.REGISTRATION_OPEN)
+
+
+@skipUnless(
+    os.environ.get("ARTFLOW_PRIVATE_FIXTURE_ROOT"),
+    "set ARTFLOW_PRIVATE_FIXTURE_ROOT to run the package-level private rehearsal",
+)
+class PrivateFixturePackageIntegrationTests(TestCase):
+    """Run the real sanitized v3 package without putting it in the repository."""
+
+    def setUp(self):
+        self.operator = _operator("private-package-integration")
+        self.media = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media.name)
+        self.media_override.enable()
+        self.addCleanup(self.media_override.disable)
+        self.addCleanup(self.media.cleanup)
+
+    def test_v3_package_reaches_a_complete_idempotent_rehearsal(self):
+        from files.models import MaterialCheck, SubmissionFile
+        from questionnaire.models import QuestionnaireResponse
+        from singer_contest.models import CriterionScore, StageResult
+        from tickets.models import Ticket
+        from voting.models import VoteBallot
+
+        fixture = PrivateTestFixture.from_root(Path(os.environ["ARTFLOW_PRIVATE_FIXTURE_ROOT"]))
+        loaded = apply_private_fixture(
+            fixture,
+            activity_key=fixture.reference["fixture_id"],
+            operator_username=self.operator.username,
+        )
+        activity = loaded.activity
+        self.assertEqual(activity.singer_registrations.filter(is_test_data=True).count(), 15)
+        self.assertEqual(
+            QuestionnaireResponse.objects.filter(
+                singer_registration__activity=activity, is_test_data=True
+            ).count(),
+            15,
+        )
+        self.assertEqual(
+            SubmissionFile.objects.filter(
+                singer_registration__activity=activity,
+                is_test_data=True,
+                is_current=True,
+            )
+            .exclude(question_key="")
+            .count(),
+            60,
+        )
+        self.assertEqual(
+            MaterialCheck.objects.filter(singer_registration__activity=activity)
+            .exclude(question_key="")
+            .filter(
+                file_purpose__in=(
+                    "accompaniment",
+                    "performance_video",
+                    "background_video",
+                    "program_image",
+                    "lyrics_script",
+                ),
+                status=MaterialCheck.Status.UPLOADED,
+            )
+            .count(),
+            60,
+        )
+        self.assertEqual(
+            CriterionScore.objects.filter(
+                score_record__round__activity=activity, is_test_data=True
+            ).count(),
+            555,
+        )
+        self.assertEqual(Ticket.objects.filter(activity=activity, is_test_data=True).count(), 280)
+        self.assertEqual(
+            VoteBallot.objects.filter(
+                vote_session__activity=activity, is_test_data=True
+            ).count(),
+            310,
+        )
+        self.assertEqual(
+            set(
+                StageResult.objects.filter(activity=activity, is_test_data=True)
+                .filter(status=StageResult.Status.CONFIRMED)
+                .values_list("stage_key", flat=True)
+            ),
+            {"stage1", "stage2", "stage3"},
+        )
+
+        repeated = apply_private_fixture(
+            fixture,
+            activity_key=fixture.reference["fixture_id"],
+            operator_username=self.operator.username,
+        )
+        self.assertEqual(repeated.report["status"], "already_loaded_noop")
 
 
 class FixtureFreezeOrderTests(TestCase):
