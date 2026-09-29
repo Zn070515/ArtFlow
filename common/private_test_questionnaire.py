@@ -191,7 +191,11 @@ def fill_registrations(
     draft would put somebody in the roster who never finished their form, which is the one
     thing the roster is supposed to mean.
     """
-    from questionnaire.registration import get_or_create_draft_registration, submit_registration
+    from questionnaire.registration import (
+        get_or_create_draft_registration,
+        questionnaire_plan,
+        submit_registration,
+    )
     from singer_contest.models import SingerRegistration
 
     from .private_test_loader import PrivateTestLoadError
@@ -212,6 +216,7 @@ def fill_registrations(
             registration=registration,
             answers=answers,
             due_rounds=due_rounds_for_reference_row(row),
+            expected_schema_hash=questionnaire_plan(version).schema_hash,
         )
         if approve:
             registration.pre_status = SingerRegistration.PreStatus.APPROVED

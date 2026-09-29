@@ -1,3 +1,4 @@
+import json
 import shutil
 import zipfile
 from functools import partial
@@ -110,7 +111,7 @@ def large_video_upload_allowed(activity) -> bool:
     return activity is None or activity.data_lifecycle != Activity.DataLifecycle.FORMAL
 
 
-def validate_upload(uploaded_file, purpose, *, activity=None):
+def validate_upload(uploaded_file, purpose, *, activity=None, allowed_extensions=None):
     if purpose not in MAX_UPLOAD_BYTES:
         raise ValidationError("文件用途无效。")
     if not uploaded_file or not getattr(uploaded_file, "size", 0):
@@ -124,6 +125,10 @@ def validate_upload(uploaded_file, purpose, *, activity=None):
     extension = PurePath(str(uploaded_file.name)).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS[purpose]:
         raise ValidationError("文件类型不符合该用途的允许列表。")
+    if allowed_extensions is not None and extension not in {
+        str(item).lower() for item in allowed_extensions
+    }:
+        raise ValidationError("文件扩展名不符合该问卷题目的允许列表。")
     content_type = str(getattr(uploaded_file, "content_type", "") or "").lower()
     if (
         content_type not in {"", "application/octet-stream"}
@@ -202,6 +207,32 @@ def _owner_filter(owner):
     raise ValidationError("文件必须关联到有效的报名或节目。")
 
 
+def questionnaire_material_authority_active(activity) -> bool:
+    """Whether a frozen singer questionnaire owns the activity's materials."""
+    from ruleset.services import current_frozen_version
+
+    version = current_frozen_version(activity)
+    if version is None:
+        return False
+    try:
+        root = json.loads(version.definition)
+    except (TypeError, ValueError):
+        # A malformed frozen definition must not reopen the legacy writer. The frozen
+        # ruleset is already unhealthy; fail closed until staff repairs it through the
+        # ruleset authority.
+        return True
+    return isinstance(root, dict) and root.get("questionnaire") is not None
+
+
+def _ensure_legacy_singer_materials_allowed(registration) -> None:
+    from singer_contest.models import SingerRegistration
+
+    if isinstance(registration, SingerRegistration) and questionnaire_material_authority_active(
+        registration.activity
+    ):
+        raise ValidationError("当前报名由已确认问卷管理，请使用问卷题目上传或审核材料。")
+
+
 def _slot_filter(owner_filter, *, purpose, question_key):
     """Which uploaded file this one replaces.
 
@@ -225,6 +256,7 @@ def _store_file(
     source_ruleset_version=None,
     max_mb=None,
     owner_total_quota=False,
+    allowed_extensions=None,
 ):
     """The one storage path both the legacy and the questionnaire uploads go through.
 
@@ -233,7 +265,12 @@ def _store_file(
     has (questionnaire — otherwise every question would hand out a fresh copy of the whole
     per-purpose budget and multiply the disk ceiling by the number of questions).
     """
-    validate_upload(uploaded_file, purpose, activity=owner.activity)
+    validate_upload(
+        uploaded_file,
+        purpose,
+        activity=owner.activity,
+        allowed_extensions=allowed_extensions,
+    )
     if max_mb is not None and uploaded_file.size > max_mb * 1024 * 1024:
         raise ValidationError(f"文件超过该题目的上限 {max_mb} MB。")
     media_root = Path(settings.MEDIA_ROOT)
@@ -313,6 +350,7 @@ def _store_file(
 @transaction.atomic
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     """Store a legacy, purpose-identified upload (unchanged behaviour)."""
+    _ensure_legacy_singer_materials_allowed(owner)
     return _store_file(
         owner=owner,
         uploaded_file=uploaded_file,
@@ -363,7 +401,7 @@ def store_questionnaire_file(
     if writable is not None and question_key not in writable:
         raise ValidationError(f"当前阶段不可上传该题目的材料：{question_key!r}。")
     config = question["file"]
-    return _store_file(
+    stored = _store_file(
         owner=registration,
         uploaded_file=uploaded_file,
         purpose=config["purpose"],
@@ -372,7 +410,18 @@ def store_questionnaire_file(
         source_ruleset_version=version,
         max_mb=config["max_mb"],
         owner_total_quota=True,
+        allowed_extensions=config["extensions"],
     )
+    from common.models import AuditLog
+
+    AuditLog.objects.create(
+        operator=actor,
+        action_type=AuditLog.ActionType.UPLOAD_FILE,
+        target=f"SubmissionFile:{stored.pk}",
+        new_value=stored.original_name,
+        note=f"questionnaire:{question_key}",
+    )
+    return stored
 
 
 @transaction.atomic
@@ -382,11 +431,12 @@ def delete_submission_file(submission_file: SubmissionFile) -> None:
     stored_name = submission_file.file.name
     was_current = submission_file.is_current
     purpose = submission_file.file_purpose
+    question_key = submission_file.question_key
     submission_file.delete()
     if was_current:
         replacement = (
             SubmissionFile.objects.select_for_update()
-            .filter(**owner_filter, file_purpose=purpose)
+            .filter(**_slot_filter(owner_filter, purpose=purpose, question_key=question_key))
             .order_by("-version", "-pk")
             .first()
         )
@@ -421,6 +471,7 @@ def reconcile_singer_material_checks(registration):
     the owner row, then reconciles checks against current requirements and prunes
     stale rows (a deleted requirement no longer surfaces as a check).
     """
+    _ensure_legacy_singer_materials_allowed(registration)
     return _reconcile_owner_under_authority(
         registration, MaterialRequirement.AppliesTo.SINGER, DEFAULT_SINGER_REQUIREMENTS
     )
@@ -445,6 +496,11 @@ def reconcile_activity_material_checks(activity, applies_to):
     _ensure_material_checks_writable(locked_activity)
     if applies_to not in MaterialRequirement.AppliesTo.values:
         raise ValidationError("无效的适用范围。")
+    if (
+        applies_to == MaterialRequirement.AppliesTo.SINGER
+        and questionnaire_material_authority_active(locked_activity)
+    ):
+        raise ValidationError("当前活动的选手材料由已确认问卷管理。")
     owner_model = _owner_model_for_applies_to(applies_to)
     fallback = (
         DEFAULT_SINGER_REQUIREMENTS

@@ -141,6 +141,7 @@ class BuilderViewTests(_BuilderBase):
         return json.loads(self.version.definition)["questionnaire"]
 
     def _post(self, **payload):
+        payload.setdefault("base_content_hash", self.version.content_hash)
         return self.client.post(self.designer_url(self.version), payload)
 
     def test_the_designer_lists_every_question(self):

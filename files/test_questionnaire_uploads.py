@@ -27,7 +27,7 @@ from ruleset.services import freeze_ruleset_version
 from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric, SingerRegistration
 
 from .models import MaterialCheck, SubmissionFile
-from .services import store_questionnaire_file, store_submission_file
+from .services import delete_submission_file, store_questionnaire_file, store_submission_file
 
 MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00"
 
@@ -92,6 +92,14 @@ def _upload(name="take.mp3"):
     return SimpleUploadedFile(name, MP3, content_type="audio/mpeg")
 
 
+def _wav_upload(name="take.wav"):
+    return SimpleUploadedFile(
+        name,
+        b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 16,
+        content_type="audio/wav",
+    )
+
+
 class _QuestionnaireUploadBase(_CharacterizationBase):
     def setUp(self):
         super().setUp()
@@ -115,7 +123,7 @@ class _QuestionnaireUploadBase(_CharacterizationBase):
         self._operator_user = user
         return user
 
-    def frozen_version(self):
+    def frozen_version(self, *, include_questionnaire=True):
         # Registration is open: a questionnaire answer file is a registration-time upload,
         # and the write authority is the phase, not the response's status.
         activity = self.make_activity(
@@ -149,7 +157,8 @@ class _QuestionnaireUploadBase(_CharacterizationBase):
                 is_test_data=True,
             )
         root = json.loads(_definition())
-        root["questionnaire"] = _questionnaire()
+        if include_questionnaire:
+            root["questionnaire"] = _questionnaire()
         version = RulesetVersion.objects.create(
             ruleset=ruleset, definition=json.dumps(root, ensure_ascii=False)
         )
@@ -297,6 +306,17 @@ class QuestionnaireUploadRefusalTests(_QuestionnaireUploadBase):
                 actor=self.operator(),
             )
 
+    def test_the_question_extension_allowlist_is_enforced(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+        with self.assertRaises(ValidationError):
+            store_questionnaire_file(
+                registration=registration,
+                question_key="r1.accompaniment",
+                uploaded_file=_wav_upload(),
+                actor=self.operator(),
+            )
+
     def test_a_stale_schema_hash_is_refused(self):
         from questionnaire.schema import schema_hash
 
@@ -380,6 +400,41 @@ class QuestionnaireUploadReviewTests(_QuestionnaireUploadBase):
         self.assertEqual(
             MaterialCheck.objects.get(question_key="r1.accompaniment").status,
             MaterialCheck.Status.APPROVED,
+        )
+
+    def test_deleting_a_question_file_promotes_only_that_questions_history(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+        for key in ("r1.accompaniment", "r2.accompaniment"):
+            store_questionnaire_file(
+                registration=registration,
+                question_key=key,
+                uploaded_file=_upload(f"{key}-v1.mp3"),
+                actor=self.operator(),
+            )
+            store_questionnaire_file(
+                registration=registration,
+                question_key=key,
+                uploaded_file=_upload(f"{key}-v2.mp3"),
+                actor=self.operator(),
+            )
+        r2_current = SubmissionFile.objects.get(
+            singer_registration=registration, question_key="r2.accompaniment", is_current=True
+        )
+        delete_submission_file(r2_current)
+        self.assertTrue(
+            SubmissionFile.objects.get(
+                singer_registration=registration,
+                question_key="r2.accompaniment",
+                version=1,
+            ).is_current
+        )
+        self.assertTrue(
+            SubmissionFile.objects.get(
+                singer_registration=registration,
+                question_key="r1.accompaniment",
+                version=2,
+            ).is_current
         )
 
 
@@ -746,7 +801,7 @@ class QuestionnaireMaterialCheckReconcileTests(_QuestionnaireUploadBase):
 
 class LegacyUploadUnchangedTests(_QuestionnaireUploadBase):
     def test_a_legacy_upload_still_has_no_question_key(self):
-        version = self.frozen_version()
+        version = self.frozen_version(include_questionnaire=False)
         registration = self.registration(version)
         created = store_submission_file(
             owner=registration,
@@ -758,7 +813,7 @@ class LegacyUploadUnchangedTests(_QuestionnaireUploadBase):
         self.assertIsNone(created.source_ruleset_version_id)
 
     def test_a_legacy_upload_still_replaces_itself_by_purpose(self):
-        version = self.frozen_version()
+        version = self.frozen_version(include_questionnaire=False)
         registration = self.registration(version)
         store_submission_file(
             owner=registration,
@@ -779,3 +834,14 @@ class LegacyUploadUnchangedTests(_QuestionnaireUploadBase):
             ).count(),
             1,
         )
+
+    def test_a_legacy_upload_is_refused_for_a_questionnaire_registration(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+        with self.assertRaises(ValidationError):
+            store_submission_file(
+                owner=registration,
+                uploaded_file=_upload(),
+                purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                uploaded_by=self.operator(),
+            )

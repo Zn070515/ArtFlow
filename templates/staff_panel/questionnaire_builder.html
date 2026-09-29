@@ -36,6 +36,7 @@
 
     <form method="post" class="mb-6 flex flex-wrap items-end gap-2 rounded border border-gray-200 bg-white p-4">
         {% csrf_token %}
+        <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
         <input type="hidden" name="action" value="add">
         <label class="text-sm text-gray-700">
             分区
@@ -75,23 +76,23 @@
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
                     {% if q.type != 'notice' %}
-                    <form method="post">{% csrf_token %}
+                    <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="move_up">
                         <input type="hidden" name="key" value="{{ q.key }}">
                         <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">上移</button>
                     </form>
-                    <form method="post">{% csrf_token %}
+                    <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="move_down">
                         <input type="hidden" name="key" value="{{ q.key }}">
                         <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">下移</button>
                     </form>
-                    <form method="post">{% csrf_token %}
+                    <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="duplicate">
                         <input type="hidden" name="key" value="{{ q.key }}">
                         <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">复制</button>
                     </form>
                     {% endif %}
-                    <form method="post">{% csrf_token %}
+                    <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="key" value="{{ q.key }}">
                         <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">删除</button>

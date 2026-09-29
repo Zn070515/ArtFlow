@@ -94,6 +94,7 @@ def _row(question, resolved, value) -> dict:
         "value": "" if value is None else value,
         "value_text": value if isinstance(value, str) else "",
         "checked": value is True,
+        "selected_values": value if isinstance(value, list) else [],
         "file_name": getattr(value, "original_name", ""),
     }
 
@@ -102,7 +103,12 @@ def _rows(plan, *, answers, context, due_rounds, registration=None, files=None) 
     resolved_by_key = {
         resolved.question["key"]: resolved
         for resolved in resolve_questions(
-            plan, answers=answers, context=context, due_rounds=due_rounds
+            plan,
+            answers=answers,
+            context=context,
+            due_rounds=due_rounds,
+            registration=registration,
+            files=files,
         )
     }
     rows = []
@@ -183,6 +189,9 @@ def builder_view(request: HttpRequest, pk: int):
             raise PermissionDenied("已冻结赛制版本不可编辑。")
         action = request.POST.get("action") or ""
         try:
+            base_content_hash = request.POST.get("base_content_hash") or ""
+            if not base_content_hash:
+                raise ValidationError("问卷已更新，请刷新后再操作。")
             questionnaire = _apply_action(
                 parse_questionnaire(_current_questionnaire(version)), action, request.POST
             )
@@ -191,7 +200,7 @@ def builder_view(request: HttpRequest, pk: int):
                 section="questionnaire",
                 value=questionnaire,
                 operator=request.user,
-                base_content_hash=request.POST.get("base_content_hash") or None,
+                base_content_hash=base_content_hash,
             )
         except ValidationError as exc:
             messages.error(request, "；".join(getattr(exc, "messages", None) or [str(exc)]))

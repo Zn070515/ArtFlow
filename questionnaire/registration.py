@@ -16,11 +16,13 @@ server-side act. Three properties are structural rather than checked in prose:
 from __future__ import annotations
 
 import json
+import re
+from decimal import Decimal, InvalidOperation
 
 from common.lifecycle import runtime_is_test
 from core.models import Activity
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from files.services import reconcile_questionnaire_material_checks
 from singer_contest.models import RoundEntry, SingerRegistration
 
@@ -108,6 +110,87 @@ def _keys_of(plan: QuestionnairePlan, answers) -> set[str]:
     return {key for key in (answers or {}) if plan.question(key) is not None}
 
 
+def normalize_answer(question: dict, raw):
+    """Normalize one client value and enforce the frozen question's value domain."""
+    if raw is None:
+        return None
+    qtype = question["type"]
+    validation = question.get("validation") or {}
+    if qtype in {"text", "textarea"}:
+        if not isinstance(raw, str):
+            raise ValidationError(f"题目 {question['key']} 必须是文本。")
+        value = raw
+        if "min_length" in validation and value and len(value) < validation["min_length"]:
+            raise ValidationError(f"题目 {question['key']} 少于最小长度。")
+        if "max_length" in validation and len(value) > validation["max_length"]:
+            raise ValidationError(f"题目 {question['key']} 超过最大长度。")
+        if value and validation.get("format") == "phone_cn" and not re.fullmatch(
+            r"1[3-9]\d{9}", value
+        ):
+            raise ValidationError(f"题目 {question['key']} 不是有效的中国大陆手机号。")
+        if value and validation.get("format") == "email" and not re.fullmatch(
+            r"[^\s@]+@[^\s@]+\.[^\s@]+", value
+        ):
+            raise ValidationError(f"题目 {question['key']} 不是有效的邮箱地址。")
+        return value
+    if qtype == "number":
+        if isinstance(raw, bool) or (not isinstance(raw, (int, float, str))):
+            raise ValidationError(f"题目 {question['key']} 必须是数字。")
+        if isinstance(raw, str) and not raw.strip():
+            return ""
+        try:
+            value = Decimal(str(raw).strip())
+        except (InvalidOperation, ValueError):
+            raise ValidationError(f"题目 {question['key']} 必须是数字。") from None
+        if not value.is_finite():
+            raise ValidationError(f"题目 {question['key']} 必须是有限数字。")
+        if "min" in validation and value < Decimal(str(validation["min"])):
+            raise ValidationError(f"题目 {question['key']} 小于允许的最小值。")
+        if "max" in validation and value > Decimal(str(validation["max"])):
+            raise ValidationError(f"题目 {question['key']} 大于允许的最大值。")
+        return int(value) if value == value.to_integral_value() else float(value)
+    if qtype == "boolean":
+        if not isinstance(raw, bool):
+            raise ValidationError(f"题目 {question['key']} 必须是布尔值。")
+        return raw
+    if qtype in {"single_choice", "select"}:
+        if not isinstance(raw, str):
+            raise ValidationError(f"题目 {question['key']} 必须是单个选项。")
+        allowed = {option["value"] for option in question.get("options", [])}
+        if raw and raw not in allowed:
+            raise ValidationError(f"题目 {question['key']} 的选项无效。")
+        return raw
+    if qtype == "multiple_choice":
+        if not isinstance(raw, list) or any(not isinstance(value, str) for value in raw):
+            raise ValidationError(f"题目 {question['key']} 必须是选项列表。")
+        if len(raw) != len(set(raw)):
+            raise ValidationError(f"题目 {question['key']} 的选项不能重复。")
+        allowed = {option["value"] for option in question.get("options", [])}
+        if any(value not in allowed for value in raw):
+            raise ValidationError(f"题目 {question['key']} 包含无效选项。")
+        if "min_selections" in validation and len(raw) < validation["min_selections"]:
+            raise ValidationError(f"题目 {question['key']} 选择项过少。")
+        if "max_selections" in validation and len(raw) > validation["max_selections"]:
+            raise ValidationError(f"题目 {question['key']} 选择项过多。")
+        return list(raw)
+    if qtype == "file":
+        raise ValidationError(f"题目 {question['key']} 必须通过文件上传入口提交。")
+    raise ValidationError(f"题目 {question['key']} 类型不受支持。")
+
+
+def normalize_answers(plan: QuestionnairePlan, answers) -> dict:
+    """Normalize all known participant answers; unknown keys are ignored."""
+    if not isinstance(answers, dict):
+        raise ValidationError("answers 必须是对象。")
+    normalized = {}
+    for key, raw in answers.items():
+        question = plan.question(key)
+        if question is None:
+            continue
+        normalized[key] = normalize_answer(question, raw)
+    return normalized
+
+
 def split_answers(plan: QuestionnairePlan, answers) -> tuple[dict, dict]:
     """Split posted answers into ``(binding -> value, question key -> value)``.
 
@@ -141,7 +224,11 @@ def _apply_bound_fields(registration: SingerRegistration, bound: dict) -> list[s
 def _save_bound_fields(registration: SingerRegistration, fields: list[str]) -> None:
     if not fields:
         return
-    registration.save(update_fields=[*fields, "updated_at"])
+    try:
+        with transaction.atomic():
+            registration.save(update_fields=[*fields, "updated_at"])
+    except IntegrityError:
+        raise ValidationError("报名信息与已有选手冲突，请检查学号等唯一字段。") from None
 
 
 @transaction.atomic
@@ -183,6 +270,9 @@ def get_or_create_draft_registration(*, version, user):
 def save_draft(*, version, registration, answers, schema_hash: str = "") -> QuestionnaireResponse:
     """Persist one autosave: bound answers onto the registration, the rest into the response."""
     plan = questionnaire_plan(version)
+    if schema_hash and schema_hash != plan.schema_hash:
+        raise ValidationError("问卷已更新，请刷新后重试。")
+    answers = normalize_answers(plan, answers)
     activity = version.ruleset.activity
     response = get_or_create_response(
         registration=registration,
@@ -230,6 +320,7 @@ def submit_registration(
     plan = questionnaire_plan(version)
     if expected_schema_hash and expected_schema_hash != plan.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
+    answers = normalize_answers(plan, answers)
     response = get_or_create_response(
         registration=registration,
         ruleset_version=version,
@@ -273,4 +364,15 @@ def submit_registration(
     reconcile_questionnaire_material_checks(registration=registration, version=version, plan=plan)
     registration.pre_status = SingerRegistration.PreStatus.SUBMITTED
     registration.save(update_fields=["pre_status", "updated_at"])
-    return mark_submitted(saved)
+    submitted = mark_submitted(saved)
+    from common.models import AuditLog
+
+    AuditLog.objects.create(
+        operator=registration.user,
+        action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+        target=f"QuestionnaireResponse:{submitted.pk}",
+        old_value=saved.status,
+        new_value=submitted.status,
+        note="questionnaire_submit",
+    )
+    return submitted

@@ -99,6 +99,27 @@ class CarryOverRuleTests(SimpleTestCase):
             incompatible_keys(_plan(), _plan(purpose="background_video")), ["r1.accompaniment"]
         )
 
+    def test_changing_choice_values_is_incompatible(self):
+        first = _questionnaire(song_type="single_choice")
+        current = _questionnaire(song_type="single_choice")
+        for document, values in ((first, ("solo", "duet")), (current, ("solo", "chorus"))):
+            song = document["pages"][0]["sections"][0]["questions"][1]
+            song["options"] = [{"value": value, "label": value} for value in values]
+        self.assertEqual(
+            incompatible_keys(compile_questionnaire(first), compile_questionnaire(current)),
+            ["r1.song"],
+        )
+
+    def test_changing_validation_domain_is_incompatible(self):
+        first = _questionnaire()
+        current = _questionnaire()
+        first["pages"][0]["sections"][0]["questions"][1]["validation"] = {"max_length": 20}
+        current["pages"][0]["sections"][0]["questions"][1]["validation"] = {"max_length": 40}
+        self.assertEqual(
+            incompatible_keys(compile_questionnaire(first), compile_questionnaire(current)),
+            ["r1.song"],
+        )
+
     def test_validate_successor_names_every_incompatible_key(self):
         with self.assertRaises(ValidationError) as caught:
             validate_successor(_plan(), _plan(song_type="textarea", purpose="background_video"))

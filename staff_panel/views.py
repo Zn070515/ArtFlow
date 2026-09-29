@@ -65,6 +65,7 @@ from exports.services import (
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 from files.services import (
+    questionnaire_material_authority_active,
     reconcile_activity_material_checks,
     reconcile_program_material_checks,
     reconcile_singer_material_checks,
@@ -716,6 +717,9 @@ def singer_registration_detail(request, pk):
             "checks": checks,
             "check_statuses": _choices(MaterialCheck.Status),
             "file_purposes": _choices(SubmissionFile.Purpose),
+            "questionnaire_material_authority": questionnaire_material_authority_active(
+                reg.activity
+            ),
             "errors": errors,
         },
     )
@@ -876,6 +880,13 @@ def activity_material_requirements(request, activity_id):
                 messages.error(request, "检查项名称不能为空。")
             elif applies_to not in MaterialRequirement.AppliesTo.values:
                 messages.error(request, "无效的适用范围。")
+            elif (
+                applies_to == MaterialRequirement.AppliesTo.SINGER
+                and questionnaire_material_authority_active(locked_activity)
+            ):
+                messages.error(
+                    request, "当前活动的选手材料由已确认问卷管理，不能再配置旧式材料项。"
+                )
             else:
                 MaterialRequirement.objects.update_or_create(
                     activity=locked_activity,
@@ -891,6 +902,8 @@ def activity_material_requirements(request, activity_id):
                 messages.success(request, "材料检查项已保存。")
         return redirect("staff:activity_material_requirements", activity_id=activity.pk)
     requirements = MaterialRequirement.objects.filter(activity=activity)
+    questionnaire_authority = questionnaire_material_authority_active(activity)
+    questionnaire_version = _current_frozen_version(activity)
     return render(
         request,
         "staff_panel/material_requirements.html",
@@ -899,6 +912,8 @@ def activity_material_requirements(request, activity_id):
             "requirements": requirements,
             "applies_to_choices": _choices(MaterialRequirement.AppliesTo),
             "file_purposes": _choices(SubmissionFile.Purpose),
+            "questionnaire_material_authority": questionnaire_authority,
+            "questionnaire_version": questionnaire_version,
         },
     )
 
@@ -913,8 +928,14 @@ def activity_material_requirement_delete(request, activity_id, pk):
         requirement = MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).first()
         if requirement is not None:
             applies_to = requirement.applies_to
-            requirement.delete()
-            reconcile_activity_material_checks(locked_activity, applies_to)
+            if (
+                applies_to == MaterialRequirement.AppliesTo.SINGER
+                and questionnaire_material_authority_active(locked_activity)
+            ):
+                messages.error(request, "当前活动的选手材料由已确认问卷管理，不能删除旧式材料项。")
+            else:
+                requirement.delete()
+                reconcile_activity_material_checks(locked_activity, applies_to)
     messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 

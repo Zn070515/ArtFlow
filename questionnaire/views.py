@@ -167,7 +167,12 @@ def _question_rows(
     resolved_by_key = {
         resolved.question["key"]: resolved
         for resolved in resolve_questions(
-            plan, answers=answers, context=context, due_rounds=due_rounds
+            plan,
+            answers=answers,
+            context=context,
+            due_rounds=due_rounds,
+            registration=registration,
+            files=files,
         )
     }
     rows = []
@@ -206,6 +211,7 @@ def _question_rows(
                         "value": "" if value is None else value,
                         "value_text": value if isinstance(value, str) else "",
                         "checked": value is True,
+                        "selected_values": value if isinstance(value, list) else [],
                         "file_name": getattr(value, "original_name", ""),
                         "editable": writable is None or key in writable,
                     }

@@ -13,6 +13,7 @@ keystroke, so there is exactly one copy of "what is your name" and no second one
 """
 
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
@@ -28,6 +29,7 @@ from .conditions import evaluate_condition
 from .registration import (
     build_submission_context,
     get_or_create_draft_registration,
+    normalize_answer,
     submit_registration,
 )
 from .runtime import missing_required, resolve_questions
@@ -161,6 +163,117 @@ class ConditionTests(_CharacterizationBase):
 
     def test_an_absent_condition_is_visible(self):
         self.assertTrue(evaluate_condition(None, answers={}, context={}))
+
+
+class AnswerNormalizationTests(_CharacterizationBase):
+    def test_choice_values_must_belong_to_the_frozen_domain(self):
+        question = {
+            "key": "kind",
+            "type": "single_choice",
+            "options": [{"value": "solo", "label": "独唱"}],
+        }
+        self.assertEqual(normalize_answer(question, "solo"), "solo")
+        with self.assertRaises(ValidationError):
+            normalize_answer(question, "forged")
+
+    def test_multiple_choice_is_a_validated_list(self):
+        question = {
+            "key": "roles",
+            "type": "multiple_choice",
+            "options": [
+                {"value": "lead", "label": "主唱"},
+                {"value": "guest", "label": "嘉宾"},
+            ],
+            "validation": {"min_selections": 1, "max_selections": 2},
+        }
+        self.assertEqual(normalize_answer(question, ["lead", "guest"]), ["lead", "guest"])
+        with self.assertRaises(ValidationError):
+            normalize_answer(question, ["forged"])
+        with self.assertRaises(ValidationError):
+            normalize_answer(question, [])
+
+    def test_text_length_and_phone_domains_are_enforced(self):
+        question = {
+            "key": "phone",
+            "type": "text",
+            "validation": {"max_length": 11, "format": "phone_cn"},
+        }
+        self.assertEqual(normalize_answer(question, "13800138000"), "13800138000")
+        with self.assertRaises(ValidationError):
+            normalize_answer(question, "not-a-phone")
+        with self.assertRaises(ValidationError):
+            normalize_answer(question, "138001380001")
+
+
+class ResolvedConditionSourceTests(_CharacterizationBase):
+    def test_conditions_read_bound_and_file_answers_in_document_order(self):
+        plan = compile_questionnaire(
+            {
+                "schema_version": 1,
+                "key": "sources",
+                "pages": [
+                    {
+                        "key": "p",
+                        "title": "P",
+                        "sections": [
+                            {
+                                "key": "s",
+                                "title": "S",
+                                "questions": [
+                                    {
+                                        "key": "name",
+                                        "type": "text",
+                                        "label": "姓名",
+                                        "binding": "registration.name",
+                                    },
+                                    {
+                                        "key": "proof",
+                                        "type": "file",
+                                        "label": "证明",
+                                        "file": {
+                                            "purpose": "other",
+                                            "extensions": [".txt"],
+                                            "max_mb": 1,
+                                            "max_files": 1,
+                                        },
+                                    },
+                                    {
+                                        "key": "bound_dependent",
+                                        "type": "text",
+                                        "label": "绑定条件",
+                                        "visible_if": {
+                                            "source": "answer",
+                                            "key": "name",
+                                            "op": "eq",
+                                            "value": "陈",
+                                        },
+                                    },
+                                    {
+                                        "key": "file_dependent",
+                                        "type": "text",
+                                        "label": "文件条件",
+                                        "visible_if": {
+                                            "source": "answer",
+                                            "key": "proof",
+                                            "op": "not_empty",
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        resolved = resolve_questions(
+            plan,
+            answers={},
+            context={},
+            registration=SimpleNamespace(name="陈"),
+            files={"proof": object()},
+        )
+        self.assertTrue(resolved[2].visible)
+        self.assertTrue(resolved[3].visible)
 
 
 class ResolveQuestionTests(_CharacterizationBase):

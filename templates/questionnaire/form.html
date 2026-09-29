@@ -80,6 +80,7 @@
                 {% for option in q.options %}
                 <label class="flex items-center gap-2 mb-1 text-sm text-gray-700">
                     <input type="checkbox" name="{{ q.key }}" value="{{ option.value }}" data-answer="{{ q.key }}"
+                           {% if option.value in q.selected_values %}checked{% endif %}
                            {% if not q.editable %}disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
                     {{ option.label }}
                 </label>

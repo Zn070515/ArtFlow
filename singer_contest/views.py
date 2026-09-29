@@ -12,6 +12,7 @@ from files.models import SubmissionFile
 from files.services import (
     large_video_upload_allowed,
     participant_uploadable_check_ids,
+    questionnaire_material_authority_active,
     reconcile_singer_material_checks,
     store_submission_file,
     submit_participant_material_for_check,
@@ -57,12 +58,20 @@ def apply_view(request):
     )
     if not request.user.is_staff_or_admin:
         activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    if request.method != "POST":
+        activities = [
+            activity
+            for activity in activities
+            if not questionnaire_material_authority_active(activity)
+        ]
     # Only offer a performer-sourced video upload when the page shows a non-formal
     # activity. The public apply path filters to FORMAL activities, so participants
     # never see the field; staff previewing test data still can.
     video_upload_allowed = any(large_video_upload_allowed(activity) for activity in activities)
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
+        if questionnaire_material_authority_active(activity):
+            raise PermissionDenied("当前活动请使用已确认问卷报名入口。")
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.SUBMIT_REGISTRATION)
         uploads = [

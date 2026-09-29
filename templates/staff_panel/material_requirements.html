@@ -7,6 +7,14 @@
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:activity_list' %}" class="hover:underline">活动管理</a> / {{ activity.title }} / 材料检查项</p>
     <h1 class="text-2xl font-bold text-gray-900 mb-6">材料检查项 — {{ activity.title }}</h1>
 
+    {% if questionnaire_material_authority %}
+    <div class="bg-blue-50 border border-blue-200 text-blue-800 rounded-lg p-4 text-sm mb-6">
+        当前活动已冻结报名问卷，选手材料由问卷题目按题目 key 管理。选手范围的旧式材料检查项已关闭；请在
+        <a href="{% url 'staff:ruleset_questionnaire' questionnaire_version.pk %}" class="font-medium underline">问卷设计器</a>
+        中维护题目。
+    </div>
+    {% endif %}
+
     <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm mb-6">
         <h3 class="font-medium text-gray-900 mb-3">添加检查项</h3>
         <form method="post" class="flex flex-col gap-3">
@@ -14,9 +22,9 @@
             <div class="flex flex-wrap gap-3">
                 <label class="block">
                     <span class="block text-xs text-gray-500 mb-1">适用范围</span>
-                    <select name="applies_to" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                    <select name="applies_to" class="border border-gray-300 rounded px-2 py-1 text-sm"{% if questionnaire_material_authority %} data-questionnaire-locked="1"{% endif %}>
                         {% for value, label in applies_to_choices %}
-                        <option value="{{ value }}">{{ label }}</option>
+                        <option value="{{ value }}"{% if value == "singer" and questionnaire_material_authority %} disabled{% endif %}>{{ label }}</option>
                         {% endfor %}
                     </select>
                 </label>

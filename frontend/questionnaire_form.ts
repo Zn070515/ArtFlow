@@ -43,7 +43,16 @@
       const key = field.dataset.answer;
       if (!key) return;
       if (field instanceof HTMLInputElement && field.type === "checkbox") {
-        answers[key] = field.checked;
+        const question = field.closest<HTMLElement>("[data-question]");
+        if (question?.dataset.questionType === "multiple_choice") {
+          const selected = Array.isArray(answers[key])
+            ? (answers[key] as string[])
+            : [];
+          if (field.checked) selected.push(field.value);
+          answers[key] = selected;
+        } else {
+          answers[key] = field.checked;
+        }
       } else {
         answers[key] = field.value;
       }
