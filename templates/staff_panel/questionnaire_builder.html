@@ -66,36 +66,60 @@
                 <div class="flex-1">
                     <p class="text-sm font-medium text-gray-800">
                         {{ q.label }}
-                        <span class="ml-1 text-xs text-gray-400">{{ q.type }}</span>
-                        <span class="ml-2 font-mono text-xs text-gray-400">{{ q.key }}</span>
+                        <span class="ml-1 text-xs text-gray-600">题型：{{ q.type_label }}</span>
+                        <span class="ml-2 font-mono text-xs text-gray-600">标识：{{ q.key }}</span>
                         {% if q.required and q.due %}<span class="text-red-600">*</span>{% endif %}
                         {% if not q.visible %}<span class="text-xs text-gray-400">（当前隐藏）</span>{% endif %}
                     </p>
-                    {% if q.binding %}<p class="text-xs text-gray-400">绑定 {{ q.binding }}</p>{% endif %}
-                    {% if q.round %}<p class="text-xs text-gray-400">轮次 {{ q.round }}</p>{% endif %}
+                    {% if q.binding %}<p class="text-xs text-gray-600">绑定报名字段：{{ q.binding }}</p>{% endif %}
+                    {% if q.round %}<p class="text-xs text-gray-600">开放轮次：{{ q.round }}</p>{% endif %}
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
+                    <details class="relative">
+                        <summary class="staff-touch-target list-none cursor-pointer rounded border border-blue-300 px-2 text-xs text-blue-700 hover:bg-blue-50">编辑题目</summary>
+                        <form method="post" class="absolute right-0 z-10 mt-2 w-72 rounded border border-gray-200 bg-white p-3 text-left shadow-lg">
+                            {% csrf_token %}
+                            <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
+                            <input type="hidden" name="action" value="edit">
+                            <input type="hidden" name="key" value="{{ q.key }}">
+                            <label class="block text-xs font-medium text-gray-700">题目标题
+                                <input name="label" value="{{ q.label }}" required class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
+                            </label>
+                            <label class="mt-2 block text-xs font-medium text-gray-700">填写说明
+                                <textarea name="description" rows="2" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm">{{ q.description }}</textarea>
+                            </label>
+                            <label class="mt-2 block text-xs font-medium text-gray-700">开放轮次（可留空）
+                                <input name="round" value="{{ q.round }}" placeholder="例如 r1" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm">
+                            </label>
+                            {% if q.type != 'notice' %}
+                            <label class="mt-2 flex items-center gap-2 text-xs text-gray-700">
+                                <input type="checkbox" name="required" value="1"{% if q.required %} checked{% endif %} class="rounded border-gray-300"> 选手必须填写
+                            </label>
+                            {% endif %}
+                            <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target mt-3 rounded bg-brand px-3 text-xs text-white disabled:opacity-50">保存题目</button>
+                        </form>
+                    </details>
                     {% if q.type != 'notice' %}
                     <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="move_up">
                         <input type="hidden" name="key" value="{{ q.key }}">
-                        <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">上移</button>
+                        <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">上移</button>
                     </form>
                     <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="move_down">
                         <input type="hidden" name="key" value="{{ q.key }}">
-                        <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">下移</button>
+                        <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">下移</button>
                     </form>
                     <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="duplicate">
                         <input type="hidden" name="key" value="{{ q.key }}">
-                        <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">复制</button>
+                        <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">复制</button>
                     </form>
                     {% endif %}
-                    <form method="post">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
+                    <form method="post" onsubmit="return confirm('确认删除这道题吗？如果有其他题目依赖它，系统会拒绝删除。');">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="key" value="{{ q.key }}">
-                        <button type="submit"{% if read_only %} disabled{% endif %} class="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">删除</button>
+                        <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">删除</button>
                     </form>
                 </div>
             </div>
@@ -107,19 +131,19 @@
     </section>
     {% endfor %}
 
-    <section class="rounded border border-gray-200 bg-white">
-        <div class="border-b border-gray-100 px-4 py-2 text-sm text-gray-600">问卷 JSON</div>
+    <details class="rounded border border-gray-200 bg-white">
+        <summary class="cursor-pointer list-none border-b border-gray-100 px-4 py-3 text-sm font-medium text-gray-700">高级 JSON（通常不需要打开）</summary>
         <form method="post" class="p-4">
             {% csrf_token %}
             <input type="hidden" name="action" value="save_json">
             <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
             <textarea name="questionnaire_json" rows="24" spellcheck="false"{% if read_only %} readonly{% endif %}
                       class="w-full rounded border border-gray-300 px-3 py-2 font-mono text-xs">{{ questionnaire_json }}</textarea>
-            <p class="mt-2 text-xs text-gray-500">
-                保存即校验：schema 不通过、或问卷已被他人修改（内容哈希过期）时会拒绝写入。
+            <p class="mt-2 text-xs text-gray-600">
+                仅在需要配置选项、条件显示、文件限制等高级结构时使用。普通题目请使用上方“编辑题目”。保存仍会进行完整 schema 校验。
             </p>
-            <button type="submit"{% if read_only %} disabled{% endif %} class="mt-3 rounded bg-brand px-3 py-1.5 text-sm text-white hover:bg-brand-light disabled:opacity-50">保存 JSON</button>
+            <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target mt-3 rounded bg-brand px-3 text-sm text-white hover:bg-brand-light disabled:opacity-50">保存高级配置</button>
         </form>
-    </section>
+    </details>
 </div>
 {% endblock %}

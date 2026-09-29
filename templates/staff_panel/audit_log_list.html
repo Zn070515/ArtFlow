@@ -8,8 +8,8 @@
     <p class="text-sm text-gray-500 mb-6"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 操作日志</p>
 
     {% if logs %}
-    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <table class="w-full text-sm">
+    <div class="bg-white border border-gray-200 rounded-lg overflow-x-auto">
+        <table class="min-w-[720px] w-full text-sm">
             <thead><tr class="bg-gray-50 text-gray-600">
                 <th class="text-left px-4 py-2 font-medium">时间</th>
                 <th class="text-left px-4 py-2 font-medium">操作人</th>

@@ -351,6 +351,14 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "新建活动")
 
+    def test_activity_create_explains_that_every_activity_starts_as_draft(self):
+        login_admin(self.client, self.admin)
+
+        response = self.client.get(reverse("staff:activity_create"))
+
+        self.assertContains(response, "新活动将从草稿开始")
+        self.assertNotContains(response, 'name="phase"')
+
     def test_activity_create_always_defaults_to_draft(self):
         login_admin(self.client, self.admin)
         response = self.client.post(
@@ -3410,11 +3418,10 @@ class ActivityPhaseEditTests(TestCase):
             ).exists()
         )
 
-    def test_admin_create_cannot_create_archived(self):
-        # ARCHIVED is not a creatable phase; the form rejects it before the
-        # view can run, so the create must not succeed or persist a row.
+    def test_admin_create_ignores_forged_phase_and_stays_draft(self):
+        # The create form intentionally has no lifecycle control. Even a forged
+        # phase field must never let a new activity skip the draft state.
         login_admin(self.client, self.admin)
-        self.client.raise_request_exception = False
         response = self.client.post(
             reverse("staff:activity_create"),
             {
@@ -3424,8 +3431,11 @@ class ActivityPhaseEditTests(TestCase):
                 "is_test_mode": "on",
             },
         )
-        self.assertNotEqual(response.status_code, 302)
-        self.assertFalse(Activity.objects.filter(title="Fake Archived").exists())
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            Activity.objects.get(title="Fake Archived").phase,
+            Activity.Phase.DRAFT,
+        )
 
 
 class ActivityPhaseViewEnforcementTests(TestCase):
@@ -6456,6 +6466,51 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(response.status_code, 302)
         keys = [n["key"] for n in self._nodes()]
         self.assertLess(keys.index("assess_r2"), keys.index("assess_r1"))
+
+    def test_editor_does_not_move_a_node_before_its_dependency(self):
+        before = self._nodes()
+
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "move_up", "key": "rank1"},
+            follow=True,
+        )
+
+        self.assertEqual(self._nodes(), before)
+        self.assertNotContains(response, "forward-only")
+        self.assertContains(response, "依赖")
+
+    def test_editor_does_not_delete_a_node_referenced_by_downstream_nodes(self):
+        before = self._nodes()
+
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {"action": "delete", "key": "stage1"},
+            follow=True,
+        )
+
+        self.assertEqual(self._nodes(), before)
+        self.assertContains(response, "仍被")
+        self.assertNotContains(response, "forward-only")
+
+    def test_editor_renders_reference_fields_with_legal_source_choices(self):
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        stage_card = next(
+            card
+            for card in response.context["cards"]
+            if card["node"]["key"] == "stage1"
+        )
+        aggregate = next(field for field in stage_card["fields"] if field["kind"] == "aggregate")
+        self.assertIn("assess_r1", aggregate["components"][0]["options"])
+        self.assertIn("assess_r2", aggregate["components"][1]["options"])
+
+    def test_editor_uses_readable_badges_and_touch_targets(self):
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertContains(response, "ruleset-node-badge")
+        self.assertNotContains(response, "bg-brand border border-brand/20 text-brand")
+        self.assertContains(response, "staff-touch-target")
 
     def test_editor_delete_node_removes(self):
         before = len(self._nodes())

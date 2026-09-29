@@ -150,6 +150,28 @@ class BuilderViewTests(_BuilderBase):
         self.assertContains(response, "姓名")
         self.assertContains(response, "r1.accompaniment")
 
+    def test_the_designer_exposes_basic_question_editing_without_raw_json(self):
+        response = self.client.get(self.designer_url(self.version))
+
+        self.assertContains(response, "编辑题目")
+        self.assertContains(response, "高级 JSON（通常不需要打开）")
+
+    def test_editing_basic_question_fields_uses_the_structured_builder(self):
+        self._post(
+            action="edit",
+            key="r1.song",
+            label="第一轮演唱曲目",
+            description="填写正式演唱的歌曲名称。",
+            round="r1",
+        )
+        question = next(
+            q
+            for q in self._stored_questionnaire()["pages"][0]["sections"][0]["questions"]
+            if q["key"] == "r1.song"
+        )
+        self.assertEqual(question["label"], "第一轮演唱曲目")
+        self.assertEqual(question["description"], "填写正式演唱的歌曲名称。")
+
     def test_adding_a_question_writes_the_questionnaire_section(self):
         self._post(action="add", section_key="identity", question_type="textarea")
         keys = [

@@ -11,3 +11,21 @@
     @apply transition-colors;
   }
 }
+
+@layer components {
+  .ruleset-node-badge {
+    @apply inline-flex min-h-[24px] items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-800;
+  }
+
+  .staff-touch-target {
+    @apply inline-flex min-h-[24px] min-w-[24px] items-center justify-center px-2 py-1;
+  }
+}
+
+@layer utilities {
+  /* Gray 400 on white is too faint for staff-facing explanatory text. Keep the
+     existing utility name for compatibility, but use the readable gray-500 token. */
+  .text-gray-400 {
+    @apply text-gray-500;
+  }
+}

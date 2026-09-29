@@ -48,7 +48,7 @@
         <div class="bg-white border border-gray-200 rounded-lg mb-3 overflow-hidden">
             <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center justify-between">
                 <span class="font-mono text-sm font-medium">{{ card.node.key }}</span>
-                <span class="text-xs bg-brand border border-brand/20 text-brand px-2 py-0.5 rounded">{{ card.type }}</span>
+                <span class="ruleset-node-badge">{{ card.type }}</span>
             </div>
             <div class="px-4 py-3">
                 <input type="hidden" name="node_{{ card.index }}_key" value="{{ card.node.key }}">
@@ -57,14 +57,14 @@
                     {% for f in card.fields %}
                         {% if f.kind == "select" %}
                         <div>
-                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</label>
+                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
                             <select name="{{ f.name }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                                 {% for opt in f.options %}<option value="{{ opt }}" {% if f.value == opt %}selected{% endif %}>{{ opt }}</option>{% endfor %}
                             </select>
                         </div>
                         {% elif f.kind == "text" %}
                         <div>
-                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}</label>
+                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
                             <input name="{{ f.name }}" value="{{ f.value }}" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                         </div>
                         {% elif f.kind == "checkbox" %}
@@ -72,9 +72,17 @@
                             <input type="checkbox" name="{{ f.name }}" value="1" {% if f.value %}checked{% endif %} class="rounded border-gray-300">
                             <span class="text-xs text-gray-600">{{ f.label }}</span>
                         </div>
+                        {% elif f.kind == "multi_select" %}
+                        <div>
+                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}</label>
+                            <select name="{{ f.name }}" multiple size="3" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                                {% for opt in f.options %}<option value="{{ opt }}"{% if opt in f.value %} selected{% endif %}>{{ opt }}</option>{% endfor %}
+                            </select>
+                            <p class="mt-1 text-xs text-gray-500">按住 Ctrl（Windows）或 Command（macOS）可多选来源。</p>
+                        </div>
                         {% elif f.kind == "json" %}
                         <div>
-                            <label class="block text-xs text-gray-500 mb-0.5">{{ f.label }}（JSON）</label>
+                            <label class="block text-xs text-gray-700 mb-0.5">{{ f.label }}（高级配置）</label>
                             <textarea name="{{ f.name }}" rows="2" class="w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono">{{ f.value }}</textarea>
                         </div>
                         {% elif f.kind == "aggregate" %}
@@ -83,9 +91,10 @@
                             <input type="hidden" name="node_{{ f.index }}_aggregate_type" value="{{ f.aggregate_type }}">
                             {% for comp in f.components %}
                             <div class="flex items-center gap-2 mb-1">
-                                <input name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_source"
-                                       value="{{ comp.source }}" placeholder="来源节点"
-                                       class="border border-gray-300 rounded px-2 py-1 text-sm flex-1">
+                                <select name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_source"
+                                        class="border border-gray-300 rounded px-2 py-1 text-sm flex-1">
+                                    {% for option in comp.options %}<option value="{{ option }}" {% if comp.source == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+                                </select>
                                 <input name="node_{{ f.index }}_aggregate_component_{{ forloop.counter0 }}_weight"
                                        value="{{ comp.weight }}" placeholder="权重"
                                        class="w-20 border border-gray-300 rounded px-2 py-1 text-sm text-right">
@@ -152,28 +161,29 @@
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">节点操作与新增</div>
         <div class="px-4 py-3 space-y-2">
             {% for card in cards %}
-            <div class="flex items-center gap-3 text-sm">
+            <div class="flex flex-wrap items-center gap-3 text-sm">
                 <span class="font-mono text-gray-700 w-28">{{ card.node.key }}</span>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
                     {% csrf_token %}<input type="hidden" name="action" value="move_up"><input type="hidden" name="key" value="{{ card.node.key }}">
-                    <button class="text-xs text-gray-600 border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">上移</button>
+                    <button class="staff-touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_up %}{{ card.move_up_reason }}{% endif %}"{% if not card.can_move_up %} disabled{% endif %}>上移</button>
                 </form>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
                     {% csrf_token %}<input type="hidden" name="action" value="move_down"><input type="hidden" name="key" value="{{ card.node.key }}">
-                    <button class="text-xs text-gray-600 border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">下移</button>
+                    <button class="staff-touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_down %}{{ card.move_down_reason }}{% endif %}"{% if not card.can_move_down %} disabled{% endif %}>下移</button>
                 </form>
-                <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" onsubmit="return confirm('确认删除节点 {{ card.node.key }}？');">
+                <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" onsubmit="return confirm('确认删除这个节点吗？');">
                     {% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{ card.node.key }}">
-                    <button class="text-xs text-red-600 border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">删除</button>
+                    <button class="staff-touch-target text-xs text-red-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_delete %}{{ card.delete_reason }}{% endif %}"{% if not card.can_delete %} disabled{% endif %}>删除</button>
                 </form>
+                {% if not card.can_delete %}<span class="text-xs text-amber-700">{{ card.delete_reason }}</span>{% endif %}
             </div>
             {% endfor %}
             <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" class="flex items-center gap-2 pt-2">
                 {% csrf_token %}<input type="hidden" name="action" value="add">
                 <select name="new_type" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
-                    {% for t in node_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                    {% for option in node_type_options %}<option value="{{ option.value }}"{% if not option.enabled %} disabled title="{{ option.reason }}"{% endif %}>{{ option.label }}{% if not option.enabled %}（暂不可用）{% endif %}</option>{% endfor %}
                 </select>
-                <button class="border border-gray-300 px-3 py-1.5 rounded text-sm">新增节点</button>
+                <button class="staff-touch-target border border-gray-300 rounded text-sm">新增节点</button>
             </form>
         </div>
     </div>

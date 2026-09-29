@@ -49,11 +49,20 @@ class ActivityForm(forms.Form):
     phase = forms.ChoiceField(choices=Activity.Phase.choices)
     description = forms.CharField(required=False)
 
-    def __init__(self, *args, include_lifecycle=False, phase_choices=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        include_lifecycle=False,
+        include_phase=True,
+        phase_choices=None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
+        if not include_phase:
+            self.fields.pop("phase", None)
         if include_lifecycle:
             self.fields["is_test_mode"] = forms.BooleanField(required=False)
-        if phase_choices is not None:
+        if phase_choices is not None and "phase" in self.fields:
             cast(forms.ChoiceField, self.fields["phase"]).choices = phase_choices
 
 

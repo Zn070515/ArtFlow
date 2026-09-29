@@ -112,7 +112,8 @@
             </div>
         </div>
         {% if conversion.valid_ballots %}
-        <table class="w-full text-sm mt-4">
+        <div class="overflow-x-auto">
+        <table class="min-w-[640px] w-full text-sm mt-4">
             <thead><tr class="bg-gray-50 text-gray-600">
                 <th class="text-left px-4 py-2 font-medium">选手</th>
                 <th class="text-right px-4 py-2 font-medium">有效票数</th>
@@ -128,6 +129,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
         <p class="text-xs text-gray-500 mt-3">多选投票时各选手支持率之和可以超过 100%；这是正确结果。</p>
         {% else %}
         <p class="text-xs text-gray-500 mt-3">尚无有效 ballot，换算是 0/0，不产生分数（赛段保持待定）。</p>
@@ -136,8 +138,8 @@
     {% endif %}
 
     {% if options %}
-    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <table class="w-full text-sm">
+    <div class="bg-white border border-gray-200 rounded-lg overflow-x-auto">
+        <table class="min-w-[640px] w-full text-sm">
             <thead><tr class="bg-gray-50 text-gray-600">
                 <th class="text-left px-4 py-2 font-medium">选手</th>
                 <th class="text-left px-4 py-2 font-medium">曲目</th>
