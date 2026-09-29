@@ -116,7 +116,7 @@
                         <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target rounded border border-gray-300 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">复制</button>
                     </form>
                     {% endif %}
-                    <form method="post" onsubmit="return confirm('确认删除题目 {{ q.label }}？如果有其他题目依赖它，系统会拒绝删除。');">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
+                    <form method="post" onsubmit="return confirm('确认删除这道题吗？如果有其他题目依赖它，系统会拒绝删除。');">{% csrf_token %}<input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
                         <input type="hidden" name="action" value="delete">
                         <input type="hidden" name="key" value="{{ q.key }}">
                         <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target rounded border border-red-300 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50">删除</button>
