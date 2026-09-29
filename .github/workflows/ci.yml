@@ -15,7 +15,11 @@ jobs:
   sqlite:
     name: Linux SQLite quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Coverage makes the Linux suite materially slower than the Windows
+    # application-only jobs. Keep the quality gate within the same bounded
+    # window as the supported application gates, with room for the expanded
+    # questionnaire surface.
+    timeout-minutes: 30
     env:
       APP_ENV: development
       DEBUG: "False"
