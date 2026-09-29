@@ -1680,9 +1680,7 @@ def round_ranking(request, pk):
     summary_rows = list(summaries)
     singers = prime_questionnaire_answers(summary.singer for summary in summary_rows)
     for singer in singers:
-        singer.song_label = questionnaire_song_for_round(
-            singer, contest_round, default="未填写"
-        )
+        singer.song_label = questionnaire_song_for_round(singer, contest_round, default="未填写")
     missing_cells = missing_score_cells(contest_round)
     return render(
         request,
@@ -2305,11 +2303,13 @@ def award_create(request):
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = _with_generic_song_labels(scope_lifecycle(
-        SingerRegistration.objects.select_related("activity").filter(
-            pre_status=SingerRegistration.PreStatus.APPROVED
+    singers = _with_generic_song_labels(
+        scope_lifecycle(
+            SingerRegistration.objects.select_related("activity").filter(
+                pre_status=SingerRegistration.PreStatus.APPROVED
+            )
         )
-    ))
+    )
     return render(
         request,
         "staff_panel/award_form.html",
@@ -2347,11 +2347,13 @@ def vote_session_create(request):
                     "activities": Activity.objects.filter(
                         activity_type=Activity.Type.SINGER_CONTEST
                     ),
-                    "singers": _with_generic_song_labels(scope_lifecycle(
-                        SingerRegistration.objects.select_related("activity").filter(
-                            pre_status=SingerRegistration.PreStatus.APPROVED
+                    "singers": _with_generic_song_labels(
+                        scope_lifecycle(
+                            SingerRegistration.objects.select_related("activity").filter(
+                                pre_status=SingerRegistration.PreStatus.APPROVED
+                            )
                         )
-                    )),
+                    ),
                     "selection_types": _choices(VoteSession.SelectionType),
                     "purposes": _choices(VoteSession.Purpose),
                 },
@@ -2398,11 +2400,13 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = _with_generic_song_labels(scope_lifecycle(
-        SingerRegistration.objects.select_related("activity").filter(
-            pre_status=SingerRegistration.PreStatus.APPROVED
+    singers = _with_generic_song_labels(
+        scope_lifecycle(
+            SingerRegistration.objects.select_related("activity").filter(
+                pre_status=SingerRegistration.PreStatus.APPROVED
+            )
         )
-    ))
+    )
     return render(
         request,
         "staff_panel/vote_session_form.html",
@@ -2803,11 +2807,13 @@ def incident_create(request):
                 {
                     "error": _form_error(form),
                     "activities": Activity.objects.all(),
-                    "singers": _with_generic_song_labels(scope_lifecycle(
-                        SingerRegistration.objects.select_related("activity").filter(
-                            pre_status=SingerRegistration.PreStatus.APPROVED
+                    "singers": _with_generic_song_labels(
+                        scope_lifecycle(
+                            SingerRegistration.objects.select_related("activity").filter(
+                                pre_status=SingerRegistration.PreStatus.APPROVED
+                            )
                         )
-                    )),
+                    ),
                     "event_types": _choices(IncidentRecord.EventType),
                 },
             )
@@ -2840,11 +2846,13 @@ def incident_create(request):
         )
         return redirect("staff:incident_list")
     activities = Activity.objects.all()
-    singers = _with_generic_song_labels(scope_lifecycle(
-        SingerRegistration.objects.select_related("activity").filter(
-            pre_status=SingerRegistration.PreStatus.APPROVED
+    singers = _with_generic_song_labels(
+        scope_lifecycle(
+            SingerRegistration.objects.select_related("activity").filter(
+                pre_status=SingerRegistration.PreStatus.APPROVED
+            )
         )
-    ))
+    )
     return render(
         request,
         "staff_panel/incident_form.html",

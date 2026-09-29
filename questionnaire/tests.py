@@ -121,9 +121,7 @@ class QuestionnaireParseTests(SimpleTestCase):
             {"format": "phone_cn", "max_length": 11},
         )
         with self.assertRaises(ValidationError):
-            parse_questionnaire(
-                _questionnaire([_question("phone", validation={"unknown": True})])
-            )
+            parse_questionnaire(_questionnaire([_question("phone", validation={"unknown": True})]))
 
 
 class QuestionnaireBindingTests(SimpleTestCase):

@@ -92,6 +92,11 @@ def _stale_or_missing_schema_hash(payload: dict, plan) -> JsonResponse | None:
     return None
 
 
+def _invalid_questionnaire_response() -> JsonResponse:
+    """Return a bounded client error without reflecting exception details."""
+    return JsonResponse({"error": "问卷内容未通过校验，请检查后重试。"}, status=409)
+
+
 def _frozen_plan(activity: Activity):
     version = current_frozen_version(activity)
     if version is None:
@@ -351,11 +356,8 @@ def autosave_view(request: HttpRequest, activity_pk: int):
             answers=answers,
             schema_hash=str(payload.get("schema_hash") or ""),
         )
-    except ValidationError as exc:
-        # A stale form and a submitted one are both "this page is out of date", which is
-        # what the client acts on; the message says which.
-        messages = getattr(exc, "messages", None) or [str(exc)]
-        return JsonResponse({"error": "；".join(messages)}, status=409)
+    except ValidationError:
+        return _invalid_questionnaire_response()
     files = current_answer_files(registration)
     return JsonResponse(
         {
@@ -452,9 +454,8 @@ def submit_view(request: HttpRequest, activity_pk: int):
             due_rounds=_due_rounds(version),
             expected_schema_hash=expected,
         )
-    except ValidationError as exc:
-        messages = getattr(exc, "messages", None) or [str(exc)]
-        return JsonResponse({"error": "；".join(messages)}, status=409)
+    except ValidationError:
+        return _invalid_questionnaire_response()
     return JsonResponse(
         {
             "status": response.status,
@@ -494,9 +495,8 @@ def upload_view(request: HttpRequest, activity_pk: int, question_key: str):
             actor=request.user,
             expected_schema_hash=str(request.POST.get("schema_hash") or ""),
         )
-    except ValidationError as exc:
-        messages = getattr(exc, "messages", None) or [str(exc)]
-        return JsonResponse({"error": "；".join(messages)}, status=409)
+    except ValidationError:
+        return _invalid_questionnaire_response()
     return JsonResponse(
         {
             "question_key": stored.question_key,

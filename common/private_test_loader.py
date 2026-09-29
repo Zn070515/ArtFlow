@@ -125,9 +125,7 @@ def _private_fixture_is_complete(activity: Activity, fixture: PrivateTestFixture
         == len(fixture.score_rows)
         and Ticket.objects.filter(activity=activity, is_test_data=True).count()
         == len(fixture.ticket_rows)
-        and VoteBallot.objects.filter(
-            vote_session__activity=activity, is_test_data=True
-        ).count()
+        and VoteBallot.objects.filter(vote_session__activity=activity, is_test_data=True).count()
         == len(fixture.p1_votes) + len(fixture.p2_votes)
         and stage_results.filter(status=StageResult.Status.CONFIRMED).count() == 3
         and set(stage_results.values_list("stage_key", flat=True)) == {"stage1", "stage2", "stage3"}
@@ -374,8 +372,7 @@ def _create_rounds_and_rubrics(
             if rubric is None:
                 raise PrivateTestLoadError(f"existing round configuration mismatch: {key}")
             expected_criteria = [
-                (item["name"], Decimal(item["max_score"]))
-                for item in criteria_by_round[key]
+                (item["name"], Decimal(item["max_score"])) for item in criteria_by_round[key]
             ]
             actual_criteria = list(
                 rubric.criteria.order_by("sequence", "pk").values_list("name", "max_score")

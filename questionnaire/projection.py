@@ -58,13 +58,10 @@ def prime_questionnaire_answers(registrations: Iterable) -> list:
         row.activity_id for row in rows if getattr(row, "activity_id", None)
     )
     version_ids = [version.pk for version in versions.values()]
-    responses = (
-        QuestionnaireResponse.objects.filter(
-            singer_registration_id__in=[row.pk for row in rows if row.pk],
-            ruleset_version_id__in=version_ids,
-        )
-        .order_by("-pk")
-    )
+    responses = QuestionnaireResponse.objects.filter(
+        singer_registration_id__in=[row.pk for row in rows if row.pk],
+        ruleset_version_id__in=version_ids,
+    ).order_by("-pk")
     response_by_registration: dict[int, QuestionnaireResponse] = {}
     for response in responses:
         response_by_registration.setdefault(response.singer_registration_id, response)
@@ -123,9 +120,8 @@ def questionnaire_song_for_round(registration, contest_round, *, default="") -> 
     value = questionnaire_value(registration, f"{round_key}.song", default=None)
     if isinstance(value, str) and value.strip():
         return value.strip()
-    if (
-        getattr(registration, "song_name", "")
-        and not getattr(registration, "_artflow_questionnaire_active", False)
+    if getattr(registration, "song_name", "") and not getattr(
+        registration, "_artflow_questionnaire_active", False
     ):
         return registration.song_name
     return str(default or "")

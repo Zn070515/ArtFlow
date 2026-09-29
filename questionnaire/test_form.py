@@ -340,6 +340,13 @@ class QuestionnaireAutosaveTests(_FormBase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_autosave_does_not_echo_validation_exception_details(self):
+        response = self._post({"answers": {"name": []}})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"], "问卷内容未通过校验，请检查后重试。")
+        self.assertNotIn("必须是文本", response.json()["error"])
+
     def test_a_participant_cannot_autosave_into_a_closed_activity(self):
         with authority_write(ACTIVITY_STATE):
             self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
@@ -402,9 +409,7 @@ class ParticipantBoundaryTests(_FormBase):
                     url, data=json.dumps(payload), content_type="application/json"
                 )
                 self.assertEqual(response.status_code, 403)
-        self.assertEqual(
-            SingerRegistration.objects.filter(activity=self.activity).count(), 3
-        )
+        self.assertEqual(SingerRegistration.objects.filter(activity=self.activity).count(), 3)
 
     def test_a_participant_cannot_open_a_test_activity(self):
         """The legacy path filtered its lookup to FORMAL activities, so guessing a primary
@@ -469,7 +474,7 @@ class QuestionnaireSubmitTests(_FormBase):
             {"answers": {"r3.song": "歌"}, "schema_hash": schema_hash(QUESTIONNAIRE)}
         )
         self.assertEqual(response.status_code, 409)
-        self.assertIn("name", response.json()["error"])
+        self.assertEqual(response.json()["error"], "问卷内容未通过校验，请检查后重试。")
 
     def test_submit_refuses_a_stale_schema_hash(self):
         self.assertEqual(self._submit({**self._filled(), "schema_hash": "0" * 64}).status_code, 409)
