@@ -262,9 +262,7 @@ def activity_list(request):
 def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
-        form = ActivityForm(
-            request.POST, include_lifecycle=True, include_phase=False
-        )
+        form = ActivityForm(request.POST, include_lifecycle=True, include_phase=False)
         if not form.is_valid():
             return render(
                 request,
@@ -1246,9 +1244,11 @@ def round_create(request):
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     selected_activity_id = request.GET.get("activity_id") or ""
-    rubrics = ScoringRubric.objects.select_related("activity").filter(
-        activity_id=selected_activity_id
-    ) if selected_activity_id.isdigit() else ScoringRubric.objects.none()
+    rubrics = (
+        ScoringRubric.objects.select_related("activity").filter(activity_id=selected_activity_id)
+        if selected_activity_id.isdigit()
+        else ScoringRubric.objects.none()
+    )
     form = ContestRoundForm(rubrics=rubrics)
     return render(
         request,
@@ -2910,8 +2910,7 @@ def incident_create(request):
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
-                                activity=activity,
-                                pre_status=SingerRegistration.PreStatus.APPROVED
+                                activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
                             )
                         )
                     ),
@@ -2958,11 +2957,7 @@ def incident_create(request):
         singer_queryset = singer_queryset.filter(activity_id=selected_activity_id)
     else:
         singer_queryset = singer_queryset.none()
-    singers = _with_generic_song_labels(
-        scope_lifecycle(
-            singer_queryset
-        )
-    )
+    singers = _with_generic_song_labels(scope_lifecycle(singer_queryset))
     return render(
         request,
         "staff_panel/incident_form.html",
@@ -3478,8 +3473,7 @@ def _display_options(options, labels=None, nodes=None):
     labels = labels or {}
     node_labels = {
         node.get("key"): (
-            f"{node.get('key')}（"
-            f"{_NODE_TYPE_LABELS.get(node.get('type'), node.get('type'))}）"
+            f"{node.get('key')}（{_NODE_TYPE_LABELS.get(node.get('type'), node.get('type'))}）"
         )
         for node in (nodes or [])
         if node.get("key")
@@ -3572,15 +3566,15 @@ def _node_field_entries(node, index, nodes, *, binding_options=None):
                 }
             )
         elif isinstance(value, bool):
-                fields.append(
-                    {
-                        "kind": "checkbox",
-                        "label": label,
-                        "help": help_text.get(field, ""),
-                        "name": base,
-                        "value": value,
-                    }
-                )
+            fields.append(
+                {
+                    "kind": "checkbox",
+                    "label": label,
+                    "help": help_text.get(field, ""),
+                    "name": base,
+                    "value": value,
+                }
+            )
         elif field in binding_options:
             options = list(binding_options[field])
             if value and value not in options:
@@ -3613,9 +3607,7 @@ def _node_field_entries(node, index, nodes, *, binding_options=None):
                     ),
                 }
             )
-        elif field in reference_fields and (
-            field != "by" or field in (spec.expects or {})
-        ):
+        elif field in reference_fields and (field != "by" or field in (spec.expects or {})):
             fields.append(
                 {
                     "kind": "select",
@@ -3820,23 +3812,12 @@ def ruleset_edit(request, pk):
         "vote_source": list((ruleset.vote_keys or {}).keys()),
     }
     cards = [
-        _build_card(node, i, nodes, binding_options=binding_options)
-        for i, node in enumerate(nodes)
+        _build_card(node, i, nodes, binding_options=binding_options) for i, node in enumerate(nodes)
     ]
-    current_round_keys = {
-        str(node.get("round"))
-        for node in nodes
-        if node.get("round")
-    }
-    current_vote_keys = {
-        str(node.get("vote_source"))
-        for node in nodes
-        if node.get("vote_source")
-    }
+    current_round_keys = {str(node.get("round")) for node in nodes if node.get("round")}
+    current_vote_keys = {str(node.get("vote_source")) for node in nodes if node.get("vote_source")}
     current_group_keys = {
-        str(node.get("by"))
-        for node in nodes
-        if node.get("type") == "PARTITION" and node.get("by")
+        str(node.get("by")) for node in nodes if node.get("type") == "PARTITION" and node.get("by")
     }
     round_candidates = list(
         ContestRound.objects.filter(activity=ruleset.activity).order_by("sequence", "pk")

@@ -349,9 +349,7 @@ class ScoringRubricProvisionForm(forms.Form):
                 self.add_error(f"criterion_name_{index}", "请填写评分项名称。")
             if max_score in (None, ""):
                 self.add_error(f"criterion_max_score_{index}", "请填写满分。")
-            criteria.append(
-                {"name": name, "max_score": max_score, "description": description}
-            )
+            criteria.append({"name": name, "max_score": max_score, "description": description})
         if not criteria and not self.errors:
             raise forms.ValidationError("至少需要一个评分项。")
         cleaned["criteria"] = criteria

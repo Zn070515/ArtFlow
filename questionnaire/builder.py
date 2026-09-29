@@ -240,11 +240,7 @@ def move_question(questionnaire: dict, *, key: str, delta: int) -> dict:
     if delta == 0:
         return parse_questionnaire(document)
     questions = section["questions"]
-    targets = (
-        range(index - 1, -1, -1)
-        if delta < 0
-        else range(index + 1, len(questions))
-    )
+    targets = range(index - 1, -1, -1) if delta < 0 else range(index + 1, len(questions))
     for target in targets:
         candidate = _clone(document)
         candidate_section, _candidate_question, candidate_index = _find(candidate, key)

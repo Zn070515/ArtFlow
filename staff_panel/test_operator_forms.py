@@ -18,9 +18,7 @@ class StructuredOperatorFormTests(SimpleTestCase):
         ]
 
     def test_running_order_uses_visible_choices_and_returns_ordered_ids(self):
-        form = RoundRunningOrderForm(
-            {"singer_ids": ["3", "1", "2"]}, singers=self.singers
-        )
+        form = RoundRunningOrderForm({"singer_ids": ["3", "1", "2"]}, singers=self.singers)
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["singer_ids"], ["3", "1", "2"])
         self.assertNotIn("ID", form.fields["singer_ids"].help_text or "")

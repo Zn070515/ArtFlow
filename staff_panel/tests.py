@@ -6602,9 +6602,7 @@ class RulesetEditorTests(TestCase):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
 
         stage_card = next(
-            card
-            for card in response.context["cards"]
-            if card["node"]["key"] == "stage1"
+            card for card in response.context["cards"] if card["node"]["key"] == "stage1"
         )
         aggregate = next(field for field in stage_card["fields"] if field["kind"] == "aggregate")
         self.assertIn("assess_r1", aggregate["components"][0]["options"])
