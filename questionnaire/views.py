@@ -249,6 +249,11 @@ def _completion(version, registration, *, answers, due_rounds, files) -> dict:
 @login_required
 def form_view(request: HttpRequest, activity_pk: int):
     activity = _activity_or_404(request, activity_pk)
+    version = current_frozen_version(activity)
+    if version is not None and not _has_questionnaire(version):
+        # A stale QR/bookmark for the questionnaire must land on the activity's real
+        # legacy entry, not expose an internal "no questionnaire" error page.
+        return redirect(f"{reverse('singer_contest:apply')}?activity={activity.pk}")
     version, plan = _frozen_plan(activity)
     staff = _is_staff(request.user)
     if staff:

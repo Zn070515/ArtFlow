@@ -110,6 +110,14 @@ class RegisterEntryTests(_EntryBase):
         response = self.client.get(reverse("singer_contest:apply"), {"activity": activity.pk})
         self.assertRedirects(response, reverse("questionnaire:form", args=[activity.pk]))
 
+    def test_a_direct_questionnaire_link_for_a_legacy_activity_is_recovered(self):
+        activity = self.activity(with_questionnaire=False)
+        response = self.client.get(reverse("questionnaire:form", args=[activity.pk]))
+        self.assertRedirects(
+            response,
+            f"{reverse('singer_contest:apply')}?activity={activity.pk}",
+        )
+
     def test_the_chooser_lists_open_activities(self):
         activity = self.activity(with_questionnaire=True)
         response = self.client.get(reverse("register:choose"))
