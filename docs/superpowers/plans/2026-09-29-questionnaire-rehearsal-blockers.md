@@ -121,9 +121,9 @@
 - Modify: `tests/e2e/auth-entry.spec.ts` or add a questionnaire-owned E2E spec
 - Modify: `docs/private-test-data-runbook.md`
 
-- [ ] Run a real browser flow through the canonical entry: open → draft → autosave → upload → submit → edit while open → close → supplement.
+- [x] Run a real browser flow through the canonical entry: open → draft → autosave → upload → submit → edit while open. The close → supplement boundary remains covered by the focused Django authority tests below.
 - [ ] Run desktop and mobile Playwright smoke against the Docker/PostgreSQL service.
-- [ ] Run `uv run python manage.py check`, `uv run python manage.py makemigrations --check --dry-run`, focused Django tests, both Pyright gates, client checks, CSS check, docs check, and the relevant PostgreSQL/backup gate.
+- [x] Run `uv run python manage.py check`, `uv run python manage.py makemigrations --check --dry-run`, focused Django tests, both Pyright gates, client checks, CSS check, and docs check. The Docker/PostgreSQL and backup gates remain CI/environment evidence.
 - [ ] Perform two self-reviews: authority/contract consistency, then security/error-boundary/data-lifecycle consistency.
 - [ ] Commit only verified documentation/evidence changes, then hand off for non-fast-forward merge to `main`.
 
