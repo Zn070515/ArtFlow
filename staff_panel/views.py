@@ -24,7 +24,6 @@ from common.business_rules import (
     ensure_same_activity,
 )
 from common.lifecycle import (
-    runtime_approved_singers,
     runtime_is_test,
     scope_lifecycle,
     scope_runtime,
@@ -142,6 +141,7 @@ from singer_contest.services import (
     build_result_closure,
     confirm_stage_result,
     create_scoring_rubric,
+    current_round_roster,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
     latest_stage_result_queryset,
@@ -1283,10 +1283,12 @@ def round_prepare(request, pk):
 @staff_required
 def round_running_order(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    singers = list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    singers = current_round_roster(contest_round)
     singer_by_id = {str(singer.pk): singer for singer in singers}
     entries = list(contest_round.entries.select_related("singer").order_by("running_order", "pk"))
-    initial_ids = [str(entry.singer_id) for entry in entries]
+    initial_ids = [str(entry.singer_id) for entry in entries] or [
+        str(singer.pk) for singer in singers
+    ]
     display_ids = initial_ids
     if request.method == "POST":
         form = RoundRunningOrderForm(request.POST, singers=singers)
@@ -1342,7 +1344,7 @@ def round_running_order(request, pk):
 @staff_required
 def round_groups(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    singers = list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    singers = current_round_roster(contest_round)
     groups = list(
         PerformanceGroup.objects.filter(round=contest_round)
         .prefetch_related("performances__singer")

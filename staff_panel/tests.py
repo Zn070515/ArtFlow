@@ -257,6 +257,75 @@ class ContestRoundCreateHTTPTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "轮次序号已存在")
 
+    def test_running_order_get_shows_current_round_roster_before_prepare(self):
+        singer_user = _create_provisioned_user(username="round-singer", password="pass")
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Draft singer",
+            student_id="20269901",
+            college="Info",
+            class_name="CS1",
+            phone="13800009901",
+            song_name="Draft song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            order_policy=ContestRound.OrderPolicy.MANUAL,
+        )
+
+        response = self.client.get(reverse("staff:round_running_order", args=[contest_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["singer_id"] for row in response.context["order_rows"]], [str(singer.pk)]
+        )
+
+    def test_groups_get_uses_existing_round_entries_as_current_roster(self):
+        singer_user = _create_provisioned_user(username="round-singer-2", password="pass")
+        current = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Current singer",
+            student_id="20269902",
+            college="Info",
+            class_name="CS1",
+            phone="13800009902",
+            song_name="Current song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        eliminated_user = _create_provisioned_user(username="round-singer-3", password="pass")
+        eliminated = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=eliminated_user,
+            name="Eliminated singer",
+            student_id="20269903",
+            college="Info",
+            class_name="CS1",
+            phone="13800009903",
+            song_name="Old song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        RoundEntry.objects.create(round=contest_round, singer=current, running_order=1)
+
+        response = self.client.get(reverse("staff:round_groups", args=[contest_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        choices = {
+            value for value, _label in response.context["form"].fields["group_singer_ids_1"].choices
+        }
+        self.assertIn(str(current.pk), choices)
+        self.assertNotIn(str(eliminated.pk), choices)
+
 
 class StaffPanelSmokeTests(TestCase):
     def setUp(self):

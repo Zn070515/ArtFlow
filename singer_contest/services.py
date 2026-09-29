@@ -242,14 +242,40 @@ def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistratio
     )
     if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
         raise ValidationError("上游赛段未核定，禁止准备该轮次。")
-    singers = list(
-        SingerRegistration.objects.filter(
-            round_entries__round=contest_round, activity=contest_round.activity
-        ).order_by("pk")
+    advancing_ids = list(
+        StageDecision.objects.filter(
+            stage_result=upstream,
+            outcome_code__in=_ADVANCING_OUTCOME_CODES,
+        )
+        .order_by("rank", "pk")
+        .values_list("singer_id", flat=True)
     )
-    if not singers:
-        raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
-    return singers
+    if not advancing_ids:
+        raise ValidationError("对应赛段尚未生成可晋级选手名单。")
+    singers_by_id = SingerRegistration.objects.filter(
+        activity=contest_round.activity,
+        pk__in=advancing_ids,
+    )
+    singers = {singer.pk: singer for singer in singers_by_id}
+    return [singers[singer_id] for singer_id in advancing_ids if singer_id in singers]
+
+
+def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration]:
+    """Return the authoritative singer roster currently usable by operator controls.
+
+    Prepared snapshots and stage materialization are authoritative once round entries
+    exist. Before preparation, the same source resolver used by ``prepare_round``
+    supplies the candidate roster, which keeps a draft round configurable without
+    broadening later rounds back to every approved singer.
+    """
+    entries = list(
+        RoundEntry.objects.filter(round=contest_round)
+        .select_related("singer")
+        .order_by("running_order", "pk")
+    )
+    if entries:
+        return [entry.singer for entry in entries]
+    return _round_source_singers(contest_round)
 
 
 def _order_singers_for_round(
