@@ -3364,6 +3364,7 @@ def _node_field_entries(node, index, nodes):
         "subtrahend",
         "from",
         "into",
+        "by",
         "ranking_source",
         "tie_break_source",
     }
@@ -3422,7 +3423,9 @@ def _node_field_entries(node, index, nodes):
                     "options": allowed[field],
                 }
             )
-        elif field in reference_fields:
+        elif field in reference_fields and (
+            field != "by" or field in (spec.expects or {})
+        ):
             fields.append(
                 {
                     "kind": "select",
