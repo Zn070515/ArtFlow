@@ -6505,6 +6505,35 @@ class RulesetEditorTests(TestCase):
         self.assertIn("assess_r1", aggregate["components"][0]["options"])
         self.assertIn("assess_r2", aggregate["components"][1]["options"])
 
+    def test_editor_distinguishes_group_field_from_group_map_reference(self):
+        from staff_panel.views import _node_field_entries
+
+        nodes = [
+            {"key": "entry", "type": "ROSTER"},
+            {"key": "groups", "type": "PARTITION", "source": "entry", "by": "学院"},
+            {
+                "key": "selected",
+                "type": "SELECT",
+                "source": "groups",
+                "count": 1,
+                "by": "groups",
+            },
+        ]
+
+        partition_by = next(
+            field
+            for field in _node_field_entries(nodes[1], 1, nodes)
+            if field["name"] == "node_1_by"
+        )
+        select_by = next(
+            field
+            for field in _node_field_entries(nodes[2], 2, nodes)
+            if field["name"] == "node_2_by"
+        )
+        self.assertEqual(partition_by["kind"], "text")
+        self.assertEqual(select_by["kind"], "select")
+        self.assertEqual(select_by["options"], ["groups"])
+
     def test_editor_uses_readable_badges_and_touch_targets(self):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
 
