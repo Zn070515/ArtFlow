@@ -88,7 +88,11 @@ FILE_PURPOSES = frozenset(
 # The server's own ceiling. A question may ask for less, never more.
 MAX_FILE_MB_HARD_LIMIT = 500
 
-AUDIENCES = frozenset({"participant", "staff"})
+VALIDATION_FORMATS = frozenset({"phone_cn", "email"})
+
+# V1 has one answer authority. Staff-only content belongs in the staff designer/review
+# surface until a separate viewer-audience contract exists for rendering and writes.
+AUDIENCES = frozenset({"participant"})
 # When an answer becomes due. ``upfront`` is the registration pass; ``before_round`` gates
 # it on a round existing/starting (round keys are resolved at freeze, §P2).
 DUE_MODES = frozenset({"upfront", "before_round"})
@@ -161,8 +165,8 @@ def _parse_file_config(question: dict, where: str) -> dict:
     )
     max_files = config.get("max_files", 1)
     _require(
-        isinstance(max_files, int) and not isinstance(max_files, bool) and max_files > 0,
-        f"{where}：file.max_files 必须是正整数。",
+        max_files == 1,
+        f"{where}：V1 文件题只支持 max_files=1。",
     )
     return {
         "purpose": purpose,
@@ -207,6 +211,58 @@ def _parse_due(question: dict, where: str, key: str) -> dict:
     return normalized
 
 
+def _parse_validation(question: dict, qtype: str, where: str, key: str) -> dict:
+    raw = question.get("validation")
+    if raw is None:
+        return {}
+    validation = _as_dict(raw, f"{where}：题目 {key!r} 的 validation 必须是对象。")
+    allowed = {
+        "text": {"min_length", "max_length", "format"},
+        "textarea": {"min_length", "max_length", "format"},
+        "number": {"min", "max"},
+        "multiple_choice": {"min_selections", "max_selections"},
+    }.get(qtype, set())
+    unknown = set(validation) - allowed
+    _require(not unknown, f"{where}：题目 {key!r} 的 validation 字段不支持：{sorted(unknown)}。")
+    normalized: dict[str, Any] = {}
+    for field in ("min_length", "max_length", "min_selections", "max_selections"):
+        if field not in validation:
+            continue
+        value = validation[field]
+        _require(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0,
+            f"{where}：题目 {key!r} 的 {field} 必须是非负整数。",
+        )
+        normalized[field] = value
+    for field in ("min", "max"):
+        if field not in validation:
+            continue
+        value = validation[field]
+        _require(
+            isinstance(value, (int, float)) and not isinstance(value, bool),
+            f"{where}：题目 {key!r} 的 {field} 必须是数字。",
+        )
+        normalized[field] = value
+    if "format" in validation:
+        value = validation["format"]
+        _require(
+            isinstance(value, str) and value in VALIDATION_FORMATS,
+            f"{where}：题目 {key!r} 的 format 不受支持：{value!r}。",
+        )
+        normalized["format"] = value
+    if "min_length" in normalized and "max_length" in normalized:
+        _require(
+            normalized["min_length"] <= normalized["max_length"],
+            f"{where}：题目 {key!r} 的长度范围无效。",
+        )
+    if "min_selections" in normalized and "max_selections" in normalized:
+        _require(
+            normalized["min_selections"] <= normalized["max_selections"],
+            f"{where}：题目 {key!r} 的选择数量范围无效。",
+        )
+    return normalized
+
+
 def _parse_question(question: dict, *, where: str, prior_keys: frozenset[str]) -> dict:
     """Validate one block and return its normalized form.
 
@@ -226,10 +282,8 @@ def _parse_question(question: dict, *, where: str, prior_keys: frozenset[str]) -
             notice["description"] = description
         return notice
 
-    _require(
-        isinstance(qtype, str) and qtype in ANSWERABLE_TYPES,
-        f"{where}：未知题目类型 {qtype!r}。",
-    )
+    if not isinstance(qtype, str) or qtype not in ANSWERABLE_TYPES:
+        raise ValidationError(f"{where}：未知题目类型 {qtype!r}。")
 
     out: dict[str, Any] = {"key": key, "type": qtype, "label": label}
     description = question.get("description")
@@ -279,11 +333,9 @@ def _parse_question(question: dict, *, where: str, prior_keys: frozenset[str]) -
     if qtype == FILE_TYPE:
         out["file"] = _parse_file_config(question, f"{where}/题目 {key!r}")
 
-    validation = question.get("validation")
-    if validation is not None:
-        out["validation"] = dict(
-            _as_dict(validation, f"{where}：题目 {key!r} 的 validation 必须是对象。")
-        )
+    validation = _parse_validation(question, qtype, where, key)
+    if validation:
+        out["validation"] = validation
 
     for field in ("visible_if", "required_if"):
         raw = question.get(field)

@@ -16,7 +16,7 @@ services:
       retries: 12
       start_period: 5s
     networks:
-      - artflow_internal
+      - artflow_event_frontend
 
   web:
     build:
@@ -69,7 +69,6 @@ services:
       start_period: 15s
     networks:
       - artflow_event_frontend
-      - artflow_internal
 
 volumes:
   postgres_data:
@@ -78,8 +77,10 @@ volumes:
   backup_data:
 
 networks:
+  # The event web service must stay on a normal bridge for Docker Desktop to
+  # publish its loopback-only host port. The database remains unpublished;
+  # this profile is still host-loopback-only and never replaces production's
+  # internal frontend/backend topology.
   artflow_event_frontend:
     driver: bridge
     internal: false
-  artflow_internal:
-    internal: true

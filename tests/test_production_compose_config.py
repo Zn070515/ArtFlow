@@ -132,13 +132,9 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
         "${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}"
     )
     assert web_environment["CSRF_TRUSTED_ORIGINS"] == ""
-    assert set(services["web"]["networks"]) == {
-        "artflow_event_frontend",
-        "artflow_internal",
-    }
-    assert set(services["db"]["networks"]) == {"artflow_internal"}
+    assert set(services["web"]["networks"]) == {"artflow_event_frontend"}
+    assert set(services["db"]["networks"]) == {"artflow_event_frontend"}
     assert compose["networks"]["artflow_event_frontend"]["internal"] is False
-    assert compose["networks"]["artflow_internal"]["internal"] is True
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
     assert "backup_data" in compose["volumes"]
@@ -488,6 +484,7 @@ def test_dockerfile_copies_every_runtime_local_app():
     dockerfile = DOCKERFILE_PATH.read_text(encoding="utf-8")
 
     assert "COPY --chown=artflow:artflow tickets ./tickets" in dockerfile
+    assert "COPY --chown=artflow:artflow questionnaire ./questionnaire" in dockerfile
 
 
 def test_dockerfile_prepares_writable_backup_mountpoint():

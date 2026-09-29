@@ -9,9 +9,12 @@
   const autosaveUrl = root.dataset.autosaveUrl || "";
   const uploadTemplate = root.dataset.uploadUrlTemplate || "";
   const schemaHash = root.dataset.schemaHash || "";
+  const csrfField = root.querySelector<HTMLInputElement>('input[name="csrfmiddlewaretoken"]');
+  const pageCsrfToken = csrfField?.value || "";
   const saveState = root.querySelector<HTMLElement>("[data-save-state]");
   const errorBox = root.querySelector<HTMLElement>("[data-form-error]");
   const requiredCount = root.querySelector<HTMLElement>("[data-completion-required]");
+  const requiredAnsweredCount = root.querySelector<HTMLElement>("[data-completion-required-answered]");
   const answeredCount = root.querySelector<HTMLElement>("[data-completion-answered]");
   if (!autosaveUrl || !uploadTemplate) return;
 
@@ -43,7 +46,16 @@
       const key = field.dataset.answer;
       if (!key) return;
       if (field instanceof HTMLInputElement && field.type === "checkbox") {
-        answers[key] = field.checked;
+        const question = field.closest<HTMLElement>("[data-question]");
+        if (question?.dataset.questionType === "multiple_choice") {
+          const selected = Array.isArray(answers[key])
+            ? (answers[key] as string[])
+            : [];
+          if (field.checked) selected.push(field.value);
+          answers[key] = selected;
+        } else {
+          answers[key] = field.checked;
+        }
       } else {
         answers[key] = field.value;
       }
@@ -69,7 +81,7 @@
         body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
       });
       const body = (await response.json()) as {
-        completion?: { required?: number; answered?: number };
+        completion?: { required?: number; required_answered?: number; answered?: number };
         error?: string;
       };
       if (!response.ok) {
@@ -82,6 +94,9 @@
       clearError();
       if (body.completion) {
         if (requiredCount) requiredCount.textContent = String(body.completion.required ?? 0);
+        if (requiredAnsweredCount) {
+          requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+        }
         if (answeredCount) answeredCount.textContent = String(body.completion.answered ?? 0);
       }
       setSaveState("已保存");
@@ -105,8 +120,7 @@
   };
 
   const csrfToken = (): string => {
-    const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-    return match && match[1] ? decodeURIComponent(match[1]) : "";
+    return pageCsrfToken;
   };
 
   root.querySelectorAll<HTMLElement>("[data-answer]").forEach((field) => {
@@ -147,5 +161,54 @@
           setSaveState("");
         });
     });
+  });
+
+  const submitUrl = root.dataset.submitUrl || "";
+  const submitButton = root.querySelector<HTMLButtonElement>("[data-submit-questionnaire]");
+  const submitState = root.querySelector<HTMLElement>("[data-submit-state]");
+  if (!submitUrl || !submitButton) return;
+
+  submitButton.addEventListener("click", () => {
+    // A submission carries the whole form, so a save still in flight would only be
+    // overwritten. Let it land first, then submit what is actually on screen.
+    if (timer !== undefined) window.clearTimeout(timer);
+    submitButton.disabled = true;
+    setSaveState("");
+    void fetch(submitUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+      body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
+    })
+      .then(async (response) => {
+        const body = (await response.json()) as {
+          status?: string;
+          error?: string;
+          completion?: { required?: number; required_answered?: number; answered?: number };
+        };
+        if (!response.ok) {
+          showError(body.error || "提交失败，请检查后重试。");
+          return;
+        }
+        clearError();
+        if (body.completion) {
+          if (requiredCount) requiredCount.textContent = String(body.completion.required ?? 0);
+          if (requiredAnsweredCount) {
+            requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+          }
+          if (answeredCount) answeredCount.textContent = String(body.completion.answered ?? 0);
+        }
+        if (submitState) {
+          submitState.textContent = "已提交。报名开放期间仍可修改；截止后将锁定。";
+          submitState.classList.remove("text-gray-500");
+          submitState.classList.add("text-green-700");
+        }
+        submitButton.textContent = "更新报名";
+      })
+      .catch(() => {
+        showError("网络错误，提交失败。");
+      })
+      .finally(() => {
+        submitButton.disabled = false;
+      });
   });
 })();

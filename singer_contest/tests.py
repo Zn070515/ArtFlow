@@ -14,6 +14,7 @@ from common.authority import (
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
+    SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
@@ -56,9 +57,11 @@ from .models import (
     ContestRound,
     DuelDecision,
     Judge,
+    JudgeSeat,
     RoundEntry,
     RoundJudge,
     ScoreRecord,
+    ScoreSource,
     ScoreSummary,
     ScoreWriteReceipt,
     SingerRegistration,
@@ -1384,6 +1387,37 @@ class RoundResetServiceTests(TestCase):
         self.assertFalse(ScoreRecord.objects.filter(round=self.round).exists())
         self.assertFalse(ScoreSummary.objects.filter(round=self.round).exists())
         self.assertTrue(AuditLog.objects.filter(target=f"ContestRound:{self.round.pk}").exists())
+
+    def test_reset_round_snapshots_removes_scores_before_protected_judge_seats(self):
+        self._prepare_round_with_scores()
+        self.activity.phase = Activity.Phase.REHEARSAL
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        snapshot = prepare_judge_panel(
+            self.round.pk,
+            operator=self.actor,
+            attending_judge_ids=[self.judge.pk],
+        )
+        seat = JudgeSeat.objects.get(panel_member__panel_snapshot=snapshot)
+        score = ScoreRecord.objects.get(round=self.round)
+        score.source = ScoreSource.DIRECT_JUDGE
+        score.source_command_id = "reset-cleanup-test"
+        score.panel_snapshot = snapshot
+        score.judge_seat = seat
+        with authority_write(SCORE_FACT_WRITE):
+            score.save(
+                update_fields=[
+                    "source",
+                    "source_command_id",
+                    "panel_snapshot",
+                    "judge_seat",
+                ]
+            )
+
+        reset_round_snapshots(self.round, self.actor, reason="reset judge snapshot cleanup")
+
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round).exists())
+        self.assertFalse(JudgeSeat.objects.filter(pk=seat.pk).exists())
 
     def test_reset_round_snapshots_rejects_formal_parents_in_test_activity(self):
         self.singer.is_test_data = False

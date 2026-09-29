@@ -29,6 +29,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
+from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 from singer_contest.models import ContestRound, ScoreSummary, SingerRegistration
 from singer_contest.services import (
     _eligible_singers,
@@ -98,7 +99,10 @@ def _registration_list_workbook(activity: Activity) -> Workbook:
             "Live Status",
         ]
     )
-    for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
+    rows = prime_questionnaire_answers(
+        scope_runtime(SingerRegistration.objects.filter(activity=activity), activity)
+    )
+    for r in rows:
         ws.append(
             [
                 r.name,
@@ -107,7 +111,7 @@ def _registration_list_workbook(activity: Activity) -> Workbook:
                 r.class_name,
                 r.phone,
                 r.wechat,
-                r.song_name,
+                generic_song_label(r),
                 "yes" if r.is_original else "no",
                 r.get_pre_status_display(),
                 r.get_live_status_display(),
@@ -123,13 +127,16 @@ def _registration_archive_workbook(activity: Activity) -> Workbook:
     ws = _active_worksheet(wb)
     ws.title = "Registration Archive"
     ws.append(["Name", "College", "Class", "Song", "Original", "Pre Status", "Live Status"])
-    for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
+    rows = prime_questionnaire_answers(
+        scope_runtime(SingerRegistration.objects.filter(activity=activity), activity)
+    )
+    for r in rows:
         ws.append(
             [
                 r.name,
                 r.college,
                 r.class_name,
-                r.song_name,
+                generic_song_label(r),
                 "yes" if r.is_original else "no",
                 r.get_pre_status_display(),
                 r.get_live_status_display(),
@@ -144,7 +151,10 @@ def _contact_list_workbook(activity: Activity) -> Workbook:
     ws = _active_worksheet(wb)
     ws.title = "Contacts"
     ws.append(["Owner Type", "Name", "Student ID", "Phone", "Wechat", "College/Class", "Item"])
-    for r in scope_runtime(SingerRegistration.objects.filter(activity=activity), activity):
+    rows = prime_questionnaire_answers(
+        scope_runtime(SingerRegistration.objects.filter(activity=activity), activity)
+    )
+    for r in rows:
         ws.append(
             [
                 "singer",
@@ -153,7 +163,7 @@ def _contact_list_workbook(activity: Activity) -> Workbook:
                 r.phone,
                 r.wechat,
                 f"{r.college} {r.class_name}",
-                r.song_name,
+                generic_song_label(r),
             ]
         )
     for p in scope_runtime(Program.objects.filter(activity=activity), activity):
@@ -347,7 +357,7 @@ def _host_script_workbook(activity: Activity) -> Workbook:
                 [idx, p.name, p.performers or p.contact_name, p.get_program_type_display(), "", ""]
             )
     else:
-        singers = list(
+        singers = prime_questionnaire_answers(
             scope_runtime(
                 SingerRegistration.objects.filter(
                     activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
@@ -356,7 +366,7 @@ def _host_script_workbook(activity: Activity) -> Workbook:
             ).order_by("pk")
         )
         for idx, s in enumerate(singers, 1):
-            ws.append([idx, s.song_name, s.name, "song", "", ""])
+            ws.append([idx, generic_song_label(s), s.name, "song", "", ""])
     _autosize_sheet(ws)
     return wb
 
@@ -526,8 +536,17 @@ def _vote_results_workbook(activity: Activity) -> Workbook:
         .select_related("vote_session", "singer")
         .annotate(vote_count=Count("records"))
     )
+    options = list(options)
+    prime_questionnaire_answers(option.singer for option in options)
     for opt in options:
-        ws.append([opt.vote_session.name, opt.singer.name, opt.singer.song_name, opt.vote_count])
+        ws.append(
+            [
+                opt.vote_session.name,
+                opt.singer.name,
+                generic_song_label(opt.singer),
+                opt.vote_count,
+            ]
+        )
     _autosize_sheet(ws)
     return wb
 
@@ -538,8 +557,10 @@ def _award_list_workbook(activity: Activity) -> Workbook:
     ws.title = "Awards"
     ws.append(["Singer", "Song", "Award"])
     official_awards = official_stage_award_queryset(activity)
-    for award in scope_runtime(official_awards, activity).select_related("singer"):
-        ws.append([award.singer.name, award.singer.song_name, award.name])
+    awards = list(scope_runtime(official_awards, activity).select_related("singer"))
+    prime_questionnaire_answers(award.singer for award in awards)
+    for award in awards:
+        ws.append([award.singer.name, generic_song_label(award.singer), award.name])
     _autosize_sheet(ws)
     return wb
 
@@ -706,14 +727,14 @@ def render_document_bytes(template: ArticleTemplate, activity: Activity) -> byte
     doc = Document()
     doc.add_heading(activity.title, 0)
     body = template.body
-    singers = scope_runtime(
+    singers = prime_questionnaire_answers(scope_runtime(
         SingerRegistration.objects.filter(
             activity=activity,
             pre_status=SingerRegistration.PreStatus.APPROVED,
         ),
         activity,
-    )
-    singer_lines = "\n".join(f"{s.name} — {s.song_name}" for s in singers)
+    ))
+    singer_lines = "\n".join(f"{s.name} — {generic_song_label(s)}" for s in singers)
     programs = scope_runtime(Program.objects.filter(activity=activity), activity)
     program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)
     body = body.replace("{title}", activity.title)

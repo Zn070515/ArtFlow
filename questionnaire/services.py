@@ -45,17 +45,15 @@ def get_or_create_response(
 def save_draft_answers(
     response: QuestionnaireResponse, *, answers: dict, schema_hash: str = ""
 ) -> QuestionnaireResponse:
-    """Merge ``answers`` into the stored draft, under the row lock.
+    """Merge ``answers`` into the stored response, under the row lock.
 
-    Two refusals matter here. A submitted response is the participant's statement of
-    record, so a later write has to come through an explicit staff action (supplement,
-    unlock) rather than a stale tab. And a write built on a questionnaire shape the version
-    no longer has is refused, so an open browser is told to refresh instead of merging
-    answers the current form cannot show.
+    This is the low-level writer and it does not decide *who* may write — authority belongs
+    to the activity's phase and the staff supplement grants, checked by
+    :func:`questionnaire.registration.save_draft`. What it refuses is a write built on a
+    questionnaire shape the version no longer has, so an open browser is told to refresh
+    instead of merging answers the current form cannot show.
     """
     locked = QuestionnaireResponse.objects.select_for_update().get(pk=response.pk)
-    if locked.status != QuestionnaireResponse.Status.DRAFT:
-        raise ValidationError("问卷已提交，不能再修改。")
     if schema_hash and locked.schema_hash and schema_hash != locked.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
     merged = dict(locked.answers or {})

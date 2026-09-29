@@ -10,9 +10,12 @@
     const autosaveUrl = root.dataset.autosaveUrl || "";
     const uploadTemplate = root.dataset.uploadUrlTemplate || "";
     const schemaHash = root.dataset.schemaHash || "";
+    const csrfField = root.querySelector('input[name="csrfmiddlewaretoken"]');
+    const pageCsrfToken = csrfField?.value || "";
     const saveState = root.querySelector("[data-save-state]");
     const errorBox = root.querySelector("[data-form-error]");
     const requiredCount = root.querySelector("[data-completion-required]");
+    const requiredAnsweredCount = root.querySelector("[data-completion-required-answered]");
     const answeredCount = root.querySelector("[data-completion-answered]");
     if (!autosaveUrl || !uploadTemplate)
         return;
@@ -42,7 +45,18 @@
             if (!key)
                 return;
             if (field instanceof HTMLInputElement && field.type === "checkbox") {
-                answers[key] = field.checked;
+                const question = field.closest("[data-question]");
+                if (question?.dataset.questionType === "multiple_choice") {
+                    const selected = Array.isArray(answers[key])
+                        ? answers[key]
+                        : [];
+                    if (field.checked)
+                        selected.push(field.value);
+                    answers[key] = selected;
+                }
+                else {
+                    answers[key] = field.checked;
+                }
             }
             else {
                 answers[key] = field.value;
@@ -78,6 +92,9 @@
             if (body.completion) {
                 if (requiredCount)
                     requiredCount.textContent = String(body.completion.required ?? 0);
+                if (requiredAnsweredCount) {
+                    requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+                }
                 if (answeredCount)
                     answeredCount.textContent = String(body.completion.answered ?? 0);
             }
@@ -103,8 +120,7 @@
         }, TYPING_SETTLE_MS);
     };
     const csrfToken = () => {
-        const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
-        return match && match[1] ? decodeURIComponent(match[1]) : "";
+        return pageCsrfToken;
     };
     root.querySelectorAll("[data-answer]").forEach((field) => {
         field.addEventListener(field instanceof HTMLSelectElement ? "change" : "input", schedule);
@@ -144,6 +160,53 @@
                 showError("网络错误，上传失败。");
                 setSaveState("");
             });
+        });
+    });
+    const submitUrl = root.dataset.submitUrl || "";
+    const submitButton = root.querySelector("[data-submit-questionnaire]");
+    const submitState = root.querySelector("[data-submit-state]");
+    if (!submitUrl || !submitButton)
+        return;
+    submitButton.addEventListener("click", () => {
+        // A submission carries the whole form, so a save still in flight would only be
+        // overwritten. Let it land first, then submit what is actually on screen.
+        if (timer !== undefined)
+            window.clearTimeout(timer);
+        submitButton.disabled = true;
+        setSaveState("");
+        void fetch(submitUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+            body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
+        })
+            .then(async (response) => {
+            const body = (await response.json());
+            if (!response.ok) {
+                showError(body.error || "提交失败，请检查后重试。");
+                return;
+            }
+            clearError();
+            if (body.completion) {
+                if (requiredCount)
+                    requiredCount.textContent = String(body.completion.required ?? 0);
+                if (requiredAnsweredCount) {
+                    requiredAnsweredCount.textContent = String(body.completion.required_answered ?? 0);
+                }
+                if (answeredCount)
+                    answeredCount.textContent = String(body.completion.answered ?? 0);
+            }
+            if (submitState) {
+                submitState.textContent = "已提交。报名开放期间仍可修改；截止后将锁定。";
+                submitState.classList.remove("text-gray-500");
+                submitState.classList.add("text-green-700");
+            }
+            submitButton.textContent = "更新报名";
+        })
+            .catch(() => {
+            showError("网络错误，提交失败。");
+        })
+            .finally(() => {
+            submitButton.disabled = false;
         });
     });
 })();

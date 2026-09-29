@@ -92,6 +92,39 @@ class QuestionnaireParseTests(SimpleTestCase):
         )
         self.assertRaises(ValidationError, parse_questionnaire, bad)
 
+    def test_duplicate_bindings_fail_during_compilation(self):
+        bad = _questionnaire(
+            [
+                _question("name_a", binding="registration.name"),
+                _question("name_b", binding="registration.name"),
+            ]
+        )
+        self.assertRaises(ValidationError, compile_questionnaire, bad)
+
+    def test_staff_audience_is_rejected_until_a_staff_viewer_contract_exists(self):
+        bad = _questionnaire([_question("internal", audience="staff")])
+        self.assertRaises(ValidationError, parse_questionnaire, bad)
+
+    def test_validation_domain_is_normalized_and_unknown_fields_fail(self):
+        parsed = parse_questionnaire(
+            _questionnaire(
+                [
+                    _question(
+                        "phone",
+                        validation={"format": "phone_cn", "max_length": 11},
+                    )
+                ]
+            )
+        )
+        self.assertEqual(
+            parsed["pages"][0]["sections"][0]["questions"][0]["validation"],
+            {"format": "phone_cn", "max_length": 11},
+        )
+        with self.assertRaises(ValidationError):
+            parse_questionnaire(
+                _questionnaire([_question("phone", validation={"unknown": True})])
+            )
+
 
 class QuestionnaireBindingTests(SimpleTestCase):
     def test_whitelisted_binding_is_accepted(self):

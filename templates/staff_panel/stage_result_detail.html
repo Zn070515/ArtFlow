@@ -72,7 +72,7 @@
                 <span class="text-gray-400 text-xs w-6 text-right">{{ forloop.counter }}</span>
                 <span class="font-mono text-xs text-gray-400 w-10 text-right">{{ decision.rank|default:"—" }}</span>
                 <span class="font-medium text-gray-900">{{ decision.singer.name }}</span>
-                <span class="text-xs text-gray-500 truncate">{{ decision.singer.song_name }}</span>
+                <span class="text-xs text-gray-500 truncate">{{ decision.song_label }}</span>
                 <span class="ml-auto font-mono text-sm text-gray-800">{{ decision.score|floatformat:2|default:"—" }}</span>
                 {% if decision.reason %}
                 <span class="text-xs text-gray-500 max-w-xs truncate" title="{{ decision.reason }}">{{ decision.reason }}</span>

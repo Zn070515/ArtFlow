@@ -20,6 +20,8 @@ version, so the old one keeps its audit trail.
 
 from __future__ import annotations
 
+import json
+
 from django.core.exceptions import ValidationError
 
 from .compiler import QuestionnairePlan
@@ -32,10 +34,20 @@ def question_semantics(question: dict) -> tuple:
     and it must not cost ten participants their answer. The type is included, and so is a
     file question's purpose — those are what the stored value has to be compatible with.
     """
+    options = tuple(option["value"] for option in question.get("options", []))
+    validation = tuple(
+        (key, json.dumps(value, ensure_ascii=False, sort_keys=True))
+        for key, value in sorted((question.get("validation") or {}).items())
+    )
+    file_config = question.get("file") or {}
     return (
         question["type"],
         question.get("binding"),
-        (question.get("file") or {}).get("purpose"),
+        question.get("round"),
+        question.get("audience", "participant"),
+        options,
+        validation,
+        file_config.get("purpose"),
     )
 
 

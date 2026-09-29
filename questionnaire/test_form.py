@@ -18,6 +18,7 @@ from uuid import uuid4
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.test_characterization import _CharacterizationBase
 from core.models import Activity
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import freeze_ruleset_version
@@ -129,13 +130,19 @@ class _FormBase(_CharacterizationBase):
         self._operator_user = user
         return user
 
-    def frozen_version(self, *, phase=Activity.Phase.REGISTRATION_OPEN):
+    def frozen_version(self, *, phase=Activity.Phase.REGISTRATION_OPEN, test_mode=False):
         activity = self.make_activity(
-            is_test_mode=True, title=f"问卷页-{uuid4().hex[:6]}", phase=phase
+            is_test_mode=test_mode, title=f"问卷页-{uuid4().hex[:6]}", phase=phase
         )
-        ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=True)
-        rubric = ScoringRubric.objects.create(activity=activity, name="r3评分", is_test_data=True)
-        RubricCriterion.objects.create(rubric=rubric, name="总分", max_score=100, is_test_data=True)
+        ruleset = ContestRuleset.objects.create(
+            activity=activity, name="RS", is_test_data=test_mode
+        )
+        rubric = ScoringRubric.objects.create(
+            activity=activity, name="r3评分", is_test_data=test_mode
+        )
+        RubricCriterion.objects.create(
+            rubric=rubric, name="总分", max_score=100, is_test_data=test_mode
+        )
         contest_round = ContestRound.objects.create(
             activity=activity, round_type=ContestRound.RoundType.PRELIMINARY, name="r3"
         )
@@ -149,7 +156,7 @@ class _FormBase(_CharacterizationBase):
                 username=f"form-field-{activity.pk}-{i}",
                 student_id=f"50{i:04d}",
                 pre_status=SingerRegistration.PreStatus.APPROVED,
-                is_test_data=True,
+                is_test_data=test_mode,
             )
         root = json.loads(_definition())
         root["questionnaire"] = QUESTIONNAIRE
@@ -210,6 +217,7 @@ class CompletionSummaryTests(_CharacterizationBase):
         )
         self.assertEqual(summary["answered"], 1)
         self.assertEqual(summary["required"], 2)
+        self.assertEqual(summary["required_answered"], 1)
 
 
 class QuestionnaireFormViewTests(_FormBase):
@@ -243,17 +251,23 @@ class QuestionnaireFormViewTests(_FormBase):
     def test_a_reload_shows_what_was_already_answered(self):
         self.client.post(
             reverse("questionnaire:autosave", args=[self.activity.pk]),
-            data=json.dumps({"answers": {"r3.song": "左手指月"}}),
+            data=json.dumps(
+                {"answers": {"r3.song": "左手指月"}, "schema_hash": schema_hash(QUESTIONNAIRE)}
+            ),
             content_type="application/json",
         )
         response = self.client.get(self._url())
         self.assertContains(response, "左手指月")
 
-    def test_a_participant_cannot_open_a_closed_activity(self):
+    def test_a_participant_can_still_read_their_form_after_registration_closes(self):
+        """Closing registration takes away the right to *edit*, not the right to see what
+        was submitted — and the supplement flow needs the page to exist."""
         with authority_write(ACTIVITY_STATE):
             self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
             self.activity.save(update_fields=["phase"])
-        self.assertEqual(self.client.get(self._url()).status_code, 403)
+        response = self.client.get(self._url())
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["editable"])
 
     def test_staff_may_preview_a_closed_activity(self):
         with authority_write(ACTIVITY_STATE):
@@ -272,9 +286,11 @@ class QuestionnaireAutosaveTests(_FormBase):
         self.client.force_login(self.user)
 
     def _post(self, payload):
+        """Post an autosave with the page's own version, as the browser would."""
+        body = {"schema_hash": schema_hash(QUESTIONNAIRE), **payload}
         return self.client.post(
             reverse("questionnaire:autosave", args=[self.activity.pk]),
-            data=json.dumps(payload),
+            data=json.dumps(body),
             content_type="application/json",
         )
 
@@ -303,7 +319,8 @@ class QuestionnaireAutosaveTests(_FormBase):
         response = self._post({"answers": {"name": "改"}, "schema_hash": "0" * 64})
         self.assertEqual(response.status_code, 409)
 
-    def test_autosave_is_refused_once_submitted(self):
+    def test_autosave_still_works_after_submitting_while_registration_is_open(self):
+        """A participant who has submitted may correct their details until the deadline."""
         from .registration import get_or_create_draft_registration
         from .services import mark_submitted
 
@@ -311,7 +328,9 @@ class QuestionnaireAutosaveTests(_FormBase):
             version=self.version, user=self.user
         )
         mark_submitted(response)
-        self.assertEqual(self._post({"answers": {"name": "改"}}).status_code, 409)
+        self.assertEqual(self._post({"answers": {"name": "改"}}).status_code, 200)
+        registration.refresh_from_db()
+        self.assertEqual(registration.name, "改")
 
     def test_autosave_needs_a_json_body(self):
         response = self.client.post(
@@ -325,4 +344,212 @@ class QuestionnaireAutosaveTests(_FormBase):
         with authority_write(ACTIVITY_STATE):
             self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
             self.activity.save(update_fields=["phase"])
-        self.assertEqual(self._post({"answers": {"name": "陈"}}).status_code, 403)
+        self.assertEqual(self._post({"answers": {"name": "陈"}}).status_code, 409)
+
+
+class ParticipantBoundaryTests(_FormBase):
+    """The three contracts a participant-facing write route owes.
+
+    Every one of them replaces something the legacy apply path already did, and which the
+    questionnaire route had quietly stopped doing.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.version = self.frozen_version()
+        self.activity = self.version.ruleset.activity
+        self.user = self.participant(self.version)
+        self.client.force_login(self.user)
+
+    def _autosave(self, payload):
+        return self.client.post(
+            reverse("questionnaire:autosave", args=[self.activity.pk]),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_autosave_requires_the_page_version(self):
+        """A client can omit an optional field, so on this boundary it is not optional:
+        without it a page that cannot see the current questionnaire could write into it."""
+        self.assertEqual(self._autosave({"answers": {"name": "陈"}}).status_code, 400)
+
+    def test_upload_requires_the_page_version(self):
+        response = self.client.post(
+            reverse("questionnaire:upload", args=[self.activity.pk, "stage.note"]),
+            data={"file": SimpleUploadedFile("a.mp3", b"ID3\x04\x00\x00")},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_submit_requires_the_page_version(self):
+        response = self.client.post(
+            reverse("questionnaire:submit", args=[self.activity.pk]),
+            data=json.dumps({"answers": {"name": "陈"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_staff_may_not_write_through_the_participant_route(self):
+        """Staff preview the form; a staff account must not be able to create or fill a
+        registration of its own through it."""
+        self.client.force_login(self.operator())
+        for url, payload in (
+            (reverse("questionnaire:autosave", args=[self.activity.pk]), {"answers": {}}),
+            (reverse("questionnaire:submit", args=[self.activity.pk]), {"answers": {}}),
+            (reverse("questionnaire:upload", args=[self.activity.pk, "stage.note"]), {}),
+        ):
+            with self.subTest(url=url):
+                response = self.client.post(
+                    url, data=json.dumps(payload), content_type="application/json"
+                )
+                self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            SingerRegistration.objects.filter(activity=self.activity).count(), 3
+        )
+
+    def test_a_participant_cannot_open_a_test_activity(self):
+        """The legacy path filtered its lookup to FORMAL activities, so guessing a primary
+        key found nothing. The questionnaire route has to do the same."""
+        rehearsal = self.frozen_version(test_mode=True)
+        self.assertEqual(
+            self.client.get(
+                reverse("questionnaire:form", args=[rehearsal.ruleset.activity_id])
+            ).status_code,
+            404,
+        )
+
+    def test_staff_can_preview_a_test_activity(self):
+        rehearsal = self.frozen_version(test_mode=True)
+        self.client.force_login(self.operator())
+        self.assertEqual(
+            self.client.get(
+                reverse("questionnaire:form", args=[rehearsal.ruleset.activity_id])
+            ).status_code,
+            200,
+        )
+
+
+class QuestionnaireSubmitTests(_FormBase):
+    def setUp(self):
+        super().setUp()
+        self.version = self.frozen_version()
+        self.activity = self.version.ruleset.activity
+        self.user = self.participant(self.version)
+        self.client.force_login(self.user)
+
+    def _submit(self, payload):
+        return self.client.post(
+            reverse("questionnaire:submit", args=[self.activity.pk]),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def _filled(self, **extra):
+        return {
+            "answers": {"name": "陈昭艺", "r3.song": "左手指月", **extra},
+            "schema_hash": schema_hash(QUESTIONNAIRE),
+        }
+
+    def test_the_form_carries_a_submit_button_pointing_at_the_route(self):
+        body = self.client.get(
+            reverse("questionnaire:form", args=[self.activity.pk])
+        ).content.decode()
+        self.assertIn("data-submit-questionnaire", body)
+        self.assertIn(reverse("questionnaire:submit", args=[self.activity.pk]), body)
+
+    def test_submit_finishes_the_registration(self):
+        response = self._submit({**self._filled(), "schema_hash": schema_hash(QUESTIONNAIRE)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "submitted")
+        registration = SingerRegistration.objects.get(activity=self.activity, user=self.user)
+        self.assertEqual(registration.pre_status, SingerRegistration.PreStatus.SUBMITTED)
+        self.assertEqual(registration.name, "陈昭艺")
+
+    def test_submit_refuses_while_a_required_answer_is_missing(self):
+        response = self._submit(
+            {"answers": {"r3.song": "歌"}, "schema_hash": schema_hash(QUESTIONNAIRE)}
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("name", response.json()["error"])
+
+    def test_submit_refuses_a_stale_schema_hash(self):
+        self.assertEqual(self._submit({**self._filled(), "schema_hash": "0" * 64}).status_code, 409)
+
+    def test_submit_refuses_a_request_that_omits_the_schema_hash(self):
+        """An HTTP caller always has one; accepting a submission without it would let a
+        page that cannot see the current questionnaire write into it."""
+        response = self._submit({"answers": {"name": "陈", "r3.song": "歌"}})
+        self.assertEqual(response.status_code, 400)
+
+    def test_submitting_again_after_an_edit_is_allowed_while_registration_is_open(self):
+        self._submit(self._filled())
+        changed = {
+            "answers": {"name": "改过的名字", "r3.song": "左手指月"},
+            "schema_hash": schema_hash(QUESTIONNAIRE),
+        }
+        self.assertEqual(self._submit(changed).status_code, 200)
+        registration = SingerRegistration.objects.get(activity=self.activity, user=self.user)
+        self.assertEqual(registration.name, "改过的名字")
+
+
+class ClosedRegistrationTests(_FormBase):
+    def setUp(self):
+        super().setUp()
+        self.version = self.frozen_version()
+        self.activity = self.version.ruleset.activity
+        self.user = self.participant(self.version)
+        self.client.force_login(self.user)
+        from .registration import get_or_create_draft_registration
+
+        self.registration, _response = get_or_create_draft_registration(
+            version=self.version, user=self.user
+        )
+
+    def _close(self):
+        with authority_write(ACTIVITY_STATE):
+            self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
+            self.activity.save(update_fields=["phase"])
+
+    def _grant_supplement(self, question_key):
+        """Send one question back. The check already exists — opening the form created one
+        per question — so this flips its status rather than adding a second."""
+        from files.models import MaterialCheck
+
+        check, _created = MaterialCheck.objects.get_or_create(
+            singer_registration=self.registration,
+            question_key=question_key,
+            defaults={"item_name": question_key},
+        )
+        check.status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+        check.save(update_fields=["status"])
+
+    def _post(self, answers):
+        return self.client.post(
+            reverse("questionnaire:autosave", args=[self.activity.pk]),
+            data=json.dumps({"answers": answers, "schema_hash": schema_hash(QUESTIONNAIRE)}),
+            content_type="application/json",
+        )
+
+    def test_an_ordinary_edit_is_refused_once_registration_closes(self):
+        self._close()
+        self.assertEqual(self._post({"r3.song": "改"}).status_code, 409)
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.name, "")
+
+    def test_a_supplement_reopens_only_the_question_it_was_granted_for(self):
+        self._close()
+        self._grant_supplement("r3.song")
+        self.assertEqual(self._post({"r3.song": "重新提交的曲目"}).status_code, 200)
+        self.assertEqual(self._post({"name": "偷改的名字"}).status_code, 409)
+
+    def test_the_closed_page_marks_the_supplemented_question_editable(self):
+        self._close()
+        self._grant_supplement("r3.song")
+        response = self.client.get(reverse("questionnaire:form", args=[self.activity.pk]))
+        rows = {
+            row["key"]: row
+            for page in response.context["pages"]
+            for section in page["sections"]
+            for row in section["questions"]
+        }
+        self.assertTrue(rows["r3.song"]["editable"])
+        self.assertFalse(rows["name"]["editable"])

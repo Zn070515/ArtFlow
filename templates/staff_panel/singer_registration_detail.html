@@ -5,7 +5,7 @@
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-10">
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:singer_registration_list' %}" class="hover:underline">报名管理</a> / {{ reg.name }}</p>
-    <h1 class="text-2xl font-bold text-gray-900 mb-6">{{ reg.name }} — {{ reg.song_name }}</h1>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">{{ reg.name }} — {{ reg.song_label }}</h1>
     {% if errors %}
     <div class="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded mb-4">
         {% for error in errors %}<p>{{ error }}</p>{% endfor %}
@@ -52,13 +52,16 @@
                 <h3 class="font-medium text-gray-900 mb-3">附件 ({{ files|length }})</h3>
                 {% if files %}
                 <ul class="space-y-1 mb-4">
-                    {% for f in files %}
-            <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({{ f.get_file_purpose_display }} · v{{ f.version }})</span>{% if f.is_current %}<span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ f.file_size|filesizeformat }}</span></li>
+                {% for f in files %}
+            <li class="flex justify-between text-xs"><span>{{ f.original_name }} <span class="text-gray-400">({% if f.question_key %}{{ f.question_key }} · {% endif %}{{ f.get_file_purpose_display }} · v{{ f.version }})</span>{% if f.is_current %}<span class="text-green-600">（当前）</span>{% endif %}</span><span>{{ f.file_size|filesizeformat }}</span></li>
                     {% endfor %}
                 </ul>
                 {% else %}
                 <p class="text-gray-400 text-xs mb-3">暂无附件</p>
                 {% endif %}
+                {% if questionnaire_material_authority %}
+                <p class="text-xs text-gray-500">当前报名由已确认问卷管理，请在上方按题目审核材料；旧式按用途上传已关闭。</p>
+                {% else %}
                 <form method="post" enctype="multipart/form-data" class="flex flex-col gap-2">
                     {% csrf_token %}
                     <input type="hidden" name="upload_file" value="1">
@@ -74,6 +77,7 @@
                         <button type="submit" class="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs hover:bg-gray-200">上传</button>
                     </div>
                 </form>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -107,7 +111,7 @@
                 {% endfor %}
             </div>
             {% else %}
-            <p class="text-gray-400 text-xs">暂无材料检查项，<a href="{% url 'staff:activity_material_requirements' reg.activity.pk %}" class="text-brand hover:underline">前往配置检查项</a></p>
+            <p class="text-gray-400 text-xs">暂无材料检查项，{% if questionnaire_material_authority %}请检查已确认问卷中的题目定义。{% else %}<a href="{% url 'staff:activity_material_requirements' reg.activity.pk %}" class="text-brand hover:underline">前往配置检查项</a>{% endif %}</p>
             {% endif %}
         </div>
     </div>

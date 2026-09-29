@@ -20,6 +20,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from django.core.exceptions import ValidationError
+
 from .schema import FILE_TYPE, NOTICE_TYPE, parse_questionnaire, schema_hash
 
 
@@ -75,6 +77,11 @@ def compile_questionnaire(questionnaire: dict | str | None) -> QuestionnairePlan
     for question in questions:
         binding = question.get("binding")
         if binding:
+            if binding in bindings:
+                raise ValidationError(
+                    f"绑定字段 {binding!r} 只能被一道题使用，重复题目："
+                    f"{bindings[binding]!r}、{question['key']!r}。"
+                )
             bindings[binding] = question["key"]
     return QuestionnairePlan(
         key=parsed["key"],

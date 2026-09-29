@@ -10,11 +10,11 @@ from typing import Any
 from accounts.models import User
 from core.models import Activity
 from core.services import transition_activity_phase
+from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.db import transaction
 from django.utils import timezone
-from files.models import SubmissionFile
-from files.services import store_submission_file
+from files.services import store_questionnaire_file
 from ruleset.models import ContestRuleset
 from ruleset.services import (
     create_ruleset_version,
@@ -54,6 +54,7 @@ from voting.services import (
 )
 
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, CONTEST_ROUND_STATE, authority_write
+from common.models import AuditLog
 from common.private_test_fixture import PrivateTestFixture
 from common.private_test_questionnaire import (
     check_answers_landed,
@@ -77,6 +78,60 @@ def _operator(username: str) -> User:
     if operator is None or not operator.is_active or not operator.is_staff_or_admin:
         raise PrivateTestLoadError("operator must be an active staff/admin account")
     return operator
+
+
+def _private_fixture_is_complete(activity: Activity, fixture: PrivateTestFixture) -> bool:
+    """Require every rehearsal layer before declaring a repeat apply a no-op."""
+    from files.models import MaterialCheck, SubmissionFile
+    from questionnaire.models import QuestionnaireResponse
+    from questionnaire.registration import questionnaire_plan
+    from ruleset.services import current_frozen_version
+    from singer_contest.models import CriterionScore, StageResult
+    from tickets.models import Ticket
+    from voting.models import VoteBallot
+
+    version = current_frozen_version(activity)
+    if version is None:
+        return False
+    try:
+        expected_question_checks = len(fixture.identities) * len(
+            questionnaire_plan(version).questions
+        )
+    except (TypeError, ValueError, ValidationError):
+        return False
+    stage_results = StageResult.objects.filter(activity=activity, is_test_data=True)
+    return (
+        activity.singer_registrations.filter(is_test_data=True).count() == len(fixture.identities)
+        and activity.rounds.count() == 4
+        and QuestionnaireResponse.objects.filter(
+            singer_registration__activity=activity, is_test_data=True
+        ).count()
+        == len(fixture.identities)
+        and SubmissionFile.objects.filter(
+            singer_registration__activity=activity,
+            is_test_data=True,
+            is_current=True,
+        )
+        .exclude(question_key="")
+        .count()
+        == len(fixture.media_assignments)
+        and MaterialCheck.objects.filter(singer_registration__activity=activity)
+        .exclude(question_key="")
+        .count()
+        == expected_question_checks
+        and CriterionScore.objects.filter(
+            score_record__round__activity=activity, is_test_data=True
+        ).count()
+        == len(fixture.score_rows)
+        and Ticket.objects.filter(activity=activity, is_test_data=True).count()
+        == len(fixture.ticket_rows)
+        and VoteBallot.objects.filter(
+            vote_session__activity=activity, is_test_data=True
+        ).count()
+        == len(fixture.p1_votes) + len(fixture.p2_votes)
+        and stage_results.filter(status=StageResult.Status.CONFIRMED).count() == 3
+        and set(stage_results.values_list("stage_key", flat=True)) == {"stage1", "stage2", "stage3"}
+    )
 
 
 def _activity_for_fixture(
@@ -103,10 +158,75 @@ def _activity_for_fixture(
             title=title,
             subtitle=marker,
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.TESTING,
+            # Registration is open, because that is where the fixture actually starts: the
+            # ruleset is frozen before anyone has submitted, and the participants then fill
+            # the frozen form. Starting at TESTING would be wrong for a reason that is easy
+            # to miss -- TESTING counts as a *settled* roster, so an empty one becomes a
+            # real zero and a top10 selection then fails the freeze with QUOTA_EXCEEDED.
+            phase=Activity.Phase.REGISTRATION_OPEN,
             description="SYNTHETIC_TEST_ONLY private rehearsal; never publish.",
             is_test_mode=True,
         )
+
+
+# The phases the fixture walks, in order. Every transition goes through
+# ``transition_activity_phase``, so the repository's legal-edge map stays the authority.
+FIXTURE_LIFECYCLE = (
+    Activity.Phase.REGISTRATION_OPEN,
+    Activity.Phase.REGISTRATION_CLOSED,
+    Activity.Phase.REVIEWING,
+    Activity.Phase.REHEARSAL,
+    Activity.Phase.LIVE,
+    Activity.Phase.RESULTS_PENDING,
+)
+
+
+def _advance_to(activity: Activity, target: str, operator: User) -> Activity:
+    """Walk the phase ladder up to and including ``target``.
+
+    Only forward from where the activity already is: ``transition_activity_phase`` refuses
+    a move backwards, and re-requesting a phase already passed would be exactly that.
+    """
+    if target not in FIXTURE_LIFECYCLE:
+        raise PrivateTestLoadError(f"unknown fixture phase: {target}")
+    start = FIXTURE_LIFECYCLE.index(activity.phase) if activity.phase in FIXTURE_LIFECYCLE else 0
+    for phase in FIXTURE_LIFECYCLE[start : FIXTURE_LIFECYCLE.index(target) + 1]:
+        activity = transition_activity_phase(
+            activity, phase, actor=operator, note="private rehearsal lifecycle"
+        )
+    activity.refresh_from_db()
+    return activity
+
+
+def _rewind_private_activity_for_reload(activity: Activity, operator: User) -> Activity:
+    """Return an already-used TEST fixture to the only safe reload entry phase."""
+    if activity.phase == Activity.Phase.REGISTRATION_OPEN and not activity.is_locked:
+        return activity
+    with transaction.atomic():
+        locked = Activity.objects.select_for_update().get(pk=activity.pk)
+        if not locked.is_test_mode or locked.data_lifecycle != Activity.DataLifecycle.TEST:
+            raise PrivateTestLoadError("only TEST activities may be rewound for a private reload")
+        old_phase = locked.phase
+        locked.phase = Activity.Phase.DRAFT
+        locked.is_locked = False
+        locked.locked_at = None
+        locked.locked_by = None
+        with authority_write(ACTIVITY_STATE):
+            locked.save(update_fields=["phase", "is_locked", "locked_at", "locked_by"])
+        AuditLog.objects.create(
+            operator=operator,
+            action_type=AuditLog.ActionType.PHASE_TRANSITION,
+            target=f"Activity:{locked.pk}",
+            old_value=old_phase,
+            new_value=Activity.Phase.DRAFT,
+            note="private_fixture_reset_runtime_rewind",
+        )
+    return transition_activity_phase(
+        locked,
+        Activity.Phase.REGISTRATION_OPEN,
+        actor=operator,
+        note="private fixture reload entry phase",
+    )
 
 
 def _get_or_create_participant(row: dict[str, str]) -> User:
@@ -217,15 +337,15 @@ def _create_rounds_and_rubrics(
     )
     rounds: dict[str, ContestRound] = {}
     for sequence, (key, name, source, advance_count) in enumerate(round_specs, start=1):
-        rubric = create_scoring_rubric(
-            activity,
-            name=f"{name}评分标准",
-            description="SYNTHETIC_TEST_ONLY; fixture criterion scale.",
-            criteria=criteria_by_round[key],
-            operator=operator,
-        )
         round_obj = ContestRound.objects.filter(activity=activity, name=name).first()
         if round_obj is None:
+            rubric = create_scoring_rubric(
+                activity,
+                name=f"{name}评分标准",
+                description="SYNTHETIC_TEST_ONLY; fixture criterion scale.",
+                criteria=criteria_by_round[key],
+                operator=operator,
+            )
             with authority_write(CONTEST_ROUND_STATE):
                 round_obj = ContestRound.objects.create(
                     activity=activity,
@@ -249,10 +369,51 @@ def _create_rounds_and_rubrics(
                     status=ContestRound.Status.DRAFT,
                     is_locked=False,
                 )
-        elif round_obj.rubric_id != rubric.pk or round_obj.activity_id != activity.pk:
-            raise PrivateTestLoadError(f"existing round configuration mismatch: {key}")
+        else:
+            rubric = round_obj.rubric
+            if rubric is None:
+                raise PrivateTestLoadError(f"existing round configuration mismatch: {key}")
+            expected_criteria = [
+                (item["name"], Decimal(item["max_score"]))
+                for item in criteria_by_round[key]
+            ]
+            actual_criteria = list(
+                rubric.criteria.order_by("sequence", "pk").values_list("name", "max_score")
+            )
+            if (
+                round_obj.activity_id != activity.pk
+                or round_obj.sequence != sequence
+                or round_obj.round_type
+                != (
+                    ContestRound.RoundType.PRELIMINARY
+                    if sequence < 3
+                    else ContestRound.RoundType.SEMI_FINAL
+                )
+                or round_obj.minimum_judge_count != 3
+                or round_obj.scoring_mode != ContestRound.ScoringMode.AVERAGE
+                or round_obj.order_policy != ContestRound.OrderPolicy.REGISTRATION_ORDER
+                or round_obj.tie_order_policy != ContestRound.TieOrderPolicy.REGISTRATION_ORDER
+                or round_obj.advance_count != advance_count
+                or round_obj.roster_source != source
+                or round_obj.roster_source_stage
+                != ("stage1" if key == "round3" else "stage2" if key == "round4" else "")
+                or not rubric.is_test_data
+                or rubric.name != f"{name}评分标准"
+                or actual_criteria != expected_criteria
+            ):
+                raise PrivateTestLoadError(f"existing round configuration mismatch: {key}")
         rounds[key] = round_obj
 
+    return rounds
+
+
+def _set_initial_round_performances(
+    fixture: PrivateTestFixture,
+    rounds: dict[str, ContestRound],
+    registrations: dict[str, SingerRegistration],
+    operator: User,
+) -> None:
+    """Create initial performance facts after questionnaire approval settles the roster."""
     round1_groups = []
     for group in fixture.reference["round1_groups"]:
         codes = [
@@ -274,23 +435,16 @@ def _create_rounds_and_rubrics(
 
     # Give every later performance a concrete performance fact without inventing a
     # round FK on SubmissionFile. A one-singer group is a safe setup fact here.
-    for key, song_field in (("round2", "round2_song"),):
-        contest_round = rounds[key]
-        if contest_round.status != ContestRound.Status.DRAFT or contest_round.groups.exists():
-            continue
-        source_rows = fixture.reference["contestants"]
-        if key == "round3":
-            source_rows = [row for row in source_rows if row.get("advanced_top10") == "YES"]
-        if key == "round4":
-            source_rows = [row for row in source_rows if row.get("advanced_top5") == "YES"]
-        specs = []
-        for item in source_rows:
-            code = item["legacy_code"]
-            song = item.get(song_field) or f"Synthetic {key} performance"
-            specs.append({"name": f"{code}｜{song}", "singer_ids": [registrations[code].pk]})
-        if specs:
-            set_round_groups(contest_round, specs, operator)
-    return rounds
+    contest_round = rounds["round2"]
+    if contest_round.status != ContestRound.Status.DRAFT or contest_round.groups.exists():
+        return
+    specs = []
+    for item in fixture.reference["contestants"]:
+        code = item["legacy_code"]
+        song = item.get("round2_song") or "Synthetic round2 performance"
+        specs.append({"name": f"{code}｜{song}", "singer_ids": [registrations[code].pk]})
+    if specs:
+        set_round_groups(contest_round, specs, operator)
 
 
 def _set_stage_round_performances(
@@ -479,12 +633,18 @@ def _score_round(contest_round, stage, fixture, registrations, judges, operator)
     lock_round(contest_round, operator)
 
 
-def _load_media(fixture, registrations, operator):
-    purpose_map = {value: value for value, _ in SubmissionFile.Purpose.choices}
+def _load_media(fixture, registrations, version, operator):
+    from questionnaire.registration import questionnaire_plan
+
+    plan = questionnaire_plan(version)
+    stage_to_round = {f"round{index}": f"r{index}" for index in range(1, 5)}
     for row in fixture.media_assignments:
-        purpose = purpose_map.get(row["file_purpose"])
-        if purpose is None:
-            raise PrivateTestLoadError(f"unsupported media purpose: {row['file_purpose']}")
+        round_key = stage_to_round.get(row["stage"])
+        if round_key is None:
+            raise PrivateTestLoadError(f"unsupported media stage: {row['stage']}")
+        question_key = f"{round_key}.{row['file_purpose']}"
+        if plan.question(question_key) is None:
+            raise PrivateTestLoadError(f"media question is not in the frozen form: {question_key}")
         source = fixture.root / "07_realistic_test_addendum" / row["relative_file"]
         if not source.is_file():
             raise PrivateTestLoadError(f"media file missing: {row['relative_file']}")
@@ -495,28 +655,24 @@ def _load_media(fixture, registrations, operator):
                 ".wav": "audio/wav",
                 ".mp4": "video/mp4",
                 ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
                 ".txt": "text/plain",
+                ".pdf": "application/pdf",
             }.get(source.suffix.lower(), "application/octet-stream")
-            store_submission_file(
-                owner=owner, uploaded_file=uploaded, purpose=purpose, uploaded_by=operator
+            store_questionnaire_file(
+                registration=owner,
+                question_key=question_key,
+                uploaded_file=uploaded,
+                actor=operator,
+                expected_schema_hash=plan.schema_hash,
             )
 
 
 def _load_scores_and_results(activity, fixture, rounds, registrations, judges, operator):
     _score_round(rounds["round1"], "round1", fixture, registrations, judges, operator)
     _score_round(rounds["round2"], "round2", fixture, registrations, judges, operator)
-    for phase in (
-        Activity.Phase.REGISTRATION_OPEN,
-        Activity.Phase.REGISTRATION_CLOSED,
-        Activity.Phase.REVIEWING,
-        Activity.Phase.REHEARSAL,
-        Activity.Phase.LIVE,
-        Activity.Phase.RESULTS_PENDING,
-    ):
-        activity = transition_activity_phase(
-            activity, phase, actor=operator, note="private rehearsal lifecycle"
-        )
-    activity.refresh_from_db()
+    activity = _advance_to(activity, Activity.Phase.RESULTS_PENDING, operator)
     resolved = maybe_resolve_checkpoints(activity, operator)
     stage1 = activity.stage_results.get(stage_key="stage1")
     if stage1.status != "ready_to_confirm":
@@ -571,20 +727,9 @@ def apply_private_fixture(
 
         clear_activity_test_data(activity, operator=operator)
         activity.refresh_from_db()
+        activity = _rewind_private_activity_for_reload(activity, operator)
     elif activity.singer_registrations.filter(is_test_data=True).exists():
-        from singer_contest.models import StageResult
-
-        complete = (
-            activity.singer_registrations.filter(is_test_data=True).count() == 15
-            and activity.rounds.count() == 4
-            and StageResult.objects.filter(
-                activity=activity,
-                stage_key="stage3",
-                status=StageResult.Status.CONFIRMED,
-                is_test_data=True,
-            ).exists()
-        )
-        if complete:
+        if _private_fixture_is_complete(activity, fixture):
             return PrivateLoadResult(
                 activity=activity,
                 report={
@@ -635,21 +780,27 @@ def apply_private_fixture(
     version = create_ruleset_version(
         ruleset, definition=json.dumps(definition, ensure_ascii=False), created_by=operator
     )
-    freeze_ruleset_version(version, operator)
+    version = freeze_ruleset_version(version, operator)
     responses = fill_registrations(
         version=version,
         registrations=registrations,
         reference_by_code={row["legacy_code"]: row for row in fixture.reference["contestants"]},
         operator=operator,
     )
-    check_answers_landed(responses=responses, registrations=registrations)
-    # A round can only be prepared once the roster it draws from exists, and the runtime
-    # readiness gate on prepare_round needs a current FROZEN authority -- so preparation
-    # follows the freeze and the submissions, not the other way round.
+    check_answers_landed(
+        responses=responses,
+        registrations=registrations,
+        reference_by_code={row["legacy_code"]: row for row in fixture.reference["contestants"]},
+    )
+    _set_initial_round_performances(fixture, rounds, registrations, operator)
+    _load_media(fixture, registrations, version, operator)
+    # Close registration and move into rehearsal: the roster is only settled from here,
+    # which is what lets prepare_round's runtime readiness gate prove it. Preparing a round
+    # before this would ask a registration-phase activity to have a final roster.
+    activity = _advance_to(activity, Activity.Phase.REHEARSAL, operator)
     for key in ("round1", "round2"):
         prepare_round(rounds[key], operator)
     _create_tickets_and_votes(activity, fixture, sessions, registrations, operator)
-    _load_media(fixture, registrations, operator)
     result = _load_scores_and_results(activity, fixture, rounds, registrations, judges, operator)
     result.update(
         {

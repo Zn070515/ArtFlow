@@ -14,6 +14,7 @@ urlpatterns = [
     path("", include("public_portal.urls")),
     path("", include("accounts.urls")),
     path("contest/", include("singer_contest.urls")),
+    path("contest/register/", include("questionnaire.register_urls")),
     path("questionnaire/", include("questionnaire.urls")),
     path("judge/", include("singer_contest.judge_urls")),
     path("farewell/", include("farewell_show.urls")),

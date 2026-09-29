@@ -19,7 +19,7 @@
         <div class="flex justify-between"><span class="text-gray-500">学院</span><span class="text-gray-900">{{ reg.college }}</span></div>
         <div class="flex justify-between"><span class="text-gray-500">班级</span><span class="text-gray-900">{{ reg.class_name }}</span></div>
         <div class="flex justify-between"><span class="text-gray-500">手机号</span><span class="text-gray-900">{{ reg.phone }}</span></div>
-        <div class="flex justify-between"><span class="text-gray-500">曲目</span><span class="text-gray-900">{{ reg.song_name }}{% if reg.is_original %}（原创）{% endif %}</span></div>
+        <div class="flex justify-between"><span class="text-gray-500">曲目</span><span class="text-gray-900">{{ song_label }}{% if reg.is_original %}（原创）{% endif %}</span></div>
         <div class="flex justify-between">
             <span class="text-gray-500">审核状态</span>
             {% if reg.pre_status == "approved" %}

@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 from tickets.services import authenticate_ticket_session
 
 from .models import VoteBallot, VoteSession
@@ -128,7 +129,10 @@ def vote_cast(request, pk):
     ):
         return redirect("voting:vote_done", pk=pk)
 
-    options = vote_session.options.select_related("singer")
+    options = list(vote_session.options.select_related("singer"))
+    singers = prime_questionnaire_answers(option.singer for option in options)
+    for singer in singers:
+        singer.song_label = generic_song_label(singer)
     max_sel = (
         vote_session.max_selections
         if vote_session.selection_type == VoteSession.SelectionType.MULTI

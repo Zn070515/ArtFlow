@@ -62,7 +62,7 @@
                 {% for s in singers %}
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" name="singers" value="{{ s.pk }}">
-                    {{ s.name }} — {{ s.song_name }}
+                    {{ s.name }} — {{ s.song_label }}
                 </label>
                 {% empty %}
                 <p class="text-gray-400 text-sm">暂无可选选手，请先审核通过选手</p>

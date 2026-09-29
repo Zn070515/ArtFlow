@@ -66,7 +66,7 @@
                 <tr class="hover:bg-gray-50 {% if s.is_advanced %}bg-green-50{% endif %}">
                     <td class="px-4 py-2 text-center font-mono text-xs {% if s.rank <= 3 %}font-bold text-brand{% endif %}">{{ s.rank }}</td>
                     <td class="px-4 py-2">{{ s.singer.name }}</td>
-                    <td class="px-4 py-2 text-gray-500 text-xs">{{ s.singer.song_name }}</td>
+                    <td class="px-4 py-2 text-gray-500 text-xs">{{ s.singer.song_label }}</td>
                     <td class="px-4 py-2 text-center font-mono text-xs">{{ s.average_score|floatformat:3 }}</td>
                     <td class="px-4 py-2 text-center">
                         {% if s.is_advanced %}<span class="text-xs text-green-700 bg-green-100 px-1.5 py-0.5 rounded">晋级</span>

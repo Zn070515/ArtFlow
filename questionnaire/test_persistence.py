@@ -150,14 +150,19 @@ class QuestionnaireResponseDraftTests(_ResponseBase):
         response.refresh_from_db()
         self.assertEqual(response.answers, {})
 
-    def test_a_submitted_response_is_no_longer_editable(self):
+    def test_submitting_does_not_by_itself_lock_the_response(self):
+        """SUBMITTED records that a participant completed a formal submission; it is not a
+        freeze on the row. Authority to write comes from the activity's phase and the staff
+        supplement grants, which this low-level writer is deliberately not the decider of —
+        making the status the gate locked people out of their own form the moment they
+        submitted, while leaving their file uploads open."""
         response = self._response()
         save_draft_answers(response, answers={"r1.song": "歌"})
         mark_submitted(response)
-        with self.assertRaises(Exception):
-            save_draft_answers(response, answers={"r1.song": "改"})
+        save_draft_answers(response, answers={"r1.song": "改"})
         response.refresh_from_db()
-        self.assertEqual(response.answers, {"r1.song": "歌"})
+        self.assertEqual(response.answers, {"r1.song": "改"})
+        self.assertEqual(response.status, QuestionnaireResponse.Status.SUBMITTED)
 
     def test_marking_submitted_stamps_the_time_and_status(self):
         response = self._response()

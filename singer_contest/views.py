@@ -12,11 +12,13 @@ from files.models import SubmissionFile
 from files.services import (
     large_video_upload_allowed,
     participant_uploadable_check_ids,
+    questionnaire_material_authority_active,
     reconcile_singer_material_checks,
     store_submission_file,
     submit_participant_material_for_check,
     validate_upload,
 )
+from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 
 from .models import SingerRegistration
 
@@ -29,7 +31,7 @@ def _apply_form_context(request, activities, *, errors=None, video_upload_allowe
         "form_data": request.POST if request.method == "POST" else {},
         "selected_activity_id": request.POST.get("activity_id", "")
         if request.method == "POST"
-        else "",
+        else request.GET.get("activity", ""),
     }
 
 
@@ -42,19 +44,50 @@ def apply_view(request):
     deliberately not deleted: it is on the *Contract* step of the Expand → Migrate → Switch
     → Contract sequence and retires only once a rehearsal has confirmed the new path. See
     ``docs/singer-questionnaire-workflow.md``.
+
+    A deep link naming an activity is resolved rather than rendered: a QR code has to land
+    on that activity's real entry, and if the activity's frozen ruleset carries a
+    questionnaire then this form is the wrong one.
     """
+    if request.method == "GET" and request.GET.get("activity"):
+        from questionnaire.views import register_entry
+
+        activity = get_object_or_404(
+            Activity.objects.filter(
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+            ),
+            pk=request.GET["activity"],
+        )
+        if not request.user.is_staff_or_admin:
+            activity = get_object_or_404(
+                Activity.objects.filter(
+                    pk=activity.pk, data_lifecycle=Activity.DataLifecycle.FORMAL
+                ),
+                pk=activity.pk,
+            )
+        if questionnaire_material_authority_active(activity):
+            return register_entry(request, activity.pk)
     activities = Activity.objects.filter(
         activity_type=Activity.Type.SINGER_CONTEST,
         phase=Activity.Phase.REGISTRATION_OPEN,
     )
     if not request.user.is_staff_or_admin:
         activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    if request.method != "POST":
+        activities = [
+            activity
+            for activity in activities
+            if not questionnaire_material_authority_active(activity)
+        ]
     # Only offer a performer-sourced video upload when the page shows a non-formal
     # activity. The public apply path filters to FORMAL activities, so participants
     # never see the field; staff previewing test data still can.
     video_upload_allowed = any(large_video_upload_allowed(activity) for activity in activities)
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
+        if questionnaire_material_authority_active(activity):
+            raise PermissionDenied("当前活动请使用已确认问卷报名入口。")
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.SUBMIT_REGISTRATION)
         uploads = [
@@ -184,7 +217,11 @@ def _participant_can_edit(registration):
 
 @login_required
 def my_registrations_view(request):
-    registrations = SingerRegistration.objects.filter(user=request.user).select_related("activity")
+    registrations = prime_questionnaire_answers(
+        SingerRegistration.objects.filter(user=request.user).select_related("activity")
+    )
+    for registration in registrations:
+        registration.song_label = generic_song_label(registration)
     return render(
         request,
         "singer_contest/my_registrations.html",
@@ -202,6 +239,8 @@ def my_registration_detail(request, pk):
     reg = get_object_or_404(
         SingerRegistration.objects.select_related("activity"), pk=pk, user=request.user
     )
+    if questionnaire_material_authority_active(reg.activity):
+        return redirect("questionnaire:form", activity_pk=reg.activity_id)
     errors = []
     if request.method == "POST":
         if "check_id" in request.POST or request.FILES.get("file"):
@@ -215,6 +254,7 @@ def my_registration_detail(request, pk):
         "singer_contest/my_submission.html",
         {
             "reg": reg,
+            "song_label": reg.song_name,
             "can_edit": _participant_can_edit(reg),
             "files": reg.files.all(),
             "checks": reg.material_checks.all(),

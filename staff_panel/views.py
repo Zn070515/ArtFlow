@@ -65,6 +65,7 @@ from exports.services import (
 from farewell_show.models import Program
 from files.models import MaterialCheck, MaterialRequirement, StaffNote, SubmissionFile
 from files.services import (
+    questionnaire_material_authority_active,
     reconcile_activity_material_checks,
     reconcile_program_material_checks,
     reconcile_singer_material_checks,
@@ -76,6 +77,11 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost, ResultRelease
 from public_portal.services import release_result_post, revoke_result_release
+from questionnaire.projection import (
+    generic_song_label,
+    prime_questionnaire_answers,
+    questionnaire_song_for_round,
+)
 from ruleset import editor as ruleset_editor
 from ruleset.compiler import compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -181,6 +187,14 @@ from staff_panel.forms import (
     SingerReviewForm,
     VoteSessionForm,
 )
+
+
+def _with_generic_song_labels(registrations):
+    """Materialize registrations with an explicit legacy/multi-round song label."""
+    rows = prime_questionnaire_answers(registrations)
+    for registration in rows:
+        registration.song_label = generic_song_label(registration)
+    return rows
 
 
 def _choices(enum_class):
@@ -629,6 +643,7 @@ def singer_registration_list(request):
     activity_id = request.GET.get("activity_id")
     if activity_id:
         registrations = registrations.filter(activity_id=activity_id)
+    registrations = _with_generic_song_labels(registrations)
     return render(
         request,
         "staff_panel/singer_registration_list.html",
@@ -704,6 +719,7 @@ def singer_registration_detail(request, pk):
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
     checks = reg.material_checks.all()
+    reg = _with_generic_song_labels([reg])[0]
     return render(
         request,
         "staff_panel/singer_registration_detail.html",
@@ -716,6 +732,9 @@ def singer_registration_detail(request, pk):
             "checks": checks,
             "check_statuses": _choices(MaterialCheck.Status),
             "file_purposes": _choices(SubmissionFile.Purpose),
+            "questionnaire_material_authority": questionnaire_material_authority_active(
+                reg.activity
+            ),
             "errors": errors,
         },
     )
@@ -876,6 +895,13 @@ def activity_material_requirements(request, activity_id):
                 messages.error(request, "检查项名称不能为空。")
             elif applies_to not in MaterialRequirement.AppliesTo.values:
                 messages.error(request, "无效的适用范围。")
+            elif (
+                applies_to == MaterialRequirement.AppliesTo.SINGER
+                and questionnaire_material_authority_active(locked_activity)
+            ):
+                messages.error(
+                    request, "当前活动的选手材料由已确认问卷管理，不能再配置旧式材料项。"
+                )
             else:
                 MaterialRequirement.objects.update_or_create(
                     activity=locked_activity,
@@ -891,6 +917,8 @@ def activity_material_requirements(request, activity_id):
                 messages.success(request, "材料检查项已保存。")
         return redirect("staff:activity_material_requirements", activity_id=activity.pk)
     requirements = MaterialRequirement.objects.filter(activity=activity)
+    questionnaire_authority = questionnaire_material_authority_active(activity)
+    questionnaire_version = _current_frozen_version(activity)
     return render(
         request,
         "staff_panel/material_requirements.html",
@@ -899,6 +927,8 @@ def activity_material_requirements(request, activity_id):
             "requirements": requirements,
             "applies_to_choices": _choices(MaterialRequirement.AppliesTo),
             "file_purposes": _choices(SubmissionFile.Purpose),
+            "questionnaire_material_authority": questionnaire_authority,
+            "questionnaire_version": questionnaire_version,
         },
     )
 
@@ -913,8 +943,14 @@ def activity_material_requirement_delete(request, activity_id, pk):
         requirement = MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).first()
         if requirement is not None:
             applies_to = requirement.applies_to
-            requirement.delete()
-            reconcile_activity_material_checks(locked_activity, applies_to)
+            if (
+                applies_to == MaterialRequirement.AppliesTo.SINGER
+                and questionnaire_material_authority_active(locked_activity)
+            ):
+                messages.error(request, "当前活动的选手材料由已确认问卷管理，不能删除旧式材料项。")
+            else:
+                requirement.delete()
+                reconcile_activity_material_checks(locked_activity, applies_to)
     messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 
@@ -965,6 +1001,7 @@ def export_registrations(request):
         )
     else:
         rows = SingerRegistration.objects.select_related("activity").filter(is_test_data=False)
+    rows = prime_questionnaire_answers(rows)
     row_count = 0
     for r in rows:
         ws.append(
@@ -975,7 +1012,7 @@ def export_registrations(request):
                 r.class_name,
                 r.phone,
                 r.wechat,
-                r.song_name,
+                generic_song_label(r),
                 "是" if r.is_original else "否",
                 r.get_pre_status_display(),
                 r.get_live_status_display(),
@@ -1269,7 +1306,7 @@ def round_score_entry(request, pk):
 
 
 def _round_grid_payload(contest_round: ContestRound) -> dict:
-    singers = list(_eligible_singers(contest_round))
+    singers = prime_questionnaire_answers(_eligible_singers(contest_round))
     judges = list(authoritative_panel_judges(contest_round))
     scores = {
         (s.singer_id, s.judge_id): str(s.score)
@@ -1279,7 +1316,7 @@ def _round_grid_payload(contest_round: ContestRound) -> dict:
         {
             "singer_id": singer.pk,
             "singer_name": singer.name,
-            "song": singer.song_name,
+            "song": questionnaire_song_for_round(singer, contest_round, default="未填写"),
             "cells": [
                 {
                     "judge_id": judge.pk,
@@ -1471,7 +1508,9 @@ def _audience_sets(activity, version):
     }
     sets = []
     for set_key, set_name in audience_keys.items():
-        singers = _audience_pool(activity, version, set_key)
+        singers = prime_questionnaire_answers(_audience_pool(activity, version, set_key))
+        for singer in singers:
+            singer.song_label = generic_song_label(singer)
         sets.append(
             {
                 "set_key": set_key,
@@ -1480,7 +1519,7 @@ def _audience_sets(activity, version):
                     {
                         "singer_id": singer.pk,
                         "singer_name": singer.name,
-                        "song": singer.song_name,
+                        "song": singer.song_label,
                         "score": stored.get((singer.pk, set_name), ""),
                     }
                     for singer in singers
@@ -1638,6 +1677,12 @@ def round_ranking(request, pk):
     summaries = ScoreSummary.objects.filter(
         round=contest_round, singer__round_entries__round=contest_round
     ).select_related("singer")
+    summary_rows = list(summaries)
+    singers = prime_questionnaire_answers(summary.singer for summary in summary_rows)
+    for singer in singers:
+        singer.song_label = questionnaire_song_for_round(
+            singer, contest_round, default="未填写"
+        )
     missing_cells = missing_score_cells(contest_round)
     return render(
         request,
@@ -1716,13 +1761,18 @@ def stage_result_detail(request, pk):
         latest_stage_result_queryset(),
         pk=pk,
     )
+    blocks = stage_decisions_by_blocks(stage)
+    decisions = [decision for block in blocks for decision in block["decisions"]]
+    prime_questionnaire_answers(decision.singer for decision in decisions)
+    for decision in decisions:
+        decision.song_label = generic_song_label(decision.singer)
     return render(
         request,
         "staff_panel/stage_result_detail.html",
         {
             "stage": stage,
             "activity": stage.activity,
-            "blocks": stage_decisions_by_blocks(stage),
+            "blocks": blocks,
             "can_unlock_stage_result": request.user.is_admin,
         },
     )
@@ -2255,11 +2305,11 @@ def award_create(request):
         return redirect("staff:award_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = scope_lifecycle(
+    singers = _with_generic_song_labels(scope_lifecycle(
         SingerRegistration.objects.select_related("activity").filter(
             pre_status=SingerRegistration.PreStatus.APPROVED
         )
-    )
+    ))
     return render(
         request,
         "staff_panel/award_form.html",
@@ -2297,11 +2347,11 @@ def vote_session_create(request):
                     "activities": Activity.objects.filter(
                         activity_type=Activity.Type.SINGER_CONTEST
                     ),
-                    "singers": scope_lifecycle(
+                    "singers": _with_generic_song_labels(scope_lifecycle(
                         SingerRegistration.objects.select_related("activity").filter(
                             pre_status=SingerRegistration.PreStatus.APPROVED
                         )
-                    ),
+                    )),
                     "selection_types": _choices(VoteSession.SelectionType),
                     "purposes": _choices(VoteSession.Purpose),
                 },
@@ -2348,11 +2398,11 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = scope_lifecycle(
+    singers = _with_generic_song_labels(scope_lifecycle(
         SingerRegistration.objects.select_related("activity").filter(
             pre_status=SingerRegistration.PreStatus.APPROVED
         )
-    )
+    ))
     return render(
         request,
         "staff_panel/vote_session_form.html",
@@ -2368,10 +2418,10 @@ def vote_session_create(request):
 @staff_required
 def vote_session_detail(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
-    options = vote_session.options.select_related("singer")
-    # Annotate with vote count
-
-    options = options.annotate(vote_count=Count("records"))
+    options = list(
+        vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
+    )
+    _with_generic_song_labels(option.singer for option in options)
     total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
     _, top = _popularity_top_tie(vote_session)
     # §9: a score-component session must be reconcilable by hand — valid ballot count,
@@ -2526,7 +2576,9 @@ def qr_generate(request, pk):
 def qr_image(request, pk, kind):
     activity = get_object_or_404(Activity, pk=pk)
     if kind == "registration":
-        path = f"{reverse('singer_contest:apply')}?activity={activity.pk}"
+        # The QR points at the activity's *real* entry, which resolves to the questionnaire
+        # or the legacy form depending on what that activity's frozen ruleset carries.
+        path = reverse("register:activity", args=[activity.pk])
     elif kind == "vote":
         vote_session = activity.vote_sessions.order_by("-created_at").first()
         if not vote_session:
@@ -2751,11 +2803,11 @@ def incident_create(request):
                 {
                     "error": _form_error(form),
                     "activities": Activity.objects.all(),
-                    "singers": scope_lifecycle(
+                    "singers": _with_generic_song_labels(scope_lifecycle(
                         SingerRegistration.objects.select_related("activity").filter(
                             pre_status=SingerRegistration.PreStatus.APPROVED
                         )
-                    ),
+                    )),
                     "event_types": _choices(IncidentRecord.EventType),
                 },
             )
@@ -2788,11 +2840,11 @@ def incident_create(request):
         )
         return redirect("staff:incident_list")
     activities = Activity.objects.all()
-    singers = scope_lifecycle(
+    singers = _with_generic_song_labels(scope_lifecycle(
         SingerRegistration.objects.select_related("activity").filter(
             pre_status=SingerRegistration.PreStatus.APPROVED
         )
-    )
+    ))
     return render(
         request,
         "staff_panel/incident_form.html",

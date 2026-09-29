@@ -65,8 +65,9 @@ python manage.py load_private_test_fixture ... --apply --reset-test-runtime
 - 四轮评分通过 Judge panel/grant/session/score authority 写入；每轮 5 名候选评委中 3 名
   实到，非实到评委不产生评分单元；
 - P1/P2 票通过合成票券签到、兑换和 `submit_ballot` 写入，再关闭并锁定投票；
-- 3 名代表选手 × 4 轮 × 5 用途的 60 个媒体文件通过 `store_submission_file` 写入。
-  当前模型只有“选手 + 用途 + version/current”语义，报告不得声称媒体拥有数据库轮次外键；
+- 3 名代表选手 × 4 轮 × 5 用途的 60 个媒体文件通过
+  `store_questionnaire_file` 写入。questionnaire 的 `question_key` 是身份，技术用途由
+  当前冻结问卷派生；轮次由 key 命名空间表达，不由浏览器或旧的 purpose-only 上传器传入；
 - 规则冻结后按 `stage1 → stage2 → stage3` 逐段解析、核定和 materialize，不直接创建 Award
   或伪造前三；TEST 结果不进入公开发布链。
 
@@ -78,3 +79,42 @@ expected/minimum/active 数、阶段 result version 和 input fingerprint、备�
 
 清理时只对专用 TEST activity 操作，并在清理前后核对 FORMAL 计数、媒体卷、PostgreSQL
 源卷和 `.env` 未变化。私测结果只能标记为内部 TEST rehearsal evidence。
+
+## 浏览器问卷门
+
+Compose integration gate 会在非生产容器中运行：
+
+```bash
+docker compose exec -T web python manage.py prepare_questionnaire_e2e \
+  --formal-fixture \
+  --output-file /tmp/artflow-questionnaire-e2e.json
+```
+
+`--formal-fixture` 是有意的显式开关：participant HTTP boundary 只允许访问 FORMAL
+活动，因此浏览器要验证真实选手入口，就必须使用一项完全合成、仅存在于临时 CI 数据库
+中的 FORMAL activity。命令在 `APP_ENV=production` 下始终拒绝执行；它不放宽 TEST
+活动的 participant 访问规则，也不改变正式活动的生命周期服务。
+
+`tests/e2e/questionnaire-flow.spec.ts` 覆盖真实浏览器的：登录 → canonical questionnaire
+entry → draft 自动保存 → question-key 文件上传 → 提交 → 报名开放期间修订。关闭后补交
+的服务/权限边界由 `questionnaire.test_form`、`questionnaire.test_entry` 和
+`files.test_questionnaire_uploads` 覆盖；Docker/PostgreSQL 运行证据仍必须以
+integration workflow 的实际结果为准。
+
+2026-09-29 本机在 `DEBUG=False`、重新 `collectstatic` 后使用 Chromium 完成该浏览器链；
+本机 Docker daemon 不可用，因此未将本地结果冒充 Compose/PostgreSQL 证据。
+
+## 本机真实包集成门
+
+真实 v3 包不进入仓库。需要运行包级 Django 集成门时，通过环境变量指向本机已校验的
+目录，然后执行：
+
+```powershell
+$env:ARTFLOW_PRIVATE_FIXTURE_ROOT = "C:\path\ArtFlow_2025院十佳_全量私测资料包_v3_test_ready"
+uv run python manage.py test common.test_private_test_loader.PrivateFixturePackageIntegrationTests
+```
+
+该测试断言 15 个报名、15 个问卷 response、60 个当前 question-key 文件、60 个媒体
+检查项、555 条 criterion score、280 张票券、310 张票及 `stage1/2/3` 三段 confirmed，
+并验证重复 apply 返回 `already_loaded_noop`。环境变量未设置时测试跳过，不会从 Git 或
+CI 工作区寻找私测原始数据。

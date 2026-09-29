@@ -80,13 +80,23 @@ def resolve_questions(
     answers,
     context,
     due_rounds: frozenset[str] | set[str] = frozenset(),
+    registration=None,
+    files=None,
 ) -> tuple[ResolvedQuestion, ...]:
     resolved = []
+    resolved_answers = dict(answers or {})
     for question in plan.questions:
-        visible = evaluate_condition(question.get("visible_if"), answers=answers, context=context)
+        visible = evaluate_condition(
+            question.get("visible_if"), answers=resolved_answers, context=context
+        )
         declared = bool(question.get("required")) or (
             question.get("required_if") is not None
-            and evaluate_condition(question["required_if"], answers=answers, context=context)
+            and evaluate_condition(
+                question["required_if"], answers=resolved_answers, context=context
+            )
+        )
+        resolved_answers[question["key"]] = resolve_question_value(
+            question, answers=answers, registration=registration, files=files
         )
         resolved.append(
             ResolvedQuestion(
@@ -117,9 +127,14 @@ def completion_summary(
     asked and cannot answer.
     """
     groups: dict[str, dict[str, int]] = {}
-    totals = {"answered": 0, "required": 0, "upcoming": 0}
+    totals = {"answered": 0, "required": 0, "required_answered": 0, "upcoming": 0}
     for resolved in resolve_questions(
-        plan, answers=answers, context=context, due_rounds=due_rounds
+        plan,
+        answers=answers,
+        context=context,
+        due_rounds=due_rounds,
+        registration=registration,
+        files=files,
     ):
         if not resolved.visible:
             continue
@@ -132,6 +147,8 @@ def completion_summary(
         if not is_blank(value):
             bucket["answered"] += 1
             totals["answered"] += 1
+            if resolved.required and resolved.due:
+                totals["required_answered"] += 1
         if resolved.required and resolved.due:
             bucket["required"] += 1
             totals["required"] += 1
@@ -153,7 +170,12 @@ def missing_required(
     """The question keys a submission still owes, in document order."""
     missing = []
     for resolved in resolve_questions(
-        plan, answers=answers, context=context, due_rounds=due_rounds
+        plan,
+        answers=answers,
+        context=context,
+        due_rounds=due_rounds,
+        registration=registration,
+        files=files,
     ):
         if not (resolved.visible and resolved.due and resolved.required):
             continue

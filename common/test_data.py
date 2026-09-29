@@ -210,6 +210,21 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
             is_open=False,
             is_locked=False,
         )
+    # A confirmed stage result consumes the round's raw score facts. Remove the disposable
+    # result projection before resetting rounds; otherwise the raw-fact guard correctly
+    # refuses the cleanup as an attempted mutation after confirmation.
+    with authority_write(TEST_DATA_CLEANUP):
+        Award.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
+    demo = StageResult.objects.filter(activity=locked_activity, is_test_data=True)
+    for stage in demo:
+        # A CONFIRMED test result is immutable during normal operation, so demote it only
+        # inside the explicit cleanup authority before deleting its computed children.
+        stage.status = StageResult.Status.HOLD
+        stage.confirmed_at = None
+        stage.confirmed_by = None
+        with authority_write(STAGE_RESULT_CONFIRM):
+            stage.save(update_fields=["status", "confirmed_at", "confirmed_by"])  # type: ignore[no-untyped-call]
+    StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     for contest_round in (
         ContestRound.objects.filter(
             activity=locked_activity,
@@ -236,25 +251,9 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         generated_document.delete()
         if stored_name:
             transaction.on_commit(partial(delete_storage_object, storage, stored_name))
-    with authority_write(TEST_DATA_CLEANUP):
-        Award.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
-    # StageResult.ruleset_version is PROTECT-ed by RulesetVersion — but a ContestRuleset
-    # is *config*, not runtime residue (§7, P0-8): a test rehearsal must leave its
-    # ruleset structure behind for the FORMAL successor. So results go first, then manual
-    # decisions, and the ContestRuleset (and its versions) is retained and later promoted.
-    # Singers are deleted later, and their stage decisions cascade once the results are
-    # gone. The StageResult/StageDecision querysets refuse to delete READY rows — but a
-    # test activity legitimately holds READY test results, so demote them first.
-    demo = StageResult.objects.filter(activity=locked_activity, is_test_data=True)
-    for stage in demo:
-        # A CONFIRMED test result is immutable, so demote via the bypass flag. Dropping a
-        # CONFIRMED row to HOLD must also clear the trail, per the confirmed_trail CHECK.
-        stage.status = StageResult.Status.HOLD
-        stage.confirmed_at = None
-        stage.confirmed_by = None
-        with authority_write(STAGE_RESULT_CONFIRM):
-            stage.save(update_fields=["status", "confirmed_at", "confirmed_by"])  # type: ignore[no-untyped-call]
-    StageResult.objects.filter(activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
+    # The ruleset structure is configuration and survives cleanup for a future formal
+    # successor. Runtime result projections were removed above, so round raw facts can now
+    # be deleted through their own guards.
     # ManualDecision FK's to the frozen RulesetVersion; delete before it is demoted.
     # The bulk queryset delete is the same ORM path as a bare save(), so it is guarded too;
     # the residue-cleanup service is an authorized mutator of ManualDecision rows.
