@@ -9,12 +9,40 @@
     {% if form.non_field_errors %}<div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{{ form.non_field_errors }}</div>{% endif %}
     <form method="post" class="mt-5 space-y-4">
         {% csrf_token %}
-        <label class="block text-sm font-medium text-gray-700">活动
-            <select name="activity_id" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                {% for activity in activities %}<option value="{{ activity.pk }}">{{ activity.title }}</option>{% endfor %}
+        <label for="id_activity_id" class="block text-sm font-medium text-gray-700">活动
+            <select id="id_activity_id" name="activity_id" required class="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for activity in activities %}<option value="{{ activity.pk }}"{% if selected_activity_id|stringformat:"s" == activity.pk|stringformat:"s" %} selected{% endif %}>{{ activity.title }}</option>{% endfor %}
             </select>
         </label>
-        {{ form.as_p }}
+        <div>
+            {{ form.name.label_tag }}{{ form.name }}
+            {% for error in form.name.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+            {{ form.description.label_tag }}{{ form.description }}
+            {% for error in form.description.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
+            <legend class="px-1 text-sm font-semibold text-gray-800">评分项</legend>
+            <p class="text-xs text-gray-500">填写名称和满分即可；空白行会忽略。总分由各评分项满分相加。</p>
+            {% for slot in criterion_slots %}
+            <div class="grid grid-cols-[minmax(0,1fr)_7rem] gap-2 items-start">
+                <div>
+                    {{ slot.name.label_tag }}{{ slot.name }}
+                    {% for error in slot.name.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+                </div>
+                <div>
+                    {{ slot.max_score.label_tag }}{{ slot.max_score }}
+                    {% for error in slot.max_score.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+                </div>
+                <div class="col-span-2">
+                    {{ slot.description.label_tag }}{{ slot.description }}
+                    {% for error in slot.description.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+            {% for error in form.non_field_errors %}<p class="text-sm text-red-700">{{ error }}</p>{% endfor %}
+        </fieldset>
         <button class="bg-brand text-white px-4 py-2 rounded text-sm">创建评分标准</button>
     </form>
 </div>

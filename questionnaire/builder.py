@@ -17,17 +17,19 @@ from typing import Iterable
 
 from django.core.exceptions import ValidationError
 
-from .schema import NOTICE_TYPE, parse_questionnaire
+from .schema import FILE_PURPOSES, NOTICE_TYPE, parse_questionnaire
 
-# The blocks the designer offers, with the shape each starts life with. File questions are
-# deliberately absent: a file question needs a registered purpose and a size ceiling, which
-# are choices rather than defaults, so the designer asks for them explicitly.
+# The blocks the designer offers, with the shape each starts life with. The defaults are
+# deliberately valid documents so adding a block never creates a save-then-fail dead end.
 DEFAULT_KEYS: dict[str, dict] = {
     "text": {"label": "单行填空"},
     "textarea": {"label": "多行填空"},
     "number": {"label": "数字"},
     "boolean": {"label": "开关"},
+    "single_choice": {"label": "单选"},
+    "multiple_choice": {"label": "多选"},
     "select": {"label": "下拉"},
+    "file": {"label": "文件上传"},
     "notice": {"label": "说明"},
 }
 
@@ -116,6 +118,15 @@ def default_question(question_type: str, *, key: str) -> dict:
             {"value": "option_1", "label": "选项一"},
             {"value": "option_2", "label": "选项二"},
         ]
+    elif question_type == "file":
+        question["file"] = {
+            "purpose": (
+                "accompaniment" if "accompaniment" in FILE_PURPOSES else sorted(FILE_PURPOSES)[0]
+            ),
+            "extensions": [".mp3", ".wav", ".mp4"],
+            "max_mb": 500,
+            "max_files": 1,
+        }
     return question
 
 
@@ -156,12 +167,14 @@ def update_question(
     description: str = "",
     round_key: str = "",
     required: bool = False,
+    options: list[dict[str, str]] | None = None,
+    file_config: dict[str, object] | None = None,
 ) -> dict:
     """Update the human-facing fields commonly changed by staff.
 
-    Advanced condition, option, and file-policy structures remain untouched here. They
-    have stronger schema contracts and stay available through the explicit advanced JSON
-    escape hatch rather than being silently rebuilt by a partial form.
+    Conditions remain untouched here. Choice options and file policy are accepted only when
+    the structured editor submits the complete field set; the final parser remains the
+    authority for uniqueness, registered purposes, extensions, and size ceilings.
     """
     document = _clone(questionnaire)
     _section_for_question, question, _index = _find(document, key)
@@ -181,6 +194,10 @@ def update_question(
         question.pop("round", None)
     if question.get("type") != NOTICE_TYPE:
         question["required"] = bool(required)
+    if question.get("type") in _CHOICE_DEFAULTS and options is not None:
+        question["options"] = options
+    if question.get("type") == "file" and file_config is not None:
+        question["file"] = file_config
     return parse_questionnaire(document)
 
 
@@ -212,16 +229,30 @@ def _dependents(questionnaire: dict, key: str) -> set[str]:
 def move_question(questionnaire: dict, *, key: str, delta: int) -> dict:
     """Reorder a block within its own section.
 
-    The result is re-validated, so a move that would put a question above the question its
-    condition names is refused here — forward-only is what makes cyclic visibility
-    impossible, and the editor cannot let the operator build the cycle and blame the
-    compiler for it.
+    Forward-only conditions remain the schema contract.  Instead of swapping one adjacent
+    pair and handing a schema exception to the operator, try each destination in the requested
+    direction and use the nearest one that still validates.  A direction with no legal
+    destination is a no-op; the view can explain that the question is already at its legal
+    boundary without changing the stored document.
     """
     document = _clone(questionnaire)
     section, _question, index = _find(document, key)
-    target = index + delta
-    if target < 0 or target >= len(section["questions"]):
+    if delta == 0:
         return parse_questionnaire(document)
     questions = section["questions"]
-    questions[index], questions[target] = questions[target], questions[index]
+    targets = (
+        range(index - 1, -1, -1)
+        if delta < 0
+        else range(index + 1, len(questions))
+    )
+    for target in targets:
+        candidate = _clone(document)
+        candidate_section, _candidate_question, candidate_index = _find(candidate, key)
+        candidate_questions = candidate_section["questions"]
+        item = candidate_questions.pop(candidate_index)
+        candidate_questions.insert(target, item)
+        try:
+            return parse_questionnaire(candidate)
+        except ValidationError:
+            continue
     return parse_questionnaire(document)

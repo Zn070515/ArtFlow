@@ -14,21 +14,21 @@
         </div>
         <div class="flex gap-2">
             {% if preparation_required %}
-            <form method="post" action="{% url 'staff:round_prepare' round.pk %}">
+            <form method="post" action="{% url 'staff:round_prepare' round.pk %}" onsubmit="return confirm('确认准备本轮？准备后会冻结出场/分组快照。');">
                 {% csrf_token %}
                 <button type="submit" class="staff-touch-target text-xs text-brand border border-brand rounded hover:bg-brand-light hover:text-white">准备轮次</button>
             </form>
             {% elif round.is_locked %}
             <span class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded font-medium">已锁定</span>
             {% if user.is_admin %}
-            <form method="post" action="{% url 'staff:round_unlock' round.pk %}" class="flex gap-1">
+            <form method="post" action="{% url 'staff:round_unlock' round.pk %}" class="flex gap-1" onsubmit="return confirm('确认解锁本轮？必须填写原因，原始评分将重新进入可修正状态。');">
                 {% csrf_token %}
                 <input name="note" placeholder="解锁原因（选填）" class="text-xs border border-red-200 rounded px-2 py-1">
                 <button type="submit" class="staff-touch-target text-xs text-red-600 bg-red-50 rounded hover:bg-red-100">解锁</button>
             </form>
             {% endif %}
             {% else %}
-            <form method="post" action="{% url 'staff:round_lock' round.pk %}">
+            <form method="post" action="{% url 'staff:round_lock' round.pk %}" onsubmit="return confirm('确认锁定本轮结果？锁定后评分不能直接修改。');">
                 {% csrf_token %}
                 <button type="submit" class="staff-touch-target text-xs text-orange-600 border border-orange-300 rounded hover:bg-orange-50">锁定结果</button>
             </form>
@@ -80,7 +80,7 @@
         <div class="border-t border-yellow-200 bg-yellow-50 p-6">
             <h2 class="font-semibold text-yellow-900 mb-1">人工核定晋级名单</h2>
             <p class="text-sm text-yellow-800 mb-4">晋级线存在同分，无法自动生成后续轮次。请勾选最终晋级的选手后提交。</p>
-            <form method="post" action="{% url 'staff:round_finalize_advancement' round.pk %}">
+            <form method="post" action="{% url 'staff:round_finalize_advancement' round.pk %}" onsubmit="return confirm('确认核定晋级名单？该名单将作为后续赛制输入。');">
                 {% csrf_token %}
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                     {% for s in summaries %}

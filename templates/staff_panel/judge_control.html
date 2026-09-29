@@ -11,7 +11,7 @@
             <p class="text-sm text-gray-500 mt-1">{{ round.activity.title }}</p>
         </div>
         <span class="inline-flex w-fit rounded-full px-3 py-1 text-sm {% if policy_state == 'HOLD' %}bg-amber-100 text-amber-800{% elif policy_state == 'ACTIVE' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-700{% endif %}">
-            {{ policy_state }}
+            {{ policy_state_label }}
         </span>
     </div>
 

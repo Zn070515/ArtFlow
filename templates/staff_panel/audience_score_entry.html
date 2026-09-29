@@ -32,7 +32,8 @@
             <span class="text-xs text-gray-500">赛段 <span class="font-mono">{{ set.stage_key }}</span></span>
         </div>
         {% if set.rows %}
-        <table class="w-full text-sm">
+        <div class="overflow-x-auto rounded border border-gray-200">
+        <table class="min-w-[640px] w-full text-sm">
             <thead>
                 <tr class="bg-gray-50 text-gray-600">
                     <th class="text-left px-3 py-2 font-medium w-10">#</th>
@@ -59,6 +60,7 @@
                 {% endfor %}
             </tbody>
         </table>
+        </div>
         {% else %}
         <div class="px-4 py-6 text-center text-gray-500 text-sm">该赛段暂无选手。</div>
         {% endif %}

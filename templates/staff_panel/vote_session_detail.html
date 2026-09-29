@@ -50,7 +50,7 @@
         <div class="flex gap-2 mt-4">
             {% if not vote_session.is_locked %}
             {% if vote_session.is_open %}
-            <form method="post" action="{% url 'staff:vote_session_close' vote_session.pk %}">
+            <form method="post" action="{% url 'staff:vote_session_close' vote_session.pk %}" onsubmit="return confirm('确认关闭投票？关闭后观众不能继续提交。');">
                 {% csrf_token %}
                 <button type="submit" class="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 px-3 py-1.5 rounded transition-colors">关闭投票</button>
             </form>
@@ -60,12 +60,12 @@
                 <button type="submit" class="text-xs bg-green-100 text-green-700 hover:bg-green-200 px-3 py-1.5 rounded transition-colors">开启投票</button>
             </form>
             {% endif %}
-            <form method="post" action="{% url 'staff:vote_session_lock' vote_session.pk %}">
+            <form method="post" action="{% url 'staff:vote_session_lock' vote_session.pk %}" onsubmit="return confirm('确认锁定投票结果？锁定后原始票据不能直接修改。');">
                 {% csrf_token %}
                 <button type="submit" class="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded hover:bg-gray-200 transition-colors">锁定结果</button>
             </form>
             {% elif request.user.is_admin %}
-            <form method="post" action="{% url 'staff:vote_session_unlock' vote_session.pk %}" class="flex gap-2">
+            <form method="post" action="{% url 'staff:vote_session_unlock' vote_session.pk %}" class="flex gap-2" onsubmit="return confirm('确认解锁投票结果？必须填写原因。');">
                 {% csrf_token %}
                 <input type="text" name="note" placeholder="解锁原因（选填）" class="text-xs border border-gray-300 rounded px-2 py-1">
                 <button type="submit" class="text-xs border border-red-300 text-red-700 px-3 py-1.5 rounded hover:bg-red-50 transition-colors">解锁结果</button>

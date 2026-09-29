@@ -44,7 +44,7 @@
                             {% with release=post.result_releases.all|first %}
                                 {% if release and release.status == "active" %}
                                 <span class="text-green-700">已公示 v{{ release.result_version }}</span>
-                                <form method="post" action="{% url 'staff:result_release_revoke' post.pk %}" class="mt-2 space-y-1">
+                                <form method="post" action="{% url 'staff:result_release_revoke' post.pk %}" class="mt-2 space-y-1" onsubmit="return confirm('确认撤销结果公示？公网结果将立即隐藏。');">
                                     {% csrf_token %}
                                     <input type="text" name="note" required maxlength="1000" placeholder="撤销原因" class="w-40 border border-gray-300 rounded px-2 py-1 text-xs">
                                     <button type="submit" class="text-red-700 hover:underline">撤销</button>

@@ -11,35 +11,35 @@
     <form method="post" class="space-y-4">
         {% csrf_token %}
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">活动</label>
-            <select name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
+            <label for="id_activity_id" class="block text-sm font-medium text-gray-700 mb-1">活动</label>
+            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for a in activities %}<option value="{{ a.pk }}"{% if selected_activity_id|stringformat:"s" == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>{% endfor %}
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">发生时间</label>
-            <input type="datetime-local" name="occurred_at" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <label for="id_occurred_at" class="block text-sm font-medium text-gray-700 mb-1">发生时间</label>
+            <input id="id_occurred_at" type="datetime-local" name="occurred_at" value="{{ form_data.occurred_at|default:"" }}" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">事件类型</label>
-            <select name="event_type" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                {% for val, label in event_types %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+            <label for="id_event_type" class="block text-sm font-medium text-gray-700 mb-1">事件类型</label>
+            <select id="id_event_type" name="event_type" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for val, label in event_types %}<option value="{{ val }}"{% if form_data.event_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">涉及选手</label>
-            <select name="singer_id" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <label for="id_singer_id" class="block text-sm font-medium text-gray-700 mb-1">涉及选手</label>
+            <select id="id_singer_id" name="singer_id" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
                 <option value="">—— 无 ——</option>
-                {% for s in singers %}<option value="{{ s.pk }}">{{ s.name }} — {{ s.song_label }}</option>{% endfor %}
+                {% for s in singers %}<option value="{{ s.pk }}"{% if selected_singer_id|stringformat:"s" == s.pk|stringformat:"s" %} selected{% endif %}>{{ s.name }} — {{ s.song_label }}</option>{% endfor %}
             </select>
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">处理结果</label>
-            <input type="text" name="resolution" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <label for="id_resolution" class="block text-sm font-medium text-gray-700 mb-1">处理结果</label>
+            <input id="id_resolution" type="text" name="resolution" value="{{ form_data.resolution|default:"" }}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
         </div>
         <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">备注</label>
-            <textarea name="remark" rows="2" class="w-full border border-gray-300 rounded px-3 py-2 text-sm"></textarea>
+            <label for="id_remark" class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+            <textarea id="id_remark" name="remark" rows="2" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ form_data.remark|default:"" }}</textarea>
         </div>
         <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">添加</button>
     </form>

@@ -141,6 +141,7 @@ class BuilderViewTests(_BuilderBase):
         return json.loads(self.version.definition)["questionnaire"]
 
     def _post(self, **payload):
+        self.version.refresh_from_db()
         payload.setdefault("base_content_hash", self.version.content_hash)
         return self.client.post(self.designer_url(self.version), payload)
 
@@ -171,6 +172,44 @@ class BuilderViewTests(_BuilderBase):
         )
         self.assertEqual(question["label"], "第一轮演唱曲目")
         self.assertEqual(question["description"], "填写正式演唱的歌曲名称。")
+
+    def test_editing_choice_options_uses_structured_fields(self):
+        self._post(action="add", section_key="identity", question_type="single_choice")
+        key = self._stored_questionnaire()["pages"][0]["sections"][0]["questions"][-1]["key"]
+        self._post(
+            action="edit",
+            key=key,
+            label="曲目类型",
+            option_value=["original", "cover"],
+            option_label=["原创", "翻唱"],
+        )
+        question = self._stored_questionnaire()["pages"][0]["sections"][0]["questions"][-1]
+        self.assertEqual(
+            question["options"],
+            [{"value": "original", "label": "原创"}, {"value": "cover", "label": "翻唱"}],
+        )
+
+    def test_editing_file_policy_uses_structured_fields(self):
+        self._post(action="add", section_key="identity", question_type="file")
+        key = self._stored_questionnaire()["pages"][0]["sections"][0]["questions"][-1]["key"]
+        self._post(
+            action="edit",
+            key=key,
+            label="伴奏文件",
+            file_purpose="accompaniment",
+            file_extensions=".mp3, .wav",
+            file_max_mb="120",
+        )
+        question = self._stored_questionnaire()["pages"][0]["sections"][0]["questions"][-1]
+        self.assertEqual(
+            question["file"],
+            {
+                "purpose": "accompaniment",
+                "extensions": [".mp3", ".wav"],
+                "max_mb": 120,
+                "max_files": 1,
+            },
+        )
 
     def test_adding_a_question_writes_the_questionnaire_section(self):
         self._post(action="add", section_key="identity", question_type="textarea")

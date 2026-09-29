@@ -329,6 +329,72 @@ class StaffPanelSmokeTests(TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
+    def test_dashboard_exposes_operator_workflows(self):
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:dashboard"))
+        self.assertContains(response, reverse("staff:rubric_create"))
+        self.assertContains(response, reverse("staff:vote_session_list"))
+        self.assertContains(response, reverse("staff:user_list"))
+
+    def test_round_list_exposes_judge_and_audience_controls(self):
+        contest_round = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="Round 1",
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:round_list"))
+        self.assertContains(response, reverse("staff:judge_control", args=[contest_round.pk]))
+        self.assertContains(
+            response,
+            reverse("staff:audience_score_entry", args=[self.singer_activity.pk]),
+        )
+
+    def test_round_create_filters_rubrics_by_selected_activity(self):
+        other_activity = _create_activity(
+            title="Other Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        ScoringRubric.objects.create(
+            activity=self.singer_activity, name="Singer rubric", is_test_data=False
+        )
+        ScoringRubric.objects.create(
+            activity=other_activity, name="Other rubric", is_test_data=False
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:round_create"), {"activity_id": self.singer_activity.pk}
+        )
+        self.assertContains(response, "Singer rubric")
+        self.assertNotContains(response, "Other rubric")
+
+    def test_vote_session_create_filters_singers_by_selected_activity(self):
+        other_activity = _create_activity(
+            title="Other Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        other_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=self.participant,
+            name="Other Singer",
+            student_id="20260099",
+            college="Music",
+            class_name="Class B",
+            phone="13800000099",
+            song_name="Other Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:vote_session_create"), {"activity_id": self.singer_activity.pk}
+        )
+        self.assertNotContains(response, f'name="singers" value="{other_singer.pk}"')
+
     def test_admin_can_create_activity_from_staff_panel(self):
         login_admin(self.client, self.admin)
         response = self.client.post(
@@ -1126,15 +1192,15 @@ class StaffPanelSmokeTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
         self.client.force_login(self.staff)
-        response = self.client.post(
-            reverse("staff:award_create"),
-            {
-                "activity_id": self.singer_activity.pk,
-                "singer_id": registration.pk,
-                "name": "Top Singer",
-            },
-        )
-        self.assertEqual(response.status_code, 403)
+        from singer_contest.services import create_manual_award
+
+        with self.assertRaises(ValidationError):
+            create_manual_award(
+                self.singer_activity,
+                singer=registration,
+                name="Top Singer",
+                operator=self.staff,
+            )
         self.assertFalse(Award.objects.exists())
 
     def test_activity_unlock_does_not_unlock_locked_round(self):
@@ -2728,16 +2794,15 @@ class StaffPanelSmokeTests(TestCase):
         )
         login_admin(self.client, self.admin)
 
-        response = self.client.post(
-            reverse("staff:award_create"),
-            {
-                "activity_id": other_activity.pk,
-                "singer_id": foreign_singer.pk,
-                "name": "Invalid Award",
-            },
-        )
+        from singer_contest.services import create_manual_award
 
-        self.assertEqual(response.status_code, 302)
+        with self.assertRaises(ValidationError):
+            create_manual_award(
+                other_activity,
+                singer=foreign_singer,
+                name="Invalid Award",
+                operator=self.admin,
+            )
         self.assertFalse(Award.objects.filter(name="Invalid Award").exists())
 
     def test_vote_session_creation_rejects_singer_from_another_activity(self):
@@ -3100,23 +3165,22 @@ class RuntimeLifecycleMatrixTests(TestCase):
 
     def test_candidate_pool_binds_each_singer_to_its_own_activity(self):
         for path in (
-            reverse("staff:award_create"),
             reverse("staff:vote_session_create"),
             reverse("staff:incident_create"),
         ):
-            if path == reverse("staff:award_create"):
-                login_admin(self.client, self.admin)
-            else:
-                self.client.force_login(self.staff)
+            self.client.force_login(self.staff)
             with self.subTest(path=path):
-                response = self.client.get(path)
+                response = self.client.get(
+                    path,
+                    {"activity_id": self.test_activity.pk},
+                )
                 self.assertEqual(response.status_code, 200)
                 self.assertContains(response, self.test_singer.name)
-                self.assertContains(response, self.formal_singer.name)
+                self.assertNotContains(response, self.formal_singer.name)
                 self.assertNotContains(response, self.test_mismatch.name)
                 self.assertNotContains(response, self.formal_mismatch.name)
 
-    def test_award_create_rejects_wrong_lifecycle_singer(self):
+    def test_direct_manual_award_is_rejected_for_any_lifecycle_singer(self):
         activity = _create_activity(
             title="Award Test",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -3127,28 +3191,23 @@ class RuntimeLifecycleMatrixTests(TestCase):
         mismatched = self._singer(activity, "Award Mismatch", False, "20260202")
         login_admin(self.client, self.admin)
 
-        rejected = self.client.post(
-            reverse("staff:award_create"),
-            {"activity_id": activity.pk, "singer_id": mismatched.pk, "name": "Bad Award"},
-        )
-        self.assertEqual(rejected.status_code, 302)
-        self.assertFalse(Award.objects.filter(name="Bad Award").exists())
+        from singer_contest.services import create_manual_award
 
-        accepted = self.client.post(
-            reverse("staff:award_create"),
-            {"activity_id": activity.pk, "singer_id": matching.pk, "name": "Good Award"},
-        )
-        self.assertEqual(accepted.status_code, 302)
-        award = Award.objects.get(name="Good Award")
-        self.assertTrue(award.is_test_data)
-        self.assertEqual(award.source_node, "MANUAL")
-        self.assertTrue(
-            AuditLog.objects.filter(
+        with self.assertRaises(ValidationError):
+            create_manual_award(
+                activity,
+                singer=matching,
+                name="Good Award",
                 operator=self.admin,
-                target=f"Award:{award.pk}",
-                new_value__contains='"source": "MANUAL"',
-            ).exists()
-        )
+            )
+        with self.assertRaises(ValidationError):
+            create_manual_award(
+                activity,
+                singer=mismatched,
+                name="Bad Award",
+                operator=self.admin,
+            )
+        self.assertFalse(Award.objects.filter(name__in=["Good Award", "Bad Award"]).exists())
 
     def test_vote_session_create_rejects_wrong_lifecycle_singer(self):
         activity = _create_activity(
@@ -3371,6 +3430,52 @@ class ActivityPhaseEditTests(TestCase):
                 new_value=Activity.Phase.REGISTRATION_OPEN,
             ).exists()
         )
+
+    def test_activity_edit_offers_only_current_and_legal_successor_phases(self):
+        activity = _create_activity(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:activity_edit", args=[activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="registration_open"')
+        self.assertContains(response, 'value="registration_closed"')
+        self.assertNotContains(response, 'value="results_published"')
+        self.assertNotContains(response, '<select name="activity_type"')
+
+    def test_activity_type_change_is_rejected_by_staff_edit(self):
+        activity = _create_activity(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.DRAFT,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Contest",
+                "activity_type": Activity.Type.FAREWELL_SHOW,
+                "phase": Activity.Phase.DRAFT,
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        activity.refresh_from_db()
+        self.assertEqual(activity.activity_type, Activity.Type.SINGER_CONTEST)
+
+    def test_archived_activity_list_exposes_only_unarchive(self):
+        activity = _create_activity(
+            title="Archived Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_locked=True,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:activity_list"))
+        self.assertContains(response, reverse("staff:activity_unarchive", args=[activity.pk]))
+        self.assertNotContains(response, reverse("staff:activity_edit", args=[activity.pk]))
 
     def test_admin_edit_rejects_backward_phase_transition(self):
         activity = _create_activity(
@@ -6505,6 +6610,31 @@ class RulesetEditorTests(TestCase):
         self.assertIn("assess_r1", aggregate["components"][0]["options"])
         self.assertIn("assess_r2", aggregate["components"][1]["options"])
 
+    def test_editor_uses_activity_binding_keys_for_round_and_vote_sources(self):
+        from staff_panel.views import _node_field_entries
+
+        nodes = [
+            {
+                "key": "assess_r1",
+                "type": "ASSESS",
+                "source": "entry",
+                "round": "r1",
+                "vote_source": "audience",
+            }
+        ]
+        fields = _node_field_entries(
+            nodes[0],
+            0,
+            nodes,
+            binding_options={"round": ["r1", "r2"], "vote_source": ["audience"]},
+        )
+
+        round_field = next(field for field in fields if field["name"] == "node_0_round")
+        vote_field = next(field for field in fields if field["name"] == "node_0_vote_source")
+        self.assertEqual(round_field["kind"], "select")
+        self.assertEqual(vote_field["kind"], "select")
+        self.assertEqual(vote_field["options"], ["audience"])
+
     def test_editor_distinguishes_group_field_from_group_map_reference(self):
         from staff_panel.views import _node_field_entries
 
@@ -6540,6 +6670,13 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, "ruleset-node-badge")
         self.assertNotContains(response, "bg-brand border border-brand/20 text-brand")
         self.assertContains(response, "staff-touch-target")
+
+    def test_editor_displays_business_labels_for_enum_fields(self):
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.assertContains(response, "百分制")
+        self.assertContains(response, "平均分")
+        self.assertNotContains(response, ">hundred<")
+        self.assertNotContains(response, ">mean<")
 
     def test_editor_delete_node_removes(self):
         before = len(self._nodes())
@@ -6651,7 +6788,7 @@ class RulesetEditorTests(TestCase):
             {"stage2": [{"label": "赛段专属", "outcome_codes": ["advanced"]}]},
         )
 
-    def test_ruleset_editor_bind_form_prerenders_json(self):
+    def test_ruleset_editor_bind_form_prerenders_controlled_choices(self):
         from singer_contest.models import ContestRound
 
         round_ = _create_round(
@@ -6665,9 +6802,11 @@ class RulesetEditorTests(TestCase):
         self.ruleset.save()
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
         self.assertEqual(response.status_code, 200)
-        # The bind form must pre-render maps as JSON (autoescaped to &quot;) so a later
-        # POST of the same page round-trips through json.loads rather than a dict repr.
-        self.assertContains(response, "{&quot;r1&quot;: %d}" % round_.pk)
+        # The operator-facing bind form uses the activity's real round as a select option;
+        # keys remain hidden machine values and are never typed as JSON by staff.
+        self.assertContains(response, 'name="round_binding_key"')
+        self.assertContains(response, 'value="r1"')
+        self.assertContains(response, f'<option value="{round_.pk}" selected>')
 
     def test_ruleset_bind_bad_json_errors_without_mutation(self):
         response = self.client.post(
@@ -6884,7 +7023,8 @@ class JudgeControlHTTPTests(TestCase):
         self.client.raise_request_exception = True
         response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "PREPARE_REQUIRED")
+        self.assertNotContains(response, "PREPARE_REQUIRED")
+        self.assertContains(response, "待准备评委组")
         self.assertContains(response, "准备评委组")
 
     def test_prepare_requires_minimum_attendance_and_creates_authoritative_context(self):
@@ -6894,7 +7034,7 @@ class JudgeControlHTTPTests(TestCase):
         )
         self.assertEqual(insufficient.status_code, 200)
         self.assertContains(insufficient, "INSUFFICIENT_JUDGES")
-        self.assertContains(insufficient, "INSUFFICIENT_JUDGES / HOLD")
+        self.assertContains(insufficient, "评委组人数不足，暂不可开始")
 
         prepared = self._prepare_panel()
         self.assertRedirects(

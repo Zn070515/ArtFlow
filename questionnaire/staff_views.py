@@ -34,7 +34,7 @@ from .builder import (
 )
 from .compiler import compile_questionnaire
 from .runtime import completion_summary, resolve_question_value, resolve_questions
-from .schema import parse_questionnaire
+from .schema import FILE_PURPOSES, parse_questionnaire
 
 ACTION_LABELS = {
     "add": "新增题目",
@@ -98,6 +98,10 @@ def _bound_rounds(version: RulesetVersion) -> frozenset[str]:
 
 
 def _row(question, resolved, value) -> dict:
+    options = question.get("options", [])
+    option_slots = list(options) + [
+        {"value": "", "label": ""} for _ in range(max(0, 6 - len(options)))
+    ]
     return {
         "key": question["key"],
         "label": question["label"],
@@ -106,7 +110,8 @@ def _row(question, resolved, value) -> dict:
         "round": question.get("round") or "",
         "binding": question.get("binding") or "",
         "description": question.get("description", ""),
-        "options": question.get("options", []),
+        "options": options,
+        "option_slots": option_slots,
         "file": question.get("file"),
         "visible": resolved.visible,
         "due": resolved.due,
@@ -204,6 +209,42 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
     if action == "delete":
         return delete_question(questionnaire, key=post.get("key") or "")
     if action == "edit":
+        options = None
+        if post.get("option_value") is not None:
+            values = post.getlist("option_value")
+            labels = post.getlist("option_label")
+            if len(values) != len(labels):
+                raise ValidationError("选择题选项不完整，请同时填写选项值和显示名称。")
+            options = []
+            for value, label in zip(values, labels, strict=True):
+                value = value.strip()
+                label = label.strip()
+                if not value and not label:
+                    continue
+                if not value or not label:
+                    raise ValidationError(
+                        "选择题每一行都要同时填写选项值和显示名称，空白行可以留空。"
+                    )
+                options.append({"value": value, "label": label})
+            if not options:
+                raise ValidationError("选择题至少需要保留一个选项。")
+        file_config = None
+        if post.get("file_purpose") is not None:
+            extensions = [
+                extension.strip().lower()
+                for extension in (post.get("file_extensions") or "").split(",")
+                if extension.strip()
+            ]
+            try:
+                max_mb = int(post.get("file_max_mb") or "")
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("文件大小上限必须是正整数 MB。") from exc
+            file_config = {
+                "purpose": post.get("file_purpose") or "",
+                "extensions": extensions,
+                "max_mb": max_mb,
+                "max_files": 1,
+            }
         return update_question(
             questionnaire,
             key=post.get("key") or "",
@@ -211,6 +252,8 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
             description=post.get("description") or "",
             round_key=post.get("round") or "",
             required=post.get("required") == "1",
+            options=options,
+            file_config=file_config,
         )
     if action in {"move_up", "move_down"}:
         delta = -1 if action == "move_up" else 1
@@ -237,9 +280,14 @@ def builder_view(request: HttpRequest, pk: int):
             base_content_hash = request.POST.get("base_content_hash") or ""
             if not base_content_hash:
                 raise ValidationError("问卷已更新，请刷新后再操作。")
-            questionnaire = _apply_action(
-                parse_questionnaire(_current_questionnaire(version)), action, request.POST
-            )
+            before = parse_questionnaire(_current_questionnaire(version))
+            questionnaire = _apply_action(before, action, request.POST)
+            if action in {"move_up", "move_down"} and questionnaire == before:
+                direction = "上" if action == "move_up" else "下"
+                messages.warning(
+                    request, f"这道题不能再向{direction}移动：条件依赖必须保持在前面。"
+                )
+                return redirect("staff:ruleset_questionnaire", pk=version.pk)
             update_ruleset_definition_section(
                 version,
                 section="questionnaire",
@@ -256,6 +304,30 @@ def builder_view(request: HttpRequest, pk: int):
     questionnaire = _current_questionnaire(version)
     plan = compile_questionnaire(questionnaire)
     rows = _rows(plan, answers={}, context={}, due_rounds=_bound_rounds(version))
+    round_choices = [("", "不限定轮次")]
+    from singer_contest.models import ContestRound
+
+    round_keys = version.ruleset.round_keys or {}
+    rounds = ContestRound.objects.filter(activity=version.ruleset.activity).order_by(
+        "sequence", "pk"
+    )
+    rounds_by_id = {str(contest_round.pk): contest_round for contest_round in rounds}
+    candidate_rounds = list(round_keys.items())
+    known_keys = {key for key, _round_id in candidate_rounds}
+    candidate_rounds.extend(
+        (
+            f"r{contest_round.sequence}",
+            contest_round.pk,
+        )
+        for contest_round in rounds
+        if contest_round.sequence and f"r{contest_round.sequence}" not in known_keys
+    )
+    for key, round_id in candidate_rounds:
+        contest_round = rounds_by_id.get(str(round_id))
+        if contest_round is None:
+            continue
+        label = contest_round.name or contest_round.get_round_type_display()
+        round_choices.append((key, f"{key} · {label}"))
     return render(
         request,
         "staff_panel/questionnaire_builder.html",
@@ -279,8 +351,11 @@ def builder_view(request: HttpRequest, pk: int):
                 ("single_choice", "单选"),
                 ("multiple_choice", "多选"),
                 ("select", "下拉"),
+                ("file", "文件上传"),
                 ("notice", "说明"),
             ],
+            "file_purposes": sorted(FILE_PURPOSES),
+            "round_choices": round_choices,
         },
     )
 

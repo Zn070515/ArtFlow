@@ -3,6 +3,7 @@ import json
 from base64 import b64encode
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from typing import cast
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -39,6 +40,7 @@ from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import (
     lock_activity_for_action,
+    phase_choices_for_activity,
     transition_activity_phase,
     unarchive_activity,
 )
@@ -48,6 +50,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Prefetch, QuerySet
 from django.http import Http404, HttpResponse, JsonResponse
+from django.http.request import QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -138,7 +141,6 @@ from singer_contest.services import (
     authoritative_panel_judges,
     build_result_closure,
     confirm_stage_result,
-    create_manual_award,
     create_scoring_rubric,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
@@ -158,7 +160,7 @@ from singer_contest.services import (
     unlock_round,
     unlock_stage_result,
 )
-from voting.models import VoteOption, VoteRecord, VoteSession
+from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
 from voting.services import (
     close_vote_session,
     lock_vote_session,
@@ -272,6 +274,7 @@ def activity_create(request):
                     "activity_types": _choices(Activity.Type),
                     "phases": CREATE_PHASE_CHOICES,
                     "data": request.POST,
+                    "form_data_present": True,
                 },
             )
         # A new activity always starts as a draft.  The create form deliberately does
@@ -297,6 +300,7 @@ def activity_create(request):
             "activity_types": _choices(Activity.Type),
             "phases": CREATE_PHASE_CHOICES,
             "data": {},
+            "form_data_present": False,
         },
     )
 
@@ -306,6 +310,9 @@ def activity_create(request):
 def activity_edit(request, pk):
     _require_admin(request.user)
     activity = get_object_or_404(Activity, pk=pk)
+    if activity.phase == Activity.Phase.ARCHIVED and request.method == "GET":
+        messages.info(request, "已归档活动为只读状态，请从导出中心执行解归档后再编辑。")
+        return redirect("staff:export_center")
     if request.method == "POST":
         activity = lock_activity_for_action(activity)
         _ensure_activity_mutable(activity)
@@ -318,8 +325,9 @@ def activity_edit(request, pk):
                     "error": _form_error(form),
                     "activity": activity,
                     "activity_types": _choices(Activity.Type),
-                    "phases": _choices(Activity.Phase),
+                    "phases": phase_choices_for_activity(activity),
                     "data": request.POST,
+                    "form_data_present": True,
                 },
             )
         data = dict(form.cleaned_data)
@@ -330,7 +338,23 @@ def activity_edit(request, pk):
             setattr(activity, key, value)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
-        activity.save()
+        try:
+            activity.save()
+        except ValidationError as error:
+            form.add_error(None, domain_error_messages(error))
+            return render(
+                request,
+                "staff_panel/activity_form.html",
+                {
+                    "error": _form_error(form),
+                    "activity": activity,
+                    "activity_types": _choices(Activity.Type),
+                    "phases": phase_choices_for_activity(activity),
+                    "data": request.POST,
+                    "form_data_present": True,
+                },
+                status=400,
+            )
         AuditLog.objects.create(
             operator=request.user,
             action_type=AuditLog.ActionType.OTHER,
@@ -343,7 +367,9 @@ def activity_edit(request, pk):
         {
             "activity": activity,
             "activity_types": _choices(Activity.Type),
-            "phases": _choices(Activity.Phase),
+            "phases": phase_choices_for_activity(activity),
+            "data": {},
+            "form_data_present": False,
         },
     )
 
@@ -1111,7 +1137,11 @@ def round_list(request):
 @staff_required
 def round_create(request):
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST.get("activity_id"))
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST.get("activity_id"),
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         form = ContestRoundForm(
             request.POST, rubrics=ScoringRubric.objects.filter(activity=activity)
         )
@@ -1120,6 +1150,7 @@ def round_create(request):
                 request,
                 "staff_panel/round_form.html",
                 {
+                    "form": form,
                     "error": _form_error(form),
                     "activities": Activity.objects.filter(
                         activity_type=Activity.Type.SINGER_CONTEST
@@ -1129,7 +1160,10 @@ def round_create(request):
                     "order_policies": _choices(ContestRound.OrderPolicy),
                     "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                     "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-                    "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                    "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                        activity=activity
+                    ),
+                    "selected_activity_id": activity.pk,
                 },
             )
         with transaction.atomic():
@@ -1146,6 +1180,7 @@ def round_create(request):
                     request,
                     "staff_panel/round_form.html",
                     {
+                        "form": form,
                         "error": _form_error(form),
                         "activities": Activity.objects.filter(
                             activity_type=Activity.Type.SINGER_CONTEST
@@ -1155,7 +1190,10 @@ def round_create(request):
                         "order_policies": _choices(ContestRound.OrderPolicy),
                         "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                         "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                        "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                            activity=activity
+                        ),
+                        "selected_activity_id": activity.pk,
                     },
                 )
             try:
@@ -1182,6 +1220,7 @@ def round_create(request):
                     request,
                     "staff_panel/round_form.html",
                     {
+                        "form": form,
                         "error": _form_error(form),
                         "activities": Activity.objects.filter(
                             activity_type=Activity.Type.SINGER_CONTEST
@@ -1191,7 +1230,10 @@ def round_create(request):
                         "order_policies": _choices(ContestRound.OrderPolicy),
                         "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                         "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                        "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                            activity=activity
+                        ),
+                        "selected_activity_id": activity.pk,
                     },
                 )
             log_action(
@@ -1203,17 +1245,24 @@ def round_create(request):
         return redirect("staff:round_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    selected_activity_id = request.GET.get("activity_id") or ""
+    rubrics = ScoringRubric.objects.select_related("activity").filter(
+        activity_id=selected_activity_id
+    ) if selected_activity_id.isdigit() else ScoringRubric.objects.none()
+    form = ContestRoundForm(rubrics=rubrics)
     return render(
         request,
         "staff_panel/round_form.html",
         {
+            "form": form,
             "activities": activities,
             "round_types": _choices(ContestRound.RoundType),
             "scoring_modes": _choices(ContestRound.ScoringMode),
             "order_policies": _choices(ContestRound.OrderPolicy),
             "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
             "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-            "rubrics": ScoringRubric.objects.select_related("activity").all(),
+            "rubrics": rubrics,
+            "selected_activity_id": selected_activity_id,
         },
     )
 
@@ -1234,32 +1283,66 @@ def round_prepare(request, pk):
 @staff_required
 def round_running_order(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
+    singers = list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    singer_by_id = {str(singer.pk): singer for singer in singers}
     entries = list(contest_round.entries.select_related("singer").order_by("running_order", "pk"))
-    initial_ids = " ".join(str(entry.singer_id) for entry in entries)
+    initial_ids = [str(entry.singer_id) for entry in entries]
+    display_ids = initial_ids
     if request.method == "POST":
-        form = RoundRunningOrderForm(request.POST)
+        form = RoundRunningOrderForm(request.POST, singers=singers)
+        display_ids = request.POST.getlist("singer_ids")
         if form.is_valid():
-            try:
-                set_round_running_order(
-                    contest_round, form.cleaned_data["singer_ids"], request.user
-                )
-            except (PermissionDenied, ValidationError) as error:
-                form.add_error(None, domain_error_messages(error))
+            ordered_ids = form.cleaned_data["singer_ids"]
+            move_action = request.POST.get("move_action")
+            if move_action is not None:
+                try:
+                    direction, raw_index = move_action.split(":", 1)
+                    index = int(raw_index)
+                except (TypeError, ValueError):
+                    direction, index = "", -1
+                target = index + (-1 if direction == "up" else 1)
+                if direction not in {"up", "down"}:
+                    target = -1
+                if 0 <= index < len(ordered_ids) and 0 <= target < len(ordered_ids):
+                    ordered_ids[index], ordered_ids[target] = (
+                        ordered_ids[target],
+                        ordered_ids[index],
+                    )
+                form = RoundRunningOrderForm(initial={"singer_ids": ordered_ids}, singers=singers)
+                initial_ids = ordered_ids
+                display_ids = ordered_ids
             else:
-                messages.success(request, "人工出场顺序已保存。")
-                return redirect("staff:round_list")
+                try:
+                    set_round_running_order(contest_round, ordered_ids, request.user)
+                except (PermissionDenied, ValidationError) as error:
+                    form.add_error(None, domain_error_messages(error))
+                else:
+                    messages.success(request, "人工出场顺序已保存。")
+                    return redirect("staff:round_list")
     else:
-        form = RoundRunningOrderForm(initial={"singer_ids": initial_ids})
+        form = RoundRunningOrderForm(initial={"singer_ids": initial_ids}, singers=singers)
+    if form.is_bound:
+        ordered_ids = cast(QueryDict, form.data).getlist("singer_ids")
+    else:
+        ordered_ids = form.initial.get("singer_ids", display_ids)
+    if hasattr(ordered_ids, "__iter__") and not isinstance(ordered_ids, str):
+        ordered_ids = [str(value) for value in ordered_ids]
+    order_rows = [
+        {"singer": singer_by_id[singer_id], "singer_id": singer_id}
+        for singer_id in ordered_ids
+        if singer_id in singer_by_id
+    ]
     return render(
         request,
         "staff_panel/round_running_order.html",
-        {"round": contest_round, "form": form, "entries": entries},
+        {"round": contest_round, "form": form, "entries": entries, "order_rows": order_rows},
     )
 
 
 @staff_required
 def round_groups(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
+    singers = list(runtime_approved_singers(contest_round.activity).order_by("pk"))
     groups = list(
         PerformanceGroup.objects.filter(round=contest_round)
         .prefetch_related("performances__singer")
@@ -1270,7 +1353,7 @@ def round_groups(request, pk):
         for group in groups
     ]
     if request.method == "POST":
-        form = RoundGroupsForm(request.POST)
+        form = RoundGroupsForm(request.POST, singers=singers)
         if form.is_valid():
             try:
                 set_round_groups(contest_round, form.cleaned_data["groups"], request.user)
@@ -1280,12 +1363,19 @@ def round_groups(request, pk):
                 messages.success(request, "分组与演出归属已保存。")
                 return redirect("staff:round_list")
     else:
-        form = RoundGroupsForm(initial={"groups": json.dumps(initial_groups, ensure_ascii=False)})
-    singers = runtime_approved_singers(contest_round.activity).order_by("pk")
+        form = RoundGroupsForm(singers=singers, initial_groups=initial_groups)
+    group_slots = [
+        {
+            "number": index,
+            "name": form[f"group_name_{index}"],
+            "members": form[f"group_singer_ids_{index}"],
+        }
+        for index in range(1, RoundGroupsForm.MAX_GROUP_SLOTS + 1)
+    ]
     return render(
         request,
         "staff_panel/round_groups.html",
-        {"round": contest_round, "form": form, "singers": singers},
+        {"round": contest_round, "form": form, "singers": singers, "group_slots": group_slots},
     )
 
 
@@ -1892,7 +1982,11 @@ def judge_list(request):
 @staff_required
 def judge_create(request):
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST["activity_id"],
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
             judge = Judge.objects.create(
@@ -1984,6 +2078,12 @@ def _judge_control_context(
         policy_state = "ACTIVE"
     if policy_state_override:
         policy_state = policy_state_override
+    policy_state_labels = {
+        "PREPARE_REQUIRED": "待准备评委组",
+        "HOLD": "已暂停",
+        "ACTIVE": "现场进行中",
+        "INSUFFICIENT_JUDGES": "评委组人数不足，暂不可开始",
+    }
 
     attendance_form = JudgePanelAttendanceForm(
         initial={"attending_judge_ids": [member.judge_id for member in panel_members]},
@@ -2003,6 +2103,7 @@ def _judge_control_context(
         "actual_judge_count": actual_judge_count,
         "minimum_judge_count": minimum_judge_count,
         "policy_state": policy_state,
+        "policy_state_label": policy_state_labels.get(policy_state, "现场状态待确认"),
         "attendance_form": attendance_form,
         "performance_action_form": JudgePerformanceActionForm(),
         "score_form": JudgeBoundScoreForm(
@@ -2073,7 +2174,7 @@ def judge_prepare(request, pk):
             contest_round,
             error=error_message,
             policy_state_override=(
-                "INSUFFICIENT_JUDGES / HOLD" if "INSUFFICIENT_JUDGES" in str(error) else ""
+                "INSUFFICIENT_JUDGES" if "INSUFFICIENT_JUDGES" in str(error) else ""
             ),
         )
     messages.success(request, "评委组已准备，评委席位和评分上下文已冻结。")
@@ -2264,6 +2365,7 @@ def rubric_create(request):
         "-created_at"
     )
     form = ScoringRubricProvisionForm(request.POST or None)
+    selected_activity_id = request.POST.get("activity_id") or request.GET.get("activity_id") or ""
     if request.method == "POST" and form.is_valid():
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         try:
@@ -2279,51 +2381,31 @@ def rubric_create(request):
         else:
             messages.success(request, "评分标准及评分项已创建。")
             return redirect("staff:round_create")
-    return render(request, "staff_panel/rubric_form.html", {"form": form, "activities": activities})
+    criterion_slots = [
+        {
+            "number": index,
+            "name": form[f"criterion_name_{index}"],
+            "max_score": form[f"criterion_max_score_{index}"],
+            "description": form[f"criterion_description_{index}"],
+        }
+        for index in range(1, ScoringRubricProvisionForm.MAX_CRITERION_SLOTS + 1)
+    ]
+    return render(
+        request,
+        "staff_panel/rubric_form.html",
+        {
+            "form": form,
+            "activities": activities,
+            "criterion_slots": criterion_slots,
+            "selected_activity_id": selected_activity_id,
+        },
+    )
 
 
 @staff_required
 def award_list(request):
     awards = official_stage_award_queryset().select_related("activity")
     return render(request, "staff_panel/award_list.html", {"awards": awards})
-
-
-@admin_required
-@transaction.atomic
-def award_create(request):
-    if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
-        singer_id = request.POST.get("singer_id")
-        if singer_id:
-            singer = get_object_or_404(SingerRegistration, pk=singer_id)
-            try:
-                create_manual_award(
-                    activity,
-                    singer=singer,
-                    name=request.POST.get("name", ""),
-                    operator=request.user,
-                )
-            except (PermissionDenied, ValidationError) as error:
-                messages.error(request, domain_error_messages(error))
-                return redirect("staff:award_list")
-        return redirect("staff:award_list")
-
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = _with_generic_song_labels(
-        scope_lifecycle(
-            SingerRegistration.objects.select_related("activity").filter(
-                pre_status=SingerRegistration.PreStatus.APPROVED
-            )
-        )
-    )
-    return render(
-        request,
-        "staff_panel/award_form.html",
-        {
-            "activities": activities,
-            "singers": singers,
-        },
-    )
 
 
 # --- Vote session management ---
@@ -2350,16 +2432,20 @@ def vote_session_create(request):
                 "staff_panel/vote_session_form.html",
                 {
                     "error": _form_error(form),
+                    "form": form,
                     "activities": Activity.objects.filter(
                         activity_type=Activity.Type.SINGER_CONTEST
                     ),
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
-                                pre_status=SingerRegistration.PreStatus.APPROVED
+                                activity=activity,
+                                pre_status=SingerRegistration.PreStatus.APPROVED,
                             )
                         )
                     ),
+                    "selected_activity_id": activity.pk,
+                    "submitted_singer_ids": request.POST.getlist("singers"),
                     "selection_types": _choices(VoteSession.SelectionType),
                     "purposes": _choices(VoteSession.Purpose),
                 },
@@ -2370,6 +2456,7 @@ def vote_session_create(request):
         selected_singers = list(
             SingerRegistration.objects.filter(
                 pk__in=singer_ids,
+                activity=activity,
                 pre_status=SingerRegistration.PreStatus.APPROVED,
             )
         )
@@ -2406,21 +2493,27 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = _with_generic_song_labels(
-        scope_lifecycle(
-            SingerRegistration.objects.select_related("activity").filter(
-                pre_status=SingerRegistration.PreStatus.APPROVED
-            )
-        )
+    selected_activity_id = request.GET.get("activity_id") or ""
+    singer_queryset = SingerRegistration.objects.select_related("activity").filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED
     )
+    if selected_activity_id.isdigit():
+        singer_queryset = singer_queryset.filter(activity_id=selected_activity_id)
+    else:
+        singer_queryset = singer_queryset.none()
+    singers = _with_generic_song_labels(scope_lifecycle(singer_queryset))
+    form = VoteSessionForm()
     return render(
         request,
         "staff_panel/vote_session_form.html",
         {
+            "form": form,
             "activities": activities,
             "singers": singers,
+            "selected_activity_id": selected_activity_id,
             "selection_types": _choices(VoteSession.SelectionType),
             "purposes": _choices(VoteSession.Purpose),
+            "submitted_singer_ids": [],
         },
     )
 
@@ -2801,8 +2894,9 @@ def incident_list(request):
 @staff_required
 @transaction.atomic
 def incident_create(request):
+    activities = Activity.objects.all()
+    form = IncidentForm(request.POST or None)
     if request.method == "POST":
-        form = IncidentForm(request.POST)
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
@@ -2812,15 +2906,20 @@ def incident_create(request):
                 "staff_panel/incident_form.html",
                 {
                     "error": _form_error(form),
-                    "activities": Activity.objects.all(),
+                    "activities": activities,
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
+                                activity=activity,
                                 pre_status=SingerRegistration.PreStatus.APPROVED
                             )
                         )
                     ),
                     "event_types": _choices(IncidentRecord.EventType),
+                    "selected_activity_id": activity.pk,
+                    "form": form,
+                    "form_data": request.POST,
+                    "selected_singer_id": request.POST.get("singer_id", ""),
                 },
             )
         singer = None
@@ -2851,12 +2950,17 @@ def incident_create(request):
             new_value=incident.event_type,
         )
         return redirect("staff:incident_list")
-    activities = Activity.objects.all()
+    selected_activity_id = request.GET.get("activity_id") or ""
+    singer_queryset = SingerRegistration.objects.select_related("activity").filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED
+    )
+    if selected_activity_id.isdigit():
+        singer_queryset = singer_queryset.filter(activity_id=selected_activity_id)
+    else:
+        singer_queryset = singer_queryset.none()
     singers = _with_generic_song_labels(
         scope_lifecycle(
-            SingerRegistration.objects.select_related("activity").filter(
-                pre_status=SingerRegistration.PreStatus.APPROVED
-            )
+            singer_queryset
         )
     )
     return render(
@@ -2866,6 +2970,10 @@ def incident_create(request):
             "activities": activities,
             "singers": singers,
             "event_types": _choices(IncidentRecord.EventType),
+            "selected_activity_id": selected_activity_id,
+            "form": form,
+            "form_data": {},
+            "selected_singer_id": "",
         },
     )
 
@@ -3269,6 +3377,23 @@ def _humanize_ruleset_editor_error(error):
     return "赛制定义未通过校验，请检查节点顺序、来源和字段填写。"
 
 
+_NODE_TYPE_LABELS = {
+    "ROSTER": "报名名单",
+    "ASSESS": "评分",
+    "RANK": "排名",
+    "SELECT": "选出名额",
+    "PARTITION": "分组",
+    "MERGE": "合并名单",
+    "SUBTRACT": "排除名单",
+    "PAIR": "配对",
+    "DUEL": "对决",
+    "AGGREGATE": "综合成绩",
+    "MANUAL_SELECT": "人工选择",
+    "FILL_TO_QUOTA": "补足名额",
+    "AWARD": "奖项",
+}
+
+
 def _try_parse_nodes(nodes):
     try:
         parse_definition({"nodes": nodes})
@@ -3349,10 +3474,33 @@ def _source_options(nodes, index, field, current=None):
     return options
 
 
-def _node_field_entries(node, index, nodes):
+def _display_options(options, labels=None, nodes=None):
+    labels = labels or {}
+    node_labels = {
+        node.get("key"): (
+            f"{node.get('key')}（"
+            f"{_NODE_TYPE_LABELS.get(node.get('type'), node.get('type'))}）"
+        )
+        for node in (nodes or [])
+        if node.get("key")
+    }
+    return [
+        {
+            "value": option,
+            "label": labels.get(option)
+            or ("报名选手" if option == ENTRY_KEY else node_labels.get(option, option)),
+        }
+        for option in options
+    ]
+
+
+def _node_field_entries(node, index, nodes, *, binding_options=None):
     """Render data-driven edit fields for one node card (select/text/checkbox/json/aggregate)."""
     labels = ruleset_editor.field_labels()
+    help_text = ruleset_editor.field_help()
+    binding_options = binding_options or {}
     allowed = ruleset_editor.field_allowed()
+    option_labels = ruleset_editor.field_option_labels()
     spec = NODE_TYPE_SPEC.get(node.get("type"))
     fields: list[dict] = []
     if spec is None:
@@ -3378,6 +3526,7 @@ def _node_field_entries(node, index, nodes):
                 {
                     "kind": "aggregate",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "index": index,
                     "aggregate_type": aggregate.get("type", "weighted_sum"),
                     "components": [
@@ -3386,6 +3535,12 @@ def _node_field_entries(node, index, nodes):
                             "weight": c.get("weight", 1.0),
                             "options": _source_options(
                                 nodes, index, "aggregate.components[].source", c.get("source")
+                            ),
+                            "display_options": _display_options(
+                                _source_options(
+                                    nodes, index, "aggregate.components[].source", c.get("source")
+                                ),
+                                nodes=nodes,
                             ),
                         }
                         for c in aggregate.get("components", [])
@@ -3397,9 +3552,13 @@ def _node_field_entries(node, index, nodes):
                 {
                     "kind": "select",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "name": base,
                     "value": value or "",
                     "options": _source_options(nodes, index, field, value),
+                    "display_options": _display_options(
+                        _source_options(nodes, index, field, value), nodes=nodes
+                    ),
                 }
             )
         elif field in ("branches", "conversion"):
@@ -3407,20 +3566,51 @@ def _node_field_entries(node, index, nodes):
                 {
                     "kind": "json",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "name": f"{base}_json",
                     "value": json.dumps(value, ensure_ascii=False) if value else "",
                 }
             )
         elif isinstance(value, bool):
-            fields.append({"kind": "checkbox", "label": label, "name": base, "value": value})
+                fields.append(
+                    {
+                        "kind": "checkbox",
+                        "label": label,
+                        "help": help_text.get(field, ""),
+                        "name": base,
+                        "value": value,
+                    }
+                )
+        elif field in binding_options:
+            options = list(binding_options[field])
+            if value and value not in options:
+                options.append(value)
+            fields.append(
+                {
+                    "kind": "select",
+                    "label": label,
+                    "help": help_text.get(field, ""),
+                    "name": base,
+                    "value": value if value is not None else "",
+                    "options": options,
+                    "display_options": _display_options(
+                        options,
+                        labels={option: f"{option}（活动绑定）" for option in options},
+                    ),
+                }
+            )
         elif allowed.get(field):
             fields.append(
                 {
                     "kind": "select",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "name": base,
                     "value": value if value is not None else "",
                     "options": allowed[field],
+                    "display_options": _display_options(
+                        allowed[field], labels=option_labels.get(field)
+                    ),
                 }
             )
         elif field in reference_fields and (
@@ -3430,9 +3620,13 @@ def _node_field_entries(node, index, nodes):
                 {
                     "kind": "select",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "name": base,
                     "value": value or "",
                     "options": _source_options(nodes, index, field, value),
+                    "display_options": _display_options(
+                        _source_options(nodes, index, field, value), nodes=nodes
+                    ),
                 }
             )
         elif field == "sources":
@@ -3440,9 +3634,13 @@ def _node_field_entries(node, index, nodes):
                 {
                     "kind": "multi_select",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "name": base,
                     "value": value or [],
                     "options": _source_options(nodes, index, field),
+                    "display_options": _display_options(
+                        _source_options(nodes, index, field), nodes=nodes
+                    ),
                 }
             )
         else:
@@ -3450,6 +3648,7 @@ def _node_field_entries(node, index, nodes):
                 {
                     "kind": "text",
                     "label": label,
+                    "help": help_text.get(field, ""),
                     "name": base,
                     "value": value if value is not None else "",
                 }
@@ -3457,7 +3656,7 @@ def _node_field_entries(node, index, nodes):
     return fields
 
 
-def _build_card(node, index, nodes):
+def _build_card(node, index, nodes, *, binding_options=None):
     sources = ruleset_editor.available_sources(nodes, index)
     _up_preview, up_target = _move_node_to_nearest_valid_slot(nodes, node["key"], -1)
     _down_preview, down_target = _move_node_to_nearest_valid_slot(nodes, node["key"], 1)
@@ -3467,8 +3666,9 @@ def _build_card(node, index, nodes):
         "node": node,
         "index": index,
         "type": node.get("type"),
+        "type_label": _NODE_TYPE_LABELS.get(node.get("type"), node.get("type")),
         "sources": sources,
-        "fields": _node_field_entries(node, index, nodes),
+        "fields": _node_field_entries(node, index, nodes, binding_options=binding_options),
         "can_move_up": up_target != index,
         "can_move_down": down_target != index,
         "can_delete": delete_allowed,
@@ -3489,14 +3689,19 @@ def _node_type_options(nodes):
             options.append(
                 {
                     "value": node_type,
-                    "label": node_type,
+                    "label": _NODE_TYPE_LABELS.get(node_type, node_type),
                     "enabled": False,
                     "reason": "当前缺少可用的上游节点。",
                 }
             )
         else:
             options.append(
-                {"value": node_type, "label": node_type, "enabled": True, "reason": ""}
+                {
+                    "value": node_type,
+                    "label": _NODE_TYPE_LABELS.get(node_type, node_type),
+                    "enabled": True,
+                    "reason": "",
+                }
             )
     return options
 
@@ -3609,8 +3814,99 @@ def ruleset_edit(request, pk):
         nodes = parse_definition(version.definition)["nodes"]
     except ValidationError:
         nodes = []
-    cards = [_build_card(node, i, nodes) for i, node in enumerate(nodes)]
     ruleset = version.ruleset
+    binding_options = {
+        "round": list((ruleset.round_keys or {}).keys()),
+        "vote_source": list((ruleset.vote_keys or {}).keys()),
+    }
+    cards = [
+        _build_card(node, i, nodes, binding_options=binding_options)
+        for i, node in enumerate(nodes)
+    ]
+    current_round_keys = {
+        str(node.get("round"))
+        for node in nodes
+        if node.get("round")
+    }
+    current_vote_keys = {
+        str(node.get("vote_source"))
+        for node in nodes
+        if node.get("vote_source")
+    }
+    current_group_keys = {
+        str(node.get("by"))
+        for node in nodes
+        if node.get("type") == "PARTITION" and node.get("by")
+    }
+    round_candidates = list(
+        ContestRound.objects.filter(activity=ruleset.activity).order_by("sequence", "pk")
+    )
+    vote_candidates = list(
+        VoteSession.objects.filter(activity=ruleset.activity).order_by("-created_at", "pk")
+    )
+    scoring_rule_candidates = list(
+        VoteScoringRule.objects.filter(vote_session__activity=ruleset.activity)
+        .select_related("vote_session")
+        .order_by("vote_session_id")
+    )
+    round_binding = ruleset.round_keys or {}
+    vote_binding = ruleset.vote_keys or {}
+    scoring_binding = ruleset.vote_scoring_rule_keys or {}
+    group_binding = ruleset.group_keys or {}
+    binding_maps = {
+        "rounds": [
+            {
+                "key": key,
+                "value": str(round_binding.get(key, "")),
+                "options": [
+                    (
+                        str(item.pk),
+                        (
+                            f"{item.name or item.get_round_type_display()}"
+                            f"（第 {item.sequence or '-'} 轮）"
+                        ),
+                    )
+                    for item in round_candidates
+                ],
+            }
+            for key in sorted(current_round_keys | set(round_binding))
+        ],
+        "votes": [
+            {
+                "key": key,
+                "value": str(vote_binding.get(key, "")),
+                "options": [(str(item.pk), item.name) for item in vote_candidates],
+            }
+            for key in sorted(current_vote_keys | set(vote_binding))
+        ],
+        "scoring_rules": [
+            {
+                "key": key,
+                "value": str(scoring_binding.get(key, "")),
+                "options": [
+                    (str(item.pk), f"{item.vote_session.name}（{item.get_mode_display()}）")
+                    for item in scoring_rule_candidates
+                    if item.vote_session_id == vote_binding.get(key)
+                    or str(item.vote_session_id) == str(vote_binding.get(key, ""))
+                ],
+            }
+            for key in sorted(set(scoring_binding) | current_vote_keys)
+        ],
+        "groups": [
+            {
+                "key": key,
+                "value": str(group_binding.get(key, "")),
+                "options": [
+                    (
+                        str(item.pk),
+                        f"{item.name or item.get_round_type_display()}（分组来源）",
+                    )
+                    for item in round_candidates
+                ],
+            }
+            for key in sorted(current_group_keys | set(group_binding))
+        ],
+    }
     return render(
         request,
         "staff_panel/ruleset_editor.html",
@@ -3640,6 +3936,7 @@ def ruleset_edit(request, pk):
                 ),
             },
             "binding_signature": _binding_signature(ruleset),
+            "binding_maps": binding_maps,
         },
     )
 
@@ -3665,15 +3962,36 @@ def ruleset_bind(request, pk):
         except json.JSONDecodeError:
             raise ValidationError(f"{name} 不是合法 JSON。")
 
+    def _parse_pairs(key_name, value_name, legacy_name, empty):
+        keys = request.POST.getlist(key_name)
+        values = request.POST.getlist(value_name)
+        if not keys and not values:
+            return _parse_json(legacy_name, empty)
+        if len(keys) != len(values):
+            raise ValidationError(f"{key_name} 与 {value_name} 数量不一致。")
+        return {
+            key.strip(): value
+            for key, value in zip(keys, values, strict=True)
+            if key.strip() and value
+        }
+
     try:
         update_ruleset_binding(
             version.ruleset,
             binding={
                 "stage_key": request.POST.get("stage_key"),
-                "round_keys": _parse_json("round_keys", {}),
-                "vote_keys": _parse_json("vote_keys", {}),
-                "vote_scoring_rule_keys": _parse_json("vote_scoring_rule_keys", {}),
-                "group_keys": _parse_json("group_keys", {}),
+                "round_keys": _parse_pairs(
+                    "round_binding_key", "round_binding_value", "round_keys", {}
+                ),
+                "vote_keys": _parse_pairs(
+                    "vote_binding_key", "vote_binding_value", "vote_keys", {}
+                ),
+                "vote_scoring_rule_keys": _parse_pairs(
+                    "scoring_binding_key", "scoring_binding_value", "vote_scoring_rule_keys", {}
+                ),
+                "group_keys": _parse_pairs(
+                    "group_binding_key", "group_binding_value", "group_keys", {}
+                ),
                 "audience_keys": _parse_json("audience_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),
                 "announcement_blocks_by_checkpoint": _parse_json(

@@ -611,6 +611,8 @@ class ContestRound(models.Model):
         entries: models.Manager["RoundEntry"]
         round_judges: models.Manager["RoundJudge"]
 
+        def get_round_type_display(self) -> str: ...
+
     class Meta:
         base_manager_name = "objects"
         constraints = [

@@ -39,6 +39,12 @@ PHASE_EDGES: dict[str, frozenset[str]] = {
 }
 
 
+def phase_choices_for_activity(activity: Activity) -> list[tuple[str, str]]:
+    """Return the current phase plus the explicitly legal next phases for the editor."""
+    allowed = {activity.phase, *PHASE_EDGES.get(activity.phase, frozenset())}
+    return [(value, label) for value, label in Activity.Phase.choices if value in allowed]
+
+
 def lock_activity_for_action(activity: Activity, action: ActivityAction | None = None) -> Activity:
     """Acquire the authoritative Activity row lock and re-validate a mutation.
 
