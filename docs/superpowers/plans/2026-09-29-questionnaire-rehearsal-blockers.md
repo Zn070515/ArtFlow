@@ -47,11 +47,11 @@
 - Keep `load_private_test_fixture --dry-run` and `--apply` unchanged.
 - `--apply` must create a TEST activity, freeze the questionnaire/ruleset with a non-empty roster, submit/approve questionnaire responses, reconcile material checks, execute the four-round judge/vote/ticket/media flows, and confirm all result stages.
 
-- [ ] Add a failing package-level test that loads the v3 fixture through the loader and asserts 15 registrations, 60 question-keyed media files/checks, 555 criterion rows, 280 tickets, 310 ballots, and three confirmed stage results.
-- [ ] Run the test and confirm it fails at the first real integration blocker rather than a fixture parser error.
-- [ ] Fix only the loader lifecycle/authority boundary exposed by the failing test.
-- [ ] Re-run the package-level test, duplicate apply idempotency, and formal-activity rejection.
-- [ ] Commit as `test: exercise private questionnaire rehearsal orchestration` and `fix: complete private questionnaire rehearsal lifecycle` when separate changes are needed.
+- [x] Add a failing package-level test that loads the v3 fixture through the loader and asserts 15 registrations, 60 question-keyed media files/checks, 555 criterion rows, 280 tickets, 310 ballots, and three confirmed stage results.
+- [x] Run the test and confirm it fails at the first real integration blocker rather than a fixture parser error.
+- [x] Fix only the loader lifecycle/authority boundary exposed by the failing test.
+- [x] Re-run the package-level test, duplicate apply idempotency, and formal-activity rejection.
+- [x] Commit as `test: exercise private questionnaire rehearsal orchestration` and `fix: complete private questionnaire rehearsal lifecycle` when separate changes are needed.
 
 ### Task 3: Complete question-keyed material authority and supplement flow
 
