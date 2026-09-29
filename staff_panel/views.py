@@ -1774,7 +1774,7 @@ def audience_scores_api(request, activity_id):
         return JsonResponse({"detail": "缺少 cells。"}, status=400)
 
     pool_ids_by_set = {
-        set_key: set(_audience_pool(activity, version, set_key).values_list("pk", flat=True))
+        set_key: {singer.pk for singer in _audience_pool(activity, version, set_key)}
         for set_key in audience_keys
     }
     rows: list[tuple[int, str, Decimal]] = []

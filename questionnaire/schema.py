@@ -138,6 +138,8 @@ def _parse_file_config(question: dict, where: str) -> dict:
         isinstance(purpose, str) and purpose in FILE_PURPOSES,
         f"{where}：未注册的文件用途 {purpose!r}。",
     )
+    if not isinstance(purpose, str) or purpose not in FILE_PURPOSES:
+        raise ValidationError(f"{where}：未注册的文件用途 {purpose!r}。")
     extensions = _as_list(config.get("extensions"), f"{where}：file.extensions 必须是列表。")
     _require(
         bool(extensions) and all(isinstance(e, str) for e in extensions),
