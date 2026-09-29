@@ -116,7 +116,10 @@ jobs:
     name: Windows Python ${{ matrix.python-version }} application gate
     runs-on: windows-latest
     # The full suite runs once per supported Windows interpreter.
-    timeout-minutes: 30
+    # The expanded application suite can take just over 30 minutes on a
+    # shared Windows runner. Keep the gate bounded while allowing normal
+    # pytest and artifact cleanup to finish.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -142,7 +145,16 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install locked dependencies
-        run: uv sync --locked --all-extras
+        run: uv sync --locked --all-extras --python "${{ matrix.python-version }}"
+
+      - name: Verify matrix Python interpreter
+        shell: pwsh
+        run: |
+          $expected = "${{ matrix.python-version }}"
+          $actual = (uv run python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+          if ($actual -ne $expected) {
+            throw "uv selected Python $actual instead of matrix target $expected"
+          }
 
       - name: Collect static assets
         run: uv run python manage.py collectstatic --noinput
