@@ -116,10 +116,10 @@ jobs:
     name: Windows Python ${{ matrix.python-version }} application gate
     runs-on: windows-latest
     # The full suite runs once per supported Windows interpreter.
-    # The expanded application suite can take just over 30 minutes on a
-    # shared Windows runner. Keep the gate bounded while allowing normal
-    # pytest and artifact cleanup to finish.
-    timeout-minutes: 35
+    # The expanded application suite takes about 35 minutes on a shared
+    # Windows runner. Keep the gate bounded while allowing pytest and normal
+    # artifact cleanup to finish.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
