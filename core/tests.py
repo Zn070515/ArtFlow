@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, TEST_DATA_SEED, authority_write
 from common.models import AuditLog
 from django.apps import apps
 from django.contrib import admin
@@ -325,12 +325,13 @@ class ActivityDeletionAuthorityTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=False,
         )
-        award = Award.objects.create(
-            activity=activity,
-            singer=singer,
-            name="Formal award",
-            is_test_data=False,
-        )
+        with authority_write(TEST_DATA_SEED):
+            award = Award.objects.create(
+                activity=activity,
+                singer=singer,
+                name="Formal award",
+                is_test_data=False,
+            )
 
         with authority_write("test_data.cleanup"):
             with self.assertRaises(ValidationError):

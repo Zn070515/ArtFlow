@@ -5,6 +5,7 @@ from accounts.models import User
 from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
+    TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -198,12 +199,20 @@ class M1CoreFinalAuthorityTests(TestCase):
             status=StageResult.Status.READY_TO_CONFIRM,
             is_test_data=True,
         )
-        award = Award.objects.create(
-            activity=self.activity,
-            singer=self.singer,
-            name="Manual award",
-            is_test_data=True,
-        )
+        with self.assertRaisesMessage(ValidationError, "正式结果或受控测试数据服务"):
+            Award.objects.create(
+                activity=self.activity,
+                singer=self.singer,
+                name="Uncontrolled manual award",
+                is_test_data=True,
+            )
+        with authority_write(TEST_DATA_SEED):
+            award = Award.objects.create(
+                activity=self.activity,
+                singer=self.singer,
+                name="Manual award",
+                is_test_data=True,
+            )
 
         with self.assertRaises(ValidationError):
             Award.objects.filter(pk=award.pk).update(source_stage_result=stage)

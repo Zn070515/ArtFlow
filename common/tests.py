@@ -57,6 +57,7 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_SEED,
     authority_write,
 )
 from common.management.commands.backup_artflow import (
@@ -1536,12 +1537,13 @@ class DemoSeedCommandTests(TestCase):
         singer = SingerRegistration.objects.get(name="Demo Singer One")
         seeded_round = ContestRound.objects.get(name="Demo Preliminary Round")
         snapshot_counts = (seeded_round.entries.count(), seeded_round.round_judges.count())
-        unowned_award = Award.objects.create(
-            activity=singer.activity,
-            singer=singer,
-            name="Unowned award",
-            is_test_data=True,
-        )
+        with authority_write(TEST_DATA_SEED):
+            unowned_award = Award.objects.create(
+                activity=singer.activity,
+                singer=singer,
+                name="Unowned award",
+                is_test_data=True,
+            )
 
         output = StringIO()
         call_command("seed_demo_data", "--reset", stdout=output)

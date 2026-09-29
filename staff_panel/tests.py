@@ -22,6 +22,7 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -1859,7 +1860,10 @@ class StaffPanelSmokeTests(TestCase):
         _create_score_summary(
             round=round_, singer=registration, average_score=91, rank=1, is_advanced=True
         )
-        Award.objects.create(activity=self.singer_activity, singer=registration, name="Top Singer")
+        with authority_write(TEST_DATA_SEED):
+            Award.objects.create(
+                activity=self.singer_activity, singer=registration, name="Top Singer"
+            )
         vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
@@ -4026,12 +4030,13 @@ class ExportPrivacyTests(TestCase):
 
     def test_award_list_uses_official_stage_authority_queryset(self):
         singer = self._registration(self.contest, "Contest Singer", "S1")
-        Award.objects.create(
-            activity=self.contest,
-            singer=singer,
-            name="人工奖",
-            is_test_data=False,
-        )
+        with authority_write(TEST_DATA_SEED):
+            Award.objects.create(
+                activity=self.contest,
+                singer=singer,
+                name="人工奖",
+                is_test_data=False,
+            )
         self.client.force_login(self.staff)
         response = self.client.get(reverse("staff:award_list"))
         self.assertEqual(response.status_code, 200)
@@ -5539,6 +5544,64 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(
             AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
+        )
+
+    def test_post_audience_scores_rejects_singer_outside_current_audience_pool(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        outside = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=_create_provisioned_user(username="rapid-api-outside", password="pass"),
+            name="未入选选手",
+            student_id="2026rapid02",
+            college="Info",
+            class_name="CS1",
+            phone="13800000001",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.REJECTED,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Scoped Audience Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            round_keys={"r1": self.round.pk},
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            }
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+
+        response = self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(
+                {"cells": [{"singer_id": outside.pk, "set_key": "audience1", "score": "90"}]}
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不属于观众分组", response.json()["detail"][0])
+        self.assertFalse(
+            AudienceScore.objects.filter(
+                activity=self.activity, stage_key="aud1set", singer=outside
+            ).exists()
         )
 
     def test_post_audience_scores_rejects_more_than_two_decimals(self):

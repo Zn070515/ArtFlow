@@ -24,6 +24,7 @@ from common.business_rules import (
     ensure_same_activity,
 )
 from common.lifecycle import (
+    runtime_approved_singers,
     runtime_is_test,
     scope_lifecycle,
     scope_runtime,
@@ -1591,21 +1592,22 @@ def _audience_pool(activity, version, audience_key):
     ``audience_key`` is a binding key matching an ASSESS node's ``vote_source``; that
     node's ``source`` declares the pool: :data:`ENTRY_KEY` → the check-in pool, or the
     name of a SELECT node → the checkpoint that outputs it, bridged to the round that
-    consumes that stage (its :class:`RoundEntry`). Falls back to the check-in pool when
-    the roster has not materialised yet, mirroring the resolver's conservative scoping
-    (its ``within`` filter is still the correctness backstop).
+    consumes that stage (its :class:`RoundEntry`). Invalid definitions and missing stage
+    rosters return an empty queryset so an operator cannot accidentally score every singer.
     """
     try:
         parsed = parse_definition(version.definition)
     except (ValidationError, TypeError, ValueError):
-        return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+        return SingerRegistration.objects.none()
     source = None
     for node in parsed["nodes"]:
         if node.get("vote_source") == audience_key:
             source = node.get("source")
             break
-    if not source or source == ENTRY_KEY:
-        return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+    if not source:
+        return SingerRegistration.objects.none()
+    if source == ENTRY_KEY:
+        return runtime_approved_singers(activity).order_by("pk")
     checkpoint_key = None
     for cp in parsed["checkpoints"]:
         if cp.get("output") == source:
@@ -1635,7 +1637,7 @@ def _audience_pool(activity, version, audience_key):
                     "pk"
                 )
             )
-    return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+    return SingerRegistration.objects.none()
 
 
 def _audience_sets(activity, version):
@@ -1705,9 +1707,9 @@ def audience_scores_api(request, activity_id):
     """Backstage audience-score entry (M1-INTEGRATION-2).
 
     GET returns the audience grid: one group per binding ``audience_keys`` entry, each
-    listing every activity singer plus its stored score (scale ``hundred``). POST accepts
-    sparse ``cells`` as ``[{singer_id, set_key, score}]``, maps each ``set_key`` to its
-    ``stage_key``, upserts :class:`~singer_contest.models.AudienceScore` rows, then
+    listing the current roster for each binding plus its stored score (scale ``hundred``).
+    POST accepts sparse ``cells`` as ``[{singer_id, set_key, score}]``, maps each ``set_key``
+    to its ``stage_key``, upserts :class:`~singer_contest.models.AudienceScore` rows, then
     auto-resolves any now-satisfiable checkpoint.
     """
     activity = get_object_or_404(Activity, pk=activity_id)
@@ -1731,9 +1733,10 @@ def audience_scores_api(request, activity_id):
     if not cells:
         return JsonResponse({"detail": "缺少 cells。"}, status=400)
 
-    valid_singer_ids = set(
-        SingerRegistration.objects.filter(activity=activity).values_list("pk", flat=True)
-    )
+    pool_ids_by_set = {
+        set_key: set(_audience_pool(activity, version, set_key).values_list("pk", flat=True))
+        for set_key in audience_keys
+    }
     rows: list[tuple[int, str, Decimal]] = []
     stage_keys: set[str] = set()
     errors: list[str] = []
@@ -1744,8 +1747,13 @@ def audience_scores_api(request, activity_id):
         except (KeyError, TypeError, ValueError, InvalidOperation):
             errors.append("单元格缺少 singer_id 或 score 不是有效数字。")
             continue
-        if singer_id not in valid_singer_ids:
-            errors.append(f"选手 {singer_id} 不属于该活动。")
+        set_key = str(cell.get("set_key", "")).strip()
+        stage_key = audience_keys.get(set_key)
+        if not stage_key:
+            errors.append(f"未知观众分组 {set_key}。")
+            continue
+        if singer_id not in pool_ids_by_set[set_key]:
+            errors.append(f"选手 {singer_id} 不属于观众分组 {set_key}。")
             continue
         if not 0 <= score <= 100:
             errors.append(f"选手 {singer_id} 的观众分必须在 0-100 之间。")
@@ -1754,11 +1762,6 @@ def audience_scores_api(request, activity_id):
         # two decimal places so SQLite (stores verbatim) and Postgres (rounds to 0.01) agree.
         if score != score.quantize(Decimal("0.01")):
             errors.append(f"选手 {singer_id} 的观众分最多保留两位小数。")
-            continue
-        set_key = str(cell.get("set_key", "")).strip()
-        stage_key = audience_keys.get(set_key)
-        if not stage_key:
-            errors.append(f"未知观众分组 {set_key}。")
             continue
         rows.append((singer_id, stage_key, score))
         stage_keys.add(stage_key)
