@@ -14,6 +14,17 @@ def test_ci_keeps_both_pyright_commands_blocking():
     assert "continue-on-error: true" not in CI_WORKFLOW
 
 
+def test_windows_ci_uses_and_verifies_each_matrix_python_interpreter():
+    assert (
+        'run: uv sync --locked --all-extras --python "${{ matrix.python-version }}"'
+        in CI_WORKFLOW
+    )
+    assert "- name: Verify matrix Python interpreter" in CI_WORKFLOW
+    assert '$expected = "${{ matrix.python-version }}"' in CI_WORKFLOW
+    assert "uv run python -c" in CI_WORKFLOW
+    assert "uv selected Python $actual instead of matrix target $expected" in CI_WORKFLOW
+
+
 def test_postgresql_integration_has_the_m2_c_focused_gate_before_full_suite():
     focused_command = """          uv run python manage.py test
           singer_contest.test_judge_authority
