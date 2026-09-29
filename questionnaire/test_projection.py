@@ -26,4 +26,3 @@ class QuestionnaireProjectionTests(SimpleTestCase):
         )
 
         self.assertEqual(generic_song_label(registration), "历史曲目")
-

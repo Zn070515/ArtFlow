@@ -727,13 +727,15 @@ def render_document_bytes(template: ArticleTemplate, activity: Activity) -> byte
     doc = Document()
     doc.add_heading(activity.title, 0)
     body = template.body
-    singers = prime_questionnaire_answers(scope_runtime(
-        SingerRegistration.objects.filter(
-            activity=activity,
-            pre_status=SingerRegistration.PreStatus.APPROVED,
-        ),
-        activity,
-    ))
+    singers = prime_questionnaire_answers(
+        scope_runtime(
+            SingerRegistration.objects.filter(
+                activity=activity,
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+            ),
+            activity,
+        )
+    )
     singer_lines = "\n".join(f"{s.name} — {generic_song_label(s)}" for s in singers)
     programs = scope_runtime(Program.objects.filter(activity=activity), activity)
     program_lines = "\n".join(f"{p.sort_order}. {p.name} — {p.contact_name}" for p in programs)

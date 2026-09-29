@@ -141,9 +141,7 @@ class PrivateFixturePackageIntegrationTests(TestCase):
         )
         self.assertEqual(Ticket.objects.filter(activity=activity, is_test_data=True).count(), 280)
         self.assertEqual(
-            VoteBallot.objects.filter(
-                vote_session__activity=activity, is_test_data=True
-            ).count(),
+            VoteBallot.objects.filter(vote_session__activity=activity, is_test_data=True).count(),
             310,
         )
         self.assertEqual(

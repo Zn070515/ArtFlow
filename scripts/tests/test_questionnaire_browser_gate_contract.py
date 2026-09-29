@@ -4,12 +4,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INTEGRATION_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/integration.yml").read_text(
     encoding="utf-8"
 )
-QUESTIONNAIRE_FLOW = (
-    REPOSITORY_ROOT / "tests/e2e/questionnaire-flow.spec.ts"
-).read_text(encoding="utf-8")
+QUESTIONNAIRE_FLOW = (REPOSITORY_ROOT / "tests/e2e/questionnaire-flow.spec.ts").read_text(
+    encoding="utf-8"
+)
 FIXTURE_COMMAND = (
-    REPOSITORY_ROOT
-    / "questionnaire/management/commands/prepare_questionnaire_e2e.py"
+    REPOSITORY_ROOT / "questionnaire/management/commands/prepare_questionnaire_e2e.py"
 ).read_text(encoding="utf-8")
 
 
@@ -26,11 +25,11 @@ def test_postgresql_compose_gate_runs_the_private_questionnaire_browser_fixture(
 
 def test_questionnaire_browser_flow_exercises_submit_upload_and_open_edit():
     for marker in (
-        'toHaveURL(new RegExp(`/questionnaire/${fixture.activity_id}/$`))',
+        "toHaveURL(new RegExp(`/questionnaire/${fixture.activity_id}/$`))",
         'data-file-answer="r1.accompaniment"',
         'name: "browser-fixture.wav"',
         'name: "提交报名"',
-        '浏览器修订曲目',
+        "浏览器修订曲目",
     ):
         assert marker in QUESTIONNAIRE_FLOW
 
