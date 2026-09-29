@@ -291,8 +291,10 @@ def activity_create(request):
         request,
         "staff_panel/activity_form.html",
         {
+            "activity": None,
             "activity_types": _choices(Activity.Type),
             "phases": CREATE_PHASE_CHOICES,
+            "data": {},
         },
     )
 

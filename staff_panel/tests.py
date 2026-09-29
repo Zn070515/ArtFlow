@@ -343,6 +343,14 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(Activity.objects.filter(title="New Contest").exists())
 
+    def test_admin_can_open_activity_create_form(self):
+        login_admin(self.client, self.admin)
+
+        response = self.client.get(reverse("staff:activity_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "新建活动")
+
     def test_activity_create_always_defaults_to_draft(self):
         login_admin(self.client, self.admin)
         response = self.client.post(
