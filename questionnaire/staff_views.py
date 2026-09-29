@@ -25,7 +25,13 @@ from django.shortcuts import get_object_or_404, redirect, render
 from ruleset.models import RulesetVersion
 from ruleset.services import update_ruleset_definition_section
 
-from .builder import add_question, delete_question, duplicate_question, move_question
+from .builder import (
+    add_question,
+    delete_question,
+    duplicate_question,
+    move_question,
+    update_question,
+)
 from .compiler import compile_questionnaire
 from .runtime import completion_summary, resolve_question_value, resolve_questions
 from .schema import parse_questionnaire
@@ -37,6 +43,19 @@ ACTION_LABELS = {
     "move_up": "上移",
     "move_down": "下移",
     "save_json": "保存 JSON",
+    "edit": "编辑题目",
+}
+
+QUESTION_TYPE_LABELS = {
+    "text": "单行填空",
+    "textarea": "多行填空",
+    "number": "数字",
+    "boolean": "开关",
+    "single_choice": "单选",
+    "multiple_choice": "多选",
+    "select": "下拉",
+    "file": "文件上传",
+    "notice": "说明",
 }
 
 PREVIEW_CONTEXTS = {
@@ -83,6 +102,7 @@ def _row(question, resolved, value) -> dict:
         "key": question["key"],
         "label": question["label"],
         "type": question["type"],
+        "type_label": QUESTION_TYPE_LABELS.get(question["type"], question["type"]),
         "round": question.get("round") or "",
         "binding": question.get("binding") or "",
         "description": question.get("description", ""),
@@ -121,6 +141,7 @@ def _rows(plan, *, answers, context, due_rounds, registration=None, files=None) 
                             "key": block["key"],
                             "label": block["label"],
                             "type": "notice",
+                            "type_label": QUESTION_TYPE_LABELS["notice"],
                             "round": "",
                             "binding": "",
                             "description": block.get("description", ""),
@@ -150,7 +171,22 @@ def _page_model(plan, rows) -> list[dict]:
     for page in plan.pages:
         sections = []
         for section in page["sections"]:
-            questions = [by_key[q["key"]] for q in section["questions"] if q["key"] in by_key]
+            questions = []
+            for question in section["questions"]:
+                row = by_key.get(question["key"])
+                if row is None:
+                    continue
+                # The builder edits the stored schema, not the current runtime state. In
+                # particular, a required question may be temporarily not due for a round;
+                # do not render that runtime result as if it changed the definition.
+                questions.append(
+                    {
+                        **row,
+                        "description": question.get("description", ""),
+                        "required": question.get("required", False),
+                        "round": question.get("round", ""),
+                    }
+                )
             sections.append({**section, "questions": questions})
         pages.append({**page, "sections": sections})
     return pages
@@ -167,6 +203,15 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
         return duplicate_question(questionnaire, key=post.get("key") or "")
     if action == "delete":
         return delete_question(questionnaire, key=post.get("key") or "")
+    if action == "edit":
+        return update_question(
+            questionnaire,
+            key=post.get("key") or "",
+            label=post.get("label") or "",
+            description=post.get("description") or "",
+            round_key=post.get("round") or "",
+            required=post.get("required") == "1",
+        )
     if action in {"move_up", "move_down"}:
         delta = -1 if action == "move_up" else 1
         return move_question(questionnaire, key=post.get("key") or "", delta=delta)

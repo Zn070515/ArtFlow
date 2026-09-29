@@ -148,6 +148,42 @@ def duplicate_question(questionnaire: dict, *, key: str) -> dict:
     return parse_questionnaire(document)
 
 
+def update_question(
+    questionnaire: dict,
+    *,
+    key: str,
+    label: str,
+    description: str = "",
+    round_key: str = "",
+    required: bool = False,
+) -> dict:
+    """Update the human-facing fields commonly changed by staff.
+
+    Advanced condition, option, and file-policy structures remain untouched here. They
+    have stronger schema contracts and stay available through the explicit advanced JSON
+    escape hatch rather than being silently rebuilt by a partial form.
+    """
+    document = _clone(questionnaire)
+    _section_for_question, question, _index = _find(document, key)
+    clean_label = label.strip()
+    if not clean_label:
+        raise ValidationError("题目标题不能为空。")
+    question["label"] = clean_label
+    clean_description = description.strip()
+    if clean_description:
+        question["description"] = clean_description
+    else:
+        question.pop("description", None)
+    clean_round = round_key.strip()
+    if clean_round:
+        question["round"] = clean_round
+    else:
+        question.pop("round", None)
+    if question.get("type") != NOTICE_TYPE:
+        question["required"] = bool(required)
+    return parse_questionnaire(document)
+
+
 def delete_question(questionnaire: dict, *, key: str) -> dict:
     """Remove a block, refusing while another question's condition still names it."""
     dependents = sorted(k for k in _dependents(questionnaire, key))
