@@ -18,6 +18,7 @@ from files.services import (
     submit_participant_material_for_check,
     validate_upload,
 )
+from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 
 from .models import SingerRegistration
 
@@ -30,7 +31,7 @@ def _apply_form_context(request, activities, *, errors=None, video_upload_allowe
         "form_data": request.POST if request.method == "POST" else {},
         "selected_activity_id": request.POST.get("activity_id", "")
         if request.method == "POST"
-        else "",
+        else request.GET.get("activity", ""),
     }
 
 
@@ -51,7 +52,22 @@ def apply_view(request):
     if request.method == "GET" and request.GET.get("activity"):
         from questionnaire.views import register_entry
 
-        return register_entry(request, int(request.GET["activity"]))
+        activity = get_object_or_404(
+            Activity.objects.filter(
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.REGISTRATION_OPEN,
+            ),
+            pk=request.GET["activity"],
+        )
+        if not request.user.is_staff_or_admin:
+            activity = get_object_or_404(
+                Activity.objects.filter(
+                    pk=activity.pk, data_lifecycle=Activity.DataLifecycle.FORMAL
+                ),
+                pk=activity.pk,
+            )
+        if questionnaire_material_authority_active(activity):
+            return register_entry(request, activity.pk)
     activities = Activity.objects.filter(
         activity_type=Activity.Type.SINGER_CONTEST,
         phase=Activity.Phase.REGISTRATION_OPEN,
@@ -201,7 +217,11 @@ def _participant_can_edit(registration):
 
 @login_required
 def my_registrations_view(request):
-    registrations = SingerRegistration.objects.filter(user=request.user).select_related("activity")
+    registrations = prime_questionnaire_answers(
+        SingerRegistration.objects.filter(user=request.user).select_related("activity")
+    )
+    for registration in registrations:
+        registration.song_label = generic_song_label(registration)
     return render(
         request,
         "singer_contest/my_registrations.html",
@@ -219,6 +239,8 @@ def my_registration_detail(request, pk):
     reg = get_object_or_404(
         SingerRegistration.objects.select_related("activity"), pk=pk, user=request.user
     )
+    if questionnaire_material_authority_active(reg.activity):
+        return redirect("questionnaire:form", activity_pk=reg.activity_id)
     errors = []
     if request.method == "POST":
         if "check_id" in request.POST or request.FILES.get("file"):
@@ -232,6 +254,7 @@ def my_registration_detail(request, pk):
         "singer_contest/my_submission.html",
         {
             "reg": reg,
+            "song_label": reg.song_name,
             "can_edit": _participant_can_edit(reg),
             "files": reg.files.all(),
             "checks": reg.material_checks.all(),

@@ -12,7 +12,7 @@
             <div class="flex justify-between items-center">
                 <div>
                     <h3 class="font-medium text-gray-900">{{ reg.activity.title }}</h3>
-                    <p class="text-xs text-gray-500 mt-1">{{ reg.name }} · {{ reg.song_name }} · {{ reg.created_at|date:"Y-m-d H:i" }}</p>
+                    <p class="text-xs text-gray-500 mt-1">{{ reg.name }} · {{ reg.song_label }} · {{ reg.created_at|date:"Y-m-d H:i" }}</p>
                 </div>
                 <div class="flex items-center gap-2">
                     {% if reg.pre_status == "approved" %}

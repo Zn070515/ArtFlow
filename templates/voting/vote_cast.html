@@ -25,7 +25,7 @@
             <input type="radio" name="selected_option" value="{{ opt.pk }}" data-vote-option{% if not can_submit %} disabled{% endif %} class="h-4 w-4 text-brand border-gray-300">
             {% endif %}
             <span class="text-sm font-medium">{{ opt.singer.name }}</span>
-            <span class="text-xs text-gray-400">{{ opt.singer.song_name }}</span>
+            <span class="text-xs text-gray-400">{{ opt.singer.song_label }}</span>
         </label>
         {% empty %}
         <p class="text-gray-400 text-sm text-center py-8">暂无可选选手</p>
