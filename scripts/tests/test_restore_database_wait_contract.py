@@ -26,6 +26,15 @@ def test_application_restore_uses_the_running_database_image_instead_of_a_drifte
     assert "postgres:17-alpine" not in script
 
 
+def test_restore_scripts_resolve_the_runtime_shared_network():
+    for script_path in RESTORE_SCRIPTS:
+        script = script_path.read_text(encoding="utf-8")
+
+        assert "resolve_compose_network.ps1" in script
+        assert "Resolve-ComposeSharedNetwork" in script
+        assert "${ComposeProjectName}_artflow_internal" not in script
+
+
 def test_backup_wrapper_targets_the_persistent_backup_mount_by_default():
     script = (REPOSITORY_ROOT / "scripts/backup_artflow.ps1").read_text(encoding="utf-8")
 
