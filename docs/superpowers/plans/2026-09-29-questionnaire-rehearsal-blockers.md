@@ -31,10 +31,10 @@
 - Preserve `questionnaire:form`, `questionnaire:autosave`, `questionnaire:submit`, and `questionnaire:upload` URL contracts.
 - Use the existing `schema_hash()` and `ParticipantBoundaryTests` contracts.
 
-- [ ] Run the focused questionnaire boundary/form tests and record the actual failure set.
-- [ ] Keep only current test/view changes that are needed for FORMAL/TEST scoping, schema-hash enforcement, and staff write rejection.
-- [ ] Run `uv run python manage.py test questionnaire.test_form questionnaire.test_entry files.test_questionnaire_uploads`.
-- [ ] Commit the focused boundary changes as `fix: close questionnaire participant write boundaries`.
+- [x] Run the focused questionnaire boundary/form tests and record the actual failure set.
+- [x] Keep only current test/view changes that are needed for FORMAL/TEST scoping, schema-hash enforcement, and staff write rejection.
+- [x] Run `uv run python manage.py test questionnaire.test_form questionnaire.test_entry files.test_questionnaire_uploads`.
+- [x] Commit the focused boundary changes as `fix: close questionnaire participant write boundaries`.
 
 ### Task 2: Prove the private fixture package reaches a complete rehearsal
 
@@ -69,11 +69,11 @@
 - Add or use `reconcile_questionnaire_material_checks(registration, version, plan)`.
 - A supplement write must identify `question_key`; it must not fall back to `file_purpose` alone.
 
-- [ ] Add failing tests for check creation on first questionnaire registration, per-question reset after replacement upload, closed-phase denial for ordinary edits, and success for a `NEEDS_SUPPLEMENT` question.
-- [ ] Add the minimal reconciliation call at the authoritative registration/freeze/submit boundary.
-- [ ] Make participant form rendering read-only after close except for question keys with an active `NEEDS_SUPPLEMENT` check.
-- [ ] Hide/disable legacy singer material requirements and staff purpose-only upload for registrations bound to a frozen questionnaire.
-- [ ] Run focused file/questionnaire/staff tests and commit as `fix: enforce questionnaire material authority`.
+- [x] Add failing tests for check creation on first questionnaire registration, per-question reset after replacement upload, closed-phase denial for ordinary edits, and success for a `NEEDS_SUPPLEMENT` question.
+- [x] Add the minimal reconciliation call at the authoritative registration/freeze/submit boundary.
+- [x] Make participant form rendering read-only after close except for question keys with an active `NEEDS_SUPPLEMENT` check.
+- [x] Hide/disable legacy singer material requirements and staff purpose-only upload for registrations bound to a frozen questionnaire.
+- [x] Run focused file/questionnaire/staff tests and commit as `fix: enforce questionnaire material authority`.
 
 ### Task 4: Validate questionnaire answers at the server boundary
 
@@ -91,10 +91,10 @@
 - Introduce one shared normalization/validation path for autosave, submit, and loader input.
 - Enforce participant-only questions, declared choice values, scalar/list shape, length/domain constraints, and safe handling of duplicate student IDs without HTTP 500.
 
-- [ ] Add failing tests for invalid single/multiple choice values, max length, required values, duplicate student ID, and `audience=staff` exposure/write attempts.
-- [ ] Implement the smallest shared validator and map expected integrity conflicts to bounded client errors.
-- [ ] Fix checkbox collection and replay for `multiple_choice` as a list of selected values.
-- [ ] Run Python and client gates, then commit as `fix: validate questionnaire answers at write boundary`.
+- [x] Add failing tests for invalid single/multiple choice values, max length, required values, duplicate student ID, and `audience=staff` exposure/write attempts.
+- [x] Implement the smallest shared validator and map expected integrity conflicts to bounded client errors.
+- [x] Fix checkbox collection and replay for `multiple_choice` as a list of selected values.
+- [x] Run Python and client gates, then commit as `fix: validate questionnaire answers at write boundary`.
 
 ### Task 5: Close compiler and file-slot identity gaps
 
@@ -111,9 +111,9 @@
 - Delete/replacement must use the same `(owner, question_key, purpose)` slot filter as upload/current-file selection.
 - Successor compatibility fingerprint must include type, binding, round, audience, choice values, validation domain, and file purpose while ignoring presentation-only label/description.
 
-- [ ] Add failing tests for duplicate binding, cross-round delete replacement, choice-domain changes, and validation-domain changes.
-- [ ] Implement the narrow guards and run the focused compiler/file/successor tests.
-- [ ] Commit as `fix: preserve questionnaire question identity contracts`.
+- [x] Add failing tests for duplicate binding, cross-round delete replacement, choice-domain changes, and validation-domain changes.
+- [x] Implement the narrow guards and run the focused compiler/file/successor tests.
+- [x] Commit as `fix: preserve questionnaire question identity contracts`.
 
 ### Task 6: Verify the complete browser rehearsal and gates
 

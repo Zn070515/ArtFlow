@@ -76,7 +76,7 @@ the Expand → Migrate → Switch → Contract sequence and is **not yet removed
 | Legacy | Status |
 |---|---|
 | `singer_contest.views.apply_view` and its template | Superseded by the questionnaire page. Still routed; retire once rehearsal confirms the new path. |
-| `SingerRegistration.song_name` | Legacy. Now `blank=True, default=""` — a draft exists before anyone has typed anything, and the per-round songs live in the questionnaire. Not dropped: historical data reads it. |
+| `SingerRegistration.song_name` | Legacy. Now `blank=True, default=""` — a draft exists before anyone has typed anything, and the per-round songs live in the questionnaire. Not dropped: legacy data reads it. Current display code uses the read-only projections in `questionnaire/projection.py`: round-aware surfaces read the frozen `<round-key>.song`, while generic lists say `多轮曲目` instead of guessing one round. |
 | `files.services.DEFAULT_SINGER_REQUIREMENTS` | Legacy. The fallback requirement table for activities with no configured requirements and no frozen questionnaire. |
 | Purpose-only singer uploads (`store_submission_file`) | Kept. A legacy upload still has `question_key=""` and still replaces itself by purpose; the farewell-show program path is unchanged. |
 
