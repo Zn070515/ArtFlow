@@ -39,6 +39,7 @@ from core.models import Activity
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import (
     lock_activity_for_action,
+    phase_choices_for_activity,
     transition_activity_phase,
     unarchive_activity,
 )
@@ -318,7 +319,7 @@ def activity_edit(request, pk):
                     "error": _form_error(form),
                     "activity": activity,
                     "activity_types": _choices(Activity.Type),
-                    "phases": _choices(Activity.Phase),
+                    "phases": phase_choices_for_activity(activity),
                     "data": request.POST,
                 },
             )
@@ -330,7 +331,22 @@ def activity_edit(request, pk):
             setattr(activity, key, value)
         if request.FILES.get("cover_image"):
             activity.cover_image = request.FILES["cover_image"]
-        activity.save()
+        try:
+            activity.save()
+        except ValidationError as error:
+            form.add_error(None, domain_error_messages(error))
+            return render(
+                request,
+                "staff_panel/activity_form.html",
+                {
+                    "error": _form_error(form),
+                    "activity": activity,
+                    "activity_types": _choices(Activity.Type),
+                    "phases": phase_choices_for_activity(activity),
+                    "data": request.POST,
+                },
+                status=400,
+            )
         AuditLog.objects.create(
             operator=request.user,
             action_type=AuditLog.ActionType.OTHER,
@@ -343,7 +359,7 @@ def activity_edit(request, pk):
         {
             "activity": activity,
             "activity_types": _choices(Activity.Type),
-            "phases": _choices(Activity.Phase),
+            "phases": phase_choices_for_activity(activity),
         },
     )
 

@@ -187,9 +187,11 @@ class Activity(models.Model):
                     type(self)
                     ._base_manager.using(using)
                     .filter(pk=self.pk)
-                    .values("phase", "is_locked", "locked_at", "locked_by_id")
+                    .values("activity_type", "phase", "is_locked", "locked_at", "locked_by_id")
                     .first()
                 )
+                if persisted_state and persisted_state["activity_type"] != self.activity_type:
+                    raise ValidationError("活动类型创建后不可修改。")
                 if (
                     persisted_state
                     and not authority_authorized(ACTIVITY_STATE)

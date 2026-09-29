@@ -63,6 +63,17 @@ class CoreModelTests(TestCase):
         self.assertFalse(activity.is_test_mode)
         self.assertEqual(activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
 
+    def test_activity_type_is_immutable_after_creation(self):
+        activity = Activity.objects.create(
+            title="Typed Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        activity.activity_type = Activity.Type.FAREWELL_SHOW
+        with self.assertRaises(ValidationError):
+            activity.save()
+        activity.refresh_from_db()
+        self.assertEqual(activity.activity_type, Activity.Type.SINGER_CONTEST)
+
 
 class ActivityCreationAuthorityTests(TestCase):
     def test_activity_instance_creation_rejects_lock_provenance(self):

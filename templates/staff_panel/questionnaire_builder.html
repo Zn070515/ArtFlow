@@ -24,12 +24,6 @@
     </div>
     {% endif %}
 
-    {% if messages %}
-    {% for message in messages %}
-    <div class="border rounded px-4 py-2 mb-3 text-sm {% if message.tags == 'error' %}bg-red-50 border-red-200 text-red-700{% else %}bg-green-50 border-green-200 text-green-700{% endif %}">{{ message }}</div>
-    {% endfor %}
-    {% endif %}
-
     <p class="text-sm text-gray-600 mb-4">
         目前需要完成 {{ completion.required }} 项（另有 {{ completion.upcoming }} 项按轮次稍后开放）
     </p>

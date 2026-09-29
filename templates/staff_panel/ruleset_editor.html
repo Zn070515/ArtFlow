@@ -31,13 +31,6 @@
         <a href="{% url 'staff:manual_decision' version.pk %}" class="border border-gray-300 px-3 py-1.5 rounded text-sm">人工选择</a>
     </div>
 
-    {% for message in messages %}
-    <div class="mb-3 text-sm px-3 py-2 rounded border
-        {% if message.tags == 'error' %}bg-red-50 border-red-300 text-red-800{% else %}bg-emerald-50 border-emerald-300 text-emerald-800{% endif %}">
-        {{ message }}
-    </div>
-    {% endfor %}
-
     <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
         {% csrf_token %}
         <input type="hidden" name="action" value="save">

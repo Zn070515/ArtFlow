@@ -3372,6 +3372,52 @@ class ActivityPhaseEditTests(TestCase):
             ).exists()
         )
 
+    def test_activity_edit_offers_only_current_and_legal_successor_phases(self):
+        activity = _create_activity(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:activity_edit", args=[activity.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="registration_open"')
+        self.assertContains(response, 'value="registration_closed"')
+        self.assertNotContains(response, 'value="results_published"')
+        self.assertNotContains(response, '<select name="activity_type"')
+
+    def test_activity_type_change_is_rejected_by_staff_edit(self):
+        activity = _create_activity(
+            title="Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.DRAFT,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Contest",
+                "activity_type": Activity.Type.FAREWELL_SHOW,
+                "phase": Activity.Phase.DRAFT,
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        activity.refresh_from_db()
+        self.assertEqual(activity.activity_type, Activity.Type.SINGER_CONTEST)
+
+    def test_archived_activity_list_exposes_only_unarchive(self):
+        activity = _create_activity(
+            title="Archived Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_locked=True,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:activity_list"))
+        self.assertContains(response, reverse("staff:activity_unarchive", args=[activity.pk]))
+        self.assertNotContains(response, reverse("staff:activity_edit", args=[activity.pk]))
+
     def test_admin_edit_rejects_backward_phase_transition(self):
         activity = _create_activity(
             title="Contest",

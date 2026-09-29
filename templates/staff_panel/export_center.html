@@ -56,13 +56,20 @@
                     <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">清空测试</button>
                 </form>
                 {% endif %}
-                {% if not a.is_locked %}
+                {% if a.phase == 'archived' %}
+                {% if user.is_admin %}
+                <form method="post" action="{% url 'staff:activity_unarchive' a.pk %}" class="inline" onsubmit="return confirm('确认解归档该活动？');">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs border border-blue-200 text-blue-600 px-2 py-1 rounded hover:bg-blue-50">解归档</button>
+                </form>
+                {% endif %}
+                {% elif not a.is_locked %}
                 <form method="post" action="{% url 'staff:activity_lock' a.pk %}">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">锁定活动</button>
                 </form>
                 {% else %}
-                {% if user.is_admin %}
+                {% if user.is_admin and a.phase != 'archived' %}
                 <form method="post" action="{% url 'staff:activity_unlock' a.pk %}">
                     {% csrf_token %}
                     <input type="text" name="note" placeholder="解锁原因（选填）" class="text-xs border border-red-200 rounded px-2 py-1">
