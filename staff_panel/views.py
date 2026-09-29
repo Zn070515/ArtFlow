@@ -1127,7 +1127,11 @@ def round_list(request):
 @staff_required
 def round_create(request):
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST.get("activity_id"))
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST.get("activity_id"),
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         form = ContestRoundForm(
             request.POST, rubrics=ScoringRubric.objects.filter(activity=activity)
         )
@@ -1145,7 +1149,10 @@ def round_create(request):
                     "order_policies": _choices(ContestRound.OrderPolicy),
                     "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                     "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-                    "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                    "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                        activity=activity
+                    ),
+                    "selected_activity_id": activity.pk,
                 },
             )
         with transaction.atomic():
@@ -1171,7 +1178,10 @@ def round_create(request):
                         "order_policies": _choices(ContestRound.OrderPolicy),
                         "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                         "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                        "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                            activity=activity
+                        ),
+                        "selected_activity_id": activity.pk,
                     },
                 )
             try:
@@ -1207,7 +1217,10 @@ def round_create(request):
                         "order_policies": _choices(ContestRound.OrderPolicy),
                         "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
                         "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-                        "rubrics": ScoringRubric.objects.select_related("activity").all(),
+                        "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                            activity=activity
+                        ),
+                        "selected_activity_id": activity.pk,
                     },
                 )
             log_action(
@@ -1219,6 +1232,10 @@ def round_create(request):
         return redirect("staff:round_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    selected_activity_id = request.GET.get("activity_id") or ""
+    rubrics = ScoringRubric.objects.select_related("activity").filter(
+        activity_id=selected_activity_id
+    ) if selected_activity_id.isdigit() else ScoringRubric.objects.none()
     return render(
         request,
         "staff_panel/round_form.html",
@@ -1229,7 +1246,8 @@ def round_create(request):
             "order_policies": _choices(ContestRound.OrderPolicy),
             "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
             "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
-            "rubrics": ScoringRubric.objects.select_related("activity").all(),
+            "rubrics": rubrics,
+            "selected_activity_id": selected_activity_id,
         },
     )
 
@@ -1908,7 +1926,11 @@ def judge_list(request):
 @staff_required
 def judge_create(request):
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST["activity_id"],
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
             judge = Judge.objects.create(
@@ -2372,10 +2394,12 @@ def vote_session_create(request):
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
-                                pre_status=SingerRegistration.PreStatus.APPROVED
+                                activity=activity,
+                                pre_status=SingerRegistration.PreStatus.APPROVED,
                             )
                         )
                     ),
+                    "selected_activity_id": activity.pk,
                     "selection_types": _choices(VoteSession.SelectionType),
                     "purposes": _choices(VoteSession.Purpose),
                 },
@@ -2386,6 +2410,7 @@ def vote_session_create(request):
         selected_singers = list(
             SingerRegistration.objects.filter(
                 pk__in=singer_ids,
+                activity=activity,
                 pre_status=SingerRegistration.PreStatus.APPROVED,
             )
         )
@@ -2422,19 +2447,22 @@ def vote_session_create(request):
         return redirect("staff:vote_session_list")
 
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    singers = _with_generic_song_labels(
-        scope_lifecycle(
-            SingerRegistration.objects.select_related("activity").filter(
-                pre_status=SingerRegistration.PreStatus.APPROVED
-            )
-        )
+    selected_activity_id = request.GET.get("activity_id") or ""
+    singer_queryset = SingerRegistration.objects.select_related("activity").filter(
+        pre_status=SingerRegistration.PreStatus.APPROVED
     )
+    if selected_activity_id.isdigit():
+        singer_queryset = singer_queryset.filter(activity_id=selected_activity_id)
+    else:
+        singer_queryset = singer_queryset.none()
+    singers = _with_generic_song_labels(scope_lifecycle(singer_queryset))
     return render(
         request,
         "staff_panel/vote_session_form.html",
         {
             "activities": activities,
             "singers": singers,
+            "selected_activity_id": selected_activity_id,
             "selection_types": _choices(VoteSession.SelectionType),
             "purposes": _choices(VoteSession.Purpose),
         },

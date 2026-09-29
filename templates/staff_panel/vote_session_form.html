@@ -13,8 +13,9 @@
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">活动</label>
             <select name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
+                {% for a in activities %}<option value="{{ a.pk }}"{% if selected_activity_id|stringformat:"s" == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>{% endfor %}
             </select>
+            <p class="text-xs text-gray-500 mt-1">候选选手只显示所选活动中已审核通过的选手；切换活动后请重新打开本页。</p>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">场次名称</label>

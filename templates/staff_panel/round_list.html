@@ -41,6 +41,8 @@
                     <td class="px-4 py-2.5">{% if r.is_locked %}<span class="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">已锁定</span>{% else %}<span class="text-xs text-gray-400">未锁定</span>{% endif %}</td>
                     <td class="px-4 py-2.5 space-x-2">
                         <a href="{% url 'staff:activity_result_board' r.activity_id %}" class="text-gray-500 hover:underline text-xs">公示板</a>
+                        <a href="{% url 'staff:judge_control' r.pk %}" class="text-brand hover:underline text-xs">评委现场</a>
+                        <a href="{% url 'staff:audience_score_entry' r.activity_id %}" class="text-brand hover:underline text-xs">观众分</a>
                         {% if r.status == "draft" %}
                         <a href="{% url 'staff:round_groups' r.pk %}" class="text-gray-500 hover:underline text-xs">分组</a>
                         {% if r.order_policy == "manual" %}<a href="{% url 'staff:round_running_order' r.pk %}" class="text-gray-500 hover:underline text-xs">人工顺序</a>{% endif %}

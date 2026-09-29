@@ -28,6 +28,10 @@
             <h3 class="font-medium text-gray-900">比赛轮次与现场控制</h3>
             <p class="mt-1 text-sm text-gray-500">管理轮次、录分、排名，并进入评委组准备、席位二维码和现场控制</p>
         </a>
+        <a href="{% url 'staff:rubric_create' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">评分标准</h3>
+            <p class="mt-1 text-sm text-gray-500">为当前活动设置评分项和满分</p>
+        </a>
         <a href="{% url 'staff:judge_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
             <h3 class="font-medium text-gray-900">评委管理</h3>
             <p class="mt-1 text-sm text-gray-500">添加和管理比赛评委</p>
@@ -68,6 +72,12 @@
             <h3 class="font-medium text-gray-900">操作日志</h3>
             <p class="mt-1 text-sm text-gray-500">查看工作人员操作记录</p>
         </a>
+        {% if user.is_admin %}
+        <a href="{% url 'staff:user_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
+            <h3 class="font-medium text-gray-900">用户管理</h3>
+            <p class="mt-1 text-sm text-gray-500">管理工作人员和管理员账号状态与角色</p>
+        </a>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

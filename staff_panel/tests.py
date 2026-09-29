@@ -329,6 +329,72 @@ class StaffPanelSmokeTests(TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
+    def test_dashboard_exposes_operator_workflows(self):
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:dashboard"))
+        self.assertContains(response, reverse("staff:rubric_create"))
+        self.assertContains(response, reverse("staff:vote_session_list"))
+        self.assertContains(response, reverse("staff:user_list"))
+
+    def test_round_list_exposes_judge_and_audience_controls(self):
+        contest_round = _create_round(
+            activity=self.singer_activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="Round 1",
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:round_list"))
+        self.assertContains(response, reverse("staff:judge_control", args=[contest_round.pk]))
+        self.assertContains(
+            response,
+            reverse("staff:audience_score_entry", args=[self.singer_activity.pk]),
+        )
+
+    def test_round_create_filters_rubrics_by_selected_activity(self):
+        other_activity = _create_activity(
+            title="Other Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        ScoringRubric.objects.create(
+            activity=self.singer_activity, name="Singer rubric", is_test_data=False
+        )
+        ScoringRubric.objects.create(
+            activity=other_activity, name="Other rubric", is_test_data=False
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:round_create"), {"activity_id": self.singer_activity.pk}
+        )
+        self.assertContains(response, "Singer rubric")
+        self.assertNotContains(response, "Other rubric")
+
+    def test_vote_session_create_filters_singers_by_selected_activity(self):
+        other_activity = _create_activity(
+            title="Other Singer Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=False,
+        )
+        other_singer = SingerRegistration.objects.create(
+            activity=other_activity,
+            user=self.participant,
+            name="Other Singer",
+            student_id="20260099",
+            college="Music",
+            class_name="Class B",
+            phone="13800000099",
+            song_name="Other Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:vote_session_create"), {"activity_id": self.singer_activity.pk}
+        )
+        self.assertNotContains(response, f'name="singers" value="{other_singer.pk}"')
+
     def test_admin_can_create_activity_from_staff_panel(self):
         login_admin(self.client, self.admin)
         response = self.client.post(
