@@ -5,7 +5,12 @@ if (!adminAccessKey) {
   throw new Error("ARTFLOW_E2E_ADMIN_ACCESS_KEY is required for the human acceptance flow.");
 }
 
-test("a new admin can register, create an activity, and enter its workspace", async ({ page }) => {
+// Both journeys intentionally exercise first-class account provisioning against the
+// same database. Keep them ordered so local SQLite rehearsal cannot race on writes;
+// PostgreSQL CI remains covered by the same visible browser contract.
+test.describe.configure({ mode: "serial" });
+
+async function registerAndOpenWorkspace(page) {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const username = `human-acceptance-${suffix}`;
   const password = `Violet!Mesa7Quartz${suffix.slice(-4)}`;
@@ -29,10 +34,46 @@ test("a new admin can register, create an activity, and enter its workspace", as
   await expect(activityRow).toBeVisible();
   await activityRow.getByRole("link", { name: "进入工作区" }).click();
   await expect(page.getByRole("heading", { name: activityTitle })).toBeVisible();
+
+  // New activities intentionally start in draft. Move the activity through the
+  // visible admin workflow before opening configuration that requires a live phase.
+  await page.getByRole("link", { name: "编辑活动" }).click();
+  await page.locator("#id_phase").selectOption("registration_open");
+  await page.getByRole("button", { name: "保存" }).click();
+  await expect(page).toHaveURL(/\/staff\/activities\/$/);
+  await page.locator("tr", { hasText: activityTitle }).getByRole("link", { name: "进入工作区" }).click();
+  await expect(page.getByRole("heading", { name: activityTitle })).toBeVisible();
+  return { activityTitle };
+}
+
+test("a new admin can reach the activity workspace and preserve scope", async ({ page }) => {
+  const { activityTitle } = await registerAndOpenWorkspace(page);
+  await expect(page.getByRole("link", { name: "编辑赛制" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "新建评分标准" })).toBeVisible();
   await expect(page.getByRole("link", { name: "新建比赛轮次" })).toBeVisible();
   await expect(page.getByRole("link", { name: "创建投票场次" })).toBeVisible();
 
-  await page.getByRole("link", { name: "新建比赛轮次" }).click();
+  await page.getByRole("link", { name: "新建评分标准" }).click();
+  await expect(page.locator("#id_activity_id option:checked")).toHaveText(activityTitle);
+  await page.locator("#id_name").fill("第一轮评分");
+  await page.locator("#id_criterion_name_1").fill("综合表现");
+  await page.locator("#id_criterion_max_score_1").fill("100");
+  await page.getByRole("button", { name: "创建评分标准" }).click();
+
+  await expect(page).toHaveURL(/\/staff\/rounds\/new\/\?activity_id=\d+/);
   await expect(page.locator("#id_activity_id")).toHaveValue(/\d+/);
   await expect(page.locator("#id_activity_id option:checked")).toHaveText(activityTitle);
+  await expect(page.locator("#id_rubric option")).toHaveCount(2);
+  await expect(page.locator("#id_rubric option").nth(1)).toHaveText("第一轮评分");
+  await expect(page.locator('[class~="bg-brand"][class~="text-brand"]')).toHaveCount(0);
+});
+
+test("the activity workspace remains usable at a mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const { activityTitle } = await registerAndOpenWorkspace(page);
+  await expect(page.getByRole("heading", { name: activityTitle })).toBeVisible();
+  await expect(page.getByText("报名与材料")).toBeVisible();
+  await expect(page.getByText("赛制与评分")).toBeVisible();
+  await expect(page.getByText("投票与现场")).toBeVisible();
+  await expect(page.locator('[class~="bg-brand"][class~="text-brand"]')).toHaveCount(0);
 });

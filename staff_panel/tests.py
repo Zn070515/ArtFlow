@@ -6209,6 +6209,7 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertContains(response, "赛制模板库")
         self.assertContains(response, HISTORICAL_SCHIDUI_NAME)
         self.assertContains(response, "校十佳屏峰")
+        self.assertContains(response, "可直接克隆")
 
     def test_template_list_requires_staff(self):
         self.client.logout()
