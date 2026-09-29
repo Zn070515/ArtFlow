@@ -32,6 +32,7 @@ done
 
 /app/scripts/wait-for-postgres.sh
 python manage.py migrate --noinput
+python manage.py seed_ruleset_templates
 python manage.py collectstatic --noinput
 
 exec "$@"

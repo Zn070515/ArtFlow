@@ -59,6 +59,28 @@ function Get-LocalIpv4 {
     throw 'No usable LAN IPv4 address was detected. Re-run with -HostAddress <IPv4>.'
 }
 
+function Write-SafeComposeLines {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object[]]$Lines
+    )
+
+    foreach ($line in $Lines) {
+        $safeLine = [string]$line
+        $safeLine = $safeLine -replace '(?i)(SECRET_KEY|STAFF_ACCESS_KEY|ADMIN_ACCESS_KEY|POSTGRES_PASSWORD|DATABASE_URL)(\s*[:=]\s*)\S+', '$1$2[redacted]'
+        Write-Host $safeLine
+    }
+}
+
+function Invoke-ComposeDiagnostics {
+    Write-Host 'Docker Compose status:'
+    $status = & docker compose @composeArguments ps 2>&1
+    Write-SafeComposeLines -Lines @($status)
+    Write-Host 'Recent web/db logs:'
+    $logs = & docker compose @composeArguments logs --tail 80 web db 2>&1
+    Write-SafeComposeLines -Lines @($logs)
+}
+
 function Invoke-ComposeStep {
     param(
         [Parameter(Mandatory = $true)]
@@ -67,6 +89,13 @@ function Invoke-ComposeStep {
 
     $output = & docker compose @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
+        Write-Host 'Docker Compose command output:'
+        Write-SafeComposeLines -Lines @($output)
+        try {
+            Invoke-ComposeDiagnostics
+        } catch {
+            Write-Host 'Unable to collect Docker Compose diagnostics.'
+        }
         throw "Docker Compose step failed: $($Arguments -join ' ')"
     }
     return $output

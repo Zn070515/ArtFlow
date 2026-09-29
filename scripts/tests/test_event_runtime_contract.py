@@ -28,6 +28,9 @@ def test_event_launcher_declares_safe_runtime_contract():
     assert "Get-LocalIpv4" in launcher
     assert "$HostAddress.Trim()" in launcher
     assert "Admin registration URL:" in launcher
+    assert "Invoke-ComposeDiagnostics" in launcher
+    assert "logs --tail 80 web db" in launcher
+    assert "POSTGRES_PASSWORD" in launcher
 
 
 def test_event_launcher_does_not_add_unsafe_network_or_data_operations():
@@ -39,6 +42,7 @@ def test_event_launcher_does_not_add_unsafe_network_or_data_operations():
     assert "docker run" not in launcher
     assert "DROP DATABASE" not in launcher.upper()
     assert "seed_demo_data --reset" not in launcher
+    assert "Write-Host $env:" not in launcher
 
 
 def test_event_environment_example_is_non_secret_and_loopback_neutral():

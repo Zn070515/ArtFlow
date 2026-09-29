@@ -508,6 +508,14 @@ def test_production_image_bakes_and_validates_its_release_revision():
     assert "must match the baked image revision" in entrypoint
 
 
+def test_runtime_entrypoint_seeds_builtin_ruleset_templates_before_static_collection():
+    entrypoint = (PROJECT_ROOT / "scripts" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    migrate_position = entrypoint.index("python manage.py migrate --noinput")
+    seed_position = entrypoint.index("python manage.py seed_ruleset_templates")
+    static_position = entrypoint.index("python manage.py collectstatic --noinput")
+    assert migrate_position < seed_position < static_position
+
+
 @pytest.mark.skipif(DOCKER is None, reason="Docker is required for Compose config validation")
 def test_production_compose_config_renders_without_starting_services(
     monkeypatch: pytest.MonkeyPatch,
