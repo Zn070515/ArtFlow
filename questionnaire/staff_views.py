@@ -34,7 +34,7 @@ from .builder import (
 )
 from .compiler import compile_questionnaire
 from .runtime import completion_summary, resolve_question_value, resolve_questions
-from .schema import parse_questionnaire
+from .schema import FILE_PURPOSES, parse_questionnaire
 
 ACTION_LABELS = {
     "add": "新增题目",
@@ -204,6 +204,33 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
     if action == "delete":
         return delete_question(questionnaire, key=post.get("key") or "")
     if action == "edit":
+        options = None
+        if post.get("option_value") is not None:
+            values = post.getlist("option_value")
+            labels = post.getlist("option_label")
+            if len(values) != len(labels):
+                raise ValidationError("选择题选项不完整，请同时填写选项值和显示名称。")
+            options = [
+                {"value": value.strip(), "label": label.strip()}
+                for value, label in zip(values, labels, strict=True)
+            ]
+        file_config = None
+        if post.get("file_purpose") is not None:
+            extensions = [
+                extension.strip().lower()
+                for extension in (post.get("file_extensions") or "").split(",")
+                if extension.strip()
+            ]
+            try:
+                max_mb = int(post.get("file_max_mb") or "")
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("文件大小上限必须是正整数 MB。") from exc
+            file_config = {
+                "purpose": post.get("file_purpose") or "",
+                "extensions": extensions,
+                "max_mb": max_mb,
+                "max_files": 1,
+            }
         return update_question(
             questionnaire,
             key=post.get("key") or "",
@@ -211,6 +238,8 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
             description=post.get("description") or "",
             round_key=post.get("round") or "",
             required=post.get("required") == "1",
+            options=options,
+            file_config=file_config,
         )
     if action in {"move_up", "move_down"}:
         delta = -1 if action == "move_up" else 1
@@ -279,8 +308,10 @@ def builder_view(request: HttpRequest, pk: int):
                 ("single_choice", "单选"),
                 ("multiple_choice", "多选"),
                 ("select", "下拉"),
+                ("file", "文件上传"),
                 ("notice", "说明"),
             ],
+            "file_purposes": sorted(FILE_PURPOSES),
         },
     )
 

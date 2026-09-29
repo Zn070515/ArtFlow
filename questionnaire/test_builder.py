@@ -22,7 +22,7 @@ from .builder import (
     move_question,
     referenced_keys,
 )
-from .schema import FILE_PURPOSES, parse_questionnaire
+from .schema import FILE_PURPOSES, MAX_FILE_MB_HARD_LIMIT, parse_questionnaire
 
 QUESTIONNAIRE = {
     "schema_version": 1,
@@ -83,6 +83,34 @@ class BuilderOperationTests(SimpleTestCase):
                 )
         self.assertEqual(len(_keys(document, "identity")), len(DEFAULT_KEYS))
         parse_questionnaire(document)
+
+    def test_choice_question_defaults_include_editable_options(self):
+        document = parse_questionnaire(QUESTIONNAIRE)
+        for question_type in ("single_choice", "multiple_choice", "select"):
+            with self.subTest(question_type=question_type):
+                question = add_question(
+                    document, section_key="identity", question_type=question_type
+                )["pages"][0]["sections"][0]["questions"][-1]
+                self.assertEqual(question["type"], question_type)
+                self.assertEqual(
+                    question["options"],
+                    [
+                        {"value": "option_1", "label": "选项一"},
+                        {"value": "option_2", "label": "选项二"},
+                    ],
+                )
+
+    def test_file_question_default_is_upload_valid(self):
+        document = add_question(
+            parse_questionnaire(QUESTIONNAIRE),
+            section_key="identity",
+            question_type="file",
+        )
+        question = document["pages"][0]["sections"][0]["questions"][0]
+        self.assertEqual(question["file"]["purpose"], "accompaniment")
+        self.assertTrue(question["file"]["extensions"])
+        self.assertLessEqual(question["file"]["max_mb"], MAX_FILE_MB_HARD_LIMIT)
+        self.assertEqual(question["file"]["max_files"], 1)
 
     def test_a_generated_key_does_not_collide_with_an_existing_one(self):
         document = parse_questionnaire(QUESTIONNAIRE)

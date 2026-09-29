@@ -96,6 +96,36 @@
                                 <input type="checkbox" name="required" value="1"{% if q.required %} checked{% endif %} class="rounded border-gray-300"> 选手必须填写
                             </label>
                             {% endif %}
+                            {% if q.type == 'single_choice' or q.type == 'multiple_choice' or q.type == 'select' %}
+                            <fieldset class="mt-3 rounded border border-gray-200 p-2">
+                                <legend class="px-1 text-xs font-medium text-gray-700">选项</legend>
+                                {% for option in q.options %}
+                                <div class="mt-1 grid grid-cols-2 gap-1">
+                                    <label class="sr-only" for="{{ q.key|slugify }}-option-value-{{ forloop.counter }}">选项值</label>
+                                    <input id="{{ q.key|slugify }}-option-value-{{ forloop.counter }}" name="option_value" value="{{ option.value }}" required class="rounded border border-gray-300 px-2 py-1 text-xs" placeholder="内部值">
+                                    <label class="sr-only" for="{{ q.key|slugify }}-option-label-{{ forloop.counter }}">选项名称</label>
+                                    <input id="{{ q.key|slugify }}-option-label-{{ forloop.counter }}" name="option_label" value="{{ option.label }}" required class="rounded border border-gray-300 px-2 py-1 text-xs" placeholder="显示名称">
+                                </div>
+                                {% endfor %}
+                                <p class="mt-1 text-[11px] text-gray-600">如需增加或删除选项，请使用下方高级配置；这里用于编辑现有选项。</p>
+                            </fieldset>
+                            {% endif %}
+                            {% if q.type == 'file' %}
+                            <fieldset class="mt-3 rounded border border-gray-200 p-2">
+                                <legend class="px-1 text-xs font-medium text-gray-700">文件上传规则</legend>
+                                <label class="mt-1 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-purpose">用途
+                                    <select id="{{ q.key|slugify }}-file-purpose" name="file_purpose" required class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
+                                        {% for purpose in file_purposes %}<option value="{{ purpose }}"{% if q.file.purpose == purpose %} selected{% endif %}>{{ purpose }}</option>{% endfor %}
+                                    </select>
+                                </label>
+                                <label class="mt-2 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-extensions">允许扩展名（逗号分隔）
+                                    <input id="{{ q.key|slugify }}-file-extensions" name="file_extensions" value="{{ q.file.extensions|join:', ' }}" required class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-xs" placeholder=".mp3, .wav">
+                                </label>
+                                <label class="mt-2 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-max-mb">单文件大小上限（MB）
+                                    <input id="{{ q.key|slugify }}-file-max-mb" name="file_max_mb" type="number" min="1" max="500" value="{{ q.file.max_mb }}" required class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
+                                </label>
+                            </fieldset>
+                            {% endif %}
                             <button type="submit"{% if read_only %} disabled{% endif %} class="staff-touch-target mt-3 rounded bg-brand px-3 text-xs text-white disabled:opacity-50">保存题目</button>
                         </form>
                     </details>
