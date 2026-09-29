@@ -52,8 +52,44 @@ def _is_staff(user) -> bool:
     return isinstance(user, AccountUser) and user.is_staff_or_admin
 
 
-def _activity_or_404(activity_pk: int) -> Activity:
-    return get_object_or_404(Activity, pk=activity_pk, activity_type=CONTEST_TYPE)
+def _activity_or_404(request: HttpRequest, activity_pk: int) -> Activity:
+    """The activity, scoped the way the legacy apply path scoped it.
+
+    A participant reaches a FORMAL activity only; a test activity is reachable by staff,
+    who preview it, and by the private rehearsal — which drives the services directly
+    rather than through this view. Guessing a primary key must not open a rehearsal, and
+    the legacy path already worked this way by filtering the queryset it looked up in.
+    """
+    activities = Activity.objects.filter(activity_type=CONTEST_TYPE)
+    if not _is_staff(request.user):
+        activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    return get_object_or_404(activities, pk=activity_pk)
+
+
+def _require_participant_writer(request: HttpRequest, activity: Activity) -> None:
+    """Writes through the participant route belong to the participant who owns the row.
+
+    Staff may preview the form; a staff account must not be able to create or fill a
+    registration of its own through it.
+    """
+    if _is_staff(request.user):
+        raise PermissionDenied("工作人员不能通过选手入口提交资料。")
+    _require_participant_page(activity)
+
+
+def _stale_or_missing_schema_hash(payload: dict, plan) -> JsonResponse | None:
+    """The version the page was rendered under is required on every participant write.
+
+    It is the guard that stops a page which cannot see the current questionnaire from
+    writing into it, and a client can omit an optional field — so on this boundary it is
+    not optional.
+    """
+    expected = str(payload.get("schema_hash") or "")
+    if not expected:
+        return JsonResponse({"error": "缺少问卷版本标识，请刷新后重试。"}, status=400)
+    if expected != plan.schema_hash:
+        return JsonResponse({"error": "问卷已更新，请刷新后重试。"}, status=409)
+    return None
 
 
 def _frozen_plan(activity: Activity):
@@ -206,7 +242,7 @@ def _completion(version, registration, *, answers, due_rounds, files) -> dict:
 
 @login_required
 def form_view(request: HttpRequest, activity_pk: int):
-    activity = _activity_or_404(activity_pk)
+    activity = _activity_or_404(request, activity_pk)
     version, plan = _frozen_plan(activity)
     staff = _is_staff(request.user)
     if staff:
@@ -283,16 +319,18 @@ def _json_body(request: HttpRequest) -> dict | None:
 @login_required
 @require_POST
 def autosave_view(request: HttpRequest, activity_pk: int):
-    activity = _activity_or_404(activity_pk)
-    version, _plan = _frozen_plan(activity)
-    if not _is_staff(request.user):
-        _require_participant_page(activity)
+    activity = _activity_or_404(request, activity_pk)
+    version, plan = _frozen_plan(activity)
+    _require_participant_writer(request, activity)
     payload = _json_body(request)
     if payload is None:
         return JsonResponse({"error": "请求体必须是 JSON 对象。"}, status=400)
     answers = payload.get("answers")
     if not isinstance(answers, dict):
         return JsonResponse({"error": "answers 必须是对象。"}, status=400)
+    stale = _stale_or_missing_schema_hash(payload, plan)
+    if stale is not None:
+        return stale
 
     registration, _response = get_or_create_draft_registration(version=version, user=request.user)
     try:
@@ -364,7 +402,7 @@ def register_entry(request: HttpRequest, activity_pk: int | None = None):
                 ]
             },
         )
-    activity = _activity_or_404(activity_pk)
+    activity = _activity_or_404(request, activity_pk)
     version = current_frozen_version(activity)
     if version is not None and _has_questionnaire(version):
         return redirect("questionnaire:form", activity_pk=activity.pk)
@@ -380,21 +418,19 @@ def submit_view(request: HttpRequest, activity_pk: int):
     optional: an HTTP caller always has one, and accepting a submission without it would
     let a page that cannot see the current questionnaire write into it.
     """
-    activity = _activity_or_404(activity_pk)
+    activity = _activity_or_404(request, activity_pk)
     version, plan = _frozen_plan(activity)
-    if not _is_staff(request.user):
-        _require_participant_page(activity)
+    _require_participant_writer(request, activity)
     payload = _json_body(request)
     if payload is None:
         return JsonResponse({"error": "请求体必须是 JSON 对象。"}, status=400)
     answers = payload.get("answers")
     if not isinstance(answers, dict):
         return JsonResponse({"error": "answers 必须是对象。"}, status=400)
-    expected = str(payload.get("schema_hash") or "")
-    if not expected:
-        return JsonResponse({"error": "缺少问卷版本标识，请刷新后重试。"}, status=400)
-    if expected != plan.schema_hash:
-        return JsonResponse({"error": "问卷已更新，请刷新后重试。"}, status=409)
+    stale = _stale_or_missing_schema_hash(payload, plan)
+    if stale is not None:
+        return stale
+    expected = str(payload["schema_hash"])
 
     registration, _response = get_or_create_draft_registration(version=version, user=request.user)
     try:
@@ -429,13 +465,15 @@ def upload_view(request: HttpRequest, activity_pk: int, question_key: str):
     """Store one answer file. The question is the address; the purpose is not an input."""
     from files.services import store_questionnaire_file
 
-    activity = _activity_or_404(activity_pk)
-    version, _plan = _frozen_plan(activity)
-    if not _is_staff(request.user):
-        _require_participant_page(activity)
+    activity = _activity_or_404(request, activity_pk)
+    version, plan = _frozen_plan(activity)
+    _require_participant_writer(request, activity)
     uploaded = request.FILES.get("file")
     if not uploaded:
         return JsonResponse({"error": "请选择要上传的文件。"}, status=400)
+    stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
+    if stale is not None:
+        return stale
     registration, _response = get_or_create_draft_registration(version=version, user=request.user)
     try:
         stored = store_questionnaire_file(

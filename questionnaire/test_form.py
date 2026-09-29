@@ -18,6 +18,7 @@ from uuid import uuid4
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.test_characterization import _CharacterizationBase
 from core.models import Activity
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import freeze_ruleset_version
@@ -129,13 +130,19 @@ class _FormBase(_CharacterizationBase):
         self._operator_user = user
         return user
 
-    def frozen_version(self, *, phase=Activity.Phase.REGISTRATION_OPEN):
+    def frozen_version(self, *, phase=Activity.Phase.REGISTRATION_OPEN, test_mode=False):
         activity = self.make_activity(
-            is_test_mode=True, title=f"问卷页-{uuid4().hex[:6]}", phase=phase
+            is_test_mode=test_mode, title=f"问卷页-{uuid4().hex[:6]}", phase=phase
         )
-        ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=True)
-        rubric = ScoringRubric.objects.create(activity=activity, name="r3评分", is_test_data=True)
-        RubricCriterion.objects.create(rubric=rubric, name="总分", max_score=100, is_test_data=True)
+        ruleset = ContestRuleset.objects.create(
+            activity=activity, name="RS", is_test_data=test_mode
+        )
+        rubric = ScoringRubric.objects.create(
+            activity=activity, name="r3评分", is_test_data=test_mode
+        )
+        RubricCriterion.objects.create(
+            rubric=rubric, name="总分", max_score=100, is_test_data=test_mode
+        )
         contest_round = ContestRound.objects.create(
             activity=activity, round_type=ContestRound.RoundType.PRELIMINARY, name="r3"
         )
@@ -149,7 +156,7 @@ class _FormBase(_CharacterizationBase):
                 username=f"form-field-{activity.pk}-{i}",
                 student_id=f"50{i:04d}",
                 pre_status=SingerRegistration.PreStatus.APPROVED,
-                is_test_data=True,
+                is_test_data=test_mode,
             )
         root = json.loads(_definition())
         root["questionnaire"] = QUESTIONNAIRE
@@ -243,7 +250,9 @@ class QuestionnaireFormViewTests(_FormBase):
     def test_a_reload_shows_what_was_already_answered(self):
         self.client.post(
             reverse("questionnaire:autosave", args=[self.activity.pk]),
-            data=json.dumps({"answers": {"r3.song": "左手指月"}}),
+            data=json.dumps(
+                {"answers": {"r3.song": "左手指月"}, "schema_hash": schema_hash(QUESTIONNAIRE)}
+            ),
             content_type="application/json",
         )
         response = self.client.get(self._url())
@@ -276,9 +285,11 @@ class QuestionnaireAutosaveTests(_FormBase):
         self.client.force_login(self.user)
 
     def _post(self, payload):
+        """Post an autosave with the page's own version, as the browser would."""
+        body = {"schema_hash": schema_hash(QUESTIONNAIRE), **payload}
         return self.client.post(
             reverse("questionnaire:autosave", args=[self.activity.pk]),
-            data=json.dumps(payload),
+            data=json.dumps(body),
             content_type="application/json",
         )
 
@@ -333,6 +344,87 @@ class QuestionnaireAutosaveTests(_FormBase):
             self.activity.phase = Activity.Phase.REGISTRATION_CLOSED
             self.activity.save(update_fields=["phase"])
         self.assertEqual(self._post({"answers": {"name": "陈"}}).status_code, 409)
+
+
+class ParticipantBoundaryTests(_FormBase):
+    """The three contracts a participant-facing write route owes.
+
+    Every one of them replaces something the legacy apply path already did, and which the
+    questionnaire route had quietly stopped doing.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.version = self.frozen_version()
+        self.activity = self.version.ruleset.activity
+        self.user = self.participant(self.version)
+        self.client.force_login(self.user)
+
+    def _autosave(self, payload):
+        return self.client.post(
+            reverse("questionnaire:autosave", args=[self.activity.pk]),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_autosave_requires_the_page_version(self):
+        """A client can omit an optional field, so on this boundary it is not optional:
+        without it a page that cannot see the current questionnaire could write into it."""
+        self.assertEqual(self._autosave({"answers": {"name": "陈"}}).status_code, 400)
+
+    def test_upload_requires_the_page_version(self):
+        response = self.client.post(
+            reverse("questionnaire:upload", args=[self.activity.pk, "stage.note"]),
+            data={"file": SimpleUploadedFile("a.mp3", b"ID3\x04\x00\x00")},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_submit_requires_the_page_version(self):
+        response = self.client.post(
+            reverse("questionnaire:submit", args=[self.activity.pk]),
+            data=json.dumps({"answers": {"name": "陈"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_staff_may_not_write_through_the_participant_route(self):
+        """Staff preview the form; a staff account must not be able to create or fill a
+        registration of its own through it."""
+        self.client.force_login(self.operator())
+        for url, payload in (
+            (reverse("questionnaire:autosave", args=[self.activity.pk]), {"answers": {}}),
+            (reverse("questionnaire:submit", args=[self.activity.pk]), {"answers": {}}),
+            (reverse("questionnaire:upload", args=[self.activity.pk, "stage.note"]), {}),
+        ):
+            with self.subTest(url=url):
+                response = self.client.post(
+                    url, data=json.dumps(payload), content_type="application/json"
+                )
+                self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            SingerRegistration.objects.filter(activity=self.activity).count(), 3
+        )
+
+    def test_a_participant_cannot_open_a_test_activity(self):
+        """The legacy path filtered its lookup to FORMAL activities, so guessing a primary
+        key found nothing. The questionnaire route has to do the same."""
+        rehearsal = self.frozen_version(test_mode=True)
+        self.assertEqual(
+            self.client.get(
+                reverse("questionnaire:form", args=[rehearsal.ruleset.activity_id])
+            ).status_code,
+            404,
+        )
+
+    def test_staff_can_preview_a_test_activity(self):
+        rehearsal = self.frozen_version(test_mode=True)
+        self.client.force_login(self.operator())
+        self.assertEqual(
+            self.client.get(
+                reverse("questionnaire:form", args=[rehearsal.ruleset.activity_id])
+            ).status_code,
+            200,
+        )
 
 
 class QuestionnaireSubmitTests(_FormBase):
@@ -432,7 +524,7 @@ class ClosedRegistrationTests(_FormBase):
     def _post(self, answers):
         return self.client.post(
             reverse("questionnaire:autosave", args=[self.activity.pk]),
-            data=json.dumps({"answers": answers}),
+            data=json.dumps({"answers": answers, "schema_hash": schema_hash(QUESTIONNAIRE)}),
             content_type="application/json",
         )
 
