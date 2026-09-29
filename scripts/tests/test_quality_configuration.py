@@ -15,6 +15,7 @@ MYPY_FILES = [
     "files",
     "incidents",
     "public_portal",
+    "questionnaire",
     "ruleset",
     "singer_contest",
     "staff_panel",
@@ -53,6 +54,12 @@ GRADUAL_MODULES = {
     "common.test_contest_domain_characterization",
     "common.test_authority_matrix",
     "config.tests",
+    "common.private_test_fixture",
+    "common.private_test_loader",
+    "common.private_test_questionnaire",
+    "common.test_private_test_fixture",
+    "common.test_private_test_loader",
+    "common.test_private_test_questionnaire",
 }
 GRADUAL_CHECKS = {
     "disallow_incomplete_defs": False,
