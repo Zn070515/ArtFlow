@@ -16,9 +16,9 @@ def test_ci_keeps_both_pyright_commands_blocking():
 
 def test_windows_ci_uses_and_verifies_each_matrix_python_interpreter():
     assert (
-        'run: uv sync --locked --all-extras --python "${{ matrix.python-version }}"'
-        in CI_WORKFLOW
+        'run: uv sync --locked --all-extras --python "${{ matrix.python-version }}"' in CI_WORKFLOW
     )
+    assert "UV_PYTHON: ${{ matrix.python-version }}" in CI_WORKFLOW
     assert "- name: Verify matrix Python interpreter" in CI_WORKFLOW
     assert '$expected = "${{ matrix.python-version }}"' in CI_WORKFLOW
     assert "uv run python -c" in CI_WORKFLOW
