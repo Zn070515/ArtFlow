@@ -8,6 +8,11 @@ app_name = "staff"
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("activities/", views.activity_list, name="activity_list"),
+    path(
+        "activities/<int:pk>/workspace/",
+        views.activity_workspace,
+        name="activity_workspace",
+    ),
     path("activities/new/", views.activity_create, name="activity_create"),
     path("activities/<int:pk>/edit/", views.activity_edit, name="activity_edit"),
     path("posts/", views.post_list, name="post_list"),

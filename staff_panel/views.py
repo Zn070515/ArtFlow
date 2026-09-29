@@ -261,6 +261,28 @@ def activity_list(request):
     return render(request, "staff_panel/activity_list.html", {"activities": activities})
 
 
+@staff_required
+def activity_workspace(request, pk):
+    activity = get_object_or_404(Activity, pk=pk)
+    rounds = ContestRound.objects.filter(activity=activity).annotate(
+        entry_count=Count("entries", distinct=True),
+        judge_count=Count("round_judges", distinct=True),
+    )
+    vote_sessions = VoteSession.objects.filter(activity=activity)
+    rubrics = ScoringRubric.objects.filter(activity=activity)
+    return render(
+        request,
+        "staff_panel/activity_workspace.html",
+        {
+            "activity": activity,
+            "rounds": rounds,
+            "vote_sessions": vote_sessions,
+            "rubrics": rubrics,
+            "registration_count": SingerRegistration.objects.filter(activity=activity).count(),
+        },
+    )
+
+
 @admin_required
 def activity_create(request):
     _require_admin(request.user)
@@ -1148,11 +1170,19 @@ def round_list(request):
         entry_count=Count("entries", distinct=True),
         judge_count=Count("round_judges", distinct=True),
     )
-    return render(request, "staff_panel/round_list.html", {"rounds": rounds})
+    activity_id = request.GET.get("activity_id") or ""
+    if activity_id.isdigit():
+        rounds = rounds.filter(activity_id=activity_id)
+    return render(
+        request,
+        "staff_panel/round_list.html",
+        {"rounds": rounds, "selected_activity_id": activity_id},
+    )
 
 
 @staff_required
 def round_create(request):
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     if request.method == "POST":
         activity = get_object_or_404(
             Activity,
@@ -1197,9 +1227,7 @@ def round_create(request):
                     {
                         "form": form,
                         "error": _form_error(form),
-                        "activities": Activity.objects.filter(
-                            activity_type=Activity.Type.SINGER_CONTEST
-                        ),
+                        "activities": activities,
                         "round_types": _choices(ContestRound.RoundType),
                         "scoring_modes": _choices(ContestRound.ScoringMode),
                         "order_policies": _choices(ContestRound.OrderPolicy),
@@ -1227,9 +1255,7 @@ def round_create(request):
                     {
                         "form": form,
                         "error": _form_error(form),
-                        "activities": Activity.objects.filter(
-                            activity_type=Activity.Type.SINGER_CONTEST
-                        ),
+                        "activities": activities,
                         "round_types": _choices(ContestRound.RoundType),
                         "scoring_modes": _choices(ContestRound.ScoringMode),
                         "order_policies": _choices(ContestRound.OrderPolicy),
@@ -1267,9 +1293,7 @@ def round_create(request):
                     {
                         "form": form,
                         "error": _form_error(form),
-                        "activities": Activity.objects.filter(
-                            activity_type=Activity.Type.SINGER_CONTEST
-                        ),
+                        "activities": activities,
                         "round_types": _choices(ContestRound.RoundType),
                         "scoring_modes": _choices(ContestRound.ScoringMode),
                         "order_policies": _choices(ContestRound.OrderPolicy),
@@ -1289,14 +1313,17 @@ def round_create(request):
             )
         return redirect("staff:round_list")
 
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     selected_activity_id = request.GET.get("activity_id") or ""
+    if not selected_activity_id:
+        selected_activity = activities.order_by("-created_at").first()
+        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
+    else:
+        selected_activity = activities.filter(pk=selected_activity_id).first()
     rubrics = (
         ScoringRubric.objects.select_related("activity").filter(activity_id=selected_activity_id)
         if selected_activity_id.isdigit()
         else ScoringRubric.objects.none()
     )
-    selected_activity = activities.filter(pk=selected_activity_id).first()
     form = ContestRoundForm(
         rubrics=rubrics,
         stage_choices=round_roster_stage_choices(selected_activity)
@@ -2423,6 +2450,9 @@ def rubric_create(request):
     )
     form = ScoringRubricProvisionForm(request.POST or None)
     selected_activity_id = request.POST.get("activity_id") or request.GET.get("activity_id") or ""
+    if not selected_activity_id:
+        selected_activity = activities.first()
+        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     if request.method == "POST" and form.is_valid():
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         try:
@@ -2437,7 +2467,7 @@ def rubric_create(request):
             form.add_error(None, domain_error_messages(error))
         else:
             messages.success(request, "评分标准及评分项已创建。")
-            return redirect("staff:round_create")
+            return redirect(f"{reverse('staff:round_create')}?activity_id={activity.pk}")
     criterion_slots = [
         {
             "number": index,
@@ -2471,12 +2501,20 @@ def award_list(request):
 @staff_required
 def vote_session_list(request):
     sessions = VoteSession.objects.select_related("activity")
-    return render(request, "staff_panel/vote_session_list.html", {"sessions": sessions})
+    activity_id = request.GET.get("activity_id") or ""
+    if activity_id.isdigit():
+        sessions = sessions.filter(activity_id=activity_id)
+    return render(
+        request,
+        "staff_panel/vote_session_list.html",
+        {"sessions": sessions, "selected_activity_id": activity_id},
+    )
 
 
 @staff_required
 @transaction.atomic
 def vote_session_create(request):
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     if request.method == "POST":
         form = VoteSessionForm(request.POST)
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
@@ -2490,9 +2528,7 @@ def vote_session_create(request):
                 {
                     "error": _form_error(form),
                     "form": form,
-                    "activities": Activity.objects.filter(
-                        activity_type=Activity.Type.SINGER_CONTEST
-                    ),
+                    "activities": activities,
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
@@ -2549,8 +2585,10 @@ def vote_session_create(request):
         )
         return redirect("staff:vote_session_list")
 
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     selected_activity_id = request.GET.get("activity_id") or ""
+    if not selected_activity_id:
+        selected_activity = activities.order_by("-created_at").first()
+        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     singer_queryset = SingerRegistration.objects.select_related("activity").filter(
         pre_status=SingerRegistration.PreStatus.APPROVED
     )
@@ -3846,10 +3884,15 @@ def contest_ruleset_create(request):
     templates = RulesetTemplate.objects.filter(
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION
     ).order_by("name")
+    selected_activity_id = request.GET.get("activity") or ""
     return render(
         request,
         "staff_panel/ruleset_create.html",
-        {"activities": activities, "templates": templates},
+        {
+            "activities": activities,
+            "templates": templates,
+            "selected_activity_id": selected_activity_id,
+        },
     )
 
 

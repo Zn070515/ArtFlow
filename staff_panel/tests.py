@@ -424,6 +424,40 @@ class StaffPanelSmokeTests(TestCase):
         self.assertContains(response, reverse("staff:vote_session_list"))
         self.assertContains(response, reverse("staff:user_list"))
 
+    def test_activity_workspace_exposes_scoped_operator_workflows(self):
+        login_admin(self.client, self.admin)
+        response = self.client.get(
+            reverse("staff:activity_workspace", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f"{reverse('staff:round_create')}?activity_id={self.singer_activity.pk}",
+        )
+        self.assertContains(
+            response,
+            f"{reverse('staff:vote_session_create')}?activity_id={self.singer_activity.pk}",
+        )
+        self.assertContains(
+            response,
+            f"{reverse('staff:singer_registration_list')}?activity_id={self.singer_activity.pk}",
+        )
+
+    def test_round_and_vote_creation_default_to_first_singer_activity(self):
+        login_admin(self.client, self.admin)
+        round_response = self.client.get(reverse("staff:round_create"))
+        vote_response = self.client.get(reverse("staff:vote_session_create"))
+
+        self.assertEqual(round_response.status_code, 200)
+        self.assertEqual(vote_response.status_code, 200)
+        self.assertEqual(
+            round_response.context["selected_activity_id"], str(self.singer_activity.pk)
+        )
+        self.assertEqual(
+            vote_response.context["selected_activity_id"], str(self.singer_activity.pk)
+        )
+
     def test_round_list_exposes_judge_and_audience_controls(self):
         contest_round = _create_round(
             activity=self.singer_activity,

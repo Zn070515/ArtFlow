@@ -9,7 +9,7 @@
             <h1 class="text-2xl font-bold text-gray-900">比赛轮次</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 比赛轮次</p>
         </div>
-        <a href="{% url 'staff:round_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">新增轮次</a>
+        <a href="{% url 'staff:round_create' %}{% if selected_activity_id %}?activity_id={{ selected_activity_id }}{% endif %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">新增轮次</a>
     </div>
 
     {% if rounds %}

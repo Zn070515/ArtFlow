@@ -15,7 +15,7 @@
             <label for="id_activity" class="block text-sm font-medium text-gray-700 mb-1">所属活动</label>
             <select id="id_activity" name="activity" required class="w-full border border-gray-300 rounded px-3 py-2">
                 {% for activity in activities %}
-                <option value="{{ activity.pk }}">{{ activity.title }}</option>
+                <option value="{{ activity.pk }}"{% if selected_activity_id|stringformat:"s" == activity.pk|stringformat:"s" %} selected{% endif %}>{{ activity.title }}</option>
                 {% endfor %}
             </select>
         </div>

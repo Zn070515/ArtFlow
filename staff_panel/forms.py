@@ -26,6 +26,19 @@ DATETIME_INPUT_FORMATS = [
     "%Y-%m-%d",
 ]
 
+FORM_CONTROL_CLASS = (
+    "w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm "
+    "text-gray-900 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+)
+
+
+def _style_form_controls(fields):
+    for field in fields.values():
+        if isinstance(field.widget, forms.CheckboxInput):
+            continue
+        existing = field.widget.attrs.get("class", "")
+        field.widget.attrs["class"] = f"{FORM_CONTROL_CLASS} {existing}".strip()
+
 
 # Phases a brand-new activity may be created in. LIVE, the results phases and
 # ARCHIVED are deliberate: they can only be reached by advancing through the
@@ -121,6 +134,7 @@ class ContestRoundForm(forms.Form):
                 choices=[("", "请选择上游赛段"), *stage_choices],
                 required=False,
             )
+        _style_form_controls(self.fields)
 
     def clean_advance_count(self):
         return self.cleaned_data.get("advance_count") or 0
@@ -341,6 +355,7 @@ class ScoringRubricProvisionForm(forms.Form):
                 max_length=240,
                 initial=criterion.get("description", ""),
             )
+        _style_form_controls(self.fields)
 
     def clean(self):
         cleaned = super().clean()
@@ -452,8 +467,16 @@ class IncidentForm(forms.Form):
 class VoteSessionForm(forms.Form):
     name = forms.CharField(label="场次名称", max_length=100)
     passcode = forms.CharField(label="现场口令", max_length=20)
-    start_time = forms.DateTimeField(label="开始时间", input_formats=DATETIME_INPUT_FORMATS)
-    end_time = forms.DateTimeField(label="结束时间", input_formats=DATETIME_INPUT_FORMATS)
+    start_time = forms.DateTimeField(
+        label="开始时间",
+        input_formats=DATETIME_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    end_time = forms.DateTimeField(
+        label="结束时间",
+        input_formats=DATETIME_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
     selection_type = forms.ChoiceField(
         label="投票方式",
         choices=VoteSession.SelectionType.choices,
@@ -472,6 +495,10 @@ class VoteSessionForm(forms.Form):
     requires_ticket = forms.BooleanField(
         label="仅允许已核验入场票参与", required=False, initial=False
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _style_form_controls(self.fields)
 
     def _posted_singer_ids(self):
         data = cast(QueryDict, self.data)
