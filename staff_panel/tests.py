@@ -78,7 +78,12 @@ from singer_contest.models import (
     StageDecision,
     StageResult,
 )
-from singer_contest.services import apply_scores, prepare_round, stage_decisions_by_blocks
+from singer_contest.services import (
+    apply_scores,
+    create_scoring_rubric,
+    prepare_round,
+    stage_decisions_by_blocks,
+)
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import open_vote_session
 
@@ -325,6 +330,19 @@ class ContestRoundCreateHTTPTests(TestCase):
         }
         self.assertIn(str(current.pk), choices)
         self.assertNotIn(str(eliminated.pk), choices)
+
+    def test_rubric_service_rejects_criteria_total_that_is_not_one_hundred(self):
+        with self.assertRaisesMessage(ValidationError, "100"):
+            create_scoring_rubric(
+                self.activity,
+                name="Invalid rubric",
+                description="",
+                criteria=[
+                    {"name": "音准", "max_score": "40"},
+                    {"name": "表现力", "max_score": "50"},
+                ],
+                operator=self.staff,
+            )
 
 
 class StaffPanelSmokeTests(TestCase):

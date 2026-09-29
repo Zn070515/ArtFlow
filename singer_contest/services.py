@@ -588,6 +588,9 @@ def create_scoring_rubric(activity, *, name, description, criteria, operator) ->
                 "sequence": index,
             }
         )
+    total = sum((item["max_score"] for item in normalized), Decimal("0"))
+    if total != Decimal("100"):
+        raise ValidationError(f"评分项满分合计必须为 100 分，当前为 {total:g} 分。")
     rubric = ScoringRubric.objects.create(
         activity=locked_activity,
         name=name,

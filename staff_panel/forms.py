@@ -352,6 +352,10 @@ class ScoringRubricProvisionForm(forms.Form):
             criteria.append({"name": name, "max_score": max_score, "description": description})
         if not criteria and not self.errors:
             raise forms.ValidationError("至少需要一个评分项。")
+        if not self.errors:
+            total = sum((criterion["max_score"] for criterion in criteria), Decimal("0"))
+            if total != Decimal("100"):
+                raise forms.ValidationError(f"评分项满分合计必须为 100 分，当前为 {total:g} 分。")
         cleaned["criteria"] = criteria
         return cleaned
 

@@ -24,7 +24,8 @@
         </div>
         <fieldset class="border border-gray-200 rounded-lg p-4 space-y-3">
             <legend class="px-1 text-sm font-semibold text-gray-800">评分项</legend>
-            <p class="text-xs text-gray-500">填写名称和满分即可；空白行会忽略。总分由各评分项满分相加。</p>
+            <p class="text-xs text-gray-500">填写名称和满分即可；空白行会忽略。各项满分合计必须为 100 分。</p>
+            <p class="text-sm font-medium text-gray-700" aria-live="polite">当前合计：<span id="rubric-total">0</span> / 100 分</p>
             {% for slot in criterion_slots %}
             <div class="grid grid-cols-[minmax(0,1fr)_7rem] gap-2 items-start">
                 <div>
@@ -46,4 +47,20 @@
         <button class="bg-brand text-white px-4 py-2 rounded text-sm">创建评分标准</button>
     </form>
 </div>
+<script>
+    (() => {
+        const total = document.getElementById("rubric-total");
+        const inputs = document.querySelectorAll('input[name^="criterion_max_score_"]');
+        if (!total) return;
+        const updateTotal = () => {
+            const sum = Array.from(inputs).reduce((value, input) => {
+                const number = Number.parseFloat(input.value);
+                return Number.isFinite(number) ? value + number : value;
+            }, 0);
+            total.textContent = sum.toFixed(2).replace(/\.00$/, "");
+        };
+        inputs.forEach((input) => input.addEventListener("input", updateTotal));
+        updateTotal();
+    })();
+</script>
 {% endblock %}

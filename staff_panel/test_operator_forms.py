@@ -56,3 +56,17 @@ class StructuredOperatorFormTests(SimpleTestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["criteria"][0]["name"], "音准")
         self.assertEqual(form.cleaned_data["criteria"][1]["max_score"], 60)
+
+    def test_rubric_rejects_criteria_total_that_is_not_one_hundred(self):
+        form = ScoringRubricProvisionForm(
+            {
+                "name": "决赛评分",
+                "criterion_name_1": "音准",
+                "criterion_max_score_1": "40",
+                "criterion_name_2": "表现力",
+                "criterion_max_score_2": "50",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("100", str(form.non_field_errors()))
