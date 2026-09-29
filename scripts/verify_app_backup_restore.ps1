@@ -10,10 +10,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'restore_database_wait.ps1')
+. (Join-Path $PSScriptRoot 'resolve_compose_network.ps1')
 
 $repositoryRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
-$composeNetwork = "${ComposeProjectName}_artflow_internal"
 $dumpPath = '/tmp/artflow-verify.dump'
 $restoreContainer = "${ComposeProjectName}-backup-restore-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
 $restoreWebContainer = "${ComposeProjectName}-web-restore-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
@@ -139,6 +139,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dbContainer)) {
         throw 'The source Compose database service is not running.'
     }
+    $composeNetwork = Resolve-ComposeSharedNetwork `
+        -DockerExecutable $script:dockerExecutable `
+        -FirstContainer $webContainer `
+        -SecondContainer $dbContainer
     $script:databaseImage = (& $script:dockerExecutable inspect -f '{{.Config.Image}}' $dbContainer).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($script:databaseImage)) {
         throw 'Could not resolve the running Compose database image.'

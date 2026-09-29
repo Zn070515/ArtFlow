@@ -10,10 +10,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'restore_database_wait.ps1')
+. (Join-Path $PSScriptRoot 'resolve_compose_network.ps1')
 
 $repositoryRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
-$composeNetwork = "${ComposeProjectName}_artflow_internal"
 $remoteDumpPath = '/tmp/artflow-backup.dump'
 $restoreContainer = "${ComposeProjectName}-backup-restore-$([Guid]::NewGuid().ToString('N').Substring(0, 12))"
 
@@ -66,6 +66,14 @@ try {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($sourceContainer)) {
         throw 'The source Compose db service is not running.'
     }
+    $webContainer = (& $script:dockerExecutable compose -p $ComposeProjectName ps -q web).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($webContainer)) {
+        throw 'The source Compose web service is not running.'
+    }
+    $composeNetwork = Resolve-ComposeSharedNetwork `
+        -DockerExecutable $script:dockerExecutable `
+        -FirstContainer $webContainer `
+        -SecondContainer $sourceContainer
 
     Write-Host "Creating custom-format dump at $backupFile"
     Invoke-Compose -Arguments @('exec', '-T', 'db', 'sh', '-lc', 'pg_dump --format=custom --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --file=/tmp/artflow-backup.dump')
