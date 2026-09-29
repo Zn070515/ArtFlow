@@ -536,9 +536,9 @@ def _vote_results_workbook(activity: Activity) -> Workbook:
         .select_related("vote_session", "singer")
         .annotate(vote_count=Count("records"))
     )
-    options = list(options)
-    prime_questionnaire_answers(option.singer for option in options)
-    for opt in options:
+    option_rows = list(options)
+    prime_questionnaire_answers(option.singer for option in option_rows)
+    for opt in option_rows:
         ws.append(
             [
                 opt.vote_session.name,

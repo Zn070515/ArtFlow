@@ -102,7 +102,9 @@ class RegisterEntryTests(_EntryBase):
         activity = self.activity(with_questionnaire=False)
         response = self.client.get(reverse("register:activity", args=[activity.pk]))
         self.assertEqual(response.status_code, 302)
-        self.assertTrue(response.url.startswith(reverse("singer_contest:apply")))
+        self.assertTrue(
+            str(getattr(response, "url", "")).startswith(reverse("singer_contest:apply"))
+        )
 
     def test_a_deep_link_into_the_legacy_form_is_resolved_too(self):
         """A QR code or a bookmark that still names the old form must land on the real one."""

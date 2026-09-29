@@ -399,11 +399,12 @@ class ParticipantBoundaryTests(_FormBase):
         """Staff preview the form; a staff account must not be able to create or fill a
         registration of its own through it."""
         self.client.force_login(self.operator())
-        for url, payload in (
+        requests: tuple[tuple[str, dict[str, object]], ...] = (
             (reverse("questionnaire:autosave", args=[self.activity.pk]), {"answers": {}}),
             (reverse("questionnaire:submit", args=[self.activity.pk]), {"answers": {}}),
             (reverse("questionnaire:upload", args=[self.activity.pk, "stage.note"]), {}),
-        ):
+        )
+        for url, payload in requests:
             with self.subTest(url=url):
                 response = self.client.post(
                     url, data=json.dumps(payload), content_type="application/json"

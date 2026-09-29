@@ -995,13 +995,15 @@ def export_registrations(request):
         ]
     )
     if activity is not None:
-        rows = scope_runtime(
+        registration_rows = scope_runtime(
             SingerRegistration.objects.select_related("activity").filter(activity=activity),
             activity,
         )
     else:
-        rows = SingerRegistration.objects.select_related("activity").filter(is_test_data=False)
-    rows = prime_questionnaire_answers(rows)
+        registration_rows = SingerRegistration.objects.select_related("activity").filter(
+            is_test_data=False
+        )
+    rows = prime_questionnaire_answers(registration_rows)
     row_count = 0
     for r in rows:
         ws.append(

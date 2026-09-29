@@ -260,7 +260,7 @@ def preview_view(request: HttpRequest, pk: int, context: str):
     version = get_object_or_404(RulesetVersion, pk=pk)
     plan = compile_questionnaire(_current_questionnaire(version))
     activity = version.ruleset.activity
-    server_context = {"activity.phase": activity.phase}
+    server_context: dict[str, object] = {"activity.phase": activity.phase}
     for key in _bound_rounds(version):
         server_context[f"qualified.{key}"] = context in {"partial", "closed", "supplement"}
 

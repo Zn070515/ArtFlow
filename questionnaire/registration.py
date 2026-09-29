@@ -139,16 +139,20 @@ def normalize_answer(question: dict, raw):
         if isinstance(raw, str) and not raw.strip():
             return ""
         try:
-            value = Decimal(str(raw).strip())
+            decimal_value = Decimal(str(raw).strip())
         except (InvalidOperation, ValueError):
             raise ValidationError(f"题目 {question['key']} 必须是数字。") from None
-        if not value.is_finite():
+        if not decimal_value.is_finite():
             raise ValidationError(f"题目 {question['key']} 必须是有限数字。")
-        if "min" in validation and value < Decimal(str(validation["min"])):
+        if "min" in validation and decimal_value < Decimal(str(validation["min"])):
             raise ValidationError(f"题目 {question['key']} 小于允许的最小值。")
-        if "max" in validation and value > Decimal(str(validation["max"])):
+        if "max" in validation and decimal_value > Decimal(str(validation["max"])):
             raise ValidationError(f"题目 {question['key']} 大于允许的最大值。")
-        return int(value) if value == value.to_integral_value() else float(value)
+        return (
+            int(decimal_value)
+            if decimal_value == decimal_value.to_integral_value()
+            else float(decimal_value)
+        )
     if qtype == "boolean":
         if not isinstance(raw, bool):
             raise ValidationError(f"题目 {question['key']} 必须是布尔值。")

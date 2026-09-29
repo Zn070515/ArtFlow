@@ -63,11 +63,11 @@ def prime_questionnaire_answers(registrations: Iterable) -> list:
         ruleset_version_id__in=version_ids,
     ).order_by("-pk")
     response_by_registration: dict[int, QuestionnaireResponse] = {}
-    for response in responses:
-        response_by_registration.setdefault(response.singer_registration_id, response)
+    for response_row in responses:
+        response_by_registration.setdefault(response_row.singer_registration_id, response_row)
     for row in rows:
         version = versions.get(row.activity_id)
-        response = response_by_registration.get(row.pk)
+        response: QuestionnaireResponse | None = response_by_registration.get(row.pk)
         row._artflow_questionnaire_version = version
         try:
             row._artflow_questionnaire_active = bool(

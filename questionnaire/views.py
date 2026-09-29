@@ -16,6 +16,7 @@ the authorization boundary for the *content* — the services decide that.
 from __future__ import annotations
 
 import json
+from typing import cast
 
 from accounts.models import User as AccountUser
 from core.models import Activity
@@ -144,7 +145,7 @@ def _due_rounds(version) -> frozenset[str]:
     return frozenset(key for key, pk in round_keys.items() if pk in started)
 
 
-NOTICE_ROW = {
+NOTICE_ROW: dict[str, object] = {
     "options": [],
     "file": None,
     "round": "",
@@ -264,12 +265,12 @@ def form_view(request: HttpRequest, activity_pk: int):
     if staff:
         # A preview: an unsaved registration, so opening the page never creates a draft
         # for a staff account that is not actually entering the contest.
-        registration = SingerRegistration(activity=activity, user=request.user)
+        registration = SingerRegistration(activity=activity, user=cast(AccountUser, request.user))
         response = None
     else:
         _require_participant_page(activity)
         registration, response = get_or_create_draft_registration(
-            version=version, user=request.user
+            version=version, user=cast(AccountUser, request.user)
         )
     writable = (
         None

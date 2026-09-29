@@ -1,3 +1,5 @@
+from collections.abc import Iterable
+
 from common.audit import log_action, redacted_field_change
 from common.business_rules import ensure_activity_unlocked, ensure_participant_can_edit
 from common.models import AuditLog
@@ -74,8 +76,9 @@ def apply_view(request):
     )
     if not request.user.is_staff_or_admin:
         activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    display_activities: Iterable[Activity] = activities
     if request.method != "POST":
-        activities = [
+        display_activities = [
             activity
             for activity in activities
             if not questionnaire_material_authority_active(activity)
@@ -83,7 +86,9 @@ def apply_view(request):
     # Only offer a performer-sourced video upload when the page shows a non-formal
     # activity. The public apply path filters to FORMAL activities, so participants
     # never see the field; staff previewing test data still can.
-    video_upload_allowed = any(large_video_upload_allowed(activity) for activity in activities)
+    video_upload_allowed = any(
+        large_video_upload_allowed(activity) for activity in display_activities
+    )
     if request.method == "POST":
         activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         if questionnaire_material_authority_active(activity):
@@ -107,7 +112,7 @@ def apply_view(request):
                 "singer_contest/apply.html",
                 _apply_form_context(
                     request,
-                    activities,
+                    display_activities,
                     errors=errors,
                     video_upload_allowed=video_upload_allowed,
                 ),
@@ -118,7 +123,7 @@ def apply_view(request):
                 "singer_contest/apply.html",
                 _apply_form_context(
                     request,
-                    activities,
+                    display_activities,
                     errors=["您已报名该活动，请勿重复提交。"],
                     video_upload_allowed=video_upload_allowed,
                 ),
@@ -131,7 +136,7 @@ def apply_view(request):
                 "singer_contest/apply.html",
                 _apply_form_context(
                     request,
-                    activities,
+                    display_activities,
                     errors=["该学号已报名本活动。"],
                     video_upload_allowed=video_upload_allowed,
                 ),
@@ -185,7 +190,7 @@ def apply_view(request):
                 "singer_contest/apply.html",
                 _apply_form_context(
                     request,
-                    activities,
+                    display_activities,
                     errors=["报名失败：该账号或学号已报名本活动。"],
                     video_upload_allowed=video_upload_allowed,
                 ),
@@ -194,7 +199,7 @@ def apply_view(request):
     return render(
         request,
         "singer_contest/apply.html",
-        _apply_form_context(request, activities, video_upload_allowed=video_upload_allowed),
+        _apply_form_context(request, display_activities, video_upload_allowed=video_upload_allowed),
     )
 
 
