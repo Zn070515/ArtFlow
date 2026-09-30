@@ -142,6 +142,7 @@ from singer_contest.services import (
     build_result_closure,
     confirm_stage_result,
     create_scoring_rubric,
+    current_round_roster,
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
     latest_stage_result_queryset,
@@ -153,12 +154,14 @@ from singer_contest.services import (
     prepare_round,
     reset_round_to_draft,
     result_closure_as_dict,
+    round_roster_stage_choices,
     set_manual_decision,
     set_round_groups,
     set_round_running_order,
     stage_decisions_by_blocks,
     unlock_round,
     unlock_stage_result,
+    validate_roster_source_stage,
 )
 from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
 from voting.services import (
@@ -231,6 +234,18 @@ def _ensure_activity_mutable(activity):
     ensure_activity_unlocked(activity)
 
 
+def _editable_singer_activities():
+    """Return activities that can accept new singer-contest configuration."""
+    return (
+        Activity.objects.filter(
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        .exclude(phase=Activity.Phase.ARCHIVED)
+        .order_by("-created_at")
+    )
+
+
 def _ensure_publication_allowed(related_activity, status):
     if (
         status == PublicPost.Status.PUBLISHED
@@ -258,13 +273,33 @@ def activity_list(request):
     return render(request, "staff_panel/activity_list.html", {"activities": activities})
 
 
+@staff_required
+def activity_workspace(request, pk):
+    activity = get_object_or_404(Activity, pk=pk)
+    rounds = ContestRound.objects.filter(activity=activity).annotate(
+        entry_count=Count("entries", distinct=True),
+        judge_count=Count("round_judges", distinct=True),
+    )
+    vote_sessions = VoteSession.objects.filter(activity=activity)
+    rubrics = ScoringRubric.objects.filter(activity=activity)
+    return render(
+        request,
+        "staff_panel/activity_workspace.html",
+        {
+            "activity": activity,
+            "rounds": rounds,
+            "vote_sessions": vote_sessions,
+            "rubrics": rubrics,
+            "registration_count": SingerRegistration.objects.filter(activity=activity).count(),
+        },
+    )
+
+
 @admin_required
 def activity_create(request):
     _require_admin(request.user)
     if request.method == "POST":
-        form = ActivityForm(
-            request.POST, include_lifecycle=True, include_phase=False
-        )
+        form = ActivityForm(request.POST, include_lifecycle=True, include_phase=False)
         if not form.is_valid():
             return render(
                 request,
@@ -331,6 +366,21 @@ def activity_edit(request, pk):
                 },
             )
         data = dict(form.cleaned_data)
+        if data["activity_type"] != activity.activity_type:
+            form.add_error("activity_type", "活动类型创建后不可修改。")
+            return render(
+                request,
+                "staff_panel/activity_form.html",
+                {
+                    "error": _form_error(form),
+                    "activity": activity,
+                    "activity_types": _choices(Activity.Type),
+                    "phases": phase_choices_for_activity(activity),
+                    "data": request.POST,
+                    "form_data_present": True,
+                },
+                status=400,
+            )
         target_phase = data.pop("phase")
         if target_phase != activity.phase:
             activity = transition_activity_phase(activity, target_phase, actor=request.user)
@@ -341,6 +391,7 @@ def activity_edit(request, pk):
         try:
             activity.save()
         except ValidationError as error:
+            transaction.set_rollback(True)
             form.add_error(None, domain_error_messages(error))
             return render(
                 request,
@@ -389,6 +440,13 @@ def post_list(request):
     return render(request, "staff_panel/post_list.html", {"posts": posts})
 
 
+def _post_status_choices(request):
+    choices = _choices(PublicPost.Status)
+    if request.user.is_admin:
+        return choices
+    return [choice for choice in choices if choice[0] != PublicPost.Status.PUBLISHED]
+
+
 @staff_required
 def post_create(request):
     if request.method == "POST":
@@ -399,8 +457,10 @@ def post_create(request):
                 "staff_panel/post_form.html",
                 {
                     "error": _form_error(form),
+                    "form_data": request.POST,
+                    "form_data_present": True,
                     "post_types": _choices(PublicPost.PostType),
-                    "statuses": _choices(PublicPost.Status),
+                    "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
                 },
             )
@@ -448,8 +508,9 @@ def post_create(request):
         "staff_panel/post_form.html",
         {
             "post_types": _choices(PublicPost.PostType),
-            "statuses": _choices(PublicPost.Status),
+            "statuses": _post_status_choices(request),
             "activities": Activity.objects.all(),
+            "form_data_present": False,
         },
     )
 
@@ -478,8 +539,10 @@ def post_edit(request, pk):
                 {
                     "error": _form_error(form),
                     "post": post,
+                    "form_data": request.POST,
+                    "form_data_present": True,
                     "post_types": _choices(PublicPost.PostType),
-                    "statuses": _choices(PublicPost.Status),
+                    "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
                 },
             )
@@ -520,7 +583,7 @@ def post_edit(request, pk):
                     "error": "该内容已被其他人更新，请刷新后重新编辑。",
                     "post": post,
                     "post_types": _choices(PublicPost.PostType),
-                    "statuses": _choices(PublicPost.Status),
+                    "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
                 },
             )
@@ -576,8 +639,9 @@ def post_edit(request, pk):
         {
             "post": post,
             "post_types": _choices(PublicPost.PostType),
-            "statuses": _choices(PublicPost.Status),
+            "statuses": _post_status_choices(request),
             "activities": Activity.objects.all(),
+            "form_data_present": False,
         },
     )
 
@@ -1131,19 +1195,30 @@ def round_list(request):
         entry_count=Count("entries", distinct=True),
         judge_count=Count("round_judges", distinct=True),
     )
-    return render(request, "staff_panel/round_list.html", {"rounds": rounds})
+    activity_id = request.GET.get("activity_id") or ""
+    if activity_id.isdigit():
+        rounds = rounds.filter(activity_id=activity_id)
+    return render(
+        request,
+        "staff_panel/round_list.html",
+        {"rounds": rounds, "selected_activity_id": activity_id},
+    )
 
 
 @staff_required
 def round_create(request):
+    activities = _editable_singer_activities()
     if request.method == "POST":
         activity = get_object_or_404(
             Activity,
             pk=request.POST.get("activity_id"),
             activity_type=Activity.Type.SINGER_CONTEST,
         )
+        stage_choices = round_roster_stage_choices(activity)
         form = ContestRoundForm(
-            request.POST, rubrics=ScoringRubric.objects.filter(activity=activity)
+            request.POST,
+            rubrics=ScoringRubric.objects.filter(activity=activity),
+            stage_choices=stage_choices,
         )
         if not form.is_valid():
             return render(
@@ -1152,9 +1227,7 @@ def round_create(request):
                 {
                     "form": form,
                     "error": _form_error(form),
-                    "activities": Activity.objects.filter(
-                        activity_type=Activity.Type.SINGER_CONTEST
-                    ),
+                    "activities": activities,
                     "round_types": _choices(ContestRound.RoundType),
                     "scoring_modes": _choices(ContestRound.ScoringMode),
                     "order_policies": _choices(ContestRound.OrderPolicy),
@@ -1166,6 +1239,29 @@ def round_create(request):
                     "selected_activity_id": activity.pk,
                 },
             )
+        if form.cleaned_data["roster_source"] == ContestRound.RosterSource.STAGE:
+            try:
+                validate_roster_source_stage(activity, form.cleaned_data["roster_source_stage"])
+            except ValidationError as error:
+                form.add_error("roster_source_stage", domain_error_messages(error))
+                return render(
+                    request,
+                    "staff_panel/round_form.html",
+                    {
+                        "form": form,
+                        "error": _form_error(form),
+                        "activities": activities,
+                        "round_types": _choices(ContestRound.RoundType),
+                        "scoring_modes": _choices(ContestRound.ScoringMode),
+                        "order_policies": _choices(ContestRound.OrderPolicy),
+                        "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+                        "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+                        "rubrics": ScoringRubric.objects.select_related("activity").filter(
+                            activity=activity
+                        ),
+                        "selected_activity_id": activity.pk,
+                    },
+                )
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
             sequence = form.cleaned_data["sequence"]
@@ -1182,9 +1278,7 @@ def round_create(request):
                     {
                         "form": form,
                         "error": _form_error(form),
-                        "activities": Activity.objects.filter(
-                            activity_type=Activity.Type.SINGER_CONTEST
-                        ),
+                        "activities": activities,
                         "round_types": _choices(ContestRound.RoundType),
                         "scoring_modes": _choices(ContestRound.ScoringMode),
                         "order_policies": _choices(ContestRound.OrderPolicy),
@@ -1222,9 +1316,7 @@ def round_create(request):
                     {
                         "form": form,
                         "error": _form_error(form),
-                        "activities": Activity.objects.filter(
-                            activity_type=Activity.Type.SINGER_CONTEST
-                        ),
+                        "activities": activities,
                         "round_types": _choices(ContestRound.RoundType),
                         "scoring_modes": _choices(ContestRound.ScoringMode),
                         "order_policies": _choices(ContestRound.OrderPolicy),
@@ -1244,12 +1336,23 @@ def round_create(request):
             )
         return redirect("staff:round_list")
 
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     selected_activity_id = request.GET.get("activity_id") or ""
-    rubrics = ScoringRubric.objects.select_related("activity").filter(
-        activity_id=selected_activity_id
-    ) if selected_activity_id.isdigit() else ScoringRubric.objects.none()
-    form = ContestRoundForm(rubrics=rubrics)
+    if not selected_activity_id:
+        selected_activity = activities.order_by("-created_at").first()
+        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
+    else:
+        selected_activity = activities.filter(pk=selected_activity_id).first()
+    rubrics = (
+        ScoringRubric.objects.select_related("activity").filter(activity_id=selected_activity_id)
+        if selected_activity_id.isdigit()
+        else ScoringRubric.objects.none()
+    )
+    form = ContestRoundForm(
+        rubrics=rubrics,
+        stage_choices=round_roster_stage_choices(selected_activity)
+        if selected_activity is not None
+        else (),
+    )
     return render(
         request,
         "staff_panel/round_form.html",
@@ -1283,10 +1386,12 @@ def round_prepare(request, pk):
 @staff_required
 def round_running_order(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    singers = list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    singers = current_round_roster(contest_round)
     singer_by_id = {str(singer.pk): singer for singer in singers}
     entries = list(contest_round.entries.select_related("singer").order_by("running_order", "pk"))
-    initial_ids = [str(entry.singer_id) for entry in entries]
+    initial_ids = [str(entry.singer_id) for entry in entries] or [
+        str(singer.pk) for singer in singers
+    ]
     display_ids = initial_ids
     if request.method == "POST":
         form = RoundRunningOrderForm(request.POST, singers=singers)
@@ -1342,7 +1447,7 @@ def round_running_order(request, pk):
 @staff_required
 def round_groups(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    singers = list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    singers = current_round_roster(contest_round)
     groups = list(
         PerformanceGroup.objects.filter(round=contest_round)
         .prefetch_related("performances__singer")
@@ -1537,21 +1642,22 @@ def _audience_pool(activity, version, audience_key):
     ``audience_key`` is a binding key matching an ASSESS node's ``vote_source``; that
     node's ``source`` declares the pool: :data:`ENTRY_KEY` → the check-in pool, or the
     name of a SELECT node → the checkpoint that outputs it, bridged to the round that
-    consumes that stage (its :class:`RoundEntry`). Falls back to the check-in pool when
-    the roster has not materialised yet, mirroring the resolver's conservative scoping
-    (its ``within`` filter is still the correctness backstop).
+    consumes that stage (its :class:`RoundEntry`). Invalid definitions and missing stage
+    rosters return an empty queryset so an operator cannot accidentally score every singer.
     """
     try:
         parsed = parse_definition(version.definition)
     except (ValidationError, TypeError, ValueError):
-        return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+        return SingerRegistration.objects.none()
     source = None
     for node in parsed["nodes"]:
         if node.get("vote_source") == audience_key:
             source = node.get("source")
             break
-    if not source or source == ENTRY_KEY:
-        return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+    if not source:
+        return SingerRegistration.objects.none()
+    if source == ENTRY_KEY:
+        return runtime_approved_singers(activity).order_by("pk")
     checkpoint_key = None
     for cp in parsed["checkpoints"]:
         if cp.get("output") == source:
@@ -1581,7 +1687,7 @@ def _audience_pool(activity, version, audience_key):
                     "pk"
                 )
             )
-    return SingerRegistration.objects.filter(activity=activity).order_by("pk")
+    return SingerRegistration.objects.none()
 
 
 def _audience_sets(activity, version):
@@ -1651,9 +1757,9 @@ def audience_scores_api(request, activity_id):
     """Backstage audience-score entry (M1-INTEGRATION-2).
 
     GET returns the audience grid: one group per binding ``audience_keys`` entry, each
-    listing every activity singer plus its stored score (scale ``hundred``). POST accepts
-    sparse ``cells`` as ``[{singer_id, set_key, score}]``, maps each ``set_key`` to its
-    ``stage_key``, upserts :class:`~singer_contest.models.AudienceScore` rows, then
+    listing the current roster for each binding plus its stored score (scale ``hundred``).
+    POST accepts sparse ``cells`` as ``[{singer_id, set_key, score}]``, maps each ``set_key``
+    to its ``stage_key``, upserts :class:`~singer_contest.models.AudienceScore` rows, then
     auto-resolves any now-satisfiable checkpoint.
     """
     activity = get_object_or_404(Activity, pk=activity_id)
@@ -1677,9 +1783,10 @@ def audience_scores_api(request, activity_id):
     if not cells:
         return JsonResponse({"detail": "缺少 cells。"}, status=400)
 
-    valid_singer_ids = set(
-        SingerRegistration.objects.filter(activity=activity).values_list("pk", flat=True)
-    )
+    pool_ids_by_set = {
+        set_key: {singer.pk for singer in _audience_pool(activity, version, set_key)}
+        for set_key in audience_keys
+    }
     rows: list[tuple[int, str, Decimal]] = []
     stage_keys: set[str] = set()
     errors: list[str] = []
@@ -1690,8 +1797,13 @@ def audience_scores_api(request, activity_id):
         except (KeyError, TypeError, ValueError, InvalidOperation):
             errors.append("单元格缺少 singer_id 或 score 不是有效数字。")
             continue
-        if singer_id not in valid_singer_ids:
-            errors.append(f"选手 {singer_id} 不属于该活动。")
+        set_key = str(cell.get("set_key", "")).strip()
+        stage_key = audience_keys.get(set_key)
+        if not stage_key:
+            errors.append(f"未知观众分组 {set_key}。")
+            continue
+        if singer_id not in pool_ids_by_set[set_key]:
+            errors.append(f"选手 {singer_id} 不属于观众分组 {set_key}。")
             continue
         if not 0 <= score <= 100:
             errors.append(f"选手 {singer_id} 的观众分必须在 0-100 之间。")
@@ -1700,11 +1812,6 @@ def audience_scores_api(request, activity_id):
         # two decimal places so SQLite (stores verbatim) and Postgres (rounds to 0.01) agree.
         if score != score.quantize(Decimal("0.01")):
             errors.append(f"选手 {singer_id} 的观众分最多保留两位小数。")
-            continue
-        set_key = str(cell.get("set_key", "")).strip()
-        stage_key = audience_keys.get(set_key)
-        if not stage_key:
-            errors.append(f"未知观众分组 {set_key}。")
             continue
         rows.append((singer_id, stage_key, score))
         stage_keys.add(stage_key)
@@ -1998,7 +2105,7 @@ def judge_create(request):
             )
         return redirect("staff:judge_list")
 
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    activities = _editable_singer_activities()
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
 
 
@@ -2361,13 +2468,18 @@ def judge_score_paper(request, pk):
 
 @staff_required
 def rubric_create(request):
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST).order_by(
-        "-created_at"
-    )
+    activities = _editable_singer_activities()
     form = ScoringRubricProvisionForm(request.POST or None)
     selected_activity_id = request.POST.get("activity_id") or request.GET.get("activity_id") or ""
+    if not selected_activity_id:
+        selected_activity = activities.first()
+        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     if request.method == "POST" and form.is_valid():
-        activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST.get("activity_id"),
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         try:
             create_scoring_rubric(
                 activity,
@@ -2380,7 +2492,7 @@ def rubric_create(request):
             form.add_error(None, domain_error_messages(error))
         else:
             messages.success(request, "评分标准及评分项已创建。")
-            return redirect("staff:round_create")
+            return redirect(f"{reverse('staff:round_create')}?activity_id={activity.pk}")
     criterion_slots = [
         {
             "number": index,
@@ -2414,15 +2526,27 @@ def award_list(request):
 @staff_required
 def vote_session_list(request):
     sessions = VoteSession.objects.select_related("activity")
-    return render(request, "staff_panel/vote_session_list.html", {"sessions": sessions})
+    activity_id = request.GET.get("activity_id") or ""
+    if activity_id.isdigit():
+        sessions = sessions.filter(activity_id=activity_id)
+    return render(
+        request,
+        "staff_panel/vote_session_list.html",
+        {"sessions": sessions, "selected_activity_id": activity_id},
+    )
 
 
 @staff_required
 @transaction.atomic
 def vote_session_create(request):
+    activities = _editable_singer_activities()
     if request.method == "POST":
         form = VoteSessionForm(request.POST)
-        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST["activity_id"],
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.MANAGE_VOTE)
@@ -2433,9 +2557,7 @@ def vote_session_create(request):
                 {
                     "error": _form_error(form),
                     "form": form,
-                    "activities": Activity.objects.filter(
-                        activity_type=Activity.Type.SINGER_CONTEST
-                    ),
+                    "activities": activities,
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
@@ -2492,8 +2614,10 @@ def vote_session_create(request):
         )
         return redirect("staff:vote_session_list")
 
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     selected_activity_id = request.GET.get("activity_id") or ""
+    if not selected_activity_id:
+        selected_activity = activities.order_by("-created_at").first()
+        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     singer_queryset = SingerRegistration.objects.select_related("activity").filter(
         pre_status=SingerRegistration.PreStatus.APPROVED
     )
@@ -2910,8 +3034,7 @@ def incident_create(request):
                     "singers": _with_generic_song_labels(
                         scope_lifecycle(
                             SingerRegistration.objects.select_related("activity").filter(
-                                activity=activity,
-                                pre_status=SingerRegistration.PreStatus.APPROVED
+                                activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
                             )
                         )
                     ),
@@ -2958,11 +3081,7 @@ def incident_create(request):
         singer_queryset = singer_queryset.filter(activity_id=selected_activity_id)
     else:
         singer_queryset = singer_queryset.none()
-    singers = _with_generic_song_labels(
-        scope_lifecycle(
-            singer_queryset
-        )
-    )
+    singers = _with_generic_song_labels(scope_lifecycle(singer_queryset))
     return render(
         request,
         "staff_panel/incident_form.html",
@@ -3241,7 +3360,7 @@ def ruleset_template_list(request):
     # Show the catalog with explicit capability status. Only production templates
     # expose cloning; experimental/unsupported entries must never look production-ready.
     templates = RulesetTemplate.objects.all()
-    activities = Activity.objects.all().order_by("-created_at")
+    activities = _editable_singer_activities()
     return render(
         request,
         "staff_panel/ruleset_template_list.html",
@@ -3253,7 +3372,7 @@ def ruleset_template_list(request):
 def ruleset_template_detail(request, pk):
     template = get_object_or_404(RulesetTemplate, pk=pk)
     nodes = parse_definition(template.definition)["nodes"] if template.definition else []
-    activities = Activity.objects.all().order_by("-created_at")
+    activities = _editable_singer_activities()
     return render(
         request,
         "staff_panel/ruleset_template_detail.html",
@@ -3478,8 +3597,7 @@ def _display_options(options, labels=None, nodes=None):
     labels = labels or {}
     node_labels = {
         node.get("key"): (
-            f"{node.get('key')}（"
-            f"{_NODE_TYPE_LABELS.get(node.get('type'), node.get('type'))}）"
+            f"{node.get('key')}（{_NODE_TYPE_LABELS.get(node.get('type'), node.get('type'))}）"
         )
         for node in (nodes or [])
         if node.get("key")
@@ -3572,15 +3690,15 @@ def _node_field_entries(node, index, nodes, *, binding_options=None):
                 }
             )
         elif isinstance(value, bool):
-                fields.append(
-                    {
-                        "kind": "checkbox",
-                        "label": label,
-                        "help": help_text.get(field, ""),
-                        "name": base,
-                        "value": value,
-                    }
-                )
+            fields.append(
+                {
+                    "kind": "checkbox",
+                    "label": label,
+                    "help": help_text.get(field, ""),
+                    "name": base,
+                    "value": value,
+                }
+            )
         elif field in binding_options:
             options = list(binding_options[field])
             if value and value not in options:
@@ -3613,9 +3731,7 @@ def _node_field_entries(node, index, nodes, *, binding_options=None):
                     ),
                 }
             )
-        elif field in reference_fields and (
-            field != "by" or field in (spec.expects or {})
-        ):
+        elif field in reference_fields and (field != "by" or field in (spec.expects or {})):
             fields.append(
                 {
                     "kind": "select",
@@ -3709,8 +3825,24 @@ def _node_type_options(nodes):
 @staff_required
 @transaction.atomic
 def contest_ruleset_create(request):
+    activities = (
+        Activity.objects.filter(
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        .exclude(phase=Activity.Phase.ARCHIVED)
+        .order_by("-created_at")
+    )
     if request.method == "POST":
-        activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+        # Keep the candidate lookup broad enough for the authoritative lock check to
+        # produce its stable 403 response.  Filtering ``is_locked=False`` here would
+        # turn a valid mutation attempt against a locked activity into a misleading
+        # 404 before ``lock_activity_for_action`` can re-validate it.
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST.get("activity"),
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         activity = lock_activity_for_action(activity)
         name = (request.POST.get("name") or "").strip()
         if not name:
@@ -3772,14 +3904,18 @@ def contest_ruleset_create(request):
         version = create_ruleset_version(ruleset, definition=definition, created_by=request.user)
         messages.success(request, "赛制已创建，进入编辑。")
         return redirect("staff:ruleset_edit", pk=version.pk)
-    activities = Activity.objects.all().order_by("-created_at")
     templates = RulesetTemplate.objects.filter(
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION
     ).order_by("name")
+    selected_activity_id = request.GET.get("activity") or ""
     return render(
         request,
         "staff_panel/ruleset_create.html",
-        {"activities": activities, "templates": templates},
+        {
+            "activities": activities,
+            "templates": templates,
+            "selected_activity_id": selected_activity_id,
+        },
     )
 
 
@@ -3820,23 +3956,12 @@ def ruleset_edit(request, pk):
         "vote_source": list((ruleset.vote_keys or {}).keys()),
     }
     cards = [
-        _build_card(node, i, nodes, binding_options=binding_options)
-        for i, node in enumerate(nodes)
+        _build_card(node, i, nodes, binding_options=binding_options) for i, node in enumerate(nodes)
     ]
-    current_round_keys = {
-        str(node.get("round"))
-        for node in nodes
-        if node.get("round")
-    }
-    current_vote_keys = {
-        str(node.get("vote_source"))
-        for node in nodes
-        if node.get("vote_source")
-    }
+    current_round_keys = {str(node.get("round")) for node in nodes if node.get("round")}
+    current_vote_keys = {str(node.get("vote_source")) for node in nodes if node.get("vote_source")}
     current_group_keys = {
-        str(node.get("by"))
-        for node in nodes
-        if node.get("type") == "PARTITION" and node.get("by")
+        str(node.get("by")) for node in nodes if node.get("type") == "PARTITION" and node.get("by")
     }
     round_candidates = list(
         ContestRound.objects.filter(activity=ruleset.activity).order_by("sequence", "pk")
@@ -4101,8 +4226,13 @@ def ruleset_clone_from_template(request, template_pk):
         pk=template_pk,
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
     )
-    activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+    activity = get_object_or_404(
+        Activity,
+        pk=request.POST.get("activity"),
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
     activity = lock_activity_for_action(activity)
+    _ensure_activity_mutable(activity)
     name = (request.POST.get("name") or "").strip() or template.name
     ruleset, _created = ContestRuleset.objects.get_or_create(
         activity=activity,

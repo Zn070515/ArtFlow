@@ -197,16 +197,16 @@ class BuilderViewTests(_BuilderBase):
             key=key,
             label="伴奏文件",
             file_purpose="accompaniment",
-            file_extensions=".mp3, .wav",
-            file_max_mb="120",
+            file_extensions=".mp3, .wav, .flac",
+            file_max_mb="100",
         )
         question = self._stored_questionnaire()["pages"][0]["sections"][0]["questions"][-1]
         self.assertEqual(
             question["file"],
             {
                 "purpose": "accompaniment",
-                "extensions": [".mp3", ".wav"],
-                "max_mb": 120,
+                "extensions": [".mp3", ".wav", ".flac"],
+                "max_mb": 100,
                 "max_files": 1,
             },
         )

@@ -26,6 +26,19 @@ DATETIME_INPUT_FORMATS = [
     "%Y-%m-%d",
 ]
 
+FORM_CONTROL_CLASS = (
+    "w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm "
+    "text-gray-900 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20"
+)
+
+
+def _style_form_controls(fields):
+    for field in fields.values():
+        if isinstance(field.widget, forms.CheckboxInput):
+            continue
+        existing = field.widget.attrs.get("class", "")
+        field.widget.attrs["class"] = f"{FORM_CONTROL_CLASS} {existing}".strip()
+
 
 # Phases a brand-new activity may be created in. LIVE, the results phases and
 # ARCHIVED are deliberate: they can only be reached by advancing through the
@@ -111,10 +124,17 @@ class ContestRoundForm(forms.Form):
         label="评分规则", queryset=ScoringRubric.objects.none(), required=False
     )
 
-    def __init__(self, *args, rubrics=None, **kwargs):
+    def __init__(self, *args, rubrics=None, stage_choices=None, **kwargs):
         super().__init__(*args, **kwargs)
         if rubrics is not None:
             cast(forms.ModelChoiceField, self.fields["rubric"]).queryset = rubrics
+        if stage_choices is not None:
+            self.fields["roster_source_stage"] = forms.ChoiceField(
+                label="上游赛段（赛段晋级时必填）",
+                choices=[("", "请选择上游赛段"), *stage_choices],
+                required=False,
+            )
+        _style_form_controls(self.fields)
 
     def clean_advance_count(self):
         return self.cleaned_data.get("advance_count") or 0
@@ -335,6 +355,7 @@ class ScoringRubricProvisionForm(forms.Form):
                 max_length=240,
                 initial=criterion.get("description", ""),
             )
+        _style_form_controls(self.fields)
 
     def clean(self):
         cleaned = super().clean()
@@ -349,11 +370,13 @@ class ScoringRubricProvisionForm(forms.Form):
                 self.add_error(f"criterion_name_{index}", "请填写评分项名称。")
             if max_score in (None, ""):
                 self.add_error(f"criterion_max_score_{index}", "请填写满分。")
-            criteria.append(
-                {"name": name, "max_score": max_score, "description": description}
-            )
+            criteria.append({"name": name, "max_score": max_score, "description": description})
         if not criteria and not self.errors:
             raise forms.ValidationError("至少需要一个评分项。")
+        if not self.errors:
+            total = sum((criterion["max_score"] for criterion in criteria), Decimal("0"))
+            if total != Decimal("100"):
+                raise forms.ValidationError(f"评分项满分合计必须为 100 分，当前为 {total:g} 分。")
         cleaned["criteria"] = criteria
         return cleaned
 
@@ -444,8 +467,16 @@ class IncidentForm(forms.Form):
 class VoteSessionForm(forms.Form):
     name = forms.CharField(label="场次名称", max_length=100)
     passcode = forms.CharField(label="现场口令", max_length=20)
-    start_time = forms.DateTimeField(label="开始时间", input_formats=DATETIME_INPUT_FORMATS)
-    end_time = forms.DateTimeField(label="结束时间", input_formats=DATETIME_INPUT_FORMATS)
+    start_time = forms.DateTimeField(
+        label="开始时间",
+        input_formats=DATETIME_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
+    end_time = forms.DateTimeField(
+        label="结束时间",
+        input_formats=DATETIME_INPUT_FORMATS,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+    )
     selection_type = forms.ChoiceField(
         label="投票方式",
         choices=VoteSession.SelectionType.choices,
@@ -464,6 +495,10 @@ class VoteSessionForm(forms.Form):
     requires_ticket = forms.BooleanField(
         label="仅允许已核验入场票参与", required=False, initial=False
     )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _style_form_controls(self.fields)
 
     def _posted_singer_ids(self):
         data = cast(QueryDict, self.data)

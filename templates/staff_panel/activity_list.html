@@ -45,6 +45,7 @@
                         {% endif %}
                     </td>
                     <td class="px-4 py-3 text-right">
+                        <a href="{% url 'staff:activity_workspace' activity.pk %}" class="text-brand hover:underline mr-3">进入工作区</a>
                         {% if user.is_admin %}
                         {% if activity.phase == 'archived' %}
                         <form method="post" action="{% url 'staff:activity_unarchive' activity.pk %}" class="inline" onsubmit="return confirm('确认解归档该活动？');">

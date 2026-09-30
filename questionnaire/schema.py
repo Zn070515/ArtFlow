@@ -28,6 +28,7 @@ import re
 from typing import Any
 
 from django.core.exceptions import ValidationError
+from files.policies import FILE_PURPOSE_POLICIES, QUESTIONNAIRE_MAX_FILE_MB_HARD_LIMIT
 
 from .conditions import parse_condition
 
@@ -72,21 +73,9 @@ BINDING_WHITELIST = frozenset(
 # the upload path knows how to check, and may not invent one. Kept as a literal rather than
 # imported because ``files.services`` reads this module; a test pins the equality instead,
 # so drift fails loudly rather than silently accepting a purpose nothing can police.
-FILE_PURPOSES = frozenset(
-    {
-        "accompaniment",
-        "background_video",
-        "performance_video",
-        "program_image",
-        "lyrics_script",
-        "host_material",
-        "public_image",
-        "showcase_image",
-        "other",
-    }
-)
+FILE_PURPOSES = frozenset(FILE_PURPOSE_POLICIES)
 # The server's own ceiling. A question may ask for less, never more.
-MAX_FILE_MB_HARD_LIMIT = 500
+MAX_FILE_MB_HARD_LIMIT = QUESTIONNAIRE_MAX_FILE_MB_HARD_LIMIT
 
 VALIDATION_FORMATS = frozenset({"phone_cn", "email"})
 
@@ -149,10 +138,18 @@ def _parse_file_config(question: dict, where: str) -> dict:
         isinstance(purpose, str) and purpose in FILE_PURPOSES,
         f"{where}：未注册的文件用途 {purpose!r}。",
     )
+    if not isinstance(purpose, str) or purpose not in FILE_PURPOSES:
+        raise ValidationError(f"{where}：未注册的文件用途 {purpose!r}。")
     extensions = _as_list(config.get("extensions"), f"{where}：file.extensions 必须是列表。")
     _require(
         bool(extensions) and all(isinstance(e, str) for e in extensions),
         f"{where}：file.extensions 必须是非空字符串列表。",
+    )
+    policy = FILE_PURPOSE_POLICIES[purpose]
+    normalized_extensions = [str(extension).strip().lower() for extension in extensions]
+    _require(
+        all(extension in policy.extensions for extension in normalized_extensions),
+        f"{where}：{purpose} 只允许使用 {', '.join(sorted(policy.extensions))}。",
     )
     max_mb = config.get("max_mb")
     _require(
@@ -163,6 +160,10 @@ def _parse_file_config(question: dict, where: str) -> dict:
         isinstance(max_mb, int) and max_mb <= MAX_FILE_MB_HARD_LIMIT,
         f"{where}：file.max_mb={max_mb} 超过服务器上限 {MAX_FILE_MB_HARD_LIMIT} MB。",
     )
+    _require(
+        isinstance(max_mb, int) and max_mb <= policy.max_mb,
+        f"{where}：{purpose} 的单文件上限为 {policy.max_mb} MB。",
+    )
     max_files = config.get("max_files", 1)
     _require(
         max_files == 1,
@@ -170,7 +171,7 @@ def _parse_file_config(question: dict, where: str) -> dict:
     )
     return {
         "purpose": purpose,
-        "extensions": list(extensions),
+        "extensions": normalized_extensions,
         "max_mb": max_mb,
         "max_files": max_files,
     }

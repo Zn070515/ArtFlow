@@ -12,6 +12,7 @@ from common.authority import (
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
+    TEST_DATA_SEED,
     AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
@@ -2017,6 +2018,13 @@ class AwardQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            if (
+                not obj.source_vote_session_id
+                and not obj.source_stage_result_id
+                and not obj.source_award_decision_id
+                and not authority_authorized(TEST_DATA_SEED)
+            ):
+                raise ValidationError("奖项必须由正式结果或受控测试数据服务生成。")
         if (
             any(obj.source_stage_result_id or obj.source_award_decision_id for obj in objs)
             and not _award_materialization_authorized()
@@ -2104,6 +2112,14 @@ class Award(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
+        if (
+            self._state.adding
+            and not self.source_vote_session_id
+            and not self.source_stage_result_id
+            and not self.source_award_decision_id
+            and not authority_authorized(TEST_DATA_SEED)
+        ):
+            raise ValidationError("奖项必须由正式结果或受控测试数据服务生成。")
         stored = None
         if not self._state.adding and self.pk:
             stored = (

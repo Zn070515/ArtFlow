@@ -36,6 +36,7 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
     TEST_DATA_CLEANUP,
+    TEST_DATA_SEED,
     TICKET_STATE,
     VOTE_SESSION_STATE,
     authority_write,
@@ -814,4 +815,6 @@ class Command(BaseCommand):
             return authority_write(TICKET_STATE)
         if model is VoteSession:
             return authority_write(VOTE_SESSION_STATE)
+        if model is Award:
+            return authority_write(TEST_DATA_SEED)
         return nullcontext()

@@ -242,14 +242,78 @@ def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistratio
     )
     if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
         raise ValidationError("上游赛段未核定，禁止准备该轮次。")
-    singers = list(
-        SingerRegistration.objects.filter(
-            round_entries__round=contest_round, activity=contest_round.activity
-        ).order_by("pk")
+    advancing_ids = list(
+        StageDecision.objects.filter(
+            stage_result=upstream,
+            outcome_code__in=_ADVANCING_OUTCOME_CODES,
+        )
+        .order_by("rank", "pk")
+        .values_list("singer_id", flat=True)
     )
-    if not singers:
-        raise ValidationError("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
-    return singers
+    if not advancing_ids:
+        raise ValidationError("对应赛段尚未生成可晋级选手名单。")
+    singers_by_id = SingerRegistration.objects.filter(
+        activity=contest_round.activity,
+        pk__in=advancing_ids,
+    )
+    singers = {singer.pk: singer for singer in singers_by_id}
+    return [singers[singer_id] for singer_id in advancing_ids if singer_id in singers]
+
+
+def round_roster_stage_choices(activity) -> list[tuple[str, str]]:
+    """Return stage/checkpoint keys available for a round's STAGE roster source."""
+    from ruleset.models import ContestRuleset, RulesetVersion
+
+    ruleset = ContestRuleset.objects.filter(activity=activity).first()
+    if ruleset is None:
+        return []
+    version = (
+        ruleset.versions.filter(status=RulesetVersion.Status.FROZEN, is_current=True)
+        .order_by("-version")
+        .first()
+        or ruleset.versions.order_by("-version").first()
+    )
+    keys: list[str] = []
+    if version is not None:
+        try:
+            definition = version.definition
+            if isinstance(definition, str):
+                definition = json.loads(definition)
+            keys.extend(
+                str(checkpoint["key"])
+                for checkpoint in (definition.get("checkpoints") or [])
+                if checkpoint.get("key")
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            keys = []
+    if ruleset.stage_key and ruleset.stage_key not in keys:
+        keys.append(ruleset.stage_key)
+    return [(key, f"{key}（结果赛段）") for key in keys]
+
+
+def validate_roster_source_stage(activity, stage_key: str) -> None:
+    """Reject a STAGE roster reference not declared by the activity ruleset."""
+    choices = round_roster_stage_choices(activity)
+    if stage_key not in {value for value, _label in choices}:
+        raise ValidationError("上游赛段必须选择当前活动赛制中已声明的结果赛段。")
+
+
+def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration]:
+    """Return the authoritative singer roster currently usable by operator controls.
+
+    Prepared snapshots and stage materialization are authoritative once round entries
+    exist. Before preparation, the same source resolver used by ``prepare_round``
+    supplies the candidate roster, which keeps a draft round configurable without
+    broadening later rounds back to every approved singer.
+    """
+    entries = list(
+        RoundEntry.objects.filter(round=contest_round)
+        .select_related("singer")
+        .order_by("running_order", "pk")
+    )
+    if entries:
+        return [entry.singer for entry in entries]
+    return _round_source_singers(contest_round)
 
 
 def _order_singers_for_round(
@@ -562,6 +626,9 @@ def create_scoring_rubric(activity, *, name, description, criteria, operator) ->
                 "sequence": index,
             }
         )
+    total = sum((item["max_score"] for item in normalized), Decimal("0"))
+    if total != Decimal("100"):
+        raise ValidationError(f"评分项满分合计必须为 100 分，当前为 {total:g} 分。")
     rubric = ScoringRubric.objects.create(
         activity=locked_activity,
         name=name,

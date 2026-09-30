@@ -28,6 +28,8 @@
                     {% endif %}
                     {% if template.status == "frozen" %}
                     <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-2 py-0.5 rounded font-medium">已冻结</span>
+                    {% elif template.builtin_key and template.capability_status == "production" %}
+                    <span class="text-xs bg-blue-50 border border-blue-300 text-blue-800 px-2 py-0.5 rounded font-medium">可直接克隆</span>
                     {% else %}
                     <span class="text-xs bg-gray-50 border border-gray-300 text-gray-600 px-2 py-0.5 rounded font-medium">草稿</span>
                     {% endif %}

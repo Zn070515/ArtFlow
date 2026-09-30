@@ -19,6 +19,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from singer_contest.models import SingerRegistration
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
+from .policies import file_purpose_policy
 from .services import (
     delete_submission_file,
     large_video_upload_allowed,
@@ -80,6 +81,12 @@ class SubmissionFileLifecycleTests(TestCase):
 
         with self.assertRaises(ValidationError):
             validate_upload(upload, SubmissionFile.Purpose.ACCOMPANIMENT)
+
+    def test_accompaniment_policy_matches_questionnaire_contract(self):
+        policy = file_purpose_policy(SubmissionFile.Purpose.ACCOMPANIMENT)
+        self.assertEqual(policy.max_mb, 100)
+        self.assertEqual(policy.extensions, frozenset({".mp3", ".wav", ".m4a", ".flac"}))
+        self.assertNotIn(".mp4", policy.extensions)
 
     def test_upload_policy_rejects_disallowed_extension(self):
         upload = SimpleUploadedFile("song.exe", b"x", content_type="application/octet-stream")

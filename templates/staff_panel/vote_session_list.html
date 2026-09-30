@@ -9,7 +9,7 @@
             <h1 class="text-2xl font-bold text-gray-900">投票管理</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 投票管理</p>
         </div>
-        <a href="{% url 'staff:vote_session_create' %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">创建投票场次</a>
+        <a href="{% url 'staff:vote_session_create' %}{% if selected_activity_id %}?activity_id={{ selected_activity_id }}{% endif %}" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light">创建投票场次</a>
     </div>
 
     {% if sessions %}

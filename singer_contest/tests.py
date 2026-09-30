@@ -18,6 +18,7 @@ from common.authority import (
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
+    TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -3172,9 +3173,10 @@ class ResultClosureServiceTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=True,
         )
-        manual = Award.objects.create(
-            activity=self.activity, singer=singer, name="人工奖", is_test_data=True
-        )
+        with authority_write(TEST_DATA_SEED):
+            manual = Award.objects.create(
+                activity=self.activity, singer=singer, name="人工奖", is_test_data=True
+            )
         from .services import materialize_stage_awards, official_stage_award_queryset
 
         old = self._stage(result_version=1)

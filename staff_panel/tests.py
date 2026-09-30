@@ -22,6 +22,7 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -78,7 +79,12 @@ from singer_contest.models import (
     StageDecision,
     StageResult,
 )
-from singer_contest.services import apply_scores, prepare_round, stage_decisions_by_blocks
+from singer_contest.services import (
+    apply_scores,
+    create_scoring_rubric,
+    prepare_round,
+    stage_decisions_by_blocks,
+)
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import open_vote_session
 
@@ -257,6 +263,88 @@ class ContestRoundCreateHTTPTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "轮次序号已存在")
 
+    def test_running_order_get_shows_current_round_roster_before_prepare(self):
+        singer_user = _create_provisioned_user(username="round-singer", password="pass")
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Draft singer",
+            student_id="20269901",
+            college="Info",
+            class_name="CS1",
+            phone="13800009901",
+            song_name="Draft song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            order_policy=ContestRound.OrderPolicy.MANUAL,
+        )
+
+        response = self.client.get(reverse("staff:round_running_order", args=[contest_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["singer_id"] for row in response.context["order_rows"]], [str(singer.pk)]
+        )
+
+    def test_groups_get_uses_existing_round_entries_as_current_roster(self):
+        singer_user = _create_provisioned_user(username="round-singer-2", password="pass")
+        current = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Current singer",
+            student_id="20269902",
+            college="Info",
+            class_name="CS1",
+            phone="13800009902",
+            song_name="Current song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        eliminated_user = _create_provisioned_user(username="round-singer-3", password="pass")
+        eliminated = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=eliminated_user,
+            name="Eliminated singer",
+            student_id="20269903",
+            college="Info",
+            class_name="CS1",
+            phone="13800009903",
+            song_name="Old song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=False,
+        )
+        contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+        )
+        RoundEntry.objects.create(round=contest_round, singer=current, running_order=1)
+
+        response = self.client.get(reverse("staff:round_groups", args=[contest_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        choices = {
+            value for value, _label in response.context["form"].fields["group_singer_ids_1"].choices
+        }
+        self.assertIn(str(current.pk), choices)
+        self.assertNotIn(str(eliminated.pk), choices)
+
+    def test_rubric_service_rejects_criteria_total_that_is_not_one_hundred(self):
+        with self.assertRaisesMessage(ValidationError, "100"):
+            create_scoring_rubric(
+                self.activity,
+                name="Invalid rubric",
+                description="",
+                criteria=[
+                    {"name": "音准", "max_score": "40"},
+                    {"name": "表现力", "max_score": "50"},
+                ],
+                operator=self.staff,
+            )
+
 
 class StaffPanelSmokeTests(TestCase):
     def setUp(self):
@@ -335,6 +423,72 @@ class StaffPanelSmokeTests(TestCase):
         self.assertContains(response, reverse("staff:rubric_create"))
         self.assertContains(response, reverse("staff:vote_session_list"))
         self.assertContains(response, reverse("staff:user_list"))
+
+    def test_activity_workspace_exposes_scoped_operator_workflows(self):
+        login_admin(self.client, self.admin)
+        response = self.client.get(
+            reverse("staff:activity_workspace", args=[self.singer_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f"{reverse('staff:round_create')}?activity_id={self.singer_activity.pk}",
+        )
+        self.assertContains(
+            response,
+            f"{reverse('staff:vote_session_create')}?activity_id={self.singer_activity.pk}",
+        )
+        self.assertContains(
+            response,
+            f"{reverse('staff:singer_registration_list')}?activity_id={self.singer_activity.pk}",
+        )
+
+    def test_configuration_selectors_hide_archived_locked_and_non_singer_activities(self):
+        locked = _create_activity(
+            title="Locked Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_locked=True,
+        )
+        archived = _create_activity(
+            title="Archived Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_locked=True,
+        )
+        from ruleset.templates import seed_ruleset_templates
+
+        seed_ruleset_templates(self.admin)
+        self.client.force_login(self.staff)
+        for route in (
+            "staff:round_create",
+            "staff:vote_session_create",
+            "staff:rubric_create",
+            "staff:judge_create",
+            "staff:ruleset_template_list",
+        ):
+            with self.subTest(route=route):
+                response = self.client.get(reverse(route))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, self.singer_activity.title)
+                self.assertNotContains(response, self.farewell_activity.title)
+                self.assertNotContains(response, locked.title)
+                self.assertNotContains(response, archived.title)
+
+    def test_round_and_vote_creation_default_to_first_singer_activity(self):
+        login_admin(self.client, self.admin)
+        round_response = self.client.get(reverse("staff:round_create"))
+        vote_response = self.client.get(reverse("staff:vote_session_create"))
+
+        self.assertEqual(round_response.status_code, 200)
+        self.assertEqual(vote_response.status_code, 200)
+        self.assertEqual(
+            round_response.context["selected_activity_id"], str(self.singer_activity.pk)
+        )
+        self.assertEqual(
+            vote_response.context["selected_activity_id"], str(self.singer_activity.pk)
+        )
 
     def test_round_list_exposes_judge_and_audience_controls(self):
         contest_round = _create_round(
@@ -1772,7 +1926,10 @@ class StaffPanelSmokeTests(TestCase):
         _create_score_summary(
             round=round_, singer=registration, average_score=91, rank=1, is_advanced=True
         )
-        Award.objects.create(activity=self.singer_activity, singer=registration, name="Top Singer")
+        with authority_write(TEST_DATA_SEED):
+            Award.objects.create(
+                activity=self.singer_activity, singer=registration, name="Top Singer"
+            )
         vote_session = _create_vote_session(
             activity=self.singer_activity,
             name="Popularity",
@@ -3465,6 +3622,35 @@ class ActivityPhaseEditTests(TestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.activity_type, Activity.Type.SINGER_CONTEST)
 
+    def test_invalid_activity_type_does_not_commit_phase_transition(self):
+        activity = _create_activity(
+            title="Atomic contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.DRAFT,
+        )
+        login_admin(self.client, self.admin)
+        self.client.raise_request_exception = False
+
+        response = self.client.post(
+            reverse("staff:activity_edit", args=[activity.pk]),
+            {
+                "title": "Atomic contest",
+                "activity_type": Activity.Type.FAREWELL_SHOW,
+                "phase": Activity.Phase.REGISTRATION_OPEN,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.DRAFT)
+        self.assertFalse(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.PHASE_TRANSITION,
+                operator=self.admin,
+                target=f"Activity:{activity.pk}",
+            ).exists()
+        )
+
     def test_archived_activity_list_exposes_only_unarchive(self):
         activity = _create_activity(
             title="Archived Contest",
@@ -3910,12 +4096,13 @@ class ExportPrivacyTests(TestCase):
 
     def test_award_list_uses_official_stage_authority_queryset(self):
         singer = self._registration(self.contest, "Contest Singer", "S1")
-        Award.objects.create(
-            activity=self.contest,
-            singer=singer,
-            name="人工奖",
-            is_test_data=False,
-        )
+        with authority_write(TEST_DATA_SEED):
+            Award.objects.create(
+                activity=self.contest,
+                singer=singer,
+                name="人工奖",
+                is_test_data=False,
+            )
         self.client.force_login(self.staff)
         response = self.client.get(reverse("staff:award_list"))
         self.assertEqual(response.status_code, 200)
@@ -4639,6 +4826,38 @@ class PublicPortalPublicationTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response["Location"].startswith(reverse("accounts:admin_login")))
         self.assertFalse(PublicPost.objects.filter(title="A Post").exists())
+
+    def test_staff_post_form_does_not_offer_published_status(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:post_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, f'value="{PublicPost.Status.PUBLISHED}"')
+
+    def test_invalid_post_create_preserves_submitted_values(self):
+        self.client.force_login(self.staff)
+        payload = self._post_payload(
+            status=PublicPost.Status.DRAFT, related_activity_id=self.testing.pk
+        )
+        payload.update({"title": "保留这个标题", "post_type": "not-a-post-type"})
+        response = self.client.post(reverse("staff:post_create"), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "保留这个标题")
+
+    def test_invalid_post_edit_preserves_submitted_values(self):
+        post = PublicPost.objects.create(
+            title="Old title", related_activity=self.testing, created_by=self.staff
+        )
+        self.client.force_login(self.staff)
+        payload = self._post_payload(
+            status=PublicPost.Status.DRAFT, related_activity_id=self.testing.pk
+        )
+        payload.update({"title": "编辑中的标题", "post_type": "not-a-post-type"})
+        response = self.client.post(reverse("staff:post_edit", args=[post.pk]), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "编辑中的标题")
 
     def test_admin_can_publish_formal_post(self):
         login_admin(self.client, self.admin)
@@ -5425,6 +5644,64 @@ class RoundScoresApiTests(TestCase):
             AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
         )
 
+    def test_post_audience_scores_rejects_singer_outside_current_audience_pool(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        outside = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=_create_provisioned_user(username="rapid-api-outside", password="pass"),
+            name="未入选选手",
+            student_id="2026rapid02",
+            college="Info",
+            class_name="CS1",
+            phone="13800000001",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.REJECTED,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Scoped Audience Ruleset",
+            is_test_data=False,
+            stage_key="快速赛段",
+            round_keys={"r1": self.round.pk},
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            }
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+
+        response = self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(
+                {"cells": [{"singer_id": outside.pk, "set_key": "audience1", "score": "90"}]}
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("不属于观众分组", response.json()["detail"][0])
+        self.assertFalse(
+            AudienceScore.objects.filter(
+                activity=self.activity, stage_key="aud1set", singer=outside
+            ).exists()
+        )
+
     def test_post_audience_scores_rejects_more_than_two_decimals(self):
         from ruleset.models import ContestRuleset, RulesetVersion
 
@@ -5964,6 +6241,7 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertContains(response, "赛制模板库")
         self.assertContains(response, HISTORICAL_SCHIDUI_NAME)
         self.assertContains(response, "校十佳屏峰")
+        self.assertContains(response, "可直接克隆")
 
     def test_template_list_requires_staff(self):
         self.client.logout()
@@ -6005,6 +6283,35 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(version.status, "draft")
         self.assertEqual(version.definition, template.definition)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_clone_rejects_non_singer_and_archived_activities(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate
+
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        farewell = _create_activity(
+            title="毕业晚会",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.DRAFT,
+            is_test_mode=True,
+        )
+        archived = self._clone_activity("已归档歌手赛")
+        archived.phase = Activity.Phase.ARCHIVED
+        archived.is_locked = True
+        _save_activity_state(archived, ["phase", "is_locked"])
+
+        non_singer_response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": farewell.pk, "name": "错误克隆"},
+        )
+        self.assertEqual(non_singer_response.status_code, 404)
+        self.assertFalse(ContestRuleset.objects.filter(activity=farewell).exists())
+
+        archived_response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": archived.pk, "name": "归档克隆"},
+        )
+        self.assertEqual(archived_response.status_code, 403)
+        self.assertFalse(ContestRuleset.objects.filter(activity=archived).exists())
 
     def test_clone_into_activity_with_existing_ruleset_reuses_it(self):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -6531,6 +6838,26 @@ class RulesetEditorTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_ruleset_create_only_offers_unlocked_singer_contest_activities(self):
+        farewell = _create_activity(
+            title="Farewell show",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.DRAFT,
+            is_test_mode=True,
+        )
+        archived = _create_activity(
+            title="Archived contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_test_mode=True,
+        )
+        response = self.client.get(reverse("staff:contest_ruleset_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.activity.title)
+        self.assertNotContains(response, farewell.title)
+        self.assertNotContains(response, archived.title)
+
     def test_rule_edit_requires_unlocked_activity(self):
         """R0: ruleset edit must re-validate the activity lock before mutating."""
         self.activity.is_locked = True
@@ -6602,9 +6929,7 @@ class RulesetEditorTests(TestCase):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
 
         stage_card = next(
-            card
-            for card in response.context["cards"]
-            if card["node"]["key"] == "stage1"
+            card for card in response.context["cards"] if card["node"]["key"] == "stage1"
         )
         aggregate = next(field for field in stage_card["fields"] if field["kind"] == "aggregate")
         self.assertIn("assess_r1", aggregate["components"][0]["options"])

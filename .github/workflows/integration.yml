@@ -37,6 +37,8 @@ jobs:
       ARTFLOW_CADDY_TEST_IMAGE: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
       ARTFLOW_REQUIRE_CADDY_RUNTIME: "true"
       ARTFLOW_REQUIRE_EVENT_RUNTIME: "true"
+      STAFF_ACCESS_KEY: artflow-ci-staff-access-key
+      ADMIN_ACCESS_KEY: artflow-ci-admin-access-key
       POSTGRES_DB: artflow_ci
       POSTGRES_USER: artflow_ci
       POSTGRES_HOST: 127.0.0.1
@@ -82,6 +84,9 @@ jobs:
         run: |
           uv run python manage.py seed_demo_data
           uv run python manage.py seed_demo_data
+
+      - name: Prepare human acceptance account boundary
+        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e
 
       - name: Run focused Ticket and entitlement tests
         run: >-
@@ -229,6 +234,7 @@ jobs:
       - name: Run browser runtime smoke
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
+          ARTFLOW_E2E_ADMIN_ACCESS_KEY: artflow-ci-admin-access-key
           PLAYWRIGHT_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/judge-e2e.json
           PLAYWRIGHT_CLOSURE_FIXTURE_PATH: ${{ runner.temp }}/result-closure-e2e.json
           PLAYWRIGHT_QUESTIONNAIRE_FIXTURE_PATH: ${{ runner.temp }}/questionnaire-e2e.json

@@ -252,10 +252,7 @@ def nodes_from_form(form) -> list[dict]:
                 if not values:
                     values = [form.get(f"{token}_{field}", "")]
                 raw_sources = [
-                    item.strip()
-                    for value in values
-                    for item in value.split(",")
-                    if item.strip()
+                    item.strip() for value in values for item in value.split(",") if item.strip()
                 ]
                 if raw_sources:
                     node[field] = raw_sources

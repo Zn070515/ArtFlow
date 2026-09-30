@@ -96,6 +96,7 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -435,12 +436,13 @@ class AuthorityMutationMatrixTests(TestCase):
             entered_by=self.operator,
             is_test_data=True,
         )
-        self.award = Award.objects.create(
-            activity=self.activity,
-            singer=self.singer,
-            name="Manual matrix award",
-            is_test_data=True,
-        )
+        with authority_write(TEST_DATA_SEED):
+            self.award = Award.objects.create(
+                activity=self.activity,
+                singer=self.singer,
+                name="Manual matrix award",
+                is_test_data=True,
+            )
 
     def _lock_round(self):
         with authority_write(CONTEST_ROUND_STATE):
@@ -2249,6 +2251,18 @@ def _ruleset_bulk_and_delete(case):
 
 
 def _award_bulk_and_delete(case):
+    case._assert_rejects(
+        lambda: Award.objects.bulk_create(
+            [
+                Award(
+                    activity=case.activity,
+                    singer=case.singer,
+                    name="Unauthorized manual award",
+                    is_test_data=True,
+                )
+            ]
+        )
+    )
     with _authorized_award_materialization():
         sourced = Award.objects.create(
             activity=case.activity,

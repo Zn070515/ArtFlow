@@ -108,9 +108,44 @@ class BuilderOperationTests(SimpleTestCase):
         )
         question = document["pages"][0]["sections"][0]["questions"][0]
         self.assertEqual(question["file"]["purpose"], "accompaniment")
-        self.assertTrue(question["file"]["extensions"])
+        from files.policies import file_purpose_policy
+
+        policy = file_purpose_policy("accompaniment")
+        self.assertEqual(set(question["file"]["extensions"]), set(policy.extensions))
+        self.assertEqual(question["file"]["max_mb"], policy.max_mb)
         self.assertLessEqual(question["file"]["max_mb"], MAX_FILE_MB_HARD_LIMIT)
         self.assertEqual(question["file"]["max_files"], 1)
+
+    def test_file_question_cannot_exceed_the_selected_purpose_policy(self):
+        document = {
+            **QUESTIONNAIRE,
+            "pages": [
+                {
+                    **QUESTIONNAIRE["pages"][0],
+                    "sections": [
+                        {
+                            "key": "identity",
+                            "title": "身份",
+                            "questions": [
+                                {
+                                    "key": "accompaniment",
+                                    "type": "file",
+                                    "label": "伴奏",
+                                    "file": {
+                                        "purpose": "accompaniment",
+                                        "extensions": [".mp3", ".mp4"],
+                                        "max_mb": 500,
+                                        "max_files": 1,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        with self.assertRaises(ValidationError):
+            parse_questionnaire(document)
 
     def test_a_generated_key_does_not_collide_with_an_existing_one(self):
         document = parse_questionnaire(QUESTIONNAIRE)
