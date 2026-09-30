@@ -23,6 +23,7 @@ from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.test_characterization import _CharacterizationBase
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
+from files.policies import file_purpose_policy
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import freeze_ruleset_version, supersede_ruleset_version
 from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric, SingerRegistration
@@ -38,6 +39,7 @@ from .successor import carry_answers, carry_over_keys, incompatible_keys, valida
 def _questionnaire(
     *, extra=None, song_type="text", purpose="accompaniment", key="singer_submission"
 ):
+    file_policy = file_purpose_policy(purpose)
     questions = [
         {"key": "name", "type": "text", "label": "姓名", "binding": "registration.name"},
         {"key": "r1.song", "type": song_type, "label": "第一轮曲目", "round": "r1"},
@@ -46,7 +48,12 @@ def _questionnaire(
             "type": "file",
             "label": "第一轮伴奏",
             "round": "r1",
-            "file": {"purpose": purpose, "extensions": [".mp3"], "max_mb": 100, "max_files": 1},
+            "file": {
+                "purpose": purpose,
+                "extensions": [sorted(file_policy.extensions)[0]],
+                "max_mb": file_policy.max_mb,
+                "max_files": 1,
+            },
         },
     ]
     if extra:

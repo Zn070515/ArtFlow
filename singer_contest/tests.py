@@ -4329,7 +4329,7 @@ class RoundEntryBridgeTests(TestCase):
 
         # The upstream is CONFIRMED (Item 5 satisfied) but no roster has materialised.
         self._confirm_upstream_stage1()
-        with self.assertRaisesMessage(ValidationError, "尚未生成该轮晋级名单"):
+        with self.assertRaisesMessage(ValidationError, "对应赛段尚未生成可晋级选手名单"):
             prepare_round(self.final, self.admin)
 
     def test_revising_stage_reconciles_round_entry(self):
@@ -4366,7 +4366,7 @@ class RoundEntryBridgeTests(TestCase):
         """A checkpoint over a not-yet-materialized STAGE round must not widen to all."""
         from .services import bind_resolve_input
 
-        with self.assertRaisesMessage(ValidationError, "尚未生成该轮晋级名单"):
+        with self.assertRaisesMessage(ValidationError, "对应赛段尚未生成可晋级选手名单"):
             bind_resolve_input(
                 self.version,
                 self.activity,
