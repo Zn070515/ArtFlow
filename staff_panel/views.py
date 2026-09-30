@@ -3832,7 +3832,15 @@ def contest_ruleset_create(request):
         .order_by("-created_at")
     )
     if request.method == "POST":
-        activity = get_object_or_404(activities, pk=request.POST.get("activity"))
+        # Keep the candidate lookup broad enough for the authoritative lock check to
+        # produce its stable 403 response.  Filtering ``is_locked=False`` here would
+        # turn a valid mutation attempt against a locked activity into a misleading
+        # 404 before ``lock_activity_for_action`` can re-validate it.
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST.get("activity"),
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         activity = lock_activity_for_action(activity)
         name = (request.POST.get("name") or "").strip()
         if not name:
