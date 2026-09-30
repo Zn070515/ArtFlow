@@ -947,7 +947,12 @@ class DoctorCommandTests(TestCase):
             root = Path(directory)
             output = StringIO()
 
-            with override_settings(STATIC_ROOT=root / "staticfiles", MEDIA_ROOT=root / "media"):
+            with override_settings(
+                STATIC_ROOT=root / "staticfiles",
+                MEDIA_ROOT=root / "media",
+                STAFF_ACCESS_KEY="",
+                ADMIN_ACCESS_KEY="",
+            ):
                 (root / "staticfiles").mkdir()
                 (root / "media").mkdir()
 
