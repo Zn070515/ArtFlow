@@ -34,6 +34,8 @@ services:
       POSTGRES_PASSWORD: artflow-local-container-password
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
+      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:-}
+      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:-}
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:-}
     ports:
       - "127.0.0.1:8000:8000"

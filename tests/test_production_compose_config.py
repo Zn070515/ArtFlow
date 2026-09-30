@@ -161,6 +161,13 @@ def test_local_compose_forwards_release_sha_to_the_built_web_image():
     assert web["environment"]["ARTFLOW_RELEASE_SHA"] == "${ARTFLOW_RELEASE_SHA:-}"
 
 
+def test_local_compose_forwards_account_access_keys_to_the_web_runtime():
+    web_environment = load_compose(LOCAL_COMPOSE_PATH)["services"]["web"]["environment"]
+
+    assert web_environment["STAFF_ACCESS_KEY"] == "${STAFF_ACCESS_KEY:-}"
+    assert web_environment["ADMIN_ACCESS_KEY"] == "${ADMIN_ACCESS_KEY:-}"
+
+
 def test_production_web_healthcheck_uses_internal_exempt_health_route():
     compose = load_compose(PRODUCTION_COMPOSE_PATH)
     healthcheck = compose["services"]["web"]["healthcheck"]["test"]

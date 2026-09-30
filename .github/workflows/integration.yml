@@ -86,7 +86,7 @@ jobs:
           uv run python manage.py seed_demo_data
 
       - name: Prepare human acceptance account boundary
-        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e
+        run: uv run python manage.py prepare_human_acceptance_e2e
 
       - name: Run focused Ticket and entitlement tests
         run: >-
@@ -126,6 +126,8 @@ jobs:
     timeout-minutes: 30
     env:
       ARTFLOW_RELEASE_SHA: ${{ github.sha }}
+      STAFF_ACCESS_KEY: artflow-ci-staff-access-key
+      ADMIN_ACCESS_KEY: artflow-ci-admin-access-key
     steps:
       - name: Check out source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
