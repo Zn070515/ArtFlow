@@ -121,7 +121,8 @@ class BuilderOperationTests(SimpleTestCase):
             **QUESTIONNAIRE,
             "pages": [
                 {
-                    **QUESTIONNAIRE["pages"][0],
+                    "key": "basic",
+                    "title": "基本信息",
                     "sections": [
                         {
                             "key": "identity",
