@@ -302,7 +302,7 @@ class RoundGroupsForm(forms.Form):
             )
 
     def clean(self):
-        cleaned = super().clean()
+        cleaned = super().clean() or {}
         groups = []
         for index in range(1, self.MAX_GROUP_SLOTS + 1):
             name = str(cleaned.get(f"group_name_{index}") or "").strip()
@@ -334,7 +334,7 @@ class ScoringRubricProvisionForm(forms.Form):
             if isinstance(criterion, dict)
         }
         for index in range(1, self.MAX_CRITERION_SLOTS + 1):
-            criterion = initial_by_slot.get(index, {})
+            criterion = initial_by_slot.get(index) or {}
             self.fields[f"criterion_name_{index}"] = forms.CharField(
                 label=f"评分项 {index}",
                 required=False,
@@ -358,8 +358,9 @@ class ScoringRubricProvisionForm(forms.Form):
         _style_form_controls(self.fields)
 
     def clean(self):
-        cleaned = super().clean()
+        cleaned = super().clean() or {}
         criteria = []
+        criterion_scores: list[Decimal] = []
         for index in range(1, self.MAX_CRITERION_SLOTS + 1):
             name = str(cleaned.get(f"criterion_name_{index}") or "").strip()
             max_score = cleaned.get(f"criterion_max_score_{index}")
@@ -370,11 +371,13 @@ class ScoringRubricProvisionForm(forms.Form):
                 self.add_error(f"criterion_name_{index}", "请填写评分项名称。")
             if max_score in (None, ""):
                 self.add_error(f"criterion_max_score_{index}", "请填写满分。")
+            elif isinstance(max_score, Decimal):
+                criterion_scores.append(max_score)
             criteria.append({"name": name, "max_score": max_score, "description": description})
         if not criteria and not self.errors:
             raise forms.ValidationError("至少需要一个评分项。")
         if not self.errors:
-            total = sum((criterion["max_score"] for criterion in criteria), Decimal("0"))
+            total = sum(criterion_scores, Decimal("0"))
             if total != Decimal("100"):
                 raise forms.ValidationError(f"评分项满分合计必须为 100 分，当前为 {total:g} 分。")
         cleaned["criteria"] = criteria
