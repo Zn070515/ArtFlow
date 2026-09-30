@@ -220,6 +220,9 @@ jobs:
             --output-file /tmp/artflow-judge-e2e.json
           docker compose cp web:/tmp/artflow-judge-e2e.json "$RUNNER_TEMP/judge-e2e.json"
 
+      - name: Prepare human acceptance account boundary
+        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e
+
       - name: Prepare isolated result closure browser fixture
         run: |
           docker compose exec -T web python manage.py prepare_result_closure_rehearsal \
