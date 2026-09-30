@@ -116,17 +116,41 @@ class OperatorEndToEndTests(TestCase):
         self.assertEqual(resp.status_code, 302, resp.content[:500])
         return ContestRound.objects.get(activity=self.activity, sequence=sequence)
 
-    def _clone_and_freeze(self, round_map):
-        # The operator instantiates the golden ruleset through the real "clone last year"
-        # path, then binds it (round_keys + audience_keys) and freezes it — the production
-        # freeze path, not ORM.
+    def _clone_last_year(self):
+        # Stage roster references are selected from the activity's declared ruleset. Clone
+        # the template before creating stage-backed rounds so the browser flow never relies
+        # on a free-form stage key that the authority cannot verify.
         resp = self.client.post(
             reverse("staff:ruleset_clone_last_year"),
             {"activity": self.activity.pk, "name": "院十佳规则"},
         )
         self.assertEqual(resp.status_code, 302, resp.content[:500])
-        version = RulesetVersion.objects.get(
-            ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+        return (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+
+    def _clone_and_freeze(self, round_map):
+        # The operator binds the declared template to the created rounds and freezes it —
+        # the production freeze path, not ORM.
+        version = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        self.assertIsNotNone(version)
+        assert version is not None
+        ruleset = version.ruleset
+        self.assertEqual(
+            RulesetVersion.objects.filter(
+                ruleset=ruleset, status=RulesetVersion.Status.DRAFT
+            ).count(),
+            1,
         )
         resp = self.client.post(
             reverse("staff:ruleset_bind", args=[version.pk]),
@@ -228,6 +252,7 @@ class OperatorEndToEndTests(TestCase):
         # 1) Activity + rounds R1-R4 through the round form POST (Item 2 fields).
         r1 = self._create_round(1, ContestRound.RosterSource.APPROVED)
         r2 = self._create_round(2, ContestRound.RosterSource.APPROVED)
+        self.assertIsNotNone(self._clone_last_year())
         r3 = self._create_round(3, ContestRound.RosterSource.STAGE, "stage1")
         r4 = self._create_round(
             4,
