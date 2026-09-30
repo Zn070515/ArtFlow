@@ -6252,6 +6252,35 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(version.definition, template.definition)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 
+    def test_clone_rejects_non_singer_and_archived_activities(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate
+
+        template = RulesetTemplate.objects.get(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY)
+        farewell = _create_activity(
+            title="毕业晚会",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.DRAFT,
+            is_test_mode=True,
+        )
+        archived = self._clone_activity("已归档歌手赛")
+        archived.phase = Activity.Phase.ARCHIVED
+        archived.is_locked = True
+        _save_activity_state(archived, ["phase", "is_locked"])
+
+        non_singer_response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": farewell.pk, "name": "错误克隆"},
+        )
+        self.assertEqual(non_singer_response.status_code, 404)
+        self.assertFalse(ContestRuleset.objects.filter(activity=farewell).exists())
+
+        archived_response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": archived.pk, "name": "归档克隆"},
+        )
+        self.assertEqual(archived_response.status_code, 403)
+        self.assertFalse(ContestRuleset.objects.filter(activity=archived).exists())
+
     def test_clone_into_activity_with_existing_ruleset_reuses_it(self):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 

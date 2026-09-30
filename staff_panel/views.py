@@ -4224,8 +4224,13 @@ def ruleset_clone_from_template(request, template_pk):
         pk=template_pk,
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
     )
-    activity = get_object_or_404(Activity, pk=request.POST.get("activity"))
+    activity = get_object_or_404(
+        Activity,
+        pk=request.POST.get("activity"),
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
     activity = lock_activity_for_action(activity)
+    _ensure_activity_mutable(activity)
     name = (request.POST.get("name") or "").strip() or template.name
     ruleset, _created = ContestRuleset.objects.get_or_create(
         activity=activity,
