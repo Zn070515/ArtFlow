@@ -234,6 +234,18 @@ def _ensure_activity_mutable(activity):
     ensure_activity_unlocked(activity)
 
 
+def _editable_singer_activities():
+    """Return activities that can accept new singer-contest configuration."""
+    return (
+        Activity.objects.filter(
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_locked=False,
+        )
+        .exclude(phase=Activity.Phase.ARCHIVED)
+        .order_by("-created_at")
+    )
+
+
 def _ensure_publication_allowed(related_activity, status):
     if (
         status == PublicPost.Status.PUBLISHED
@@ -1195,7 +1207,7 @@ def round_list(request):
 
 @staff_required
 def round_create(request):
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    activities = _editable_singer_activities()
     if request.method == "POST":
         activity = get_object_or_404(
             Activity,
@@ -1215,9 +1227,7 @@ def round_create(request):
                 {
                     "form": form,
                     "error": _form_error(form),
-                    "activities": Activity.objects.filter(
-                        activity_type=Activity.Type.SINGER_CONTEST
-                    ),
+                    "activities": activities,
                     "round_types": _choices(ContestRound.RoundType),
                     "scoring_modes": _choices(ContestRound.ScoringMode),
                     "order_policies": _choices(ContestRound.OrderPolicy),
@@ -2095,7 +2105,7 @@ def judge_create(request):
             )
         return redirect("staff:judge_list")
 
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    activities = _editable_singer_activities()
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
 
 
@@ -2458,16 +2468,18 @@ def judge_score_paper(request, pk):
 
 @staff_required
 def rubric_create(request):
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST).order_by(
-        "-created_at"
-    )
+    activities = _editable_singer_activities()
     form = ScoringRubricProvisionForm(request.POST or None)
     selected_activity_id = request.POST.get("activity_id") or request.GET.get("activity_id") or ""
     if not selected_activity_id:
         selected_activity = activities.first()
         selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     if request.method == "POST" and form.is_valid():
-        activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST.get("activity_id"),
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         try:
             create_scoring_rubric(
                 activity,
@@ -2527,10 +2539,14 @@ def vote_session_list(request):
 @staff_required
 @transaction.atomic
 def vote_session_create(request):
-    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
+    activities = _editable_singer_activities()
     if request.method == "POST":
         form = VoteSessionForm(request.POST)
-        activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        activity = get_object_or_404(
+            Activity,
+            pk=request.POST["activity_id"],
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.MANAGE_VOTE)
@@ -3344,14 +3360,7 @@ def ruleset_template_list(request):
     # Show the catalog with explicit capability status. Only production templates
     # expose cloning; experimental/unsupported entries must never look production-ready.
     templates = RulesetTemplate.objects.all()
-    activities = (
-        Activity.objects.filter(
-            activity_type=Activity.Type.SINGER_CONTEST,
-            is_locked=False,
-        )
-        .exclude(phase=Activity.Phase.ARCHIVED)
-        .order_by("-created_at")
-    )
+    activities = _editable_singer_activities()
     return render(
         request,
         "staff_panel/ruleset_template_list.html",
@@ -3363,14 +3372,7 @@ def ruleset_template_list(request):
 def ruleset_template_detail(request, pk):
     template = get_object_or_404(RulesetTemplate, pk=pk)
     nodes = parse_definition(template.definition)["nodes"] if template.definition else []
-    activities = (
-        Activity.objects.filter(
-            activity_type=Activity.Type.SINGER_CONTEST,
-            is_locked=False,
-        )
-        .exclude(phase=Activity.Phase.ARCHIVED)
-        .order_by("-created_at")
-    )
+    activities = _editable_singer_activities()
     return render(
         request,
         "staff_panel/ruleset_template_detail.html",

@@ -444,6 +444,38 @@ class StaffPanelSmokeTests(TestCase):
             f"{reverse('staff:singer_registration_list')}?activity_id={self.singer_activity.pk}",
         )
 
+    def test_configuration_selectors_hide_archived_locked_and_non_singer_activities(self):
+        locked = _create_activity(
+            title="Locked Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_locked=True,
+        )
+        archived = _create_activity(
+            title="Archived Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_locked=True,
+        )
+        from ruleset.templates import seed_ruleset_templates
+
+        seed_ruleset_templates(self.admin)
+        self.client.force_login(self.staff)
+        for route in (
+            "staff:round_create",
+            "staff:vote_session_create",
+            "staff:rubric_create",
+            "staff:judge_create",
+            "staff:ruleset_template_list",
+        ):
+            with self.subTest(route=route):
+                response = self.client.get(reverse(route))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, self.singer_activity.title)
+                self.assertNotContains(response, self.farewell_activity.title)
+                self.assertNotContains(response, locked.title)
+                self.assertNotContains(response, archived.title)
+
     def test_round_and_vote_creation_default_to_first_singer_activity(self):
         login_admin(self.client, self.admin)
         round_response = self.client.get(reverse("staff:round_create"))
