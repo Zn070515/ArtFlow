@@ -14,6 +14,7 @@ song and accompaniment, plus the third round's guest singer.
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError
+from files.policies import file_purpose_policy
 
 # Reference-row field -> question key. The reference fixture already distinguishes the four
 # rounds' songs; before, the loader collapsed them into one column and lost the distinction.
@@ -35,6 +36,7 @@ MEDIA_FILE_SPECS = (
 
 
 def _file_question(key: str, round_key: str, label: str, purpose: str, extensions) -> dict:
+    policy = file_purpose_policy(purpose)
     return {
         "key": key,
         "type": "file",
@@ -44,7 +46,7 @@ def _file_question(key: str, round_key: str, label: str, purpose: str, extension
         "file": {
             "purpose": purpose,
             "extensions": extensions,
-            "max_mb": 100,
+            "max_mb": policy.max_mb,
             "max_files": 1,
         },
     }

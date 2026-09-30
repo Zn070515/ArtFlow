@@ -242,6 +242,13 @@ def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistratio
     )
     if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
         raise ValidationError("上游赛段未核定，禁止准备该轮次。")
+    materialized_entries = list(
+        RoundEntry.objects.filter(round=contest_round)
+        .select_related("singer")
+        .order_by("running_order", "pk")
+    )
+    if materialized_entries:
+        return [entry.singer for entry in materialized_entries]
     advancing_ids = list(
         StageDecision.objects.filter(
             stage_result=upstream,
@@ -1694,7 +1701,9 @@ def _stage_entry_roster(version, activity, bound_rounds, *, checkpoint=None) -> 
         # "only the finalists" guarantee. An APPROVED round legitimately rosters every
         # approved singer regardless, so only that case falls back.
         if entry_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
-            raise StageRosterNotMaterialized("尚未生成该轮晋级名单，请先重算并确认对应赛段结果。")
+            raise StageRosterNotMaterialized(
+                "对应赛段尚未生成可晋级选手名单，请先重算并确认对应赛段结果。"
+            )
     return tuple(
         str(pk)
         for pk in scope_runtime(
