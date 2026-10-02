@@ -11,6 +11,7 @@ from ruleset.schema import parse_definition
 from singer_contest.models import ContestRound, ScoringRubric, SingerRegistration
 from singer_contest.services import validate_score
 from voting.models import VoteSession
+from voting.policies import formal_singer_contest_requires_ticket
 
 # Accepts both browser `datetime-local` values (naive ISO) and tz-aware ISO strings
 # such as `timezone.now().isoformat()`.
@@ -469,7 +470,7 @@ class IncidentForm(forms.Form):
 
 class VoteSessionForm(forms.Form):
     name = forms.CharField(label="场次名称", max_length=100)
-    passcode = forms.CharField(label="现场口令", max_length=20)
+    passcode = forms.CharField(label="现场口令", max_length=20, required=False)
     start_time = forms.DateTimeField(
         label="开始时间",
         input_formats=DATETIME_INPUT_FORMATS,
@@ -499,7 +500,8 @@ class VoteSessionForm(forms.Form):
         label="仅允许已核验入场票参与", required=False, initial=False
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, activity: Activity | None = None, **kwargs):
+        self.activity = activity
         super().__init__(*args, **kwargs)
         _style_form_controls(self.fields)
 
@@ -514,6 +516,8 @@ class VoteSessionForm(forms.Form):
         selection_type = cleaned.get("selection_type") or VoteSession.SelectionType.SINGLE
         max_selections = cleaned.get("max_selections") or 1
         purpose = cleaned.get("purpose") or VoteSession.Purpose.SELECTION
+        if self.activity is not None and formal_singer_contest_requires_ticket(self.activity):
+            cleaned["requires_ticket"] = True
         singer_ids = self._posted_singer_ids()
         if not singer_ids:
             raise forms.ValidationError("请至少选择一个候选选手。")

@@ -21,10 +21,10 @@
             {{ form.name.label_tag }}{{ form.name }}
             {% for error in form.name.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
-        <div>
+        {% if not formal_ticket_voting %}<div>
             {{ form.passcode.label_tag }}{{ form.passcode }}
             {% for error in form.passcode.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
-        </div>
+        </div>{% endif %}
         <div class="grid grid-cols-2 gap-4">
             <div>
                 {{ form.start_time.label_tag }}{{ form.start_time }}
@@ -49,10 +49,12 @@
             <p class="text-xs text-gray-500 mt-1">锁定投票只记录原始事实；正式奖项必须由赛制 AWARD 核定发布。</p>
             <p class="text-xs text-gray-500 mt-1">选择「成绩组成」时：正式成绩来源必须启用入场票校验；观众分 = 支持该选手的有效 ballot 数 ÷ 有效 ballot 总数 × 100；多选时各选手支持率之和可以超过 100%。</p>
         </div>
-        <label for="id_requires_ticket" class="flex items-center gap-2 text-sm text-gray-700">
+        {% if formal_ticket_voting %}
+        <p class="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">正式歌手比赛统一使用已核验入场票参与观众投票。</p>
+        {% else %}<label for="id_requires_ticket" class="flex items-center gap-2 text-sm text-gray-700">
             {{ form.requires_ticket }}
             仅允许已核验入场票参与（「成绩组成」必须勾选）
-        </label>
+        </label>{% endif %}
         <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">候选选手（可多选）</label>
             <div class="border border-gray-300 rounded px-3 py-2 max-h-48 overflow-y-auto space-y-1">

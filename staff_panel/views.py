@@ -167,6 +167,7 @@ from singer_contest.services import (
     validate_roster_source_stage,
 )
 from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
+from voting.policies import formal_singer_contest_requires_ticket
 from voting.services import (
     close_vote_session,
     lock_vote_session,
@@ -2579,11 +2580,11 @@ def vote_session_list(request):
 def vote_session_create(request):
     activities = _editable_singer_activities()
     if request.method == "POST":
-        form = VoteSessionForm(request.POST)
         activity = get_object_or_404(activities, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.MANAGE_VOTE)
+        form = VoteSessionForm(request.POST, activity=activity)
         if not form.is_valid():
             return render(
                 request,
@@ -2604,6 +2605,7 @@ def vote_session_create(request):
                     "submitted_singer_ids": request.POST.getlist("singers"),
                     "selection_types": _choices(VoteSession.SelectionType),
                     "purposes": _choices(VoteSession.Purpose),
+                    "formal_ticket_voting": formal_singer_contest_requires_ticket(activity),
                 },
             )
         singer_ids = request.POST.getlist("singers")
@@ -2624,13 +2626,19 @@ def vote_session_create(request):
         vote_session = VoteSession.objects.create(
             activity=activity,
             name=form.cleaned_data["name"],
-            passcode=form.cleaned_data["passcode"],
+            passcode=(
+                "" if formal_singer_contest_requires_ticket(activity) else form.cleaned_data["passcode"]
+            ),
             start_time=form.cleaned_data["start_time"],
             end_time=form.cleaned_data["end_time"],
             selection_type=form.cleaned_data["selection_type"],
             max_selections=form.cleaned_data["max_selections"],
             purpose=form.cleaned_data["purpose"],
-            requires_ticket=form.cleaned_data["requires_ticket"],
+            requires_ticket=(
+                True
+                if formal_singer_contest_requires_ticket(activity)
+                else form.cleaned_data["requires_ticket"]
+            ),
             is_test_data=activity.is_test_mode,
         )
         for i, sid in enumerate(singer_ids):
@@ -2665,7 +2673,7 @@ def vote_session_create(request):
     else:
         singer_queryset = singer_queryset.none()
     singers = _with_generic_song_labels(scope_lifecycle(singer_queryset))
-    form = VoteSessionForm()
+    form = VoteSessionForm(activity=selected_activity)
     return render(
         request,
         "staff_panel/vote_session_form.html",
@@ -2677,6 +2685,9 @@ def vote_session_create(request):
             "selection_types": _choices(VoteSession.SelectionType),
             "purposes": _choices(VoteSession.Purpose),
             "submitted_singer_ids": [],
+            "formal_ticket_voting": bool(
+                selected_activity and formal_singer_contest_requires_ticket(selected_activity)
+            ),
         },
     )
 

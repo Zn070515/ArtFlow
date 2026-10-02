@@ -380,7 +380,7 @@ class VoteSession(models.Model):
         "core.Activity", on_delete=models.CASCADE, related_name="vote_sessions"
     )
     name = models.CharField(max_length=100)
-    passcode = models.CharField(max_length=20)
+    passcode = models.CharField(max_length=20, blank=True, default="")
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     is_open = models.BooleanField(default=False)
