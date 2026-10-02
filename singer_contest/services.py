@@ -295,7 +295,23 @@ def round_roster_stage_choices(activity) -> list[tuple[str, str]]:
             keys = []
     if ruleset.stage_key and ruleset.stage_key not in keys:
         keys.append(ruleset.stage_key)
-    return [(key, f"{key}（结果赛段）") for key in keys]
+    labels: dict[str, str] = {}
+    if version is not None:
+        try:
+            definition = version.definition
+            if isinstance(definition, str):
+                definition = json.loads(definition)
+            labels = {
+                str(checkpoint["key"]): str(checkpoint.get("name") or checkpoint.get("label") or "")
+                for checkpoint in (definition.get("checkpoints") or [])
+                if checkpoint.get("key")
+            }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            labels = {}
+    return [
+        (key, labels.get(key) or f"第 {index} 个结果赛段")
+        for index, key in enumerate(keys, start=1)
+    ]
 
 
 def validate_roster_source_stage(activity, stage_key: str) -> None:
@@ -303,6 +319,66 @@ def validate_roster_source_stage(activity, stage_key: str) -> None:
     choices = round_roster_stage_choices(activity)
     if stage_key not in {value for value, _label in choices}:
         raise ValidationError("上游赛段必须选择当前活动赛制中已声明的结果赛段。")
+
+
+class RoundSetupReadiness(StrEnum):
+    """Whether a draft round may accept roster-dependent setup facts."""
+
+    READY = "ready"
+    WAITING_FOR_UPSTREAM_CONFIRMATION = "waiting_for_upstream_confirmation"
+    MISSING_UPSTREAM = "missing_upstream"
+    STALE = "stale"
+
+
+def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
+    """Return the single readiness state shared by round setup reads and writes."""
+    if contest_round.roster_source != ContestRound.RosterSource.STAGE:
+        return RoundSetupReadiness.READY
+    stage_key = (contest_round.roster_source_stage or "").strip()
+    if not stage_key:
+        return RoundSetupReadiness.MISSING_UPSTREAM
+    stage = (
+        StageResult.objects.filter(activity=contest_round.activity, stage_key=stage_key)
+        .order_by("-result_version", "-pk")
+        .first()
+    )
+    if stage is None:
+        return RoundSetupReadiness.MISSING_UPSTREAM
+    if stage.status != StageResult.Status.CONFIRMED:
+        return RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION
+    entry_ids = set(
+        RoundEntry.objects.filter(round=contest_round).values_list("singer_id", flat=True)
+    )
+    advancing_ids = set(
+        stage.decisions.filter(outcome_code__in=_ADVANCING_OUTCOME_CODES).values_list(
+            "singer_id", flat=True
+        )
+    )
+    if not advancing_ids:
+        return RoundSetupReadiness.READY if entry_ids else RoundSetupReadiness.MISSING_UPSTREAM
+    if not entry_ids:
+        if (
+            Performance.objects.filter(round=contest_round).exists()
+            or PerformanceGroup.objects.filter(round=contest_round).exists()
+        ):
+            return RoundSetupReadiness.STALE
+        return RoundSetupReadiness.READY
+    if entry_ids != advancing_ids:
+        return RoundSetupReadiness.STALE
+    return RoundSetupReadiness.READY
+
+
+def _ensure_round_setup_ready(contest_round: ContestRound) -> None:
+    readiness = round_setup_readiness(contest_round)
+    messages = {
+        RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION: (
+            "上游赛段尚未核定，暂不能配置本轮分组、人工顺序或准备轮次。"
+        ),
+        RoundSetupReadiness.MISSING_UPSTREAM: "对应赛段尚未生成可晋级选手名单。",
+        RoundSetupReadiness.STALE: "上游晋级名单已变化，本轮设置已失效，请重新配置分组和出场顺序。",
+    }
+    if readiness != RoundSetupReadiness.READY:
+        raise ValidationError(messages[readiness])
 
 
 def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration]:
@@ -313,6 +389,8 @@ def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration
     supplies the candidate roster, which keeps a draft round configurable without
     broadening later rounds back to every approved singer.
     """
+    if contest_round.roster_source == ContestRound.RosterSource.STAGE:
+        _ensure_round_setup_ready(contest_round)
     entries = list(
         RoundEntry.objects.filter(round=contest_round)
         .select_related("singer")
@@ -395,6 +473,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
         raise PermissionDenied("轮次不属于当前活动。")
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
+    _ensure_round_setup_ready(locked_round)
     # P0-B runtime boundary: the frozen ruleset's deferred roster facts (SELECT quotas,
     # vote candidate rosters, group capacity, full/subset coverage) are proven here — the
     # last moment before they become load-bearing. Fail closed.
@@ -472,6 +551,7 @@ def set_round_running_order(contest_round, singer_ids, operator) -> ContestRound
         raise ValidationError("只能为草稿轮次设置人工出场顺序。")
     if locked_round.order_policy != ContestRound.OrderPolicy.MANUAL:
         raise ValidationError("只有人工顺序轮次可以设置人工出场顺序。")
+    _ensure_round_setup_ready(locked_round)
     singers = _round_source_singers(locked_round)
     ordered_ids = [str(singer_id) for singer_id in singer_ids]
     expected_ids = [str(singer.pk) for singer in singers]
@@ -522,6 +602,7 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
         raise PermissionDenied("轮次不属于当前活动。")
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("只能为草稿轮次设置分组。")
+    _ensure_round_setup_ready(locked_round)
     if not isinstance(group_specs, list) or not group_specs:
         raise ValidationError("至少需要一个分组。")
 
@@ -1770,9 +1851,13 @@ def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
         return {}
     out: dict[str, dict[str, str]] = {}
     for by, round_pk in group_keys.items():
-        perfs = Performance.objects.filter(round_id=round_pk, group__isnull=False).select_related(
-            "group"
+        current_entry_ids = list(
+            RoundEntry.objects.filter(round_id=round_pk).values_list("singer_id", flat=True)
         )
+        perfs = Performance.objects.filter(round_id=round_pk, group__isnull=False)
+        if current_entry_ids:
+            perfs = perfs.filter(singer_id__in=current_entry_ids)
+        perfs = perfs.select_related("group")
         entry: dict[str, str] = {}
         for p in perfs:
             assert p.group is not None
@@ -2124,13 +2209,6 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
         StageResult.Status.CONFIRMED,
     }:
         return None
-    advancers = list(
-        stage.decisions.filter(outcome_code__in=_ADVANCING_OUTCOME_CODES)
-        .select_related("singer")
-        .order_by("rank", "pk")
-    )
-    if not advancers:
-        return None
     target = (
         ContestRound.objects.select_for_update()
         .filter(
@@ -2144,6 +2222,11 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     )
     if target is None:
         return None
+    advancers = list(
+        stage.decisions.filter(outcome_code__in=_ADVANCING_OUTCOME_CODES)
+        .select_related("singer")
+        .order_by("rank", "pk")
+    )
     target_singers = [decision.singer for decision in advancers]
     existing_orders = dict(
         RoundEntry.objects.filter(round=target, singer__in=target_singers).values_list(
@@ -2154,8 +2237,10 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
         set(existing_orders) == {singer.pk for singer in target_singers}
         and all(order is not None for order in existing_orders.values())
     )
-    ordered_singers = _order_singers_for_round(
-        target, target_singers, allow_unordered_manual=manual_unordered
+    ordered_singers = (
+        _order_singers_for_round(target, target_singers, allow_unordered_manual=manual_unordered)
+        if target_singers
+        else []
     )
     running_order_by_singer = (
         {}
@@ -2184,6 +2269,22 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     for singer_id, index in running_order_by_singer.items():
         entry_qs.filter(singer_id=singer_id).update(running_order=index)
     if removed or to_create:
+        Performance.objects.filter(round=target).delete()
+        PerformanceGroup.objects.filter(round=target).delete()
+        AuditLog.objects.create(
+            operator=operator,
+            action_type=AuditLog.ActionType.OTHER,
+            target=f"ContestRound:{target.pk}",
+            new_value=json.dumps(
+                {
+                    "stage_key": stage.stage_key,
+                    "removed_entries": len(removed),
+                    "added_entries": len(to_create),
+                },
+                ensure_ascii=False,
+            ),
+            note="invalidate_round_setup_facts",
+        )
         AuditLog.objects.create(
             operator=operator,
             action_type=AuditLog.ActionType.OTHER,
@@ -2778,6 +2879,43 @@ def _release_stage_consumed_facts(stage: StageResult, *, operator) -> None:
         )
 
 
+def _invalidate_downstream_stage_rounds(stage: StageResult, *, operator) -> None:
+    """Remove derived rosters and setup facts after an upstream stage is unlocked.
+
+    A confirmed stage is the authority for every draft STAGE round that consumes it.
+    Once an administrator reopens that stage, its old decisions can no longer support
+    downstream setup. Clearing the derived snapshot before raw facts are corrected also
+    prevents the next resolve from reading stale groups or manual roster entries.
+    """
+    downstream = ContestRound.objects.select_for_update().filter(
+        activity=stage.activity,
+        roster_source=ContestRound.RosterSource.STAGE,
+        roster_source_stage=stage.stage_key,
+        status=ContestRound.Status.DRAFT,
+    )
+    for contest_round in downstream:
+        has_facts = (
+            RoundEntry.objects.filter(round=contest_round).exists()
+            or Performance.objects.filter(round=contest_round).exists()
+            or PerformanceGroup.objects.filter(round=contest_round).exists()
+        )
+        if not has_facts:
+            continue
+        Performance.objects.filter(round=contest_round).delete()
+        PerformanceGroup.objects.filter(round=contest_round).delete()
+        RoundEntry.objects.filter(round=contest_round).delete()
+        AuditLog.objects.create(
+            operator=operator,
+            action_type=AuditLog.ActionType.OTHER,
+            target=f"ContestRound:{contest_round.pk}",
+            new_value=json.dumps(
+                {"stage_key": stage.stage_key, "round": contest_round.pk},
+                ensure_ascii=False,
+            ),
+            note="invalidate_round_setup_facts:stage_unlock",
+        )
+
+
 @transaction.atomic
 def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> StageResult:
     """Admin unlock a CONFIRMED stage result so its raw facts can be corrected (§38).
@@ -2822,6 +2960,7 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
     with authority_write(STAGE_RESULT_CONFIRM):
         locked.save(update_fields=["confirmed_by", "confirmed_at", "status"])
     _release_stage_consumed_facts(locked, operator=current_operator)
+    _invalidate_downstream_stage_rounds(locked, operator=current_operator)
     from public_portal.services import supersede_releases_for_stage_result
 
     supersede_releases_for_stage_result(
