@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from argparse import ArgumentParser
 from typing import Any
 
 from accounts.models import InstallationState, User
@@ -15,7 +16,7 @@ from common.authority import ACCOUNT_AUTHORITY, authority_write
 class Command(BaseCommand):
     help = "Prepare a non-production installation-state boundary for human acceptance E2E."
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument(
             "--fresh-bootstrap",
             action="store_true",

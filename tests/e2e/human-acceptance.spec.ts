@@ -13,7 +13,9 @@ test.describe.configure({ mode: "serial" });
 async function registerAndOpenWorkspace(page) {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const username = `human-acceptance-${suffix}`;
-  const password = `Violet!Mesa7Quartz${suffix.slice(-4)}`;
+  // Keep the fixture independent of the random suffix's character composition:
+  // Django's password validators require a numeric character.
+  const password = `Violet!Mesa7Quartz2026${suffix.slice(-4)}`;
   const activityTitle = `Human acceptance activity ${suffix}`;
 
   await page.goto("/register/admin/");

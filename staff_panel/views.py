@@ -1223,8 +1223,12 @@ def round_list(request):
     }
     for contest_round in rounds:
         readiness = round_setup_readiness(contest_round)
-        contest_round.setup_readiness = readiness.value
-        contest_round.setup_readiness_label = readiness_labels.get(readiness, "")
+        setattr(contest_round, "setup_readiness", readiness.value)
+        setattr(
+            contest_round,
+            "setup_readiness_label",
+            readiness_labels.get(readiness, ""),
+        )
     return render(
         request,
         "staff_panel/round_list.html",
