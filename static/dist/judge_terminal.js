@@ -148,7 +148,7 @@
     const stateField = root.querySelector("[data-performance-state]");
     const criteriaContainer = root.querySelector("[data-criteria]");
     const totalField = root.querySelector("[data-total]");
-    const redeemUrl = root.dataset.redeemUrl || "/entry-access/grants/redeem/";
+    const claimUrl = root.dataset.claimUrl || "/judge/claim/";
     const contextUrl = root.dataset.contextUrl || "/judge/context/";
     const scoreUrl = root.dataset.scoreUrl || "/judge/score/";
     const legacyStorageKey = "artflow:judge:draft";
@@ -407,20 +407,19 @@
             return null;
         }
     }
-    async function redeem(fragment) {
-        const response = await fetch(redeemUrl, {
+    async function claim() {
+        const response = await fetch(claimUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: fragment }),
+            credentials: "same-origin",
         });
-        return response.ok ? parseSession(await jsonResponse(response)) : null;
+        return response.ok;
     }
     async function loadContext(token) {
         if (contextRequest)
             return contextRequest;
         contextRequest = (async () => {
             const response = await fetch(contextUrl, {
-                headers: { Authorization: `Bearer ${token}` },
+                credentials: "same-origin",
             });
             return response.ok ? parseContext(await jsonResponse(response)) : null;
         })();
@@ -527,7 +526,8 @@
         try {
             const response = await fetch(scoreUrl, {
                 method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` },
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     command_id: current.command_id,
                     expected_context_version: context.context_version,
@@ -564,16 +564,10 @@
         }
     }
     async function boot() {
-        const fragment = window.location.hash.slice(1);
-        if (!fragment) {
-            statusText(terminalRoot, "请使用现场二维码进入评委终端。");
-            return;
-        }
-        window.history.replaceState(null, "", window.location.pathname);
         try {
-            sessionToken = await redeem(decodeURIComponent(fragment));
-            if (!sessionToken)
-                throw new Error("invalid grant");
+            if (!(await claim()))
+                throw new Error("claim failed");
+            sessionToken = "cookie";
             const loadedContext = await loadContext(sessionToken);
             if (!loadedContext)
                 throw new Error("invalid context");
@@ -585,7 +579,7 @@
             sessionToken = null;
             context = null;
             stopped = true;
-            statusText(terminalRoot, "评委会话无效或已过期，请重新扫描现场二维码。");
+            statusText(terminalRoot, "评委终端暂不可用，请联系现场工作人员。");
         }
     }
     scoreField.addEventListener("input", scheduleDraftPersistence);

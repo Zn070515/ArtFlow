@@ -3,7 +3,7 @@
 
 {% block content %}
 <main class="mx-auto max-w-xl p-6" data-judge-terminal
-      data-redeem-url="{% url 'entry_access:grant_redeem' %}"
+      data-claim-url="{{ claim_url|default:'' }}"
       data-context-url="{% url 'judge:context' %}"
       data-score-url="{% url 'judge:score' %}">
   <h1 class="text-2xl font-semibold">评委评分终端</h1>

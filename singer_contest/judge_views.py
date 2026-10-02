@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 
 from common.audit import client_ip
 from common.rate_limit import allow
+from core.models import Activity
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import render
@@ -16,6 +18,7 @@ from .judge_authority import (
     JudgePanelChanged,
     JudgePerformanceNotScorable,
     JudgeRoundOnHold,
+    claim_judge_session,
     get_judge_context,
     submit_judge_score,
 )
@@ -65,7 +68,7 @@ def _rate_limit(
     ip_limit: int,
 ) -> JsonResponse | None:
     source = _rate_limit_identity(client_ip(request) or "unknown")
-    token = _bearer_token(request)
+    token = _judge_token(request)
     if token is None:
         decision = allow(
             f"judge:{operation}:anonymous-ip:{source}",
@@ -110,6 +113,10 @@ def _bearer_token(request: HttpRequest) -> str | None:
     return token
 
 
+def _judge_token(request: HttpRequest) -> str | None:
+    return _bearer_token(request) or request.COOKIES.get("artflow_judge_session")
+
+
 def _body_payload(request: HttpRequest) -> dict[str, object] | None:
     declared_length = request.headers.get("Content-Length")
     if declared_length:
@@ -140,6 +147,63 @@ def judge_terminal(request: HttpRequest):
     return render(request, "singer_contest/judge_terminal.html")
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
+    if not _same_origin(request):
+        return _error("ORIGIN_REJECTED", 403)
+    activity = (
+        Activity.objects.filter(
+            public_code=public_code,
+            activity_type=Activity.Type.SINGER_CONTEST,
+            data_lifecycle=Activity.DataLifecycle.FORMAL,
+        )
+        .first()
+    )
+    if activity is None:
+        return _error("INVALID_JUDGE_ENTRY", 404)
+    existing_token = _judge_token(request)
+    if existing_token:
+        try:
+            context = get_judge_context(existing_token)
+        except (ValidationError, PermissionDenied):
+            pass
+        else:
+            response = _no_store(JsonResponse({"seat_label": f"J{context.seat_id}", "reused": True}))
+            response.set_cookie(
+                "artflow_judge_session",
+                existing_token,
+                max_age=8 * 60 * 60,
+                httponly=True,
+                secure=getattr(settings, "APP_ENV", "development") == "production",
+                samesite="Lax",
+            )
+            return response
+    try:
+        claimed = claim_judge_session(activity)
+    except (ValidationError, PermissionDenied):
+        return _error("JUDGE_TERMINALS_FULL", 409)
+    response = _no_store(
+        JsonResponse(
+            {
+                "seat_label": claimed.seat_label,
+                "expires_at": claimed.session.expires_at.isoformat(),
+                "reused": False,
+            },
+            status=201,
+        )
+    )
+    response.set_cookie(
+        "artflow_judge_session",
+        claimed.token,
+        max_age=8 * 60 * 60,
+        httponly=True,
+        secure=getattr(settings, "APP_ENV", "development") == "production",
+        samesite="Lax",
+    )
+    return response
+
+
 @require_http_methods(["GET"])
 def judge_context(request: HttpRequest) -> JsonResponse:
     limited = _rate_limit(
@@ -153,7 +217,7 @@ def judge_context(request: HttpRequest) -> JsonResponse:
         return limited
     if not _same_origin(request):
         return _error("ORIGIN_REJECTED", 403)
-    token = _bearer_token(request)
+    token = _judge_token(request)
     if token is None:
         return _error("INVALID_JUDGE_SESSION", 401)
     try:
@@ -177,7 +241,7 @@ def judge_score(request: HttpRequest) -> JsonResponse:
         return limited
     if not _same_origin(request):
         return _error("ORIGIN_REJECTED", 403)
-    token = _bearer_token(request)
+    token = _judge_token(request)
     if token is None:
         return _error("INVALID_JUDGE_SESSION", 401)
     payload = _body_payload(request)

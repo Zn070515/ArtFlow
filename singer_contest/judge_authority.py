@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -11,6 +12,9 @@ from decimal import Decimal
 from accounts.models import User
 from accounts.services import require_current_staff
 from common.authority import (
+    ACCESS_GRANT_STATE,
+    ENTRY_POINT_CONFIG,
+    EPHEMERAL_SESSION_STATE,
     JUDGE_PANEL_STATE,
     JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
@@ -25,7 +29,7 @@ from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
-from entry_access.models import EntryPoint, EphemeralSession
+from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
 from entry_access.services import (
     IssuedAccessGrant,
     authenticate_ephemeral_session,
@@ -87,6 +91,13 @@ class JudgeScoreSubmission:
     score_record_id: int
     reason_code: str
     status: str
+
+
+@dataclass(frozen=True)
+class ClaimedJudgeSession:
+    session: JudgeSession
+    token: str
+    seat_label: str
 
 
 @dataclass(frozen=True)
@@ -164,6 +175,109 @@ def _active_panel_snapshot(contest_round: ContestRound) -> RoundPanelSnapshot | 
         .order_by("-version")
         .first()
     )
+
+
+@transaction.atomic
+def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
+    """Claim the first free prepared seat for the stable public judge entry."""
+    locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
+    snapshots = (
+        RoundPanelSnapshot.objects.select_for_update()
+        .select_related("round")
+        .filter(
+            activity=locked_activity,
+            state=RoundPanelSnapshot.State.ACTIVE,
+            round__status__in=[ContestRound.Status.PREPARED, ContestRound.Status.SCORING],
+        )
+        .order_by("round_id", "-version")
+    )
+    now = timezone.now()
+    for snapshot in snapshots:
+        seats = (
+            JudgeSeat.objects.select_for_update()
+            .select_related("panel_member")
+            .filter(panel_member__panel_snapshot=snapshot, state=JudgeSeat.State.ASSIGNED)
+            .order_by("pk")
+        )
+        for seat in seats:
+            active = (
+                JudgeSession._base_manager.select_for_update()
+                .filter(seat=seat, state=JudgeSession.State.ACTIVE)
+                .first()
+            )
+            if active is not None:
+                if active.expires_at > now:
+                    continue
+                active.state = JudgeSession.State.REVOKED
+                active.revoked_at = now
+                active.revocation_reason = "会话已过期，自动释放席位。"
+                with authority_write(JUDGE_SESSION_STATE):
+                    active.save(update_fields=["state", "revoked_at", "revocation_reason"])
+
+            entry_point = (
+                EntryPoint.objects.filter(
+                    activity=locked_activity,
+                    kind=EntryPoint.Kind.JUDGE,
+                    is_active=True,
+                )
+                .order_by("pk")
+                .first()
+            )
+            if entry_point is None:
+                entry_point = EntryPoint(
+                    activity=locked_activity,
+                    kind=EntryPoint.Kind.JUDGE,
+                    label="Stable judge entry",
+                )
+                with authority_write(ENTRY_POINT_CONFIG):
+                    entry_point.save()
+
+            raw_grant = secrets.token_urlsafe(32)
+            grant_expires_at = now + timedelta(hours=8)
+            grant = AccessGrant(
+                entry_point=entry_point,
+                kind=EntryPoint.Kind.JUDGE,
+                activity=locked_activity,
+                round=snapshot.round,
+                token_digest=_ephemeral_token_digest(raw_grant),
+                expires_at=grant_expires_at,
+            )
+            with authority_write(ACCESS_GRANT_STATE):
+                grant.save()
+
+            raw_session = secrets.token_urlsafe(32)
+            transport = EphemeralSession(
+                grant=grant,
+                kind=EntryPoint.Kind.JUDGE,
+                activity=locked_activity,
+                round=snapshot.round,
+                token_digest=_ephemeral_token_digest(raw_session),
+                expires_at=grant_expires_at,
+                last_seen_at=now,
+            )
+            with authority_write(EPHEMERAL_SESSION_STATE):
+                transport.save()
+            grant.redeemed_at = now
+            with authority_write(ACCESS_GRANT_STATE):
+                grant.save(update_fields=["redeemed_at"])
+            with authority_write(JUDGE_SESSION_STATE):
+                judge_session = JudgeSession.objects.create(
+                    ephemeral_session=transport,
+                    seat=seat,
+                    panel_snapshot=snapshot,
+                    state=JudgeSession.State.ACTIVE,
+                    expires_at=grant_expires_at,
+                    is_test_data=snapshot.is_test_data,
+                    last_seen_at=now,
+                )
+            seat_suffix = seat.panel_member.seat_key.removeprefix("seat-")
+            seat_label = seat.display_label.strip() or f"J{seat_suffix}"
+            return ClaimedJudgeSession(
+                session=judge_session,
+                token=raw_session,
+                seat_label=seat_label,
+            )
+    raise ValidationError("评委终端已全部连接，或当前尚未准备评委组。")
 
 
 def _panel_roster_digest(judges: list[Judge]) -> str:
@@ -338,7 +452,6 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
         raise ValidationError("当前轮次没有活动中的评委组快照。")
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
 
-    now = timezone.now()
     with authority_write(JUDGE_PANEL_STATE):
         snapshot.state = RoundPanelSnapshot.State.HOLD
         snapshot.save(update_fields=["state"])
@@ -368,15 +481,6 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
     ):
         revoke_access_grant(seat_grant.access_grant, actor=locked.operator, note=reason)
         revoked_grants += 1
-    with authority_write(JUDGE_SESSION_STATE):
-        JudgeSession.objects.filter(
-            seat__panel_member__panel_snapshot=snapshot,
-            state=JudgeSession.State.ACTIVE,
-        ).update(
-            state=JudgeSession.State.REVOKED,
-            revoked_at=now,
-            revocation_reason=reason,
-        )
     _audit(
         operator=locked.operator,
         action_type=AuditLog.ActionType.JUDGE_PANEL_HOLD,
@@ -384,7 +488,7 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
         old_value=RoundPanelSnapshot.State.ACTIVE,
         new_value=RoundPanelSnapshot.State.HOLD,
         note=f"{reason};context_version={run_state.context_version};"
-        f"revoked_unredeemed_grants={revoked_grants}",
+        f"revoked_unredeemed_grants={revoked_grants};active_sessions_preserved=True",
     )
     return snapshot
 
@@ -592,6 +696,12 @@ def issue_judge_grant(seat_id: int, *, operator, ttl_seconds: int) -> IssuedAcce
         raise PermissionDenied("当前评委席位不可签发授权。")
     if snapshot.state != RoundPanelSnapshot.State.ACTIVE:
         raise PermissionDenied("评委组未处于可签发授权状态。")
+    if JudgeSession.objects.filter(
+        seat=seat,
+        state=JudgeSession.State.ACTIVE,
+        expires_at__gt=timezone.now(),
+    ).exists():
+        raise ValidationError("当前评委席位已有活动中的终端。")
     if JudgeSeatGrant.objects.filter(
         seat=seat,
         access_grant__redeemed_at__isnull=True,
@@ -674,14 +784,26 @@ def _authenticate_judge_session_locked(
         .filter(access_grant_id=transport.grant_id)
         .first()
     )
-    if binding is None:
-        raise ValidationError("评委访问会话无效。")
-    seat = binding.seat
-    snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=binding.panel_snapshot_id)
+    if binding is not None:
+        seat = binding.seat
+        snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=binding.panel_snapshot_id)
+    else:
+        direct_session = (
+            JudgeSession.objects.select_for_update()
+            .select_related("seat", "panel_snapshot")
+            .filter(ephemeral_session_id=transport.pk)
+            .first()
+        )
+        if direct_session is None:
+            raise ValidationError("评委访问会话无效。")
+        seat = direct_session.seat
+        snapshot = RoundPanelSnapshot.objects.select_for_update().get(
+            pk=direct_session.panel_snapshot_id
+        )
     if (
-        binding.access_grant.revoked_at is not None
+        (binding is not None and binding.access_grant.revoked_at is not None)
         or seat.state != JudgeSeat.State.ASSIGNED
-        or snapshot.state != RoundPanelSnapshot.State.ACTIVE
+        or snapshot.state not in {RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD}
         or snapshot.round_id != locked.contest_round.pk
         or snapshot.activity_id != locked.activity.pk
         or locked.contest_round.status == ContestRound.Status.LOCKED
@@ -912,10 +1034,12 @@ def submit_judge_score(
         .select_related("panel_member__panel_snapshot")
         .get(pk=session.seat_id)
     )
-    if snapshot.state != RoundPanelSnapshot.State.ACTIVE or seat.state != JudgeSeat.State.ASSIGNED:
+    if seat.state != JudgeSeat.State.ASSIGNED:
         raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
     if run_state.state == PerformanceRunState.State.HOLD:
         raise JudgeRoundOnHold("ROUND_ON_HOLD")
+    if snapshot.state != RoundPanelSnapshot.State.ACTIVE:
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
     if run_state.state not in {
         PerformanceRunState.State.PERFORMING,
         PerformanceRunState.State.ACCEPTING_SCORE,

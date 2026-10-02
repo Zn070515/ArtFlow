@@ -77,7 +77,14 @@ def activity_live(request, public_code: str):
 
 def activity_judge(request, public_code: str):
     activity = _public_contest(request, public_code)
-    return render(request, "public_portal/activity_judge.html", {"activity": activity})
+    return render(
+        request,
+        "singer_contest/judge_terminal.html",
+        {
+            "activity": activity,
+            "claim_url": f"/judge/claim/{activity.public_code}/",
+        },
+    )
 
 
 def home(request):
