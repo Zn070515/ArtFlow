@@ -311,12 +311,12 @@ class AdminAuthoritySurfaceTests(TestCase):
     def test_contest_profile_metadata_is_editable_and_rubric_is_observation_only(self):
         from .models import RubricCriterion, ScoringRubric
 
-        for model in (SingerRegistration, Judge):
-            with self.subTest(model=model.__name__):
-                self.assert_editable_metadata(model)
-        for model in (ScoringRubric, RubricCriterion):
-            with self.subTest(model=model.__name__):
-                self.assert_observation_only(model)
+        for metadata_model in (SingerRegistration, Judge):
+            with self.subTest(model=metadata_model.__name__):
+                self.assert_editable_metadata(metadata_model)
+        for rubric_model in (ScoringRubric, RubricCriterion):
+            with self.subTest(model=rubric_model.__name__):
+                self.assert_observation_only(rubric_model)
 
     def test_activity_authority_is_service_only_but_presentation_metadata_remains_editable(self):
         from core.admin import ActivityAdmin
