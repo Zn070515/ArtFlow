@@ -1483,6 +1483,8 @@ class AuthorityMutationMatrixTests(TestCase):
             (ScoreSummaryAdmin, ScoreSummary, None),
             (AwardAdmin, Award, self.award),
             (RulesetVersionAdmin, RulesetVersion, self.version),
+            (RubricCriterionAdmin, RubricCriterion, self.criterion),
+            (ScoringRubricAdmin, ScoringRubric, self.rubric),
         ):
             model_admin = readonly_admin_class(readonly_model, admin.site)
             with self.subTest(model=readonly_model.__name__):
@@ -2515,7 +2517,4 @@ MODEL_MATRIX = (
 )
 
 
-ADMIN_CANONICAL_MATRIX = (
-    (RubricCriterionAdmin, RubricCriterion, "criterion", ()),
-    (ScoringRubricAdmin, ScoringRubric, "rubric", ()),
-)
+ADMIN_CANONICAL_MATRIX = ()

@@ -111,11 +111,11 @@
                                 <legend class="px-1 text-xs font-medium text-gray-700">文件上传规则</legend>
                                 <p class="mt-1 text-[11px] leading-5 text-gray-600">只能填写下方用途对应的扩展名和大小；保存时系统会再次校验，避免选手上传时才发现规则不匹配。</p>
                                 <ul class="mt-1 space-y-0.5 text-[11px] text-gray-600">
-                                    {% for policy in file_policies %}<li>{{ policy.purpose }}：{{ policy.extensions|join:', ' }}，最多 {{ policy.max_mb }} MB</li>{% endfor %}
+                                    {% for policy in file_policies %}<li>{{ policy.label }}：{{ policy.extensions|join:', ' }}，最多 {{ policy.max_mb }} MB{% if not policy.direct_upload_allowed %}，正式活动不支持浏览器直传{% endif %}</li>{% endfor %}
                                 </ul>
                                 <label class="mt-1 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-purpose">用途
                                     <select id="{{ q.key|slugify }}-file-purpose" name="file_purpose" required class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-xs">
-                                        {% for purpose in file_purposes %}<option value="{{ purpose }}"{% if q.file.purpose == purpose %} selected{% endif %}>{{ purpose }}</option>{% endfor %}
+                                        {% for purpose, label in file_purpose_options %}<option value="{{ purpose }}"{% if q.file.purpose == purpose %} selected{% endif %}>{{ label }}</option>{% endfor %}
                                     </select>
                                 </label>
                                 <label class="mt-2 block text-xs text-gray-700" for="{{ q.key|slugify }}-file-extensions">允许扩展名（逗号分隔）

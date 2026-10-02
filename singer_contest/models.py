@@ -1986,6 +1986,12 @@ class AwardQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def update(self, **kwargs):
         self._ensure_mutable()
         if (
+            not authority_authorized(TEST_DATA_SEED)
+            and ("source_vote_session" in kwargs or "source_vote_session_id" in kwargs)
+            and kwargs.get("source_vote_session", kwargs.get("source_vote_session_id"))
+        ):
+            raise ValidationError("新的正式奖项不能以投票场次作为来源。")
+        if (
             not _award_materialization_authorized()
             and ("source_stage_result" in kwargs or "source_stage_result_id" in kwargs)
             and kwargs.get("source_stage_result", kwargs.get("source_stage_result_id"))
@@ -2018,6 +2024,8 @@ class AwardQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         objs = list(objs)
         for obj in objs:
             obj.clean()
+            if obj.source_vote_session_id and not authority_authorized(TEST_DATA_SEED):
+                raise ValidationError("新的正式奖项不能以投票场次作为来源。")
             if (
                 not obj.source_vote_session_id
                 and not obj.source_stage_result_id
@@ -2035,6 +2043,10 @@ class AwardQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def bulk_update(self, objs, fields, *args, **kwargs):
         self._ensure_mutable()
         objs = list(objs)
+        if not authority_authorized(TEST_DATA_SEED) and (
+            "source_vote_session" in fields or "source_vote_session_id" in fields
+        ):
+            raise ValidationError("新的正式奖项不能以投票场次作为来源。")
         if not _award_materialization_authorized():
             for obj in objs:
                 stored = (
@@ -2114,6 +2126,12 @@ class Award(models.Model):
         self.clean()
         if (
             self._state.adding
+            and self.source_vote_session_id
+            and not authority_authorized(TEST_DATA_SEED)
+        ):
+            raise ValidationError("新的正式奖项不能以投票场次作为来源。")
+        if (
+            self._state.adding
             and not self.source_vote_session_id
             and not self.source_stage_result_id
             and not self.source_award_decision_id
@@ -2125,7 +2143,11 @@ class Award(models.Model):
             stored = (
                 type(self)
                 ._base_manager.filter(pk=self.pk)
-                .values("source_stage_result_id", "source_award_decision_id")
+                .values(
+                    "source_vote_session_id",
+                    "source_stage_result_id",
+                    "source_award_decision_id",
+                )
                 .first()
             )
         if not _award_materialization_authorized() and stored:
@@ -2134,6 +2156,7 @@ class Award(models.Model):
             if (
                 stored["source_stage_result_id"] != self.source_stage_result_id
                 or stored["source_award_decision_id"] != self.source_award_decision_id
+                or stored["source_vote_session_id"] != self.source_vote_session_id
             ):
                 raise ValidationError("奖项 provenance 只能由核定服务维护。")
             _ensure_stage_result_origins(stored["source_stage_result_id"])

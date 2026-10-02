@@ -71,13 +71,16 @@
                 {% elif q.type == 'file' %}
                 <div class="flex items-center gap-3">
                     <input type="file" id="q-{{ q.key }}" name="{{ q.key }}" data-file-answer="{{ q.key }}"
-                           {% if not q.editable %}disabled{% endif %}
+                           {% if not q.editable or not q.file.direct_upload_allowed %}disabled{% endif %}
                            class="text-sm text-gray-600">
                     <span class="text-xs text-gray-500" data-file-name="{{ q.key }}">{{ q.file_name }}</span>
                 </div>
                 <p class="text-xs text-gray-400 mt-1">
                     支持 {{ q.file.extensions|join:"、" }}，单个文件不超过 {{ q.file.max_mb }} MB
                 </p>
+                {% if q.file and not q.file.direct_upload_allowed %}
+                <p class="text-xs text-amber-700 mt-1">正式活动暂不支持浏览器直接上传此类视频，请联系工作人员提交材料。</p>
+                {% endif %}
                 {% elif q.type == 'multiple_choice' %}
                 {% for option in q.options %}
                 <label class="flex items-center gap-2 mb-1 text-sm text-gray-700">

@@ -26,6 +26,7 @@ from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
+from files.policies import effective_file_policy
 from ruleset.services import current_frozen_version
 from singer_contest.models import ContestRound, SingerRegistration
 
@@ -161,7 +162,7 @@ NOTICE_ROW: dict[str, object] = {
 
 
 def _question_rows(
-    plan, *, registration, answers, context, due_rounds, files, writable=None
+    plan, *, activity, registration, answers, context, due_rounds, files, writable=None
 ) -> list[dict]:
     """One row per block, in document order.
 
@@ -202,6 +203,18 @@ def _question_rows(
                 value = resolve_question_value(
                     question, answers=answers, registration=registration, files=files
                 )
+                file_config = question.get("file")
+                if file_config:
+                    file_config = dict(file_config)
+                    policy = effective_file_policy(file_config["purpose"], activity)
+                    file_config.update(
+                        {
+                            "max_mb": min(
+                                int(file_config.get("max_mb") or policy.max_mb), policy.max_mb
+                            ),
+                            "direct_upload_allowed": policy.direct_upload_allowed,
+                        }
+                    )
                 rows.append(
                     {
                         "key": key,
@@ -209,7 +222,7 @@ def _question_rows(
                         "description": question.get("description", ""),
                         "type": question["type"],
                         "options": question.get("options", []),
-                        "file": question.get("file"),
+                        "file": file_config,
                         "round": question.get("round") or "",
                         "visible": resolved.visible,
                         "due": resolved.due,
@@ -290,6 +303,7 @@ def form_view(request: HttpRequest, activity_pk: int):
     )
     rows = _question_rows(
         plan,
+        activity=activity,
         registration=registration,
         answers=answers,
         context=context,

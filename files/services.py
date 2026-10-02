@@ -19,7 +19,7 @@ from PIL import Image, UnidentifiedImageError
 from questionnaire.schema import FILE_TYPE
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
-from .policies import FILE_PURPOSE_POLICIES
+from .policies import FILE_PURPOSE_POLICIES, effective_file_policy
 
 VIDEO_PURPOSES = (
     SubmissionFile.Purpose.BACKGROUND_VIDEO,
@@ -50,7 +50,11 @@ def video_upload_cap_bytes(activity) -> int:
     to source a large file through the browser on the first round.
     """
     if activity is not None and activity.data_lifecycle == Activity.DataLifecycle.FORMAL:
-        return settings.ARTFLOW_VIDEO_UPLOAD_MAX_MB * 1024 * 1024
+        return (
+            effective_file_policy(SubmissionFile.Purpose.PERFORMANCE_VIDEO, activity).max_mb
+            * 1024
+            * 1024
+        )
     return max(MAX_UPLOAD_BYTES[purpose] for purpose in VIDEO_PURPOSES)
 
 
