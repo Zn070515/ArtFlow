@@ -329,6 +329,7 @@ class AdminAuthoritySurfaceTests(TestCase):
             set(activity_admin.get_readonly_fields(self.request)),
             {
                 "activity_type",
+                "public_code",
                 "phase",
                 "is_test_mode",
                 "data_lifecycle",

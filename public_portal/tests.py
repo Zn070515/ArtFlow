@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -25,6 +26,7 @@ from django.urls import reverse
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import StageResult
+from voting.models import VoteSession
 
 from .models import PublicMedia, PublicPost, ResultRelease
 
@@ -51,6 +53,115 @@ def _close_file_response_resources(response):
         filelike.close()
     response.file_to_stream = None
     closers.clear()
+
+
+class StableActivityEntryTests(TestCase):
+    def setUp(self):
+        with authority_write(ACTIVITY_STATE):
+            self.formal = Activity.objects.create(
+                title="Stable Contest",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.LIVE,
+                is_test_mode=False,
+            )
+            self.testing = Activity.objects.create(
+                title="Private Rehearsal",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                is_test_mode=True,
+            )
+            with authority_write(ACCOUNT_AUTHORITY):
+                self.staff = User.objects.create_user(
+                    username="stable-entry-staff",
+                    password="pass",
+                    role=User.Role.STAFF,
+                )
+
+    def test_public_code_is_generated_and_immutable(self):
+        public_code = self.formal.public_code
+        self.assertIsNotNone(public_code)
+        self.assertRegex(str(public_code), r"^[A-Z2-9]{8}$")
+        self.assertNotEqual(self.formal.public_code, self.testing.public_code)
+
+        self.formal.public_code = "ABCDEFGH"
+        with self.assertRaises(ValidationError):
+            self.formal.save()
+
+    def test_formal_activity_has_stable_public_routes(self):
+        response = self.client.get(
+            reverse("public_portal:activity_entry", args=[self.formal.public_code])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            reverse("public_portal:activity_apply", args=[self.formal.public_code]),
+        )
+        self.assertContains(
+            response,
+            reverse("public_portal:activity_live", args=[self.formal.public_code]),
+        )
+        self.assertContains(
+            response,
+            reverse("public_portal:activity_judge", args=[self.formal.public_code]),
+        )
+
+    def test_anonymous_user_cannot_open_test_activity_public_route(self):
+        response = self.client.get(
+            reverse("public_portal:activity_entry", args=[self.testing.public_code])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_live_route_keeps_same_target_when_vote_sessions_change(self):
+        live_url = reverse("public_portal:activity_live", args=[self.formal.public_code])
+        first = self.client.get(live_url)
+        self.assertEqual(first.status_code, 200)
+        self.assertContains(first, "当前暂无开放投票")
+
+        now = timezone.now()
+        VoteSession.objects.create(
+            activity=self.formal,
+            name="Audience A",
+            passcode="1234",
+            start_time=now - timedelta(minutes=1),
+            end_time=now + timedelta(minutes=10),
+        )
+        second = self.client.get(live_url)
+        self.assertEqual(second.status_code, 200)
+        self.assertContains(second, "当前暂无开放投票")
+        self.assertEqual(
+            live_url, reverse("public_portal:activity_live", args=[self.formal.public_code])
+        )
+
+    @override_settings(APP_ENV="production")
+    @patch("qrcode.make")
+    def test_qr_images_use_stable_https_routes_and_no_store(self, make_qr):
+        make_qr.return_value.save.side_effect = lambda stream: stream.write(b"png")
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:qr_image", args=[self.formal.pk, "live"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertEqual(response["Pragma"], "no-cache")
+        self.assertEqual(
+            make_qr.call_args.args[0],
+            "https://testserver"
+            + reverse("public_portal:activity_live", args=[self.formal.public_code]),
+        )
+
+    def test_qr_center_exposes_four_stable_kinds_and_retires_dynamic_kinds(self):
+        self.client.force_login(self.staff)
+        page = self.client.get(reverse("staff:qr_generate", args=[self.formal.pk]))
+        self.assertEqual(page.status_code, 200)
+        for kind in ("activity", "apply", "live", "judge"):
+            with self.subTest(kind=kind):
+                response = self.client.get(reverse("staff:qr_image", args=[self.formal.pk, kind]))
+                self.assertEqual(response.status_code, 200)
+        for retired_kind in ("vote", "results"):
+            with self.subTest(kind=retired_kind):
+                response = self.client.get(
+                    reverse("staff:qr_image", args=[self.formal.pk, retired_kind])
+                )
+                self.assertEqual(response.status_code, 404)
 
 
 class PublicPhotoImportTests(TestCase):

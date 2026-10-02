@@ -291,8 +291,6 @@ class VoteBallotTests(TestCase):
         foreign_option = VoteOption.objects.create(
             vote_session=other_session, singer=self.option.singer
         )
-        other_session = open_vote_session(other_session, self.operator)
-
         with self.assertRaises(ValidationError):
             submit_ballot(
                 self.session,
@@ -742,6 +740,9 @@ class VoteSessionCreationAuthorityTests(TestCase):
         self.activity = Activity.objects.create(
             title="Vote creation", activity_type=Activity.Type.SINGER_CONTEST
         )
+        self.operator = create_provisioned_user(
+            username="vote-open-operator", password="pass", role=User.Role.STAFF
+        )
 
     def _session_kwargs(self, name, **kwargs):
         now = timezone.now()
@@ -791,6 +792,18 @@ class VoteSessionCreationAuthorityTests(TestCase):
 
         session.refresh_from_db()
         self.assertFalse(session.is_locked)
+
+    def test_open_service_rejects_a_second_open_session_for_the_activity(self):
+        first = VoteSession.objects.create(**self._session_kwargs("First"))
+        second = VoteSession.objects.create(**self._session_kwargs("Second"))
+        with authority_write(VOTE_SESSION_STATE):
+            VoteSession.objects.filter(pk=first.pk).update(is_open=True)
+
+        with self.assertRaises(ValidationError):
+            open_vote_session(second, self.operator)
+
+        second.refresh_from_db()
+        self.assertFalse(second.is_open)
 
     def test_vote_session_bulk_create_positional_configuration_guard_through_both_managers(
         self,
@@ -947,7 +960,7 @@ class VoteEntryRateLimitTests(TestCase):
             passcode="5678",
             start_time=timezone.now() - timedelta(minutes=1),
             end_time=timezone.now() + timedelta(minutes=10),
-            is_open=True,
+            is_open=False,
         )
         url = reverse("voting:vote_entry", args=[self.session.pk])
         for _ in range(10):

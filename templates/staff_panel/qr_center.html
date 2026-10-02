@@ -12,7 +12,7 @@
         {% for a in activities %}
         <div class="border border-gray-200 bg-white rounded-lg p-5">
             <h3 class="font-medium text-gray-900">{{ a.title }}</h3>
-            <p class="text-xs text-gray-500 mt-1">{{ a.get_activity_type_display }} · {{ a.get_phase_display }}</p>
+            <p class="text-xs text-gray-500 mt-1">{{ a.get_phase_display }} · 入口码 {{ a.public_code }}</p>
             <a href="{% url 'staff:qr_generate' a.pk %}" class="inline-block mt-3 text-xs text-brand hover:underline">查看二维码 &rarr;</a>
         </div>
         {% endfor %}

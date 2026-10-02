@@ -4,7 +4,7 @@ from base64 import b64encode
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import cast
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
 
 from accounts.decorators import admin_required, staff_required
@@ -44,6 +44,7 @@ from core.services import (
     transition_activity_phase,
     unarchive_activity,
 )
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -2827,40 +2828,55 @@ def _popularity_top_tie(vote_session):
 
 @staff_required
 def qr_center(request):
-    activities = Activity.objects.all()
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     return render(request, "staff_panel/qr_center.html", {"activities": activities})
 
 
 @staff_required
 def qr_generate(request, pk):
-    activity = get_object_or_404(Activity, pk=pk)
+    activity = get_object_or_404(
+        Activity,
+        pk=pk,
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
     return render(request, "staff_panel/qr_detail.html", {"activity": activity})
 
 
 @staff_required
 def qr_image(request, pk, kind):
-    activity = get_object_or_404(Activity, pk=pk)
-    if kind == "registration":
-        # The QR points at the activity's *real* entry, which resolves to the questionnaire
-        # or the legacy form depending on what that activity's frozen ruleset carries.
-        path = reverse("register:activity", args=[activity.pk])
-    elif kind == "vote":
-        vote_session = activity.vote_sessions.order_by("-created_at").first()
-        if not vote_session:
-            return HttpResponse("No vote session", status=404)
-        path = reverse("voting:vote_entry", args=[vote_session.pk])
-    elif kind == "results":
-        path = reverse("public_portal:result_list")
+    activity = get_object_or_404(
+        Activity,
+        pk=pk,
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
+    stable_paths = {
+        "activity": "public_portal:activity_entry",
+        "apply": "public_portal:activity_apply",
+        "live": "public_portal:activity_live",
+        "judge": "public_portal:activity_judge",
+        # Keep already printed registration sheets usable while moving them to
+        # the stable activity-scoped entry. Vote/result QR kinds are retired.
+        "registration": "public_portal:activity_apply",
+    }
+    route_name = stable_paths.get(kind)
+    if route_name is not None:
+        path = reverse(route_name, kwargs={"public_code": activity.public_code})
     else:
         return HttpResponse("Unknown QR code kind", status=404)
 
     import qrcode
 
-    image = qrcode.make(request.build_absolute_uri(path))
+    absolute_url = request.build_absolute_uri(path)
+    if settings.APP_ENV == "production":
+        parts = urlsplit(absolute_url)
+        absolute_url = urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
+    image = qrcode.make(absolute_url)
     buffer = io.BytesIO()
     image.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type="image/png")
     response["Content-Disposition"] = f'inline; filename="{kind}_{activity.pk}.png"'
+    response["Cache-Control"] = "no-store"
+    response["Pragma"] = "no-cache"
     return response
 
 

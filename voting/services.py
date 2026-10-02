@@ -305,6 +305,8 @@ def open_vote_session(vote_session, operator):
             raise PermissionDenied("投票已锁定，无法开放。")
         if locked.is_open:
             return locked
+        if VoteSession.objects.filter(activity_id=locked.activity_id, is_open=True).exists():
+            raise ValidationError("同一活动同时只能开放一个投票场次。")
         # P0-B runtime boundary: a score-component vote's candidate roster is a deferred
         # roster fact — it is proven here, before ballots can be cast against it.
         require_runtime_readiness(locked.activity)

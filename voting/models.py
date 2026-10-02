@@ -419,6 +419,11 @@ class VoteSession(models.Model):
                 condition=Q(end_time__gt=F("start_time")),
                 name="vote_end_after_start",
             ),
+            models.UniqueConstraint(
+                fields=["activity"],
+                condition=Q(is_open=True),
+                name="vote_one_open_session_per_activity",
+            ),
         ]
 
     def __str__(self):
