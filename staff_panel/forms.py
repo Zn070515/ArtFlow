@@ -401,7 +401,7 @@ class ManualDecisionForm(forms.Form):
         ]
         cast(forms.ChoiceField, self.fields["manual_key"]).choices = manual_keys
         cast(forms.MultipleChoiceField, self.fields["chosen"]).choices = [
-            (str(singer.pk), f"{singer.pk} — {singer.name}")
+            (str(singer.pk), singer.name)
             for singer in SingerRegistration.objects.filter(activity=activity).order_by("pk")
         ]
 

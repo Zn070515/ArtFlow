@@ -22,7 +22,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
-from files.policies import FILE_PURPOSE_POLICIES
+from files.policies import FILE_PURPOSE_LABELS, FILE_PURPOSE_POLICIES, effective_file_policy
 from ruleset.models import RulesetVersion
 from ruleset.services import update_ruleset_definition_section
 
@@ -356,13 +356,23 @@ def builder_view(request: HttpRequest, pk: int):
                 ("notice", "说明"),
             ],
             "file_purposes": sorted(FILE_PURPOSES),
+            "file_purpose_options": [
+                (purpose, FILE_PURPOSE_LABELS.get(purpose, purpose))
+                for purpose in sorted(FILE_PURPOSES)
+            ],
             "file_policies": [
                 {
                     "purpose": purpose,
-                    "extensions": sorted(policy.extensions),
-                    "max_mb": policy.max_mb,
+                    "label": FILE_PURPOSE_LABELS.get(purpose, purpose),
+                    "extensions": sorted(
+                        effective_file_policy(purpose, version.ruleset.activity).extensions
+                    ),
+                    "max_mb": effective_file_policy(purpose, version.ruleset.activity).max_mb,
+                    "direct_upload_allowed": effective_file_policy(
+                        purpose, version.ruleset.activity
+                    ).direct_upload_allowed,
                 }
-                for purpose, policy in sorted(FILE_PURPOSE_POLICIES.items())
+                for purpose in sorted(FILE_PURPOSE_POLICIES)
             ],
             "round_choices": round_choices,
         },

@@ -12,10 +12,10 @@
         {% csrf_token %}
         <div>
             <label for="id_activity_id" class="block text-sm font-medium text-gray-700 mb-1">活动</label>
-            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm" onchange="this.form.method='get'; this.form.submit();">
                 {% for a in activities %}<option value="{{ a.pk }}"{% if selected_activity_id|stringformat:"s" == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>{% endfor %}
             </select>
-            <p class="text-xs text-gray-500 mt-1">候选选手只显示所选活动中已审核通过的选手；切换活动后请重新打开本页。</p>
+            <p class="text-xs text-gray-500 mt-1">切换活动后会重新加载该活动已审核通过的候选选手。</p>
         </div>
         <div>
             {{ form.name.label_tag }}{{ form.name }}

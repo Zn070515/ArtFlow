@@ -130,19 +130,13 @@ class CriterionScoreAdmin(ObservationOnlyAdmin):
     readonly_fields = ["score_record", "criterion", "value", "is_test_data"]
 
 
-class RubricCriterionInline(admin.TabularInline):
-    model = RubricCriterion
-    extra = 1
-
-
 @admin.register(ScoringRubric)
-class ScoringRubricAdmin(admin.ModelAdmin):
+class ScoringRubricAdmin(ObservationOnlyAdmin):
     list_display = ["name", "activity", "sequence"]
-    inlines = [RubricCriterionInline]
 
 
 @admin.register(RubricCriterion)
-class RubricCriterionAdmin(admin.ModelAdmin):
+class RubricCriterionAdmin(ObservationOnlyAdmin):
     list_display = ["name", "rubric", "max_score", "sequence"]
 
 

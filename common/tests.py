@@ -799,6 +799,16 @@ class ActivityOwnershipTests(TestCase):
             title="Second",
             activity_type=Activity.Type.SINGER_CONTEST,
         )
+        first_singer = SingerRegistration.objects.create(
+            activity=first,
+            user=User.objects.create_user(username="first-owner", password="pass"),
+            name="First Singer",
+            student_id="20260000",
+            college="College",
+            class_name="Class",
+            phone="13800000001",
+            song_name="Song",
+        )
         singer = SingerRegistration.objects.create(
             activity=second,
             user=user,
@@ -819,6 +829,13 @@ class ActivityOwnershipTests(TestCase):
             start_time=timezone.now(),
             end_time=timezone.now() + timedelta(minutes=5),
         )
+        with self.assertRaises(ValidationError):
+            Award(
+                activity=first,
+                singer=first_singer,
+                name="Vote award",
+                source_vote_session=vote_session,
+            ).save()
         with self.assertRaises(ValidationError):
             VoteOption(vote_session=vote_session, singer=singer).save()
 

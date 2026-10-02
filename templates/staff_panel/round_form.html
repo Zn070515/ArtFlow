@@ -12,10 +12,10 @@
         {% csrf_token %}
         <div>
             <label for="id_activity_id" class="block text-sm font-medium text-gray-700 mb-1">活动</label>
-            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm" onchange="this.form.method='get'; this.form.submit();">
                 {% for a in activities %}<option value="{{ a.pk }}"{% if selected_activity_id|stringformat:"s" == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>{% endfor %}
             </select>
-            <p class="text-xs text-gray-500 mt-1">评分规则只显示所选活动的规则；如需切换活动，请先在地址中选择活动后重新打开本页。</p>
+            <p class="text-xs text-gray-500 mt-1">切换活动后会重新加载对应的赛制、评分标准和上游赛段。</p>
         </div>
         <div>
             {{ form.name.label_tag }}{{ form.name }}

@@ -4285,6 +4285,88 @@ class RoundEntryBridgeTests(TestCase):
         self.assertEqual(stage.stage_key, "stage1")  # type: ignore[union-attr]
         self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
 
+    def test_ready_stage_roster_cannot_configure_downstream_round(self):
+        from .services import (
+            RoundSetupReadiness,
+            current_round_roster,
+            round_setup_readiness,
+            run_ruleset,
+        )
+
+        run_ruleset(
+            self.version,
+            self.activity,
+            stage_key="stage1",
+            computed_by=self.admin,
+            round_keys={"r1": self.prelim, "final": self.final},
+            checkpoint="stage1",
+        )
+        self.assertEqual(
+            round_setup_readiness(self.final),
+            RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION,
+        )
+        with self.assertRaisesMessage(ValidationError, "上游赛段尚未核定"):
+            current_round_roster(self.final)
+
+    def test_stage_roster_change_clears_draft_setup_facts(self):
+        from .models import Performance, PerformanceGroup
+        from .services import (
+            _invalidate_downstream_stage_rounds,
+            materialize_round_entry_from_stage,
+            set_round_groups,
+        )
+
+        def stage_with_decisions(version, singers):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.admin,
+                stage_key="stage1",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                result_version=version,
+                is_test_data=True,
+            )
+            StageDecision.objects.bulk_create(
+                [
+                    StageDecision(
+                        stage_result=stage,
+                        singer=singer,
+                        outcome_code="direct",
+                        rank=index,
+                        is_test_data=True,
+                    )
+                    for index, singer in enumerate(singers, start=1)
+                ]
+            )
+            return stage
+
+        first = stage_with_decisions(1, self.singers[:3])
+        with authority_write(STAGE_RESULT_CONFIRM):
+            first.status = StageResult.Status.CONFIRMED
+            first.confirmed_by = self.admin
+            first.confirmed_at = timezone.now()
+            first.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+        materialize_round_entry_from_stage(first, operator=self.admin)
+        set_round_groups(
+            self.final,
+            [{"name": "第一组", "singer_ids": [s.pk for s in self.singers[:3]]}],
+            self.admin,
+        )
+        self.assertEqual(PerformanceGroup.objects.filter(round=self.final).count(), 1)
+        self.assertEqual(Performance.objects.filter(round=self.final).count(), 3)
+
+        _invalidate_downstream_stage_rounds(first, operator=self.admin)
+        self.assertFalse(RoundEntry.objects.filter(round=self.final).exists())
+        self.assertFalse(PerformanceGroup.objects.filter(round=self.final).exists())
+        self.assertFalse(Performance.objects.filter(round=self.final).exists())
+
+        second = stage_with_decisions(2, self.singers[3:])
+        materialize_round_entry_from_stage(second, operator=self.admin)
+
+        self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[3:]])
+        self.assertFalse(PerformanceGroup.objects.filter(round=self.final).exists())
+        self.assertFalse(Performance.objects.filter(round=self.final).exists())
+
     def test_final_ruleset_entry_is_top3_not_all_approved(self):
         from .services import bind_resolve_input, run_ruleset
 
@@ -5295,7 +5377,6 @@ class BindingSourceHelperTests(TestCase):
         self.assertEqual(out["audience"][str(self.singers[2].pk)], Decimal("1"))
 
     def test_source_vote_scores_empty_session_skips(self):
-
         from .services import _source_vote_scores
 
         vs = self._vote_session()

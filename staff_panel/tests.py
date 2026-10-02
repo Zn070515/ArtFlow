@@ -444,6 +444,49 @@ class StaffPanelSmokeTests(TestCase):
             f"{reverse('staff:singer_registration_list')}?activity_id={self.singer_activity.pk}",
         )
 
+    def test_activity_workspace_dispatches_farewell_show_domain(self):
+        login_admin(self.client, self.admin)
+        response = self.client.get(
+            reverse("staff:activity_workspace", args=[self.farewell_activity.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "节目征集与审核")
+        self.assertContains(response, "查看本活动节目")
+        self.assertNotContains(response, "新建比赛轮次")
+
+    def test_locked_singer_workspace_hides_mutation_links(self):
+        locked = _create_activity(
+            title="Locked Workspace",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_locked=True,
+        )
+        login_admin(self.client, self.admin)
+        response = self.client.get(reverse("staff:activity_workspace", args=[locked.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "工作区仅提供查看和导出入口")
+        self.assertNotContains(response, "新建评分标准")
+        self.assertNotContains(response, "新建比赛轮次")
+        self.assertNotContains(response, "创建投票场次")
+
+    def test_locked_activity_get_context_normalizes_to_editable_activity(self):
+        locked = _create_activity(
+            title="Locked Context",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_locked=True,
+        )
+        self.client.force_login(self.staff)
+        for route in ("staff:round_create", "staff:vote_session_create"):
+            with self.subTest(route=route):
+                response = self.client.get(reverse(route) + f"?activity_id={locked.pk}")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    response.context["selected_activity_id"], str(self.singer_activity.pk)
+                )
+
     def test_configuration_selectors_hide_archived_locked_and_non_singer_activities(self):
         locked = _create_activity(
             title="Locked Contest",
@@ -4625,6 +4668,7 @@ class PublicPostOptimisticConcurrencyTests(TestCase):
         )
         self.assertEqual(stale.status_code, 200)
         self.assertContains(stale, "已被其他人更新")
+        self.assertContains(stale, "Stale overwrite attempt")
         self.post.refresh_from_db()
         self.assertEqual(self.post.title, "Co-author's save")
         self.assertEqual(self.post.version, 1)
