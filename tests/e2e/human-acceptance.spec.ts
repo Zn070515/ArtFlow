@@ -46,7 +46,7 @@ async function registerAndOpenWorkspace(page) {
   return { activityTitle };
 }
 
-test("a new admin can reach the activity workspace and preserve scope", async ({ page }) => {
+test("the first admin bootstrap reaches the Singer workspace and preserves scope", async ({ page }) => {
   const { activityTitle } = await registerAndOpenWorkspace(page);
   await expect(page.getByRole("link", { name: "编辑赛制" })).toBeVisible();
   await expect(page.getByRole("link", { name: "新建评分标准" })).toBeVisible();
@@ -66,7 +66,40 @@ test("a new admin can reach the activity workspace and preserve scope", async ({
   await expect(page.locator("#id_rubric option")).toHaveCount(2);
   await expect(page.locator("#id_rubric option").nth(1)).toHaveText("第一轮评分");
   await expect(page.locator('[class~="bg-brand"][class~="text-brand"]')).toHaveCount(0);
+
+  await page.getByLabel("轮次名称").fill("第一轮");
+  await page.locator("#id_sequence").fill("1");
+  await page.locator("#id_rubric").selectOption({ label: "第一轮评分" });
+  await page.getByRole("button", { name: "创建轮次" }).click();
+  await expect(page).toHaveURL(/\/staff\/rounds\/$/);
+  await expect(page.getByText("第一轮")).toBeVisible();
+
+  await page.goto(`/staff/vote-sessions/new/?activity_id=${await activityId(page, activityTitle)}`);
+  await expect(page.locator("#id_activity_id option:checked")).toHaveText(activityTitle);
+
+  await page.goto("/staff/activities/");
+  await page.getByRole("link", { name: "新建活动" }).click();
+  const farewellTitle = `${activityTitle} 毕晚`;
+  await page.getByLabel("活动标题").fill(farewellTitle);
+  await page.locator("#id_activity_type").selectOption("farewell_show");
+  await page.getByRole("button", { name: "保存" }).click();
+  const farewellRow = page.locator("tr", { hasText: farewellTitle });
+  await farewellRow.getByRole("link", { name: "进入工作区" }).click();
+  await expect(page.getByRole("heading", { name: "节目征集与审核" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "查看本活动节目" })).toBeVisible();
+  await expect(page.getByText("新建比赛轮次")).toHaveCount(0);
 });
+
+async function activityId(page, title: string) {
+  await page.goto("/staff/activities/");
+  const workspaceHref = await page
+    .locator("tr", { hasText: title })
+    .getByRole("link", { name: "进入工作区" })
+    .getAttribute("href");
+  const match = workspaceHref?.match(/activities\/(\d+)\/workspace/);
+  if (!match) throw new Error(`Could not resolve activity id for ${title}.`);
+  return match[1];
+}
 
 test("the activity workspace remains usable at a mobile viewport", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });

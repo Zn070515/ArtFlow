@@ -86,7 +86,7 @@ jobs:
           uv run python manage.py seed_demo_data
 
       - name: Prepare human acceptance account boundary
-        run: uv run python manage.py prepare_human_acceptance_e2e
+        run: uv run python manage.py prepare_human_acceptance_e2e --fresh-bootstrap
 
       - name: Run focused Ticket and entitlement tests
         run: >-
@@ -221,7 +221,7 @@ jobs:
           docker compose cp web:/tmp/artflow-judge-e2e.json "$RUNNER_TEMP/judge-e2e.json"
 
       - name: Prepare human acceptance account boundary
-        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e
+        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e --fresh-bootstrap
 
       - name: Prepare isolated result closure browser fixture
         run: |
