@@ -214,6 +214,15 @@ jobs:
       - name: Install Chromium for browser smoke
         run: npx playwright install --with-deps chromium
 
+      - name: Prepare human acceptance account boundary
+        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e --fresh-bootstrap
+
+      - name: Run first-admin human acceptance
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
+          ARTFLOW_E2E_ADMIN_ACCESS_KEY: artflow-ci-admin-access-key
+        run: npx playwright test tests/e2e/human-acceptance.spec.ts
+
       - name: Prepare isolated Judge browser authority fixture
         run: |
           docker compose exec -T web python manage.py prepare_judge_e2e \
@@ -233,9 +242,6 @@ jobs:
             --output-file /tmp/artflow-questionnaire-e2e.json
           docker compose cp web:/tmp/artflow-questionnaire-e2e.json "$RUNNER_TEMP/questionnaire-e2e.json"
 
-      - name: Prepare human acceptance account boundary
-        run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e --fresh-bootstrap
-
       - name: Run browser runtime smoke
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
@@ -243,7 +249,7 @@ jobs:
           PLAYWRIGHT_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/judge-e2e.json
           PLAYWRIGHT_CLOSURE_FIXTURE_PATH: ${{ runner.temp }}/result-closure-e2e.json
           PLAYWRIGHT_QUESTIONNAIRE_FIXTURE_PATH: ${{ runner.temp }}/questionnaire-e2e.json
-        run: npm run test:e2e
+        run: npm run test:e2e -- --grep-invert "human acceptance"
 
       - name: Remove Judge browser fixture
         if: ${{ always() }}

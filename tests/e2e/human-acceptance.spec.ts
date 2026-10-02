@@ -10,6 +10,8 @@ if (!adminAccessKey) {
 // PostgreSQL CI remains covered by the same visible browser contract.
 test.describe.configure({ mode: "serial" });
 
+test.describe("human acceptance", () => {
+
 async function registerAndOpenWorkspace(page) {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const username = `human-acceptance-${suffix}`;
@@ -74,7 +76,7 @@ test("the first admin bootstrap reaches the Singer workspace and preserves scope
   await page.locator("#id_rubric").selectOption({ label: "第一轮评分" });
   await page.getByRole("button", { name: "创建轮次" }).click();
   await expect(page).toHaveURL(/\/staff\/rounds\/$/);
-  await expect(page.getByText("第一轮")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "第一轮", exact: true }).first()).toBeVisible();
 
   await page.goto(`/staff/vote-sessions/new/?activity_id=${await activityId(page, activityTitle)}`);
   await expect(page.locator("#id_activity_id option:checked")).toHaveText(activityTitle);
@@ -111,4 +113,6 @@ test("the activity workspace remains usable at a mobile viewport", async ({ page
   await expect(page.getByText("赛制与评分")).toBeVisible();
   await expect(page.getByText("投票与现场")).toBeVisible();
   await expect(page.locator('[class~="bg-brand"][class~="text-brand"]')).toHaveCount(0);
+});
+
 });
