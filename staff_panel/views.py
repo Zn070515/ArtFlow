@@ -131,6 +131,7 @@ from singer_contest.models import (
 from singer_contest.services import (
     IdempotencyConflictError,
     ResultClosureCode,
+    RoundSetupReadiness,
     StaleScoreVersionError,
     _current_frozen_version,
     _current_resolve_status,
@@ -155,6 +156,7 @@ from singer_contest.services import (
     reset_round_to_draft,
     result_closure_as_dict,
     round_roster_stage_choices,
+    round_setup_readiness,
     set_manual_decision,
     set_round_groups,
     set_round_running_order,
@@ -282,6 +284,11 @@ def activity_workspace(request, pk):
     )
     vote_sessions = VoteSession.objects.filter(activity=activity)
     rubrics = ScoringRubric.objects.filter(activity=activity)
+    can_configure_singer = (
+        activity.activity_type == Activity.Type.SINGER_CONTEST
+        and not activity.is_locked
+        and activity.phase != Activity.Phase.ARCHIVED
+    )
     return render(
         request,
         "staff_panel/activity_workspace.html",
@@ -291,6 +298,9 @@ def activity_workspace(request, pk):
             "vote_sessions": vote_sessions,
             "rubrics": rubrics,
             "registration_count": SingerRegistration.objects.filter(activity=activity).count(),
+            "programs": Program.objects.filter(activity=activity),
+            "incident_count": IncidentRecord.objects.filter(activity=activity).count(),
+            "can_configure_singer": can_configure_singer,
         },
     )
 
@@ -581,7 +591,9 @@ def post_edit(request, pk):
                 "staff_panel/post_form.html",
                 {
                     "error": "该内容已被其他人更新，请刷新后重新编辑。",
-                    "post": post,
+                    "post": locked_post,
+                    "form_data": request.POST,
+                    "form_data_present": True,
                     "post_types": _choices(PublicPost.PostType),
                     "statuses": _post_status_choices(request),
                     "activities": Activity.objects.all(),
@@ -1191,13 +1203,28 @@ def export_programs(request):
 
 @staff_required
 def round_list(request):
-    rounds = ContestRound.objects.select_related("activity").annotate(
-        entry_count=Count("entries", distinct=True),
-        judge_count=Count("round_judges", distinct=True),
+    rounds = list(
+        ContestRound.objects.select_related("activity").annotate(
+            entry_count=Count("entries", distinct=True),
+            judge_count=Count("round_judges", distinct=True),
+        )
     )
     activity_id = request.GET.get("activity_id") or ""
     if activity_id.isdigit():
-        rounds = rounds.filter(activity_id=activity_id)
+        rounds = [
+            contest_round
+            for contest_round in rounds
+            if str(contest_round.activity_id) == activity_id
+        ]
+    readiness_labels = {
+        RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION: "等待上游赛段核定",
+        RoundSetupReadiness.MISSING_UPSTREAM: "缺少上游赛段结果",
+        RoundSetupReadiness.STALE: "晋级名单已变化，需重新配置",
+    }
+    for contest_round in rounds:
+        readiness = round_setup_readiness(contest_round)
+        contest_round.setup_readiness = readiness.value
+        contest_round.setup_readiness_label = readiness_labels.get(readiness, "")
     return render(
         request,
         "staff_panel/round_list.html",
@@ -1209,11 +1236,7 @@ def round_list(request):
 def round_create(request):
     activities = _editable_singer_activities()
     if request.method == "POST":
-        activity = get_object_or_404(
-            Activity,
-            pk=request.POST.get("activity_id"),
-            activity_type=Activity.Type.SINGER_CONTEST,
-        )
+        activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         stage_choices = round_roster_stage_choices(activity)
         form = ContestRoundForm(
             request.POST,
@@ -1336,15 +1359,18 @@ def round_create(request):
             )
         return redirect("staff:round_list")
 
-    selected_activity_id = request.GET.get("activity_id") or ""
-    if not selected_activity_id:
-        selected_activity = activities.order_by("-created_at").first()
-        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
-    else:
-        selected_activity = activities.filter(pk=selected_activity_id).first()
+    requested_activity_id = request.GET.get("activity_id") or None
+    selected_activity = (
+        activities.filter(pk=requested_activity_id).first()
+        if requested_activity_id is not None
+        else activities.first()
+    )
+    if selected_activity is None:
+        selected_activity = activities.first()
+    selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     rubrics = (
-        ScoringRubric.objects.select_related("activity").filter(activity_id=selected_activity_id)
-        if selected_activity_id.isdigit()
+        ScoringRubric.objects.select_related("activity").filter(activity=selected_activity)
+        if selected_activity is not None
         else ScoringRubric.objects.none()
     )
     form = ContestRoundForm(
@@ -1386,7 +1412,11 @@ def round_prepare(request, pk):
 @staff_required
 def round_running_order(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    singers = current_round_roster(contest_round)
+    try:
+        singers = current_round_roster(contest_round)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"暂时无法配置人工顺序：{domain_error_messages(error)}")
+        return redirect("staff:round_list")
     singer_by_id = {str(singer.pk): singer for singer in singers}
     entries = list(contest_round.entries.select_related("singer").order_by("running_order", "pk"))
     initial_ids = [str(entry.singer_id) for entry in entries] or [
@@ -1447,7 +1477,11 @@ def round_running_order(request, pk):
 @staff_required
 def round_groups(request, pk):
     contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
-    singers = current_round_roster(contest_round)
+    try:
+        singers = current_round_roster(contest_round)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"暂时无法配置分组：{domain_error_messages(error)}")
+        return redirect("staff:round_list")
     groups = list(
         PerformanceGroup.objects.filter(round=contest_round)
         .prefetch_related("performances__singer")
@@ -2088,12 +2122,9 @@ def judge_list(request):
 
 @staff_required
 def judge_create(request):
+    activities = _editable_singer_activities()
     if request.method == "POST":
-        activity = get_object_or_404(
-            Activity,
-            pk=request.POST["activity_id"],
-            activity_type=Activity.Type.SINGER_CONTEST,
-        )
+        activity = get_object_or_404(activities, pk=request.POST["activity_id"])
         with transaction.atomic():
             locked_activity = lock_activity_for_action(activity)
             judge = Judge.objects.create(
@@ -2105,7 +2136,6 @@ def judge_create(request):
             )
         return redirect("staff:judge_list")
 
-    activities = _editable_singer_activities()
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
 
 
@@ -2470,16 +2500,19 @@ def judge_score_paper(request, pk):
 def rubric_create(request):
     activities = _editable_singer_activities()
     form = ScoringRubricProvisionForm(request.POST or None)
-    selected_activity_id = request.POST.get("activity_id") or request.GET.get("activity_id") or ""
-    if not selected_activity_id:
+    requested_activity_id = (
+        request.POST.get("activity_id") or request.GET.get("activity_id") or None
+    )
+    selected_activity = (
+        activities.filter(pk=requested_activity_id).first()
+        if requested_activity_id is not None
+        else activities.first()
+    )
+    if selected_activity is None:
         selected_activity = activities.first()
-        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
+    selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     if request.method == "POST" and form.is_valid():
-        activity = get_object_or_404(
-            Activity,
-            pk=request.POST.get("activity_id"),
-            activity_type=Activity.Type.SINGER_CONTEST,
-        )
+        activity = get_object_or_404(activities, pk=request.POST.get("activity_id"))
         try:
             create_scoring_rubric(
                 activity,
@@ -2542,11 +2575,7 @@ def vote_session_create(request):
     activities = _editable_singer_activities()
     if request.method == "POST":
         form = VoteSessionForm(request.POST)
-        activity = get_object_or_404(
-            Activity,
-            pk=request.POST["activity_id"],
-            activity_type=Activity.Type.SINGER_CONTEST,
-        )
+        activity = get_object_or_404(activities, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.MANAGE_VOTE)
@@ -2614,10 +2643,15 @@ def vote_session_create(request):
         )
         return redirect("staff:vote_session_list")
 
-    selected_activity_id = request.GET.get("activity_id") or ""
-    if not selected_activity_id:
-        selected_activity = activities.order_by("-created_at").first()
-        selected_activity_id = str(selected_activity.pk) if selected_activity else ""
+    requested_activity_id = request.GET.get("activity_id") or None
+    selected_activity = (
+        activities.filter(pk=requested_activity_id).first()
+        if requested_activity_id is not None
+        else activities.first()
+    )
+    if selected_activity is None:
+        selected_activity = activities.first()
+    selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     singer_queryset = SingerRegistration.objects.select_related("activity").filter(
         pre_status=SingerRegistration.PreStatus.APPROVED
     )
@@ -3825,14 +3859,7 @@ def _node_type_options(nodes):
 @staff_required
 @transaction.atomic
 def contest_ruleset_create(request):
-    activities = (
-        Activity.objects.filter(
-            activity_type=Activity.Type.SINGER_CONTEST,
-            is_locked=False,
-        )
-        .exclude(phase=Activity.Phase.ARCHIVED)
-        .order_by("-created_at")
-    )
+    activities = _editable_singer_activities()
     if request.method == "POST":
         # Keep the candidate lookup broad enough for the authoritative lock check to
         # produce its stable 403 response.  Filtering ``is_locked=False`` here would
@@ -3907,7 +3934,15 @@ def contest_ruleset_create(request):
     templates = RulesetTemplate.objects.filter(
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION
     ).order_by("name")
-    selected_activity_id = request.GET.get("activity") or ""
+    requested_activity_id = request.GET.get("activity") or None
+    selected_activity = (
+        activities.filter(pk=requested_activity_id).first()
+        if requested_activity_id is not None
+        else activities.first()
+    )
+    if selected_activity is None:
+        selected_activity = activities.first()
+    selected_activity_id = str(selected_activity.pk) if selected_activity else ""
     return render(
         request,
         "staff_panel/ruleset_create.html",
