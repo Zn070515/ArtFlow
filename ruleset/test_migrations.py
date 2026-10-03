@@ -13,9 +13,14 @@ from tests.migration_helpers import MigrationTransactionTestCase
 
 
 class MigrationTestMixin(MigrationTransactionTestCase):
+    core_before = ("core", "0004_alter_activity_options")
+
     def _migrate_to(self, targets):
         executor = MigrationExecutor(connection)
-        executor.migrate(targets)
+        normalized = list(targets)
+        if self.core_before not in normalized:
+            normalized.append(self.core_before)
+        executor.migrate(normalized)
         return executor
 
     def _apps_at(self, target):

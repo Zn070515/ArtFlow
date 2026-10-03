@@ -279,7 +279,7 @@ class TicketLifecycleServiceTests(TestCase):
             self.fail(f"tickets.services.{name} is not implemented")
         return service
 
-    def test_issue_generates_a_one_time_digest_only_secret(self):
+    def test_issue_generates_a_versioned_credential_and_digest_only_secret(self):
         create_ticket = self._service("create_ticket")
         issue_ticket = self._service("issue_ticket")
         ticket = create_ticket(
@@ -291,7 +291,8 @@ class TicketLifecycleServiceTests(TestCase):
         issued = issue_ticket(ticket, actor=self.staff)
 
         self.assertEqual(ticket_model(self).State.ISSUED, issued.ticket.state)
-        self.assertEqual(len(issued.secret), 43)
+        self.assertTrue(issued.secret.startswith("AF1.T."))
+        self.assertEqual(issued.ticket.credential_version, 2)
         self.assertNotEqual(issued.secret, issued.ticket.secret_digest)
         issued.ticket.refresh_from_db()
         self.assertNotIn(issued.secret, issued.ticket.secret_digest or "")
@@ -543,7 +544,7 @@ class TicketStaffHttpTests(TestCase):
         self.assertEqual(response["Pragma"], "no-cache")
         payload = response.json()
         secret = payload["secret"]
-        self.assertEqual(len(secret), 43)
+        self.assertTrue(secret.startswith("AF1.T."))
         listing = self.client.get(f"/staff/tickets/?activity_id={self.activity.pk}")
         self.assertEqual(listing.status_code, 200)
         self.assertNotContains(listing, secret)
@@ -567,7 +568,7 @@ class TicketStaffHttpTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, "票据详情")
         self.assertContains(detail, issued.ticket.get_state_display())
-        self.assertNotContains(detail, issued.secret)
+        self.assertContains(detail, ticket_services.ticket_credential(issued.ticket))
         self.assertNotContains(detail, issued.ticket.secret_digest)
 
     def test_staff_issue_page_supports_batch_qr_output_without_caching(self):
