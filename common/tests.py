@@ -22,7 +22,7 @@ from django.core.management.base import CommandError
 from django.db import (
     DatabaseError,
     IntegrityError,
-    close_old_connections,
+    connection,
     transaction,
 )
 from django.db import models as django_models
@@ -668,7 +668,7 @@ class ActivityLifecycleConcurrencyTests(TransactionTestCase):
                 release_formal_save.wait(timeout=5)
 
         def promote_activity():
-            close_old_connections()
+            connection.close()
             try:
                 formal_activity = Activity.objects.get(pk=activity.pk)
                 formal_activity.is_test_mode = False
@@ -676,10 +676,10 @@ class ActivityLifecycleConcurrencyTests(TransactionTestCase):
             except Exception as error:
                 formal_errors.append(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         def save_stale_activity():
-            close_old_connections()
+            connection.close()
             stale_save_started.set()
             try:
                 stale_activity.save()
@@ -687,7 +687,7 @@ class ActivityLifecycleConcurrencyTests(TransactionTestCase):
                 stale_errors.append(error)
             finally:
                 stale_save_finished.set()
-                close_old_connections()
+                connection.close()
 
         pre_save.connect(hold_formal_save, sender=Activity, weak=False)
         formal_thread = Thread(target=promote_activity)

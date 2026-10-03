@@ -9,7 +9,7 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, transaction
+from django.db import connection, transaction
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from files.models import MaterialCheck, SubmissionFile
@@ -177,7 +177,7 @@ class ProgramLockOrderConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=hold_activity_lock)
         holder.start()
@@ -186,7 +186,7 @@ class ProgramLockOrderConcurrencyTests(TransactionTestCase):
         edit_result: dict[str, object] = {}
 
         def try_program_edit():
-            close_old_connections()
+            connection.close()
             try:
                 request = RequestFactory().post("/x", {"contact_phone": "13800000002"})
                 request.user = self.user
@@ -195,7 +195,7 @@ class ProgramLockOrderConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 edit_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         editor = threading.Thread(target=try_program_edit)
         editor.start()

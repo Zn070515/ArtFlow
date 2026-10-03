@@ -12,7 +12,7 @@ from core.models import Activity
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, close_old_connections, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count
 from django.test import TestCase, TransactionTestCase, override_settings
 from singer_contest.models import SingerRegistration
@@ -834,13 +834,13 @@ class MaterialCheckReconcileConcurrencyTests(TransactionTestCase):
         errors: dict[str, object] = {}
 
         def run_reconcile():
-            close_old_connections()
+            connection.close()
             try:
                 reconcile_singer_material_checks(self.registration)
             except Exception as error:  # pragma: no cover - diagnostic only
                 errors["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=run_reconcile) for _ in range(4)]
         for thread in threads:

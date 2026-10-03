@@ -32,7 +32,6 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import (
     IntegrityError,
     OperationalError,
-    close_old_connections,
     connection,
     transaction,
 )
@@ -1873,7 +1872,7 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
         results: dict[str, str] = {}
 
         def do_unlock():
-            close_old_connections()
+            connection.close()
             try:
                 unlock_round(self.round, self.user)
                 results["unlock"] = "ok"
@@ -1882,10 +1881,10 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
             except Exception:
                 results["unlock"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         def do_prepare():
-            close_old_connections()
+            connection.close()
             try:
                 prepare_round(semifinal, self.user)
                 results["prepare"] = "ok"
@@ -1894,7 +1893,7 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
             except Exception:
                 results["prepare"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=do_unlock), threading.Thread(target=do_prepare)]
         for thread in threads:
@@ -1957,7 +1956,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
         result_lock = threading.Lock()
 
         def apply_identical_command():
-            close_old_connections()
+            connection.close()
             try:
                 start.wait(timeout=10)
                 result = apply_scores_if_version(
@@ -1973,7 +1972,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
                 with result_lock:
                     errors.append(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         workers = [threading.Thread(target=apply_identical_command) for _ in range(2)]
         for worker in workers:
@@ -2032,7 +2031,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
         result_lock = threading.Lock()
 
         def apply_command(round_id, singer_id, judge_id):
-            close_old_connections()
+            connection.close()
             try:
                 start.wait(timeout=10)
                 result = apply_scores_if_version(
@@ -2048,7 +2047,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
                 with result_lock:
                     errors.append(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         workers = [
             threading.Thread(
@@ -2124,7 +2123,7 @@ class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=transition_to_no_score_phase)
         holder.start()
@@ -2133,7 +2132,7 @@ class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
         prepare_result: dict[str, object] = {}
 
         def try_prepare():
-            close_old_connections()
+            connection.close()
             try:
                 prepare_round(self.round, self.user)
                 prepare_result["done"] = True
@@ -2142,7 +2141,7 @@ class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 prepare_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         worker = threading.Thread(target=try_prepare)
         worker.start()
@@ -2210,7 +2209,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=hold_activity_lock)
         holder.start()
@@ -2219,7 +2218,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         edit_result: dict[str, object] = {}
 
         def try_participant_edit():
-            close_old_connections()
+            connection.close()
             try:
                 request = RequestFactory().post("/x", {"phone": "13800000051"})
                 request.user = self.user
@@ -2228,7 +2227,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 edit_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         editor = threading.Thread(target=try_participant_edit)
         editor.start()
@@ -2265,7 +2264,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=hold_activity_lock)
         holder.start()
@@ -2274,7 +2273,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         review_result: dict[str, object] = {}
 
         def try_review():
-            close_old_connections()
+            connection.close()
             try:
                 review_material_check(
                     check,
@@ -2288,7 +2287,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 review_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         reviewer = threading.Thread(target=try_review)
         reviewer.start()
@@ -2320,7 +2319,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=hold_activity_lock)
         holder.start()
@@ -2329,7 +2328,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         mutate_result: dict[str, object] = {}
 
         def try_mutate_requirements():
-            close_old_connections()
+            connection.close()
             try:
                 request = RequestFactory().post(
                     "/x",
@@ -2346,7 +2345,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 mutate_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         mutator = threading.Thread(target=try_mutate_requirements)
         mutator.start()
@@ -2387,7 +2386,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         results: dict[str, str] = {}
 
         def run_cleanup():
-            close_old_connections()
+            connection.close()
             try:
                 clear_activity_test_data(test_activity, operator=self.staff)
                 results["clear"] = "ok"
@@ -2396,10 +2395,10 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception:
                 results["clear"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         def run_upload():
-            close_old_connections()
+            connection.close()
             try:
                 store_submission_file(
                     owner=test_reg,
@@ -2413,7 +2412,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
             except Exception:
                 results["upload"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=run_cleanup), threading.Thread(target=run_upload)]
         for thread in threads:
@@ -2501,7 +2500,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=hold)
         holder.start()
@@ -2515,7 +2514,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
         edit_result: dict[str, object] = {}
 
         def try_edit():
-            close_old_connections()
+            connection.close()
             try:
                 request = RequestFactory().post("/x", {"action": "add", "new_type": "ASSESS"})
                 request.user = self.admin
@@ -2526,7 +2525,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 edit_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         worker = threading.Thread(target=try_edit)
         worker.start()
@@ -2551,7 +2550,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
         clone_result: dict[str, object] = {}
 
         def try_clone():
-            close_old_connections()
+            connection.close()
             try:
                 request = RequestFactory().post("/x", {"activity": self.activity.pk, "name": "X"})
                 request.user = self.admin
@@ -2562,7 +2561,7 @@ class RulesetActivityLockConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 clone_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         worker = threading.Thread(target=try_clone)
         worker.start()
@@ -3364,7 +3363,7 @@ class ResultClosureConfirmationConcurrencyTests(TransactionTestCase):
         start = threading.Barrier(2)
 
         def confirm():
-            close_old_connections()
+            connection.close()
             try:
                 start.wait(timeout=30)
                 actor = User.objects.get(pk=self.operator.pk)
@@ -3377,7 +3376,7 @@ class ResultClosureConfirmationConcurrencyTests(TransactionTestCase):
                 with guard:
                     outcomes.append(("error", type(error).__name__))
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=confirm) for _ in range(2)]
         for thread in threads:
@@ -5268,7 +5267,7 @@ class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
         guard = threading.Lock()
 
         def do_recompute():
-            close_old_connections()
+            connection.close()
             try:
                 recompute_activity_result(self.activity, self.admin, ruleset=self.ruleset)
                 with guard:
@@ -5277,7 +5276,7 @@ class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
                 with guard:
                     outcomes.append(f"error:{type(exc).__name__}")
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=do_recompute) for _ in range(4)]
         for t in threads:
@@ -5863,7 +5862,7 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
         guard = threading.Lock()
 
         def do_set():
-            close_old_connections()
+            connection.close()
             try:
                 set_manual_decision(
                     self.version,
@@ -5878,10 +5877,10 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
                 with guard:
                     outcomes.append(f"set-error:{type(exc).__name__}")
             finally:
-                close_old_connections()
+                connection.close()
 
         def do_confirm():
-            close_old_connections()
+            connection.close()
             try:
                 confirm_stage_result(self.stage, confirmed_by=self.admin)
                 with guard:
@@ -5890,7 +5889,7 @@ class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
                 with guard:
                     outcomes.append(f"confirm-error:{type(exc).__name__}")
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=do_set), threading.Thread(target=do_confirm)]
         for t in threads:

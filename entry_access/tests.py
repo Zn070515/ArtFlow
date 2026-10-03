@@ -16,7 +16,7 @@ from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import close_old_connections
+from django.db import connection
 from django.test import (
     Client,
     RequestFactory,
@@ -429,14 +429,14 @@ class EntryAccessRedemptionConcurrencyTests(TransactionTestCase):
         barrier = threading.Barrier(2)
 
         def redeem():
-            close_old_connections()
+            connection.close()
             try:
                 barrier.wait(timeout=10)
                 results.append(redeem_access_grant(self.token))
             except Exception as error:  # pragma: no cover - assertion below reports it
                 results.append(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=redeem) for _ in range(2)]
         for thread in threads:

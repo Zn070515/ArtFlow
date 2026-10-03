@@ -14,7 +14,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import DatabaseError, close_old_connections, connection, transaction
+from django.db import DatabaseError, connection, transaction
 from django.db.models import Q
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
@@ -659,7 +659,7 @@ class DatabaseRateLimitConcurrencyTests(TransactionTestCase):
         errors: list[Exception] = []
 
         def hit_from_worker():
-            close_old_connections()
+            connection.close()
             try:
                 start.wait(timeout=10)
                 outcomes.append(
@@ -668,7 +668,7 @@ class DatabaseRateLimitConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic assertion below
                 errors.append(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         workers = [threading.Thread(target=hit_from_worker) for _ in range(2)]
         for worker in workers:
@@ -1412,7 +1412,7 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
         results: dict[str, str] = {}
 
         def demote_b():
-            close_old_connections()
+            connection.close()
             try:
                 change_user_role(target=admin_b, new_role=User.Role.PARTICIPANT, actor=admin_a)
                 results["b"] = "ok"
@@ -1421,10 +1421,10 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
             except Exception:
                 results["b"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         def demote_a():
-            close_old_connections()
+            connection.close()
             try:
                 change_user_role(target=admin_a, new_role=User.Role.PARTICIPANT, actor=admin_b)
                 results["a"] = "ok"
@@ -1433,7 +1433,7 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
             except Exception:
                 results["a"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=demote_b), threading.Thread(target=demote_a)]
         for thread in threads:
@@ -1454,7 +1454,7 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
         results: dict[str, str] = {}
 
         def deactivate_b():
-            close_old_connections()
+            connection.close()
             try:
                 set_user_active(target=admin_b, is_active=False, actor=admin_a)
                 results["b"] = "ok"
@@ -1463,10 +1463,10 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
             except Exception:
                 results["b"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         def deactivate_a():
-            close_old_connections()
+            connection.close()
             try:
                 set_user_active(target=admin_a, is_active=False, actor=admin_b)
                 results["a"] = "ok"
@@ -1475,7 +1475,7 @@ class AdminAuthorityConcurrencyTests(TransactionTestCase):
             except Exception:
                 results["a"] = "error"
             finally:
-                close_old_connections()
+                connection.close()
 
         threads = [threading.Thread(target=deactivate_b), threading.Thread(target=deactivate_a)]
         for thread in threads:
