@@ -24,6 +24,8 @@ class DatabaseSettings(TypedDict, total=False):
     PASSWORD: str
     HOST: str
     PORT: str
+    CONN_MAX_AGE: int
+    CONN_HEALTH_CHECKS: bool
     TEST: dict[str, str]
 
 
@@ -132,6 +134,13 @@ if DATABASE_ENGINE == "postgresql":
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            # Three sync Gunicorn workers would otherwise open and close a
+            # connection per request. 60 s is a deliberately conservative reuse
+            # window that still costs at most one connection per worker, and the
+            # health check revalidates it so a database restart cannot hand a
+            # request a dead socket.
+            "CONN_MAX_AGE": get_int(os.environ, "POSTGRES_CONN_MAX_AGE", 60),
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 elif DATABASE_ENGINE == "sqlite":

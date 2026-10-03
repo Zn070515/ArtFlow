@@ -237,6 +237,27 @@ class SettingsTests(SimpleTestCase):
             settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
         )
 
+    def test_production_postgresql_reuses_connections_with_health_checks(self):
+        settings_module = self.reload_settings(production_environment())
+        default = settings_module.DATABASES["default"]
+
+        self.assertEqual(default["ENGINE"], "django.db.backends.postgresql")
+        self.assertEqual(default["CONN_MAX_AGE"], 60)
+        self.assertTrue(default["CONN_HEALTH_CHECKS"])
+
+    def test_postgresql_connection_reuse_is_configurable(self):
+        settings_module = self.reload_settings(
+            {**production_environment(), "POSTGRES_CONN_MAX_AGE": "0"}
+        )
+
+        self.assertEqual(settings_module.DATABASES["default"]["CONN_MAX_AGE"], 0)
+
+    def test_sqlite_keeps_the_django_default_connection_lifecycle(self):
+        default = self.reload_settings({"APP_ENV": "development"}).DATABASES["default"]
+
+        self.assertNotIn("CONN_MAX_AGE", default)
+        self.assertNotIn("CONN_HEALTH_CHECKS", default)
+
     def test_rate_limit_backend_is_locmem_outside_production_and_database_in_production(self):
         development_backend = self.reload_settings({"APP_ENV": "development"}).RATE_LIMIT_BACKEND
         test_backend = self.reload_settings({"APP_ENV": "test"}).RATE_LIMIT_BACKEND
