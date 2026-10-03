@@ -215,7 +215,7 @@ try {
     Invoke-Uv run mypy
     Invoke-Uv run python manage.py check
     Invoke-Uv run python manage.py makemigrations --check --dry-run
-    Invoke-Uv run pytest -q --cov
+    Invoke-Uv run pytest -q -n auto --maxprocesses=4 --dist=loadscope --cov --durations=30
     Invoke-PowerShellScript -ScriptPath (Join-Path $repositoryRoot 'scripts/check_docs.ps1')
     Invoke-PowerShellScript -ScriptPath (Join-Path $repositoryRoot 'scripts/export-requirements.ps1')
 

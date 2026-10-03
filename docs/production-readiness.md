@@ -278,7 +278,7 @@ uv run mypy
 npm run check:pyright:entry-access
 uv run python manage.py check
 uv run python manage.py makemigrations --check --dry-run
-uv run pytest -q --cov
+uv run pytest -q -n auto --maxprocesses=4 --dist=loadscope --cov --durations=30
 pwsh -NoProfile -File scripts\check_docs.ps1
 ```
 
