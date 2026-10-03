@@ -169,11 +169,14 @@ def test_local_compose_forwards_account_access_keys_to_the_web_runtime():
     assert web_environment["ADMIN_ACCESS_KEY"] == "${ADMIN_ACCESS_KEY:-}"
 
 
-def test_production_web_healthcheck_uses_internal_exempt_health_route():
+def test_production_web_healthcheck_uses_the_internal_liveness_route():
     compose = load_compose(PRODUCTION_COMPOSE_PATH)
     healthcheck = compose["services"]["web"]["healthcheck"]["test"]
 
-    assert "http://127.0.0.1:8000/healthz/" in healthcheck[-1]
+    # Liveness, not readiness: a temporary database outage must not declare the
+    # application container dead. Readiness stays covered by the proxy probe.
+    assert "http://127.0.0.1:8000/livez/" in healthcheck[-1]
+    assert "http://127.0.0.1:8000/healthz/" not in healthcheck[-1]
 
 
 def test_production_proxy_healthcheck_uses_the_internal_http_listener():

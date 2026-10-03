@@ -228,7 +228,9 @@ TICKET_ACCESS_SESSION_TTL_SECONDS = get_int(
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SECURE_SSL_REDIRECT = APP_ENV == "production"
-SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+# The container, proxy and deploy-script probes speak plain HTTP over the
+# internal network, so every probe route must skip the HTTPS redirect.
+SECURE_REDIRECT_EXEMPT = [r"^livez/$", r"^readyz/$", r"^healthz/$"]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if APP_ENV == "production" else None
 SESSION_COOKIE_SECURE = APP_ENV == "production"
 SESSION_COOKIE_HTTPONLY = True

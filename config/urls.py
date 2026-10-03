@@ -3,13 +3,15 @@ from django.conf import settings
 from django.contrib import admin
 from django.urls import include, path
 
-from config.health import healthz
+from config.health import healthz, livez, readyz
 
 handler403 = "config.error_views.permission_denied"
 handler404 = "config.error_views.page_not_found"
 handler500 = "config.error_views.server_error"
 
 urlpatterns = [
+    path("livez/", livez, name="livez"),
+    path("readyz/", readyz, name="readyz"),
     path("healthz/", healthz, name="healthz"),
     path("", include("public_portal.urls")),
     path("", include("accounts.urls")),

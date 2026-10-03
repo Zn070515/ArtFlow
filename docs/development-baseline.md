@@ -60,7 +60,8 @@ Run diagnostics without mutating data:
 
 ```powershell
 uv run python manage.py doctor
-Invoke-WebRequest http://127.0.0.1:8000/healthz/
+Invoke-WebRequest http://127.0.0.1:8000/livez/
+Invoke-WebRequest http://127.0.0.1:8000/readyz/
 ```
 
 `doctor` checks loaded configuration, database connectivity, unapplied migrations,
@@ -70,8 +71,23 @@ static/media directories, non-secret access-key readiness, and the non-secret fi
 failure. When the database is healthy it also reports Ticket row and stale
 access-session counts; if the database check fails it does not query Ticket
 tables again. It returns nonzero for failures and does not print secrets or a
-complete database URL. `/healthz/` accepts only `GET`; it returns a minimal
-`ok` or generic unavailable status and is safe for container health checks.
+complete database URL.
+
+Health probes are split by what they actually observe, and all three accept only
+`GET` and answer with a minimal body:
+
+| Route | Meaning | Body |
+|---|---|---|
+| `/livez/` | The application process answered. No database call, no system checks. | `{"status": "alive"}` |
+| `/readyz/` | The default database connection is reachable. | `{"status": "ok"}` or generic unavailable |
+| `/healthz/` | Readiness under its historical name; kept because the container, Caddy and CI probes already point at it. | same as `/readyz/` |
+
+Django's full system-check set is a startup gate, not a heartbeat: it runs in
+`manage.py check` (also executed by `scripts/docker-entrypoint.sh` before
+migrations), in `doctor`, and in the deployment gate. The application container's
+liveness probe uses `/livez/` so a temporary database outage cannot mark a
+running process dead; database readiness is still covered by the Caddy proxy
+probe, which reaches `/healthz/` through the real request path.
 Event and production launchers pass `doctor --require-access-keys`, which turns
 missing or placeholder `STAFF_ACCESS_KEY` / `ADMIN_ACCESS_KEY` into a
 configuration failure. After rotating either key, run

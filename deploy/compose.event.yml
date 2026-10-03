@@ -56,13 +56,15 @@ services:
       - static_data:/app/staticfiles
       - media_data:/app/media
       - backup_data:/app/backups
+    # Liveness only: an on-site database blip must not mark the running event
+    # stack dead. Database readiness stays available at /readyz/ and /healthz/.
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
         ]
       interval: 10s
       timeout: 5s
