@@ -1,3 +1,6 @@
+import math
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -13,6 +16,15 @@ from django.utils import timezone
 from common.models import RateLimitBucket
 
 _CLEANUP_BATCH_SIZE = 32
+# Expired buckets are reset by the next UPSERT, so cleanup is housekeeping, not a
+# correctness condition. Sweeping on every ``allow()`` put a scan-and-delete on
+# the judge/live polling hot path (twice per context request); one sweep per
+# process per interval is enough to bound table growth.
+_CLEANUP_INTERVAL_SECONDS = 30
+_cleanup_lock = threading.Lock()
+# "Never swept yet": a freshly started process should sweep on its first call
+# regardless of how little of the interval it has been up for.
+_last_cleanup_at = -math.inf
 
 
 class RateLimitExceeded(Exception):
@@ -134,6 +146,30 @@ def _cleanup_expired_buckets(*, now: datetime, exclude_key: str) -> None:
         RateLimitBucket.objects.filter(pk__in=expired_ids, expires_at__lte=now).delete()
 
 
+def _maybe_cleanup_expired_buckets(*, now: datetime, exclude_key: str) -> None:
+    """Sweep expired buckets at most once per interval, per process.
+
+    Guarded by a process-local deadline so a burst of ``allow()`` calls performs
+    one sweep instead of one per call. A failing sweep is swallowed on purpose:
+    cleanup is best-effort and must never change an allowance that was already
+    decided. The deadline is advanced on failure too, so a broken database does
+    not turn into a retry storm.
+    """
+    global _last_cleanup_at
+    if time.monotonic() - _last_cleanup_at < _CLEANUP_INTERVAL_SECONDS:
+        return
+    with _cleanup_lock:
+        if time.monotonic() - _last_cleanup_at < _CLEANUP_INTERVAL_SECONDS:
+            return
+        try:
+            with transaction.atomic():
+                _cleanup_expired_buckets(now=now, exclude_key=exclude_key)
+        except DatabaseError:
+            pass
+        finally:
+            _last_cleanup_at = time.monotonic()
+
+
 def allow(key: str, *, limit: int, window_seconds: int) -> RateLimitDecision:
     """Record an attempt and return only its allowance and retry metadata.
 
@@ -162,12 +198,7 @@ def allow(key: str, *, limit: int, window_seconds: int) -> RateLimitDecision:
                 window_seconds=window_seconds,
                 now=now,
             )
-        try:
-            with transaction.atomic():
-                _cleanup_expired_buckets(now=now, exclude_key=storage_key)
-        except DatabaseError:
-            # Cleanup is best-effort and must not change an allowance already decided.
-            pass
+        _maybe_cleanup_expired_buckets(now=now, exclude_key=storage_key)
         return decision
     return _allow_locmem(key, limit=limit, window_seconds=window_seconds, now=now)
 

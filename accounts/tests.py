@@ -562,7 +562,12 @@ class DatabaseRateLimitTests(TransactionTestCase):
             expires_at=now + timedelta(minutes=5),
         )
 
-        with patch.object(rate_limit, "_CLEANUP_BATCH_SIZE", 2):
+        # Cleanup is now interval-throttled per process, so make the sweep due
+        # before asserting how much one sweep may delete.
+        with (
+            patch.object(rate_limit, "_last_cleanup_at", -float("inf")),
+            patch.object(rate_limit, "_CLEANUP_BATCH_SIZE", 2),
+        ):
             rate_limit.allow("new-public-key", limit=1, window_seconds=300)
 
         self.assertEqual(RateLimitBucket.objects.filter(expires_at__lte=now).count(), 1)
