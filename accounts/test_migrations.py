@@ -1,25 +1,9 @@
-from common.authority import ACCOUNT_AUTHORITY, authority_write
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
-
-from .models import InstallationState
+from tests.migration_helpers import MigrationTransactionTestCase
 
 
-class InstallationStateMigrationTests(TransactionTestCase):
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        # The migration test moves the database through historical schemas and
-        # explicitly restores the latest schema.  Recreate the singleton that
-        # a data migration normally seeds so the next xdist group starts from
-        # the same initial installation state.
-        with authority_write(ACCOUNT_AUTHORITY):
-            InstallationState.objects.update_or_create(
-                pk=InstallationState.SINGLETON_PK,
-                defaults={"initialized_at": None},
-            )
-
+class InstallationStateMigrationTests(MigrationTransactionTestCase):
     def test_existing_effective_admin_is_backfilled_as_initialized(self):
         executor = MigrationExecutor(connection)
         try:
