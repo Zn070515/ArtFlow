@@ -7,8 +7,9 @@ from .models import InstallationState
 
 
 class InstallationStateMigrationTests(TransactionTestCase):
-    def _fixture_teardown(self):
-        super()._fixture_teardown()
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
         # The migration test moves the database through historical schemas and
         # explicitly restores the latest schema.  Recreate the singleton that
         # a data migration normally seeds so the next xdist group starts from
