@@ -11,12 +11,19 @@
   const voteName = root.querySelector<HTMLElement>("[data-live-vote-name]");
   const voteLabel = root.querySelector<HTMLElement>("[data-live-vote-label]");
   const voteLink = root.querySelector<HTMLAnchorElement>("[data-live-vote-link]");
+  const ticketStatus = root.querySelector<HTMLElement>("[data-live-ticket-status]");
   let revision = "";
   let timer: number | undefined;
 
   function render(payload: unknown): void {
     if (!payload || typeof payload !== "object") return;
-    const value = payload as { state?: unknown; label?: unknown; vote_name?: unknown; vote_url?: unknown };
+    const value = payload as {
+      state?: unknown;
+      label?: unknown;
+      vote_name?: unknown;
+      vote_url?: unknown;
+      ticket_status?: unknown;
+    };
     if (typeof value.state !== "string" || typeof value.label !== "string" || typeof value.vote_name !== "string") return;
     const open = value.state === "open" && typeof value.vote_url === "string" && value.vote_url.length > 0;
     if (voteSection && waitingSection) {
@@ -28,6 +35,13 @@
     if (voteLink) {
       voteLink.href = typeof value.vote_url === "string" ? value.vote_url : "#";
       voteLink.classList.toggle("hidden", !open);
+    }
+    if (ticketStatus && typeof value.ticket_status === "string") {
+      ticketStatus.textContent = value.ticket_status === "checked_in"
+        ? "票券已检票，可以参与当前开放投票。"
+        : value.ticket_status === "recognized"
+          ? "票券已识别，请先到入口完成检票。"
+          : "请先扫描入场票；完成检票后才能参与投票。";
     }
   }
 
