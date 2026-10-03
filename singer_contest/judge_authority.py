@@ -260,7 +260,6 @@ def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
                 round=snapshot.round,
                 token_digest=_ephemeral_token_digest(raw_session),
                 expires_at=grant_expires_at,
-                last_seen_at=now,
             )
             with authority_write(EPHEMERAL_SESSION_STATE):
                 transport.save()

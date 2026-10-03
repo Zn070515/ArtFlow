@@ -315,6 +315,7 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
                     "APP_ENV=development",
                     "DEBUG=False",
                     "SECRET_KEY=event-runtime-test-secret",
+                    "QR_SIGNING_KEY=event-runtime-test-qr-signing-key",
                     "STAFF_ACCESS_KEY=event-runtime-test-staff-key",
                     "ADMIN_ACCESS_KEY=event-runtime-test-admin-key",
                     "POSTGRES_DB=event_runtime",
