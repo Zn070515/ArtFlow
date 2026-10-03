@@ -193,8 +193,12 @@ class Ticket(models.Model):
         super().clean()
         if self.state == self.State.CREATED and self.secret_digest is not None:
             raise ValidationError("已创建票据不能携带可兑换密钥摘要。")
-        if self.state in {self.State.ISSUED, self.State.CHECKED_IN} and not self.secret_digest:
-            raise ValidationError("已签发票据必须携带密钥摘要。")
+        if (
+            self.state in {self.State.ISSUED, self.State.CHECKED_IN}
+            and not self.secret_digest
+            and not self.public_code
+        ):
+            raise ValidationError("已签发票据必须携带可验证凭证。")
         if self.secret_digest and len(self.secret_digest) != TICKET_DIGEST_LENGTH:
             raise ValidationError("票据密钥摘要格式无效。")
 

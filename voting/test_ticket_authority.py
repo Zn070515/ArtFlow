@@ -54,6 +54,23 @@ class TicketVoteAuthorityTests(TestCase):
     def test_vote_session_defaults_to_no_ticket_requirement(self):
         self.assertFalse(self.session.requires_ticket)
 
+    def test_formal_singer_contest_vote_is_forced_to_ticket_authority(self):
+        formal = Activity.objects.create(
+            title="Formal ticket vote authority",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        session = VoteSession.objects.create(
+            activity=formal,
+            name="Formal audience vote",
+            start_time=timezone.now() - timedelta(minutes=1),
+            end_time=timezone.now() + timedelta(minutes=10),
+            requires_ticket=False,
+        )
+        self.assertTrue(session.requires_ticket)
+        with self.assertRaises(ValidationError):
+            VoteSession.objects.filter(pk=session.pk).update(requires_ticket=False)
+
     def test_ticket_requirement_cannot_change_after_open_or_lock(self):
         self.session.requires_ticket = True
         self.session.save(update_fields=["requires_ticket"])

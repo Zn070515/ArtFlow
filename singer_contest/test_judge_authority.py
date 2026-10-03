@@ -347,6 +347,24 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(RoundPanelSnapshot.objects.count(), 1)
         self.assertEqual(JudgeSeat.objects.count(), 1)
 
+    def test_prepare_panel_rejects_a_second_active_activity_panel(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        from .models import RoundJudge
+
+        with authority_write(CONTEST_ROUND_STATE):
+            other_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="Second service round",
+            )
+        RoundJudge.objects.create(round=other_round, judge=self.judge)
+        with authority_write(CONTEST_ROUND_STATE):
+            other_round.status = ContestRound.Status.PREPARED
+            other_round.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(ValidationError, "只能有一个现场评委组"):
+            prepare_judge_panel(other_round.pk, operator=self.operator)
+
     def test_prepare_panel_rejects_draft_round(self):
         from django.core.exceptions import ValidationError
 

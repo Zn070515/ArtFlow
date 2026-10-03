@@ -434,6 +434,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
         "activity_id",
         "round_type",
         "scoring_mode",
+        "judge_count",
         "minimum_judge_count",
         "name",
         "sequence",
@@ -562,6 +563,11 @@ class ContestRound(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rounds")
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
+    judge_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="匿名评委通道数量；留空时沿用历史评委名单。",
+    )
     minimum_judge_count = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -633,6 +639,10 @@ class ContestRound(models.Model):
             models.CheckConstraint(
                 condition=Q(minimum_judge_count__isnull=True) | Q(minimum_judge_count__gte=1),
                 name="round_minimum_judge_positive",
+            ),
+            models.CheckConstraint(
+                condition=Q(judge_count__isnull=True) | Q(judge_count__gte=1),
+                name="round_judge_count_positive",
             ),
         ]
 

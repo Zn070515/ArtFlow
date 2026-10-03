@@ -307,6 +307,28 @@ def activity_workspace(request, pk):
     )
 
 
+@staff_required
+@require_POST
+def activity_judge_entry_toggle(request, pk):
+    activity = get_object_or_404(Activity, pk=pk)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛支持评委彩排入口。")
+    if not activity.is_test_mode or activity.phase == Activity.Phase.ARCHIVED or activity.is_locked:
+        raise PermissionDenied("只有未锁定的 TEST 活动可以开放评委彩排入口。")
+    activity.judge_entry_open = not activity.judge_entry_open
+    with authority_write(ACTIVITY_STATE):
+        activity.save(update_fields=["judge_entry_open"])
+    log_action(
+        request,
+        AuditLog.ActionType.OTHER,
+        f"Activity:{activity.pk}",
+        new_value=f"judge_entry_open={activity.judge_entry_open}",
+    )
+    messages.success(
+        request,
+        "评委彩排入口已开放。" if activity.judge_entry_open else "评委彩排入口已关闭。",
+    )
+    return redirect("staff:activity_workspace", pk=activity.pk)
 @admin_required
 def activity_create(request):
     _require_admin(request.user)
@@ -1325,6 +1347,7 @@ def round_create(request):
                         "activity": locked_activity,
                         "round_type": form.cleaned_data["round_type"],
                         "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "judge_count": form.cleaned_data["judge_count"],
                         "minimum_judge_count": form.cleaned_data["minimum_judge_count"],
                         "name": form.cleaned_data["name"],
                         "advance_count": form.cleaned_data["advance_count"],
@@ -2162,6 +2185,7 @@ def _judge_control_context(
         .first()
     )
     panel_members = []
+    panel_member_rows = []
     seat_rows = []
     if panel_snapshot is not None:
         panel_members = list(
@@ -2173,6 +2197,12 @@ def _judge_control_context(
         }
         for member in panel_members:
             seat = seats.get(member.pk)
+            seat_label = (
+                seat.display_label.strip()
+                if seat is not None and seat.display_label.strip()
+                else member.seat_key.replace("seat-", "J")
+            )
+            panel_member_rows.append({"member": member, "seat_label": seat_label})
             if seat is not None:
                 pending_grant = (
                     JudgeSeatGrant.objects.filter(
@@ -2190,6 +2220,7 @@ def _judge_control_context(
                 {
                     "member": member,
                     "seat": seat,
+                    "seat_label": seat_label,
                     "pending_grant": pending_grant,
                 }
             )
@@ -2239,6 +2270,7 @@ def _judge_control_context(
         "round_judges": round_judges,
         "panel_snapshot": panel_snapshot,
         "panel_members": panel_members,
+        "panel_member_rows": panel_member_rows,
         "seat_rows": seat_rows,
         "run_state": run_state,
         "performances": performances,
@@ -2308,7 +2340,12 @@ def judge_prepare(request, pk):
         prepare_judge_panel(
             contest_round.pk,
             operator=request.user,
-            attending_judge_ids=form.cleaned_data["attending_judge_ids"],
+            attending_judge_ids=(
+                None
+                if contest_round.judge_count is not None
+                and not request.POST.getlist("attending_judge_ids")
+                else form.cleaned_data["attending_judge_ids"]
+            ),
         )
     except (PermissionDenied, ValidationError) as error:
         error_message = domain_error_messages(error)
@@ -3346,6 +3383,7 @@ def activity_clone(request, pk):
             round_type=contest_round.round_type,
             scoring_mode=contest_round.scoring_mode,
             minimum_judge_count=contest_round.minimum_judge_count,
+            judge_count=contest_round.judge_count,
             name=contest_round.name,
             advance_count=contest_round.advance_count,
             sequence=contest_round.sequence,

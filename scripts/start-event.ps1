@@ -67,7 +67,7 @@ function Write-SafeComposeLines {
 
     foreach ($line in $Lines) {
         $safeLine = [string]$line
-        $safeLine = $safeLine -replace '(?i)(SECRET_KEY|STAFF_ACCESS_KEY|ADMIN_ACCESS_KEY|POSTGRES_PASSWORD|DATABASE_URL)(\s*[:=]\s*)\S+', '$1$2[redacted]'
+        $safeLine = $safeLine -replace '(?i)(SECRET_KEY|QR_SIGNING_KEY|STAFF_ACCESS_KEY|ADMIN_ACCESS_KEY|POSTGRES_PASSWORD|DATABASE_URL)(\s*[:=]\s*)\S+', '$1$2[redacted]'
         Write-Host $safeLine
     }
 }

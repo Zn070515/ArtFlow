@@ -26,7 +26,14 @@ def generate_activity_public_code() -> str:
 
 class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     lifecycle_fields = {"is_test_mode", "data_lifecycle"}
-    state_fields = {"phase", "is_locked", "locked_at", "locked_by", "locked_by_id"}
+    state_fields = {
+        "phase",
+        "is_locked",
+        "locked_at",
+        "locked_by",
+        "locked_by_id",
+        "judge_entry_open",
+    }
     immutable_fields = {"activity_type", "public_code"}
 
     def _ensure_state_authorized(self, fields):
@@ -56,6 +63,8 @@ class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("Activity state must be changed through the lifecycle service.")
         for activity in objs:
             activity._ensure_initial_state_authorized()
+            if not activity.public_code:
+                activity.public_code = generate_activity_public_code()
             activity.data_lifecycle = (
                 activity.DataLifecycle.TEST
                 if activity.is_test_mode
@@ -114,8 +123,10 @@ class Activity(models.Model):
         unique=True,
         editable=False,
         default=generate_activity_public_code,
-        null=True,
-        blank=True,
+    )
+    judge_entry_open = models.BooleanField(
+        default=False,
+        help_text="TEST 活动的评委彩排入口是否暂时开放。",
     )
     data_lifecycle = models.CharField(
         max_length=12,
@@ -220,6 +231,7 @@ class Activity(models.Model):
                         "is_locked",
                         "locked_at",
                         "locked_by_id",
+                        "judge_entry_open",
                     )
                     .first()
                 )
@@ -245,6 +257,7 @@ class Activity(models.Model):
                         or persisted_state["is_locked"] != self.is_locked
                         or persisted_state["locked_at"] != self.locked_at
                         or persisted_state["locked_by_id"] != self.locked_by_id
+                        or persisted_state["judge_entry_open"] != self.judge_entry_open
                     )
                 ):
                     raise ValidationError(

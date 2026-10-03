@@ -482,9 +482,28 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     source = locked_round.effective_roster_source()
     singers = _round_source_singers(locked_round)
 
-    judges = list(
-        Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
-    )
+    if locked_round.judge_count is not None:
+        judges = list(
+            Judge.objects.filter(
+                round_assignments__round=locked_round,
+                is_active=True,
+            ).order_by("pk")
+        )
+        if not judges:
+            judges = [
+                Judge.objects.create(
+                    activity=locked_round.activity,
+                    name=f"J{index}",
+                    is_active=True,
+                )
+                for index in range(1, locked_round.judge_count + 1)
+            ]
+        elif len(judges) != locked_round.judge_count:
+            raise ValidationError("匿名评委通道数与本轮已配置评委不一致。")
+    else:
+        judges = list(
+            Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
+        )
     singers = _order_singers_for_round(locked_round, singers)
     if not singers or not judges:
         raise ValidationError("准备比赛轮次需要至少一名选手和一名活跃评委。")

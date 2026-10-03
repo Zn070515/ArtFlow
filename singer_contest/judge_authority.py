@@ -74,6 +74,7 @@ class JudgeContext:
     round_id: int
     round_name: str
     seat_id: int
+    seat_label: str
     panel_snapshot_id: int
     panel_version: int
     context_version: int
@@ -181,16 +182,22 @@ def _active_panel_snapshot(contest_round: ContestRound) -> RoundPanelSnapshot | 
 def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
     """Claim the first free prepared seat for the stable public judge entry."""
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)
-    snapshots = (
+    snapshots = list(
         RoundPanelSnapshot.objects.select_for_update()
         .select_related("round")
         .filter(
             activity=locked_activity,
-            state=RoundPanelSnapshot.State.ACTIVE,
+            state__in=[RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD],
             round__status__in=[ContestRound.Status.PREPARED, ContestRound.Status.SCORING],
         )
         .order_by("round_id", "-version")
     )
+    if len(snapshots) != 1:
+        if not snapshots:
+            raise ValidationError("当前尚未准备唯一的现场评委组。")
+        raise ValidationError("同一活动同时存在多个现场评委组，必须先关闭其他轮次。")
+    if snapshots[0].state != RoundPanelSnapshot.State.ACTIVE:
+        raise ValidationError("当前评委组已暂停，请等待工作人员恢复。")
     now = timezone.now()
     for snapshot in snapshots:
         seats = (
@@ -358,6 +365,18 @@ def prepare_judge_panel(
     existing = _active_panel_snapshot(contest_round)
     if existing is not None:
         return existing
+
+    competing = (
+        RoundPanelSnapshot.objects.select_for_update()
+        .filter(
+            activity=locked.activity,
+            state__in=[RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD],
+        )
+        .exclude(round=contest_round)
+        .first()
+    )
+    if competing is not None:
+        raise ValidationError("同一活动同时只能有一个现场评委组。")
 
     round_judges = list(
         RoundJudge.objects.filter(round=contest_round).select_related("judge").order_by("pk")
@@ -1428,6 +1447,10 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
         round_id=session.panel_snapshot.round_id,
         round_name=contest_round.name or contest_round.get_round_type_display(),
         seat_id=session.seat_id,
+        seat_label=(
+            session.seat.display_label.strip()
+            or session.seat.panel_member.seat_key.replace("seat-", "J")
+        ),
         panel_snapshot_id=session.panel_snapshot_id,
         panel_version=session.panel_snapshot.version,
         context_version=run_state.context_version,

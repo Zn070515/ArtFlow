@@ -86,7 +86,7 @@ def validate_production_environment(env: Mapping[str, str]) -> None:
     if is_placeholder_value(secret_key):
         raise ImproperlyConfigured("Production configuration cannot use a placeholder SECRET_KEY.")
 
-    for key_name in ("STAFF_ACCESS_KEY", "ADMIN_ACCESS_KEY"):
+    for key_name in ("STAFF_ACCESS_KEY", "ADMIN_ACCESS_KEY", "QR_SIGNING_KEY"):
         access_key = env.get(key_name, "").strip()
         if not access_key:
             raise ImproperlyConfigured(f"Production configuration requires {key_name}.")
