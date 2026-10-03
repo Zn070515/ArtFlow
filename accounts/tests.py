@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 from io import StringIO
 from types import SimpleNamespace
-from unittest import skipUnless
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -20,6 +19,7 @@ from django.db.models import Q
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from tests.helpers import postgresql_only
 
 from .admin import CustomUserAdmin
 from .models import InstallationState, User
@@ -643,7 +643,7 @@ class DatabaseRateLimitTests(TransactionTestCase):
         self.assertEqual(set(vars(decision)), {"allowed", "retry_after_seconds"})
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL atomic upsert")
+@postgresql_only
 class DatabaseRateLimitConcurrencyTests(TransactionTestCase):
     @override_settings(RATE_LIMIT_BACKEND="database")
     def test_concurrent_workers_allow_only_the_configured_limit(self):
@@ -1386,7 +1386,7 @@ class AccountAuthorityCreationTests(TestCase):
         self.assertTrue(existing.is_staff)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class AdminAuthorityConcurrencyTests(TransactionTestCase):
     """Concurrent admin mutations must never leave zero effective admins."""
 

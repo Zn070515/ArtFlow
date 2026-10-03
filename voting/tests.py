@@ -1,7 +1,6 @@
 import threading
 import time
 from datetime import timedelta
-from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import (
@@ -21,6 +20,7 @@ from django.urls import reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound, Judge, SingerRegistration
 from singer_contest.services import apply_scores, prepare_round
+from tests.helpers import postgresql_only
 from tickets.services import check_in_ticket, create_ticket, issue_ticket, redeem_ticket
 
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
@@ -406,7 +406,7 @@ class VoteActivityLockOverlayTests(TestCase):
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 1)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class VoteActivityLockConcurrencyTests(TransactionTestCase):
     """Verify the Activity row lock is taken before the child rows."""
 
@@ -542,7 +542,7 @@ class VoteActivityLockConcurrencyTests(TransactionTestCase):
         self.assertNotEqual(results.get("score"), "deadlock")
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class VoteBallotConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.operator = create_provisioned_user(
