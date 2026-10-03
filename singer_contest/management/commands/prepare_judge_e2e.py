@@ -17,7 +17,7 @@ from singer_contest.judge_authority import (
     issue_judge_grant,
     prepare_judge_panel,
 )
-from singer_contest.models import ContestRound, Judge, SingerRegistration
+from singer_contest.models import ContestRound, SingerRegistration
 from singer_contest.services import prepare_round, set_round_groups
 
 
@@ -29,6 +29,11 @@ class Command(BaseCommand):
             "--output-file",
             required=True,
             help="Write the short-lived grant fixture JSON to this private temporary file.",
+        )
+        parser.add_argument(
+            "--shared-entry",
+            action="store_true",
+            help="Prepare the shared anonymous entry fixture without a legacy Grant session.",
         )
 
     def handle(self, *args, **options) -> None:
@@ -56,17 +61,13 @@ class Command(BaseCommand):
                 pre_status=SingerRegistration.PreStatus.APPROVED,
                 is_test_data=True,
             )
-            Judge.objects.create(
-                activity=activity,
-                name="Judge browser fixture judge",
-                is_active=True,
-            )
             with authority_write(CONTEST_ROUND_STATE):
                 contest_round = ContestRound.objects.create(
                     activity=activity,
                     round_type=ContestRound.RoundType.PRELIMINARY,
                     name="Judge browser fixture round",
-                    minimum_judge_count=1,
+                    judge_count=5,
+                    minimum_judge_count=5,
                     status=ContestRound.Status.DRAFT,
                     is_locked=False,
                 )
@@ -79,17 +80,23 @@ class Command(BaseCommand):
             snapshot = prepare_judge_panel(contest_round.pk, operator=operator)
             performance = contest_round.performances.get()
             advance_performance(contest_round.pk, performance.pk, operator=operator)
-            seat = snapshot.members.get(seat_key="seat-1").seats.get()
-            issued = issue_judge_grant(seat.pk, operator=operator, ttl_seconds=10 * 60)
+            issued = None
+            if not options["shared_entry"]:
+                seat = snapshot.members.get(seat_key="seat-1").seats.get()
+                issued = issue_judge_grant(seat.pk, operator=operator, ttl_seconds=10 * 60)
 
+        fixture = {
+            "activity_id": activity.pk,
+            "public_code": activity.public_code,
+            "judge_entry_open": activity.judge_entry_open,
+            "round_id": contest_round.pk,
+            "performance_id": performance.pk,
+        }
+        if issued is not None:
+            fixture["grant_token"] = issued.token
         output_path.write_text(
             json.dumps(
-                {
-                    "grant_token": issued.token,
-                    "activity_id": activity.pk,
-                    "round_id": contest_round.pk,
-                    "performance_id": performance.pk,
-                },
+                fixture,
                 ensure_ascii=True,
                 sort_keys=True,
             ),
@@ -134,4 +141,5 @@ class Command(BaseCommand):
                 activity_type=Activity.Type.SINGER_CONTEST,
                 phase=Activity.Phase.TESTING,
                 is_test_mode=True,
+                judge_entry_open=True,
             )

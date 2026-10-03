@@ -229,6 +229,19 @@ jobs:
             --output-file /tmp/artflow-judge-e2e.json
           docker compose cp web:/tmp/artflow-judge-e2e.json "$RUNNER_TEMP/judge-e2e.json"
 
+      - name: Prepare isolated shared Judge browser fixture
+        run: |
+          docker compose exec -T web python manage.py prepare_judge_e2e \
+            --shared-entry \
+            --output-file /tmp/artflow-shared-judge-e2e.json
+          docker compose cp web:/tmp/artflow-shared-judge-e2e.json "$RUNNER_TEMP/shared-judge-e2e.json"
+
+      - name: Prepare isolated Live and Ticket browser fixture
+        run: |
+          docker compose exec -T web python manage.py prepare_live_ticket_e2e \
+            --output-file /tmp/artflow-live-ticket-e2e.json
+          docker compose cp web:/tmp/artflow-live-ticket-e2e.json "$RUNNER_TEMP/live-ticket-e2e.json"
+
       - name: Prepare isolated result closure browser fixture
         run: |
           docker compose exec -T web python manage.py prepare_result_closure_rehearsal \
@@ -246,7 +259,10 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
           ARTFLOW_E2E_ADMIN_ACCESS_KEY: artflow-ci-admin-access-key
+          ARTFLOW_E2E_STAFF_ACCESS_KEY: artflow-ci-staff-access-key
           PLAYWRIGHT_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/judge-e2e.json
+          PLAYWRIGHT_SHARED_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/shared-judge-e2e.json
+          PLAYWRIGHT_LIVE_TICKET_FIXTURE_PATH: ${{ runner.temp }}/live-ticket-e2e.json
           PLAYWRIGHT_CLOSURE_FIXTURE_PATH: ${{ runner.temp }}/result-closure-e2e.json
           PLAYWRIGHT_QUESTIONNAIRE_FIXTURE_PATH: ${{ runner.temp }}/questionnaire-e2e.json
         run: npm run test:e2e -- --grep-invert "human acceptance"
@@ -256,6 +272,18 @@ jobs:
         run: |
           rm -f "$RUNNER_TEMP/judge-e2e.json"
           docker compose exec -T web rm -f -- /tmp/artflow-judge-e2e.json || true
+
+      - name: Remove shared Judge browser fixture
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/shared-judge-e2e.json"
+          docker compose exec -T web rm -f -- /tmp/artflow-shared-judge-e2e.json || true
+
+      - name: Remove Live and Ticket browser fixture
+        if: ${{ always() }}
+        run: |
+          rm -f "$RUNNER_TEMP/live-ticket-e2e.json"
+          docker compose exec -T web rm -f -- /tmp/artflow-live-ticket-e2e.json || true
 
       - name: Remove result closure browser fixture
         if: ${{ always() }}
