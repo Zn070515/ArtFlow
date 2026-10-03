@@ -1,6 +1,6 @@
 """Reusable pytest decorators for cross-database test contracts."""
 
-from typing import TypeVar
+from typing import TypeVar, cast
 
 import pytest
 from django.db import connection
@@ -15,4 +15,4 @@ def postgresql_only(test: _TestObject) -> _TestObject:
         connection.vendor != "postgresql",
         reason="requires PostgreSQL database semantics",
     )(test)
-    return pytest.mark.postgresql(skipped)
+    return cast(_TestObject, pytest.mark.postgresql(skipped))
