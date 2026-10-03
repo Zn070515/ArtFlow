@@ -127,6 +127,31 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 `-StartCompose` explicitly performs `docker compose up --build --wait`; without it, the script requires an already running Compose `web` service. The contract runs migrations, `doctor`, a health request, idempotent demo seeding, the opt-in demo reset check, and Django's full `manage.py test` suite inside the `web` container. The image intentionally installs only the production extra, so this gate uses Django's built-in test runner rather than host `pytest`. It never stops services or removes volumes. Use `docker compose down --volumes` separately—and only when intentionally discarding local PostgreSQL, static, and media data.
 
+### Ballot burst benchmark
+
+`voting.services.submit_ballot` deliberately serializes: it takes the Activity
+authority lock, then the VoteSession row lock, then the ticket locks. Do not
+change that protocol on a hunch. Measure it first:
+
+```powershell
+uv run python manage.py benchmark_ballot_burst --vote-session <pk> --clients 300 --duration 10
+```
+
+The command drives the real service entry point from N threads, releases each
+client's single ballot across `--duration` seconds, and reports throughput,
+success/failure counts with reasons, p50/p95/p99 latency, PostgreSQL peak
+connection and blocked-lock counts, deadlocks, and transaction growth. It also
+re-checks that accepted ballots equal new ballot rows and that records match, so
+a "fast" run that lost votes fails loudly.
+
+It refuses a non-test activity (a burst writes real ballots), refuses SQLite
+unless `--allow-sqlite` is passed (row-lock waits there are not representative),
+and tags every row it creates as test data. Compare 100/200/300 clients before
+and after any change; only adopt a protocol change when the numbers show lock
+waits are the bottleneck, and never bypass the integrity or authority contracts
+to do it. The measured 100/200/300 baselines and their limits are recorded in
+[production readiness](production-readiness.md#2026-10-04-p1-8-投票-burst-量化记录).
+
 ## CI and local gates
 
 The repository CI covers Linux SQLite quality checks, Windows application checks, PostgreSQL integration, the scoped `entry_access` Pyright gate, a Chromium browser runtime smoke, workflow linting, dependency audit, CodeQL, and a Git-history secret scan. The PostgreSQL integration verifies migrations, `doctor`, `/healthz/`, repeated demo seeding, the browser-reachable health endpoint, and the explicit PostgreSQL-marked concurrency suite.

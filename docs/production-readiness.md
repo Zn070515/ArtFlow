@@ -445,3 +445,42 @@ HTTP 请求；没有超时、连接错误或 5xx。Django authority/恶意边界
 同出口合法评委隔离和健康端点有界吞吐；它不证明公网抗 DDoS、WAF 容量、学校 NAT
 规模、IdP/MFA、TLS、备份保留期限或事件响应时限。上述项目继续保持部署前置 `HOLD`，
 必须由部署方提供独立证据和负责人签字。
+
+### 2026-10-04 P1-8 投票 burst 量化记录
+
+投票链路是刻意串行化的：`submit_ballot` 依次取 Activity authority 锁、VoteSession
+行锁、TicketAccessSession/Ticket 锁。这轮不改该协议，只产出“是否需要改”的证据。
+
+环境：本机，独立 PostgreSQL 16 容器（`postgres:16-alpine`，默认
+`max_connections=100`），目标为一个 TEST 活动的开放投票场次
+（`requires_ticket=True`，走完整锁链），驱动方式是真实服务入口
+`voting.services.submit_ballot`，每个模拟观众一个线程、一张已检票票据，在
+`--duration` 内随机释放自己那一票。命令为
+[`voting/management/commands/benchmark_ballot_burst.py`](../voting/management/commands/benchmark_ballot_burst.py)：
+
+```powershell
+uv run python manage.py benchmark_ballot_burst --vote-session <pk> --clients 300 --duration 10
+```
+
+| 场景 | 接受/失败 | 吞吐 | p50 / p95 / p99（ms） | 峰值阻塞锁 | deadlock | 行数一致性 |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| 100 clients / 10s | 100 / 0 | 10.07/s | 74.76 / 101.95 / 142.36 | 1 | 0 | +100 ballot / +100 record |
+| 200 clients / 10s | 200 / 0 | 19.90/s | 82.74 / 141.07 / 188.37 | 3 | 0 | +200 / +200 |
+| 300 clients / 10s | 300 / 0 | 29.24/s | 137.74 / 414.02 / 447.90 | 13 | 0 | +300 / +300 |
+| 300 clients / 0.5s（同时尖峰） | 111 / 189 | — | 1958.07 / 3460.02 / 3517.29 | 95 | 0 | +111 / +111 |
+
+判定与边界：
+
+- 四档**均无 deadlock、无丢票、无重复票**：每档“实际接受数 == ballot 行增量 ==
+  record 行增量”，即成功与权威事实一一对应。
+- 300 人 / 10s 内 p99 447.90ms、零失败。按“只有数据证明锁串行化影响现场才改协议”
+  的判据，**当前签名不构成重写投票锁协议的理由**；峰值阻塞锁 1→13 说明行锁竞争确实
+  随并发上升，但远未触及 Gunicorn `timeout 120`。
+- 0.5s 同时尖峰档的 189 个失败全部是
+  `OperationalError: FATAL: sorry, too many clients already`：那是**裸容器
+  `max_connections=100` 的连接数上限**，不是选票锁缺陷；失败全部发生在任何写入之前，
+  属于安全失败。这也反向印证“不要为了吞吐盲目加 worker/线程”。
+- 本 harness 每客户端一个线程，比“3 个 sync worker”的 WSGI 部署更极端，因此上表是
+  **服务层锁行为**的测量，不是生产吞吐预测。
+- 未覆盖：经 Caddy/Gunicorn 的 HTTP 与 worker 容量、2C4G 硬件、公网与现场网络、
+  多进程下的连接池上限。这些仍按部署前置 `HOLD` 处理，需要现场彩排的独立证据。
