@@ -215,6 +215,15 @@ ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 3
 # making a staff action feel stale. 0 disables the memo entirely.
 LIVE_STATE_CACHE_SECONDS = get_int(os.environ, "LIVE_STATE_CACHE_SECONDS", 1)
 
+# How authorized media bytes reach the client. Django currently streams them
+# itself; an object-storage backend that answers with a short-lived signed
+# redirect lands when media moves off the application server. Only implemented
+# names are accepted, so a typo fails at startup instead of on the first private
+# download. Django keeps the authorization decision in every case.
+ARTFLOW_DELIVERY_BACKEND = os.environ.get("ARTFLOW_DELIVERY_BACKEND", "local").strip().lower()
+if ARTFLOW_DELIVERY_BACKEND != "local":
+    raise ImproperlyConfigured("ARTFLOW_DELIVERY_BACKEND must be local.")
+
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_ACCESS_KEY on sensitive actions.
 ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 15 * 60)

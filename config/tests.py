@@ -336,6 +336,15 @@ class SettingsTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             self.reload_settings({"APP_ENV": "test", "DATABASE_ENGINE": "not-a-database"})
 
+    def test_delivery_backend_defaults_to_local(self):
+        settings_module = self.reload_settings(production_environment())
+
+        self.assertEqual(settings_module.ARTFLOW_DELIVERY_BACKEND, "local")
+
+    def test_delivery_backend_rejects_an_unimplemented_name(self):
+        with self.assertRaises(ImproperlyConfigured):
+            self.reload_settings({"APP_ENV": "development", "ARTFLOW_DELIVERY_BACKEND": "oss"})
+
     def test_static_directory_exists_for_staticfiles_validation(self):
         from django.conf import settings
 
