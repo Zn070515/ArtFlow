@@ -14,6 +14,7 @@ class Migration(migrations.Migration):
                 default=core.models.generate_activity_public_code,
                 editable=False,
                 max_length=8,
+                null=True,
                 unique=True,
             ),
         ),
