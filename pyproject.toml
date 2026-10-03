@@ -24,6 +24,7 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "pytest-django>=4.11",
+    "pytest-xdist>=3.6",
     "ruff>=0.11",
     "mypy>=1.15",
     "django-stubs>=5.2",
@@ -87,6 +88,9 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["tests.py", "test_*.py", "*_tests.py"]
 addopts = "-ra --strict-markers"
 filterwarnings = ["error"]
+markers = [
+    "postgresql: tests that require PostgreSQL database semantics",
+]
 
 [tool.coverage.run]
 branch = true

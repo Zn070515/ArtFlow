@@ -74,10 +74,15 @@ def load_pyproject() -> dict:
 
 
 def test_quality_configuration_enforces_the_engineering_baseline():
+    project = load_pyproject()["project"]
     tools = load_pyproject()["tool"]
     coverage = tools["coverage"]
     mypy = tools["mypy"]
+    dev_dependencies = project["optional-dependencies"]["dev"]
+    pytest_options = tools["pytest"]["ini_options"]
 
+    assert any(dependency.startswith("pytest-xdist") for dependency in dev_dependencies)
+    assert any(marker.startswith("postgresql:") for marker in pytest_options["markers"])
     assert coverage["run"]["branch"] is True
     assert coverage["report"]["fail_under"] >= 75
     assert mypy["files"] == MYPY_FILES

@@ -10,7 +10,6 @@ from decimal import Decimal
 from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest import skipUnless
 from unittest.mock import patch
 
 from accounts.models import User
@@ -33,7 +32,7 @@ from django import forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import IntegrityError, close_old_connections, transaction
 from django.db.models import Max
 from django.http import FileResponse
 from django.test import (
@@ -85,6 +84,7 @@ from singer_contest.services import (
     prepare_round,
     stage_decisions_by_blocks,
 )
+from tests.helpers import postgresql_only
 from tickets.services import check_in_ticket, create_ticket, issue_ticket, redeem_ticket
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import open_vote_session
@@ -4436,7 +4436,7 @@ class WordGenerateArchiveAuthorityTests(TestCase):
         self.assertIn(f"推文_{doc_obj.pk}.docx", names)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
     """M0-Y Case B/D: a generation racing an archive commit must not persist."""
 
@@ -4708,7 +4708,7 @@ class PublicPostOptimisticConcurrencyTests(TestCase):
         self.assertEqual(created.version, 0)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class PublicPostReparentConcurrencyTests(TransactionTestCase):
     """M0-X: a stale reparent must never bypass the current parent's authority."""
 

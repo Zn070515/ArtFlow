@@ -25,16 +25,21 @@ def test_windows_ci_uses_and_verifies_each_matrix_python_interpreter():
     assert "uv selected Python $actual instead of matrix target $expected" in CI_WORKFLOW
 
 
-def test_postgresql_integration_has_the_m2_c_focused_gate_before_full_suite():
-    focused_command = """          uv run python manage.py test
-          singer_contest.test_judge_authority
-          singer_contest.test_judge_http
-          staff_panel.tests.JudgeControlHTTPTests
+def test_full_sqlite_and_windows_suites_use_bounded_xdist_and_duration_reporting():
+    assert CI_WORKFLOW.count("--maxprocesses=4") == 2
+    assert CI_WORKFLOW.count("--dist=loadscope") == 2
+    assert CI_WORKFLOW.count("--durations=30") == 2
+    assert "fail-fast: true" in CI_WORKFLOW
+
+
+def test_postgresql_integration_runs_only_the_explicit_marker_gate():
+    marker_command = """      - name: Run PostgreSQL-specific tests
+        run: uv run pytest -q -m postgresql --durations=30
 """
-    assert focused_command in INTEGRATION_WORKFLOW
-    assert INTEGRATION_WORKFLOW.index("Run M2-C Judge authority focused gate") < (
-        INTEGRATION_WORKFLOW.index("Run full test suite")
-    )
+    assert marker_command in INTEGRATION_WORKFLOW
+    assert "Run focused Ticket and entitlement tests" not in INTEGRATION_WORKFLOW
+    assert "Run M2-C Judge authority focused gate" not in INTEGRATION_WORKFLOW
+    assert "Run full test suite" not in INTEGRATION_WORKFLOW
 
 
 def test_published_static_probe_uses_configured_django_entrypoint():

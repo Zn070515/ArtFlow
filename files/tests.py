@@ -3,7 +3,6 @@ import tempfile
 import threading
 from pathlib import Path
 from types import SimpleNamespace
-from unittest import skipUnless
 from unittest.mock import patch
 
 from accounts.models import User
@@ -13,10 +12,11 @@ from core.models import Activity
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import IntegrityError, close_old_connections, transaction
 from django.db.models import Count
 from django.test import TestCase, TransactionTestCase, override_settings
 from singer_contest.models import SingerRegistration
+from tests.helpers import postgresql_only
 
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 from .policies import file_purpose_policy
@@ -807,7 +807,7 @@ class MaterialCheckReconcileTests(TestCase):
         self.assertEqual(lyrics.review_note, "已核对")
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class MaterialCheckReconcileConcurrencyTests(TransactionTestCase):
     """M0-V: concurrent reconcile of one owner never yields duplicate rows."""
 

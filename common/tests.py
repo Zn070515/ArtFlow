@@ -23,7 +23,6 @@ from django.db import (
     DatabaseError,
     IntegrityError,
     close_old_connections,
-    connection,
     transaction,
 )
 from django.db import models as django_models
@@ -48,6 +47,7 @@ from singer_contest.models import (
     ScoreSummary,
     SingerRegistration,
 )
+from tests.helpers import postgresql_only
 from voting.models import VoteOption, VoteRecord, VoteSession
 
 from common.audit import client_ip
@@ -647,10 +647,7 @@ class ActivityLifecycleBulkWriteTests(TestCase):
             )
 
 
-@skipUnless(
-    connection.features.has_select_for_update,
-    "Activity lifecycle race protection requires database row locking.",
-)
+@postgresql_only
 class ActivityLifecycleConcurrencyTests(TransactionTestCase):
     def test_stale_test_save_waits_for_formal_promotion_lock(self):
         activity = Activity.objects.create(

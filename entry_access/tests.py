@@ -1,6 +1,5 @@
 import hashlib
 from datetime import timedelta
-from unittest import skipUnless
 
 from common.authority import (
     ACCESS_GRANT_STATE,
@@ -17,7 +16,7 @@ from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import close_old_connections, connection
+from django.db import close_old_connections
 from django.test import (
     Client,
     RequestFactory,
@@ -29,6 +28,7 @@ from django.test import (
 from django.urls import NoReverseMatch, get_resolver, reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound
+from tests.helpers import postgresql_only
 
 from .models import AccessGrant, EntryPoint, EphemeralSession
 from .services import (
@@ -398,7 +398,7 @@ class EntryAccessRedemptionTests(TestCase):
             )
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class EntryAccessRedemptionConcurrencyTests(TransactionTestCase):
     reset_sequences = True
 

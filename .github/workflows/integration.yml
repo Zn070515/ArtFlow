@@ -2,7 +2,9 @@ name: PostgreSQL integration
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -88,21 +90,6 @@ jobs:
       - name: Prepare human acceptance account boundary
         run: uv run python manage.py prepare_human_acceptance_e2e --fresh-bootstrap
 
-      - name: Run focused Ticket and entitlement tests
-        run: >-
-          uv run python manage.py test
-          tickets
-          voting.test_ticket_authority
-          voting.test_ticket_submission
-          common.test_ticket_cleanup
-
-      - name: Run M2-C Judge authority focused gate
-        run: >-
-          uv run python manage.py test
-          singer_contest.test_judge_authority
-          singer_contest.test_judge_http
-          staff_panel.tests.JudgeControlHTTPTests
-
       - name: Pull pinned Caddy runtime test image
         shell: bash
         run: |
@@ -117,8 +104,8 @@ jobs:
           done
           exit 1
 
-      - name: Run full test suite
-        run: uv run pytest -q
+      - name: Run PostgreSQL-specific tests
+        run: uv run pytest -q -m postgresql --durations=30
 
   compose-smoke:
     name: Docker Compose PostgreSQL acceptance gate
@@ -321,9 +308,6 @@ jobs:
 
       - name: Prepare production startup test fixture
         run: docker compose exec -T --user root web sh -lc 'touch /app/.env && chown artflow:artflow /app/.env'
-
-      - name: Run Django test suite in web container
-        run: docker compose exec -T web python manage.py test
 
       - name: Verify application backup and restore without touching source volumes
         run: >-

@@ -1,6 +1,5 @@
 import threading
 from datetime import timedelta
-from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
@@ -9,6 +8,7 @@ from django.db import connection
 from django.test import TransactionTestCase
 from django.utils import timezone
 from singer_contest.models import SingerRegistration
+from tests.helpers import postgresql_only
 from tickets.models import TicketAccessSession
 from tickets.services import check_in_ticket, create_ticket, issue_ticket, redeem_ticket
 
@@ -16,7 +16,7 @@ from .models import VoteBallot, VoteOption, VoteSession
 from .services import open_vote_session, submit_ballot
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class TicketBallotConcurrencyTests(TransactionTestCase):
     reset_sequences = True
 

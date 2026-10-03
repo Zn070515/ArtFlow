@@ -31,7 +31,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 ```powershell
 pwsh -NoProfile -File scripts/verify.ps1
 ```
-涵盖：根开发 Compose 容器契约、显式 `deploy/compose.production.yml` 的生产契约与 `docker compose -f deploy/compose.production.yml config --quiet`（只验证配置，不启动或销毁生产服务）、CI workflow 契约、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q --cov`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。生产部署另需使用已导入的 digest-pinned 镜像并执行外部 HTTPS smoke。
+涵盖：根开发 Compose 容器契约、显式 `deploy/compose.production.yml` 的生产契约与 `docker compose -f deploy/compose.production.yml config --quiet`（只验证配置，不启动或销毁生产服务）、CI workflow 契约、`uv lock --check`、`ruff check .`、`ruff format --check .`、`mypy`、`manage.py check`、`makemigrations --check --dry-run`、`pytest -q -n auto --maxprocesses=4 --dist=loadscope --cov --durations=30`、`check_docs.ps1`、`export-requirements.ps1`、`manage.py check --deploy --fail-level WARNING`。生产部署另需使用已导入的 digest-pinned 镜像并执行外部 HTTPS smoke。
 
 ## 2. PostgreSQL 验收（自动化）
 

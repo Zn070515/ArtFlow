@@ -2,7 +2,6 @@ import shutil
 import tempfile
 import threading
 import time
-from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import ACTIVITY_STATE, authority_write
@@ -10,10 +9,11 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, connection, transaction
+from django.db import close_old_connections, transaction
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from files.models import MaterialCheck, SubmissionFile
+from tests.helpers import postgresql_only
 
 from .models import Program
 from .views import my_program_detail
@@ -136,7 +136,7 @@ class ProgramMaterialPurityTests(TestCase):
         self.assertIn("contact_phone", audit.old_value)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class ProgramLockOrderConcurrencyTests(TransactionTestCase):
     """O6: a Program edit must never land after the activity lock commits."""
 

@@ -6,7 +6,6 @@ from dataclasses import FrozenInstanceError
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, cast
-from unittest import skipUnless
 
 from accounts.models import User
 from common.authority import (
@@ -47,6 +46,7 @@ from files.services import review_material_check, store_submission_file
 from openpyxl import Workbook
 from ruleset.models import ContestRuleset, RulesetVersion
 from staff_panel.views import activity_material_requirements
+from tests.helpers import postgresql_only
 from voting.models import VoteSession
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
@@ -1825,7 +1825,7 @@ class RoundLockTOCTOUTests(TestCase):
         )
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class ActivityFirstLockConcurrencyTests(TransactionTestCase):
     """Concurrent M0-P races must never produce a state the lock order forbids."""
 
@@ -1912,7 +1912,7 @@ class ActivityFirstLockConcurrencyTests(TransactionTestCase):
         )
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
     """One idempotency command is serialized at the Activity → Round lock boundary."""
 
@@ -2079,7 +2079,7 @@ class RapidScoreReceiptConcurrencyTests(TransactionTestCase):
         self.assertEqual(sorted([self.round.score_version, other_round.score_version]), [0, 1])
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
     """M0-W: a no-SCORE phase commit must prevent prepare_round from landing."""
 
@@ -2162,7 +2162,7 @@ class PrepareRoundScoreAuthorityConcurrencyTests(TransactionTestCase):
         self.assertEqual(self.round.round_judges.count(), 0)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
     """M0-T: an Activity lock commit must block every activity-owned mutation.
 
@@ -2425,7 +2425,7 @@ class ActivityOwnedMutationBoundaryTests(TransactionTestCase):
         self.assertNotEqual(results.get("upload"), "deadlock", results)
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class RulesetActivityLockConcurrencyTests(TransactionTestCase):
     """R0 §44: ruleset edits/clones serialize on the Activity lock (M0 authority).
 
@@ -3307,7 +3307,7 @@ class ResultClosureServiceTests(TestCase):
         self.assertFalse(official_stage_award_queryset(self.activity).filter(pk=award.pk).exists())
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class ResultClosureConfirmationConcurrencyTests(TransactionTestCase):
     """The Activity lock makes concurrent confirmation a single authority event."""
 
@@ -5186,7 +5186,7 @@ class RapidEntryServiceTests(TestCase):
         self.assertEqual(stage.decisions.get().outcome_code, "direct")
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class RecomputeActivityResultConcurrencyTests(TransactionTestCase):
     """M1-R9 §二: concurrent recomputes of one activity are linearized by the Activity
     FOR UPDATE lock, so ``result_version`` is never minted twice (the DB unique is the
@@ -5787,7 +5787,7 @@ class ManualDecisionServiceTests(TestCase):
         self.assertTrue(saved.exists())
 
 
-@skipUnless(connection.vendor == "postgresql", "requires PostgreSQL row locks")
+@postgresql_only
 class ManualDecisionMutationConcurrencyTests(TransactionTestCase):
     """M1-R9 §三: a ManualDecision set racing a StageResult confirm is linearized by the
     Activity lock — exactly one committing order wins, so a CONFIRMED stage can never hold
