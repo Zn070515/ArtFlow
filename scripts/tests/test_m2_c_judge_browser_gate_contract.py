@@ -53,7 +53,7 @@ def test_judge_browser_fixture_cannot_run_in_production_or_print_grant():
 
 def test_shared_judge_browser_gate_covers_fixed_capacity_and_stable_entry():
     for marker in (
-        "shared judge entry assigns five terminals and rejects the sixth",
+        "shared judge entry assigns five terminals, survives HOLD, and rejects the sixth",
         "`/e/${fixture.public_code}/judge/`",
         "评委终端已就绪。",
         "评委会话无效或已过期，请重新扫描现场二维码。",
