@@ -31,6 +31,10 @@ for required_variable in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HO
 done
 
 /app/scripts/wait-for-postgres.sh
+# The full system-check set is a startup gate. It used to sit on the 10 s health
+# probe; running it once here keeps the deployment gate without paying for it on
+# every heartbeat.
+python manage.py check
 python manage.py migrate --noinput
 python manage.py seed_ruleset_templates
 python manage.py collectstatic --noinput

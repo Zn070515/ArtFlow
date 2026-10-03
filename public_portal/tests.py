@@ -21,14 +21,16 @@ from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import StageResult
 from voting.models import VoteSession
 
+from .live_state import clear_live_state_cache
 from .models import PublicMedia, PublicPost, ResultRelease
 
 
@@ -56,8 +58,100 @@ def _close_file_response_resources(response):
     closers.clear()
 
 
+class LiveStateSharedCacheTests(TestCase):
+    """The shared live-state half is memoised per process; personal state never is."""
+
+    def setUp(self):
+        clear_live_state_cache()
+        self.addCleanup(clear_live_state_cache)
+        with authority_write(ACTIVITY_STATE):
+            self.formal = Activity.objects.create(
+                title="Live cache activity",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.LIVE,
+                is_test_mode=False,
+            )
+            self.other = Activity.objects.create(
+                title="Live cache sibling",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.LIVE,
+                is_test_mode=False,
+            )
+        self.url = reverse("public_portal:activity_live_state", args=[self.formal.public_code])
+
+    def _live_state_queries(self, url=None):
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(url or self.url)
+        self.assertEqual(response.status_code, 200)
+        return response, sum(
+            1 for query in captured.captured_queries if "PUBLICPOST" in query["sql"].upper()
+        )
+
+    def test_shared_state_is_recomputed_only_once_per_ttl(self):
+        _, first = self._live_state_queries()
+
+        _, second = self._live_state_queries()
+
+        self.assertGreater(first, 0)
+        self.assertEqual(second, 0)
+
+    def test_shared_state_is_recomputed_when_the_memo_is_disabled(self):
+        with override_settings(LIVE_STATE_CACHE_SECONDS=0):
+            _, first = self._live_state_queries()
+            _, second = self._live_state_queries()
+
+        self.assertGreater(first, 0)
+        self.assertGreater(second, 0)
+
+    def test_two_activities_keep_distinct_memo_entries(self):
+        sibling_url = reverse("public_portal:activity_live_state", args=[self.other.public_code])
+        now = timezone.now()
+        vote_session = VoteSession.objects.create(
+            activity=self.formal,
+            name="Formal vote",
+            start_time=now - timedelta(minutes=1),
+            end_time=now + timedelta(minutes=10),
+        )
+        with authority_write(VOTE_SESSION_STATE):
+            vote_session.is_open = True
+            vote_session.save(update_fields=["is_open"])
+
+        with override_settings(LIVE_STATE_CACHE_SECONDS=0):
+            formal, _ = self._live_state_queries()
+            sibling, _ = self._live_state_queries(sibling_url)
+
+        self.assertEqual(formal.json()["vote_name"], "Formal vote")
+        self.assertEqual(sibling.json()["vote_name"], "")
+        self.assertEqual(sibling.json()["state"], "waiting")
+
+        # Each activity memoises on its own key: once warmed under the default
+        # TTL, a repeat request for either one is a cache hit.
+        self._live_state_queries()
+        self._live_state_queries(sibling_url)
+        _, formal_queries = self._live_state_queries()
+        _, sibling_queries = self._live_state_queries(sibling_url)
+
+        self.assertEqual(formal_queries, 0)
+        self.assertEqual(sibling_queries, 0)
+
+    @patch("public_portal.views.authenticate_ticket_session_readonly")
+    def test_personal_ticket_state_is_never_served_from_the_shared_memo(self, authenticate):
+        self.client.cookies["artflow_ticket_session"] = "ticket-session"
+        authenticate.return_value = SimpleNamespace(ticket=SimpleNamespace(state="checked_in"))
+
+        first, _ = self._live_state_queries()
+        authenticate.side_effect = ValidationError("revoked")
+        second, _ = self._live_state_queries()
+
+        self.assertEqual(first.json()["ticket_status"], "checked_in")
+        self.assertEqual(second.json()["ticket_status"], "unrecognized")
+        self.assertEqual(first.json()["state"], second.json()["state"])
+
+
 class StableActivityEntryTests(TestCase):
     def setUp(self):
+        clear_live_state_cache()
+        self.addCleanup(clear_live_state_cache)
         with authority_write(ACTIVITY_STATE):
             self.formal = Activity.objects.create(
                 title="Stable Contest",
@@ -150,6 +244,7 @@ class StableActivityEntryTests(TestCase):
             live_url, reverse("public_portal:activity_live", args=[self.formal.public_code])
         )
 
+    @override_settings(LIVE_STATE_CACHE_SECONDS=0)
     def test_live_state_uses_shared_vote_state_and_no_store(self):
         live_state_url = reverse(
             "public_portal:activity_live_state", args=[self.formal.public_code]
@@ -185,7 +280,7 @@ class StableActivityEntryTests(TestCase):
         ended = self.client.get(live_state_url)
         self.assertEqual(ended.json()["state"], "ended")
 
-    @patch("public_portal.views.authenticate_ticket_session")
+    @patch("public_portal.views.authenticate_ticket_session_readonly")
     def test_live_surface_explains_ticket_qualification_state(self, authenticate):
         self.client.cookies["artflow_ticket_session"] = "ticket-session"
         authenticate.return_value = SimpleNamespace(ticket=SimpleNamespace(state="issued"))

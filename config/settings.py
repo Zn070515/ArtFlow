@@ -24,6 +24,8 @@ class DatabaseSettings(TypedDict, total=False):
     PASSWORD: str
     HOST: str
     PORT: str
+    CONN_MAX_AGE: int
+    CONN_HEALTH_CHECKS: bool
     TEST: dict[str, str]
 
 
@@ -132,6 +134,13 @@ if DATABASE_ENGINE == "postgresql":
             "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
             "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
             "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            # Three sync Gunicorn workers would otherwise open and close a
+            # connection per request. 60 s is a deliberately conservative reuse
+            # window that still costs at most one connection per worker, and the
+            # health check revalidates it so a database restart cannot hand a
+            # request a dead socket.
+            "CONN_MAX_AGE": get_int(os.environ, "POSTGRES_CONN_MAX_AGE", 60),
+            "CONN_HEALTH_CHECKS": True,
         }
     }
 elif DATABASE_ENGINE == "sqlite":
@@ -200,6 +209,21 @@ ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS = get_int(
 ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 256)
 ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 365)
 
+# How long (seconds) one worker may memoise the activity-wide half of the live
+# state payload before recomputing it. The shared half is identical for every
+# viewer of an activity, so a one-second window collapses a polling wave without
+# making a staff action feel stale. 0 disables the memo entirely.
+LIVE_STATE_CACHE_SECONDS = get_int(os.environ, "LIVE_STATE_CACHE_SECONDS", 1)
+
+# How authorized media bytes reach the client. Django currently streams them
+# itself; an object-storage backend that answers with a short-lived signed
+# redirect lands when media moves off the application server. Only implemented
+# names are accepted, so a typo fails at startup instead of on the first private
+# download. Django keeps the authorization decision in every case.
+ARTFLOW_DELIVERY_BACKEND = os.environ.get("ARTFLOW_DELIVERY_BACKEND", "local").strip().lower()
+if ARTFLOW_DELIVERY_BACKEND != "local":
+    raise ImproperlyConfigured("ARTFLOW_DELIVERY_BACKEND must be local.")
+
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_ACCESS_KEY on sensitive actions.
 ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 15 * 60)
@@ -213,7 +237,9 @@ TICKET_ACCESS_SESSION_TTL_SECONDS = get_int(
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SECURE_SSL_REDIRECT = APP_ENV == "production"
-SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+# The container, proxy and deploy-script probes speak plain HTTP over the
+# internal network, so every probe route must skip the HTTPS redirect.
+SECURE_REDIRECT_EXEMPT = [r"^livez/$", r"^readyz/$", r"^healthz/$"]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if APP_ENV == "production" else None
 SESSION_COOKIE_SECURE = APP_ENV == "production"
 SESSION_COOKIE_HTTPONLY = True

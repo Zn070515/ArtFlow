@@ -70,12 +70,12 @@ from common.management.commands.verify_app_backup import validate_counts, verify
 
 from . import models as common_models
 from .business_rules import ensure_same_activity
+from .delivery import _local_file_response as _media_file_response
 from .lifecycle import runtime_is_test, scope_lifecycle, scope_runtime
 from .maintenance import WriteBarrierBusy, write_barrier
 from .management.commands.seed_demo_data import Command as SeedDemoDataCommand
 from .models import AuditLog, MaintenanceState, SeedRecord
 from .test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
-from .views import _media_file_response
 
 DOCTOR_SECRET_KEY_SENTINEL = "doctor-secret-key-sentinel"
 DOCTOR_ADMIN_ACCESS_KEY_SENTINEL = "doctor-admin-access-key-sentinel"

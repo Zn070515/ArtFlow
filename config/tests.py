@@ -7,10 +7,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from django.core.checks import Error
 from django.core.exceptions import ImproperlyConfigured
 from django.db import DatabaseError, connections
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
+
+from config import health as health_module
 
 DEVELOPMENT_SECRET_KEY = "django-insecure-dev-only-change-me"
 
@@ -190,17 +191,6 @@ class HealthEndpointTests(TestCase):
         self.assertEqual(response.json(), {"status": "unavailable"})
         self.assertEqual(response["Allow"], "GET")
 
-    def test_healthz_returns_generic_unavailable_response_for_configuration_errors(self):
-        with patch(
-            "config.health.run_checks",
-            return_value=[Error("Configuration rejected: configuration-secret", id="config.E001")],
-        ):
-            response = self.client.get("/healthz/")
-
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json(), {"status": "unavailable"})
-        self.assertNotIn("configuration-secret", response.content.decode())
-
     def test_healthz_returns_generic_unavailable_response_for_database_errors(self):
         with patch.object(
             connections["default"],
@@ -212,6 +202,69 @@ class HealthEndpointTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"status": "unavailable"})
         self.assertNotIn("database-secret", response.content.decode())
+
+    def test_livez_reports_liveness_even_when_the_database_is_unreachable(self):
+        with patch.object(
+            connections["default"],
+            "ensure_connection",
+            side_effect=DatabaseError("database-secret"),
+        ):
+            response = self.client.get("/livez/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "alive"})
+        self.assertNotIn("database-secret", response.content.decode())
+
+    def test_livez_rejects_non_get_requests(self):
+        response = self.client.post("/livez/")
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertEqual(response["Allow"], "GET")
+
+    def test_readyz_reports_a_reachable_database(self):
+        response = self.client.get("/readyz/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_readyz_is_unavailable_when_the_database_is_unreachable(self):
+        with patch.object(
+            connections["default"],
+            "ensure_connection",
+            side_effect=DatabaseError("database-secret"),
+        ):
+            response = self.client.get("/readyz/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertNotIn("database-secret", response.content.decode())
+
+    def test_readyz_rejects_non_get_requests(self):
+        response = self.client.post("/readyz/")
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        self.assertEqual(response["Allow"], "GET")
+
+    def test_probes_never_run_the_full_system_check_set(self):
+        # run_checks() belongs to startup, doctor and the deployment gate. The
+        # probes are polled every 10-15 s, so the set must not be reachable from
+        # any of them; create=True keeps the assertion honest if the import ever
+        # comes back.
+        with patch.object(
+            health_module,
+            "run_checks",
+            create=True,
+            side_effect=AssertionError("system checks belong to startup"),
+        ):
+            responses = [
+                self.client.get("/livez/"),
+                self.client.get("/readyz/"),
+                self.client.get("/healthz/"),
+            ]
+
+        self.assertEqual([response.status_code for response in responses], [200, 200, 200])
 
 
 class SettingsTests(SimpleTestCase):
@@ -236,6 +289,27 @@ class SettingsTests(SimpleTestCase):
         self.assertEqual(
             settings_module.DATABASES["default"]["ENGINE"], "django.db.backends.sqlite3"
         )
+
+    def test_production_postgresql_reuses_connections_with_health_checks(self):
+        settings_module = self.reload_settings(production_environment())
+        default = settings_module.DATABASES["default"]
+
+        self.assertEqual(default["ENGINE"], "django.db.backends.postgresql")
+        self.assertEqual(default["CONN_MAX_AGE"], 60)
+        self.assertTrue(default["CONN_HEALTH_CHECKS"])
+
+    def test_postgresql_connection_reuse_is_configurable(self):
+        settings_module = self.reload_settings(
+            {**production_environment(), "POSTGRES_CONN_MAX_AGE": "0"}
+        )
+
+        self.assertEqual(settings_module.DATABASES["default"]["CONN_MAX_AGE"], 0)
+
+    def test_sqlite_keeps_the_django_default_connection_lifecycle(self):
+        default = self.reload_settings({"APP_ENV": "development"}).DATABASES["default"]
+
+        self.assertNotIn("CONN_MAX_AGE", default)
+        self.assertNotIn("CONN_HEALTH_CHECKS", default)
 
     def test_rate_limit_backend_is_locmem_outside_production_and_database_in_production(self):
         development_backend = self.reload_settings({"APP_ENV": "development"}).RATE_LIMIT_BACKEND
@@ -262,6 +336,15 @@ class SettingsTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             self.reload_settings({"APP_ENV": "test", "DATABASE_ENGINE": "not-a-database"})
 
+    def test_delivery_backend_defaults_to_local(self):
+        settings_module = self.reload_settings(production_environment())
+
+        self.assertEqual(settings_module.ARTFLOW_DELIVERY_BACKEND, "local")
+
+    def test_delivery_backend_rejects_an_unimplemented_name(self):
+        with self.assertRaises(ImproperlyConfigured):
+            self.reload_settings({"APP_ENV": "development", "ARTFLOW_DELIVERY_BACKEND": "oss"})
+
     def test_static_directory_exists_for_staticfiles_validation(self):
         from django.conf import settings
 
@@ -285,7 +368,10 @@ class SettingsTests(SimpleTestCase):
 
         self.assertFalse(settings_module.DEBUG)
         self.assertTrue(settings_module.SECURE_SSL_REDIRECT)
-        self.assertIn(r"^healthz/$", settings_module.SECURE_REDIRECT_EXEMPT)
+        self.assertEqual(
+            settings_module.SECURE_REDIRECT_EXEMPT,
+            [r"^livez/$", r"^readyz/$", r"^healthz/$"],
+        )
         self.assertEqual(
             settings_module.SECURE_PROXY_SSL_HEADER, ("HTTP_X_FORWARDED_PROTO", "https")
         )
@@ -295,16 +381,22 @@ class SettingsTests(SimpleTestCase):
         self.assertFalse(settings_module.SECURE_HSTS_INCLUDE_SUBDOMAINS)
         self.assertFalse(settings_module.SECURE_HSTS_PRELOAD)
 
-    def test_https_redirect_exempts_healthz_but_not_public_pages(self):
+    def test_https_redirect_exempts_every_probe_route_but_not_public_pages(self):
         with (
-            override_settings(SECURE_SSL_REDIRECT=True, SECURE_REDIRECT_EXEMPT=[r"^healthz/$"]),
-            patch("config.health.run_checks", return_value=[]),
+            override_settings(
+                SECURE_SSL_REDIRECT=True,
+                SECURE_REDIRECT_EXEMPT=[r"^livez/$", r"^readyz/$", r"^healthz/$"],
+            ),
             patch.object(connections["default"], "ensure_connection", return_value=None),
         ):
-            health_response = self.client.get("/healthz/")
+            probe_responses = [
+                self.client.get("/livez/"),
+                self.client.get("/readyz/"),
+                self.client.get("/healthz/"),
+            ]
             public_response = self.client.get("/")
 
-        self.assertEqual(health_response.status_code, 200)
+        self.assertEqual([response.status_code for response in probe_responses], [200, 200, 200])
         self.assertEqual(public_response.status_code, 301)
         self.assertTrue(public_response["Location"].startswith("https://"))
 

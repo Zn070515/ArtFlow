@@ -1,24 +1,14 @@
-import os
 from pathlib import Path
 
 from archive.models import ArchivePackage
-from django.conf import settings
 from django.core.exceptions import PermissionDenied
-from django.http import FileResponse, Http404
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from exports.models import ExportTask, GeneratedDocument
 from files.models import SubmissionFile
 from public_portal.models import PublicMedia, PublicPost
 
-
-def _media_file_response(relative_path, download_name=None):
-    media_root = os.path.realpath(settings.MEDIA_ROOT)
-    full_path = os.path.realpath(os.path.join(media_root, relative_path))
-    if not full_path.startswith(f"{media_root}{os.sep}"):
-        raise Http404("Invalid media path.")
-    if not os.path.isfile(full_path):
-        raise Http404("Media file not found.")
-    return FileResponse(open(full_path, "rb"), as_attachment=False, filename=download_name)
+from .delivery import get_delivery_backend
 
 
 def _can_access_submission_file(user, submission_file):
@@ -36,7 +26,14 @@ def _can_access_submission_file(user, submission_file):
 
 
 def controlled_media(request, path):
+    """Authorize a media path, then hand delivery to the configured backend.
+
+    Authorization stays here and always runs before any byte is produced: the
+    delivery backend is only ever reached for a path this function has already
+    approved for this caller.
+    """
     relative_path = Path(path).as_posix()
+    backend = get_delivery_backend()
     public_posts = PublicPost.published_public()
 
     submission_file = (
@@ -47,23 +44,25 @@ def controlled_media(request, path):
     if submission_file:
         if not _can_access_submission_file(request.user, submission_file):
             raise PermissionDenied("You do not have access to this file.")
-        return _media_file_response(relative_path, submission_file.original_name)
+        return backend.deliver(relative_path, download_name=submission_file.original_name)
 
     if public_posts.filter(cover_image=relative_path).exists():
-        return _media_file_response(relative_path)
+        return backend.deliver(relative_path)
 
     if PublicMedia.objects.filter(
         image=relative_path,
         is_published=True,
         post__in=public_posts,
     ).exists():
-        return _media_file_response(relative_path)
+        return backend.deliver(relative_path)
 
     if GeneratedDocument.objects.filter(file=relative_path).exists():
         if not request.user.is_authenticated or not request.user.is_staff_or_admin:
             raise PermissionDenied("Generated documents are staff-only.")
         document = get_object_or_404(GeneratedDocument, file=relative_path)
-        return _media_file_response(relative_path, Path(document.file.name or relative_path).name)
+        return backend.deliver(
+            relative_path, download_name=Path(document.file.name or relative_path).name
+        )
 
     if (
         ExportTask.objects.filter(file=relative_path).exists()
@@ -71,6 +70,6 @@ def controlled_media(request, path):
     ):
         if not request.user.is_authenticated or not request.user.is_staff_or_admin:
             raise PermissionDenied("Export files are staff-only.")
-        return _media_file_response(relative_path)
+        return backend.deliver(relative_path)
 
     raise Http404("Media file not registered.")

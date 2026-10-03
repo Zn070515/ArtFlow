@@ -60,7 +60,8 @@ Run diagnostics without mutating data:
 
 ```powershell
 uv run python manage.py doctor
-Invoke-WebRequest http://127.0.0.1:8000/healthz/
+Invoke-WebRequest http://127.0.0.1:8000/livez/
+Invoke-WebRequest http://127.0.0.1:8000/readyz/
 ```
 
 `doctor` checks loaded configuration, database connectivity, unapplied migrations,
@@ -70,8 +71,23 @@ static/media directories, non-secret access-key readiness, and the non-secret fi
 failure. When the database is healthy it also reports Ticket row and stale
 access-session counts; if the database check fails it does not query Ticket
 tables again. It returns nonzero for failures and does not print secrets or a
-complete database URL. `/healthz/` accepts only `GET`; it returns a minimal
-`ok` or generic unavailable status and is safe for container health checks.
+complete database URL.
+
+Health probes are split by what they actually observe, and all three accept only
+`GET` and answer with a minimal body:
+
+| Route | Meaning | Body |
+|---|---|---|
+| `/livez/` | The application process answered. No database call, no system checks. | `{"status": "alive"}` |
+| `/readyz/` | The default database connection is reachable. | `{"status": "ok"}` or generic unavailable |
+| `/healthz/` | Readiness under its historical name; kept because the container, Caddy and CI probes already point at it. | same as `/readyz/` |
+
+Django's full system-check set is a startup gate, not a heartbeat: it runs in
+`manage.py check` (also executed by `scripts/docker-entrypoint.sh` before
+migrations), in `doctor`, and in the deployment gate. The application container's
+liveness probe uses `/livez/` so a temporary database outage cannot mark a
+running process dead; database readiness is still covered by the Caddy proxy
+probe, which reaches `/healthz/` through the real request path.
 Event and production launchers pass `doctor --require-access-keys`, which turns
 missing or placeholder `STAFF_ACCESS_KEY` / `ADMIN_ACCESS_KEY` into a
 configuration failure. After rotating either key, run
@@ -110,6 +126,31 @@ pwsh -NoProfile -File scripts\verify_postgres_acceptance.ps1 -StartCompose -Veri
 ```
 
 `-StartCompose` explicitly performs `docker compose up --build --wait`; without it, the script requires an already running Compose `web` service. The contract runs migrations, `doctor`, a health request, idempotent demo seeding, the opt-in demo reset check, and Django's full `manage.py test` suite inside the `web` container. The image intentionally installs only the production extra, so this gate uses Django's built-in test runner rather than host `pytest`. It never stops services or removes volumes. Use `docker compose down --volumes` separately—and only when intentionally discarding local PostgreSQL, static, and media data.
+
+### Ballot burst benchmark
+
+`voting.services.submit_ballot` deliberately serializes: it takes the Activity
+authority lock, then the VoteSession row lock, then the ticket locks. Do not
+change that protocol on a hunch. Measure it first:
+
+```powershell
+uv run python manage.py benchmark_ballot_burst --vote-session <pk> --clients 300 --duration 10
+```
+
+The command drives the real service entry point from N threads, releases each
+client's single ballot across `--duration` seconds, and reports throughput,
+success/failure counts with reasons, p50/p95/p99 latency, PostgreSQL peak
+connection and blocked-lock counts, deadlocks, and transaction growth. It also
+re-checks that accepted ballots equal new ballot rows and that records match, so
+a "fast" run that lost votes fails loudly.
+
+It refuses a non-test activity (a burst writes real ballots), refuses SQLite
+unless `--allow-sqlite` is passed (row-lock waits there are not representative),
+and tags every row it creates as test data. Compare 100/200/300 clients before
+and after any change; only adopt a protocol change when the numbers show lock
+waits are the bottleneck, and never bypass the integrity or authority contracts
+to do it. The measured 100/200/300 baselines and their limits are recorded in
+[production readiness](production-readiness.md#2026-10-04-p1-8-投票-burst-量化记录).
 
 ## CI and local gates
 

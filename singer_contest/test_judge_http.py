@@ -21,7 +21,7 @@ class JudgeRouteContractTests(TestCase):
         self.assertEqual(response.json()["reason_code"], "INVALID_JUDGE_SESSION")
         self.assertEqual(response["Cache-Control"], "no-store")
 
-    @patch("singer_contest.judge_views.get_judge_context")
+    @patch("singer_contest.judge_views.get_judge_context_readonly")
     def test_context_returns_server_owned_display_and_criterion_fields(self, context_mock):
         context_mock.return_value = JudgeContext(
             activity_id=1,
@@ -133,7 +133,7 @@ class JudgeRouteContractTests(TestCase):
         self.assertEqual(response["Retry-After"], "17")
         allow_mock.assert_called_once()
 
-    @patch("singer_contest.judge_views.get_judge_context")
+    @patch("singer_contest.judge_views.get_judge_context_readonly")
     @patch("singer_contest.judge_views.allow")
     def test_context_rate_limit_separates_same_ip_judge_sessions(self, allow_mock, context_mock):
         allow_mock.return_value.allowed = True

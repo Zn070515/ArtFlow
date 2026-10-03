@@ -140,7 +140,13 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 
 ## 健康检查与大小/超时
 
-- 健康检查使用匿名 `GET /healthz/`，只返回通用状态，不泄露配置细节。
+- 健康检查按观察对象拆分为三个匿名 `GET` 路由，都只返回通用状态，不泄露配置细节：
+  `/livez/`（进程存活，不查数据库、不跑 system checks）、`/readyz/`（默认数据库连接可用）、
+  `/healthz/`（readiness 的历史别名，容器/Caddy/CI 探针沿用）。
+- 应用容器的 liveness 探针使用 `/livez/`，因此临时数据库故障不会把运行中的进程判死；
+  数据库 readiness 仍由 Caddy 代理探针经真实请求路径访问 `/healthz/` 覆盖。
+  完整 Django system checks 属于启动阶段（`manage.py check`，容器入口在 migrate 前执行）、
+  `doctor` 和部署 gate，不再每 10~15 秒随探针运行。
 - 上传最大值按用途在 `files/services.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB）。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
 - 生产 Caddy manifest 固定 `request_body max_size 120MB`；现场/event profile 才可使用更高的本地上限。应用层还会执行用途上限、文件 magic/container 校验、每报名配额、版本保留、上传限流和磁盘低水位检查。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
 - 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。

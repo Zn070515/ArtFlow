@@ -18,6 +18,9 @@ htmlcov/
 *.log
 local_settings.py
 db.sqlite3
+# File-backed test database (settings.DATABASES["default"]["TEST"]), plus its
+# journal/wal siblings. Never commit a SQLite database.
+test_db.sqlite3*
 media/
 staticfiles/
 

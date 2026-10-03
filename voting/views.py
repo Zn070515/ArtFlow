@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 from tickets.models import Ticket
-from tickets.services import authenticate_ticket_session
+from tickets.services import authenticate_ticket_session_readonly
 
 from .models import VoteBallot, VoteSession
 from .policies import vote_ui_state
@@ -21,7 +21,7 @@ def _ticket_session_for_request(request, vote_session):
     if not raw_token:
         return None
     try:
-        session = authenticate_ticket_session(raw_token, activity=vote_session.activity)
+        session = authenticate_ticket_session_readonly(raw_token, activity=vote_session.activity)
     except ValidationError:
         return None
     if session.ticket.state != Ticket.State.CHECKED_IN:

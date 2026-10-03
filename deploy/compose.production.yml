@@ -51,13 +51,16 @@ services:
       - static_data:/app/staticfiles
       - media_data:/app/media
       - backup_data:/app/backups
+    # Liveness only: a temporary database outage must not get the application
+    # container declared dead. Database readiness is covered by the proxy probe
+    # below, which reaches the app through the real request path.
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/healthz/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
         ]
       interval: 10s
       timeout: 5s

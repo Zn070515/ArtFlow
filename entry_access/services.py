@@ -11,10 +11,11 @@ from common.authority import (
     EPHEMERAL_SESSION_STATE,
     authority_write,
 )
+from common.heartbeat import HEARTBEAT_INTERVAL
 from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from singer_contest.models import ContestRound
 
@@ -204,6 +205,57 @@ def authenticate_ephemeral_session(raw_token, *, expected_kind, activity, round=
         with authority_write(EPHEMERAL_SESSION_STATE):
             session.save(update_fields=["last_seen_at"])
         return session
+
+
+def resolve_ephemeral_session_readonly(raw_token) -> EphemeralSession:
+    """Resolve a live ephemeral session with one ordinary indexed SELECT.
+
+    No ``select_for_update`` and no write: callers that only need to *read* the
+    session scope must not turn a GET into a locking write transaction.
+    """
+    _validate_raw_token(raw_token, "临时访问会话无效。")
+    session = (
+        EphemeralSession.objects.select_related("grant", "activity", "round")
+        .filter(token_digest=_token_digest(raw_token))
+        .first()
+    )
+    if session is None or session.revoked_at is not None or session.expires_at <= timezone.now():
+        raise ValidationError("临时访问会话无效。")
+    return session
+
+
+def authenticate_ephemeral_session_readonly(
+    raw_token, *, expected_kind, activity=None, round=None
+) -> EphemeralSession:
+    """Read-only analogue of :func:`authenticate_ephemeral_session`.
+
+    ``activity``/``round`` narrow the session scope when supplied; callers that
+    already resolved the scope from the session itself may omit them and validate
+    it against the returned row. The heartbeat is throttled and best-effort.
+    """
+    session = resolve_ephemeral_session_readonly(raw_token)
+    if session.kind != expected_kind:
+        raise ValidationError("临时访问会话无效。")
+    if activity is not None and session.activity_id != getattr(activity, "pk", activity):
+        raise ValidationError("临时访问会话无效。")
+    if round is not None and session.round_id != getattr(round, "pk", round):
+        raise ValidationError("临时访问会话无效。")
+    heartbeat_ephemeral_session(session)
+    return session
+
+
+def heartbeat_ephemeral_session(session: EphemeralSession, *, now=None) -> None:
+    """Best-effort, throttled ``last_seen_at`` refresh for read-only polling."""
+    moment = now or timezone.now()
+    last_seen = session.last_seen_at
+    if last_seen is not None and moment - last_seen < HEARTBEAT_INTERVAL:
+        return
+    try:
+        with transaction.atomic(), authority_write(EPHEMERAL_SESSION_STATE):
+            EphemeralSession.objects.filter(pk=session.pk).update(last_seen_at=moment)
+    except DatabaseError:
+        return
+    session.last_seen_at = moment
 
 
 def _normalize_revoke_note(note):

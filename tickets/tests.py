@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 from accounts.services import mark_admin_verified
 from common.authority import ACCOUNT_AUTHORITY, authority_write
@@ -12,7 +13,10 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import connection
+from django.db.models.query import QuerySet
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -459,7 +463,7 @@ class TicketLifecycleServiceTests(TestCase):
         create_ticket = self._service("create_ticket")
         issue_ticket = self._service("issue_ticket")
         redeem_ticket = self._service("redeem_ticket")
-        authenticate = self._service("authenticate_ticket_session")
+        authenticate = self._service("authenticate_ticket_session_for_mutation")
         revoke_session = self._service("revoke_ticket_session")
         issued = issue_ticket(
             create_ticket(self.activity, actor=self.staff, serial_number="0007"),
@@ -478,6 +482,79 @@ class TicketLifecycleServiceTests(TestCase):
         revoke_session(redeemed.session, actor=self.staff)
         with self.assertRaises(ValidationError):
             authenticate(redeemed.token, activity=self.activity)
+
+    def test_readonly_authentication_reads_without_locking_or_writing(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        redeem_ticket = self._service("redeem_ticket")
+        authenticate_readonly = self._service("authenticate_ticket_session_readonly")
+        Session = ticket_session_model(self)
+        issued = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0008"),
+            actor=self.staff,
+        )
+        redeemed = redeem_ticket(issued.secret, request_meta=None)
+        # First contact may stamp last_seen_at once; steady-state polling may not.
+        authenticate_readonly(redeemed.token, activity=self.activity)
+        stored_seen = Session.objects.get(pk=redeemed.session.pk).last_seen_at
+        self.assertIsNotNone(stored_seen)
+
+        with (
+            patch.object(
+                QuerySet,
+                "select_for_update",
+                side_effect=AssertionError("read-only polling must not take a row lock"),
+            ),
+            CaptureQueriesContext(connection) as captured,
+        ):
+            sessions = [
+                authenticate_readonly(redeemed.token, activity=self.activity) for _ in range(25)
+            ]
+
+        statements = [query["sql"].lstrip().upper() for query in captured.captured_queries]
+        self.assertEqual(
+            [statement for statement in statements if statement.startswith("UPDATE")], []
+        )
+        self.assertEqual(Session.objects.get(pk=redeemed.session.pk).last_seen_at, stored_seen)
+        self.assertEqual({session.pk for session in sessions}, {redeemed.session.pk})
+
+    def test_readonly_authentication_refreshes_the_heartbeat_only_after_the_throttle(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        redeem_ticket = self._service("redeem_ticket")
+        authenticate_readonly = self._service("authenticate_ticket_session_readonly")
+        Session = ticket_session_model(self)
+        issued = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0010"),
+            actor=self.staff,
+        )
+        redeemed = redeem_ticket(issued.secret, request_meta=None)
+        stale = timezone.now() - timedelta(seconds=61)
+        with authority_write(TICKET_SESSION_STATE_SCOPE):
+            Session.objects.filter(pk=redeemed.session.pk).update(last_seen_at=stale)
+
+        authenticate_readonly(redeemed.token, activity=self.activity)
+
+        self.assertGreater(Session.objects.get(pk=redeemed.session.pk).last_seen_at, stale)
+
+    def test_readonly_authentication_keeps_revoke_and_scope_rules(self):
+        create_ticket = self._service("create_ticket")
+        issue_ticket = self._service("issue_ticket")
+        redeem_ticket = self._service("redeem_ticket")
+        authenticate_readonly = self._service("authenticate_ticket_session_readonly")
+        revoke_session = self._service("revoke_ticket_session")
+        issued = issue_ticket(
+            create_ticket(self.activity, actor=self.staff, serial_number="0009"),
+            actor=self.staff,
+        )
+        redeemed = redeem_ticket(issued.secret, request_meta=None)
+
+        with self.assertRaises(ValidationError):
+            authenticate_readonly("unknown-ticket-session", activity=self.activity)
+
+        revoke_session(redeemed.session, actor=self.staff)
+        with self.assertRaises(ValidationError):
+            authenticate_readonly(redeemed.token, activity=self.activity)
 
     def test_unknown_credentials_are_generic_and_do_not_create_rows(self):
         redeem_ticket = self._service("redeem_ticket")

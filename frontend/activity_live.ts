@@ -12,8 +12,45 @@
   const voteLabel = root.querySelector<HTMLElement>("[data-live-vote-label]");
   const voteLink = root.querySelector<HTMLAnchorElement>("[data-live-vote-link]");
   const ticketStatus = root.querySelector<HTMLElement>("[data-live-ticket-status]");
+
+  // A fixed 2.5 s cadence made every open page poll in lockstep, so a whole
+  // audience arrives as one spike. Jitter spreads the wave; the failure ladder
+  // and the hidden-tab interval keep a struggling or backgrounded client from
+  // spending the server's capacity on polls nobody is reading.
+  const NORMAL_MIN_MS = 2200;
+  const NORMAL_MAX_MS = 2800;
+  const HIDDEN_MIN_MS = 10000;
+  const HIDDEN_MAX_MS = 15000;
+  const FAILURE_DELAYS_MS: readonly number[] = [2500, 5000, 8000, 10000];
+  const MAX_FAILURE_DELAY_MS = 10000;
+
   let revision = "";
   let timer: number | undefined;
+  let stopped = false;
+  let pollInFlight = false;
+  let failureCount = 0;
+
+  function jitter(min: number, max: number): number {
+    return min + Math.random() * (max - min);
+  }
+
+  function nextDelay(): number {
+    if (document.hidden) return jitter(HIDDEN_MIN_MS, HIDDEN_MAX_MS);
+    if (failureCount > 0) {
+      return FAILURE_DELAYS_MS[Math.min(failureCount, FAILURE_DELAYS_MS.length) - 1]
+        ?? MAX_FAILURE_DELAY_MS;
+    }
+    return jitter(NORMAL_MIN_MS, NORMAL_MAX_MS);
+  }
+
+  function schedule(): void {
+    if (stopped) return;
+    if (timer !== undefined) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = undefined;
+      void poll();
+    }, nextDelay());
+  }
 
   function render(payload: unknown): void {
     if (!payload || typeof payload !== "object") return;
@@ -46,24 +83,50 @@
   }
 
   async function poll(): Promise<void> {
+    if (stopped || pollInFlight) return;
+    pollInFlight = true;
     try {
       const response = await fetch(endpoint, { credentials: "same-origin", cache: "no-store" });
-      if (response.ok) {
-        const payload = await response.json() as { revision?: unknown };
-        if (typeof payload.revision === "string" && payload.revision !== revision) {
-          revision = payload.revision;
-          render(payload);
-        }
+      if (!response.ok) {
+        failureCount += 1;
+        return;
       }
+      const payload = await response.json() as { revision?: unknown };
+      if (typeof payload.revision === "string" && payload.revision !== revision) {
+        revision = payload.revision;
+        render(payload);
+      }
+      failureCount = 0;
     } catch {
-      // Keep the server-rendered state while the next poll retries.
+      // Keep the server-rendered state and retry on the failure ladder.
+      failureCount += 1;
     } finally {
-      timer = window.setTimeout(() => void poll(), 2500);
+      pollInFlight = false;
+      schedule();
     }
   }
 
-  void poll();
-  window.addEventListener("beforeunload", () => {
-    if (timer !== undefined) window.clearTimeout(timer);
+  document.addEventListener("visibilitychange", () => {
+    if (stopped) return;
+    if (document.hidden) {
+      schedule();
+      return;
+    }
+    // Back in view: refresh now instead of waiting out the hidden interval.
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timer = undefined;
+    }
+    void poll();
   });
+
+  window.addEventListener("beforeunload", () => {
+    stopped = true;
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timer = undefined;
+    }
+  });
+
+  void poll();
 })();

@@ -22,17 +22,19 @@ from common.authority import (
     SCORE_FACT_WRITE,
     authority_write,
 )
+from common.heartbeat import HEARTBEAT_INTERVAL
 from common.models import AuditLog
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
 from entry_access.services import (
     IssuedAccessGrant,
     authenticate_ephemeral_session,
+    authenticate_ephemeral_session_readonly,
     create_entry_point,
     issue_access_grant,
     revoke_access_grant,
@@ -129,6 +131,35 @@ class JudgePerformanceNotScorable(PermissionDenied):
 class LockedJudgeTransport:
     activity: Activity
     contest_round: ContestRound
+
+
+@dataclass(frozen=True)
+class JudgeContextTransport:
+    """Read-only resolution of a judge ephemeral transport.
+
+    Shares the shape of :class:`LockedJudgeTransport` but carries the ephemeral
+    session row so the read-only path never has to lock or re-resolve it.
+    """
+
+    ephemeral_session: EphemeralSession
+    activity: Activity
+    contest_round: ContestRound
+
+
+def _judge_context_transport_readonly(raw_ephemeral_token: str) -> JudgeContextTransport:
+    """Resolve the judge transport for read-only polling with plain SELECTs."""
+    ephemeral = authenticate_ephemeral_session_readonly(
+        raw_ephemeral_token, expected_kind=EntryPoint.Kind.JUDGE
+    )
+    if ephemeral.round_id is None:
+        raise ValidationError("评委访问会话无效。")
+    contest_round = ephemeral.round
+    activity = ephemeral.activity
+    if contest_round is None or contest_round.activity_id != activity.pk:
+        raise ValidationError("评委访问会话无效。")
+    return JudgeContextTransport(
+        ephemeral_session=ephemeral, activity=activity, contest_round=contest_round
+    )
 
 
 def _locked_judge_transport(raw_ephemeral_token: str) -> LockedJudgeTransport:
@@ -893,6 +924,76 @@ def authenticate_judge_session(raw_ephemeral_token: str) -> JudgeSession:
     return _authenticate_judge_session_locked(raw_ephemeral_token, locked)
 
 
+def _authenticate_judge_session_readonly(
+    transport: JudgeContextTransport,
+) -> JudgeSession | None:
+    """Validate the judge session binding with plain SELECTs.
+
+    Returns ``None`` when the ``JudgeSession`` row has not been materialized yet;
+    the caller then creates it once through the authoritative path and serves
+    plain reads on every later poll. Validation mirrors the locked variant so a
+    revoked grant, reassigned seat, held panel or locked round still refuses the
+    read.
+    """
+    ephemeral = transport.ephemeral_session
+    binding = (
+        JudgeSeatGrant.objects.select_related(
+            "access_grant",
+            "seat__panel_member__panel_snapshot__round__activity",
+            "panel_snapshot",
+        )
+        .filter(access_grant_id=ephemeral.grant_id)
+        .first()
+    )
+    session = (
+        JudgeSession._base_manager.select_related("seat", "panel_snapshot")
+        .filter(ephemeral_session_id=ephemeral.pk)
+        .first()
+    )
+    if binding is not None:
+        seat = binding.seat
+        snapshot = binding.panel_snapshot
+    elif session is not None:
+        seat = session.seat
+        snapshot = session.panel_snapshot
+    else:
+        return None
+    if (
+        (binding is not None and binding.access_grant.revoked_at is not None)
+        or seat.state != JudgeSeat.State.ASSIGNED
+        or snapshot.state not in {RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD}
+        or snapshot.round_id != transport.contest_round.pk
+        or snapshot.activity_id != transport.activity.pk
+        # The authoritative path reaches the activity lock through
+        # lock_activity_for_action → ensure_activity_unlocked; the read-only path
+        # must refuse the same states without taking that lock.
+        or transport.activity.is_locked
+        or transport.contest_round.status == ContestRound.Status.LOCKED
+        or transport.contest_round.is_locked
+    ):
+        raise ValidationError("评委访问会话无效。")
+    if session is None:
+        return None
+    if session.state != JudgeSession.State.ACTIVE or session.expires_at <= timezone.now():
+        raise ValidationError("评委访问会话无效。")
+    heartbeat_judge_session(session)
+    return session
+
+
+def heartbeat_judge_session(session: JudgeSession, *, now=None) -> None:
+    """Best-effort, throttled ``last_seen_at`` refresh for read-only polling."""
+    moment = now or timezone.now()
+    last_seen = session.last_seen_at
+    if last_seen is not None and moment - last_seen < HEARTBEAT_INTERVAL:
+        return
+    try:
+        with transaction.atomic(), authority_write(JUDGE_SESSION_STATE):
+            JudgeSession._base_manager.filter(pk=session.pk).update(last_seen_at=moment)
+    except DatabaseError:
+        return
+    session.last_seen_at = moment
+
+
 @contextmanager
 def _authorized_score_fact_write():
     previous = _raw_fact_write_authorized()
@@ -1442,7 +1543,30 @@ def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     )
     if run_state is None:
         raise ValidationError("评委现场上下文尚未建立。")
+    return _build_judge_context(session, run_state)
 
+
+def get_judge_context_readonly(raw_ephemeral_token: str) -> JudgeContext:
+    """Read-only judge context for the polling GET path.
+
+    Ordinary SELECTs only: no ``select_for_update``, no Activity/Round
+    authoritative write lock and no per-poll ``last_seen_at`` update. The first
+    contact for a grant-issued seat has no ``JudgeSession`` row yet, so it is
+    materialized once through the authoritative path; every later poll is a
+    plain read. Scoring authority is untouched — ``submit_judge_score`` still
+    takes its full lock protocol.
+    """
+    transport = _judge_context_transport_readonly(raw_ephemeral_token)
+    session = _authenticate_judge_session_readonly(transport)
+    if session is None:
+        return get_judge_context(raw_ephemeral_token)
+    run_state = PerformanceRunState.objects.filter(round_id=session.panel_snapshot.round_id).first()
+    if run_state is None:
+        raise ValidationError("评委现场上下文尚未建立。")
+    return _build_judge_context(session, run_state)
+
+
+def _build_judge_context(session: JudgeSession, run_state: PerformanceRunState) -> JudgeContext:
     contest_round = session.panel_snapshot.round
     performance = None
     if run_state.current_performance_id is not None:

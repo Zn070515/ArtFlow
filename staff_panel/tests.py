@@ -32,7 +32,7 @@ from django import forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, close_old_connections, transaction
+from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.db.models import Max
 from django.http import FileResponse
 from django.test import (
@@ -42,6 +42,7 @@ from django.test import (
     TransactionTestCase,
     override_settings,
 )
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from exports.models import ArticleTemplate, GeneratedDocument
@@ -81,6 +82,7 @@ from singer_contest.models import (
 from singer_contest.services import (
     apply_scores,
     create_scoring_rubric,
+    missing_score_cells,
     prepare_round,
     stage_decisions_by_blocks,
 )
@@ -90,7 +92,7 @@ from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import open_vote_session
 
 from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
-from staff_panel.views import post_edit
+from staff_panel.views import _round_grid_payload, post_edit
 
 
 def login_admin(client, user):
@@ -5261,6 +5263,32 @@ class RoundScoresApiTests(TestCase):
         self.assertFalse(data["matrix_complete"])
         self.assertEqual(len(data["grid"]), 1)
         self.assertEqual(data["grid"][0]["singer_id"], self.singer.pk)
+
+    def test_grid_payload_completeness_matches_the_authoritative_helper(self):
+        self.assertFalse(_round_grid_payload(self.round)["matrix_complete"])
+        self.assertNotEqual(missing_score_cells(self.round), [])
+
+        self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+
+        self.assertTrue(_round_grid_payload(self.round)["matrix_complete"])
+        self.assertEqual(missing_score_cells(self.round), [])
+
+    def test_grid_payload_reads_the_score_matrix_once(self):
+        with CaptureQueriesContext(connection) as captured:
+            _round_grid_payload(self.round)
+
+        score_reads = [
+            query["sql"]
+            for query in captured.captured_queries
+            if query["sql"].lstrip().upper().startswith("SELECT")
+            and "SCORERECORD" in query["sql"].upper()
+        ]
+        self.assertEqual(len(score_reads), 1, score_reads)
 
     def test_post_applies_cell_and_bumps_version(self):
         response = self._post(

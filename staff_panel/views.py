@@ -1595,9 +1595,14 @@ def _round_grid_payload(contest_round: ContestRound) -> dict:
         }
         for singer in singers
     ]
+    # Completeness from the rows this payload already materialised. Calling
+    # missing_score_cells() here would repeat the eligible-singer, authoritative-
+    # judge and ScoreRecord queries a second time for the same answer.
+    expected_cells = {(singer.pk, judge.pk) for singer in singers for judge in judges}
+    matrix_complete = expected_cells.issubset(scores)
     return {
         "version": contest_round.score_version,
-        "matrix_complete": not missing_score_cells(contest_round),
+        "matrix_complete": matrix_complete,
         "grid": grid,
         "judges": [{"id": judge.pk, "name": judge.name} for judge in judges],
     }
