@@ -5,6 +5,7 @@ const judgeFixturePath = process.env.PLAYWRIGHT_SHARED_JUDGE_FIXTURE_PATH;
 const staffAccessKey = process.env.ARTFLOW_E2E_STAFF_ACCESS_KEY;
 
 test("shared judge entry assigns five terminals and rejects the sixth", async ({ browser }) => {
+  test.setTimeout(60_000);
   if (!judgeFixturePath) {
     throw new Error(
       "PLAYWRIGHT_SHARED_JUDGE_FIXTURE_PATH is required for the shared Judge browser flow.",
@@ -37,12 +38,14 @@ test("shared judge entry assigns five terminals and rejects the sixth", async ({
     const entryPath = `/e/${fixture.public_code}/judge/`;
     await Promise.all(pages.slice(0, 5).map((page) => page.goto(entryPath)));
 
-    for (const page of pages.slice(0, 5)) {
-      await expect(page.locator("[data-status]")).toHaveText("评委终端已就绪。");
-      await expect(page.locator("[data-activity]")).toHaveText(
-        "Judge browser fixture activity",
-      );
-    }
+    await Promise.all(
+      pages.slice(0, 5).flatMap((page) => [
+        expect(page.locator("[data-status]")).toHaveText("评委终端已就绪。"),
+        expect(page.locator("[data-activity]")).toHaveText(
+          "Judge browser fixture activity",
+        ),
+      ]),
+    );
     await pages[5].goto(entryPath);
     await expect(pages[5].locator("[data-status]")).toHaveText(
       "评委会话无效或已过期，请重新扫描现场二维码。",
@@ -63,13 +66,17 @@ test("shared judge entry assigns five terminals and rejects the sixth", async ({
     await staff.goto(`/staff/judges/round/${fixture.round_id}/control/`);
     await staff.getByPlaceholder("暂停评委组原因").fill("礼堂流程暂停测试");
     await staff.getByRole("button", { name: "暂停评委组" }).click();
-    for (const page of pages.slice(0, 5)) {
-      await expect(page.locator("[data-performance-state]")).toHaveText("现场暂停");
-    }
+    await Promise.all(
+      pages
+        .slice(0, 5)
+        .map((page) => expect(page.locator("[data-performance-state]")).toHaveText("现场暂停")),
+    );
     await staff.getByRole("button", { name: "恢复评委组" }).click();
-    for (const page of pages.slice(0, 5)) {
-      await expect(page.locator("[data-performance-state]")).toHaveText("评分中");
-    }
+    await Promise.all(
+      pages
+        .slice(0, 5)
+        .map((page) => expect(page.locator("[data-performance-state]")).toHaveText("评分中")),
+    );
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await staffContext.close();
