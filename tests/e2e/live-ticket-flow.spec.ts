@@ -58,9 +58,10 @@ test("one live URL updates, checks in a ticket, and admits a ballot", async ({ b
 
     await viewer.goto(`/tickets/scan/#${encodeURIComponent(fixture.credential)}`);
     await expect(viewer.locator("[data-ticket-scan-status]")).toHaveText(/已完成现场检票/);
-    await viewer.goto(`/voting/${fixture.vote_session_id}/`);
+    await viewer.goto(`/vote/${fixture.vote_session_id}/`);
     await expect(viewer.locator("[data-vote-cast]")).toBeVisible();
     await viewer.locator("[data-vote-option]").first().check();
+    viewer.once("dialog", (dialog) => dialog.accept());
     await viewer.getByRole("button", { name: "提交投票" }).click();
     await expect(viewer.getByRole("heading", { name: "投票成功" })).toBeVisible();
     await expect(viewer.getByRole("link", { name: "返回现场页面" })).toHaveAttribute(

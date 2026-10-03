@@ -1,4 +1,4 @@
-import { BrowserQRCodeReader } from "@zxing/browser";
+"use strict";
 (() => {
     "use strict";
     const root = document.querySelector("[data-ticket-check-in-root]");
@@ -83,7 +83,7 @@ import { BrowserQRCodeReader } from "@zxing/browser";
         setStatus("当前浏览器不支持摄像头，请使用下方手工输入。", "error");
         return;
     }
-    const reader = new BrowserQRCodeReader();
+    const reader = new ZXingBrowser.BrowserQRCodeReader();
     void reader.decodeFromVideoDevice(undefined, video, (result) => {
         if (result)
             void checkIn(result.getText());
