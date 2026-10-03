@@ -1,8 +1,8 @@
+import secrets
+
 from django.db import migrations, models
 
 import core.models
-import secrets
-
 
 _PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
