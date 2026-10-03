@@ -8,13 +8,13 @@ item name no requirement (and no fallback) explains stays empty rather than gues
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from tests.migration_helpers import MigrationTransactionTestCase
 
 BEFORE = "0010_materialslot"
 AFTER = "0011_materialcheck_file_purpose"
 
 
-class MaterialCheckFilePurposeBackfillTests(TransactionTestCase):
+class MaterialCheckFilePurposeBackfillTests(MigrationTransactionTestCase):
     def _migrate_to(self, targets):
         executor = MigrationExecutor(connection)
         executor.migrate(targets)

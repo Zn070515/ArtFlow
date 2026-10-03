@@ -9,10 +9,10 @@ normalized the data.
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from tests.migration_helpers import MigrationTransactionTestCase
 
 
-class MigrationTestMixin:
+class MigrationTestMixin(MigrationTransactionTestCase):
     def _migrate_to(self, targets):
         executor = MigrationExecutor(connection)
         executor.migrate(targets)
@@ -28,7 +28,7 @@ class MigrationTestMixin:
         executor.migrate(executor.loader.graph.leaf_nodes())
 
 
-class RulesetMigrationTest(TransactionTestCase, MigrationTestMixin):
+class RulesetMigrationTest(MigrationTestMixin):
     def test_duplicate_ruleset_version_renumber_succeeds(self):
         before = "0010_alter_rulesetversion_is_current_and_more"
         target = ("ruleset", before)
@@ -67,7 +67,7 @@ class RulesetMigrationTest(TransactionTestCase, MigrationTestMixin):
             self._restore_latest()
 
 
-class StageResultVersionMigrationTest(TransactionTestCase, MigrationTestMixin):
+class StageResultVersionMigrationTest(MigrationTestMixin):
     def test_duplicate_result_version_renumber_succeeds(self):
         before = "0017_remove_stageresult_stage_result_unique_identity_and_more"
         target = ("singer_contest", before)
@@ -120,7 +120,7 @@ class StageResultVersionMigrationTest(TransactionTestCase, MigrationTestMixin):
             self._restore_latest()
 
 
-class ConfirmedTrailMigrationTest(TransactionTestCase, MigrationTestMixin):
+class ConfirmedTrailMigrationTest(MigrationTestMixin):
     def test_legacy_confirmed_with_null_actor_demoted(self):
         before = "0018_stageresult_stage_result_unique_version"
         target = ("singer_contest", before)
@@ -164,7 +164,7 @@ class ConfirmedTrailMigrationTest(TransactionTestCase, MigrationTestMixin):
             self._restore_latest()
 
 
-class HistoricalTemplateIdentityMigrationTest(TransactionTestCase, MigrationTestMixin):
+class HistoricalTemplateIdentityMigrationTest(MigrationTestMixin):
     """§11.1 — an existing database upgrades the 2025 template in place, never by fork."""
 
     before = "0016_contestruleset_vote_scoring_rule_keys"
