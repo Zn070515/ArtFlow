@@ -108,6 +108,7 @@ from singer_contest.judge_authority import (
     prepare_judge_panel,
     resume_judge_panel,
     resume_performance,
+    set_judge_seat_display_label,
     submit_paper_score,
     submit_staff_proxy_score,
 )
@@ -2376,7 +2377,7 @@ def judge_panel_hold(request, pk):
     except (PermissionDenied, ValidationError) as error:
         messages.error(request, f"暂停评委组失败：{domain_error_messages(error)}")
     else:
-        messages.success(request, "评委组已暂停，当前评委会话已撤销。")
+        messages.success(request, "评委组已暂停，当前评委会话已保留；恢复后可继续评分。")
     return redirect("staff:judge_control", pk=pk)
 
 
@@ -2390,6 +2391,28 @@ def judge_panel_resume(request, pk):
         messages.error(request, f"恢复评委组失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "评委组已恢复。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_seat_label(request, pk, seat_id):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        seat = get_object_or_404(
+            JudgeSeat,
+            pk=seat_id,
+            panel_member__panel_snapshot__round=contest_round,
+        )
+        set_judge_seat_display_label(
+            seat.pk,
+            operator=request.user,
+            display_label=request.POST.get("display_label", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"保存评委席位备注失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "评委席位备注已保存。")
     return redirect("staff:judge_control", pk=pk)
 
 

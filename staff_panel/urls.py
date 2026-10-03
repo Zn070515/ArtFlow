@@ -81,6 +81,11 @@ urlpatterns = [
         name="judge_panel_resume",
     ),
     path(
+        "judges/round/<int:pk>/seats/<int:seat_id>/label/",
+        views.judge_seat_label,
+        name="judge_seat_label",
+    ),
+    path(
         "judges/round/<int:pk>/performances/advance/",
         views.judge_performance_advance,
         name="judge_performance_advance",

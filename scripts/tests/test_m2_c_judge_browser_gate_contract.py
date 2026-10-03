@@ -57,6 +57,9 @@ def test_shared_judge_browser_gate_covers_fixed_capacity_and_stable_entry():
         "`/e/${fixture.public_code}/judge/`",
         "评委终端已就绪。",
         "评委会话无效或已过期，请重新扫描现场二维码。",
+        "暂停评委组",
+        "恢复评委组",
+        "现场暂停",
     ):
         assert marker in SHARED_JUDGE_FLOW
 
