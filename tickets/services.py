@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import TICKET_SESSION_STATE, TICKET_STATE, authority_write
@@ -22,6 +24,8 @@ from .models import Ticket, TicketAccessSession
 
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 INVALID_TICKET_MESSAGE = "票据无效。"
+_CREDENTIAL_PREFIX = "AF1.T"
+_PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,54 @@ class IssuedTicket:
 class RedeemedTicketSession:
     session: TicketAccessSession
     token: str
+
+
+def _new_public_code() -> str:
+    while True:
+        candidate = "".join(secrets.choice(_PUBLIC_CODE_ALPHABET) for _ in range(10))
+        if not Ticket._base_manager.filter(public_code=candidate).exists():
+            return candidate
+
+
+def _credential_signature(public_code: str, version: int) -> str:
+    message = f"{_CREDENTIAL_PREFIX}.{public_code}.{version}".encode("ascii")
+    return hmac.new(settings.SECRET_KEY.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
+
+
+def ticket_credential(ticket: Ticket) -> str:
+    if not ticket.public_code:
+        raise ValidationError(INVALID_TICKET_MESSAGE)
+    signature = _credential_signature(ticket.public_code, ticket.credential_version)
+    return f"{_CREDENTIAL_PREFIX}.{ticket.public_code}.{ticket.credential_version}.{signature}"
+
+
+def _ticket_for_credential(raw_credential: Any) -> Ticket | None:
+    if isinstance(raw_credential, str) and "://" in raw_credential:
+        parsed = urlsplit(raw_credential)
+        raw_credential = unquote(parsed.fragment or parsed.path.rsplit("/", 1)[-1])
+    if isinstance(raw_credential, str) and raw_credential.startswith(f"{_CREDENTIAL_PREFIX}."):
+        parts = raw_credential.split(".")
+        if len(parts) != 5 or parts[0] != "AF1" or parts[1] != "T":
+            return None
+        _, _, public_code, version_text, signature = parts
+        if not public_code.isalnum() or not version_text.isdigit() or len(signature) != 32:
+            return None
+        version = int(version_text)
+        expected = _credential_signature(public_code, version)
+        if not hmac.compare_digest(signature, expected):
+            return None
+        return (
+            Ticket.objects.select_related("activity")
+            .filter(public_code=public_code, credential_version=version)
+            .first()
+        )
+    try:
+        raw_secret = _validate_raw_token(raw_credential)
+    except ValidationError:
+        return None
+    return Ticket.objects.select_related("activity").filter(
+        secret_digest=_token_digest(raw_secret)
+    ).first()
 
 
 def _token_digest(raw_token: str) -> str:
@@ -117,6 +169,9 @@ def issue_ticket(ticket: Ticket, *, actor: Any) -> IssuedTicket:
         now = timezone.now()
         old_state = locked_ticket.state
         locked_ticket.secret_digest = _token_digest(raw_secret)
+        if not locked_ticket.public_code:
+            locked_ticket.public_code = _new_public_code()
+        locked_ticket.credential_version = max(1, locked_ticket.credential_version)
         locked_ticket.state = Ticket.State.ISSUED
         locked_ticket.issued_at = now
         locked_ticket.issued_by = current_actor
@@ -125,6 +180,8 @@ def issue_ticket(ticket: Ticket, *, actor: Any) -> IssuedTicket:
             locked_ticket.save(
                 update_fields=[
                     "secret_digest",
+                    "public_code",
+                    "credential_version",
                     "state",
                     "issued_at",
                     "issued_by",
@@ -196,10 +253,8 @@ def check_in_ticket(
     request_meta: TicketRequestMeta | None = None,
 ) -> Ticket:
     current_actor = require_current_staff(actor)
-    raw_secret = _validate_raw_token(raw_secret)
-    digest = _token_digest(raw_secret)
     with transaction.atomic():
-        candidate = Ticket.objects.select_related("activity").filter(secret_digest=digest).first()
+        candidate = _ticket_for_credential(raw_secret)
         if candidate is None:
             raise ValidationError(INVALID_TICKET_MESSAGE)
         lock_activity_for_action(candidate.activity, ActivityAction.CHECK_IN)
@@ -284,15 +339,13 @@ def redeem_ticket(
     *,
     request_meta: TicketRequestMeta | None = None,
 ) -> RedeemedTicketSession:
-    raw_secret = _validate_raw_token(raw_secret)
-    digest = _token_digest(raw_secret)
     now = timezone.now()
     with transaction.atomic():
+        candidate = _ticket_for_credential(raw_secret)
         ticket = (
-            Ticket.objects.select_for_update()
-            .select_related("activity")
-            .filter(secret_digest=digest)
-            .first()
+            Ticket.objects.select_for_update().select_related("activity").filter(pk=candidate.pk).first()
+            if candidate is not None
+            else None
         )
         if ticket is None or ticket.state not in {Ticket.State.ISSUED, Ticket.State.CHECKED_IN}:
             raise ValidationError(INVALID_TICKET_MESSAGE)
@@ -314,6 +367,27 @@ def redeem_ticket(
             ip_address=(request_meta.ip_address if request_meta else None),
         )
         return RedeemedTicketSession(session=session, token=raw_token)
+
+
+def rotate_ticket_credential(ticket: Ticket, *, actor: Any) -> str:
+    current_actor = require_current_staff(actor)
+    with transaction.atomic():
+        locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
+        lock_activity_for_action(locked.activity, ActivityAction.MANAGE_TICKETS)
+        if locked.state not in {Ticket.State.ISSUED, Ticket.State.CHECKED_IN}:
+            raise ValidationError("当前票据状态不能重置凭证。")
+        if not locked.public_code:
+            locked.public_code = _new_public_code()
+        locked.credential_version += 1
+        with authority_write(TICKET_STATE):
+            locked.save(update_fields=["public_code", "credential_version", "updated_at"])
+        _audit_ticket(
+            operator=current_actor,
+            action_type=AuditLog.ActionType.TICKET_ISSUE,
+            ticket=locked,
+            note=f"credential_version={locked.credential_version}",
+        )
+        return ticket_credential(locked)
 
 
 def authenticate_ticket_session(

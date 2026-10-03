@@ -148,6 +148,7 @@
     const stateField = root.querySelector("[data-performance-state]");
     const criteriaContainer = root.querySelector("[data-criteria]");
     const totalField = root.querySelector("[data-total]");
+    const redeemUrl = root.dataset.redeemUrl || "/entry-access/grants/redeem/";
     const claimUrl = root.dataset.claimUrl || "/judge/claim/";
     const contextUrl = root.dataset.contextUrl || "/judge/context/";
     const scoreUrl = root.dataset.scoreUrl || "/judge/score/";
@@ -155,6 +156,7 @@
     const storageKeyPrefix = "artflow:judge:draft:";
     const maxDrafts = 8;
     let sessionToken = null;
+    let cookieSession = false;
     let context = null;
     let draft = null;
     let draftTimer = null;
@@ -414,12 +416,21 @@
         });
         return response.ok;
     }
+    async function redeem(fragment) {
+        const response = await fetch(redeemUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: fragment }),
+        });
+        return response.ok ? parseSession(await jsonResponse(response)) : null;
+    }
     async function loadContext(token) {
         if (contextRequest)
             return contextRequest;
         contextRequest = (async () => {
             const response = await fetch(contextUrl, {
                 credentials: "same-origin",
+                ...(cookieSession || !token ? {} : { headers: { Authorization: `Bearer ${token}` } }),
             });
             return response.ok ? parseContext(await jsonResponse(response)) : null;
         })();
@@ -527,7 +538,12 @@
             const response = await fetch(scoreUrl, {
                 method: "POST",
                 credentials: "same-origin",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    ...(cookieSession || !sessionToken
+                        ? {}
+                        : { Authorization: `Bearer ${sessionToken}` }),
+                },
                 body: JSON.stringify({
                     command_id: current.command_id,
                     expected_context_version: context.context_version,
@@ -564,10 +580,21 @@
         }
     }
     async function boot() {
+        const fragment = window.location.hash.slice(1);
         try {
-            if (!(await claim()))
-                throw new Error("claim failed");
-            sessionToken = "cookie";
+            if (fragment) {
+                window.history.replaceState(null, "", window.location.pathname);
+                sessionToken = await redeem(decodeURIComponent(fragment));
+                if (!sessionToken)
+                    throw new Error("invalid grant");
+                cookieSession = false;
+            }
+            else {
+                if (!(await claim()))
+                    throw new Error("claim failed");
+                sessionToken = "cookie";
+                cookieSession = true;
+            }
             const loadedContext = await loadContext(sessionToken);
             if (!loadedContext)
                 throw new Error("invalid context");
@@ -579,7 +606,7 @@
             sessionToken = null;
             context = null;
             stopped = true;
-            statusText(terminalRoot, "评委终端暂不可用，请联系现场工作人员。");
+            statusText(terminalRoot, "评委会话无效或已过期，请重新扫描现场二维码。");
         }
     }
     scoreField.addEventListener("input", scheduleDraftPersistence);

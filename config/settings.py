@@ -192,7 +192,7 @@ ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SEC
 # Ticket-backed audience sessions are intentionally short-lived. The raw session
 # token is held only by the browser's HttpOnly cookie and never by the database.
 TICKET_ACCESS_SESSION_TTL_SECONDS = get_int(
-    os.environ, "TICKET_ACCESS_SESSION_TTL_SECONDS", 30 * 60
+    os.environ, "TICKET_ACCESS_SESSION_TTL_SECONDS", 8 * 60 * 60
 )
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
