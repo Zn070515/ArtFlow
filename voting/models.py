@@ -14,6 +14,18 @@ from django.db import models
 from django.db.models import F, Q
 
 
+def _formal_singer_contest_activity(activity_id: int | None) -> bool:
+    if not activity_id:
+        return False
+    from core.models import Activity
+
+    return Activity._base_manager.filter(
+        pk=activity_id,
+        activity_type=Activity.Type.SINGER_CONTEST,
+        data_lifecycle=Activity.DataLifecycle.FORMAL,
+    ).exists()
+
+
 def _ensure_vote_session_mutable(vote_session_id: int | None) -> None:
     if not vote_session_id:
         return
@@ -300,6 +312,10 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                 _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id)
 
     def update(self, **kwargs):
+        if kwargs.get("requires_ticket") is False:
+            for activity_id in self.values_list("activity_id", flat=True):
+                if _formal_singer_contest_activity(activity_id):
+                    raise ValidationError("正式歌手比赛投票必须使用入场票。")
         self._ensure_state_authorized(kwargs)
         self._ensure_configuration_mutable(kwargs)
         return super().update(**kwargs)
@@ -325,6 +341,11 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                     raise ValidationError(message)
                 if "requires_ticket" in fields:
                     _ensure_vote_session_not_bound_to_frozen_ruleset(obj.pk)
+                    if (
+                        obj.requires_ticket is False
+                        and _formal_singer_contest_activity(obj.activity_id)
+                    ):
+                        raise ValidationError("正式歌手比赛投票必须使用入场票。")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
     def bulk_create(self, objs, *args, **kwargs):
@@ -353,6 +374,8 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                     if existing and "requires_ticket" in update_fields:
                         _ensure_vote_session_not_bound_to_frozen_ruleset(existing["pk"])
         for vote_session in objs:
+            if _formal_singer_contest_activity(vote_session.activity_id):
+                vote_session.requires_ticket = True
             vote_session._ensure_initial_state_authorized()
         return super().bulk_create(objs, *args, **kwargs)
 
@@ -450,6 +473,8 @@ class VoteSession(models.Model):
         ensure_vote_not_consumed_by_confirmed_stage(self)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if _formal_singer_contest_activity(self.activity_id):
+            self.requires_ticket = True
         if self._state.adding:
             self._ensure_initial_state_authorized()
         elif self.pk:

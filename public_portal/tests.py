@@ -13,6 +13,7 @@ from common.authority import (
     ACTIVITY_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    VOTE_SESSION_STATE,
     authority_write,
 )
 from common.models import AuditLog
@@ -110,6 +111,26 @@ class StableActivityEntryTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_test_judge_entry_requires_explicit_rehearsal_open(self):
+        judge_url = reverse(
+            "public_portal:activity_judge", args=[self.testing.public_code]
+        )
+        self.assertEqual(self.client.get(judge_url).status_code, 404)
+
+        with authority_write(ACTIVITY_STATE):
+            self.testing.judge_entry_open = True
+            self.testing.save(update_fields=["judge_entry_open"])
+
+        self.assertEqual(self.client.get(judge_url).status_code, 200)
+        claim_url = reverse("judge:claim", args=[self.testing.public_code])
+        claim = self.client.post(claim_url)
+        self.assertEqual(claim.status_code, 409)
+
+        with authority_write(ACTIVITY_STATE):
+            self.testing.judge_entry_open = False
+            self.testing.save(update_fields=["judge_entry_open"])
+        self.assertEqual(self.client.post(claim_url).status_code, 404)
+
     def test_live_route_keeps_same_target_when_vote_sessions_change(self):
         live_url = reverse("public_portal:activity_live", args=[self.formal.public_code])
         first = self.client.get(live_url)
@@ -130,6 +151,41 @@ class StableActivityEntryTests(TestCase):
         self.assertEqual(
             live_url, reverse("public_portal:activity_live", args=[self.formal.public_code])
         )
+
+    def test_live_state_uses_shared_vote_state_and_no_store(self):
+        live_state_url = reverse(
+            "public_portal:activity_live_state", args=[self.formal.public_code]
+        )
+        waiting = self.client.get(live_state_url)
+        self.assertEqual(waiting.status_code, 200)
+        self.assertEqual(waiting.json()["state"], "waiting")
+        self.assertEqual(waiting["Cache-Control"], "no-store")
+
+        now = timezone.now()
+        vote_session = VoteSession.objects.create(
+            activity=self.formal,
+            name="Live state vote",
+            start_time=now - timedelta(minutes=1),
+            end_time=now + timedelta(minutes=10),
+        )
+        with authority_write(VOTE_SESSION_STATE):
+            vote_session.is_open = True
+            vote_session.save(update_fields=["is_open"])
+        opened = self.client.get(live_state_url)
+        self.assertEqual(opened.json()["state"], "open")
+        self.assertEqual(opened.json()["vote_name"], vote_session.name)
+
+        with authority_write(VOTE_SESSION_STATE):
+            vote_session.is_open = False
+            vote_session.save(update_fields=["is_open"])
+        vote_session.start_time = now - timedelta(minutes=2)
+        vote_session.end_time = now - timedelta(minutes=1)
+        vote_session.save(update_fields=["start_time", "end_time"])
+        with authority_write(VOTE_SESSION_STATE):
+            vote_session.is_open = True
+            vote_session.save(update_fields=["is_open"])
+        ended = self.client.get(live_state_url)
+        self.assertEqual(ended.json()["state"], "ended")
 
     @override_settings(APP_ENV="production")
     @patch("qrcode.make")

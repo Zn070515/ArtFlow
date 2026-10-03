@@ -318,6 +318,8 @@ class TicketLifecycleServiceTests(TestCase):
         self.assertNotEqual(rotated, credential)
         with self.assertRaises(ValidationError):
             self._service("redeem_ticket")(credential)
+        with self.assertRaises(ValidationError):
+            self._service("redeem_ticket")(issued.secret)
         self.assertEqual(
             self._service("redeem_ticket")(rotated).session.ticket_id,
             issued.ticket.pk,

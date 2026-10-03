@@ -54,7 +54,9 @@ def _new_public_code() -> str:
 
 def _credential_signature(public_code: str, version: int) -> str:
     message = f"{_CREDENTIAL_PREFIX}.{public_code}.{version}".encode("ascii")
-    return hmac.new(settings.SECRET_KEY.encode("utf-8"), message, hashlib.sha256).hexdigest()[:32]
+    return hmac.new(
+        settings.QR_SIGNING_KEY.encode("utf-8"), message, hashlib.sha256
+    ).hexdigest()[:32]
 
 
 def ticket_credential(ticket: Ticket) -> str:
@@ -84,6 +86,14 @@ def _ticket_for_credential(raw_credential: Any) -> Ticket | None:
             .filter(public_code=public_code, credential_version=version)
             .first()
         )
+    # Once a ticket has a versioned public credential, a rotated legacy secret
+    # must never become a back door to the supposedly invalidated QR code.
+    if isinstance(raw_credential, str) and raw_credential and Ticket.objects.filter(
+        secret_digest=_token_digest(raw_credential),
+        public_code__isnull=False,
+        credential_version__gt=1,
+    ).exists():
+        return None
     try:
         raw_secret = _validate_raw_token(raw_credential)
     except ValidationError:
@@ -384,8 +394,11 @@ def rotate_ticket_credential(ticket: Ticket, *, actor: Any) -> str:
         if not locked.public_code:
             locked.public_code = _new_public_code()
         locked.credential_version += 1
+        locked.secret_digest = None
         with authority_write(TICKET_STATE):
-            locked.save(update_fields=["public_code", "credential_version", "updated_at"])
+            locked.save(
+                update_fields=["secret_digest", "public_code", "credential_version", "updated_at"]
+            )
         _audit_ticket(
             operator=current_actor,
             action_type=AuditLog.ActionType.TICKET_ISSUE,

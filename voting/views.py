@@ -6,9 +6,11 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
+from tickets.models import Ticket
 from tickets.services import authenticate_ticket_session
 
 from .models import VoteBallot, VoteSession
+from .policies import vote_ui_state
 from .services import submit_ballot
 
 
@@ -19,9 +21,12 @@ def _ticket_session_for_request(request, vote_session):
     if not raw_token:
         return None
     try:
-        return authenticate_ticket_session(raw_token, activity=vote_session.activity)
+        session = authenticate_ticket_session(raw_token, activity=vote_session.activity)
     except ValidationError:
         return None
+    if session.ticket.state != Ticket.State.CHECKED_IN:
+        return None
+    return session
 
 
 def _uses_ticket_entry(vote_session: VoteSession) -> bool:
@@ -55,20 +60,6 @@ def _vote_rate_limit_decision(request, pk):
     return allow(f"vote-passcode:{pk}:{session_key}", limit=10, window_seconds=300)
 
 
-def _vote_ui_state(vote_session, now):
-    if vote_session.activity.is_locked:
-        return "activity_locked", "活动已锁定", False
-    if vote_session.is_locked:
-        return "locked", "投票已锁定", False
-    if not vote_session.is_open:
-        return "closed", "投票未开放", False
-    if now < vote_session.start_time:
-        return "not_started", "投票尚未开始", False
-    if now > vote_session.end_time:
-        return "ended", "投票已结束", False
-    return "open", "投票进行中", True
-
-
 def vote_entry(request, pk):
     vote_session = _get_vote_session_for_public_request(request, pk)
     now = timezone.now()
@@ -77,7 +68,7 @@ def vote_entry(request, pk):
     ticket_session = _ticket_session_for_request(request, vote_session) if ticket_required else None
 
     if ticket_required and ticket_session is not None:
-        _, label, can_submit = _vote_ui_state(vote_session, now)
+        _, label, can_submit = vote_ui_state(vote_session, now)
         if can_submit:
             return redirect("voting:vote_cast", pk=pk)
         error = label
@@ -123,7 +114,7 @@ def vote_cast(request, pk):
     if not ticket_required and request.session.get("vote_passcode_ok") != str(pk):
         return redirect("voting:vote_entry", pk=pk)
 
-    vote_ui_state, vote_ui_label, can_submit = _vote_ui_state(vote_session, now)
+    vote_state, vote_ui_label, can_submit = vote_ui_state(vote_session, now)
     error = None
     ticket_session = _ticket_session_for_request(request, vote_session) if ticket_required else None
     if ticket_required and ticket_session is None:
@@ -181,7 +172,7 @@ def vote_cast(request, pk):
             "max_selections": max_sel,
             "is_multi": vote_session.selection_type == VoteSession.SelectionType.MULTI,
             "error": error,
-            "vote_ui_state": vote_ui_state,
+            "vote_ui_state": vote_state,
             "vote_ui_label": vote_ui_label,
             "can_submit": can_submit,
         },

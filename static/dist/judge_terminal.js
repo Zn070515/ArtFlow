@@ -22,6 +22,7 @@
             !positiveInteger(candidate.round_id) ||
             typeof candidate.round_name !== "string" ||
             !positiveInteger(candidate.seat_id) ||
+            typeof candidate.seat_label !== "string" ||
             !positiveInteger(candidate.panel_snapshot_id) ||
             !positiveInteger(candidate.panel_version) ||
             !nonNegativeInteger(candidate.context_version) ||
@@ -53,6 +54,7 @@
             round_id: candidate.round_id,
             round_name: candidate.round_name,
             seat_id: candidate.seat_id,
+            seat_label: candidate.seat_label,
             panel_snapshot_id: candidate.panel_snapshot_id,
             panel_version: candidate.panel_version,
             context_version: candidate.context_version,
@@ -141,6 +143,7 @@
     const notesField = notesInput;
     const submitControl = submitButton;
     const roundField = root.querySelector("[data-round]");
+    const seatField = root.querySelector("[data-seat-label]");
     const activityField = root.querySelector("[data-activity]");
     const performanceField = root.querySelector("[data-performance-label]");
     const singerField = root.querySelector("[data-singer]");
@@ -331,6 +334,8 @@
             activityField.textContent = value.activity_name;
         if (roundField)
             roundField.textContent = value.round_name;
+        if (seatField)
+            seatField.textContent = value.seat_label;
         if (performanceField)
             performanceField.textContent = value.performance_label || "暂无";
         if (singerField)

@@ -155,9 +155,15 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
     activity = Activity.objects.filter(
         public_code=public_code,
         activity_type=Activity.Type.SINGER_CONTEST,
-        data_lifecycle=Activity.DataLifecycle.FORMAL,
+        data_lifecycle__in=[
+            Activity.DataLifecycle.FORMAL,
+            Activity.DataLifecycle.TEST,
+        ],
     ).first()
-    if activity is None:
+    if activity is None or (
+        activity.data_lifecycle == Activity.DataLifecycle.TEST
+        and not activity.judge_entry_open
+    ):
         return _error("INVALID_JUDGE_ENTRY", 404)
     existing_token = _judge_token(request)
     if existing_token:
@@ -166,18 +172,19 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
         except (ValidationError, PermissionDenied):
             pass
         else:
-            response = _no_store(
-                JsonResponse({"seat_label": f"J{context.seat_id}", "reused": True})
-            )
-            response.set_cookie(
-                "artflow_judge_session",
-                existing_token,
-                max_age=8 * 60 * 60,
-                httponly=True,
-                secure=getattr(settings, "APP_ENV", "development") == "production",
-                samesite="Lax",
-            )
-            return response
+            if context.activity_id == activity.pk:
+                response = _no_store(
+                    JsonResponse({"seat_label": context.seat_label, "reused": True})
+                )
+                response.set_cookie(
+                    "artflow_judge_session",
+                    existing_token,
+                    max_age=8 * 60 * 60,
+                    httponly=True,
+                    secure=getattr(settings, "APP_ENV", "development") == "production",
+                    samesite="Lax",
+                )
+                return response
     try:
         claimed = claim_judge_session(activity)
     except (ValidationError, PermissionDenied):

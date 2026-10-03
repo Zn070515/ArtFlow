@@ -32,6 +32,11 @@
             {% for error in form.scoring_mode.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
+            {{ form.judge_count.label_tag }}{{ form.judge_count }}
+            {% for error in form.judge_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+            <p class="text-xs text-gray-500 mt-1">现场会自动使用 J1、J2 等通道，不需要提前录入老师姓名。</p>
+        </div>
+        <div>
             {{ form.minimum_judge_count.label_tag }}{{ form.minimum_judge_count }}
             {% for error in form.minimum_judge_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
             <p class="text-xs text-gray-500 mt-1">留空时按准备名单人数执行 fail-safe；轮次准备后不可修改。</p>

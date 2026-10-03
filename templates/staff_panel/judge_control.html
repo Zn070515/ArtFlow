@@ -27,6 +27,9 @@
         {% if not panel_snapshot %}
         <form method="post" action="{% url 'staff:judge_prepare' round.pk %}" class="mt-4 space-y-4">
             {% csrf_token %}
+            {% if round.judge_count %}
+            <p class="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">本轮将自动准备 {{ round.judge_count }} 个匿名评分通道：J1 至 J{{ round.judge_count }}。不需要提前录入评委姓名。</p>
+            {% else %}
             <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 {% for round_judge in round_judges %}
                 <label class="flex items-center gap-2 rounded border border-gray-200 px-3 py-2 text-sm">
@@ -37,13 +40,19 @@
                 <p class="text-sm text-gray-500">本轮尚未配置评委预备名单。</p>
                 {% endfor %}
             </div>
+            {% endif %}
             <button class="rounded bg-brand px-4 py-2 text-sm text-white hover:bg-brand-light" type="submit">准备评委组</button>
         </form>
         {% else %}
         <div class="mt-4 flex flex-wrap gap-2 text-sm">
-            {% for member in panel_members %}
-            <span class="rounded bg-gray-100 px-3 py-1 text-gray-700">{{ member.seat_key }} · {{ member.judge.name }}</span>
+            {% for row in panel_member_rows %}
+            <span class="rounded bg-gray-100 px-3 py-1 text-gray-700">{{ row.seat_label }}</span>
             {% endfor %}
+        </div>
+        <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+            <p class="font-medium">共享评委入口</p>
+            <p class="mt-1">所有评委扫描同一张二维码，系统按连接顺序自动领取空闲评分通道。</p>
+            <a class="mt-2 inline-block text-brand underline" href="{% url 'public_portal:activity_judge' round.activity.public_code %}">{% url 'public_portal:activity_judge' round.activity.public_code %}</a>
         </div>
         <div class="mt-5 flex flex-wrap gap-3">
             {% if panel_snapshot.state == 'active' %}
@@ -63,35 +72,6 @@
     </section>
 
     {% if panel_snapshot %}
-    <section class="rounded-lg border border-gray-200 bg-white p-5">
-        <h2 class="text-lg font-semibold text-gray-900">评委席位入口</h2>
-        <p class="mt-1 text-sm text-gray-500">二维码只在本次响应中显示；授权兑换后即不能重复使用。</p>
-        <div class="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {% for row in seat_rows %}
-            <div class="rounded border border-gray-200 p-4">
-                <div class="font-medium text-gray-900">{{ row.member.seat_key }} · {{ row.member.judge.name }}</div>
-                <div class="mt-1 text-xs text-gray-500">席位状态：{{ row.seat.get_state_display }}</div>
-                {% if row.pending_grant %}
-                <div class="mt-2 text-xs text-amber-700">已有未兑换授权，不能重复签发。</div>
-                {% elif policy_state == 'ACTIVE' %}
-                <form method="post" action="{% url 'staff:judge_seat_qr' round.pk row.seat.pk %}" class="mt-3">
-                    {% csrf_token %}
-                    <button class="rounded bg-brand px-3 py-2 text-sm text-white" type="submit">签发 15 分钟入口</button>
-                </form>
-                {% else %}
-                <button class="mt-3 rounded bg-gray-200 px-3 py-2 text-sm text-gray-500" type="button" data-control-state="hold-disabled" disabled>HOLD 中不可签发</button>
-                {% endif %}
-            </div>
-            {% endfor %}
-        </div>
-        {% if qr_data_uri %}
-        <div class="mt-5 rounded border border-green-200 bg-green-50 p-4 text-center">
-            <p class="text-sm text-green-800">席位 {{ qr_seat_id }} 的一次性入口二维码</p>
-            <img class="mx-auto mt-3 h-64 w-64" src="{{ qr_data_uri }}" alt="评委入口二维码">
-        </div>
-        {% endif %}
-    </section>
-
     <section class="rounded-lg border border-gray-200 bg-white p-5">
         <div class="flex items-center justify-between gap-3">
             <h2 class="text-lg font-semibold text-gray-900">表演进度</h2>
@@ -164,7 +144,7 @@
                 <label class="block text-sm">席位
                     <select class="mt-1 w-full rounded border border-gray-300 px-3 py-2" name="seat_id" required>
                         <option value="">选择席位</option>
-                        {% for row in seat_rows %}<option value="{{ row.seat.pk }}">{{ row.member.seat_key }} · {{ row.member.judge.name }}</option>{% endfor %}
+                {% for row in seat_rows %}<option value="{{ row.seat.pk }}">{{ row.seat_label }}</option>{% endfor %}
                     </select>
                 </label>
                 {% if round.rubric %}

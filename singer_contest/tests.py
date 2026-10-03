@@ -805,6 +805,21 @@ class ScoringServiceTests(TestCase):
             [self.judge.pk, second_judge.pk],
         )
 
+    def test_prepare_round_creates_anonymous_judge_channels_when_configured(self):
+        self.round.judge_count = 3
+        self.round.save(update_fields=["judge_count"])
+
+        prepare_round(self.round, self.user)
+
+        self.assertEqual(
+            list(
+                RoundJudge.objects.filter(round=self.round)
+                .select_related("judge")
+                .values_list("judge__name", flat=True)
+            ),
+            ["J1", "J2", "J3"],
+        )
+
     def test_prepare_round_rejects_drop_high_low_with_fewer_than_three_judges(self):
         self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
         _save_round_state(self.round)

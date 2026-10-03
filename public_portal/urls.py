@@ -8,6 +8,7 @@ urlpatterns = [
     path("e/<str:public_code>/", views.activity_entry, name="activity_entry"),
     path("e/<str:public_code>/apply/", views.activity_apply, name="activity_apply"),
     path("e/<str:public_code>/live/", views.activity_live, name="activity_live"),
+    path("e/<str:public_code>/live/state/", views.activity_live_state, name="activity_live_state"),
     path("e/<str:public_code>/judge/", views.activity_judge, name="activity_judge"),
     path("", views.home, name="home"),
     path("post/<int:pk>/", views.post_detail, name="post_detail"),

@@ -12,6 +12,8 @@ import { BrowserQRCodeReader } from "@zxing/browser";
   const input = root.querySelector<HTMLInputElement>("[name='secret']");
   const endpoint = root.dataset.checkInUrl || "/staff/tickets/check-in/";
   let busy = false;
+  let lastCredential = "";
+  let lastCredentialAt = 0;
 
   function credential(value: string): string {
     const trimmed = value.trim();
@@ -34,6 +36,10 @@ import { BrowserQRCodeReader } from "@zxing/browser";
   async function checkIn(value: string): Promise<void> {
     const normalized = credential(value);
     if (!normalized || busy) return;
+    const now = Date.now();
+    if (normalized === lastCredential && now - lastCredentialAt < 1500) return;
+    lastCredential = normalized;
+    lastCredentialAt = now;
     busy = true;
     setStatus("正在检票……");
     const csrf = scannerRoot.querySelector<HTMLInputElement>("[name='csrfmiddlewaretoken']")?.value;

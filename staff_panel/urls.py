@@ -15,6 +15,11 @@ urlpatterns = [
     ),
     path("activities/new/", views.activity_create, name="activity_create"),
     path("activities/<int:pk>/edit/", views.activity_edit, name="activity_edit"),
+    path(
+        "activities/<int:pk>/judge-entry/toggle/",
+        views.activity_judge_entry_toggle,
+        name="activity_judge_entry_toggle",
+    ),
     path("posts/", views.post_list, name="post_list"),
     path("posts/new/", views.post_create, name="post_create"),
     path("posts/<int:pk>/preview/", views.post_preview, name="post_preview"),
