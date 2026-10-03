@@ -86,6 +86,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 | `APP_ENV` | 必须是 `production` |
 | `DEBUG` | 必须是 `False` |
 | `SECRET_KEY` | 长随机密钥 |
+| `QR_SIGNING_KEY` | 独立的长随机密钥，用于票券二维码凭证签名 |
 | `STAFF_ACCESS_KEY` | ArtFlow 工作人员注册与登录密钥 |
 | `ADMIN_ACCESS_KEY` | ArtFlow 管理员注册、登录与高风险操作认证密钥 |
 | `ARTFLOW_RELEASE_SHA` | 构建当前生产镜像的完整 Git commit SHA；用于备份 manifest 溯源 |
@@ -100,7 +101,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 | `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
 | `RATE_LIMIT_BACKEND` | 生产 manifest 固定为 `database`，保证多 worker 共享限流桶 |
 
-`DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
+`DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`QR_SIGNING_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
 
 ## 来源 IP 与 X-Forwarded-For
 

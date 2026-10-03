@@ -20,6 +20,7 @@ def production_environment(**overrides):
         "APP_ENV": "production",
         "DEBUG": "False",
         "SECRET_KEY": "production-secret-key",
+        "QR_SIGNING_KEY": "production-qr-signing-key",
         "STAFF_ACCESS_KEY": "production-staff-key",
         "ADMIN_ACCESS_KEY": "production-admin-key",
         "ALLOWED_HOSTS": "artflow.internal",
@@ -107,6 +108,7 @@ class RuntimeTests(SimpleTestCase):
 
         placeholders = {
             "SECRET_KEY": "set-a-long-random-production-secret",
+            "QR_SIGNING_KEY": "set-a-long-random-qr-signing-key",
             "STAFF_ACCESS_KEY": "set-a-long-random-staff-access-key",
             "ADMIN_ACCESS_KEY": "set-a-long-random-admin-access-key",
             "ARTFLOW_RELEASE_SHA": "replace-me-with-the-deployed-commit-sha",
@@ -324,6 +326,7 @@ class SettingsTests(SimpleTestCase):
             "APP_ENV",
             "DEBUG",
             "SECRET_KEY",
+            "QR_SIGNING_KEY",
             "STAFF_ACCESS_KEY",
             "ADMIN_ACCESS_KEY",
             "ALLOWED_HOSTS",

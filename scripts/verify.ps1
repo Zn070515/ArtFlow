@@ -177,6 +177,7 @@ $temporaryProductionEnvironment = [ordered]@{
     APP_ENV = 'production'
     DEBUG = 'False'
     SECRET_KEY = 'artflow-verification-secret-key-for-local-contract-checks-only-2026'
+    QR_SIGNING_KEY = 'artflow-verification-qr-signing-key'
     STAFF_ACCESS_KEY = 'artflow-verification-staff-access-key'
     ADMIN_ACCESS_KEY = 'artflow-verification-admin-access-key'
     ALLOWED_HOSTS = 'artflow.internal'

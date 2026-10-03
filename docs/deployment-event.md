@@ -17,6 +17,7 @@ Copy-Item .env.event.example .env.event
 编辑未提交的 `.env.event`，至少替换：
 
 - `SECRET_KEY`
+- `QR_SIGNING_KEY`（应与 `SECRET_KEY` 分开，专用于可恢复票券二维码签名）
 - `STAFF_ACCESS_KEY`
 - `ADMIN_ACCESS_KEY`
 - `POSTGRES_PASSWORD`
