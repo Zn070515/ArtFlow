@@ -32,7 +32,7 @@ from django import forms
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Max
 from django.http import FileResponse
 from django.test import (
@@ -4475,7 +4475,7 @@ class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=commit_archive)
         holder.start()
@@ -4484,7 +4484,7 @@ class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
         gen_result: dict[str, object] = {}
 
         def try_generate():
-            close_old_connections()
+            connection.close()
             try:
                 generate_persistent_document(self.activity, self.template, self.staff)
                 gen_result["done"] = True
@@ -4493,7 +4493,7 @@ class WordGenerateArchiveConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 gen_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         worker = threading.Thread(target=try_generate)
         worker.start()
@@ -4776,7 +4776,7 @@ class PublicPostReparentConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 holder_error["error"] = error
             finally:
-                close_old_connections()
+                connection.close()
 
         holder = threading.Thread(target=commit_reparent_to_b)
         holder.start()
@@ -4785,7 +4785,7 @@ class PublicPostReparentConcurrencyTests(TransactionTestCase):
         t2_result: dict[str, object] = {}
 
         def try_stale_reparent():
-            close_old_connections()
+            connection.close()
             try:
                 request = self._reparent_request(self.c.pk)
                 request.user = self.staff
@@ -4796,7 +4796,7 @@ class PublicPostReparentConcurrencyTests(TransactionTestCase):
             except Exception as error:  # pragma: no cover - diagnostic only
                 t2_result["error"] = repr(error)
             finally:
-                close_old_connections()
+                connection.close()
 
         t2 = threading.Thread(target=try_stale_reparent)
         t2.start()
