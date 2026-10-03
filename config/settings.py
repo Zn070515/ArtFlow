@@ -200,6 +200,12 @@ ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS = get_int(
 ARTFLOW_UPLOAD_MIN_FREE_MB = get_int(os.environ, "ARTFLOW_UPLOAD_MIN_FREE_MB", 256)
 ARTFLOW_PII_RETENTION_DAYS = get_int(os.environ, "ARTFLOW_PII_RETENTION_DAYS", 365)
 
+# How long (seconds) one worker may memoise the activity-wide half of the live
+# state payload before recomputing it. The shared half is identical for every
+# viewer of an activity, so a one-second window collapses a polling wave without
+# making a staff action feel stale. 0 disables the memo entirely.
+LIVE_STATE_CACHE_SECONDS = get_int(os.environ, "LIVE_STATE_CACHE_SECONDS", 1)
+
 # How long (seconds) an admin's elevated second-factor verification stays valid.
 # After this window the admin must re-enter ADMIN_ACCESS_KEY on sensitive actions.
 ADMIN_VERIFICATION_TTL_SECONDS = get_int(os.environ, "ADMIN_VERIFICATION_TTL_SECONDS", 15 * 60)

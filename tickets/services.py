@@ -11,13 +11,14 @@ from urllib.parse import unquote, urlsplit
 
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import TICKET_SESSION_STATE, TICKET_STATE, authority_write
+from common.heartbeat import HEARTBEAT_INTERVAL
 from common.models import AuditLog
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from .models import Ticket, TicketAccessSession
@@ -415,11 +416,18 @@ def rotate_ticket_credential(ticket: Ticket, *, actor: Any) -> str:
         return ticket_credential(locked)
 
 
-def authenticate_ticket_session(
+def authenticate_ticket_session_for_mutation(
     raw_token: str,
     *,
     activity: Activity | int,
 ) -> TicketAccessSession:
+    """Authoritative ticket-session check that holds the session row lock.
+
+    Keep this for callers that must lock the session before their own write.
+    Polling GETs must use :func:`authenticate_ticket_session_readonly` instead:
+    this variant takes ``SELECT ... FOR UPDATE`` and writes ``last_seen_at``,
+    which is wrong for a 2.5 s live poll.
+    """
     raw_token = _validate_raw_token(raw_token)
     activity_id = getattr(activity, "pk", activity)
     now = timezone.now()
@@ -442,6 +450,53 @@ def authenticate_ticket_session(
         with authority_write(TICKET_SESSION_STATE):
             session.save(update_fields=["last_seen_at"])
         return session
+
+
+def authenticate_ticket_session_readonly(
+    raw_token: str,
+    *,
+    activity: Activity | int,
+) -> TicketAccessSession:
+    """Read-only ticket-session authentication for polling GETs.
+
+    One indexed SELECT with ``select_related("ticket")`` and the same validity
+    rules as the mutation variant — token digest, revocation, expiry, activity
+    scope and ticket state — but no ``select_for_update`` and no per-request
+    ``last_seen_at`` write. Authoritative actions (``submit_ballot``, redeem,
+    revoke) re-validate and re-lock inside their own transaction, so nothing here
+    weakens them.
+    """
+    raw_token = _validate_raw_token(raw_token)
+    activity_id = getattr(activity, "pk", activity)
+    now = timezone.now()
+    session = (
+        TicketAccessSession.objects.select_related("ticket")
+        .filter(token_digest=_token_digest(raw_token))
+        .first()
+    )
+    if (
+        session is None
+        or session.revoked_at is not None
+        or session.expires_at <= now
+        or session.ticket.activity_id != activity_id
+        or session.ticket.state not in {Ticket.State.ISSUED, Ticket.State.CHECKED_IN}
+    ):
+        raise ValidationError(INVALID_TICKET_MESSAGE)
+    _heartbeat_ticket_session(session, now=now)
+    return session
+
+
+def _heartbeat_ticket_session(session: TicketAccessSession, *, now: datetime) -> None:
+    """Best-effort, throttled ``last_seen_at`` refresh for read-only polling."""
+    last_seen = session.last_seen_at
+    if last_seen is not None and now - last_seen < HEARTBEAT_INTERVAL:
+        return
+    try:
+        with transaction.atomic(), authority_write(TICKET_SESSION_STATE):
+            TicketAccessSession.objects.filter(pk=session.pk).update(last_seen_at=now)
+    except DatabaseError:
+        return
+    session.last_seen_at = now
 
 
 def revoke_ticket_session(
