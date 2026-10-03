@@ -5,7 +5,7 @@ description = "ArtFlow student arts department activity operations platform"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "asgiref==3.11.1",
+    "asgiref==3.12.1",
     "django==6.0.8",
     "et-xmlfile==2.0.0",
     "openpyxl==3.1.5",
