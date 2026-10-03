@@ -8,6 +8,16 @@
     <p class="text-sm text-gray-500"><a class="underline" href="{% url 'public_portal:activity_entry' activity.public_code %}">{{ activity.title }}</a></p>
     <h1 class="mt-2 text-3xl font-bold text-gray-900">现场观众入口</h1>
 
+    <p class="mt-3 text-sm text-gray-600" data-live-ticket-status>
+        {% if ticket_status == "checked_in" %}
+            票券已检票，可以参与当前开放投票。
+        {% elif ticket_status == "recognized" %}
+            票券已识别，请先到入口完成检票。
+        {% else %}
+            请先扫描入场票；完成检票后才能参与投票。
+        {% endif %}
+    </p>
+
     <section class="mt-8 rounded border {% if vote_is_active %}border-green-200 bg-green-50{% else %}border-blue-200 bg-blue-50{% endif %} p-5{% if not vote_session %} hidden{% endif %}" data-live-vote-section>
         <p class="text-sm font-medium {% if vote_is_active %}text-green-900{% else %}text-blue-900{% endif %}" data-live-vote-name>{{ vote_session.name|default:"" }}</p>
         <p class="mt-2 text-sm {% if vote_is_active %}text-green-800{% else %}text-blue-800{% endif %}" data-live-vote-label>{{ vote_state_label|default:"" }}</p>

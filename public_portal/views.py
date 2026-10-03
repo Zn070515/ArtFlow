@@ -1,10 +1,13 @@
 from core.models import Activity
+from django.core.exceptions import ValidationError
 from django.db.models import Prefetch
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET
+from tickets.models import Ticket
+from tickets.services import authenticate_ticket_session
 from voting.models import VoteSession
 from voting.policies import vote_ui_state
 
@@ -34,6 +37,18 @@ def _activity_result_posts(activity: Activity):
         related_activity=activity,
         post_type=PublicPost.PostType.RESULT_PUBLICATION,
     )
+
+
+def _ticket_status_for_request(request, activity: Activity) -> str:
+    """Expose only the ticket qualification state needed by the live shell."""
+    raw_token = request.COOKIES.get("artflow_ticket_session")
+    if not raw_token:
+        return "unrecognized"
+    try:
+        session = authenticate_ticket_session(raw_token, activity=activity)
+    except ValidationError:
+        return "unrecognized"
+    return "checked_in" if session.ticket.state == Ticket.State.CHECKED_IN else "recognized"
 
 
 def activity_entry(request, public_code: str):
@@ -78,6 +93,7 @@ def activity_live(request, public_code: str):
             "vote_state_label": vote_state_label,
             "result_post": result_post,
             "now": now,
+            "ticket_status": _ticket_status_for_request(request, activity),
         },
     )
 
@@ -96,6 +112,7 @@ def activity_live_state(request, public_code: str):
     else:
         state, label, can_submit = vote_ui_state(vote_session, now)
     result_post = _activity_result_posts(activity).first()
+    ticket_status = _ticket_status_for_request(request, activity)
     revision = ":".join(
         [
             str(vote_session.pk if vote_session else 0),
@@ -103,6 +120,7 @@ def activity_live_state(request, public_code: str):
             str(vote_session.start_time.timestamp() if vote_session else 0),
             str(vote_session.end_time.timestamp() if vote_session else 0),
             str(result_post.pk if result_post else 0),
+            ticket_status,
         ]
     )
     response = JsonResponse(
@@ -119,6 +137,7 @@ def activity_live_state(request, public_code: str):
             "result_url": (
                 reverse("public_portal:post_detail", args=[result_post.pk]) if result_post else None
             ),
+            "ticket_status": ticket_status,
         }
     )
     response["Cache-Control"] = "no-store"

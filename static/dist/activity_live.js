@@ -13,6 +13,7 @@
     const voteName = root.querySelector("[data-live-vote-name]");
     const voteLabel = root.querySelector("[data-live-vote-label]");
     const voteLink = root.querySelector("[data-live-vote-link]");
+    const ticketStatus = root.querySelector("[data-live-ticket-status]");
     let revision = "";
     let timer;
     function render(payload) {
@@ -33,6 +34,13 @@
         if (voteLink) {
             voteLink.href = typeof value.vote_url === "string" ? value.vote_url : "#";
             voteLink.classList.toggle("hidden", !open);
+        }
+        if (ticketStatus && typeof value.ticket_status === "string") {
+            ticketStatus.textContent = value.ticket_status === "checked_in"
+                ? "票券已检票，可以参与当前开放投票。"
+                : value.ticket_status === "recognized"
+                    ? "票券已识别，请先到入口完成检票。"
+                    : "请先扫描入场票；完成检票后才能参与投票。";
         }
     }
     async function poll() {

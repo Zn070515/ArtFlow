@@ -185,6 +185,27 @@ class StableActivityEntryTests(TestCase):
         ended = self.client.get(live_state_url)
         self.assertEqual(ended.json()["state"], "ended")
 
+    @patch("public_portal.views.authenticate_ticket_session")
+    def test_live_surface_explains_ticket_qualification_state(self, authenticate):
+        self.client.cookies["artflow_ticket_session"] = "ticket-session"
+        authenticate.return_value = SimpleNamespace(ticket=SimpleNamespace(state="issued"))
+        recognized = self.client.get(
+            reverse("public_portal:activity_live", args=[self.formal.public_code])
+        )
+        self.assertContains(recognized, "票券已识别，请先到入口完成检票")
+
+        authenticate.return_value.ticket.state = "checked_in"
+        checked_in = self.client.get(
+            reverse("public_portal:activity_live_state", args=[self.formal.public_code])
+        )
+        self.assertEqual(checked_in.json()["ticket_status"], "checked_in")
+
+        authenticate.side_effect = ValidationError("expired")
+        expired = self.client.get(
+            reverse("public_portal:activity_live_state", args=[self.formal.public_code])
+        )
+        self.assertEqual(expired.json()["ticket_status"], "unrecognized")
+
     @override_settings(APP_ENV="production")
     @patch("qrcode.make")
     def test_qr_images_use_stable_https_routes_and_no_store(self, make_qr):

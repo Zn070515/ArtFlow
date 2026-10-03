@@ -558,6 +558,40 @@ def resume_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
 
 
 @transaction.atomic
+def set_judge_seat_display_label(seat_id: int, *, operator, display_label: str) -> JudgeSeat:
+    """Update the optional human-facing note for an anonymous judge channel."""
+    current_operator = require_current_staff(operator)
+    seat = (
+        JudgeSeat.objects.select_for_update()
+        .select_related("panel_member__panel_snapshot__round__activity")
+        .get(pk=seat_id)
+    )
+    snapshot = seat.panel_member.panel_snapshot
+    if snapshot.state == RoundPanelSnapshot.State.SUPERSEDED:
+        raise ValidationError("已替换的评委组不能修改席位备注。")
+    if seat.state != JudgeSeat.State.ASSIGNED:
+        raise ValidationError("当前评委席位不可修改。")
+    normalized = display_label.strip()
+    if len(normalized) > 100:
+        raise ValidationError("评委席位备注不能超过 100 个字符。")
+    old_label = seat.display_label
+    if old_label == normalized:
+        return seat
+    with authority_write(JUDGE_PANEL_STATE):
+        seat.display_label = normalized
+        seat.save(update_fields=["display_label"])
+    _audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.JUDGE_PANEL_CHANGE,
+        target=f"JudgeSeat:{seat.pk}",
+        old_value=f"display_label={old_label}",
+        new_value=f"display_label={normalized}",
+        note="optional display metadata only; score authority remains the seat channel",
+    )
+    return seat
+
+
+@transaction.atomic
 def advance_performance(round_id: int, performance_id: int, *, operator) -> PerformanceRunState:
     locked = _lock_judge_round(round_id, operator)
     if locked.contest_round.status == ContestRound.Status.LOCKED:

@@ -32,6 +32,7 @@ from .judge_authority import (
     prepare_judge_panel,
     resume_judge_panel,
     resume_performance,
+    set_judge_seat_display_label,
     submit_judge_score,
     submit_paper_score,
     submit_staff_proxy_score,
@@ -384,6 +385,41 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(held.state, RoundPanelSnapshot.State.HOLD)
         self.assertEqual(self.round.performance_run_state.state, PerformanceRunState.State.HOLD)
         self.assertEqual(self.round.performance_run_state.hold_reason, "裁判席位核验")
+
+    def test_shared_judge_hold_preserves_anonymous_session(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        from .judge_authority import claim_judge_session
+
+        claimed = claim_judge_session(self.activity)
+        held = hold_judge_panel(self.round.pk, operator=self.operator, reason="舞台调整")
+        self.assertEqual(held.state, RoundPanelSnapshot.State.HOLD)
+        self.assertEqual(
+            authenticate_judge_session(claimed.token).pk,
+            claimed.session.pk,
+        )
+
+        resumed = resume_judge_panel(self.round.pk, operator=self.operator)
+        self.assertEqual(resumed.state, RoundPanelSnapshot.State.ACTIVE)
+        self.assertEqual(
+            authenticate_judge_session(claimed.token).pk,
+            claimed.session.pk,
+        )
+
+    def test_anonymous_judge_seat_can_have_optional_display_note(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+
+        updated = set_judge_seat_display_label(
+            seat.pk,
+            operator=self.operator,
+            display_label="左侧手机",
+        )
+
+        self.assertEqual(updated.display_label, "左侧手机")
+        self.assertEqual(
+            JudgeSeat.objects.get(pk=seat.pk).display_label,
+            "左侧手机",
+        )
 
     def test_panel_hold_revokes_unredeemed_grant_and_rotates_context_generation(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)

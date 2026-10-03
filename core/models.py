@@ -122,7 +122,6 @@ class Activity(models.Model):
         max_length=8,
         unique=True,
         editable=False,
-        null=True,
         default=generate_activity_public_code,
     )
     judge_entry_open = models.BooleanField(
