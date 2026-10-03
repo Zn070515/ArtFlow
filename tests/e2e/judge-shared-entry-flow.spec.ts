@@ -65,6 +65,7 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
     await expect(staff).toHaveURL(/\/staff\/$/);
 
     await staff.goto(`/staff/judges/round/${fixture.round_id}/control/`);
+    await staff.getByPlaceholder("暂停评委组原因").fill("浏览器验收暂停");
     await staff.getByRole("button", { name: "暂停评委组" }).click();
     await expect(staff.getByText("评委组已暂停")).toBeVisible();
     await expect(pages[0].locator("[data-performance-state]")).toHaveText("现场暂停");
