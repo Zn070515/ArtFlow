@@ -39,7 +39,7 @@ from singer_contest.services import (
     official_stage_award_queryset,
     snapshot_fingerprint,
 )
-from voting.models import VoteOption, VoteSession
+from voting.models import VoteOption
 
 from .models import ArticleTemplate, GeneratedDocument
 
@@ -473,10 +473,15 @@ def build_execution_package(activity: Activity, request: Any = None) -> list[Pac
         artifacts.append(
             _xlsx(f"score_template_{contest_round.pk}", _score_template_workbook(contest_round))
         )
-    for vote_session in scope_runtime(VoteSession.objects.filter(activity=activity), activity):
-        path = reverse("voting:vote_entry", args=[vote_session.pk])
+    for kind, route_name in (
+        ("activity", "public_portal:activity_entry"),
+        ("apply", "public_portal:activity_apply"),
+        ("live", "public_portal:activity_live"),
+        ("judge", "public_portal:activity_judge"),
+    ):
+        path = reverse(route_name, kwargs={"public_code": activity.public_code})
         url = request.build_absolute_uri(path) if request is not None else path
-        artifacts.append(_qr_artifact(f"vote_qr_{vote_session.pk}", url))
+        artifacts.append(_qr_artifact(f"{kind}_qr", url))
     return artifacts
 
 

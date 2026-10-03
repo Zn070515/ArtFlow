@@ -2211,7 +2211,7 @@ class StaffPanelSmokeTests(TestCase):
             advance_count=1,
         )
         prepare_round(contest_round, self.staff)
-        vote_session = _create_vote_session(
+        _create_vote_session(
             activity=activity,
             name="Pop",
             passcode="1234",
@@ -2233,7 +2233,8 @@ class StaffPanelSmokeTests(TestCase):
         self.assertIn("host_script.xlsx", names)
         self.assertIn("incident_empty_form.xlsx", names)
         self.assertIn(f"score_template_{contest_round.pk}.xlsx", names)
-        self.assertIn(f"vote_qr_{vote_session.pk}.png", names)
+        for qr_name in ("activity_qr.png", "apply_qr.png", "live_qr.png", "judge_qr.png"):
+            self.assertIn(qr_name, names)
         for omitted in [
             "score_results.xlsx",
             "vote_results.xlsx",

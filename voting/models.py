@@ -380,7 +380,7 @@ class VoteSession(models.Model):
         "core.Activity", on_delete=models.CASCADE, related_name="vote_sessions"
     )
     name = models.CharField(max_length=100)
-    passcode = models.CharField(max_length=20)
+    passcode = models.CharField(max_length=20, blank=True, default="")
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     is_open = models.BooleanField(default=False)
@@ -418,6 +418,11 @@ class VoteSession(models.Model):
             models.CheckConstraint(
                 condition=Q(end_time__gt=F("start_time")),
                 name="vote_end_after_start",
+            ),
+            models.UniqueConstraint(
+                fields=["activity"],
+                condition=Q(is_open=True),
+                name="vote_one_open_session_per_activity",
             ),
         ]
 

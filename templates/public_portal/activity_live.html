@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{{ activity.title }} · 现场{% endblock %}
+
+{% block content %}
+<main class="mx-auto max-w-xl px-4 py-10">
+    <p class="text-sm text-gray-500"><a class="underline" href="{% url 'public_portal:activity_entry' activity.public_code %}">{{ activity.title }}</a></p>
+    <h1 class="mt-2 text-3xl font-bold text-gray-900">现场观众入口</h1>
+
+    {% if vote_session and vote_is_active %}
+    <section class="mt-8 rounded border border-green-200 bg-green-50 p-5">
+        <p class="text-sm font-medium text-green-900">{{ vote_session.name }}</p>
+        <p class="mt-2 text-sm text-green-800">当前投票已开放。</p>
+        <a class="mt-4 inline-block rounded bg-brand px-4 py-2 text-sm font-medium text-white" href="{% url 'voting:vote_entry' vote_session.pk %}">立即投票</a>
+    </section>
+    {% elif vote_session %}
+    <section class="mt-8 rounded border border-blue-200 bg-blue-50 p-5">
+        <p class="text-sm font-medium text-blue-900">{{ vote_session.name }}</p>
+        <p class="mt-2 text-sm text-blue-800">投票即将开始，请留意现场提示。</p>
+    </section>
+    {% else %}
+    <section class="mt-8 rounded border border-gray-200 bg-white p-5">
+        <p class="font-medium text-gray-900">当前暂无开放投票</p>
+        <p class="mt-2 text-sm text-gray-600">请继续观看比赛，投票开放后本页面会显示入口。</p>
+    </section>
+    {% endif %}
+
+    {% if result_post %}
+    <section class="mt-6 rounded border border-gray-200 bg-white p-5">
+        <p class="text-sm text-gray-600">结果公示</p>
+        <a class="mt-1 inline-block text-sm text-brand underline" href="{% url 'public_portal:post_detail' result_post.pk %}">{{ result_post.title }}</a>
+    </section>
+    {% endif %}
+</main>
+{% endblock %}

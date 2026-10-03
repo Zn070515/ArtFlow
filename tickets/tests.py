@@ -303,6 +303,26 @@ class TicketLifecycleServiceTests(TestCase):
             ).exists()
         )
 
+    def test_recoverable_credential_can_be_redeemed_until_rotated(self):
+        ticket = self._service("create_ticket")(
+            self.activity, actor=self.staff, serial_number="recoverable-1"
+        )
+        issued = self._service("issue_ticket")(ticket, actor=self.staff)
+        credential = self._service("ticket_credential")(issued.ticket)
+
+        first = self._service("redeem_ticket")(credential)
+        second = self._service("redeem_ticket")(credential)
+        self.assertNotEqual(first.session.pk, second.session.pk)
+
+        rotated = self._service("rotate_ticket_credential")(issued.ticket, actor=self.staff)
+        self.assertNotEqual(rotated, credential)
+        with self.assertRaises(ValidationError):
+            self._service("redeem_ticket")(credential)
+        self.assertEqual(
+            self._service("redeem_ticket")(rotated).session.ticket_id,
+            issued.ticket.pk,
+        )
+
     def test_batch_issue_creates_sequential_issued_tickets_atomically(self):
         issue_batch = self._service("issue_ticket_batch")
 

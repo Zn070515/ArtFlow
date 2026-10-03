@@ -1114,6 +1114,7 @@ class JudgeSeat(models.Model):
         RoundPanelSnapshotMember, on_delete=models.PROTECT, related_name="seats"
     )
     state = models.CharField(max_length=16, choices=State.choices)
+    display_label = models.CharField(max_length=100, blank=True)
     assigned_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -1231,6 +1232,13 @@ class JudgeSession(models.Model):
 
     class Meta:
         base_manager_name = "objects"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["seat"],
+                condition=Q(state="active"),
+                name="judge_session_one_active_per_seat",
+            )
+        ]
         indexes = [
             models.Index(fields=["expires_at"], name="judge_session_expiry_idx"),
             models.Index(fields=["state"], name="judge_session_state_idx"),

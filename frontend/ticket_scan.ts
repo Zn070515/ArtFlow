@@ -45,6 +45,18 @@
     }
   }
 
+  function normalizeCredential(value: string): string {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    try {
+      const parsed = new URL(trimmed, window.location.origin);
+      if (parsed.hash) return decodeURIComponent(parsed.hash.slice(1));
+    } catch {
+      // Raw credential fallback.
+    }
+    return trimmed;
+  }
+
   async function redeem(secret: string, status: HTMLElement | null): Promise<void> {
     try {
       const csrf = document.querySelector<HTMLInputElement>('[name="csrfmiddlewaretoken"]');
@@ -54,7 +66,7 @@
           "Content-Type": "application/json",
           ...(csrf?.value ? { "X-CSRFToken": csrf.value } : {}),
         },
-        body: JSON.stringify({ secret }),
+        body: JSON.stringify({ secret: normalizeCredential(secret) }),
       });
       const payload = response.ok ? await response.json() : null;
       setStatus(

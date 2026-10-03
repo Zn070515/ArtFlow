@@ -57,6 +57,8 @@ class TicketQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             "batch_reference",
             "serial_number",
             "secret_digest",
+            "public_code",
+            "credential_version",
             "state",
             "issued_at",
             "issued_by",
@@ -126,6 +128,10 @@ class Ticket(models.Model):
         blank=True,
         editable=False,
     )
+    public_code = models.CharField(
+        max_length=12, unique=True, null=True, blank=True, editable=False
+    )
+    credential_version = models.PositiveIntegerField(default=1, editable=False)
     state = models.CharField(max_length=16, choices=State.choices, default=State.CREATED)
     issued_at = models.DateTimeField(null=True, blank=True)
     issued_by = models.ForeignKey(
@@ -220,6 +226,8 @@ class Ticket(models.Model):
                     "batch_reference",
                     "serial_number",
                     "secret_digest",
+                    "public_code",
+                    "credential_version",
                     "state",
                     "issued_at",
                     "issued_by_id",

@@ -6,6 +6,7 @@ app_name = "judge"
 
 urlpatterns = [
     path("terminal/", judge_views.judge_terminal, name="terminal"),
+    path("claim/<str:public_code>/", judge_views.judge_claim, name="claim"),
     path("context/", judge_views.judge_context, name="context"),
     path("score/", judge_views.judge_score, name="score"),
 ]

@@ -27,6 +27,8 @@ from .services import (
     issue_ticket_batch,
     redeem_ticket,
     revoke_ticket,
+    rotate_ticket_credential,
+    ticket_credential,
     void_ticket,
 )
 
@@ -97,6 +99,13 @@ def _required_text(payload: dict[str, Any], key: str) -> str:
     return value
 
 
+def _credential_from_payload(payload: dict[str, Any]) -> str:
+    value = payload.get("credential", payload.get("secret"))
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError
+    return value.strip()
+
+
 def _required_form_int(payload, key: str) -> int:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -107,10 +116,10 @@ def _required_form_int(payload, key: str) -> int:
         raise ValueError from None
 
 
-def _qr_data_uri(request: HttpRequest, secret: str) -> str:
+def _qr_data_uri(request: HttpRequest, credential: str) -> str:
     import qrcode
 
-    target = f"{request.build_absolute_uri('/tickets/scan/')}#{quote(secret, safe='')}"
+    target = f"{request.build_absolute_uri('/tickets/scan/')}#{quote(credential, safe='')}"
     image = qrcode.make(target)
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -147,7 +156,7 @@ def redeem(request: HttpRequest) -> JsonResponse:
         return _rate_limited_response(decision.retry_after_seconds)
     try:
         payload = _json_payload(request)
-        raw_secret = _required_text(payload, "secret")
+        raw_secret = _credential_from_payload(payload)
         result = redeem_ticket(
             raw_secret,
             request_meta=TicketRequestMeta(ip_address=client_ip(request)),
@@ -235,7 +244,8 @@ def issue_page(request: HttpRequest) -> HttpResponse:
                 {
                     "ticket": item.ticket,
                     "secret": item.secret,
-                    "qr_data_uri": _qr_data_uri(request, item.secret),
+                    "credential": ticket_credential(item.ticket),
+                    "qr_data_uri": _qr_data_uri(request, ticket_credential(item.ticket)),
                 }
                 for item in issued_tickets
             ]
@@ -273,7 +283,17 @@ def check_in_page(request: HttpRequest) -> HttpResponse:
 @require_GET
 def detail_page(request: HttpRequest, ticket_id: int) -> HttpResponse:
     ticket = get_object_or_404(Ticket.objects.select_related("activity"), pk=ticket_id)
-    response = render(request, "staff_panel/ticket_detail.html", {"ticket": ticket})
+    response = render(
+        request,
+        "staff_panel/ticket_detail.html",
+        {
+            "ticket": ticket,
+            "credential": ticket_credential(ticket) if ticket.public_code else None,
+            "qr_data_uri": (
+                _qr_data_uri(request, ticket_credential(ticket)) if ticket.public_code else None
+            ),
+        },
+    )
     return _no_store(response)
 
 
@@ -291,6 +311,18 @@ def action_page(request: HttpRequest, ticket_id: int):
             messages.success(request, "票据已撤销。")
         else:
             raise ValidationError("无效的票据操作。")
+    except ValidationError as error:
+        messages.error(request, str(error))
+    return redirect("ticket_staff:detail", ticket_id=ticket_id)
+
+
+@staff_required
+@require_POST
+def reset_credential_page(request: HttpRequest, ticket_id: int):
+    ticket = get_object_or_404(Ticket, pk=ticket_id)
+    try:
+        rotate_ticket_credential(ticket, actor=request.user)
+        messages.success(request, "票据凭证已重置，旧二维码已失效。")
     except ValidationError as error:
         messages.error(request, str(error))
     return redirect("ticket_staff:detail", ticket_id=ticket_id)
@@ -335,13 +367,17 @@ def issue(request: HttpRequest) -> JsonResponse:
         return _invalid_response()
     except PermissionDenied:
         raise
+    credential = ticket_credential(result.ticket)
     return _no_store(
         JsonResponse(
             {
                 "ticket_id": result.ticket.pk,
                 "state": result.ticket.state,
                 "secret": result.secret,
-                "qr_url": f"{request.build_absolute_uri('/tickets/scan/')}#{result.secret}",
+                "credential": credential,
+                "qr_url": (
+                    f"{request.build_absolute_uri('/tickets/scan/')}#{quote(credential, safe='')}"
+                ),
             },
             status=201,
         )
@@ -354,7 +390,7 @@ def check_in(request: HttpRequest) -> JsonResponse:
     try:
         payload = _json_payload(request)
         ticket = check_in_ticket(
-            _required_text(payload, "secret"),
+            _credential_from_payload(payload),
             actor=request.user,
             request_meta=TicketRequestMeta(ip_address=client_ip(request)),
         )

@@ -4,7 +4,7 @@ from base64 import b64encode
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from typing import cast
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 from uuid import uuid4
 
 from accounts.decorators import admin_required, staff_required
@@ -44,6 +44,7 @@ from core.services import (
     transition_activity_phase,
     unarchive_activity,
 )
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -166,6 +167,7 @@ from singer_contest.services import (
     validate_roster_source_stage,
 )
 from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
+from voting.policies import formal_singer_contest_requires_ticket
 from voting.services import (
     close_vote_session,
     lock_vote_session,
@@ -2578,11 +2580,11 @@ def vote_session_list(request):
 def vote_session_create(request):
     activities = _editable_singer_activities()
     if request.method == "POST":
-        form = VoteSessionForm(request.POST)
         activity = get_object_or_404(activities, pk=request.POST["activity_id"])
         activity = lock_activity_for_runtime_data(activity)
         ensure_activity_unlocked(activity)
         ensure_activity_action_allowed(activity, ActivityAction.MANAGE_VOTE)
+        form = VoteSessionForm(request.POST, activity=activity)
         if not form.is_valid():
             return render(
                 request,
@@ -2603,6 +2605,7 @@ def vote_session_create(request):
                     "submitted_singer_ids": request.POST.getlist("singers"),
                     "selection_types": _choices(VoteSession.SelectionType),
                     "purposes": _choices(VoteSession.Purpose),
+                    "formal_ticket_voting": formal_singer_contest_requires_ticket(activity),
                 },
             )
         singer_ids = request.POST.getlist("singers")
@@ -2623,13 +2626,21 @@ def vote_session_create(request):
         vote_session = VoteSession.objects.create(
             activity=activity,
             name=form.cleaned_data["name"],
-            passcode=form.cleaned_data["passcode"],
+            passcode=(
+                ""
+                if formal_singer_contest_requires_ticket(activity)
+                else form.cleaned_data["passcode"]
+            ),
             start_time=form.cleaned_data["start_time"],
             end_time=form.cleaned_data["end_time"],
             selection_type=form.cleaned_data["selection_type"],
             max_selections=form.cleaned_data["max_selections"],
             purpose=form.cleaned_data["purpose"],
-            requires_ticket=form.cleaned_data["requires_ticket"],
+            requires_ticket=(
+                True
+                if formal_singer_contest_requires_ticket(activity)
+                else form.cleaned_data["requires_ticket"]
+            ),
             is_test_data=activity.is_test_mode,
         )
         for i, sid in enumerate(singer_ids):
@@ -2664,7 +2675,7 @@ def vote_session_create(request):
     else:
         singer_queryset = singer_queryset.none()
     singers = _with_generic_song_labels(scope_lifecycle(singer_queryset))
-    form = VoteSessionForm()
+    form = VoteSessionForm(activity=selected_activity)
     return render(
         request,
         "staff_panel/vote_session_form.html",
@@ -2676,6 +2687,9 @@ def vote_session_create(request):
             "selection_types": _choices(VoteSession.SelectionType),
             "purposes": _choices(VoteSession.Purpose),
             "submitted_singer_ids": [],
+            "formal_ticket_voting": bool(
+                selected_activity and formal_singer_contest_requires_ticket(selected_activity)
+            ),
         },
     )
 
@@ -2827,40 +2841,55 @@ def _popularity_top_tie(vote_session):
 
 @staff_required
 def qr_center(request):
-    activities = Activity.objects.all()
+    activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
     return render(request, "staff_panel/qr_center.html", {"activities": activities})
 
 
 @staff_required
 def qr_generate(request, pk):
-    activity = get_object_or_404(Activity, pk=pk)
+    activity = get_object_or_404(
+        Activity,
+        pk=pk,
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
     return render(request, "staff_panel/qr_detail.html", {"activity": activity})
 
 
 @staff_required
 def qr_image(request, pk, kind):
-    activity = get_object_or_404(Activity, pk=pk)
-    if kind == "registration":
-        # The QR points at the activity's *real* entry, which resolves to the questionnaire
-        # or the legacy form depending on what that activity's frozen ruleset carries.
-        path = reverse("register:activity", args=[activity.pk])
-    elif kind == "vote":
-        vote_session = activity.vote_sessions.order_by("-created_at").first()
-        if not vote_session:
-            return HttpResponse("No vote session", status=404)
-        path = reverse("voting:vote_entry", args=[vote_session.pk])
-    elif kind == "results":
-        path = reverse("public_portal:result_list")
+    activity = get_object_or_404(
+        Activity,
+        pk=pk,
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
+    stable_paths = {
+        "activity": "public_portal:activity_entry",
+        "apply": "public_portal:activity_apply",
+        "live": "public_portal:activity_live",
+        "judge": "public_portal:activity_judge",
+        # Keep already printed registration sheets usable while moving them to
+        # the stable activity-scoped entry. Vote/result QR kinds are retired.
+        "registration": "public_portal:activity_apply",
+    }
+    route_name = stable_paths.get(kind)
+    if route_name is not None:
+        path = reverse(route_name, kwargs={"public_code": activity.public_code})
     else:
         return HttpResponse("Unknown QR code kind", status=404)
 
     import qrcode
 
-    image = qrcode.make(request.build_absolute_uri(path))
+    absolute_url = request.build_absolute_uri(path)
+    if settings.APP_ENV == "production":
+        parts = urlsplit(absolute_url)
+        absolute_url = urlunsplit(("https", parts.netloc, parts.path, parts.query, parts.fragment))
+    image = qrcode.make(absolute_url)
     buffer = io.BytesIO()
     image.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type="image/png")
     response["Content-Disposition"] = f'inline; filename="{kind}_{activity.pk}.png"'
+    response["Cache-Control"] = "no-store"
+    response["Pragma"] = "no-cache"
     return response
 
 

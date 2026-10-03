@@ -7,6 +7,7 @@ from .models import Activity
 class ActivityAdmin(admin.ModelAdmin):
     list_display = [
         "title",
+        "public_code",
         "activity_type",
         "phase",
         "data_lifecycle",
@@ -18,6 +19,7 @@ class ActivityAdmin(admin.ModelAdmin):
     search_fields = ["title"]
     readonly_fields = [
         "activity_type",
+        "public_code",
         "phase",
         "is_test_mode",
         "data_lifecycle",

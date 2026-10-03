@@ -27,7 +27,7 @@ from tickets.services import (
 )
 
 from .models import VoteBallot, VoteOption, VoteSession
-from .services import open_vote_session, submit_ballot
+from .services import close_vote_session, open_vote_session, submit_ballot
 
 
 class TicketVoteSubmissionTests(TestCase):
@@ -183,6 +183,7 @@ class TicketVoteSubmissionTests(TestCase):
             )
 
     def test_no_ticket_vote_ignores_supplied_ticket_context(self):
+        close_vote_session(self.vote_session, self.staff)
         legacy_session = VoteSession.objects.create(
             activity=self.activity,
             name="Legacy Vote",

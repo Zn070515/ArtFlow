@@ -9,6 +9,9 @@
         <h1 class="text-xl font-bold text-gray-900 mb-2">投票成功</h1>
         <p class="text-sm text-gray-500">感谢参与 {{ vote_session.name }}！</p>
     </div>
+    {% if live_url %}
+    <a href="{{ live_url }}" class="mt-5 inline-block rounded bg-brand px-4 py-2 text-sm text-white">返回现场页面</a>
+    {% endif %}
     <p class="text-xs text-gray-400 mt-4">每人仅限投票一次</p>
 </div>
 {% endblock %}

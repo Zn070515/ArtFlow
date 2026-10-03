@@ -10,27 +10,29 @@
         <a href="{% url 'staff:qr_center' %}" class="hover:underline">二维码中心</a> / {{ activity.title }}
     </p>
 
-    <div class="grid sm:grid-cols-3 gap-6">
+    <div class="grid sm:grid-cols-2 gap-6">
+        <div class="border border-gray-200 bg-white rounded-lg p-6 text-center">
+            <h3 class="font-medium text-gray-900 mb-3">活动入口</h3>
+            <img src="{% url 'staff:qr_image' activity.pk 'activity' %}" alt="活动入口二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
+            <a href="{% url 'staff:qr_image' activity.pk 'activity' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
+        </div>
+
         <div class="border border-gray-200 bg-white rounded-lg p-6 text-center">
             <h3 class="font-medium text-gray-900 mb-3">报名入口</h3>
-            <img src="{% url 'staff:qr_image' activity.pk 'registration' %}" alt="报名二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
-            <a href="{% url 'staff:qr_image' activity.pk 'registration' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
+            <img src="{% url 'staff:qr_image' activity.pk 'apply' %}" alt="报名二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
+            <a href="{% url 'staff:qr_image' activity.pk 'apply' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
         </div>
 
         <div class="border border-gray-200 bg-white rounded-lg p-6 text-center">
-            <h3 class="font-medium text-gray-900 mb-3">投票入口</h3>
-            {% if activity.vote_sessions.exists %}
-            <img src="{% url 'staff:qr_image' activity.pk 'vote' %}" alt="投票二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
-            <a href="{% url 'staff:qr_image' activity.pk 'vote' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
-            {% else %}
-            <div class="w-40 h-40 mx-auto border border-dashed border-gray-200 rounded flex items-center justify-center text-xs text-gray-400">暂无投票场次</div>
-            {% endif %}
+            <h3 class="font-medium text-gray-900 mb-3">现场观众入口</h3>
+            <img src="{% url 'staff:qr_image' activity.pk 'live' %}" alt="现场观众入口二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
+            <a href="{% url 'staff:qr_image' activity.pk 'live' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
         </div>
 
         <div class="border border-gray-200 bg-white rounded-lg p-6 text-center">
-            <h3 class="font-medium text-gray-900 mb-3">结果公示</h3>
-            <img src="{% url 'staff:qr_image' activity.pk 'results' %}" alt="结果二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
-            <a href="{% url 'staff:qr_image' activity.pk 'results' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
+            <h3 class="font-medium text-gray-900 mb-3">评委入口</h3>
+            <img src="{% url 'staff:qr_image' activity.pk 'judge' %}" alt="评委入口二维码" class="w-40 h-40 mx-auto border border-gray-200 rounded">
+            <a href="{% url 'staff:qr_image' activity.pk 'judge' %}" download class="inline-block mt-3 text-xs text-brand hover:underline">下载 PNG</a>
         </div>
     </div>
 </div>

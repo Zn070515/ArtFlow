@@ -1,3 +1,4 @@
+import secrets
 from typing import TYPE_CHECKING
 
 from common.authority import (
@@ -15,15 +16,26 @@ if TYPE_CHECKING:
     from voting.models import VoteSession
 
 
+_PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_activity_public_code() -> str:
+    """Return a short, human-scannable identifier for a formal activity URL."""
+    return "".join(secrets.choice(_PUBLIC_CODE_ALPHABET) for _ in range(8))
+
+
 class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     lifecycle_fields = {"is_test_mode", "data_lifecycle"}
     state_fields = {"phase", "is_locked", "locked_at", "locked_by", "locked_by_id"}
+    immutable_fields = {"activity_type", "public_code"}
 
     def _ensure_state_authorized(self, fields):
         if self.state_fields.intersection(fields) and not authority_authorized(ACTIVITY_STATE):
             raise ValidationError("Activity state must be changed through the lifecycle service.")
 
     def update(self, **kwargs):
+        if self.immutable_fields.intersection(kwargs):
+            raise ValidationError("Activity type and public code cannot be changed.")
         self._ensure_state_authorized(kwargs)
         if self.lifecycle_fields.intersection(kwargs):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
@@ -32,6 +44,8 @@ class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def bulk_create(self, objs, *args, **kwargs):
         objs = list(objs)
         options = parse_bulk_create_options(args, kwargs)
+        if options.update_conflicts and self.immutable_fields.intersection(options.update_fields):
+            raise ValidationError("Activity type and public code cannot be changed.")
         if options.update_conflicts and self.lifecycle_fields.intersection(options.update_fields):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
         if (
@@ -50,6 +64,8 @@ class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs):
+        if self.immutable_fields.intersection(fields):
+            raise ValidationError("Activity type and public code cannot be changed.")
         self._ensure_state_authorized(fields)
         if self.lifecycle_fields.intersection(fields):
             raise ValidationError("Activity lifecycle must be changed through Activity.save().")
@@ -93,6 +109,14 @@ class Activity(models.Model):
     description = models.TextField(blank=True)
     cover_image = models.ImageField(upload_to="activities/covers/", blank=True)
     is_test_mode = models.BooleanField(default=True)
+    public_code = models.CharField(
+        max_length=8,
+        unique=True,
+        editable=False,
+        default=generate_activity_public_code,
+        null=True,
+        blank=True,
+    )
     data_lifecycle = models.CharField(
         max_length=12,
         choices=DataLifecycle,
@@ -164,6 +188,8 @@ class Activity(models.Model):
         allow_transition = kwargs.pop("_allow_lifecycle_transition", False)
         if self._state.adding:
             self._ensure_initial_state_authorized()
+            if not self.public_code:
+                self.public_code = generate_activity_public_code()
             self.data_lifecycle = (
                 self.DataLifecycle.TEST if self.is_test_mode else self.DataLifecycle.FORMAL
             )
@@ -187,11 +213,30 @@ class Activity(models.Model):
                     type(self)
                     ._base_manager.using(using)
                     .filter(pk=self.pk)
-                    .values("activity_type", "phase", "is_locked", "locked_at", "locked_by_id")
+                    .values(
+                        "activity_type",
+                        "public_code",
+                        "phase",
+                        "is_locked",
+                        "locked_at",
+                        "locked_by_id",
+                    )
                     .first()
                 )
+                if (
+                    persisted_state
+                    and persisted_state["public_code"] is None
+                    and not self.public_code
+                ):
+                    self.public_code = generate_activity_public_code()
                 if persisted_state and persisted_state["activity_type"] != self.activity_type:
                     raise ValidationError("活动类型创建后不可修改。")
+                if (
+                    persisted_state
+                    and persisted_state["public_code"] is not None
+                    and persisted_state["public_code"] != self.public_code
+                ):
+                    raise ValidationError("活动公开入口编码创建后不可修改。")
                 if (
                     persisted_state
                     and not authority_authorized(ACTIVITY_STATE)

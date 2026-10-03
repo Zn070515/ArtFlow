@@ -1,7 +1,90 @@
+from core.models import Activity
 from django.db.models import Prefetch
-from django.shortcuts import get_object_or_404, render
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
+from voting.models import VoteSession
 
 from .models import PublicMedia, PublicPost
+
+
+def _public_contest(request, public_code: str) -> Activity:
+    """Resolve a stable public contest code without exposing rehearsal data."""
+    activities = Activity.objects.filter(
+        public_code=public_code,
+        activity_type=Activity.Type.SINGER_CONTEST,
+    )
+    is_staff = bool(
+        getattr(request.user, "is_authenticated", False)
+        and getattr(request.user, "is_staff_or_admin", False)
+    )
+    if not is_staff:
+        activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
+    try:
+        return activities.get()
+    except Activity.DoesNotExist as error:
+        raise Http404("Activity not found.") from error
+
+
+def _activity_result_posts(activity: Activity):
+    return PublicPost.published_public().filter(
+        related_activity=activity,
+        post_type=PublicPost.PostType.RESULT_PUBLICATION,
+    )
+
+
+def activity_entry(request, public_code: str):
+    activity = _public_contest(request, public_code)
+    result_post = _activity_result_posts(activity).first()
+    return render(
+        request,
+        "public_portal/activity_entry.html",
+        {"activity": activity, "result_post": result_post},
+    )
+
+
+def activity_apply(request, public_code: str):
+    activity = _public_contest(request, public_code)
+    return redirect("register:activity", activity_pk=activity.pk)
+
+
+def activity_live(request, public_code: str):
+    activity = _public_contest(request, public_code)
+    now = timezone.now()
+    vote_session = (
+        VoteSession.objects.filter(
+            activity=activity,
+            is_open=True,
+            is_locked=False,
+        )
+        .order_by("start_time", "pk")
+        .first()
+    )
+    vote_is_active = bool(vote_session and vote_session.start_time <= now <= vote_session.end_time)
+    result_post = _activity_result_posts(activity).first()
+    return render(
+        request,
+        "public_portal/activity_live.html",
+        {
+            "activity": activity,
+            "vote_session": vote_session,
+            "vote_is_active": vote_is_active,
+            "result_post": result_post,
+            "now": now,
+        },
+    )
+
+
+def activity_judge(request, public_code: str):
+    activity = _public_contest(request, public_code)
+    return render(
+        request,
+        "singer_contest/judge_terminal.html",
+        {
+            "activity": activity,
+            "claim_url": f"/judge/claim/{activity.public_code}/",
+        },
+    )
 
 
 def home(request):
