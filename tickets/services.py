@@ -25,6 +25,7 @@ from .models import Ticket, TicketAccessSession
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 INVALID_TICKET_MESSAGE = "票据无效。"
 _CREDENTIAL_PREFIX = "AF1.T"
+_CURRENT_CREDENTIAL_VERSION = 2
 _PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -187,7 +188,9 @@ def issue_ticket(ticket: Ticket, *, actor: Any) -> IssuedTicket:
         locked_ticket.secret_digest = _token_digest(raw_secret)
         if not locked_ticket.public_code:
             locked_ticket.public_code = _new_public_code()
-        locked_ticket.credential_version = max(1, locked_ticket.credential_version)
+        locked_ticket.credential_version = max(
+            _CURRENT_CREDENTIAL_VERSION, locked_ticket.credential_version
+        )
         locked_ticket.state = Ticket.State.ISSUED
         locked_ticket.issued_at = now
         locked_ticket.issued_by = current_actor
@@ -212,7 +215,7 @@ def issue_ticket(ticket: Ticket, *, actor: Any) -> IssuedTicket:
             old_state=old_state,
             new_state=locked_ticket.state,
         )
-        return IssuedTicket(ticket=locked_ticket, secret=raw_secret)
+        return IssuedTicket(ticket=locked_ticket, secret=ticket_credential(locked_ticket))
 
 
 def issue_ticket_batch(
