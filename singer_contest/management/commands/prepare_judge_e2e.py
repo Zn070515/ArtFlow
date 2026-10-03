@@ -46,8 +46,7 @@ class Command(BaseCommand):
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with transaction.atomic():
-            operator_password = f"JudgeFixture!{uuid4().hex[:12]}"
-            operator = self._create_operator(operator_password)
+            operator = self._create_operator()
             activity = self._create_activity()
             singer_user = self._create_participant()
             singer = SingerRegistration.objects.create(
@@ -92,8 +91,6 @@ class Command(BaseCommand):
             "judge_entry_open": activity.judge_entry_open,
             "round_id": contest_round.pk,
             "performance_id": performance.pk,
-            "staff_username": operator.username,
-            "staff_password": operator_password,
         }
         if issued is not None:
             fixture["grant_token"] = issued.token
@@ -112,7 +109,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Judge browser fixture prepared."))
 
     @staticmethod
-    def _create_operator(password: str) -> User:
+    def _create_operator() -> User:
         with authority_write(ACCOUNT_AUTHORITY):
             operator = User(
                 username=f"judge-e2e-operator-{uuid4().hex}",
@@ -120,7 +117,7 @@ class Command(BaseCommand):
                 is_staff=True,
                 is_superuser=True,
             )
-            operator.set_password(password)
+            operator.set_unusable_password()
             operator.save()
         return operator
 
