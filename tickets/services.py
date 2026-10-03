@@ -88,9 +88,11 @@ def _ticket_for_credential(raw_credential: Any) -> Ticket | None:
         raw_secret = _validate_raw_token(raw_credential)
     except ValidationError:
         return None
-    return Ticket.objects.select_related("activity").filter(
-        secret_digest=_token_digest(raw_secret)
-    ).first()
+    return (
+        Ticket.objects.select_related("activity")
+        .filter(secret_digest=_token_digest(raw_secret))
+        .first()
+    )
 
 
 def _token_digest(raw_token: str) -> str:
@@ -343,7 +345,10 @@ def redeem_ticket(
     with transaction.atomic():
         candidate = _ticket_for_credential(raw_secret)
         ticket = (
-            Ticket.objects.select_for_update().select_related("activity").filter(pk=candidate.pk).first()
+            Ticket.objects.select_for_update()
+            .select_related("activity")
+            .filter(pk=candidate.pk)
+            .first()
             if candidate is not None
             else None
         )

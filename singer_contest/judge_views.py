@@ -152,14 +152,11 @@ def judge_terminal(request: HttpRequest):
 def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
     if not _same_origin(request):
         return _error("ORIGIN_REJECTED", 403)
-    activity = (
-        Activity.objects.filter(
-            public_code=public_code,
-            activity_type=Activity.Type.SINGER_CONTEST,
-            data_lifecycle=Activity.DataLifecycle.FORMAL,
-        )
-        .first()
-    )
+    activity = Activity.objects.filter(
+        public_code=public_code,
+        activity_type=Activity.Type.SINGER_CONTEST,
+        data_lifecycle=Activity.DataLifecycle.FORMAL,
+    ).first()
     if activity is None:
         return _error("INVALID_JUDGE_ENTRY", 404)
     existing_token = _judge_token(request)
