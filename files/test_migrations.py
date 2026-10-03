@@ -12,12 +12,16 @@ from tests.migration_helpers import MigrationTransactionTestCase
 
 BEFORE = "0010_materialslot"
 AFTER = "0011_materialcheck_file_purpose"
+CORE_BEFORE = ("core", "0004_alter_activity_options")
 
 
 class MaterialCheckFilePurposeBackfillTests(MigrationTransactionTestCase):
     def _migrate_to(self, targets):
         executor = MigrationExecutor(connection)
-        executor.migrate(targets)
+        normalized = list(targets)
+        if CORE_BEFORE not in normalized:
+            normalized.append(CORE_BEFORE)
+        executor.migrate(normalized)
         return executor
 
     def _apps_at(self, target):
