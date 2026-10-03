@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import TypedDict
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -14,6 +15,17 @@ from config.runtime import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+class DatabaseSettings(TypedDict, total=False):
+    ENGINE: str
+    NAME: str
+    USER: str
+    PASSWORD: str
+    HOST: str
+    PORT: str
+    TEST: dict[str, str]
+
 
 load_environment(BASE_DIR)
 APP_ENV = get_app_env()
@@ -110,7 +122,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASE_ENGINE = os.environ.get("DATABASE_ENGINE", "sqlite").strip().lower()
-DATABASES: dict[str, dict[str, object]]
+DATABASES: dict[str, DatabaseSettings]
 if DATABASE_ENGINE == "postgresql":
     DATABASES = {
         "default": {
