@@ -19,7 +19,7 @@ from .judge_authority import (
     JudgePerformanceNotScorable,
     JudgeRoundOnHold,
     claim_judge_session,
-    get_judge_context,
+    get_judge_context_readonly,
     submit_judge_score,
 )
 
@@ -167,7 +167,7 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
     existing_token = _judge_token(request)
     if existing_token:
         try:
-            context = get_judge_context(existing_token)
+            context = get_judge_context_readonly(existing_token)
         except (ValidationError, PermissionDenied):
             pass
         else:
@@ -226,7 +226,7 @@ def judge_context(request: HttpRequest) -> JsonResponse:
     if token is None:
         return _error("INVALID_JUDGE_SESSION", 401)
     try:
-        context = get_judge_context(token)
+        context = get_judge_context_readonly(token)
     except (ValidationError, PermissionDenied):
         return _error("INVALID_JUDGE_SESSION", 401)
     return _no_store(JsonResponse({"context": asdict(context)}))

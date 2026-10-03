@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -18,14 +19,21 @@ from common.authority import (
 from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import connection
+from django.db.models.query import QuerySet
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
+from entry_access.models import EphemeralSession
 from entry_access.services import redeem_access_grant
 
 from .judge_authority import (
     JudgeIdempotencyConflict,
+    JudgeRoundOnHold,
     advance_performance,
     authenticate_judge_session,
     get_judge_context,
+    get_judge_context_readonly,
     hold_judge_panel,
     hold_performance,
     issue_judge_grant,
@@ -503,6 +511,113 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(context.performance_label, "第 1 个节目")
         self.assertEqual(context.singer_name, "Singer")
         self.assertEqual(context.song_title, "Song title")
+
+    def _materialized_judge_token(self) -> str:
+        """Prepare a panel, issue+redeem a grant and materialize the JudgeSession once."""
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        get_judge_context(redeemed.token)
+        return redeemed.token
+
+    def test_readonly_context_polling_takes_no_locks_and_writes_nothing(self):
+        token = self._materialized_judge_token()
+        session = JudgeSession.objects.get()
+        ephemeral = EphemeralSession._base_manager.get(pk=session.ephemeral_session_id)
+        stored_seen = session.last_seen_at
+        stored_ephemeral_seen = ephemeral.last_seen_at
+
+        with (
+            patch.object(
+                QuerySet,
+                "select_for_update",
+                side_effect=AssertionError("read-only polling must not take a row lock"),
+            ),
+            CaptureQueriesContext(connection) as captured,
+        ):
+            contexts = [get_judge_context_readonly(token) for _ in range(25)]
+
+        statements = [query["sql"].lstrip().upper() for query in captured.captured_queries]
+        self.assertEqual(
+            [statement for statement in statements if statement.startswith("UPDATE")], []
+        )
+        session.refresh_from_db()
+        ephemeral.refresh_from_db()
+        self.assertEqual(session.last_seen_at, stored_seen)
+        self.assertEqual(ephemeral.last_seen_at, stored_ephemeral_seen)
+        # The read-only payload is byte-identical to the authoritative one.
+        self.assertEqual({context.context_version for context in contexts}, {0})
+        self.assertEqual(contexts[0], get_judge_context(token))
+
+    def test_readonly_context_materializes_the_session_on_first_contact_only(self):
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        self.assertFalse(JudgeSession.objects.exists())
+
+        first = get_judge_context_readonly(redeemed.token)
+
+        self.assertEqual(first.round_id, self.round.pk)
+        self.assertEqual(JudgeSession.objects.count(), 1)
+
+    def test_readonly_context_refreshes_the_heartbeat_only_after_the_throttle(self):
+        token = self._materialized_judge_token()
+        session = JudgeSession.objects.get()
+        stale = timezone.now() - timedelta(seconds=61)
+        with authority_write(JUDGE_SESSION_STATE):
+            JudgeSession._base_manager.filter(pk=session.pk).update(last_seen_at=stale)
+
+        get_judge_context_readonly(token)
+
+        session.refresh_from_db()
+        refreshed = session.last_seen_at
+        assert refreshed is not None
+        self.assertGreater(refreshed, stale)
+
+    def test_readonly_context_refuses_a_revoked_seat(self):
+        token = self._materialized_judge_token()
+        target = JudgeSeat.objects.get()
+        with authority_write(JUDGE_PANEL_STATE):
+            target.state = JudgeSeat.State.REVOKED
+            target.revoked_at = timezone.now()
+            target.save(update_fields=["state", "revoked_at"])
+
+        with self.assertRaises(ValidationError):
+            get_judge_context_readonly(token)
+        # The authoritative path refuses the same state, so the read-only path
+        # never becomes the looser door.
+        with self.assertRaises(ValidationError):
+            get_judge_context(token)
+
+    def test_readonly_context_refuses_a_locked_activity(self):
+        token = self._materialized_judge_token()
+        with authority_write(ACTIVITY_STATE):
+            self.activity.is_locked = True
+            self.activity.save(update_fields=["is_locked"])
+
+        with self.assertRaises(ValidationError):
+            get_judge_context_readonly(token)
+        with self.assertRaises(PermissionDenied):
+            get_judge_context(token)
+
+    def test_readonly_context_keeps_hold_visible_while_scoring_stays_blocked(self):
+        token = self._materialized_judge_token()
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+        hold_judge_panel(self.round.pk, operator=self.operator, reason="舞台调整")
+
+        context = get_judge_context_readonly(token)
+        self.assertEqual(context.performance_state, PerformanceRunState.State.HOLD)
+
+        with self.assertRaises(JudgeRoundOnHold):
+            submit_judge_score(
+                token,
+                command_id="judge-readonly-hold",
+                expected_context_version=context.context_version,
+                expected_performance_id=self.performance.pk,
+                score_payload={"score": "90.00", "notes": ""},
+            )
 
     def test_rubric_score_materializes_criterion_facts_and_server_computed_total(self):
         _, criteria = self._bind_rubric("40", "60")

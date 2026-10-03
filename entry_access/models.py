@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from common.authority import (
     ACCESS_GRANT_STATE,
@@ -332,6 +332,11 @@ class EphemeralSession(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = EphemeralSessionQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        grant_id: int
+        activity_id: int
+        round_id: int | None
 
     class Meta:
         base_manager_name = "objects"
