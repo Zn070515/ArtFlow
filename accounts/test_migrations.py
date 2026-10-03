@@ -4,8 +4,6 @@ from django.test import TransactionTestCase
 
 
 class InstallationStateMigrationTests(TransactionTestCase):
-    serialized_rollback = True
-
     def test_existing_effective_admin_is_backfilled_as_initialized(self):
         executor = MigrationExecutor(connection)
         try:
