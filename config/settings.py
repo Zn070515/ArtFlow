@@ -110,6 +110,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASE_ENGINE = os.environ.get("DATABASE_ENGINE", "sqlite").strip().lower()
+DATABASES: dict[str, dict[str, object]]
 if DATABASE_ENGINE == "postgresql":
     DATABASES = {
         "default": {
