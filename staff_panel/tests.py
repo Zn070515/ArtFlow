@@ -386,9 +386,7 @@ class StaffPanelSmokeTests(TestCase):
 
     def _checked_in_ticket_token(self, serial_number):
         with authority_write(ACTIVITY_STATE):
-            Activity.objects.filter(pk=self.singer_activity.pk).update(
-                phase=Activity.Phase.LIVE
-            )
+            Activity.objects.filter(pk=self.singer_activity.pk).update(phase=Activity.Phase.LIVE)
         ticket = create_ticket(
             self.singer_activity,
             actor=self.staff,
@@ -880,9 +878,7 @@ class StaffPanelSmokeTests(TestCase):
         visitor = self.client_class()
         visitor.cookies["artflow_ticket_session"] = self._checked_in_ticket_token("SMOKE-001")
         self.assertEqual(
-            visitor.post(
-                reverse("voting:vote_entry", args=[vote_session.pk])
-            ).status_code,
+            visitor.post(reverse("voting:vote_entry", args=[vote_session.pk])).status_code,
             302,
         )
         self.assertEqual(

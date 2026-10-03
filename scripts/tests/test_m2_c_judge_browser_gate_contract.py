@@ -5,12 +5,12 @@ INTEGRATION_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/integration.yml").r
     encoding="utf-8"
 )
 JUDGE_FLOW = (REPOSITORY_ROOT / "tests/e2e/judge-flow.spec.ts").read_text(encoding="utf-8")
-SHARED_JUDGE_FLOW = (
-    REPOSITORY_ROOT / "tests/e2e/judge-shared-entry-flow.spec.ts"
-).read_text(encoding="utf-8")
-LIVE_TICKET_FLOW = (
-    REPOSITORY_ROOT / "tests/e2e/live-ticket-flow.spec.ts"
-).read_text(encoding="utf-8")
+SHARED_JUDGE_FLOW = (REPOSITORY_ROOT / "tests/e2e/judge-shared-entry-flow.spec.ts").read_text(
+    encoding="utf-8"
+)
+LIVE_TICKET_FLOW = (REPOSITORY_ROOT / "tests/e2e/live-ticket-flow.spec.ts").read_text(
+    encoding="utf-8"
+)
 FIXTURE_COMMAND = (
     REPOSITORY_ROOT / "singer_contest/management/commands/prepare_judge_e2e.py"
 ).read_text(encoding="utf-8")

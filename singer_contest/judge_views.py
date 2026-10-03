@@ -161,8 +161,7 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
         ],
     ).first()
     if activity is None or (
-        activity.data_lifecycle == Activity.DataLifecycle.TEST
-        and not activity.judge_entry_open
+        activity.data_lifecycle == Activity.DataLifecycle.TEST and not activity.judge_entry_open
     ):
         return _error("INVALID_JUDGE_ENTRY", 404)
     existing_token = _judge_token(request)

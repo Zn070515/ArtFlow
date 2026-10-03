@@ -341,9 +341,8 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                     raise ValidationError(message)
                 if "requires_ticket" in fields:
                     _ensure_vote_session_not_bound_to_frozen_ruleset(obj.pk)
-                    if (
-                        obj.requires_ticket is False
-                        and _formal_singer_contest_activity(obj.activity_id)
+                    if obj.requires_ticket is False and _formal_singer_contest_activity(
+                        obj.activity_id
                     ):
                         raise ValidationError("正式歌手比赛投票必须使用入场票。")
         return super().bulk_update(objs, fields, *args, **kwargs)
