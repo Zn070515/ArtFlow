@@ -120,6 +120,7 @@ class Activity(models.Model):
     is_test_mode = models.BooleanField(default=True)
     public_code = models.CharField(
         max_length=8,
+        null=True,
         unique=True,
         editable=False,
         default=generate_activity_public_code,
