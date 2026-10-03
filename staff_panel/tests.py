@@ -85,6 +85,7 @@ from singer_contest.services import (
     prepare_round,
     stage_decisions_by_blocks,
 )
+from tickets.services import check_in_ticket, create_ticket, issue_ticket, redeem_ticket
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import open_vote_session
 
@@ -382,6 +383,20 @@ class StaffPanelSmokeTests(TestCase):
     def tearDown(self):
         self.override.disable()
         shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _checked_in_ticket_token(self, serial_number):
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.singer_activity.pk).update(
+                phase=Activity.Phase.LIVE
+            )
+        ticket = create_ticket(
+            self.singer_activity,
+            actor=self.staff,
+            serial_number=serial_number,
+        )
+        issued = issue_ticket(ticket, actor=self.staff)
+        check_in_ticket(issued.secret, actor=self.staff)
+        return redeem_ticket(issued.secret).token
 
     def test_staff_form_pages_render(self):
         registration = SingerRegistration.objects.create(
@@ -863,9 +878,10 @@ class StaffPanelSmokeTests(TestCase):
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
         vote_session = open_vote_session(vote_session, self.staff)
         visitor = self.client_class()
+        visitor.cookies["artflow_ticket_session"] = self._checked_in_ticket_token("SMOKE-001")
         self.assertEqual(
             visitor.post(
-                reverse("voting:vote_entry", args=[vote_session.pk]), {"passcode": "1234"}
+                reverse("voting:vote_entry", args=[vote_session.pk])
             ).status_code,
             302,
         )
@@ -3134,9 +3150,10 @@ class StaffPanelSmokeTests(TestCase):
         vote_session = open_vote_session(vote_session, self.staff)
         first = self.client_class()
         second = self.client_class()
+        first.cookies["artflow_ticket_session"] = self._checked_in_ticket_token("IP-001")
+        second.cookies["artflow_ticket_session"] = self._checked_in_ticket_token("IP-002")
         first.post(
             reverse("voting:vote_entry", args=[vote_session.pk]),
-            {"passcode": "1234"},
             REMOTE_ADDR="127.0.0.1",
         )
         self.assertEqual(
@@ -3149,7 +3166,6 @@ class StaffPanelSmokeTests(TestCase):
         )
         second.post(
             reverse("voting:vote_entry", args=[vote_session.pk]),
-            {"passcode": "1234"},
             REMOTE_ADDR="127.0.0.1",
         )
         response = second.post(

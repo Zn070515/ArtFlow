@@ -30,6 +30,7 @@ REQUIRE_CADDY_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_CADDY_RUNTIME") == "true
 REQUIRE_EVENT_RUNTIME = os.environ.get("ARTFLOW_REQUIRE_EVENT_RUNTIME") == "true"
 CONFIG_ENVIRONMENT = {
     "SECRET_KEY": "artflow-compose-config-test-secret-key-not-for-deployment-2026",
+    "QR_SIGNING_KEY": "artflow-compose-config-test-qr-signing-key-not-for-deployment-2026",
     "STAFF_ACCESS_KEY": "artflow-compose-config-test-staff-key-not-for-deployment-2026",
     "ADMIN_ACCESS_KEY": "artflow-compose-config-test-admin-key-not-for-deployment-2026",
     "ALLOWED_HOSTS": "artflow.internal",

@@ -54,6 +54,16 @@
             <p class="mt-1">所有评委扫描同一张二维码，系统按连接顺序自动领取空闲评分通道。</p>
             <a class="mt-2 inline-block text-brand underline" href="{% url 'public_portal:activity_judge' round.activity.public_code %}">{% url 'public_portal:activity_judge' round.activity.public_code %}</a>
         </div>
+        {% if qr_data_uri %}
+        <div class="mt-4 rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+            <p class="font-medium">兼容评委入口二维码</p>
+            <p class="mt-1">该二维码仅用于旧版单席位终端流程；现场共享入口请使用上面的活动二维码。</p>
+            {% for row in seat_rows %}
+            {% if row.pending_grant %}<p class="mt-2 text-amber-700">已有未兑换授权，不能重复签发。</p>{% endif %}
+            {% endfor %}
+            <img class="mt-3 h-64 w-64" src="{{ qr_data_uri }}" alt="评委入口二维码">
+        </div>
+        {% endif %}
         <div class="mt-5 flex flex-wrap gap-3">
             {% if panel_snapshot.state == 'active' %}
             <form method="post" action="{% url 'staff:judge_panel_hold' round.pk %}" class="flex gap-2">

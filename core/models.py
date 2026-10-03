@@ -122,10 +122,12 @@ class Activity(models.Model):
         max_length=8,
         unique=True,
         editable=False,
+        null=True,
         default=generate_activity_public_code,
     )
     judge_entry_open = models.BooleanField(
         default=False,
+        db_default=False,
         help_text="TEST 活动的评委彩排入口是否暂时开放。",
     )
     data_lifecycle = models.CharField(
