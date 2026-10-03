@@ -2627,7 +2627,9 @@ def vote_session_create(request):
             activity=activity,
             name=form.cleaned_data["name"],
             passcode=(
-                "" if formal_singer_contest_requires_ticket(activity) else form.cleaned_data["passcode"]
+                ""
+                if formal_singer_contest_requires_ticket(activity)
+                else form.cleaned_data["passcode"]
             ),
             start_time=form.cleaned_data["start_time"],
             end_time=form.cleaned_data["end_time"],

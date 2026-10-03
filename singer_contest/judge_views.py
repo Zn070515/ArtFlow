@@ -169,7 +169,9 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
         except (ValidationError, PermissionDenied):
             pass
         else:
-            response = _no_store(JsonResponse({"seat_label": f"J{context.seat_id}", "reused": True}))
+            response = _no_store(
+                JsonResponse({"seat_label": f"J{context.seat_id}", "reused": True})
+            )
             response.set_cookie(
                 "artflow_judge_session",
                 existing_token,
