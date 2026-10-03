@@ -112,9 +112,7 @@ class StableActivityEntryTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_test_judge_entry_requires_explicit_rehearsal_open(self):
-        judge_url = reverse(
-            "public_portal:activity_judge", args=[self.testing.public_code]
-        )
+        judge_url = reverse("public_portal:activity_judge", args=[self.testing.public_code])
         self.assertEqual(self.client.get(judge_url).status_code, 404)
 
         with authority_write(ACTIVITY_STATE):

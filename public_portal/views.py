@@ -64,9 +64,7 @@ def activity_live(request, public_code: str):
         .first()
     )
     vote_state, vote_state_label, vote_is_active = (
-        vote_ui_state(vote_session, now)
-        if vote_session
-        else ("waiting", "当前暂无开放投票", False)
+        vote_ui_state(vote_session, now) if vote_session else ("waiting", "当前暂无开放投票", False)
     )
     result_post = _activity_result_posts(activity).first()
     return render(
@@ -119,9 +117,7 @@ def activity_live_state(request, public_code: str):
                 else None
             ),
             "result_url": (
-                reverse("public_portal:post_detail", args=[result_post.pk])
-                if result_post
-                else None
+                reverse("public_portal:post_detail", args=[result_post.pk]) if result_post else None
             ),
         }
     )

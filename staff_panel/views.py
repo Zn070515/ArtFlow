@@ -329,6 +329,8 @@ def activity_judge_entry_toggle(request, pk):
         "评委彩排入口已开放。" if activity.judge_entry_open else "评委彩排入口已关闭。",
     )
     return redirect("staff:activity_workspace", pk=activity.pk)
+
+
 @admin_required
 def activity_create(request):
     _require_admin(request.user)

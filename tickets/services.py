@@ -54,9 +54,9 @@ def _new_public_code() -> str:
 
 def _credential_signature(public_code: str, version: int) -> str:
     message = f"{_CREDENTIAL_PREFIX}.{public_code}.{version}".encode("ascii")
-    return hmac.new(
-        settings.QR_SIGNING_KEY.encode("utf-8"), message, hashlib.sha256
-    ).hexdigest()[:32]
+    return hmac.new(settings.QR_SIGNING_KEY.encode("utf-8"), message, hashlib.sha256).hexdigest()[
+        :32
+    ]
 
 
 def ticket_credential(ticket: Ticket) -> str:
@@ -88,11 +88,15 @@ def _ticket_for_credential(raw_credential: Any) -> Ticket | None:
         )
     # Once a ticket has a versioned public credential, a rotated legacy secret
     # must never become a back door to the supposedly invalidated QR code.
-    if isinstance(raw_credential, str) and raw_credential and Ticket.objects.filter(
-        secret_digest=_token_digest(raw_credential),
-        public_code__isnull=False,
-        credential_version__gt=1,
-    ).exists():
+    if (
+        isinstance(raw_credential, str)
+        and raw_credential
+        and Ticket.objects.filter(
+            secret_digest=_token_digest(raw_credential),
+            public_code__isnull=False,
+            credential_version__gt=1,
+        ).exists()
+    ):
         return None
     try:
         raw_secret = _validate_raw_token(raw_credential)
