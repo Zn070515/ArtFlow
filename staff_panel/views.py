@@ -282,7 +282,7 @@ def activity_workspace(request, pk):
     activity = get_object_or_404(Activity, pk=pk)
     rounds = ContestRound.objects.filter(activity=activity).annotate(
         entry_count=Count("entries", distinct=True),
-        judge_count=Count("round_judges", distinct=True),
+        configured_judge_count=Count("round_judges", distinct=True),
     )
     vote_sessions = VoteSession.objects.filter(activity=activity)
     rubrics = ScoringRubric.objects.filter(activity=activity)
@@ -1230,7 +1230,7 @@ def round_list(request):
     rounds = list(
         ContestRound.objects.select_related("activity").annotate(
             entry_count=Count("entries", distinct=True),
-            judge_count=Count("round_judges", distinct=True),
+            assigned_judge_count=Count("round_judges", distinct=True),
         )
     )
     activity_id = request.GET.get("activity_id") or ""

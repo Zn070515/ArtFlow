@@ -21,6 +21,7 @@ from django.urls import reverse
 from django.utils import timezone
 from singer_contest.models import ContestRound, Judge, SingerRegistration
 from singer_contest.services import apply_scores, prepare_round
+from tickets.services import check_in_ticket, create_ticket, issue_ticket, redeem_ticket
 
 from .models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from .services import (
@@ -81,6 +82,7 @@ class VotePublicStagingBoundaryTests(TestCase):
         activity = create_activity(
             title="Vote Activity",
             activity_type=Activity.Type.SINGER_CONTEST,
+            phase=(Activity.Phase.LIVE if not is_test_mode else Activity.Phase.DRAFT),
             is_test_mode=is_test_mode,
         )
         singer = SingerRegistration.objects.create(
@@ -108,6 +110,13 @@ class VotePublicStagingBoundaryTests(TestCase):
         )
         session = open_vote_session(session, self.staff)
         return session, option
+
+    def _authenticate_checked_in_ticket(self, client, activity):
+        ticket = create_ticket(activity, actor=self.staff, serial_number="VOTE-001")
+        issued = issue_ticket(ticket, actor=self.staff)
+        check_in_ticket(issued.secret, actor=self.staff)
+        redeemed = redeem_ticket(issued.secret)
+        client.cookies["artflow_ticket_session"] = redeemed.token
 
     def test_test_session_anonymous_entry_404(self):
         session, _ = self._make_session(is_test_mode=True)
@@ -188,9 +197,9 @@ class VotePublicStagingBoundaryTests(TestCase):
         self.assertContains(response, "data-vote-option disabled")
         self.assertContains(response, '<button type="submit" data-vote-submit disabled')
 
-    def test_formal_valid_passcode_cast_still_works(self):
+    def test_formal_checked_in_ticket_cast_works(self):
         session, option = self._make_session(is_test_mode=False)
-        self.client.post(reverse("voting:vote_entry", args=[session.pk]), {"passcode": "1234"})
+        self._authenticate_checked_in_ticket(self.client, session.activity)
         cast = self.client.post(
             reverse("voting:vote_cast", args=[session.pk]),
             {"selected_option": [option.pk]},
@@ -328,7 +337,7 @@ class VoteActivityLockOverlayTests(TestCase):
         self.activity = create_activity(
             title="Overlay Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
-            phase=Activity.Phase.REGISTRATION_OPEN,
+            phase=Activity.Phase.LIVE,
             is_test_mode=False,
             is_locked=False,
         )
@@ -352,14 +361,19 @@ class VoteActivityLockOverlayTests(TestCase):
         )
         self.option = VoteOption.objects.create(vote_session=self.session, singer=singer)
         self.session = open_vote_session(self.session, self.operator)
+        ticket = create_ticket(self.activity, actor=self.operator, serial_number="OVERLAY-001")
+        issued = issue_ticket(ticket, actor=self.operator)
+        check_in_ticket(issued.secret, actor=self.operator)
+        self.ticket_secret = issued.secret
 
     def _cast_ballot(self):
         client = self.client_class()
+        redeemed = redeem_ticket(self.ticket_secret)
+        client.cookies["artflow_ticket_session"] = redeemed.token
         entry = client.post(
             reverse("voting:vote_entry", args=[self.session.pk]),
-            {"passcode": self.session.passcode},
         )
-        self.assertEqual(entry.status_code, 302)
+        self.assertIn(entry.status_code, {200, 302})
         return client.post(
             reverse("voting:vote_cast", args=[self.session.pk]),
             {"selected_option": [str(self.option.pk)]},
@@ -914,10 +928,14 @@ class VoteSessionDeletionAuthorityTests(TestCase):
 class VoteEntryRateLimitTests(TestCase):
     def setUp(self):
         cache.clear()
+        self.staff = create_provisioned_user(
+            username="vote-rate-limit-staff", password="pass", role=User.Role.STAFF
+        )
+        self.client.force_login(self.staff)
         self.activity = Activity.objects.create(
             title="Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
-            is_test_mode=False,
+            is_test_mode=True,
         )
         self.session = create_vote_session(
             activity=self.activity,

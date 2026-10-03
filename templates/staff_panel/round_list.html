@@ -37,7 +37,7 @@
                     <td class="px-4 py-2.5 text-gray-500">{{ r.get_scoring_mode_display }}</td>
                     <td class="px-4 py-2.5">{{ r.advance_count|default:"—" }}</td>
                     <td class="px-4 py-2.5"><span class="text-xs text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded">{{ r.get_status_display }}</span></td>
-                    <td class="px-4 py-2.5 text-xs text-gray-500">选手 {{ r.entry_count }} · 评委 {{ r.judge_count }}</td>
+                    <td class="px-4 py-2.5 text-xs text-gray-500">选手 {{ r.entry_count }} · 评委 {{ r.assigned_judge_count }}</td>
                     <td class="px-4 py-2.5">{% if r.is_locked %}<span class="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded">已锁定</span>{% else %}<span class="text-xs text-gray-400">未锁定</span>{% endif %}</td>
                     <td class="px-4 py-2.5 space-x-2">
                         <a href="{% url 'staff:activity_result_board' r.activity_id %}" class="text-gray-500 hover:underline text-xs">公示板</a>
