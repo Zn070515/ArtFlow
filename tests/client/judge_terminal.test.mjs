@@ -141,6 +141,7 @@ const contextPayload = {
     activity_name: "校园歌手赛",
     round_id: 2,
     seat_id: 3,
+    seat_label: "J3",
     panel_snapshot_id: 4,
     panel_version: 1,
     context_version: 5,
