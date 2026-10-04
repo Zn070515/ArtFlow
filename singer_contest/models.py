@@ -394,6 +394,7 @@ class SingerRegistration(models.Model):
 
     if TYPE_CHECKING:
         activity_id: int
+        user_id: int
         staff_notes: models.Manager[StaffNote]
         files: models.Manager[SubmissionFile]
         material_checks: models.Manager[MaterialCheck]
@@ -869,6 +870,7 @@ class ContestRound(models.Model):
         activity_id: int
         rubric_id: int | None
         entries: models.Manager["RoundEntry"]
+        groups: models.Manager["Group"]
         round_judges: models.Manager["RoundJudge"]
 
         def get_round_type_display(self) -> str: ...
@@ -1327,6 +1329,7 @@ class RoundPanelSnapshotMember(models.Model):
         panel_snapshot_id: int
         judge_id: int
         source_round_judge_id: int
+        seats: models.Manager["JudgeSeat"]
 
     class Meta:
         base_manager_name = "objects"

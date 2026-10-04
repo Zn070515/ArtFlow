@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
@@ -72,6 +74,10 @@ class AuditLog(models.Model):
     note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    if TYPE_CHECKING:
+
+        def get_action_type_display(self) -> str: ...
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -91,6 +97,9 @@ class SeedRecord(models.Model):
     )
     object_id = models.PositiveBigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
+
+    if TYPE_CHECKING:
+        content_type_id: int
 
     class Meta:
         constraints = [
