@@ -4,14 +4,14 @@
 
 {% block content %}
 <div class="max-w-6xl mx-auto px-4 py-10">
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">毕晚节目管理</h1>
             <p class="text-sm text-gray-500 mt-1"><a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> / 节目管理</p>
         </div>
-        <div class="flex items-center gap-2">
-            <form method="get" class="flex items-center gap-2">
-                <select name="activity_id" onchange="this.form.submit()" class="text-xs border border-gray-300 rounded px-2 py-1">
+        <div class="flex flex-wrap items-center gap-2">
+            <form method="get" class="flex min-w-0 items-center gap-2">
+                <select name="activity_id" onchange="this.form.submit()" class="min-w-0 max-w-full text-xs border border-gray-300 rounded px-2 py-1">
                     <option value="">全部活动</option>
                     {% for a in activities %}
                     <option value="{{ a.pk }}" {% if selected_activity_id == a.pk|stringformat:"s" %}selected{% endif %}>{{ a.title }}</option>
