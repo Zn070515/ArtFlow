@@ -141,8 +141,8 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 ## 健康检查与大小/超时
 
 - 健康检查按观察对象拆分为三个匿名 `GET` 路由，都只返回通用状态，不泄露配置细节：
-  `/livez/`（进程存活，不查数据库、不跑 system checks）、`/readyz/`（默认数据库连接可用）、
-  `/healthz/`（readiness 的历史别名，容器/Caddy/CI 探针沿用）。
+  `/livez/`（进程存活，不查数据库、不跑 system checks）、
+  `/readyz/`（执行轻量 `SELECT 1` 验证数据库可用）、`/healthz/`（readiness 的历史别名，容器/Caddy/CI 探针沿用）。
 - 应用容器的 liveness 探针使用 `/livez/`，因此临时数据库故障不会把运行中的进程判死；
   数据库 readiness 仍由 Caddy 代理探针经真实请求路径访问 `/healthz/` 覆盖。
   完整 Django system checks 属于启动阶段（`manage.py check`，容器入口在 migrate 前执行）、

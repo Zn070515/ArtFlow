@@ -79,7 +79,7 @@ Health probes are split by what they actually observe, and all three accept only
 | Route | Meaning | Body |
 |---|---|---|
 | `/livez/` | The application process answered. No database call, no system checks. | `{"status": "alive"}` |
-| `/readyz/` | The default database connection is reachable. | `{"status": "ok"}` or generic unavailable |
+| `/readyz/` | The default database accepts a lightweight `SELECT 1` query. | `{"status": "ok"}` or generic unavailable |
 | `/healthz/` | Readiness under its historical name; kept because the container, Caddy and CI probes already point at it. | same as `/readyz/` |
 
 Django's full system-check set is a startup gate, not a heartbeat: it runs in

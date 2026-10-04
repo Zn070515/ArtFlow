@@ -25,7 +25,7 @@ from common.authority import (
 from common.heartbeat import HEARTBEAT_INTERVAL
 from common.models import AuditLog
 from core.models import Activity
-from core.policies import ActivityAction
+from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, transaction
@@ -34,9 +34,10 @@ from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
 from entry_access.services import (
     IssuedAccessGrant,
     authenticate_ephemeral_session,
-    authenticate_ephemeral_session_readonly,
     create_entry_point,
+    heartbeat_ephemeral_session,
     issue_access_grant,
+    resolve_ephemeral_session_readonly,
     revoke_access_grant,
 )
 
@@ -148,15 +149,16 @@ class JudgeContextTransport:
 
 def _judge_context_transport_readonly(raw_ephemeral_token: str) -> JudgeContextTransport:
     """Resolve the judge transport for read-only polling with plain SELECTs."""
-    ephemeral = authenticate_ephemeral_session_readonly(
-        raw_ephemeral_token, expected_kind=EntryPoint.Kind.JUDGE
-    )
+    ephemeral = resolve_ephemeral_session_readonly(raw_ephemeral_token)
+    if ephemeral.kind != EntryPoint.Kind.JUDGE:
+        raise ValidationError("评委访问会话无效。")
     if ephemeral.round_id is None:
         raise ValidationError("评委访问会话无效。")
     contest_round = ephemeral.round
     activity = ephemeral.activity
     if contest_round is None or contest_round.activity_id != activity.pk:
         raise ValidationError("评委访问会话无效。")
+    ensure_activity_action_allowed(activity, ActivityAction.SCORE)
     return JudgeContextTransport(
         ephemeral_session=ephemeral, activity=activity, contest_round=contest_round
     )
@@ -976,6 +978,7 @@ def _authenticate_judge_session_readonly(
         return None
     if session.state != JudgeSession.State.ACTIVE or session.expires_at <= timezone.now():
         raise ValidationError("评委访问会话无效。")
+    heartbeat_ephemeral_session(ephemeral)
     heartbeat_judge_session(session)
     return session
 

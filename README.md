@@ -152,7 +152,7 @@ pwsh -NoProfile -File scripts/check_docs.ps1
 pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1 -ComposeProjectName artflow -BackupPath backups/artflow-rehearsal.dump
 ```
 
-`doctor` 只读检查配置、数据库、迁移、运行目录和首个管理员 provisioning 状态。匿名探针只返回运行状态，不返回配置或业务数据：`GET /livez/` 表示进程存活（不查数据库），`GET /readyz/` 表示数据库连接可用，`GET /healthz/` 是 readiness 的历史别名，容器/Caddy/CI 探针继续沿用。演示数据可用 `uv run python manage.py seed_demo_data --reset` 清理，但它只会删除该命令拥有且带测试标记的运行数据；仍应先在非重要数据库中验证。
+`doctor` 只读检查配置、数据库、迁移、运行目录和首个管理员 provisioning 状态。匿名探针只返回运行状态，不返回配置或业务数据：`GET /livez/` 表示进程存活（不查数据库），`GET /readyz/` 执行轻量 `SELECT 1` 验证数据库可用，`GET /healthz/` 是 readiness 的历史别名，容器/Caddy/CI 探针继续沿用。演示数据可用 `uv run python manage.py seed_demo_data --reset` 清理，但它只会删除该命令拥有且带测试标记的运行数据；仍应先在非重要数据库中验证。
 
 数据库恢复不能用活动资料归档替代。Docker Compose 环境可用上面的备份恢复命令，把源库恢复到隔离临时容器并运行 Django 检查；该演练不会重置源数据库或卷。完整事件日矩阵见[生产准备演练](docs/production-readiness.md)，备份约束见 [PostgreSQL 备份与恢复演练](docs/postgres-backup-restore.md)。
 
