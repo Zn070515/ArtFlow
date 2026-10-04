@@ -5,7 +5,7 @@
 {% block content %}
 <div class="max-w-6xl mx-auto px-4 py-10">
     <h1 class="text-2xl font-bold text-gray-900 mb-2">工作人员后台</h1>
-    <p class="text-sm text-gray-500 mb-8">欢迎，{{ user.username }}</p>
+    <p class="text-sm text-gray-500 mb-8 break-all">欢迎，{{ user.username }}</p>
 
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <a href="{% url 'staff:activity_list' %}" class="block border border-gray-200 bg-white rounded-lg p-5 hover:border-gray-300 transition-colors">
