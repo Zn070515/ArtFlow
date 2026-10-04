@@ -227,6 +227,7 @@ urlpatterns = [
         name="activity_result_closure",
     ),
     path("stage-results/<int:pk>/", views.stage_result_detail, name="stage_result_detail"),
+    path("stage-results/<int:pk>/pdf/", views.stage_result_pdf, name="stage_result_pdf"),
     path(
         "stage-results/<int:pk>/confirm/",
         views.stage_result_confirm,

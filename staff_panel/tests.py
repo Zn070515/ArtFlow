@@ -8146,6 +8146,102 @@ class ResultClosureViewTests(TestCase):
         )
 
 
+class StageResultPdfTests(TestCase):
+    """GOAL §2.4: a stage result is downloadable as a printable handcard PDF."""
+
+    def setUp(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        self.staff = _create_provisioned_user(
+            username="stage-pdf-staff", password="pass", role=User.Role.STAFF
+        )
+        self.participant = _create_provisioned_user(
+            username="stage-pdf-participant", password="pass", role=User.Role.PARTICIPANT
+        )
+        self.activity = _create_activity(
+            title="Stage PDF Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.RESULTS_PENDING,
+            is_test_mode=True,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Stage PDF Ruleset",
+            stage_key="final",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                binding={"stage_key": "final"},
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+        self.stage = StageResult.objects.create(
+            activity=self.activity,
+            ruleset_version=version,
+            created_by=self.staff,
+            stage_key="final",
+            status=StageResult.Status.READY_TO_CONFIRM,
+            ruleset_hash=version.authority_hash,
+            input_fingerprint="pdf",
+            result_version=1,
+            is_test_data=True,
+        )
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.participant,
+            name="手卡选手",
+            student_id="PDF001",
+            college="Arts",
+            class_name="1",
+            phone="13900000000",
+            song_name="夜空中最亮的星",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        StageDecision.objects.create(
+            stage_result=self.stage,
+            singer=singer,
+            outcome_code="direct",
+            rank=1,
+            score=Decimal("92.50"),
+            is_test_data=True,
+        )
+
+    def test_stage_result_pdf_is_staff_only(self):
+        self.client.logout()
+        anonymous = self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk]))
+        self.assertEqual(anonymous.status_code, 302)
+
+        self.client.force_login(self.participant)
+        self.client.raise_request_exception = False
+        participant = self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk]))
+        self.assertEqual(participant.status_code, 403)
+        self.client.raise_request_exception = True
+
+    def test_stage_result_pdf_renders_a_real_document(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        # A handcard with one row is far larger than a blank one-page document.
+        self.assertGreater(len(response.content), 1500)
+
+    def test_stage_result_pdf_rejects_an_unknown_stage(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:stage_result_pdf", args=[999999]))
+
+        self.assertEqual(response.status_code, 404)
+
+
 class StageResultAuthorityDetailTests(TestCase):
     def test_old_result_detail_does_not_expose_superseded_result(self):
         staff = _create_provisioned_user(
