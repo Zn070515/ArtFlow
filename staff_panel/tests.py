@@ -7537,20 +7537,20 @@ class JudgeControlHTTPTests(TestCase):
             {"attending_judge_ids": [str(self.judge.pk)]},
         )
 
-    def test_control_page_links_the_per_seat_qr_fallback(self):
-        """The legacy single-seat QR stays reachable without becoming the default entry."""
+    def test_control_page_presents_one_shared_judge_qr(self):
+        """Judges get exactly one entry QR; the page offers no per-seat QR."""
         self._prepare_panel()
 
         response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("staff:qr_image", args=[self.activity.pk, "judge"]))
         seats = response.context["seat_rows"]
         self.assertTrue(seats)
-        self.assertContains(
+        self.assertNotContains(
             response,
             reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seats[0]["seat"].pk]),
         )
-        self.assertContains(response, "单席位二维码")
 
     def test_control_page_is_staff_only_and_readable(self):
         self.client.logout()

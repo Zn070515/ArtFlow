@@ -51,26 +51,19 @@
         </div>
         <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {% for row in seat_rows %}
-            <div class="rounded border border-gray-200 p-2">
-                <form method="post" action="{% url 'staff:judge_seat_label' round.pk row.seat.pk %}" class="flex items-center gap-2">
-                    {% csrf_token %}
-                    <span class="shrink-0 text-sm font-medium text-gray-700">{{ row.seat_label }}</span>
-                    <input class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" name="display_label" maxlength="100" value="{{ row.seat.display_label }}" placeholder="可选备注">
-                    <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700" type="submit">保存</button>
-                </form>
-                {% if panel_snapshot.state == 'active' %}
-                <form method="post" action="{% url 'staff:judge_seat_qr' round.pk row.seat.pk %}" class="mt-1 flex justify-end">
-                    {% csrf_token %}
-                    <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600" type="submit" title="旧版单席位终端备用入口，现场共享二维码优先">单席位二维码</button>
-                </form>
-                {% endif %}
-            </div>
+            <form method="post" action="{% url 'staff:judge_seat_label' round.pk row.seat.pk %}" class="flex items-center gap-2 rounded border border-gray-200 p-2">
+                {% csrf_token %}
+                <span class="shrink-0 text-sm font-medium text-gray-700">{{ row.seat_label }}</span>
+                <input class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" name="display_label" maxlength="100" value="{{ row.seat.display_label }}" placeholder="可选备注">
+                <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700" type="submit">保存</button>
+            </form>
             {% endfor %}
         </div>
         <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <p class="font-medium">共享评委入口</p>
-            <p class="mt-1">所有评委扫描同一张二维码，系统按连接顺序自动领取空闲评分通道。</p>
-            <a class="mt-2 inline-block text-brand underline" href="{% url 'public_portal:activity_judge' round.activity.public_code %}">{% url 'public_portal:activity_judge' round.activity.public_code %}</a>
+            <p class="mt-1">所有评委扫描这同一张二维码，系统按连接顺序自动领取空闲评分通道。</p>
+            <img class="mt-3 h-56 w-56 rounded border border-blue-200 bg-white p-2" src="{% url 'staff:qr_image' round.activity.pk 'judge' %}" alt="共享评委入口二维码">
+            <a class="mt-2 block text-brand underline" href="{% url 'public_portal:activity_judge' round.activity.public_code %}">{% url 'public_portal:activity_judge' round.activity.public_code %}</a>
         </div>
         {% if qr_data_uri %}
         <div class="mt-4 rounded border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">

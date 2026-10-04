@@ -44,3 +44,5 @@ Use `uv run python manage.py doctor` for read-only configuration, database, migr
 ## Git workflow
 
 Work on a short-lived feature branch from a clean, updated `main`. Verify the scoped change before committing. The integration owner merges the verified branch into `main` with a non-fast-forward merge and pushes `main`; do not rewrite or force-push shared history.
+
+Pushing is automatic and does not need to be requested each time: once a scoped change has passed its focused gate, commit it on the short-lived branch, merge it into `main` with `--no-ff`, and push `main`. Never push a change that has not passed its focused gate, and never force-push or rewrite shared history.
