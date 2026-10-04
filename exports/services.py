@@ -574,7 +574,8 @@ def _vote_results_workbook(activity: Activity) -> Workbook:
                 opt.vote_session.name,
                 opt.singer.name,
                 generic_song_label(opt.singer),
-                opt.vote_count,
+                # Added by the annotate() above; mypy's Django plugin sees it, pyright cannot.
+                opt.vote_count,  # type: ignore[reportAttributeAccessIssue]
             ]
         )
     _autosize_sheet(ws)

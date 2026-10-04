@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import models, router, transaction
 
 if TYPE_CHECKING:
+    from singer_contest.models import ContestRound
     from voting.models import VoteSession
 
 
@@ -149,7 +150,12 @@ class Activity(models.Model):
 
     if TYPE_CHECKING:
         vote_sessions: models.Manager[VoteSession]
+        rounds: models.Manager[ContestRound]
         locked_by_id: int | None
+
+        def get_activity_type_display(self) -> str: ...
+
+        def get_phase_display(self) -> str: ...
 
     class Meta:
         verbose_name_plural = "activities"

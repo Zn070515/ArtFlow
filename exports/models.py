@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.db import models
 
@@ -38,6 +40,12 @@ class ExportTask(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+    if TYPE_CHECKING:
+
+        def get_export_type_display(self) -> str: ...
+
+        def get_format_display(self) -> str: ...
 
     def __str__(self):
         return f"{self.get_export_type_display()} ({self.get_format_display()})"

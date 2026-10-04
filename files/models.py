@@ -42,6 +42,9 @@ class SubmissionFile(models.Model):
 
     if TYPE_CHECKING:
         group_id: int | None
+
+        def get_file_purpose_display(self) -> str: ...
+
     file = models.FileField(upload_to="submissions/%Y/%m/")
     # The metadata-free rendition of an image upload (GOAL §19.3). ``file`` stays private;
     # a caller whose only claim is ``is_public`` is served this instead. Empty for audio,
@@ -398,6 +401,13 @@ class MaterialSlot(models.Model):
                 name="materialslot_owner_subject_xor",
             ),
         ]
+
+    if TYPE_CHECKING:
+        activity_id: int
+        round_id: int | None
+        singer_registration_id: int | None
+        program_id: int | None
+        group_id: int | None
 
     def clean(self):
         contest_round = self.round if self.round_id else None

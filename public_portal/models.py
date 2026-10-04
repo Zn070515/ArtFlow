@@ -61,6 +61,11 @@ class PublicPost(models.Model):
     if TYPE_CHECKING:
         related_activity_id: int | None
         media_items: models.Manager["PublicMedia"]
+        result_releases: models.Manager["ResultRelease"]
+
+        def get_post_type_display(self) -> str: ...
+
+        def get_status_display(self) -> str: ...
 
     class Meta:
         ordering = ["-is_pinned", "sort_order", "-created_at"]

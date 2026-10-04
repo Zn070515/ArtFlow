@@ -1087,20 +1087,19 @@ def _build_decisions(
     # node must NOT carry a prior stage's label forward (the Stage2-Top5-shows-Top10 bug:
     # once a contestant is DIRECT in a replayed stage1 Top10, the narrower Top5 cannot
     # demote them). Here the checkpoint's own output/decisions decide, not st.outcome.
-    if decisions_spec or output_node is not None:
-        spec_outcome = {d["source"]: OutcomeCode(d["outcome"]) for d in decisions_spec}
+    spec_outcome = {d["source"]: OutcomeCode(d["outcome"]) for d in decisions_spec}
 
-        def label(c: str) -> tuple[OutcomeCode, str]:
-            if decisions_spec:
-                for d in decisions_spec:
-                    if c in _member_set(st.values.get(d["source"])):
-                        return spec_outcome[d["source"]], d["source"]
-                return OutcomeCode.ELIMINATED, ""
-            out_node = output_node
-            assert out_node is not None
-            if c in _member_set(st.values.get(out_node)):
-                return OutcomeCode.DIRECT, out_node
+    def label(c: str) -> tuple[OutcomeCode, str]:
+        if decisions_spec:
+            for d in decisions_spec:
+                if c in _member_set(st.values.get(d["source"])):
+                    return spec_outcome[d["source"]], d["source"]
             return OutcomeCode.ELIMINATED, ""
+        out_node = output_node
+        assert out_node is not None
+        if c in _member_set(st.values.get(out_node)):
+            return OutcomeCode.DIRECT, out_node
+        return OutcomeCode.ELIMINATED, ""
 
     out = []
     for c in roster:

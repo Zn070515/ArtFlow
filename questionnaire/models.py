@@ -63,8 +63,9 @@ class QuestionnaireResponse(models.Model):
     if TYPE_CHECKING:
         # Django creates the ``<fk>_id`` shadow attribute at runtime; declare it here so
         # Pylance can see it (see AGENTS.md, Pylance & Pyright Type Checking).
-        singer_registration_id: int
+        singer_registration_id: int | None
         ruleset_version_id: int
+        group_id: int | None
 
     class Meta:
         constraints = [
