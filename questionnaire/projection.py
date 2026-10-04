@@ -64,6 +64,8 @@ def prime_questionnaire_answers(registrations: Iterable) -> list:
     ).order_by("-pk")
     response_by_registration: dict[int, QuestionnaireResponse] = {}
     for response_row in responses:
+        if response_row.singer_registration_id is None:
+            continue
         response_by_registration.setdefault(response_row.singer_registration_id, response_row)
     for row in rows:
         version = versions.get(row.activity_id)

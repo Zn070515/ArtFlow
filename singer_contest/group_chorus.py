@@ -275,9 +275,9 @@ def correct_group_stage(
                 group.is_active = False
                 group.save(update_fields=["is_active", "updated_at"])
         for group_order, (name, members) in enumerate(normalized, start=1):
-            group = active_groups.get(group_order)
-            if group is None:
-                group = Group.objects.create(
+            selected_group = active_groups.get(group_order)
+            if selected_group is None:
+                selected_group = Group.objects.create(
                     stage=locked_stage,
                     name=name,
                     group_order=group_order,
@@ -285,13 +285,13 @@ def correct_group_stage(
                     is_test_data=locked_stage.is_test_data,
                 )
             else:
-                group.name = name
-                group.is_active = True
-                group.save(update_fields=["name", "is_active", "updated_at"])
+                selected_group.name = name
+                selected_group.is_active = True
+                selected_group.save(update_fields=["name", "is_active", "updated_at"])
             GroupMembership.objects.bulk_create(
                 [
                     GroupMembership(
-                        group=group,
+                        group=selected_group,
                         singer=singer,
                         is_current=True,
                         added_by=current_operator,

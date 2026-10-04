@@ -81,6 +81,8 @@ def _group_or_404(request: HttpRequest, group_pk: int) -> Group:
         stage__status__in=[GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN],
     )
     if not _is_staff(request.user):
+        if not isinstance(request.user, AccountUser):
+            return get_object_or_404(groups.none(), pk=group_pk)
         groups = groups.filter(
             stage__activity__data_lifecycle=Activity.DataLifecycle.FORMAL,
             memberships__is_current=True,
