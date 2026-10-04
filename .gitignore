@@ -47,7 +47,7 @@ dist/
 backups/
 
 logs/**
-test-results/playwright/
+test-results/
 
 docs/advices/**
 docs/superpowers/**

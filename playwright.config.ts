@@ -1,5 +1,20 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// The phone widths this audience actually uses. Each is its own project so the VS Code
+// Test Explorer lists them separately and any single width can be run or debugged on its
+// own. Layout is decided by the CSS viewport width, not the pixel density, so seven
+// widths span the range from an original iPhone SE to a Pro Max without pretending to
+// simulate every handset on the market.
+const PHONE_PROJECTS = [
+  { name: "phone-320-se", device: devices["iPhone SE"] },
+  { name: "phone-360-android", device: devices["Galaxy S24"] },
+  { name: "phone-375-iphone8", device: devices["iPhone 8"] },
+  { name: "phone-390-iphone14", device: devices["iPhone 14"] },
+  { name: "phone-393-iphone15", device: devices["iPhone 15"] },
+  { name: "phone-412-pixel7", device: devices["Pixel 7"] },
+  { name: "phone-430-promax", device: devices["iPhone 15 Pro Max"] },
+];
+
 export default defineConfig({
   testDir: "tests/e2e",
   outputDir: "test-results/playwright",
@@ -15,6 +30,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      testIgnore: /mobile-layout\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -22,5 +38,10 @@ export default defineConfig({
       testMatch: /(?:auth-entry|ticket-boundary)\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
     },
+    ...PHONE_PROJECTS.map(({ name, device }) => ({
+      name,
+      testMatch: /mobile-layout\.spec\.ts/,
+      use: { ...device },
+    })),
   ],
 });
