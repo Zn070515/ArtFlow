@@ -14,9 +14,6 @@ from django.db.models import Q
 
 from .schema import content_hash, parse_definition
 
-if TYPE_CHECKING:
-    from singer_contest.models import StageResult
-
 
 class RulesetTemplate(models.Model):
     """Reusable blueprint for a contest ruleset (global, not activity-scoped)."""
@@ -353,7 +350,11 @@ class RulesetVersion(models.Model):
 
     if TYPE_CHECKING:
         ruleset_id: int
-        stage_results: models.Manager[StageResult]
+        # Left unparameterised on purpose: naming StageResult here would need a cross-app
+        # import under TYPE_CHECKING, and that import crashes mypy's Django plugin
+        # outright ("Error constructing plugin instance of NewSemanalDjangoPlugin").
+        # Only manager calls are made through this relation.
+        stage_results: models.Manager
 
     class Meta:
         base_manager_name = "objects"

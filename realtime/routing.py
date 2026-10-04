@@ -5,15 +5,15 @@ from .consumers import GroupMaterialConsumer, JudgeContextConsumer, StaffActivit
 # channels' URLRouter accepts an ASGI application here, but Django's path() is typed for a
 # view callable, so these two diagnostics are a stub gap rather than a routing mistake.
 websocket_urlpatterns = [
-    path(  # type: ignore[reportCallIssue]
+    path(  # pyright: ignore[reportCallIssue]
         "ws/staff/activity/<int:activity_id>/",
-        StaffActivityConsumer.as_asgi(),  # type: ignore[reportArgumentType]
+        StaffActivityConsumer.as_asgi(),  # pyright: ignore[reportArgumentType]
         name="staff_activity",
     ),
-    path("ws/judge/", JudgeContextConsumer.as_asgi(), name="judge_context"),  # type: ignore[reportCallIssue]
-    path(  # type: ignore[reportCallIssue]
+    path("ws/judge/", JudgeContextConsumer.as_asgi(), name="judge_context"),  # pyright: ignore[reportCallIssue, reportArgumentType]
+    path(  # pyright: ignore[reportCallIssue]
         "ws/group/<int:group_id>/materials/",
-        GroupMaterialConsumer.as_asgi(),  # type: ignore[reportArgumentType]
+        GroupMaterialConsumer.as_asgi(),  # pyright: ignore[reportArgumentType]
         name="group_material",
     ),
 ]

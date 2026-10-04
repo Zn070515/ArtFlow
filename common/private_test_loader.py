@@ -11,7 +11,7 @@ from accounts.models import User
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
-from django.core.files import File
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.utils import timezone
 from files.services import store_questionnaire_file
@@ -646,17 +646,17 @@ def _load_media(fixture, registrations, version, operator):
         if not source.is_file():
             raise PrivateTestLoadError(f"media file missing: {row['relative_file']}")
         owner = registrations[row["contestant_code"]]
+        content_type = {
+            ".wav": "audio/wav",
+            ".mp4": "video/mp4",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".txt": "text/plain",
+            ".pdf": "application/pdf",
+        }.get(source.suffix.lower(), "application/octet-stream")
         with source.open("rb") as handle:
-            uploaded = File(handle, name=source.name)
-            uploaded.content_type = {
-                ".wav": "audio/wav",
-                ".mp4": "video/mp4",
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".txt": "text/plain",
-                ".pdf": "application/pdf",
-            }.get(source.suffix.lower(), "application/octet-stream")
+            uploaded = SimpleUploadedFile(source.name, handle.read(), content_type=content_type)
             store_questionnaire_file(
                 registration=owner,
                 question_key=question_key,

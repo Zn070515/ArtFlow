@@ -8,7 +8,7 @@ from core.models import Activity
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models.deletion import Collector, ProtectedError, RestrictedError
 from django.utils import timezone
 from exports.models import ArticleTemplate
@@ -639,9 +639,12 @@ class Command(BaseCommand):
             return False
         return self._collector_contains_only_owned_test_data(collector)
 
-    def _collector_for(self, candidate: Any) -> Any:
-        collector = Collector(using=candidate._state.db)
-        collector.collect([candidate])
+    def _collector_for(self, candidate: models.Model) -> Any:
+        collector = Collector(using=candidate._state.db or "default")
+        # Django's stub types this parameter as its own _IndexableCollection protocol,
+        # which neither list nor tuple satisfies. The `pyright:` form is deliberate:
+        # mypy has no complaint here and would report a `type: ignore` as unused.
+        collector.collect((candidate,))  # pyright: ignore[reportArgumentType]
         return collector
 
     def _lock_collected_objects(self, collector: Any) -> None:

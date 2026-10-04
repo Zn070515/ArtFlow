@@ -424,6 +424,7 @@ class VoteSession(models.Model):
 
     if TYPE_CHECKING:
         options: models.Manager["VoteOption"]
+        activity_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -580,6 +581,10 @@ class VoteBallot(models.Model):
 
     objects = VoteBallotManager()
 
+    if TYPE_CHECKING:
+        vote_session_id: int
+        ticket_id: int | None
+
     class Meta:
         base_manager_name = "objects"
         constraints = [
@@ -661,6 +666,7 @@ class VoteOption(models.Model):
 
     if TYPE_CHECKING:
         singer_id: int
+        vote_session_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -765,6 +771,11 @@ class VoteRecord(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = VoteRecordManager()
+
+    if TYPE_CHECKING:
+        ballot_id: int | None
+        vote_session_id: int
+        vote_option_id: int
 
     class Meta:
         base_manager_name = "objects"
