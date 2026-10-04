@@ -6114,6 +6114,102 @@ class RoundScoresApiTests(TestCase):
             AudienceScore.objects.filter(activity=self.activity, stage_key="aud1set").exists()
         )
 
+    def _frozen_audience_ruleset(self):
+        """Bind an audience set so the manual audience-score API accepts a save."""
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Audience Source Ruleset",
+            is_test_data=False,
+            stage_key="来源赛段",
+            round_keys={"r1": self.round.pk},
+            audience_keys={"audience1": "aud1set"},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {
+                                "key": "assess_r1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "round": "r1",
+                            },
+                            {
+                                "key": "assess_a1",
+                                "type": "ASSESS",
+                                "source": "entry",
+                                "vote_source": "audience1",
+                            },
+                            {
+                                "key": "composite",
+                                "type": "AGGREGATE",
+                                "aggregate": {
+                                    "type": "weighted_sum",
+                                    "components": [
+                                        {"source": "assess_r1", "weight": 0.7},
+                                        {"source": "assess_a1", "weight": 0.3},
+                                    ],
+                                },
+                            },
+                            {
+                                "key": "rank",
+                                "type": "RANK",
+                                "source": "composite",
+                                "descending": True,
+                            },
+                            {"key": "top1", "type": "SELECT", "source": "rank", "count": 1},
+                        ],
+                    }
+                ),
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+
+    def _save_audience(self, **extra):
+        payload = {"cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}]}
+        payload.update(extra)
+        return self.client.post(
+            reverse("staff:audience_scores_api", args=[self.activity.pk]),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_audience_score_records_and_keeps_its_source(self):
+        """GOAL §9.8: a degraded-source number must name where it came from."""
+        self._frozen_audience_ruleset()
+
+        saved = self._save_audience(source="external_form", note="腾讯表单导出 10-04")
+        self.assertEqual(saved.status_code, 200)
+        row = AudienceScore.objects.get(activity=self.activity, singer=self.singer)
+        self.assertEqual(row.source, AudienceScore.Source.EXTERNAL_FORM)
+        self.assertEqual(row.source_note, "腾讯表单导出 10-04")
+
+        # A later save that only corrects the number must not erase the recorded provenance.
+        self.assertEqual(self._save_audience().status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.score, Decimal("90"))
+        self.assertEqual(row.source, AudienceScore.Source.EXTERNAL_FORM)
+        self.assertEqual(row.source_note, "腾讯表单导出 10-04")
+
+        audits = AuditLog.objects.filter(
+            action_type=AuditLog.ActionType.ENTER_SCORE,
+            target=f"AudienceScore:{self.activity.pk}",
+        )
+        self.assertTrue(any("source=external_form" in audit.new_value for audit in audits))
+
+    def test_audience_score_rejects_an_unknown_source(self):
+        self._frozen_audience_ruleset()
+
+        response = self._save_audience(source="guesswork")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(AudienceScore.objects.filter(activity=self.activity).exists())
+
 
 class ResultBoardTests(TestCase):
     """M1-H result board: latest-per-stage banners and block-grouped handcard."""
