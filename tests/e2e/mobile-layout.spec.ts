@@ -15,7 +15,13 @@ import { readFileSync } from "node:fs";
 
 import { expect, test } from "@playwright/test";
 
-type Fixture = { public_code: string; activity_id: number; session_key: string };
+type Fixture = {
+  public_code: string;
+  activity_id: number;
+  round_id: number;
+  singer_id: number;
+  session_key: string;
+};
 
 // The default browser root font is 16px, and WeChat's own font-size control and the
 // system accessibility settings both scale it. Everything here is sized in rem, so a
@@ -76,6 +82,20 @@ const FIXTURE_TARGETS: Target[] = [
   { name: "staff-users", path: "/staff/users/", staff: true },
   { name: "staff-posts", path: "/staff/posts/", staff: true },
   { name: "staff-programs", path: "/staff/programs/", staff: true },
+  { name: "staff-registration-detail", path: "/staff/registrations/{singer}/", staff: true },
+  { name: "staff-activity-new", path: "/staff/activities/new/", staff: true },
+  { name: "staff-activity-edit", path: "/staff/activities/{activity}/edit/", staff: true },
+  { name: "staff-round-new", path: "/staff/rounds/new/", staff: true },
+  { name: "staff-round-running-order", path: "/staff/rounds/{round}/running-order/", staff: true },
+  { name: "staff-round-groups", path: "/staff/rounds/{round}/groups/", staff: true },
+  { name: "staff-round-ranking", path: "/staff/rounds/{round}/ranking/", staff: true },
+  { name: "staff-rubric-new", path: "/staff/rubrics/new/", staff: true },
+  { name: "staff-vote-new", path: "/staff/vote-sessions/new/", staff: true },
+  { name: "staff-judge-new", path: "/staff/judges/new/", staff: true },
+  { name: "staff-ruleset-create", path: "/staff/rulesets/create/", staff: true },
+  { name: "staff-result-board", path: "/staff/activity/{activity}/result-board/", staff: true },
+  { name: "staff-result-closure", path: "/staff/activity/{activity}/result-closure/", staff: true },
+  { name: "staff-audience-scores", path: "/staff/activity/{activity}/audience-scores/", staff: true },
 ];
 
 // Runs in the browser: the document must not scroll sideways, and when it does, name the
@@ -116,7 +136,8 @@ function resolve(path: string): string {
   return path
     .replace("{code}", fixture?.public_code ?? "")
     .replace("{activity}", String(fixture?.activity_id ?? ""))
-    .replace("{round}", String(fixture?.round_id ?? ""));
+    .replace("{round}", String(fixture?.round_id ?? ""))
+    .replace("{singer}", String(fixture?.singer_id ?? ""));
 }
 
 // The loop is what makes this a contract: every phone width in every device project

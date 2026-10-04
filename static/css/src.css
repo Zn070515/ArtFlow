@@ -21,6 +21,21 @@
   textarea {
     min-width: 0;
   }
+
+  /* A fieldset carries a user-agent `min-inline-size: min-content`, so it refuses to
+     shrink below its widest child. Inside a phone-width form that pushes the whole
+     fieldset — and the page — wider than its container. */
+  fieldset {
+    min-width: 0;
+  }
+
+  /* A form widget Django renders directly carries no class at all, so it keeps the
+     user-agent's 20-character default width — wider than its container once the reader
+     raises the font size. Only unclassed text-like inputs are touched; anything already
+     styled by a utility, and checkboxes and radios, keep their own width. */
+  input:not([class]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]) {
+    width: 100%;
+  }
 }
 
 @layer components {

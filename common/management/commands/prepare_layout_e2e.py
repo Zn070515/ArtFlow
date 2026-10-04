@@ -50,8 +50,7 @@ class Command(BaseCommand):
             staff = self._create_staff(password)
             activity = self._create_activity()
             contest_round = self._create_round(activity)
-            for index in range(3):
-                self._create_singer(activity, index)
+            singers = [self._create_singer(activity, index) for index in range(3)]
             session_key = self._session_key(staff)
 
         output_path.write_text(
@@ -60,6 +59,7 @@ class Command(BaseCommand):
                     "public_code": activity.public_code,
                     "activity_id": activity.pk,
                     "round_id": contest_round.pk,
+                    "singer_id": singers[0].pk,
                     "session_key": session_key,
                     "staff_username": staff.username,
                     "staff_password": password,
