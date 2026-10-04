@@ -199,6 +199,7 @@ function edit(runtime, value = "90.5") {
 
 function assertPendingRecord(record, {
   score = "90.5",
+  base = "",
   commandId = "rapid-test-command-1",
   baseVersion = 3,
   conflicts,
@@ -209,7 +210,7 @@ function assertPendingRecord(record, {
     round: 55,
     endpoint: "/staff/rounds/55/scores/api/",
     base_version: baseVersion,
-    cells: [{ singer_id: 1, judge_id: 9, score }],
+    cells: [{ singer_id: 1, judge_id: 9, base, score }],
     command_id: commandId,
     updated_at: undefined,
   };
@@ -257,6 +258,47 @@ test("a non-acknowledgement response retains the pending record", async () => {
   assertPendingRecord(runtime.storage.records()[0]);
 });
 
+test("partial accepted response clears saved cells and keeps stale cells", async () => {
+  let requestBody = null;
+  const runtime = boot({
+    initialGrid: grid("", "70"),
+    fetchImpl: async (_url, options) => {
+      if (options.method === "POST") {
+        requestBody = JSON.parse(options.body);
+        return response(200, {
+          version: 4,
+          matrix_complete: false,
+          applied: [{ singer_id: 1, judge_id: 9, score: "91" }],
+          conflicts: [{
+            singer_id: 1,
+            judge_id: 10,
+            base: "70",
+            server: "71",
+            local: "92",
+          }],
+        });
+      }
+      return response(200, { version: 4, matrix_complete: false, grid: grid("91", "71") });
+    },
+  });
+
+  runtime.input.value = "91";
+  runtime.tbody.dispatch("input", { target: runtime.input });
+  runtime.secondInput.value = "92";
+  runtime.tbody.dispatch("input", { target: runtime.secondInput });
+  runtime.runTimers();
+  await settle();
+
+  assert.deepEqual(requestBody.cells, [
+    { singer_id: 1, judge_id: 10, base: "70", score: "92" },
+    { singer_id: 1, judge_id: 9, base: "", score: "91" },
+  ]);
+  assert.equal(runtime.input.value, "91");
+  assert.equal(runtime.secondInput.value, "92");
+  assert.equal(runtime.pendingCount.textContent, "1");
+  assert.match(runtime.conflicts.textContent, /71/);
+});
+
 test("clearing an existing server score restores it without creating a mutation", () => {
   const runtime = boot({ initialGrid: grid("70") });
 
@@ -275,7 +317,7 @@ test("reload restores only this round's pending cells", () => {
     round: 55,
     endpoint: "/staff/rounds/55/scores/api/",
     base_version: 3,
-    cells: [{ singer_id: 1, judge_id: 9, score: "88" }],
+    cells: [{ singer_id: 1, judge_id: 9, base: "70", score: "88" }],
     command_id: "rapid-reload-command",
     updated_at: "2026-09-05T12:00:00.000Z",
   }));
@@ -368,7 +410,7 @@ test("a stale response rebases a draft when its server cell is unchanged", async
   assert.equal(runtime.secondInput.value, "85");
   assert.equal(runtime.pendingCount.textContent, "1");
   assert.equal(runtime.conflicts.textContent, "");
-  assertPendingRecord(runtime.storage.records()[0], { score: "90", baseVersion: 4 });
+  assertPendingRecord(runtime.storage.records()[0], { score: "90", base: "70", baseVersion: 4 });
   assert.equal(runtime.storage.records()[0].base_version, 4);
 });
 
@@ -392,6 +434,7 @@ test("a stale divergent cell retains both values as an explicit conflict", async
   assert.match(runtime.conflicts.textContent, /95/);
   assertPendingRecord(runtime.storage.records()[0], {
     score: "90",
+    base: "70",
     baseVersion: 4,
     conflicts: [{ singer_id: 1, judge_id: 9, base: "70", server: "95", local: "90" }],
   });

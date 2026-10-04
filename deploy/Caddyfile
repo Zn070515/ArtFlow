@@ -11,6 +11,11 @@ https://{$CADDY_SITE_ADDRESS} {
 		max_size 120MB
 	}
 	header -Server
+	@realtime path /ws/*
+	reverse_proxy @realtime realtime:8001 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+	}
 	reverse_proxy web:8000 {
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto https

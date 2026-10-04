@@ -18,6 +18,19 @@ services:
     networks:
       - artflow_event_frontend
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - artflow_event_frontend
+
   web:
     build:
       context: ..
@@ -38,6 +51,7 @@ services:
       ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
       ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:-}
+      ARTFLOW_PROCESS_ROLE: web
       SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-0}
       SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
       SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
@@ -66,6 +80,61 @@ services:
           "python",
           "-c",
           "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - artflow_event_frontend
+
+  realtime:
+    build:
+      context: ..
+      args:
+        ARTFLOW_BUILD_SHA: ${ARTFLOW_RELEASE_SHA:-}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the event environment}
+      QR_SIGNING_KEY: ${QR_SIGNING_KEY:?Set QR_SIGNING_KEY in the event environment}
+      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the event environment}
+      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the event environment}
+      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
+      ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
+      ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
+      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:-}
+      ARTFLOW_PROCESS_ROLE: realtime
+      ARTFLOW_REALTIME_REDIS_URL: redis://redis:6379/0
+      SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-0}
+      SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
+      SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
+      ALLOWED_HOSTS: ${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ""
+      RATE_LIMIT_BACKEND: database
+      DATABASE_ENGINE: postgresql
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the event environment}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the event environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the event environment}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]
+    ports:
+      - "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_REALTIME_PORT:-8001}:8001"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8001/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
         ]
       interval: 10s
       timeout: 5s

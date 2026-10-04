@@ -596,6 +596,31 @@ class EntryAccessHttpTests(TestCase):
         self.assertEqual(post_response["Pragma"], "no-cache")
         self.assertIn("session_token", post_response.json())
 
+    def test_judge_redeem_sets_httponly_session_cookie(self):
+        judge_entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.JUDGE,
+            label="Judge HTTP",
+            actor=self.staff,
+        )
+        issued = issue_access_grant(
+            judge_entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=5),
+        )
+
+        response = self.client.post(
+            reverse("entry_access:grant_redeem"),
+            data={"token": issued.token},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cookie = response.cookies["artflow_judge_session"]
+        self.assertEqual(cookie.value, response.json()["session_token"])
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+
     def test_redeem_invalid_grant_has_generic_reason(self):
         response = self.client.post(
             reverse("entry_access:grant_redeem"),

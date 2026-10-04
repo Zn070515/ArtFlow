@@ -155,6 +155,7 @@
     const claimUrl = root.dataset.claimUrl || "/judge/claim/";
     const contextUrl = root.dataset.contextUrl || "/judge/context/";
     const scoreUrl = root.dataset.scoreUrl || "/judge/score/";
+    const wsUrl = root.dataset.wsUrl || "/ws/judge/";
     const legacyStorageKey = "artflow:judge:draft";
     const storageKeyPrefix = "artflow:judge:draft:";
     const maxDrafts = 8;
@@ -168,6 +169,11 @@
     let pollDelay = 2000;
     let stopped = false;
     let contextRequest = null;
+    let realtimeSocket = null;
+    let realtimeReconnectTimer = null;
+    let realtimeHeartbeatTimer = null;
+    let realtimeReconnectDelay = 1000;
+    let realtimeConnected = false;
     const criterionInputs = new Map();
     function contextFingerprint(value) {
         return [value.activity_id, value.round_id, value.seat_id, value.panel_snapshot_id,
@@ -459,9 +465,98 @@
     async function refreshContext() {
         if (!sessionToken)
             return;
-        const refreshed = await loadContext(sessionToken);
-        if (refreshed)
-            setContext(refreshed);
+        try {
+            const refreshed = await loadContext(sessionToken);
+            if (refreshed)
+                setContext(refreshed);
+        }
+        catch {
+            // The normal poll remains the fallback when a push-triggered refetch fails.
+        }
+    }
+    function realtimeUrl() {
+        const url = new URL(wsUrl, window.location.href);
+        url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return url.toString();
+    }
+    function clearRealtimeTimers() {
+        if (realtimeReconnectTimer !== null) {
+            clearTimeout(realtimeReconnectTimer);
+            realtimeReconnectTimer = null;
+        }
+        if (realtimeHeartbeatTimer !== null) {
+            clearInterval(realtimeHeartbeatTimer);
+            realtimeHeartbeatTimer = null;
+        }
+    }
+    function scheduleRealtimeReconnect() {
+        if (stopped || !sessionToken || realtimeReconnectTimer !== null)
+            return;
+        realtimeReconnectTimer = setTimeout(() => {
+            realtimeReconnectTimer = null;
+            connectRealtime();
+        }, realtimeReconnectDelay);
+        realtimeReconnectDelay = Math.min(10000, realtimeReconnectDelay * 2);
+    }
+    function closeRealtime() {
+        clearRealtimeTimers();
+        const socket = realtimeSocket;
+        realtimeSocket = null;
+        realtimeConnected = false;
+        if (socket)
+            socket.close();
+    }
+    function connectRealtime() {
+        if (stopped || !sessionToken || realtimeSocket !== null || typeof WebSocket === "undefined")
+            return;
+        let socket;
+        try {
+            socket = new WebSocket(realtimeUrl());
+        }
+        catch {
+            scheduleRealtimeReconnect();
+            return;
+        }
+        realtimeSocket = socket;
+        socket.addEventListener("open", () => {
+            if (realtimeSocket !== socket)
+                return;
+            realtimeConnected = true;
+            realtimeReconnectDelay = 1000;
+            pollDelay = 2000;
+            if (realtimeHeartbeatTimer !== null)
+                clearInterval(realtimeHeartbeatTimer);
+            realtimeHeartbeatTimer = setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN)
+                    socket.send(JSON.stringify({ type: "heartbeat" }));
+            }, 15000);
+            schedulePoll(30000);
+        });
+        socket.addEventListener("message", (event) => {
+            let payload;
+            try {
+                payload = JSON.parse(event.data);
+            }
+            catch {
+                return;
+            }
+            if (!isRecord(payload) || payload.type !== "judge.context_changed")
+                return;
+            void refreshContext();
+        });
+        socket.addEventListener("error", () => {
+            if (realtimeSocket === socket)
+                socket.close();
+        });
+        socket.addEventListener("close", () => {
+            if (realtimeSocket !== socket)
+                return;
+            realtimeSocket = null;
+            realtimeConnected = false;
+            clearRealtimeTimers();
+            schedulePoll(2000);
+            scheduleRealtimeReconnect();
+        });
     }
     async function pollContext() {
         if (!sessionToken || pollInFlight || stopped)
@@ -487,7 +582,7 @@
         }
         finally {
             pollInFlight = false;
-            schedulePoll(pollDelay);
+            schedulePoll(realtimeConnected ? 30000 : pollDelay);
         }
     }
     function collectScorePayload() {
@@ -605,7 +700,8 @@
                 throw new Error("invalid context");
             setContext(loadedContext, true);
             statusText(terminalRoot, "评委终端已就绪。");
-            schedulePoll();
+            connectRealtime();
+            schedulePoll(realtimeConnected ? 30000 : pollDelay);
         }
         catch {
             sessionToken = null;
@@ -626,6 +722,7 @@
         stopped = true;
         if (pollTimer !== null)
             clearTimeout(pollTimer);
+        closeRealtime();
         sessionToken = null;
     });
     void boot();

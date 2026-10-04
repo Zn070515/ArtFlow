@@ -89,6 +89,7 @@ INSTALLED_APPS = [
     "archive",
     "incidents",
     "staff_panel",
+    "realtime",
 ]
 
 MIDDLEWARE = [
@@ -122,6 +123,26 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+REALTIME_REDIS_URL = os.environ.get("ARTFLOW_REALTIME_REDIS_URL", "").strip()
+if REALTIME_REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REALTIME_REDIS_URL],
+                "capacity": 1000,
+                "expiry": 60,
+            },
+        }
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        }
+    }
 
 DATABASE_ENGINE = os.environ.get("DATABASE_ENGINE", "sqlite").strip().lower()
 DATABASES: dict[str, DatabaseSettings]

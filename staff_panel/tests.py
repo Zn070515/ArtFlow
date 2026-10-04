@@ -690,6 +690,35 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(formal_activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(formal_activity.is_test_mode)
 
+    @patch("staff_panel.views.schedule_activity_event")
+    def test_activity_field_patch_uses_value_cas_and_notifies_after_write(self, event_mock):
+        login_admin(self.client, self.admin)
+        response = self.client.patch(
+            reverse("staff:activity_field_patch", args=[self.singer_activity.pk, "title"]),
+            data=json.dumps({"base": self.singer_activity.title, "value": "协作后的标题"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.singer_activity.refresh_from_db()
+        self.assertEqual(self.singer_activity.title, "协作后的标题")
+        self.assertEqual(response.json()["field"], "title")
+        event_mock.assert_called_once()
+        self.assertEqual(event_mock.call_args.kwargs["event"], "activity.field_changed")
+
+    def test_activity_field_patch_rejects_stale_base_without_overwriting(self):
+        login_admin(self.client, self.admin)
+        response = self.client.patch(
+            reverse("staff:activity_field_patch", args=[self.singer_activity.pk, "title"]),
+            data=json.dumps({"base": "旧标题", "value": "错误覆盖"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["reason_code"], "FIELD_STALE")
+        self.singer_activity.refresh_from_db()
+        self.assertNotEqual(self.singer_activity.title, "错误覆盖")
+
     def test_formal_activity_cannot_be_reopened_in_test_mode(self):
         formal_activity = _create_activity(
             title="Formal Contest",
@@ -5302,6 +5331,109 @@ class RoundScoresApiTests(TestCase):
         self.assertEqual(data["version"], 1)
         self.assertTrue(data["matrix_complete"])
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
+
+    @patch("singer_contest.services.schedule_activity_event")
+    def test_post_uses_per_cell_base_and_returns_partial_success(self, event_mock):
+        second_judge = Judge.objects.create(activity=self.activity, name="Judge B")
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.save(update_fields=["status"])
+        RoundJudge.objects.create(round=self.round, judge=second_judge)
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+        first = self._post(
+            {
+                "base_version": 0,
+                "cells": [
+                    {
+                        "singer_id": self.singer.pk,
+                        "judge_id": self.judge.pk,
+                        "base": "",
+                        "score": "91",
+                    }
+                ],
+            }
+        )
+        self.assertEqual(first.status_code, 200)
+
+        response = self._post(
+            {
+                "base_version": 1,
+                "cells": [
+                    {
+                        "singer_id": self.singer.pk,
+                        "judge_id": self.judge.pk,
+                        "base": "90",
+                        "score": "92",
+                    },
+                    {
+                        "singer_id": self.singer.pk,
+                        "judge_id": second_judge.pk,
+                        "base": "",
+                        "score": "88",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["version"], 2)
+        self.assertEqual(
+            data["applied"],
+            [{"singer_id": self.singer.pk, "judge_id": second_judge.pk, "score": "88"}],
+        )
+        self.assertEqual(
+            data["conflicts"],
+            [
+                {
+                    "singer_id": self.singer.pk,
+                    "judge_id": self.judge.pk,
+                    "base": "90",
+                    "server": "91.00",
+                    "local": "92",
+                }
+            ],
+        )
+        self.assertEqual(
+            ScoreRecord.objects.get(round=self.round, judge=self.judge).score,
+            Decimal("91"),
+        )
+        self.assertEqual(
+            ScoreRecord.objects.get(round=self.round, judge=second_judge).score,
+            Decimal("88"),
+        )
+        event_mock.assert_called_with(
+            self.activity.pk,
+            event="score.grid_changed",
+            resource=f"round-score:{self.round.pk}",
+            revision=2,
+            actor={"id": self.admin.pk, "display": self.admin.get_username()},
+            details={
+                "changes": [
+                    {"singer_id": self.singer.pk, "judge_id": second_judge.pk, "score": "88"}
+                ]
+            },
+        )
+
+    @patch("singer_contest.services.schedule_activity_event")
+    def test_post_schedules_post_commit_grid_invalidation(self, event_mock):
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event_mock.assert_called_once_with(
+            self.activity.pk,
+            event="score.grid_changed",
+            resource=f"round-score:{self.round.pk}",
+            revision=1,
+            actor={"id": self.admin.pk, "display": self.admin.get_username()},
+        )
 
     def test_post_corrects_existing_direct_judge_fact_through_formal_authority(self):
         from entry_access.services import redeem_access_grant

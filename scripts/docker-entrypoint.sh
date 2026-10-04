@@ -31,12 +31,27 @@ for required_variable in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD POSTGRES_HO
 done
 
 /app/scripts/wait-for-postgres.sh
-# The full system-check set is a startup gate. It used to sit on the 10 s health
-# probe; running it once here keeps the deployment gate without paying for it on
-# every heartbeat.
-python manage.py check
-python manage.py migrate --noinput
-python manage.py seed_ruleset_templates
-python manage.py collectstatic --noinput
+
+process_role="${ARTFLOW_PROCESS_ROLE:-web}"
+case "$process_role" in
+    web)
+        # The full system-check set is a startup gate. It used to sit on the 10 s
+        # health probe; running it once here keeps the deployment gate without
+        # paying for it on every heartbeat.
+        python manage.py check
+        python manage.py migrate --noinput
+        python manage.py seed_ruleset_templates
+        python manage.py collectstatic --noinput
+        ;;
+    realtime)
+        # Realtime must never race the web container over migrations, seed data or
+        # static collection. It only verifies that the Django configuration loads.
+        python manage.py check
+        ;;
+    *)
+        printf 'ARTFLOW_PROCESS_ROLE must be web or realtime, got: %s\n' "$process_role" >&2
+        exit 64
+        ;;
+esac
 
 exec "$@"

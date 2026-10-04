@@ -1691,8 +1691,13 @@ class ScoreWriteReceipt(models.Model):
     in :class:`ScoreRecord` and their change detail remains in :class:`AuditLog`.
     """
 
-    RESULT_PAYLOAD_MAX_BYTES = 256
-    RESULT_PAYLOAD_KEYS = frozenset({"status", "reason_code", "version", "matrix_complete"})
+    RESULT_PAYLOAD_MAX_BYTES = 32768
+    RESULT_PAYLOAD_KEYS = frozenset(
+        {"status", "reason_code", "version", "matrix_complete", "applied", "conflicts"}
+    )
+    RESULT_PAYLOAD_REQUIRED_KEYS = frozenset(
+        {"status", "reason_code", "version", "matrix_complete"}
+    )
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -1727,7 +1732,9 @@ class ScoreWriteReceipt(models.Model):
             raise ValidationError({"status": "成绩写入回执状态无效。"})
         if not isinstance(result_payload, dict):
             raise ValidationError({"result_payload": "成绩写入回执结果必须是对象。"})
-        if set(result_payload) != cls.RESULT_PAYLOAD_KEYS:
+        if not cls.RESULT_PAYLOAD_REQUIRED_KEYS.issubset(result_payload) or not set(
+            result_payload
+        ).issubset(cls.RESULT_PAYLOAD_KEYS):
             raise ValidationError({"result_payload": "成绩写入回执结果字段无效。"})
         if result_payload["status"] != cls.Status.SUCCEEDED:
             raise ValidationError({"result_payload": "成绩写入回执结果状态无效。"})
@@ -1739,6 +1746,42 @@ class ScoreWriteReceipt(models.Model):
             raise ValidationError({"result_payload": "成绩写入回执结果版本必须是整数。"})
         if not isinstance(result_payload["matrix_complete"], bool):
             raise ValidationError({"result_payload": "成绩写入回执完成标记必须是布尔值。"})
+        for key in ("applied", "conflicts"):
+            if key not in result_payload:
+                continue
+            values = result_payload[key]
+            if not isinstance(values, list) or len(values) > 100:
+                raise ValidationError({"result_payload": f"{key} 结果无效。"})
+            for value in values:
+                if not isinstance(value, dict):
+                    raise ValidationError({"result_payload": f"{key} 结果无效。"})
+                if key == "applied":
+                    if set(value) != {"singer_id", "judge_id", "score"}:
+                        raise ValidationError({"result_payload": "accepted patch 结果无效。"})
+                    if (
+                        isinstance(value["singer_id"], bool)
+                        or not isinstance(value["singer_id"], int)
+                        or value["singer_id"] <= 0
+                        or isinstance(value["judge_id"], bool)
+                        or not isinstance(value["judge_id"], int)
+                        or value["judge_id"] <= 0
+                        or not isinstance(value["score"], str)
+                    ):
+                        raise ValidationError({"result_payload": "accepted patch 结果无效。"})
+                elif set(value) != {"singer_id", "judge_id", "base", "server", "local"}:
+                    raise ValidationError({"result_payload": "score conflict 结果无效。"})
+                elif (
+                    isinstance(value["singer_id"], bool)
+                    or not isinstance(value["singer_id"], int)
+                    or value["singer_id"] <= 0
+                    or isinstance(value["judge_id"], bool)
+                    or not isinstance(value["judge_id"], int)
+                    or value["judge_id"] <= 0
+                    or not all(
+                        isinstance(value[field], str) for field in ("base", "server", "local")
+                    )
+                ):
+                    raise ValidationError({"result_payload": "score conflict 结果无效。"})
         if result_version is not None and result_payload["version"] != result_version:
             raise ValidationError({"result_payload": "成绩写入回执结果版本不一致。"})
         try:

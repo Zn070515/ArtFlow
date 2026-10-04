@@ -3,8 +3,10 @@ from typing import Any
 
 from common.audit import client_ip
 from common.rate_limit import allow
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -106,15 +108,24 @@ def redeem_grant(request):
                 {"detail": "临时访问授权无效。", "reason_code": "INVALID_GRANT"}, status=400
             )
         )
-    return _no_store(
-        JsonResponse(
-            {
-                "session_id": result.session.pk,
-                "session_token": result.token,
-                "kind": result.session.kind,
-                "activity_id": getattr(result.session, "activity_id", None),
-                "round_id": getattr(result.session, "round_id", None),
-                "expires_at": result.session.expires_at.isoformat(),
-            }
-        )
+    response = JsonResponse(
+        {
+            "session_id": result.session.pk,
+            "session_token": result.token,
+            "kind": result.session.kind,
+            "activity_id": getattr(result.session, "activity_id", None),
+            "round_id": getattr(result.session, "round_id", None),
+            "expires_at": result.session.expires_at.isoformat(),
+        }
     )
+    if result.session.kind == "judge":
+        max_age = max(1, int((result.session.expires_at - timezone.now()).total_seconds()))
+        response.set_cookie(
+            "artflow_judge_session",
+            result.token,
+            max_age=min(8 * 60 * 60, max_age),
+            httponly=True,
+            secure=getattr(settings, "APP_ENV", "development") == "production",
+            samesite="Lax",
+        )
+    return _no_store(response)
