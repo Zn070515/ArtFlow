@@ -441,7 +441,7 @@ class PublicDerivativeDeliveryTests(TestCase):
         response = self.client.get(reverse("controlled_media", kwargs={"path": stored.file.name}))
 
         self.assertEqual(response.status_code, 200)
-        body = b"".join(response.streaming_content)
+        body = b"".join(response.streaming_content)  # type: ignore[attr-defined]
         with stored.derivative.open("rb") as handle:
             self.assertEqual(body, handle.read())
 
@@ -458,7 +458,7 @@ class PublicDerivativeDeliveryTests(TestCase):
         response = self.client.get(reverse("controlled_media", kwargs={"path": stored.file.name}))
 
         self.assertEqual(response.status_code, 200)
-        body = b"".join(response.streaming_content)
+        body = b"".join(response.streaming_content)  # type: ignore[attr-defined]
         with stored.file.open("rb") as handle:
             self.assertEqual(body, handle.read())
 

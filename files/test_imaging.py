@@ -24,10 +24,10 @@ def _jpeg_with_metadata() -> bytes:
 
 class SanitizeImageTests(SimpleTestCase):
     def test_image_names_are_recognised_by_extension(self):
-        for name in ("a.jpg", "a.JPEG", "a.png", "a.webp"):
-            self.assertTrue(is_image_name(name), name)
-        for name in ("a.mp3", "a.mp4", "a.pdf", "", None):
-            self.assertFalse(is_image_name(name), name)
+        for image_name in ("a.jpg", "a.JPEG", "a.png", "a.webp"):
+            self.assertTrue(is_image_name(image_name), image_name)
+        for other_name in ("a.mp3", "a.mp4", "a.pdf", "", None):
+            self.assertFalse(is_image_name(other_name), other_name)
         self.assertEqual(IMAGE_EXTENSIONS, frozenset({".jpg", ".jpeg", ".png", ".webp"}))
 
     def test_re_encode_strips_metadata_and_bakes_in_the_orientation(self):
