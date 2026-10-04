@@ -47,9 +47,7 @@ class QuestionnaireResponse(models.Model):
         related_name="questionnaire_responses",
     )
     questionnaire_key = models.CharField(max_length=64)
-    subject = models.CharField(
-        max_length=16, choices=Subject.choices, default=Subject.PARTICIPANT
-    )
+    subject = models.CharField(max_length=16, choices=Subject.choices, default=Subject.PARTICIPANT)
     # The questionnaire's identity when the response was written, so a browser holding an
     # older form can be told to refresh instead of overwriting answers it cannot see.
     schema_hash = models.CharField(max_length=64, blank=True)
