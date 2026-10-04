@@ -1691,7 +1691,7 @@ class ScoreWriteReceipt(models.Model):
     in :class:`ScoreRecord` and their change detail remains in :class:`AuditLog`.
     """
 
-    RESULT_PAYLOAD_MAX_BYTES = 8192
+    RESULT_PAYLOAD_MAX_BYTES = 32768
     RESULT_PAYLOAD_KEYS = frozenset(
         {"status", "reason_code", "version", "matrix_complete", "applied", "conflicts"}
     )

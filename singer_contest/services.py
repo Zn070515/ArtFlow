@@ -1323,6 +1323,8 @@ def apply_scores_if_version(
     if base_version is None:
         raise ValidationError("缺少 base_version。")
     command_id = _validated_score_command_id(command_id)
+    if len(score_values) > 100:
+        raise ValidationError("单次评分保存最多包含 100 个单元格。")
     current_operator = require_current_staff(operator)
     try:
         parsed_base_version = int(base_version)
