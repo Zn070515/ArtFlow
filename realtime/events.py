@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
+from channels.layers import get_channel_layer  # type: ignore[import-untyped]
 from django.db import transaction
 
 logger = logging.getLogger(__name__)

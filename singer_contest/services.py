@@ -1433,15 +1433,23 @@ def apply_scores_if_version(
     receipt.full_clean(validate_unique=False)
     receipt.save(update_fields=["result_version", "result_payload", "status"])
     if changes:
-        event_kwargs = {
-            "event": "score.grid_changed",
-            "resource": f"round-score:{locked_round.pk}",
-            "revision": locked_round.score_version,
-            "actor": {"id": current_operator.pk, "display": current_operator.get_username()},
-        }
         if base_values is not None:
-            event_kwargs["details"] = {"changes": result["applied"]}
-        schedule_activity_event(locked_activity.pk, **event_kwargs)
+            schedule_activity_event(
+                locked_activity.pk,
+                event="score.grid_changed",
+                resource=f"round-score:{locked_round.pk}",
+                revision=locked_round.score_version,
+                actor={"id": current_operator.pk, "display": current_operator.get_username()},
+                details={"changes": result["applied"]},
+            )
+        else:
+            schedule_activity_event(
+                locked_activity.pk,
+                event="score.grid_changed",
+                resource=f"round-score:{locked_round.pk}",
+                revision=locked_round.score_version,
+                actor={"id": current_operator.pk, "display": current_operator.get_username()},
+            )
     return result
 
 
