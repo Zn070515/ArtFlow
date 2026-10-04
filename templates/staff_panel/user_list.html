@@ -41,21 +41,21 @@
                             <form method="post" action="{% url 'staff:user_role_update' user.pk %}" onsubmit="return confirm('确认将该账号设为工作人员？');">
                                 {% csrf_token %}
                                 <input type="hidden" name="new_role" value="staff">
-                                <button type="submit" class="staff-touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">设为工作人员</button>
+                                <button type="submit" class="touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">设为工作人员</button>
                             </form>
                             {% endif %}
                             {% if user.role != 'admin' %}
                             <form method="post" action="{% url 'staff:user_role_update' user.pk %}" onsubmit="return confirm('确认将该账号设为管理员？管理员可以执行高风险活动操作。');">
                                 {% csrf_token %}
                                 <input type="hidden" name="new_role" value="admin">
-                                <button type="submit" class="staff-touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">设为管理员</button>
+                                <button type="submit" class="touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">设为管理员</button>
                             </form>
                             {% endif %}
                             {% if user.role != 'participant' %}
                             <form method="post" action="{% url 'staff:user_role_update' user.pk %}" onsubmit="return confirm('确认调整该账号的角色？');">
                                 {% csrf_token %}
                                 <input type="hidden" name="new_role" value="participant">
-                                <button type="submit" class="staff-touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">
+                                <button type="submit" class="touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">
                                     {% if user.role == 'admin' %}撤销管理员{% else %}撤销工作人员{% endif %}
                                 </button>
                             </form>
@@ -64,13 +64,13 @@
                             <form method="post" action="{% url 'staff:user_set_active' user.pk %}" onsubmit="return confirm('确认停用这个账号？该账号将立即无法登录。');">
                                 {% csrf_token %}
                                 <input type="hidden" name="active" value="0">
-                                <button type="submit" class="staff-touch-target text-xs px-2 py-1 border border-red-200 text-red-600 rounded hover:bg-red-50">停用账户</button>
+                                <button type="submit" class="touch-target text-xs px-2 py-1 border border-red-200 text-red-600 rounded hover:bg-red-50">停用账户</button>
                             </form>
                             {% else %}
                             <form method="post" action="{% url 'staff:user_set_active' user.pk %}" onsubmit="return confirm('确认重新启用这个账号？');">
                                 {% csrf_token %}
                                 <input type="hidden" name="active" value="1">
-                                <button type="submit" class="staff-touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">启用账户</button>
+                                <button type="submit" class="touch-target text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100">启用账户</button>
                             </form>
                             {% endif %}
                         </div>

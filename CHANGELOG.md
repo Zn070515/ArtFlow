@@ -26,6 +26,33 @@ Staff pages were desktop layouts with a hamburger menu bolted on. A phone width 
 - Page headers and filter rows that measured as broken were made to stack on small
   screens.
 
+### Mobile touch targets — a measured floor, not a feeling
+
+A page that fits a phone can still be unusable on one: staff tap the vote switch,
+check-in, judge connection and incident notes one-handed, in a dark room, in a hurry.
+`mobile-touch.spec.ts` measures every control on the same pages the layout audit walks.
+
+- **The gate is 24x24 CSS px, the WCAG 2.2 AA minimum (2.5.8), not 44x44.** Measured
+  first: at 44px, 489 of 529 standalone controls miss the bar — that is not a gate, it is
+  a rewrite of nearly every control in the app. At 24px the number was 172, concentrated
+  in a handful of shared patterns, which is a gate that can be held. The threshold stays
+  overridable (`PLAYWRIGHT_TOUCH_MIN_PX`) so the stricter bar can be probed as that debt
+  is paid.
+- **Inline links are excluded, per the rule's own exception** (2.5.8 exempts a target
+  bounded by the line-height of its sentence). The probe reads the computed `display`:
+  a standalone action link is blockified by its container, one inside a sentence is not.
+  Without this the audit reported the footer and page-header prose links as failures.
+- `tests/e2e/layout-targets.ts` — the page list moved to one module so the layout and
+  touch specs cannot drift apart; `mobile-layout.spec.ts` had already grown its own copy.
+- `static/css/src.css` — two base rules carry most of it: every `input`/`select`/`button`
+  gets a 24px `min-height` (a control is otherwise only as tall as its text — 16px for a
+  `text-xs` button, 20px for a bare Django widget), and checkbox/radio controls are sized
+  directly, which lifts the wrapping label with them. The `staff-touch-target` component
+  is renamed `touch-target`: it is applied to public pages now, and padding is part of the
+  target, so the box grows around the label.
+- The desktop `chromium` project ignores both mobile specs; the touch audit was otherwise
+  running a second time at desktop widths.
+
 ### Toolchain — the type-check baseline covers the whole project
 
 `pyrightconfig.json` was a hand-written list of twenty file names that stopped growing

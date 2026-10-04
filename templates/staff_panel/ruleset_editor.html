@@ -202,15 +202,15 @@
                 <span class="font-mono text-gray-700 w-28">{{ card.node.key }}</span>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
                     {% csrf_token %}<input type="hidden" name="action" value="move_up"><input type="hidden" name="key" value="{{ card.node.key }}"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
-                    <button class="staff-touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_up %}{{ card.move_up_reason }}{% endif %}"{% if not card.can_move_up %} disabled{% endif %}>上移</button>
+                    <button class="touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_up %}{{ card.move_up_reason }}{% endif %}"{% if not card.can_move_up %} disabled{% endif %}>上移</button>
                 </form>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
                     {% csrf_token %}<input type="hidden" name="action" value="move_down"><input type="hidden" name="key" value="{{ card.node.key }}"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
-                    <button class="staff-touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_down %}{{ card.move_down_reason }}{% endif %}"{% if not card.can_move_down %} disabled{% endif %}>下移</button>
+                    <button class="touch-target text-xs text-gray-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_move_down %}{{ card.move_down_reason }}{% endif %}"{% if not card.can_move_down %} disabled{% endif %}>下移</button>
                 </form>
                 <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}" onsubmit="return confirm('确认删除这个节点吗？');">
                     {% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="key" value="{{ card.node.key }}"><input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
-                    <button class="staff-touch-target text-xs text-red-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_delete %}{{ card.delete_reason }}{% endif %}"{% if not card.can_delete %} disabled{% endif %}>删除</button>
+                    <button class="touch-target text-xs text-red-600 border border-gray-300 rounded hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50" title="{% if not card.can_delete %}{{ card.delete_reason }}{% endif %}"{% if not card.can_delete %} disabled{% endif %}>删除</button>
                 </form>
                 {% if not card.can_delete %}<span class="text-xs text-amber-700">{{ card.delete_reason }}</span>{% endif %}
             </div>
@@ -220,7 +220,7 @@
                 <select name="new_type" class="border border-gray-300 rounded px-3 py-1.5 text-sm">
                     {% for option in node_type_options %}<option value="{{ option.value }}"{% if not option.enabled %} disabled title="{{ option.reason }}"{% endif %}>{{ option.label }}{% if not option.enabled %}（暂不可用）{% endif %}</option>{% endfor %}
                 </select>
-                <button class="staff-touch-target border border-gray-300 rounded text-sm">新增节点</button>
+                <button class="touch-target border border-gray-300 rounded text-sm">新增节点</button>
             </form>
         </div>
     </div>

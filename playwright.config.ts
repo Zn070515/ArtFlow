@@ -30,7 +30,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: /mobile-layout\.spec\.ts/,
+      testIgnore: /mobile-(?:layout|touch)\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -40,7 +40,7 @@ export default defineConfig({
     },
     ...PHONE_PROJECTS.map(({ name, device }) => ({
       name,
-      testMatch: /mobile-layout\.spec\.ts/,
+      testMatch: /mobile-(?:layout|touch)\.spec\.ts/,
       use: { ...device },
     })),
   ],

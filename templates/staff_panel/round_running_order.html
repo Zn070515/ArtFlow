@@ -20,8 +20,8 @@
                 <span class="w-8 text-center text-sm font-semibold text-gray-600">{{ forloop.counter }}</span>
                 <span class="flex-1 text-sm text-gray-900">{{ row.singer.name }}{% if row.singer.song_name %}<span class="text-gray-500"> · {{ row.singer.song_name }}</span>{% endif %}</span>
                 <input type="hidden" name="singer_ids" value="{{ row.singer_id }}">
-                <button type="submit" name="move_action" value="up:{{ forloop.counter0 }}" class="staff-touch-target border border-gray-300 rounded px-2 py-1 text-sm{% if forloop.first %} opacity-40 cursor-not-allowed{% endif %}" {% if forloop.first %}disabled{% endif %} aria-label="将 {{ row.singer.name }} 上移">↑</button>
-                <button type="submit" name="move_action" value="down:{{ forloop.counter0 }}" class="staff-touch-target border border-gray-300 rounded px-2 py-1 text-sm{% if forloop.last %} opacity-40 cursor-not-allowed{% endif %}" {% if forloop.last %}disabled{% endif %} aria-label="将 {{ row.singer.name }} 下移">↓</button>
+                <button type="submit" name="move_action" value="up:{{ forloop.counter0 }}" class="touch-target border border-gray-300 rounded px-2 py-1 text-sm{% if forloop.first %} opacity-40 cursor-not-allowed{% endif %}" {% if forloop.first %}disabled{% endif %} aria-label="将 {{ row.singer.name }} 上移">↑</button>
+                <button type="submit" name="move_action" value="down:{{ forloop.counter0 }}" class="touch-target border border-gray-300 rounded px-2 py-1 text-sm{% if forloop.last %} opacity-40 cursor-not-allowed{% endif %}" {% if forloop.last %}disabled{% endif %} aria-label="将 {{ row.singer.name }} 下移">↓</button>
             </div>
             {% empty %}<p class="text-sm text-gray-500">当前没有已审核选手。</p>{% endfor %}
         </fieldset>
