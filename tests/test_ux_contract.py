@@ -121,10 +121,12 @@ class GroupMaterialPresenceContractTests(SimpleTestCase):
         self.assertIn("group:3:materials", rendered)
         self.assertIn("group.material_changed", rendered)
         self.assertIn("当前没有其他组员在线", rendered)
-        self.assertIn("dist/collab_presence.js", rendered)
+        # With DEBUG=False the manifest storage rewrites this to
+        # dist/collab_presence.<hash>.js, so match the hash-optional form.
+        self.assertRegex(rendered, r"dist/collab_presence(\.[0-9a-f]+)?\.js")
 
     def test_a_personal_form_does_not_join_a_group_room(self):
         rendered = self._render(group=None)
 
         self.assertNotIn("data-collab-presence", rendered)
-        self.assertNotIn("collab_presence.js", rendered)
+        self.assertNotIn("collab_presence", rendered)
