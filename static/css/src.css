@@ -36,6 +36,25 @@
   input:not([class]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]) {
     width: 100%;
   }
+
+  /* A 13px checkbox wrapped in a 21px label is a 21px-tall target, which is under the
+     WCAG 2.5.8 minimum — and these rows are how staff pick who is in which group, on a
+     phone. Sizing the control itself lifts the label with it. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-width: 24px;
+    min-height: 24px;
+  }
+
+  /* Same 24px floor for every other control. A control is normally only as tall as its
+     text — 16px for a `text-xs` button, 20px for a bare Django widget — and these are the
+     ones staff tap one-handed on a phone during a show. Only the height is set, so an
+     already-styled control keeps its spacing and only grows if it was under the floor. */
+  input,
+  select,
+  button {
+    min-height: 24px;
+  }
 }
 
 @layer components {
@@ -43,7 +62,11 @@
     @apply inline-flex min-h-[24px] items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-800;
   }
 
-  .staff-touch-target {
+  /* WCAG 2.2 AA (2.5.8) puts the pointer-target floor at 24x24 CSS px. A standalone link
+     that sits in a flex or grid row is blockified by its container, so it is not covered
+     by the inline-text exception and has to carry the floor itself. Padding is part of
+     the target, so the box grows around the label rather than the label shrinking. */
+  .touch-target {
     @apply inline-flex min-h-[24px] min-w-[24px] items-center justify-center px-2 py-1;
   }
 }

@@ -50,24 +50,24 @@
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">报名与材料</h2>
             <p class="text-sm text-gray-500 mt-1">先审核报名，再进入比赛设置。</p>
-            <a class="inline-block mt-4 text-brand hover:underline text-sm" href="{% url 'staff:singer_registration_list' %}?activity_id={{ activity.pk }}">查看本活动报名</a>
+            <a class="touch-target mt-4 text-brand hover:underline text-sm" href="{% url 'staff:singer_registration_list' %}?activity_id={{ activity.pk }}">查看本活动报名</a>
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">赛制与评分</h2>
             <p class="text-sm text-gray-500 mt-1">当前工作区创建的轮次、评分标准都会绑定到本活动。</p>
             {% if can_configure_singer %}<div class="flex flex-wrap gap-3 mt-4 text-sm">
-                <a class="text-brand hover:underline" href="{% url 'staff:contest_ruleset_create' %}?activity={{ activity.pk }}">编辑赛制</a>
-                <a class="text-brand hover:underline" href="{% url 'staff:rubric_create' %}?activity_id={{ activity.pk }}">新建评分标准</a>
-                <a class="text-brand hover:underline" href="{% url 'staff:round_create' %}?activity_id={{ activity.pk }}">新建比赛轮次</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:contest_ruleset_create' %}?activity={{ activity.pk }}">编辑赛制</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:rubric_create' %}?activity_id={{ activity.pk }}">新建评分标准</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:round_create' %}?activity_id={{ activity.pk }}">新建比赛轮次</a>
             </div>{% endif %}
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">投票与现场</h2>
             <p class="text-sm text-gray-500 mt-1">观众投票、轮次录分和现场控制都从本活动开始。</p>
             <div class="flex flex-wrap gap-3 mt-4 text-sm">
-                {% if can_configure_singer %}<a class="text-brand hover:underline" href="{% url 'staff:vote_session_create' %}?activity_id={{ activity.pk }}">创建投票场次</a>{% endif %}
-                <a class="text-brand hover:underline" href="{% url 'staff:round_list' %}?activity_id={{ activity.pk }}">查看本活动轮次</a>
-                <a class="text-brand hover:underline" href="{% url 'staff:vote_session_list' %}?activity_id={{ activity.pk }}">查看本活动投票</a>
+                {% if can_configure_singer %}<a class="touch-target text-brand hover:underline" href="{% url 'staff:vote_session_create' %}?activity_id={{ activity.pk }}">创建投票场次</a>{% endif %}
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:round_list' %}?activity_id={{ activity.pk }}">查看本活动轮次</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:vote_session_list' %}?activity_id={{ activity.pk }}">查看本活动投票</a>
             </div>
         </section>
     </div>
@@ -77,7 +77,7 @@
                 <h2 class="font-semibold text-gray-900">条件性分组合唱</h2>
                 <p class="text-sm text-gray-500 mt-1">只有正式赛制包含分组合唱时才配置外部分组、成员确认和共享材料。</p>
             </div>
-            {% if can_configure_singer %}<a class="text-brand hover:underline text-sm" href="{% url 'staff:group_stage_create' activity.pk %}">新建分组合唱赛段</a>{% endif %}
+            {% if can_configure_singer %}<a class="touch-target text-brand hover:underline text-sm" href="{% url 'staff:group_stage_create' activity.pk %}">新建分组合唱赛段</a>{% endif %}
         </div>
         {% if group_stages %}
         <div class="mt-4 space-y-2">
@@ -115,22 +115,22 @@
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">节目征集与审核</h2>
             <p class="text-sm text-gray-500 mt-1">查看节目报名、审核状态和节目材料。</p>
-            <a class="inline-block mt-4 text-brand hover:underline text-sm" href="{% url 'staff:program_list' %}?activity_id={{ activity.pk }}">查看本活动节目</a>
+            <a class="touch-target mt-4 text-brand hover:underline text-sm" href="{% url 'staff:program_list' %}?activity_id={{ activity.pk }}">查看本活动节目</a>
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">节目顺序与现场</h2>
             <p class="text-sm text-gray-500 mt-1">管理节目顺序、彩排资料和现场执行包。</p>
             <div class="flex flex-wrap gap-3 mt-4 text-sm">
-                <a class="text-brand hover:underline" href="{% url 'staff:program_list' %}?activity_id={{ activity.pk }}">节目顺序</a>
-                <a class="text-brand hover:underline" href="{% url 'staff:execution_package' activity.pk %}">下载执行包</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:program_list' %}?activity_id={{ activity.pk }}">节目顺序</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:execution_package' activity.pk %}">下载执行包</a>
             </div>
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">材料与异常</h2>
             <p class="text-sm text-gray-500 mt-1">集中查看活动材料要求和现场异常。</p>
             <div class="flex flex-wrap gap-3 mt-4 text-sm">
-                {% if not activity.is_locked and activity.phase != "archived" %}<a class="text-brand hover:underline" href="{% url 'staff:activity_material_requirements' activity.pk %}">管理材料要求</a>{% endif %}
-                <a class="text-brand hover:underline" href="{% url 'staff:incident_list' %}">查看异常记录</a>
+                {% if not activity.is_locked and activity.phase != "archived" %}<a class="touch-target text-brand hover:underline" href="{% url 'staff:activity_material_requirements' activity.pk %}">管理材料要求</a>{% endif %}
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:incident_list' %}">查看异常记录</a>
             </div>
         </section>
     </div>
@@ -139,17 +139,17 @@
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">内容与材料</h2>
             <p class="text-sm text-gray-500 mt-1">管理通用活动内容、材料要求和公共信息。</p>
-            {% if not activity.is_locked and activity.phase != "archived" %}<a class="inline-block mt-4 text-brand hover:underline text-sm" href="{% url 'staff:activity_material_requirements' activity.pk %}">管理材料要求</a>{% endif %}
+            {% if not activity.is_locked and activity.phase != "archived" %}<a class="touch-target mt-4 text-brand hover:underline text-sm" href="{% url 'staff:activity_material_requirements' activity.pk %}">管理材料要求</a>{% endif %}
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">异常记录</h2>
             <p class="text-sm text-gray-500 mt-1">记录和跟进活动执行中的异常。</p>
-            <a class="inline-block mt-4 text-brand hover:underline text-sm" href="{% url 'staff:incident_list' %}">查看异常记录</a>
+            <a class="touch-target mt-4 text-brand hover:underline text-sm" href="{% url 'staff:incident_list' %}">查看异常记录</a>
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">执行与归档</h2>
             <p class="text-sm text-gray-500 mt-1">下载当前活动的执行资料包。</p>
-            <a class="inline-block mt-4 text-brand hover:underline text-sm" href="{% url 'staff:execution_package' activity.pk %}">下载执行包</a>
+            <a class="touch-target mt-4 text-brand hover:underline text-sm" href="{% url 'staff:execution_package' activity.pk %}">下载执行包</a>
         </section>
     </div>
     {% endif %}

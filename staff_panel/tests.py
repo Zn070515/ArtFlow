@@ -7411,7 +7411,7 @@ class RulesetEditorTests(TestCase):
 
         self.assertContains(response, "ruleset-node-badge")
         self.assertNotContains(response, "bg-brand border border-brand/20 text-brand")
-        self.assertContains(response, "staff-touch-target")
+        self.assertContains(response, "touch-target")
 
     def test_editor_displays_business_labels_for_enum_fields(self):
         response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
