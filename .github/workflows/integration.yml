@@ -198,8 +198,8 @@ jobs:
           done
           exit 1
 
-      - name: Install Chromium for browser smoke
-        run: npx playwright install --with-deps chromium
+      - name: Install browsers for the smoke and layout runs
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Prepare human acceptance account boundary
         run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e --fresh-bootstrap
@@ -242,11 +242,18 @@ jobs:
             --output-file /tmp/artflow-questionnaire-e2e.json
           docker compose cp web:/tmp/artflow-questionnaire-e2e.json "$RUNNER_TEMP/questionnaire-e2e.json"
 
+      - name: Prepare mobile layout fixture
+        run: |
+          docker compose exec -T web python manage.py prepare_layout_e2e \
+            --output-file /tmp/artflow-layout-e2e.json
+          docker compose cp web:/tmp/artflow-layout-e2e.json "$RUNNER_TEMP/layout-e2e.json"
+
       - name: Run browser runtime smoke
         env:
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:8000
           ARTFLOW_E2E_ADMIN_ACCESS_KEY: artflow-ci-admin-access-key
           ARTFLOW_E2E_STAFF_ACCESS_KEY: artflow-ci-staff-access-key
+          PLAYWRIGHT_LAYOUT_FIXTURE_PATH: ${{ runner.temp }}/layout-e2e.json
           PLAYWRIGHT_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/judge-e2e.json
           PLAYWRIGHT_SHARED_JUDGE_FIXTURE_PATH: ${{ runner.temp }}/shared-judge-e2e.json
           PLAYWRIGHT_LIVE_TICKET_FIXTURE_PATH: ${{ runner.temp }}/live-ticket-e2e.json

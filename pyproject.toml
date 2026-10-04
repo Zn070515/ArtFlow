@@ -211,6 +211,11 @@ module = [
     "common.private_test_fixture",
     "common.private_test_loader",
     "common.private_test_questionnaire",
+    # The browser-fixture command shapes disposable test rows through models whose
+    # managers are built from `models.Manager.from_queryset(...)`, which mypy cannot see
+    # a `create` on. It is a data-shaping boundary like the loaders above, covered by the
+    # layout spec rather than by an annotated domain API.
+    "common.management.commands.prepare_layout_e2e",
     "common.test_private_test_fixture",
     "common.test_private_test_loader",
     "common.test_private_test_questionnaire",

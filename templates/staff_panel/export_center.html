@@ -100,16 +100,16 @@
     <h2 class="text-xl font-semibold text-gray-900 mt-10 mb-4">Word 推文生成</h2>
     <div class="grid sm:grid-cols-2 gap-4">
         {% for t in templates %}
-        <div class="border border-gray-200 bg-white rounded-lg p-4 flex items-center justify-between">
+        <div class="min-w-0 border border-gray-200 bg-white rounded-lg p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
                 <h3 class="text-sm font-medium text-gray-900">{{ t.name }}</h3>
                 <p class="text-xs text-gray-500">{{ t.get_template_type_display }}</p>
             </div>
             <form method="post" action="{% url 'staff:word_generate' t.pk 0 %}"
                   x-data="{ activityId: '' }"
-                  class="flex items-center gap-2">
+                  class="flex min-w-0 items-center gap-2">
                 {% csrf_token %}
-                <select name="activity_id" x-model="activityId" class="text-xs border border-gray-300 rounded px-2 py-1" required>
+                <select name="activity_id" x-model="activityId" class="min-w-0 max-w-full text-xs border border-gray-300 rounded px-2 py-1" required>
                     <option value="">选择活动</option>
                     {% for a in activities %}<option value="{{ a.pk }}">{{ a.title }}</option>{% endfor %}
                 </select>

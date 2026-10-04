@@ -10,6 +10,17 @@
   a {
     @apply transition-colors;
   }
+
+  /* Staff filter rows put these controls in a grid or flex track. A form control
+     defaults to `min-width: auto`, which for a <select> is the width of its longest
+     option — so one long activity title blows the single-column mobile track out past
+     the viewport and the whole page scrolls sideways. Allowing them to shrink lets the
+     track do its job; on a wide screen nothing changes because the track is wider. */
+  input,
+  select,
+  textarea {
+    min-width: 0;
+  }
 }
 
 @layer components {

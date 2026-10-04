@@ -60,6 +60,7 @@ GRADUAL_MODULES = {
     "common.private_test_fixture",
     "common.private_test_loader",
     "common.private_test_questionnaire",
+    "common.management.commands.prepare_layout_e2e",
     "common.test_private_test_fixture",
     "common.test_private_test_loader",
     "common.test_private_test_questionnaire",

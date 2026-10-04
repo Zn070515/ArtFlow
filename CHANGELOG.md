@@ -1,5 +1,287 @@
 # Changelog
 
+## 2026-10-05
+
+### Mobile layout — a scroll-free phone contract
+
+Staff pages were desktop layouts with a hamburger menu bolted on. A phone width made an
+`<h1>` next to a filter form collapse into a vertical column of single characters, and a
+`<select>` whose width follows its longest option pushed whole pages sideways.
+
+- `playwright.config.ts` — seven phone widths (320 / 360 / 375 / 390 / 393 / 412 / 430)
+  are now first-class projects. The iPhone projects run WebKit, because that is what iOS
+  Safari and WeChat on iOS actually are; the Android ones run Chromium. Layout is decided
+  by the CSS viewport width, so seven widths span the range without simulating every
+  handset.
+- `tests/e2e/mobile-layout.spec.ts` + `prepare_layout_e2e` — the audit is a real spec
+  against a disposable fixture, in the same shape as the other five browser flows, so it
+  runs in CI and each page is individually runnable from the editor. The assertion is
+  about the document, not about every element: a wide data table inside `overflow-x-auto`
+  is meant to scroll in its own box (this is what Django's own admin does for its
+  changelists) — what must never happen is the page itself scrolling sideways.
+- `static/css/src.css` — one base rule, `input, select, textarea { min-width: 0 }`. A form
+  control defaults to `min-width: auto`, which for a `<select>` is the width of its
+  longest option; that alone was blowing single-column mobile grid tracks out of the
+  viewport on several pages.
+- Page headers and filter rows that measured as broken were made to stack on small
+  screens.
+
+### Toolchain — the type-check baseline covers the whole project
+
+`pyrightconfig.json` was a hand-written list of twenty file names that stopped growing
+several apps ago: it covered 22 of 181 production modules, so ten apps were checked by
+nothing. `[tool.mypy] files` and `[tool.ruff] src` were each missing two apps.
+
+- The baselines are directory-level now. Widening them surfaced 194 pyright diagnostics
+  and 20 mypy ones, all fixed rather than suppressed — most were Django's runtime-created
+  attributes, declared where the project already declares them.
+- `pyrightconfig.entry-access.json` is deleted: once the baseline covers every app, that
+  scoped config checked a strict subset of it. GOAL §21.1 asks for exactly this.
+- `CLAUDE.md` / `AGENTS.md` — a configuration sweep after each change round is now part of
+  the workflow. A whitelist keeps passing while the tree grows past it.
+- `.env` templates document the delivery backend, the five upload limits, the PII
+  retention window and the live-state cache TTL, with their real defaults. `.dockerignore`
+  gains `node_modules/` and `backups/`; dependabot gains the npm ecosystem.
+
+## 2026-10-04
+
+### Judge entry — one shared QR, and the participant gets told when group material changes
+
+- `staff_panel` — the per-seat judge QR entry is retired. Judges scan one shared QR and
+  claim a free seat by arrival order; the staff view, route, template block and the
+  per-seat grant context it fed are gone. The short-lived grant mechanism itself stays:
+  it is the documented legacy fallback and the judge browser fixtures still use it.
+- `files` / `docs/realtime-collaboration.md` — the participant group-material page joins
+  the `/ws/group/<pk>/materials/` room the backend already mounted and published to, so
+  members see who else is on the page and get a refresh banner when another member or a
+  staff member changes the material. Presence stays advisory and never becomes an edit
+  lock.
+
+### GOAL gap closure — incident detail, audience provenance, PDF handcard, public derivatives
+
+Four capabilities `GOAL.md` describes were not implemented; each is now covered by tests.
+
+- `incidents` — an incident records the affected round, the authority state it happened
+  under, and whether it needs a post-event review. The state defaults to an explicit
+  "unrecorded" so an incident filed afterwards never invents it.
+- `singer_contest` — a manually verified audience score records where its numbers came
+  from (external form / paper tally / other) plus a short note. The API keys are optional
+  and only restamp provenance when a source is supplied, so correcting a number cannot
+  erase what was recorded.
+- `exports` — the stage result handcard is downloadable as a PDF, rendered from the same
+  `stage_decisions_by_blocks()` structure the staff page shows.
+- `files` / `common` / `public_portal` — the private original is now separated from the
+  public derivative. An image upload gets a metadata-free re-encode (EXIF orientation
+  baked into the pixels, no metadata written back); a caller whose only claim is
+  `is_public` is served that derivative while staff and the owner keep the original.
+  Staff-uploaded gallery photos, which have no private original, are sanitized in place.
+
+### Test infrastructure and runtime hot paths
+
+- make polling read-only and take the hot paths off the request thread
+- add realtime collaboration phases
+- complete group chorus workflow
+- preserve rapid score lock checks
+- close runtime readiness and judge polling gaps
+- restore installation state after flush
+- expose doctor test diagnostics
+- release worker-thread connections in concurrency tests
+- isolate migration test state
+- type migration teardown cleanup
+- satisfy the mypy gate for the reportlab and derivative work
+- fix realtime type gate
+- satisfy group chorus type checks
+- format questionnaire model
+- refresh compiled css asset
+
+## 2026-10-03
+
+Live venue orchestration closed; the browser acceptance suite stabilised; migration
+test isolation finished across the historical suite.
+
+- add live QR and mobile现场 flows
+- close live venue orchestration
+- complete live venue orchestration
+- stabilize live browser acceptance
+- close final live acceptance regressions
+- align judge client acceptance fixture
+- remove flaky judge browser extension
+- stabilize shared judge acceptance
+- fix judge hold browser gate
+- close advice acceptance gaps
+- preserve activity migration compatibility
+- isolate all historical migration tests
+- isolate migration rollback teardown
+- restore migration test state
+- fix PostgreSQL marker typing
+- type database test configuration
+- preserve database setting field types
+- isolate sqlite xdist test databases
+- streamline CI test gates
+- apply live entry formatting
+- format feature modules
+- refresh compiled tailwind asset
+
+## 2026-10-02
+
+- isolate browser acceptance fixture setup
+- close CI quality and bootstrap gates
+- close batch three integration contracts
+
+## 2026-09-30
+
+Human acceptance batch 3 closed; the compose contracts aligned.
+
+- close human acceptance batch 3
+- fix human acceptance CI runtime
+- prepare compose human acceptance state
+- satisfy mypy quality gate
+- align roster and questionnaire contracts
+- align compose test contracts
+
+## 2026-09-29
+
+Human acceptance batches 1 and 2 closed; the questionnaire rehearsal blockers
+cleared; the Windows CI matrix corrected.
+
+- close staff human acceptance batch 1
+- close human acceptance batch 2
+- close post-merge review finding
+- complete questionnaire rehearsal blockers
+- align questionnaire quality baseline
+- close questionnaire mypy gate
+- fix questionnaire CI gates
+- fix admin activity creation form
+- honor windows python matrix in ci
+- keep windows uv commands on matrix python
+- allow windows ci suite to finish
+- fix linux ci timeout
+- fix compose restore network resolution
+
+## 2026-09-28
+
+The ruleset-driven questionnaire landed; auth and event-day UX hardened.
+
+- Ruleset-driven questionnaire
+- complete private rehearsal hardening
+- close account operations gates
+- add role access-key account flows
+- harden auth and event UX
+- harden UX safety and mobile rehearsal
+- fix auth browser smoke contract
+- align judge browser contract
+- tune shared registration throttle
+- fix event runtime CI compatibility
+- fix event runtime network boundary
+- fix CI result type gate
+- close formatter CI gate
+
+## 2026-09-27
+
+Production release readiness closed: backup durability, deployment gates and the
+singer final business boundary.
+
+- harden production release readiness
+- harden production deployment gates
+- harden production backup durability
+- close production operations gates
+- formalize the singer final business boundary
+- fix CI media and release provenance
+- harden CI retry and redirects
+- clear mypy quality gate errors
+- fix activity clone lifecycle
+- make the upload throttle regression test backend-stable
+
+## 2026-09-24
+
+Commercial event runtime and first-run provisioning.
+
+- add commercial first-run setup
+- add commercial event runtime
+- add commercial first admin provisioning
+- fix first-run mypy typing
+- refresh commercial setup css
+
+## 2026-09-23
+
+- prepare commercial brand neutrality
+- close compose branding propagation
+- close m2-d2 release gate
+
+## 2026-09-21
+
+M2-D2 result release authority closed; M2-D1 gate closed; pre-M2-D2 cleanup.
+
+- complete m2-d2 result release authority
+- close m2-d1 gate
+- pre-m2-d2 code cleanup
+- fix result correction rehearsal
+- restore postgres acceptance gates
+- stabilize postgres restore gate
+- format restore gate contract
+- satisfy cleanup type gates
+- fix cleanup lint gate
+
+## 2026-09-11
+
+- integrate m2-d1 result authority closure
+- record m2-d1 docker rehearsal
+
+## 2026-09-10
+
+- require inline agent execution
+
+## 2026-09-08
+
+M2-B ticket entitlement and the whole M2-C judge authority chain — panel policy,
+staff judge control, the judge client — plus the malicious rehearsal matrix.
+
+- integrate M2-B ticket entitlement
+- integrate m2-c1 actual panel policy
+- integrate m2-c2 staff judge control
+- integrate m2-c3 judge client close
+- integrate m2-c judge authority
+- integrate M2-C judge authority plan
+- integrate m2-c gate
+- integrate m2-c malicious rehearsal gate
+- integrate m2-c malicious rehearsal matrix
+- record m2-c malicious rehearsal
+- close m2-c authority and browser gates
+- integrate attack rehearsal fixes
+- harden security abuse boundaries
+- integrate m2-b ticket operator surface
+- sync production requirement export
+
+## 2026-09-07
+
+M2-A entry access foundation, the M2 progressive toolchain gates, and the M1
+authority baseline.
+
+- integrate M1 authority baseline
+- harden authority and runtime baseline
+- close M1 residual contracts
+- record M1 production rehearsal
+- add M2-A entry access foundation
+- finalize m2-a proxy boundary
+- add progressive M2 toolchain gates
+- harden security boundaries and type gates
+- add typed rapid score client boundary
+- add client tooling micro-refactor
+- close CI and service authority gaps
+- publish school readiness goal baseline
+- record agent execution and proxy rules
+
+## 2026-09-04
+
+GOAL v4 baseline established; M1 identity, state and core-raw authority closed.
+
+- establish GOAL v4 baseline
+- close m1-i execution baseline
+- close core raw authority baseline
+- close M1 state and identity authority
+- fix postgres capability fixture
+- extend Windows CI timeout
+
 ## 2026-09-01
 
 ### Batch A — M1-CORE-CLOSE (authority closure)
