@@ -17,10 +17,10 @@ htmlcov/
 # Django
 *.log
 local_settings.py
-db.sqlite3
-# File-backed test database (settings.DATABASES["default"]["TEST"]), plus its
-# journal/wal siblings. Never commit a SQLite database.
-test_db.sqlite3*
+# Any SQLite database, whatever it happens to be called, plus its journal/wal
+# siblings. Never commit a SQLite database.
+*.sqlite3
+*.sqlite3-*
 media/
 staticfiles/
 

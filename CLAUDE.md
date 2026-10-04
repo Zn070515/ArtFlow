@@ -38,6 +38,7 @@ Use `uv run python manage.py doctor` for read-only configuration, database, migr
 - Preserve activity and result locks, audit logging, and test-data safeguards when changing operational flows.
 - Do not commit `.env`, secrets, SQLite databases, uploads, exports, archives, or generated media.
 - Run `pwsh -NoProfile -File scripts/check_docs.ps1` after user-facing documentation changes.
+- After each change round, sweep the configuration files for anything that change made stale: the pyright `include` list, the ruff/mypy module lists, the Tailwind `content` globs, the `.env` templates, `.dockerignore`, and `dependabot.yml`. A file that exists but appears in no list is checked by nothing.
 - Do not let claude get into Co-Authored commits; it is a code reviewer, not a code author. Use `git commit --author` to correct any misattribution.
 - Keep reviewer/advice documents under `docs/advices/`; never place a `ChatGPT.md` (or any large reviewer-note dump) at the repository root.
 

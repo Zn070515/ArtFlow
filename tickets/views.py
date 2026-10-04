@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from base64 import b64encode
 from io import BytesIO
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import quote
 
 from accounts.decorators import admin_required, staff_required
@@ -79,7 +79,11 @@ def _rate_limited_response(retry_after_seconds: int) -> JsonResponse:
     return _no_store(response)
 
 
-def _no_store(response: HttpResponse) -> HttpResponse:
+_ResponseT = TypeVar("_ResponseT", bound=HttpResponse)
+
+
+def _no_store(response: _ResponseT) -> _ResponseT:
+    """Stamp no-cache headers while preserving the response's concrete type."""
     response["Cache-Control"] = "no-store"
     response["Pragma"] = "no-cache"
     return response
@@ -122,7 +126,7 @@ def _qr_data_uri(request: HttpRequest, credential: str) -> str:
     target = f"{request.build_absolute_uri('/tickets/scan/')}#{quote(credential, safe='')}"
     image = qrcode.make(target)
     buffer = BytesIO()
-    image.save(buffer, format="PNG")
+    image.save(buffer)
     return f"data:image/png;base64,{b64encode(buffer.getvalue()).decode('ascii')}"
 
 
@@ -222,7 +226,7 @@ def ticket_list_page(request: HttpRequest) -> HttpResponse:
 
 @staff_required
 def issue_page(request: HttpRequest) -> HttpResponse:
-    issued_tickets = []
+    issued_rows: list[dict[str, Any]] = []
     error = ""
     if request.method == "POST":
         try:
@@ -230,7 +234,7 @@ def issue_page(request: HttpRequest) -> HttpResponse:
                 Activity, pk=_required_form_int(request.POST, "activity_id")
             )
             quantity = _required_form_int(request.POST, "quantity")
-            issued_tickets = issue_ticket_batch(
+            issued = issue_ticket_batch(
                 activity,
                 actor=request.user,
                 quantity=quantity,
@@ -240,19 +244,19 @@ def issue_page(request: HttpRequest) -> HttpResponse:
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             error = str(exc) or "签发参数无效。"
         else:
-            issued_tickets = [
+            issued_rows = [
                 {
                     "ticket": item.ticket,
                     "secret": item.secret,
                     "credential": ticket_credential(item.ticket),
                     "qr_data_uri": _qr_data_uri(request, ticket_credential(item.ticket)),
                 }
-                for item in issued_tickets
+                for item in issued
             ]
     response = render(
         request,
         "staff_panel/ticket_issue.html",
-        {"activities": _ticket_activities(), "error": error, "issued_tickets": issued_tickets},
+        {"activities": _ticket_activities(), "error": error, "issued_tickets": issued_rows},
     )
     return _no_store(response)
 

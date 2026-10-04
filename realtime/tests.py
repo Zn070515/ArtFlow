@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 from accounts.models import User
 from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
-from channels.testing import WebsocketCommunicator
+from channels.layers import get_channel_layer  # type: ignore[import-untyped]
+from channels.testing import WebsocketCommunicator  # type: ignore[import-untyped]
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from config.asgi import application
 from core.models import Activity
@@ -19,6 +19,13 @@ from .events import (
     schedule_group_material_event,
     schedule_judge_context_event,
 )
+
+
+def _recorded_call(mock: AsyncMock):
+    """The awaited call recorded on ``mock``, narrowed for the type checker."""
+    recorded = mock.await_args
+    assert recorded is not None, "expected the mock to have been awaited"
+    return recorded
 
 
 class StaffActivityConsumerTests(TestCase):
@@ -231,8 +238,8 @@ class RealtimeEventTests(TestCase):
                 )
 
         group_send.assert_awaited_once()
-        self.assertEqual(group_send.await_args.args[0], "group_material_17")
-        self.assertEqual(group_send.await_args.args[1]["resource"], "group:17:materials")
+        self.assertEqual(_recorded_call(group_send).args[0], "group_material_17")
+        self.assertEqual(_recorded_call(group_send).args[1]["resource"], "group:17:materials")
 
     @patch("realtime.events.get_channel_layer")
     def test_activity_event_carries_accepted_patch_details_after_commit(
@@ -253,9 +260,9 @@ class RealtimeEventTests(TestCase):
                 group_send.assert_not_awaited()
 
         group_send.assert_awaited_once()
-        self.assertEqual(group_send.await_args.args[0], "staff_activity_12")
+        self.assertEqual(_recorded_call(group_send).args[0], "staff_activity_12")
         self.assertEqual(
-            group_send.await_args.args[1]["details"],
+            _recorded_call(group_send).args[1]["details"],
             {"changes": [{"singer_id": 1, "judge_id": 2, "score": "91"}]},
         )
 
@@ -270,9 +277,9 @@ class RealtimeEventTests(TestCase):
                 group_send.assert_not_awaited()
 
         group_send.assert_awaited_once()
-        self.assertEqual(group_send.await_args.args[0], "judge_round_9")
-        self.assertEqual(group_send.await_args.args[1]["event"], "judge.context_changed")
-        self.assertEqual(group_send.await_args.args[1]["revision"], 3)
+        self.assertEqual(_recorded_call(group_send).args[0], "judge_round_9")
+        self.assertEqual(_recorded_call(group_send).args[1]["event"], "judge.context_changed")
+        self.assertEqual(_recorded_call(group_send).args[1]["revision"], 3)
 
     @patch("realtime.events.get_channel_layer")
     def test_rolled_back_judge_event_is_not_published(self, get_channel_layer_mock):

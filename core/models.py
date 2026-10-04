@@ -149,6 +149,7 @@ class Activity(models.Model):
 
     if TYPE_CHECKING:
         vote_sessions: models.Manager[VoteSession]
+        locked_by_id: int | None
 
     class Meta:
         verbose_name_plural = "activities"

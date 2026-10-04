@@ -633,7 +633,7 @@ class TicketStaffHttpTests(TestCase):
 
         listing = self.client.get(
             reverse("ticket_staff:list_page"),
-            {"activity_id": self.activity.pk, "state": "issued"},
+            {"activity_id": str(self.activity.pk), "state": "issued"},
         )
         self.assertEqual(listing.status_code, 200)
         self.assertContains(listing, "票据管理")
