@@ -60,9 +60,11 @@ src = [
     "incidents",
     "public_portal",
     "questionnaire",
+    "realtime",
     "ruleset",
     "singer_contest",
     "staff_panel",
+    "tickets",
     "voting",
     "tests",
 ]
@@ -150,8 +152,11 @@ files = [
     "public_portal",
     "questionnaire",
     "ruleset",
+    "realtime",
     "singer_contest",
     "staff_panel",
+    "tests",
+    "tickets",
     "voting",
 ]
 check_untyped_defs = true
