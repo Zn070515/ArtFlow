@@ -14,6 +14,42 @@ urlpatterns = [
         name="activity_workspace",
     ),
     path("activities/new/", views.activity_create, name="activity_create"),
+    path(
+        "activities/<int:activity_id>/group-stages/new/",
+        views.group_stage_create,
+        name="group_stage_create",
+    ),
+    path("group-stages/<int:pk>/", views.group_stage_detail, name="group_stage_detail"),
+    path(
+        "group-stages/<int:pk>/history/",
+        views.group_stage_history,
+        name="group_stage_history",
+    ),
+    path(
+        "groups/<int:pk>/materials/history/",
+        views.group_material_history,
+        name="group_material_history",
+    ),
+    path(
+        "group-stages/<int:pk>/record/",
+        views.group_stage_record,
+        name="group_stage_record",
+    ),
+    path(
+        "group-stages/<int:pk>/confirm/",
+        views.group_stage_confirm,
+        name="group_stage_confirm",
+    ),
+    path(
+        "group-stages/<int:pk>/freeze/",
+        views.group_stage_freeze,
+        name="group_stage_freeze",
+    ),
+    path(
+        "group-stages/<int:pk>/correct/",
+        views.group_stage_correct,
+        name="group_stage_correct",
+    ),
     path("activities/<int:pk>/edit/", views.activity_edit, name="activity_edit"),
     path(
         "activities/<int:pk>/fields/<str:field>/",

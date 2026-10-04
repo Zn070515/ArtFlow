@@ -159,9 +159,21 @@ def _validate_file_signature(uploaded_file, extension: str) -> None:
 def _owner_filter(owner):
     if hasattr(owner, "student_id"):
         return {"singer_registration": owner}
+    if hasattr(owner, "stage_id") and hasattr(owner, "group_order"):
+        return {"group": owner}
     if hasattr(owner, "program_type"):
         return {"program": owner}
-    raise ValidationError("文件必须关联到有效的报名或节目。")
+    raise ValidationError("文件必须关联到有效的报名、分组合唱组或节目。")
+
+
+def _owner_activity(owner):
+    activity = getattr(owner, "activity", None)
+    if activity is not None:
+        return activity
+    stage = getattr(owner, "stage", None)
+    if stage is not None:
+        return stage.activity
+    raise ValidationError("材料主体未关联有效活动。")
 
 
 def questionnaire_material_authority_active(activity) -> bool:
@@ -382,8 +394,61 @@ def store_questionnaire_file(
 
 
 @transaction.atomic
+def store_questionnaire_group_file(
+    *, group, question_key, uploaded_file, actor, expected_schema_hash=""
+):
+    """Store a file answer owned by a confirmed Group Chorus group."""
+    from questionnaire.registration import (
+        _require_group_member,
+        questionnaire_plan,
+        writable_group_question_keys,
+    )
+    from ruleset.services import current_frozen_version
+
+    version = current_frozen_version(_owner_activity(group))
+    if version is None:
+        raise ValidationError("当前活动没有已确认的赛制，无法上传材料。")
+    plan = questionnaire_plan(version)
+    if plan.subject != "group":
+        raise ValidationError("当前赛制没有分组合唱组问卷。")
+    if expected_schema_hash and expected_schema_hash != plan.schema_hash:
+        raise ValidationError("问卷已更新，请刷新后重试。")
+    question = plan.question(question_key)
+    if question is None or question["type"] != FILE_TYPE:
+        raise ValidationError("问卷中没有这一道有效文件题。")
+    current_actor = _require_group_member(group, actor)
+    writable = writable_group_question_keys(activity=_owner_activity(group), group=group, plan=plan)
+    if writable is not None and question_key not in writable:
+        raise ValidationError(f"当前阶段不可上传该题目的材料：{question_key!r}。")
+    reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
+    config = question["file"]
+    stored = _store_file(
+        owner=group,
+        uploaded_file=uploaded_file,
+        purpose=config["purpose"],
+        uploaded_by=current_actor,
+        question_key=question_key,
+        source_ruleset_version=version,
+        max_mb=config["max_mb"],
+        owner_total_quota=True,
+        allowed_extensions=config["extensions"],
+    )
+    from common.models import AuditLog
+
+    AuditLog.objects.create(
+        operator=current_actor,
+        action_type=AuditLog.ActionType.UPLOAD_FILE,
+        target=f"SubmissionFile:{stored.pk}",
+        new_value=stored.original_name,
+        note=f"group_questionnaire:{question_key}",
+    )
+    return stored
+
+
+@transaction.atomic
 def delete_submission_file(submission_file: SubmissionFile) -> None:
-    owner_filter = _owner_filter(submission_file.singer_registration or submission_file.program)
+    owner = submission_file.singer_registration or submission_file.group or submission_file.program
+    owner_filter = _owner_filter(owner)
     storage = submission_file.file.storage
     stored_name = submission_file.file.name
     was_current = submission_file.is_current
@@ -420,6 +485,10 @@ DEFAULT_PROGRAM_REQUIREMENTS = [
     ("伴奏文件", SubmissionFile.Purpose.ACCOMPANIMENT),
 ]
 
+DEFAULT_GROUP_REQUIREMENTS = [
+    ("合唱伴奏", SubmissionFile.Purpose.ACCOMPANIMENT),
+]
+
 
 def reconcile_singer_material_checks(registration):
     """Recompute a singer registration's MaterialCheck rows under authority.
@@ -438,6 +507,17 @@ def reconcile_program_material_checks(program):
     """Recompute a program's MaterialCheck rows under authority (see above)."""
     return _reconcile_owner_under_authority(
         program, MaterialRequirement.AppliesTo.PROGRAM, DEFAULT_PROGRAM_REQUIREMENTS
+    )
+
+
+def reconcile_group_material_checks(group):
+    """Create the shared material checklist for one confirmed chorus Group."""
+    from singer_contest.models import GroupStage
+
+    if group.stage.status == GroupStage.Status.DRAFT:
+        raise ValidationError("分组合唱组尚未确认，不能建立共享材料检查项。")
+    return _reconcile_owner_under_authority(
+        group, MaterialRequirement.AppliesTo.GROUP, DEFAULT_GROUP_REQUIREMENTS
     )
 
 
@@ -462,20 +542,29 @@ def reconcile_activity_material_checks(activity, applies_to):
     fallback = (
         DEFAULT_SINGER_REQUIREMENTS
         if applies_to == MaterialRequirement.AppliesTo.SINGER
-        else DEFAULT_PROGRAM_REQUIREMENTS
+        else (
+            DEFAULT_GROUP_REQUIREMENTS
+            if applies_to == MaterialRequirement.AppliesTo.GROUP
+            else DEFAULT_PROGRAM_REQUIREMENTS
+        )
     )
     requirements = _requirements_for(locked_activity, applies_to, fallback)
-    for owner in owner_model.objects.filter(activity=locked_activity).select_for_update():
+    owners = (
+        owner_model.objects.filter(stage__activity=locked_activity)
+        if applies_to == MaterialRequirement.AppliesTo.GROUP
+        else owner_model.objects.filter(activity=locked_activity)
+    )
+    for owner in owners.select_for_update():
         _reconcile_owner_checks(owner, requirements)
     return locked_activity
 
 
 @transaction.atomic
 def _reconcile_owner_under_authority(owner, applies_to, fallback):
-    locked_activity = lock_activity_for_action(owner.activity)
+    locked_activity = lock_activity_for_action(_owner_activity(owner))
     _ensure_material_checks_writable(locked_activity)
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
-    if locked_owner.activity_id != locked_activity.pk:
+    if _owner_activity(locked_owner).pk != locked_activity.pk:
         raise PermissionDenied("材料检查项不属于当前活动。")
     requirements = _requirements_for(locked_activity, applies_to, fallback)
     return _reconcile_owner_checks(locked_owner, requirements)
@@ -496,6 +585,10 @@ def _owner_model_for_applies_to(applies_to):
         from farewell_show.models import Program
 
         return Program
+    if applies_to == MaterialRequirement.AppliesTo.GROUP:
+        from singer_contest.models import Group
+
+        return Group
     raise ValidationError("无效的适用范围。")
 
 
@@ -592,6 +685,7 @@ def reconcile_questionnaire_material_checks(*, registration, version, plan):
             "sort_order": index,
             "item_name": question["label"],
             "file_purpose": purpose,
+            "required": bool(question.get("required")),
             "source_ruleset_version": version,
         }
         if existing is not None and existing.file_purpose != purpose:
@@ -625,6 +719,70 @@ def reconcile_questionnaire_material_checks(*, registration, version, plan):
 
 
 @transaction.atomic
+def reconcile_group_questionnaire_material_checks(*, group, version, plan):
+    """Create one auditable material check per Group questionnaire question."""
+    from questionnaire.conditions import is_blank
+    from questionnaire.models import QuestionnaireResponse
+    from questionnaire.runtime import resolve_question_value
+    from questionnaire.schema import NOTICE_TYPE
+
+    owner_filter = _owner_filter(group)
+    response = QuestionnaireResponse.objects.filter(group=group, ruleset_version=version).first()
+    answers = (response.answers if response else {}) or {}
+    present = {
+        row.question_key: row
+        for row in SubmissionFile.objects.filter(**owner_filter, is_current=True).exclude(
+            question_key=""
+        )
+    }
+    current = {
+        check.question_key: check
+        for check in MaterialCheck.objects.filter(**owner_filter).exclude(question_key="")
+    }
+    seen = set()
+    checks = []
+    for index, question in enumerate(plan.questions):
+        if question["type"] == NOTICE_TYPE:
+            continue
+        key = question["key"]
+        seen.add(key)
+        purpose = (question.get("file") or {}).get("purpose") or ""
+        value = resolve_question_value(question, answers=answers, registration=None, files=present)
+        satisfied = bool(purpose) and key in present
+        if not purpose:
+            satisfied = not is_blank(value)
+        existing = current.get(key)
+        defaults = {
+            "sort_order": index,
+            "item_name": question["label"],
+            "file_purpose": purpose,
+            "required": bool(question.get("required")),
+            "source_ruleset_version": version,
+        }
+        if existing is None or existing.file_purpose != purpose:
+            defaults["status"] = (
+                MaterialCheck.Status.UPLOADED if satisfied else MaterialCheck.Status.MISSING
+            )
+            defaults.update({"review_note": "", "reviewed_by": None, "reviewed_at": None})
+        elif existing.status == MaterialCheck.Status.MISSING and satisfied:
+            defaults["status"] = MaterialCheck.Status.UPLOADED
+        elif existing.status != MaterialCheck.Status.MISSING and not satisfied:
+            defaults["status"] = MaterialCheck.Status.MISSING
+        else:
+            defaults["status"] = existing.status
+        check, _created = MaterialCheck.objects.update_or_create(
+            question_key=key,
+            defaults=defaults,
+            **owner_filter,
+        )
+        checks.append(check)
+    stale = [check for key, check in current.items() if key not in seen]
+    if stale:
+        MaterialCheck.objects.filter(pk__in=[check.pk for check in stale]).delete()
+    return checks
+
+
+@transaction.atomic
 def review_material_check(check, *, status, note, actor):
     """Record a staff review decision on a material check and audit it.
 
@@ -638,16 +796,16 @@ def review_material_check(check, *, status, note, actor):
         raise ValidationError("无效的审核状态。")
     from common.models import AuditLog
 
-    owner = check.singer_registration or check.program
+    owner = check.singer_registration or check.group or check.program
     if owner is None:
         raise ValidationError("材料检查项未关联有效报名，无法审核。")
-    activity = lock_activity_for_action(owner.activity, ActivityAction.REVIEW_REGISTRATION)
+    activity = lock_activity_for_action(_owner_activity(owner), ActivityAction.REVIEW_REGISTRATION)
     # A left outer join is invalid with FOR UPDATE on PostgreSQL (the nullable
     # singer_registration / program FKs become the null side), so lock the row
     # without select_related and resolve the owner lazily.
     locked_check = MaterialCheck.objects.select_for_update().get(pk=check.pk)
-    locked_owner = locked_check.singer_registration or locked_check.program
-    if locked_owner is None or locked_owner.activity_id != activity.pk:
+    locked_owner = locked_check.singer_registration or locked_check.group or locked_check.program
+    if locked_owner is None or _owner_activity(locked_owner).pk != activity.pk:
         raise ValidationError("材料检查项不属于当前活动。")
     old_status = locked_check.status
     locked_check.status = status
@@ -663,6 +821,16 @@ def review_material_check(check, *, status, note, actor):
         new_value=f"{status}: {locked_check.review_note}",
         note=locked_check.item_name,
     )
+    if locked_check.group_id:
+        from realtime.events import schedule_group_material_event
+
+        schedule_group_material_event(
+            locked_check.group_id,
+            event="group.material_reviewed",
+            revision=locked_check.pk,
+            actor={"id": current_actor.pk, "username": current_actor.get_username()},
+            details={"check_id": locked_check.pk, "status": locked_check.status},
+        )
     return locked_check
 
 
@@ -684,7 +852,7 @@ def participant_uploadable_check_ids(owner) -> set[int]:
     rendering only. Hiding a button is never the authorization boundary; a crafted POST
     is judged by the service alone.
     """
-    activity = owner.activity
+    activity = _owner_activity(owner)
     if activity.is_locked:
         return set()
     if activity.phase in _PARTICIPANT_FREE_UPLOAD_PHASES:
@@ -707,7 +875,17 @@ def _require_owner_actor(actor, owner):
     current_actor = get_user_model().objects.filter(pk=actor_pk, is_active=True).first()
     if current_actor is None:
         raise PermissionDenied("当前操作者账户无效。")
-    if owner.user_id != current_actor.pk:
+    if hasattr(owner, "user_id"):
+        if owner.user_id != current_actor.pk:
+            raise ValidationError(UNKNOWN_CHECK_MESSAGE)
+    elif hasattr(owner, "stage_id") and hasattr(owner, "group_order"):
+        from singer_contest.models import GroupMembership
+
+        if not GroupMembership.objects.filter(
+            group=owner, is_current=True, singer__user_id=current_actor.pk
+        ).exists():
+            raise ValidationError(UNKNOWN_CHECK_MESSAGE)
+    else:
         raise ValidationError(UNKNOWN_CHECK_MESSAGE)
     return current_actor
 
@@ -741,9 +919,9 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
     if not uploaded_file:
         raise ValidationError("请选择要上传的文件。")
     owner_filter = _owner_filter(owner)
-    locked_activity = lock_activity_for_action(owner.activity)
+    locked_activity = lock_activity_for_action(_owner_activity(owner))
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
-    if locked_owner.activity_id != locked_activity.pk:
+    if _owner_activity(locked_owner).pk != locked_activity.pk:
         raise PermissionDenied("材料检查项不属于当前活动。")
     current_actor = _require_owner_actor(actor, locked_owner)
     _ensure_participant_upload_phase(locked_activity)
@@ -765,7 +943,7 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
     # A questionnaire check carries its question, so the replacement occupies that
     # question's slot: uploading the second round's accompaniment must not demote the
     # first round's, which is exactly what a purpose-scoped write would do.
-    return _store_file(
+    stored = _store_file(
         owner=locked_owner,
         uploaded_file=uploaded_file,
         purpose=locked_check.file_purpose,
@@ -774,6 +952,17 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         source_ruleset_version=locked_check.source_ruleset_version,
         owner_total_quota=bool(locked_check.question_key),
     )
+    if getattr(locked_owner, "group_id", None):
+        from realtime.events import schedule_group_material_event
+
+        schedule_group_material_event(
+            locked_owner.group_id,
+            event="group.material_changed",
+            revision=stored.pk,
+            actor={"id": current_actor.pk, "username": current_actor.get_username()},
+            details={"file_id": stored.pk, "check_id": locked_check.pk},
+        )
+    return stored
 
 
 def _reconcile_owner_checks(owner, requirements):

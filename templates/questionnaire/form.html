@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}报名资料 — {{ activity.title }} — ArtFlow{% endblock %}
+{% block title %}{% if group %}分组合唱材料{% else %}报名资料{% endif %} — {{ activity.title }} — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl mx-auto px-4 py-10"
@@ -15,7 +15,12 @@
     {% csrf_token %}
 
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
+    {% if group %}
+    <p class="text-sm text-gray-500 mb-2">{{ group.stage.name }} · {{ group.name }} · 共享材料</p>
+    <p class="text-xs text-gray-500 mb-6">当前成员：{% for membership in current_members %}{{ membership.singer.name }}{% if not forloop.last %}、{% endif %}{% empty %}暂无当前成员{% endfor %}</p>
+    {% else %}
     <p class="text-sm text-gray-500 mb-6">资料完成度</p>
+    {% endif %}
 
     <p class="mb-4 text-sm text-gray-700" data-completion aria-live="polite">
         当前必填 <span data-completion-required>{{ completion.required }}</span> 项，已完成

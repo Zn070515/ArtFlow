@@ -28,15 +28,22 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 from files.policies import effective_file_policy
 from ruleset.services import current_frozen_version
-from singer_contest.models import ContestRound, SingerRegistration
+from singer_contest.group_chorus import current_group_members
+from singer_contest.models import ContestRound, Group, GroupStage, SingerRegistration
 
 from .registration import (
+    build_group_submission_context,
     build_submission_context,
     current_answer_files,
+    current_group_answer_files,
     get_or_create_draft_registration,
+    get_or_create_group_response,
     questionnaire_plan,
     save_draft,
+    save_group_draft,
+    submit_group_response,
     submit_registration,
+    writable_group_question_keys,
     writable_question_keys,
 )
 from .runtime import completion_summary, resolve_question_value, resolve_questions
@@ -66,6 +73,32 @@ def _activity_or_404(request: HttpRequest, activity_pk: int) -> Activity:
     if not _is_staff(request.user):
         activities = activities.filter(data_lifecycle=Activity.DataLifecycle.FORMAL)
     return get_object_or_404(activities, pk=activity_pk)
+
+
+def _group_or_404(request: HttpRequest, group_pk: int) -> Group:
+    groups = Group.objects.select_related("stage__activity").filter(
+        is_active=True,
+        stage__status__in=[GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN],
+    )
+    if not _is_staff(request.user):
+        groups = groups.filter(
+            stage__activity__data_lifecycle=Activity.DataLifecycle.FORMAL,
+            memberships__is_current=True,
+            memberships__singer__user=request.user,
+        )
+    return get_object_or_404(groups.distinct(), pk=group_pk)
+
+
+def _require_group_page(activity: Activity) -> None:
+    if activity.is_locked:
+        raise PermissionDenied("活动已锁定，无法打开分组合唱材料页。")
+    if activity.phase not in {
+        Activity.Phase.REGISTRATION_OPEN,
+        Activity.Phase.REGISTRATION_CLOSED,
+        Activity.Phase.REVIEWING,
+        Activity.Phase.REHEARSAL,
+    }:
+        raise PermissionDenied("当前活动阶段不允许维护分组合唱材料。")
 
 
 def _require_participant_writer(request: HttpRequest, activity: Activity) -> None:
@@ -339,6 +372,70 @@ def form_view(request: HttpRequest, activity_pk: int):
     )
 
 
+@login_required
+def group_form_view(request: HttpRequest, group_pk: int):
+    group = _group_or_404(request, group_pk)
+    activity = group.stage.activity
+    if not _is_staff(request.user):
+        _require_group_page(activity)
+    version, plan = _frozen_plan(activity)
+    if plan.subject != "group":
+        raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
+    staff = _is_staff(request.user)
+    response = (
+        get_or_create_group_response(
+            group=group, ruleset_version=version, questionnaire_key=plan.key
+        )
+        if not staff
+        else None
+    )
+    writable = (
+        None if staff else writable_group_question_keys(activity=activity, group=group, plan=plan)
+    )
+    answers = (response.answers if response else {}) or {}
+    files = current_group_answer_files(group)
+    due_rounds = _due_rounds(version)
+    context = build_group_submission_context(version=version, group=group)
+    rows = _question_rows(
+        plan,
+        activity=activity,
+        registration=None,
+        answers=answers,
+        context=context,
+        due_rounds=due_rounds,
+        files=files,
+        writable=writable,
+    )
+    return render(
+        request,
+        "questionnaire/form.html",
+        {
+            "activity": activity,
+            "version": version,
+            "plan": plan,
+            "pages": _page_model(plan, rows),
+            "editable": writable is None or bool(writable),
+            "preview": staff,
+            "schema_hash": plan.schema_hash,
+            "completion": completion_summary(
+                plan,
+                registration=None,
+                answers=answers,
+                context=context,
+                due_rounds=due_rounds,
+                files=files,
+            ),
+            "form_url": request.path,
+            "submitted": bool(response and response.status == "submitted"),
+            "autosave_url": f"/questionnaire/group/{group.pk}/autosave/",
+            "upload_url_template": f"/questionnaire/group/{group.pk}/file/__KEY__/",
+            "submit_url": f"/questionnaire/group/{group.pk}/submit/",
+            "group": group,
+            "current_members": current_group_members(group),
+        },
+    )
+
+
 def _json_body(request: HttpRequest) -> dict | None:
     try:
         payload = json.loads(request.body or b"{}")
@@ -518,3 +615,116 @@ def upload_view(request: HttpRequest, activity_pk: int, question_key: str):
             "file_name": stored.original_name,
         }
     )
+
+
+@login_required
+@require_POST
+def group_autosave_view(request: HttpRequest, group_pk: int):
+    group = _group_or_404(request, group_pk)
+    if _is_staff(request.user):
+        raise PermissionDenied("工作人员不能通过选手入口修改分组合唱资料。")
+    _require_group_page(group.stage.activity)
+    version, plan = _frozen_plan(group.stage.activity)
+    if plan.subject != "group":
+        raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
+    payload = _json_body(request)
+    if payload is None or not isinstance(payload.get("answers"), dict):
+        return JsonResponse({"error": "请求体必须包含 answers 对象。"}, status=400)
+    stale = _stale_or_missing_schema_hash(payload, plan)
+    if stale is not None:
+        return stale
+    try:
+        saved = save_group_draft(
+            version=version,
+            group=group,
+            answers=payload["answers"],
+            actor=request.user,
+            schema_hash=str(payload.get("schema_hash") or ""),
+        )
+    except ValidationError:
+        return _invalid_questionnaire_response()
+    return JsonResponse(
+        {
+            "completion": completion_summary(
+                plan,
+                registration=None,
+                answers=saved.answers or {},
+                context=build_group_submission_context(version=version, group=group),
+                due_rounds=_due_rounds(version),
+                files=current_group_answer_files(group),
+            ),
+            "schema_hash": saved.schema_hash,
+        }
+    )
+
+
+@login_required
+@require_POST
+def group_submit_view(request: HttpRequest, group_pk: int):
+    group = _group_or_404(request, group_pk)
+    if _is_staff(request.user):
+        raise PermissionDenied("工作人员不能通过选手入口提交分组合唱资料。")
+    _require_group_page(group.stage.activity)
+    version, plan = _frozen_plan(group.stage.activity)
+    if plan.subject != "group":
+        raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
+    payload = _json_body(request)
+    if payload is None or not isinstance(payload.get("answers"), dict):
+        return JsonResponse({"error": "请求体必须包含 answers 对象。"}, status=400)
+    stale = _stale_or_missing_schema_hash(payload, plan)
+    if stale is not None:
+        return stale
+    try:
+        response = submit_group_response(
+            version=version,
+            group=group,
+            answers=payload["answers"],
+            actor=request.user,
+            due_rounds=_due_rounds(version),
+            expected_schema_hash=str(payload["schema_hash"]),
+        )
+    except ValidationError:
+        return _invalid_questionnaire_response()
+    return JsonResponse(
+        {
+            "status": response.status,
+            "submitted_at": response.submitted_at.isoformat() if response.submitted_at else "",
+            "completion": completion_summary(
+                plan,
+                registration=None,
+                answers=response.answers or {},
+                context=build_group_submission_context(version=version, group=group),
+                due_rounds=_due_rounds(version),
+                files=current_group_answer_files(group),
+            ),
+        }
+    )
+
+
+@login_required
+@require_POST
+def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
+    from files.services import store_questionnaire_group_file
+
+    group = _group_or_404(request, group_pk)
+    if _is_staff(request.user):
+        raise PermissionDenied("工作人员不能通过选手入口上传分组合唱材料。")
+    _require_group_page(group.stage.activity)
+    uploaded = request.FILES.get("file")
+    if not uploaded:
+        return JsonResponse({"error": "请选择要上传的文件。"}, status=400)
+    version, plan = _frozen_plan(group.stage.activity)
+    stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
+    if stale is not None:
+        return stale
+    try:
+        stored = store_questionnaire_group_file(
+            group=group,
+            question_key=question_key,
+            uploaded_file=uploaded,
+            actor=request.user,
+            expected_schema_hash=str(request.POST.get("schema_hash") or ""),
+        )
+    except ValidationError:
+        return _invalid_questionnaire_response()
+    return JsonResponse({"question_key": stored.question_key, "file_name": stored.original_name})

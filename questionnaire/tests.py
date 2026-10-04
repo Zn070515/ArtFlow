@@ -275,6 +275,16 @@ class QuestionnaireFileTests(SimpleTestCase):
             _questionnaire([_question("r2.accompaniment", type="file")]),
         )
 
+    def test_group_questionnaire_requires_group_material_file(self):
+        valid = _questionnaire([self._file_question()])
+        valid["subject"] = "group"
+        self.assertEqual(parse_questionnaire(valid)["subject"], "group")
+
+        invalid = _questionnaire([_question("group_name")])
+        invalid["subject"] = "group"
+        with self.assertRaises(ValidationError):
+            parse_questionnaire(invalid)
+
 
 class QuestionnairePlanTests(SimpleTestCase):
     def test_plan_lists_questions_in_document_order(self):

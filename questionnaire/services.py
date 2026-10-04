@@ -21,7 +21,8 @@ from .models import QuestionnaireResponse
 @transaction.atomic
 def get_or_create_response(
     *,
-    registration,
+    registration=None,
+    group=None,
     ruleset_version,
     questionnaire_key: str,
     schema_hash: str = "",
@@ -32,13 +33,35 @@ def get_or_create_response(
     Idempotent: the unique constraint is the identity, so a participant who reloads the
     page re-reads their draft rather than starting a second one.
     """
+    if (registration is None) == (group is None):
+        raise ValidationError("问卷响应必须且只能关联一个提交主体。")
+    subject = (
+        QuestionnaireResponse.Subject.GROUP
+        if group is not None
+        else QuestionnaireResponse.Subject.PARTICIPANT
+    )
+    identity = {"group": group} if group is not None else {"singer_registration": registration}
     response, _created = QuestionnaireResponse.objects.get_or_create(
-        singer_registration=registration,
+        **identity,
         ruleset_version=ruleset_version,
         questionnaire_key=questionnaire_key,
-        defaults={"schema_hash": schema_hash, "is_test_data": is_test_data},
+        defaults={
+            "subject": subject,
+            "schema_hash": schema_hash,
+            "is_test_data": is_test_data,
+        },
     )
     return response
+
+
+def get_or_create_group_response(*, group, ruleset_version, questionnaire_key, schema_hash=""):
+    return get_or_create_response(
+        group=group,
+        ruleset_version=ruleset_version,
+        questionnaire_key=questionnaire_key,
+        schema_hash=schema_hash,
+        is_test_data=group.is_test_data,
+    )
 
 
 @transaction.atomic

@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .consumers import JudgeContextConsumer, StaffActivityConsumer
+from .consumers import GroupMaterialConsumer, JudgeContextConsumer, StaffActivityConsumer
 
 websocket_urlpatterns = [
     path(
@@ -9,4 +9,9 @@ websocket_urlpatterns = [
         name="staff_activity",
     ),
     path("ws/judge/", JudgeContextConsumer.as_asgi(), name="judge_context"),
+    path(
+        "ws/group/<int:group_id>/materials/",
+        GroupMaterialConsumer.as_asgi(),
+        name="group_material",
+    ),
 ]

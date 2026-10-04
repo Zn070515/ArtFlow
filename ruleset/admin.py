@@ -70,6 +70,7 @@ class ContestRulesetAdmin(MaintenanceMetadataAdmin):
         "vote_keys",
         "vote_scoring_rule_keys",
         "group_keys",
+        "group_stage_keys",
         "audience_keys",
         "created_by",
         "created_at",

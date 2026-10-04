@@ -265,3 +265,156 @@ class JudgeContextConsumer(AsyncJsonWebsocketConsumer):
         from singer_contest.judge_authority import get_judge_context_readonly
 
         return get_judge_context_readonly(token)
+
+
+class GroupMaterialConsumer(AsyncJsonWebsocketConsumer):
+    """Presence and invalidation room for one Group Chorus material workspace."""
+
+    async def connect(self) -> None:
+        user = self.scope.get("user")
+        if not isinstance(user, User) or not user.is_authenticated:
+            await self.close(code=4403)
+            return
+        group_id = self.scope.get("url_route", {}).get("kwargs", {}).get("group_id")
+        if not isinstance(group_id, int):
+            await self.close(code=4404)
+            return
+        group = await self._load_group(group_id, user.pk)
+        if group is None:
+            await self.close(code=4403)
+            return
+        self.group_id = group_id
+        self.activity_id = group["activity_id"]
+        self.room = f"group_material_{group_id}"
+        self.client_id = self._requested_client_id()
+        self.presence_store = redis_presence_store(self.room)
+        self.member = PresenceMember(
+            client_id=self.client_id,
+            user_id=user.pk,
+            display=user.get_username(),
+        )
+        await self.channel_layer.group_add(self.room, self.channel_name)
+        await self.accept()
+        await self._put_presence()
+        await self.send_json(
+            {
+                "type": "presence.snapshot",
+                "resource": f"group:{group_id}:materials",
+                "members": await self._presence_snapshot(),
+            }
+        )
+        await self._broadcast_presence("presence.join")
+
+    async def disconnect(self, close_code: int) -> None:
+        if not hasattr(self, "room"):
+            return
+        try:
+            if getattr(self, "presence_store", None) is not None:
+                await self.presence_store.remove(self.client_id)
+            await self._broadcast_presence("presence.leave")
+            await self.channel_layer.group_discard(self.room, self.channel_name)
+        except Exception:
+            pass
+        finally:
+            if getattr(self, "presence_store", None) is not None:
+                try:
+                    await self.presence_store.close()
+                except Exception:
+                    pass
+
+    async def receive_json(self, content: dict[str, Any], **kwargs: Any) -> None:
+        message_type = content.get("type")
+        if message_type == "heartbeat":
+            await self._put_presence()
+            return
+        if message_type in {"presence.focus", "presence.blur"}:
+            path = content.get("path", "") if message_type == "presence.focus" else ""
+            if not isinstance(path, str) or len(path) > _PATH_MAX_LENGTH:
+                await self.send_json({"type": "error", "code": "INVALID_PRESENCE_PATH"})
+                return
+            self.member = PresenceMember(
+                client_id=self.member.client_id,
+                user_id=self.member.user_id,
+                display=self.member.display,
+                path=path,
+            )
+            await self._put_presence()
+            await self._broadcast_presence(message_type)
+            return
+        await self.send_json({"type": "error", "code": "UNSUPPORTED_REALTIME_MESSAGE"})
+
+    async def realtime_presence(self, event: dict[str, Any]) -> None:
+        if event.get("origin") == self.client_id and event.get("event") != "presence.join":
+            return
+        payload = {
+            "type": event.get("event", "presence.update"),
+            "resource": f"group:{self.group_id}:materials",
+        }
+        if "member" in event:
+            payload["member"] = event["member"]
+        await self.send_json(payload)
+
+    async def realtime_event(self, event: dict[str, Any]) -> None:
+        payload = {
+            "type": event["event"],
+            "resource": event["resource"],
+            "revision": event.get("revision"),
+            "actor": event.get("actor"),
+        }
+        details = event.get("details")
+        if isinstance(details, dict):
+            payload.update(details)
+        await self.send_json(payload)
+
+    async def _broadcast_presence(self, event_name: str) -> None:
+        await self.channel_layer.group_send(
+            self.room,
+            {
+                "type": "realtime.presence",
+                "event": event_name,
+                "resource": f"group:{self.group_id}:materials",
+                "member": self.member.as_dict(),
+                "origin": self.client_id,
+            },
+        )
+
+    async def _put_presence(self) -> None:
+        if self.presence_store is not None:
+            try:
+                await self.presence_store.put(self.member)
+            except Exception:
+                pass
+
+    async def _presence_snapshot(self) -> list[dict[str, int | str]]:
+        if self.presence_store is None:
+            return [self.member.as_dict()]
+        try:
+            return await self.presence_store.snapshot()
+        except Exception:
+            return [self.member.as_dict()]
+
+    def _requested_client_id(self) -> str:
+        raw = self.scope.get("query_string", b"").decode("ascii", errors="ignore")
+        for item in raw.split("&"):
+            key, separator, value = item.partition("=")
+            if key == "client_id" and separator and _CLIENT_ID_PATTERN.fullmatch(value):
+                return value
+        return self.channel_name.replace("!", "-")
+
+    @sync_to_async
+    def _load_group(self, group_id: int, user_id: int) -> dict[str, int] | None:
+        from singer_contest.models import Group
+
+        group = (
+            Group.objects.select_related("stage__activity")
+            .filter(pk=group_id, is_active=True)
+            .first()
+        )
+        if group is None:
+            return None
+        user = User.objects.filter(pk=user_id).first()
+        if user is None or user.is_staff_or_admin:
+            return {"activity_id": group.stage.activity_id}
+        if group.memberships.filter(is_current=True, singer__user_id=user_id).exists():
+            return {"activity_id": group.stage.activity_id}
+        return None

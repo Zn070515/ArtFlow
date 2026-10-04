@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from common.authority import (
     CONTEST_ROUND_STATE,
+    GROUP_STAGE_STATE,
     JUDGE_PANEL_STATE,
     JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
@@ -424,6 +425,256 @@ class SingerRegistration(models.Model):
     def save(self, *args, **kwargs):
         _ensure_identity_ownership_unchanged(self, frozenset({"activity_id", "user_id"}))
         return super().save(*args, **kwargs)
+
+
+class GroupChorusQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    def _ensure_write_authorized(self):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱配置必须通过正式服务修改。")
+
+    def update(self, **kwargs):
+        self._ensure_write_authorized()
+        return super().update(**kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._ensure_write_authorized()
+        return super().delete(*args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._ensure_write_authorized()
+        objs = list(objs)
+        for obj in objs:
+            obj.clean()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_write_authorized()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+GroupChorusManager = models.Manager.from_queryset(GroupChorusQuerySet)
+
+
+class GroupStage(models.Model):
+    """An explicit, conditional group-chorus stage for a Singer Contest.
+
+    Grouping is performed outside ArtFlow.  This aggregate stores the operator's
+    verified result and its lifecycle, while :class:`GroupMembership` keeps the
+    correction history instead of overwriting the previous roster.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "待录入"
+        CONFIRMED = "confirmed", "已确认"
+        FROZEN = "frozen", "已冻结"
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="group_stages"
+    )
+    stage_key = models.CharField(max_length=100)
+    name = models.CharField(max_length=100)
+    status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="confirmed_group_stages",
+    )
+    frozen_at = models.DateTimeField(null=True, blank=True)
+    frozen_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="frozen_group_stages",
+    )
+    is_test_data = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    objects = GroupChorusManager()
+
+    if TYPE_CHECKING:
+        activity_id: int
+        groups: models.Manager["Group"]
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "stage_key"], name="groupstage_unique_activity_key"
+            )
+        ]
+
+    def clean(self):
+        from core.models import Activity
+
+        if self.activity_id and self.activity.activity_type != Activity.Type.SINGER_CONTEST:
+            raise ValidationError("分组合唱赛段只能绑定歌手比赛活动。")
+        if not str(self.stage_key or "").strip():
+            raise ValidationError("分组合唱赛段必须有稳定的赛段标识。")
+        if not str(self.name or "").strip():
+            raise ValidationError("分组合唱赛段必须有名称。")
+
+    def save(self, *args, **kwargs):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱配置必须通过正式服务修改。")
+        self.clean()
+        if self._state.adding and not self.is_test_data:
+            self.is_test_data = runtime_is_test(self.activity)
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱配置必须通过正式服务删除。")
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.activity.title} — {self.name}"
+
+
+class Group(models.Model):
+    """One externally formed group inside a confirmed group stage."""
+
+    stage = models.ForeignKey(GroupStage, on_delete=models.CASCADE, related_name="groups")
+    name = models.CharField(max_length=100)
+    group_order = models.PositiveIntegerField()
+    is_active = models.BooleanField(default=True)
+    is_test_data = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    objects = GroupChorusManager()
+
+    if TYPE_CHECKING:
+        stage_id: int
+        memberships: models.Manager["GroupMembership"]
+        files: models.Manager["SubmissionFile"]
+        material_checks: models.Manager["MaterialCheck"]
+        readiness: str
+        readiness_label: str
+        missing_materials: list[str]
+        current_members: list["GroupMembership"]
+
+    class Meta:
+        ordering = ["group_order", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["stage", "group_order"],
+                condition=Q(is_active=True),
+                name="group_unique_active_order",
+            ),
+            models.UniqueConstraint(
+                fields=["stage", "name"],
+                condition=Q(is_active=True),
+                name="group_unique_active_name",
+            ),
+        ]
+
+    @property
+    def activity(self):
+        return self.stage.activity
+
+    @property
+    def activity_id(self):
+        return self.stage.activity_id
+
+    def clean(self):
+        if self.stage_id and self.stage.activity_id:
+            from core.models import Activity
+
+            if self.stage.activity.activity_type != Activity.Type.SINGER_CONTEST:
+                raise ValidationError("分组合唱组只能属于歌手比赛活动。")
+        if not str(self.name or "").strip():
+            raise ValidationError("分组合唱组必须有名称。")
+        if not self.group_order or self.group_order < 1:
+            raise ValidationError("分组合唱组顺序必须从 1 开始。")
+
+    def save(self, *args, **kwargs):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱配置必须通过正式服务修改。")
+        self.clean()
+        if self._state.adding and not self.is_test_data:
+            self.is_test_data = self.stage.is_test_data
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱配置必须通过正式服务删除。")
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.stage.name} — {self.name}"
+
+
+class GroupMembership(models.Model):
+    """Append-only membership snapshots for a Group.
+
+    A current row represents the participant's present access. Corrections close
+    the old row and create a new one, which preserves the former roster for audit
+    and archive purposes.
+    """
+
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="memberships")
+    singer = models.ForeignKey(
+        SingerRegistration, on_delete=models.CASCADE, related_name="group_memberships"
+    )
+    is_current = models.BooleanField(default=True)
+    joined_at = models.DateTimeField(auto_now_add=True)
+    left_at = models.DateTimeField(null=True, blank=True)
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="added_group_memberships",
+    )
+    removed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="removed_group_memberships",
+    )
+    change_reason = models.TextField(blank=True, default="")
+    objects = GroupChorusManager()
+
+    if TYPE_CHECKING:
+        group_id: int
+        singer_id: int
+
+    class Meta:
+        ordering = ["group__group_order", "singer_id", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "singer"],
+                condition=Q(is_current=True),
+                name="groupmembership_one_current_per_group_singer",
+            )
+        ]
+
+    def clean(self):
+        if self.group_id and self.singer_id:
+            if self.group.stage.activity_id != self.singer.activity_id:
+                raise ValidationError("分组合唱成员必须属于同一活动。")
+        if self.is_current and (self.left_at or self.removed_by_id):
+            raise ValidationError("当前分组合唱成员不能同时拥有离组信息。")
+        if not self.is_current and not self.left_at:
+            raise ValidationError("历史分组合唱成员必须记录离组时间。")
+
+    def save(self, *args, **kwargs):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱成员必须通过正式服务修改。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
+            raise ValidationError("分组合唱成员历史不可直接删除。")
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.group.name} — {self.singer.name}"
 
 
 _CONTEST_ROUND_STATE_FIELDS = frozenset(

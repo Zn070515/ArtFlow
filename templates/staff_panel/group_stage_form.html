@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}创建分组合唱赛段 — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:activity_workspace' activity.pk %}" class="hover:underline">{{ activity.title }}</a> / 分组合唱</p>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">创建分组合唱赛段</h1>
+    <form method="post" class="space-y-4 bg-white border border-gray-200 rounded-lg p-5">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<p class="text-xs text-gray-500 mt-1">{{ field.help_text }}</p>{% endif %}
+            {{ field.errors }}
+        </div>
+        {% endfor %}
+        <button class="rounded bg-brand px-4 py-2 text-sm text-white" type="submit">创建并录入分组</button>
+    </form>
+</div>
+{% endblock %}

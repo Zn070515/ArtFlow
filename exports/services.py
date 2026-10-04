@@ -30,7 +30,8 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
-from singer_contest.models import ContestRound, ScoreSummary, SingerRegistration
+from singer_contest.group_chorus import current_group_members, group_material_readiness
+from singer_contest.models import ContestRound, GroupStage, ScoreSummary, SingerRegistration
 from singer_contest.services import (
     _eligible_singers,
     authoritative_panel_judges,
@@ -267,6 +268,18 @@ def _material_checklist_workbook(activity: Activity) -> Workbook:
                 c.get_status_display(),
             ]
         )
+    for c in MaterialCheck.objects.filter(
+        group__stage__activity=activity,
+        group__stage__is_test_data=runtime_is_test(activity),
+    ).select_related("group", "group__stage"):
+        ws.append(
+            [
+                "group",
+                f"{c.group.stage.name} / {c.group.name}" if c.group else "",
+                c.item_name,
+                c.get_status_display(),
+            ]
+        )
     _autosize_sheet(ws)
     return wb
 
@@ -334,6 +347,18 @@ def _missing_materials_workbook(activity: Activity) -> Workbook:
             [
                 "program",
                 c.program.name if c.program else "",
+                c.item_name,
+            ]
+        )
+    for c in MaterialCheck.objects.filter(
+        group__stage__activity=activity,
+        group__stage__is_test_data=runtime_is_test(activity),
+        status=MaterialCheck.Status.MISSING,
+    ).select_related("group", "group__stage"):
+        ws.append(
+            [
+                "group",
+                f"{c.group.stage.name} / {c.group.name}" if c.group else "",
                 c.item_name,
             ]
         )
@@ -646,6 +671,70 @@ def _attachment_index_workbook(activity: Activity) -> Workbook:
                 "yes" if f.is_public else "no",
             ]
         )
+    group_files = SubmissionFile.objects.filter(
+        group__stage__activity=activity,
+        group__stage__is_test_data=runtime_is_test(activity),
+        is_test_data=runtime_is_test(activity),
+    ).select_related("group", "group__stage", "uploaded_by")
+    for f in group_files:
+        ws.append(
+            [
+                "group",
+                f"{f.group.stage.name} / {f.group.name}" if f.group else "",
+                f.get_file_purpose_display(),
+                f.original_name,
+                f.file_size,
+                f.uploaded_by.username if f.uploaded_by else "",
+                f.uploaded_at.strftime("%Y-%m-%d %H:%M"),
+                "yes" if f.is_current else "no",
+                "yes" if f.is_public else "no",
+            ]
+        )
+    _autosize_sheet(ws)
+    return wb
+
+
+def _group_chorus_workbook(activity: Activity) -> Workbook:
+    """Export the Group Chorus structure, membership history and readiness."""
+    wb = Workbook()
+    ws = _active_worksheet(wb)
+    ws.title = "Group Chorus"
+    ws.append(
+        [
+            "Stage Key",
+            "Stage",
+            "Stage Status",
+            "Group Order",
+            "Group",
+            "Active",
+            "Current Members",
+            "Material Readiness",
+            "Current Files",
+            "Membership History Rows",
+        ]
+    )
+    stages = GroupStage.objects.filter(
+        activity=activity,
+        is_test_data=runtime_is_test(activity),
+    ).prefetch_related("groups__memberships__singer", "groups__files")
+    for stage in stages.order_by("stage_key", "pk"):
+        for group in stage.groups.order_by("group_order", "pk"):
+            members = list(current_group_members(group))
+            files = list(group.files.filter(is_current=True).order_by("pk"))
+            ws.append(
+                [
+                    stage.stage_key,
+                    stage.name,
+                    stage.get_status_display(),
+                    group.group_order,
+                    group.name,
+                    "yes" if group.is_active else "no",
+                    ", ".join(member.singer.name for member in members),
+                    group_material_readiness(group).value,
+                    ", ".join(file.original_name for file in files),
+                    group.memberships.count(),
+                ]
+            )
     _autosize_sheet(ws)
     return wb
 
@@ -712,6 +801,7 @@ def build_archive_package(activity: Activity) -> list[PackageArtifact]:
         _xlsx("incident_list", _incident_list_workbook(activity)),
         _xlsx("staff_notes", _staff_notes_workbook(activity)),
         _xlsx("attachment_index", _attachment_index_workbook(activity)),
+        _xlsx("group_chorus", _group_chorus_workbook(activity)),
         _xlsx("public_content_index", _public_content_index_workbook(activity)),
     ]
     for doc in scope_runtime(GeneratedDocument.objects.filter(activity=activity), activity):
@@ -829,6 +919,21 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
     for vote_session in locked_activity.vote_sessions.all():
         if not vote_session.is_locked:
             raise PermissionDenied(f"投票「{vote_session.name}」尚未锁定，不能归档。")
+
+    group_stages = GroupStage.objects.filter(
+        activity=locked_activity,
+        is_test_data=locked_activity.is_test_mode,
+    ).prefetch_related("groups__memberships", "groups__files")
+    for group_stage in group_stages:
+        if group_stage.status != GroupStage.Status.FROZEN:
+            raise PermissionDenied(f"分组合唱赛段「{group_stage.name}」尚未冻结，不能归档。")
+        if not all(
+            group_material_readiness(group).value == "ready"
+            for group in group_stage.groups.filter(is_active=True)
+        ):
+            raise PermissionDenied(
+                f"分组合唱赛段「{group_stage.name}」仍有组别材料未就绪，不能归档。"
+            )
 
     artifacts = build_archive_package(locked_activity)
     ArchivePackage.objects.filter(activity=locked_activity, is_current=True).update(

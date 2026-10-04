@@ -60,10 +60,12 @@ activity editor also exposes value-CAS PATCH primitives for title, subtitle
 and description, so unrelated fields can converge without a universal field
 revision table.
 
-There is currently no Group/GroupMembership aggregate in the domain model. A
-group-material room is therefore intentionally not mounted yet; mapping a
-farewell `Program` to that room would weaken membership authorization and file
-slot ownership.
+Group Chorus now has a formal `GroupStage -> Group -> GroupMembership` aggregate.
+The `/ws/group/<group_id>/materials/` room is mounted for the current group
+members and staff. It carries presence and post-commit material invalidations
+only; uploads, questionnaire saves and material reviews remain HTTP service
+mutations with the same membership, phase, CSRF, audit and transaction checks.
+Farewell `Program` rows do not use this room.
 
 Presence is not a database fact and is not audited. Redis records expire after a
 short TTL, and browser reconnect is advisory. A presence indicator must never

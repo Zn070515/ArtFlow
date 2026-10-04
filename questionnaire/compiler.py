@@ -30,6 +30,7 @@ class QuestionnairePlan:
     """The canonical, order-preserving view of one questionnaire."""
 
     key: str
+    subject: str
     schema_version: int
     schema_hash: str
     pages: tuple[dict, ...]
@@ -52,6 +53,7 @@ class QuestionnairePlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
+            "subject": self.subject,
             "schema_version": self.schema_version,
             "schema_hash": self.schema_hash,
             "pages": list(self.pages),
@@ -85,6 +87,7 @@ def compile_questionnaire(questionnaire: dict | str | None) -> QuestionnairePlan
             bindings[binding] = question["key"]
     return QuestionnairePlan(
         key=parsed["key"],
+        subject=parsed.get("subject", "participant"),
         schema_version=parsed["schema_version"],
         schema_hash=schema_hash(parsed),
         pages=tuple(parsed["pages"]),

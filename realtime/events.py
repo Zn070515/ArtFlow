@@ -74,6 +74,25 @@ def schedule_activity_event(
     )
 
 
+def schedule_group_material_event(
+    group_id: int,
+    *,
+    event: str,
+    revision: int | str | None = None,
+    actor: Mapping[str, Any] | None = None,
+    details: Mapping[str, Any] | None = None,
+) -> None:
+    """Notify current group members and staff viewing one group material page."""
+    schedule_realtime_event(
+        f"group_material_{group_id}",
+        event=event,
+        resource=f"group:{group_id}:materials",
+        revision=revision,
+        actor=actor,
+        details=details,
+    )
+
+
 def schedule_judge_context_event(
     round_id: int,
     *,

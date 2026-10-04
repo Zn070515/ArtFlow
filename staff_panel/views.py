@@ -101,6 +101,14 @@ from ruleset.services import (
     update_ruleset_definition_section,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
+from singer_contest.group_chorus import (
+    confirm_group_stage,
+    correct_group_stage,
+    create_group_stage,
+    freeze_group_stage,
+    group_material_readiness,
+    record_group_stage,
+)
 from singer_contest.judge_authority import (
     advance_performance,
     hold_judge_panel,
@@ -116,6 +124,9 @@ from singer_contest.judge_authority import (
 from singer_contest.models import (
     AudienceScore,
     ContestRound,
+    Group,
+    GroupMembership,
+    GroupStage,
     Judge,
     JudgeSeat,
     JudgeSeatGrant,
@@ -182,6 +193,9 @@ from staff_panel.forms import (
     CREATE_PHASE_CHOICES,
     ActivityForm,
     ContestRoundForm,
+    GroupStageAssignmentForm,
+    GroupStageCorrectionForm,
+    GroupStageCreateForm,
     IncidentForm,
     JudgeBoundScoreForm,
     JudgePanelAttendanceForm,
@@ -215,7 +229,7 @@ def _choices(enum_class):
 def _form_error(form):
     for field_errors in form.errors.values():
         if field_errors:
-            return field_errors[0]
+            return str(field_errors[0])
     return "提交的数据无效。"
 
 
@@ -288,6 +302,7 @@ def activity_workspace(request, pk):
     )
     vote_sessions = VoteSession.objects.filter(activity=activity)
     rubrics = ScoringRubric.objects.filter(activity=activity)
+    group_stages = GroupStage.objects.filter(activity=activity).prefetch_related("groups")
     can_configure_singer = (
         activity.activity_type == Activity.Type.SINGER_CONTEST
         and not activity.is_locked
@@ -301,12 +316,242 @@ def activity_workspace(request, pk):
             "rounds": rounds,
             "vote_sessions": vote_sessions,
             "rubrics": rubrics,
+            "group_stages": group_stages,
             "registration_count": SingerRegistration.objects.filter(activity=activity).count(),
             "programs": Program.objects.filter(activity=activity),
             "incident_count": IncidentRecord.objects.filter(activity=activity).count(),
             "can_configure_singer": can_configure_singer,
         },
     )
+
+
+@staff_required
+def group_stage_create(request, activity_id):
+    activity = get_object_or_404(Activity, pk=activity_id)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛支持分组合唱赛段。")
+    form = GroupStageCreateForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            stage = create_group_stage(
+                activity,
+                stage_key=form.cleaned_data["stage_key"],
+                name=form.cleaned_data["name"],
+                operator=request.user,
+            )
+        except (PermissionDenied, ValidationError) as error:
+            form.add_error(None, domain_error_messages(error))
+        else:
+            messages.success(request, "分组合唱赛段已创建，请录入外部分组结果。")
+            return redirect("staff:group_stage_detail", pk=stage.pk)
+    return render(
+        request,
+        "staff_panel/group_stage_form.html",
+        {"activity": activity, "form": form},
+    )
+
+
+@staff_required
+def group_stage_detail(request, pk):
+    stage = get_object_or_404(
+        GroupStage.objects.select_related("activity").prefetch_related(
+            "groups__memberships__singer"
+        ),
+        pk=pk,
+    )
+    singers = list(
+        SingerRegistration.objects.filter(
+            activity=stage.activity, pre_status=SingerRegistration.PreStatus.APPROVED
+        ).order_by("pk")
+    )
+    initial_groups = [
+        {
+            "name": group.name,
+            "singer_ids": list(
+                group.memberships.filter(is_current=True).values_list("singer_id", flat=True)
+            ),
+        }
+        for group in stage.groups.filter(is_active=True).order_by("group_order", "pk")
+    ]
+    max_group_slots = max(len(singers), len(initial_groups), 1)
+    assignment_form = GroupStageAssignmentForm(
+        singers=singers, initial_groups=initial_groups, max_group_slots=max_group_slots
+    )
+    correction_form = GroupStageCorrectionForm(
+        singers=singers, initial_groups=initial_groups, max_group_slots=max_group_slots
+    )
+    groups = list(
+        stage.groups.filter(is_active=True).prefetch_related(
+            "memberships__singer", "material_checks", "files"
+        )
+    )
+    for group in groups:
+        group.current_members = [
+            membership for membership in group.memberships.all() if membership.is_current
+        ]
+        readiness = group_material_readiness(group)
+        group.readiness = readiness.value
+        group.readiness_label = {
+            "waiting_for_confirmation": "等待确认分组",
+            "missing_member": "缺少有效成员",
+            "missing_material": "缺少已审核的伴奏材料",
+            "ready": "READY",
+        }[readiness.value]
+        current_files = {file.file_purpose for file in group.files.all() if file.is_current}
+        has_performance_video = "performance_video" in current_files
+        group.missing_materials = [
+            check.item_name
+            for check in group.material_checks.all()
+            if check.required
+            and check.status != MaterialCheck.Status.APPROVED
+            and not (
+                has_performance_video
+                and not check.question_key
+                and check.file_purpose == "accompaniment"
+            )
+        ]
+        if not any(
+            file_purpose in current_files for file_purpose in ("accompaniment", "performance_video")
+        ):
+            group.missing_materials.insert(0, "合唱伴奏（音频或视频）")
+    return render(
+        request,
+        "staff_panel/group_stage_detail.html",
+        {
+            "stage": stage,
+            "groups": groups,
+            "assignment_form": assignment_form,
+            "correction_form": correction_form,
+            "can_record": stage.status == GroupStage.Status.DRAFT and not stage.activity.is_locked,
+            "can_correct": stage.status in (GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN)
+            and not stage.activity.is_locked,
+        },
+    )
+
+
+@staff_required
+def group_stage_history(request, pk):
+    stage = get_object_or_404(
+        GroupStage.objects.select_related("activity"),
+        pk=pk,
+    )
+    history = (
+        GroupMembership.objects.filter(group__stage=stage, is_current=False)
+        .select_related("group", "singer", "added_by", "removed_by")
+        .order_by("-left_at", "-pk")
+    )
+    audits = (
+        AuditLog.objects.filter(
+            target=f"GroupStage:{stage.pk}",
+            action_type__in={
+                AuditLog.ActionType.CREATE_GROUP_STAGE,
+                AuditLog.ActionType.UPDATE_GROUP_STAGE,
+                AuditLog.ActionType.CONFIRM_GROUP_STAGE,
+                AuditLog.ActionType.FREEZE_GROUP_STAGE,
+                AuditLog.ActionType.CORRECT_GROUP_STAGE,
+            },
+        )
+        .select_related("operator")
+        .order_by("-created_at", "-pk")
+    )
+    return render(
+        request,
+        "staff_panel/group_stage_history.html",
+        {"stage": stage, "history": history, "audits": audits},
+    )
+
+
+@staff_required
+def group_material_history(request, pk):
+    group = get_object_or_404(
+        Group.objects.select_related("stage__activity"),
+        pk=pk,
+    )
+    files = (
+        SubmissionFile.objects.filter(group=group)
+        .select_related("uploaded_by", "source_ruleset_version")
+        .order_by("-uploaded_at", "-version", "-pk")
+    )
+    return render(
+        request,
+        "staff_panel/group_material_history.html",
+        {"group": group, "files": files},
+    )
+
+
+@staff_required
+@require_POST
+def group_stage_record(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    singers = SingerRegistration.objects.filter(
+        activity=stage.activity, pre_status=SingerRegistration.PreStatus.APPROVED
+    ).order_by("pk")
+    form = GroupStageAssignmentForm(
+        request.POST, singers=singers, max_group_slots=max(singers.count(), 1)
+    )
+    if form.is_valid():
+        try:
+            record_group_stage(stage, form.cleaned_data["groups"], request.user)
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, domain_error_messages(error))
+        else:
+            messages.success(request, "外部分组结果已保存。")
+    else:
+        messages.error(request, _form_error(form))
+    return redirect("staff:group_stage_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def group_stage_confirm(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    try:
+        confirm_group_stage(stage, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, domain_error_messages(error))
+    else:
+        messages.success(request, "分组合唱分组已确认。")
+    return redirect("staff:group_stage_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def group_stage_freeze(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    try:
+        freeze_group_stage(stage, request.user)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, domain_error_messages(error))
+    else:
+        messages.success(request, "分组合唱分组已冻结。")
+    return redirect("staff:group_stage_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def group_stage_correct(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    singers = SingerRegistration.objects.filter(
+        activity=stage.activity, pre_status=SingerRegistration.PreStatus.APPROVED
+    ).order_by("pk")
+    form = GroupStageCorrectionForm(
+        request.POST, singers=singers, max_group_slots=max(singers.count(), 1)
+    )
+    if form.is_valid():
+        try:
+            correct_group_stage(
+                stage,
+                form.cleaned_data["groups"],
+                request.user,
+                reason=form.cleaned_data["reason"],
+            )
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, domain_error_messages(error))
+        else:
+            messages.success(request, "分组合唱成员修正已保存并记录审计。")
+    else:
+        messages.error(request, _form_error(form))
+    return redirect("staff:group_stage_detail", pk=stage.pk)
 
 
 @staff_required
@@ -1062,7 +1307,7 @@ def program_detail(request, pk):
 @require_POST
 def material_check_review(request):
     check = get_object_or_404(MaterialCheck, pk=request.POST.get("check_id"))
-    owner = check.singer_registration or check.program
+    owner = check.singer_registration or check.group or check.program
     if owner is None:
         messages.error(request, "材料检查项未关联有效报名，无法审核。")
         return redirect("staff:export_center")
@@ -1089,12 +1334,11 @@ def material_check_review(request):
 
 
 def _material_review_redirect(owner):
-    target = (
-        "staff:singer_registration_detail"
-        if getattr(owner, "student_id", None)
-        else "staff:program_detail"
-    )
-    return redirect(target, pk=owner.pk)
+    if getattr(owner, "student_id", None):
+        return redirect("staff:singer_registration_detail", pk=owner.pk)
+    if getattr(owner, "stage_id", None):
+        return redirect("staff:group_stage_detail", pk=owner.stage_id)
+    return redirect("staff:program_detail", pk=owner.pk)
 
 
 @staff_required
@@ -4220,6 +4464,13 @@ def ruleset_edit(request, pk):
     vote_binding = ruleset.vote_keys or {}
     scoring_binding = ruleset.vote_scoring_rule_keys or {}
     group_binding = ruleset.group_keys or {}
+    group_stage_binding = ruleset.group_stage_keys or {}
+    group_stage_candidates = list(
+        GroupStage.objects.filter(
+            activity=ruleset.activity,
+            status=GroupStage.Status.FROZEN,
+        ).order_by("stage_key", "pk")
+    )
     binding_maps = {
         "rounds": [
             {
@@ -4273,6 +4524,17 @@ def ruleset_edit(request, pk):
             }
             for key in sorted(current_group_keys | set(group_binding))
         ],
+        "group_stages": [
+            {
+                "key": key,
+                "value": str(group_stage_binding.get(key, "")),
+                "options": [
+                    (str(item.pk), f"{item.name}（{item.stage_key}）")
+                    for item in group_stage_candidates
+                ],
+            }
+            for key in sorted(current_group_keys | set(group_stage_binding))
+        ],
     }
     return render(
         request,
@@ -4293,6 +4555,7 @@ def ruleset_edit(request, pk):
                     ruleset.vote_scoring_rule_keys or {}, ensure_ascii=False
                 ),
                 "group_keys": json.dumps(ruleset.group_keys or {}, ensure_ascii=False),
+                "group_stage_keys": json.dumps(ruleset.group_stage_keys or {}, ensure_ascii=False),
                 "audience_keys": json.dumps(ruleset.audience_keys or {}, ensure_ascii=False),
                 "announcement_blocks": json.dumps(
                     ruleset.announcement_blocks or [], ensure_ascii=False
@@ -4358,6 +4621,12 @@ def ruleset_bind(request, pk):
                 ),
                 "group_keys": _parse_pairs(
                     "group_binding_key", "group_binding_value", "group_keys", {}
+                ),
+                "group_stage_keys": _parse_pairs(
+                    "group_stage_binding_key",
+                    "group_stage_binding_value",
+                    "group_stage_keys",
+                    {},
                 ),
                 "audience_keys": _parse_json("audience_keys", {}),
                 "announcement_blocks": _parse_json("announcement_blocks", []),
