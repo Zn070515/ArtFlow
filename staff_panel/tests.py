@@ -7427,7 +7427,6 @@ class JudgeControlContractTests(SimpleTestCase):
             "staff:judge_performance_advance": [7],
             "staff:judge_performance_hold": [7],
             "staff:judge_performance_resume": [7],
-            "staff:judge_seat_qr": [7, 11],
             "staff:judge_score_proxy": [7],
             "staff:judge_score_paper": [7],
         }
@@ -7538,19 +7537,43 @@ class JudgeControlHTTPTests(TestCase):
         )
 
     def test_control_page_presents_one_shared_judge_qr(self):
-        """Judges get exactly one entry QR; the page offers no per-seat QR."""
+        """Judges get exactly one entry QR, produced by the shared entry endpoint."""
         self._prepare_panel()
 
         response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, reverse("staff:qr_image", args=[self.activity.pk, "judge"]))
-        seats = response.context["seat_rows"]
-        self.assertTrue(seats)
-        self.assertNotContains(
+        self.assertContains(
             response,
-            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seats[0]["seat"].pk]),
+            reverse("public_portal:activity_judge", args=[self.activity.public_code]),
         )
+
+    def test_shared_judge_qr_image_is_served(self):
+        self._prepare_panel()
+
+        response = self.client.get(reverse("staff:qr_image", args=[self.activity.pk, "judge"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+
+    def test_shared_judge_entry_is_wired_to_a_real_seat_claim(self):
+        """The one staff QR targets the entry whose claim actually assigns a seat."""
+        self._prepare_panel()
+        with authority_write(ACTIVITY_STATE):
+            self.activity.judge_entry_open = True
+            self.activity.save(update_fields=["judge_entry_open"])
+
+        self.client.logout()
+        terminal = self.client.get(
+            reverse("public_portal:activity_judge", args=[self.activity.public_code])
+        )
+        self.assertEqual(terminal.status_code, 200)
+        self.assertContains(terminal, reverse("judge:claim", args=[self.activity.public_code]))
+
+        claim = self.client.post(reverse("judge:claim", args=[self.activity.public_code]))
+        self.assertEqual(claim.status_code, 201)
+        self.assertIn("artflow_judge_session", claim.cookies)
 
     def test_control_page_is_staff_only_and_readable(self):
         self.client.logout()
@@ -7629,36 +7652,9 @@ class JudgeControlHTTPTests(TestCase):
             PerformanceRunState.State.IDLE,
         )
 
-    def test_qr_hold_and_resume_use_staff_authority_services(self):
+    def test_panel_hold_and_resume_use_staff_authority_services(self):
         self._prepare_panel()
-        from singer_contest.models import JudgeSeat, RoundPanelSnapshot
-
-        seat = JudgeSeat.objects.get()
-        qr_response = self.client.post(
-            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
-        )
-        self.assertEqual(qr_response.status_code, 200)
-        self.assertContains(qr_response, "data:image/png;base64,")
-        self.assertNotContains(qr_response, "Judge terminal")
-        self.assertContains(qr_response, "已有未兑换授权")
-        duplicate_qr = self.client.post(
-            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
-        )
-        self.assertRedirects(
-            duplicate_qr,
-            reverse("staff:judge_control", args=[self.contest_round.pk]),
-        )
-        from types import SimpleNamespace
-
-        with patch(
-            "staff_panel.views.issue_judge_grant",
-            return_value=SimpleNamespace(token="RawJudgeToken-should-not-be-plain"),
-        ):
-            mocked_qr = self.client.post(
-                reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk])
-            )
-        self.assertEqual(mocked_qr.status_code, 200)
-        self.assertNotContains(mocked_qr, "RawJudgeToken-should-not-be-plain")
+        from singer_contest.models import RoundPanelSnapshot
 
         hold_get = self.client.get(reverse("staff:judge_panel_hold", args=[self.contest_round.pk]))
         self.assertEqual(hold_get.status_code, 405)
@@ -7672,10 +7668,6 @@ class JudgeControlHTTPTests(TestCase):
         )
         held_page = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
         self.assertContains(held_page, "HOLD")
-        self.assertNotContains(
-            held_page,
-            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seat.pk]),
-        )
         self.assertContains(held_page, "评分已禁用")
         self.assertEqual(
             RoundPanelSnapshot.objects.get(round=self.contest_round).state,

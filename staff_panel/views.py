@@ -1,10 +1,8 @@
 import io
 import json
-from base64 import b64encode
 from decimal import Decimal, InvalidOperation
-from io import BytesIO
 from typing import cast
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from accounts.decorators import admin_required, staff_required
@@ -113,7 +111,6 @@ from singer_contest.judge_authority import (
     advance_performance,
     hold_judge_panel,
     hold_performance,
-    issue_judge_grant,
     prepare_judge_panel,
     resume_judge_panel,
     resume_performance,
@@ -129,7 +126,6 @@ from singer_contest.models import (
     GroupStage,
     Judge,
     JudgeSeat,
-    JudgeSeatGrant,
     Performance,
     PerformanceGroup,
     PerformanceRunState,
@@ -2531,8 +2527,6 @@ def _judge_control_context(
     contest_round,
     *,
     error="",
-    qr_data_uri="",
-    qr_seat_id=None,
     policy_state_override="",
 ):
     round_judges = list(contest_round.round_judges.select_related("judge").order_by("pk"))
@@ -2561,25 +2555,11 @@ def _judge_control_context(
                 else member.seat_key.replace("seat-", "J")
             )
             panel_member_rows.append({"member": member, "seat_label": seat_label})
-            if seat is not None:
-                pending_grant = (
-                    JudgeSeatGrant.objects.filter(
-                        seat=seat,
-                        access_grant__redeemed_at__isnull=True,
-                        access_grant__revoked_at__isnull=True,
-                        access_grant__expires_at__gt=timezone.now(),
-                    )
-                    .select_related("access_grant")
-                    .first()
-                )
-            else:
-                pending_grant = None
             seat_rows.append(
                 {
                     "member": member,
                     "seat": seat,
                     "seat_label": seat_label,
-                    "pending_grant": pending_grant,
                 }
             )
 
@@ -2661,8 +2641,6 @@ def _judge_control_context(
             },
         ),
         "error": error,
-        "qr_data_uri": qr_data_uri,
-        "qr_seat_id": qr_seat_id,
     }
 
 
@@ -2825,34 +2803,6 @@ def judge_performance_resume(request, pk):
     else:
         messages.success(request, "当前表演已恢复。")
     return redirect("staff:judge_control", pk=pk)
-
-
-@staff_required
-@require_POST
-def judge_seat_qr(request, pk, seat_id):
-    seat = get_object_or_404(
-        JudgeSeat.objects.select_related("panel_member__panel_snapshot"),
-        pk=seat_id,
-        panel_member__panel_snapshot__round_id=pk,
-    )
-    try:
-        issued = issue_judge_grant(seat.pk, operator=request.user, ttl_seconds=15 * 60)
-    except (PermissionDenied, ValidationError) as error:
-        messages.error(request, f"签发评委入口失败：{domain_error_messages(error)}")
-        return redirect("staff:judge_control", pk=pk)
-    import qrcode
-
-    target = f"{request.build_absolute_uri(reverse('judge:terminal'))}#{quote(issued.token)}"
-    image = qrcode.make(target)
-    buffer = BytesIO()
-    image.save(buffer)
-    qr_data_uri = f"data:image/png;base64,{b64encode(buffer.getvalue()).decode('ascii')}"
-    return _render_judge_control(
-        request,
-        seat.panel_member.panel_snapshot.round,
-        qr_data_uri=qr_data_uri,
-        qr_seat_id=seat.pk,
-    )
 
 
 def _submit_staff_judge_score(request, pk, *, paper):
