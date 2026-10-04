@@ -9,7 +9,7 @@ class MigrationTransactionTestCase(TransactionTestCase):
     """Restore data-migration singleton rows after historical-schema tests."""
 
     def _post_teardown(self):
-        super()._post_teardown()
+        TransactionTestCase._post_teardown(self)  # type: ignore[attr-defined]
         with authority_write(ACCOUNT_AUTHORITY):
             InstallationState.objects.update_or_create(
                 pk=InstallationState.SINGLETON_PK,
