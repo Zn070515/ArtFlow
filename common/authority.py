@@ -43,6 +43,7 @@ ROUND_PERFORMANCE_STATE = "round_performance.state"
 JUDGE_SCORE_SUBMISSION = "judge_score.submission"
 SCORE_FACT_WRITE = "score_fact.write"
 VOTE_SCORING_RULE = "vote_scoring_rule.write"
+GROUP_STAGE_STATE = "group_stage.state"
 
 
 @dataclass(frozen=True)

@@ -54,6 +54,11 @@ class AuditLog(models.Model):
         RELEASE_RESULT = "release_result", "发布正式结果"
         REVOKE_RESULT = "revoke_result", "撤销正式结果发布"
         SUPERSEDE_RESULT_RELEASE = "supersede_result_release", "取代正式结果发布"
+        CREATE_GROUP_STAGE = "create_group_stage", "创建分组合唱赛段"
+        UPDATE_GROUP_STAGE = "update_group_stage", "录入分组合唱分组"
+        CONFIRM_GROUP_STAGE = "confirm_group_stage", "确认分组合唱分组"
+        FREEZE_GROUP_STAGE = "freeze_group_stage", "冻结分组合唱分组"
+        CORRECT_GROUP_STAGE = "correct_group_stage", "修正分组合唱成员"
         OTHER = "other", "其他"
 
     operator = models.ForeignKey(
