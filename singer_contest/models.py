@@ -499,6 +499,8 @@ class GroupStage(models.Model):
         activity_id: int
         groups: models.Manager["Group"]
 
+        def get_status_display(self) -> str: ...
+
     class Meta:
         ordering = ["created_at", "pk"]
         constraints = [

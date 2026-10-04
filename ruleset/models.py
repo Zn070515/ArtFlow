@@ -14,6 +14,9 @@ from django.db.models import Q
 
 from .schema import content_hash, parse_definition
 
+if TYPE_CHECKING:
+    from singer_contest.models import StageResult
+
 
 class RulesetTemplate(models.Model):
     """Reusable blueprint for a contest ruleset (global, not activity-scoped)."""
@@ -182,6 +185,7 @@ class ContestRuleset(models.Model):
 
     if TYPE_CHECKING:
         versions: models.Manager["RulesetVersion"]
+        activity_id: int
 
     def clean(self):
         if self.activity_id:
@@ -346,6 +350,10 @@ class RulesetVersion(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     objects = RulesetVersionManager()
+
+    if TYPE_CHECKING:
+        ruleset_id: int
+        stage_results: models.Manager[StageResult]
 
     class Meta:
         base_manager_name = "objects"
