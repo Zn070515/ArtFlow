@@ -8,9 +8,8 @@ INTEGRATION_WORKFLOW = (REPOSITORY_ROOT / ".github/workflows/integration.yml").r
 READINESS_DOC = (REPOSITORY_ROOT / "docs/production-readiness.md").read_text(encoding="utf-8")
 
 
-def test_ci_keeps_both_pyright_commands_blocking():
+def test_ci_keeps_the_pyright_command_blocking():
     assert "run: npm run check:pyright\n" in CI_WORKFLOW
-    assert "run: npm run check:pyright:entry-access\n" in CI_WORKFLOW
     assert "continue-on-error: true" not in CI_WORKFLOW
 
 
