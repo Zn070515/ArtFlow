@@ -14,7 +14,11 @@ from django.db import transaction
 from django.test import TestCase
 from singer_contest.judge_authority import JudgeContext
 
-from .events import schedule_activity_event, schedule_judge_context_event
+from .events import (
+    schedule_activity_event,
+    schedule_group_material_event,
+    schedule_judge_context_event,
+)
 
 
 class StaffActivityConsumerTests(TestCase):
@@ -212,6 +216,24 @@ class JudgeContextConsumerTests(TestCase):
 
 
 class RealtimeEventTests(TestCase):
+    @patch("realtime.events.get_channel_layer")
+    def test_group_material_event_targets_the_group_room(self, get_channel_layer_mock):
+        group_send = AsyncMock()
+        get_channel_layer_mock.return_value = SimpleNamespace(group_send=group_send)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                schedule_group_material_event(
+                    17,
+                    event="group.material_changed",
+                    revision=4,
+                    details={"file_id": 9},
+                )
+
+        group_send.assert_awaited_once()
+        self.assertEqual(group_send.await_args.args[0], "group_material_17")
+        self.assertEqual(group_send.await_args.args[1]["resource"], "group:17:materials")
+
     @patch("realtime.events.get_channel_layer")
     def test_activity_event_carries_accepted_patch_details_after_commit(
         self, get_channel_layer_mock
