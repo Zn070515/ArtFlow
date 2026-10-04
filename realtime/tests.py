@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
 from accounts.models import User
 from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from config.asgi import application
 from core.models import Activity
 from django.test import TestCase
+from django.db import transaction
+from singer_contest.judge_authority import JudgeContext
+
+from .events import schedule_judge_context_event
 
 
 class StaffActivityConsumerTests(TestCase):
@@ -99,3 +107,134 @@ class StaffActivityConsumerTests(TestCase):
             await second.disconnect()
 
         async_to_sync(exercise)()
+
+
+class JudgeContextConsumerTests(TestCase):
+    def _judge_context(self) -> JudgeContext:
+        return JudgeContext(
+            activity_id=1,
+            activity_name="测试歌手赛",
+            round_id=9,
+            round_name="决赛",
+            seat_id=3,
+            seat_label="J3",
+            panel_snapshot_id=4,
+            panel_version=1,
+            context_version=7,
+            performance_id=None,
+            performance_label=None,
+            singer_name=None,
+            song_title=None,
+            performance_state="idle",
+            rubric_payload={"name": "评分表", "criteria": []},
+        )
+
+    def test_missing_judge_cookie_is_rejected(self):
+        async def exercise():
+            communicator = WebsocketCommunicator(
+                application,
+                "/ws/judge/",
+                headers=[
+                    (b"host", b"testserver"),
+                    (b"origin", b"http://testserver"),
+                ],
+            )
+            connected, detail = await communicator.connect()
+            self.assertFalse(connected)
+            self.assertEqual(detail, 4401)
+
+        async_to_sync(exercise)()
+
+    @patch("singer_contest.judge_authority.get_judge_context_readonly")
+    def test_cookie_authenticates_without_client_supplied_round(self, context_mock):
+        context_mock.return_value = self._judge_context()
+
+        async def exercise():
+            communicator = WebsocketCommunicator(
+                application,
+                "/ws/judge/?round_id=9999",
+                headers=[
+                    (b"host", b"testserver"),
+                    (b"origin", b"http://testserver"),
+                    (b"cookie", b"artflow_judge_session=opaque-session"),
+                ],
+            )
+            connected, detail = await communicator.connect()
+            self.assertTrue(connected, detail)
+            ready = await communicator.receive_json_from()
+            self.assertEqual(ready["type"], "realtime.ready")
+            self.assertEqual(ready["resource"], "judge-context:9")
+            self.assertEqual(ready["revision"], 7)
+
+            await communicator.send_json_to({"type": "heartbeat"})
+            await communicator.send_json_to({"type": "unsupported"})
+            error = await communicator.receive_json_from()
+            self.assertEqual(error["code"], "UNSUPPORTED_REALTIME_MESSAGE")
+
+            await communicator.disconnect()
+
+        async_to_sync(exercise)()
+
+    @patch("singer_contest.judge_authority.get_judge_context_readonly")
+    def test_context_event_is_forwarded_without_business_payload(self, context_mock):
+        context_mock.return_value = self._judge_context()
+
+        async def exercise():
+            communicator = WebsocketCommunicator(
+                application,
+                "/ws/judge/",
+                headers=[
+                    (b"host", b"testserver"),
+                    (b"origin", b"http://testserver"),
+                    (b"cookie", b"artflow_judge_session=opaque-session"),
+                ],
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+            await communicator.receive_json_from()
+            await get_channel_layer().group_send(
+                "judge_round_9",
+                {
+                    "type": "realtime.event",
+                    "event": "judge.context_changed",
+                    "resource": "judge-context:9",
+                    "revision": 8,
+                    "actor": {"id": 1, "display": "staff"},
+                },
+            )
+            changed = await communicator.receive_json_from()
+            self.assertEqual(changed["type"], "judge.context_changed")
+            self.assertEqual(changed["revision"], 8)
+            self.assertNotIn("context", changed)
+            await communicator.disconnect()
+
+        async_to_sync(exercise)()
+
+
+class RealtimeEventTests(TestCase):
+    @patch("realtime.events.get_channel_layer")
+    def test_judge_event_publishes_only_after_commit(self, get_channel_layer_mock):
+        group_send = AsyncMock()
+        get_channel_layer_mock.return_value = SimpleNamespace(group_send=group_send)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                schedule_judge_context_event(round_id=9, revision=3)
+                group_send.assert_not_awaited()
+
+        group_send.assert_awaited_once()
+        self.assertEqual(group_send.await_args.args[0], "judge_round_9")
+        self.assertEqual(group_send.await_args.args[1]["event"], "judge.context_changed")
+        self.assertEqual(group_send.await_args.args[1]["revision"], 3)
+
+    @patch("realtime.events.get_channel_layer")
+    def test_rolled_back_judge_event_is_not_published(self, get_channel_layer_mock):
+        group_send = AsyncMock()
+        get_channel_layer_mock.return_value = SimpleNamespace(group_send=group_send)
+
+        with self.assertRaises(RuntimeError):
+            with transaction.atomic():
+                schedule_judge_context_event(round_id=9, revision=4)
+                raise RuntimeError("rollback")
+
+        group_send.assert_not_awaited()

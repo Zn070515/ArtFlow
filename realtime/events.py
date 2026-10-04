@@ -67,3 +67,19 @@ def schedule_activity_event(
         revision=revision,
         actor=actor,
     )
+
+
+def schedule_judge_context_event(
+    round_id: int,
+    *,
+    revision: int,
+    actor: Mapping[str, object] | None = None,
+) -> None:
+    """Notify connected judge terminals that their HTTP context is stale."""
+    schedule_realtime_event(
+        f"judge_round_{round_id}",
+        event="judge.context_changed",
+        resource=f"judge-context:{round_id}",
+        revision=revision,
+        actor=actor,
+    )

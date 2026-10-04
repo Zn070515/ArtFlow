@@ -40,6 +40,7 @@ from entry_access.services import (
     resolve_ephemeral_session_readonly,
     revoke_access_grant,
 )
+from realtime.events import schedule_judge_context_event
 
 from .models import (
     ContestRound,
@@ -380,6 +381,10 @@ def _audit(
     )
 
 
+def _realtime_actor(user: User) -> dict[str, object]:
+    return {"id": user.pk, "display": user.get_username()}
+
+
 @transaction.atomic
 def prepare_judge_panel(
     round_id: int,
@@ -489,6 +494,11 @@ def prepare_judge_panel(
             sort_keys=True,
         ),
     )
+    schedule_judge_context_event(
+        contest_round.pk,
+        revision=0,
+        actor=_realtime_actor(locked.operator),
+    )
     return snapshot
 
 
@@ -541,6 +551,11 @@ def hold_judge_panel(round_id: int, *, operator, reason: str) -> RoundPanelSnaps
         note=f"{reason};context_version={run_state.context_version};"
         f"revoked_unredeemed_grants={revoked_grants};active_sessions_preserved=True",
     )
+    schedule_judge_context_event(
+        locked.contest_round.pk,
+        revision=run_state.context_version,
+        actor=_realtime_actor(locked.operator),
+    )
     return snapshot
 
 
@@ -586,6 +601,11 @@ def resume_judge_panel(round_id: int, *, operator) -> RoundPanelSnapshot:
         old_value=RoundPanelSnapshot.State.HOLD,
         new_value=RoundPanelSnapshot.State.ACTIVE,
         note="resume_judge_panel",
+    )
+    schedule_judge_context_event(
+        locked.contest_round.pk,
+        revision=run_state.context_version,
+        actor=_realtime_actor(locked.operator),
     )
     return snapshot
 
@@ -642,8 +662,9 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
     if run_state.state == PerformanceRunState.State.HOLD:
         raise PermissionDenied("ROUND_ON_HOLD")
+    context_changed = run_state.current_performance_id != performance.pk
     next_version = run_state.context_version
-    if run_state.current_performance_id != performance.pk:
+    if context_changed:
         next_version += 1
     with authority_write(ROUND_PERFORMANCE_STATE):
         run_state.current_performance = performance
@@ -674,6 +695,12 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
             sort_keys=True,
         ),
     )
+    if context_changed:
+        schedule_judge_context_event(
+            locked.contest_round.pk,
+            revision=next_version,
+            actor=_realtime_actor(locked.operator),
+        )
     return run_state
 
 
@@ -718,6 +745,11 @@ def hold_performance(
         target=f"PerformanceRunState:{run_state.pk}",
         note=reason,
     )
+    schedule_judge_context_event(
+        locked.contest_round.pk,
+        revision=run_state.context_version,
+        actor=_realtime_actor(locked.operator),
+    )
     return run_state
 
 
@@ -749,6 +781,11 @@ def resume_performance(round_id: int, *, operator) -> PerformanceRunState:
                 "updated_at",
             ]
         )
+    schedule_judge_context_event(
+        locked.contest_round.pk,
+        revision=run_state.context_version,
+        actor=_realtime_actor(locked.operator),
+    )
     return run_state
 
 

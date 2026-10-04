@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import re
+from http.cookies import SimpleCookie
 from typing import Any
 
 from accounts.models import User
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from core.models import Activity
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 
 from .presence import PresenceMember, redis_presence_store
 
@@ -190,3 +191,75 @@ class StaffActivityConsumer(AsyncJsonWebsocketConsumer):
             return Activity.objects.filter(pk=activity_id).exists()
         except PermissionDenied:
             return False
+
+
+class JudgeContextConsumer(AsyncJsonWebsocketConsumer):
+    """Push-only invalidation channel for the authenticated judge terminal.
+
+    The browser sends no round, seat, or business mutation through this socket.
+    The HttpOnly judge session cookie is resolved server-side and the complete
+    context is still fetched through the authoritative HTTP endpoint.
+    """
+
+    async def connect(self) -> None:
+        token = self._judge_cookie()
+        if not token:
+            await self.close(code=4401)
+            return
+        try:
+            context = await self._load_context(token)
+        except (PermissionDenied, ValidationError):
+            await self.close(code=4401)
+            return
+
+        self.room = f"judge_round_{context.round_id}"
+        await self.channel_layer.group_add(self.room, self.channel_name)
+        await self.accept()
+        await self.send_json(
+            {
+                "type": "realtime.ready",
+                "resource": f"judge-context:{context.round_id}",
+                "revision": context.context_version,
+            }
+        )
+
+    async def disconnect(self, close_code: int) -> None:
+        if hasattr(self, "room"):
+            await self.channel_layer.group_discard(self.room, self.channel_name)
+
+    async def receive_json(self, content: dict[str, Any], **kwargs: Any) -> None:
+        if content.get("type") == "heartbeat":
+            return
+        await self.send_json({"type": "error", "code": "UNSUPPORTED_REALTIME_MESSAGE"})
+
+    async def realtime_event(self, event: dict[str, Any]) -> None:
+        await self.send_json(
+            {
+                "type": event["event"],
+                "resource": event["resource"],
+                "revision": event.get("revision"),
+                "actor": event.get("actor"),
+            }
+        )
+
+    def _judge_cookie(self) -> str | None:
+        raw_cookie = next(
+            (value for key, value in self.scope.get("headers", []) if key == b"cookie"),
+            b"",
+        )
+        if not raw_cookie:
+            return None
+        cookies = SimpleCookie()
+        try:
+            cookies.load(raw_cookie.decode("latin-1"))
+        except (TypeError, ValueError):
+            return None
+        morsel = cookies.get("artflow_judge_session")
+        value = morsel.value if morsel is not None else ""
+        return value or None
+
+    @sync_to_async
+    def _load_context(self, token: str):
+        from singer_contest.judge_authority import get_judge_context_readonly
+
+        return get_judge_context_readonly(token)
