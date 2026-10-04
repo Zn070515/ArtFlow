@@ -137,7 +137,7 @@ pwsh -NoProfile -File scripts\start-event.ps1
 
 ## 环境变量
 
-从 `.env.example` 创建本地 `.env` 并替换其中的占位值。模板包含 `APP_ENV`、`SECRET_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`DEV_ADMIN_USERNAME`、`DEV_ADMIN_PASSWORD`、`DEBUG` 和 `DATABASE_ENGINE`；`seed_dev_admin` 使用 `DEV_ADMIN_USERNAME` 和 `DEV_ADMIN_PASSWORD`。管理员和工作人员的浏览器注册/登录分别使用对应密钥；管理员密码应使用浏览器密码字段、隐藏式交互输入或 stdin，不要保存到 tracked 文件。只有选择 PostgreSQL 时才需要 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_HOST` 和 `POSTGRES_PORT`。
+从 `.env.example` 创建本地 `.env` 并替换其中的占位值。模板包含 `APP_ENV`、`SECRET_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`DEV_ADMIN_USERNAME`、`DEV_ADMIN_PASSWORD`、`DEBUG` 和 `DATABASE_ENGINE`；`seed_dev_admin` 使用 `DEV_ADMIN_USERNAME` 和 `DEV_ADMIN_PASSWORD`。模板同时记录了一组**带安全默认值的可选运行参数**，不设置时按默认值运行：媒体交付后端 `ARTFLOW_DELIVERY_BACKEND`（当前仅实现 `local`，其它取值会在启动时报错而不是静默回落）、报名上传配额与保留版本数 `ARTFLOW_UPLOAD_QUOTA_MB` / `ARTFLOW_UPLOAD_MAX_VERSIONS`、媒体卷低水位 `ARTFLOW_UPLOAD_MIN_FREE_MB`、上传限流 `ARTFLOW_UPLOAD_RATE_LIMIT` / `ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS`、个人信息保留天数 `ARTFLOW_PII_RETENTION_DAYS`、现场状态缓存 TTL `LIVE_STATE_CACHE_SECONDS`。管理员和工作人员的浏览器注册/登录分别使用对应密钥；管理员密码应使用浏览器密码字段、隐藏式交互输入或 stdin，不要保存到 tracked 文件。只有选择 PostgreSQL 时才需要 `POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_HOST` 和 `POSTGRES_PORT`。
 
 生产环境使用 `.env.production.example` 作为字段清单：`APP_ENV=production`、`DEBUG=False`、真实的主机名和 CSRF 来源、PostgreSQL 连接配置都是必需的；`TRUST_X_FORWARDED_FOR` 只在可信反向代理覆盖客户端 `X-Forwarded-For` 时才设为 `true`。示例值仅是占位符；不得提交 `.env`、密钥、密码、数据库、媒体文件或生成的导出文件。生产拓扑见[生产部署说明](docs/deployment-production.md)。
 
@@ -151,6 +151,22 @@ uv run python manage.py doctor
 pwsh -NoProfile -File scripts/check_docs.ps1
 pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1 -ComposeProjectName artflow -BackupPath backups/artflow-rehearsal.dump
 ```
+
+### 手机布局门禁
+
+现场页面以**手机**为一等终端，所以布局本身也是门禁：七个手机宽度（320 / 360 / 375 / 390 / 393 / 412 / 430，覆盖初代 iPhone SE 到 Pro Max 与主流安卓）各是一个 Playwright project，iPhone 跑 WebKit（iOS Safari 与微信 iOS 的真实内核），安卓跑 Chromium。断言的是**页面不允许整体横向滚动**——表格在 `overflow-x-auto` 内部滚动是允许的（Django admin 的 changelist 也是这么做的）。需要先启动服务：
+
+```powershell
+uv run python manage.py migrate --noinput
+uv run python manage.py prepare_layout_e2e --output-file test-results\layout-e2e.json
+$env:PLAYWRIGHT_LAYOUT_FIXTURE_PATH = "test-results\layout-e2e.json"
+uv run python manage.py runserver
+# 另一个终端：
+npx playwright install chromium webkit
+npm run test:e2e
+```
+
+不带该 fixture 时 staff 页面会被跳过，公共页面仍会测量。
 
 `doctor` 只读检查配置、数据库、迁移、运行目录和首个管理员 provisioning 状态。匿名探针只返回运行状态，不返回配置或业务数据：`GET /livez/` 表示进程存活（不查数据库），`GET /readyz/` 执行轻量 `SELECT 1` 验证数据库可用，`GET /healthz/` 是 readiness 的历史别名，容器/Caddy/CI 探针继续沿用。演示数据可用 `uv run python manage.py seed_demo_data --reset` 清理，但它只会删除该命令拥有且带测试标记的运行数据；仍应先在非重要数据库中验证。
 
