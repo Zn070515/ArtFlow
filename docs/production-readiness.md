@@ -275,7 +275,7 @@ uv run python manage.py collectstatic --noinput --clear
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy
-npm run check:pyright:entry-access
+npm run check:pyright
 uv run python manage.py check
 uv run python manage.py makemigrations --check --dry-run
 uv run pytest -q -n auto --maxprocesses=4 --dist=loadscope --cov --durations=30
