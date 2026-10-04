@@ -13,6 +13,17 @@
     const resolvedSocketPath = socketPath;
     const resolvedMembersList = membersList;
     const resolvedStatus = status;
+    // Optional, additive hooks. The staff workspace leaves these unset and keeps the
+    // original wording; the group chorus material page supplies its own empty-state copy
+    // and the business event names that should surface a manual refresh banner. Presence
+    // and this banner are advisory only — a refresh never becomes an edit lock.
+    const emptyText = root.dataset.collabEmptyText || "当前没有其他工作人员在线";
+    const refreshEvents = (root.dataset.collabRefreshEvents || "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+    const refreshBanner = root.querySelector("[data-collab-refresh]");
+    const refreshAction = root.querySelector("[data-collab-refresh-action]");
     const clientStorageKey = "artflow:collab:client-id";
     const existingClientId = window.sessionStorage.getItem(clientStorageKey);
     const clientId = existingClientId || crypto.randomUUID().replace(/-/g, "");
@@ -37,7 +48,7 @@
         if (members.size === 0) {
             const empty = document.createElement("li");
             empty.className = "text-gray-500";
-            empty.textContent = "当前没有其他工作人员在线";
+            empty.textContent = emptyText;
             resolvedMembersList.append(empty);
             return;
         }
@@ -139,6 +150,10 @@
                 addMember(message.member);
                 renderMembers();
             }
+            else if (refreshEvents.includes(String(message.type))) {
+                if (refreshBanner)
+                    refreshBanner.hidden = false;
+            }
         });
         socket.addEventListener("close", () => {
             clearTimers();
@@ -166,6 +181,9 @@
         clearTimers();
         socket?.close();
     });
+    if (refreshAction) {
+        refreshAction.addEventListener("click", () => window.location.reload());
+    }
     renderMembers();
     connect();
 })();
