@@ -38,6 +38,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Max, OuterRef, Q, QuerySet, Subquery
 from django.utils import timezone
+from realtime.events import schedule_activity_event
 from ruleset.compiler import ExecutionPlan, compile_version
 from ruleset.resolver import (
     OutcomeCode,
@@ -1351,7 +1352,7 @@ def apply_scores_if_version(
         raise ValidationError("请先准备比赛轮次后再录入评分。")
     if parsed_base_version != locked_round.score_version:
         raise StaleScoreVersionError(locked_round.score_version)
-    apply_scores(locked_round, score_values, current_operator, note=note)
+    changes = apply_scores(locked_round, score_values, current_operator, note=note)
     locked_round.refresh_from_db()
     result = {
         "status": ScoreWriteReceipt.Status.SUCCEEDED,
@@ -1364,6 +1365,14 @@ def apply_scores_if_version(
     receipt.status = ScoreWriteReceipt.Status.SUCCEEDED
     receipt.full_clean(validate_unique=False)
     receipt.save(update_fields=["result_version", "result_payload", "status"])
+    if changes:
+        schedule_activity_event(
+            locked_activity.pk,
+            event="score.grid_changed",
+            resource=f"round-score:{locked_round.pk}",
+            revision=locked_round.score_version,
+            actor={"id": current_operator.pk, "display": current_operator.get_username()},
+        )
     return result
 
 

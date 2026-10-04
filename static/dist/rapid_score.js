@@ -80,6 +80,7 @@
     if (!/^[1-9]\d*$/.test(operatorId))
         return;
     const apiUrl = container.dataset.apiUrl || "";
+    const wsUrl = container.dataset.wsUrl || "/ws/staff/activity/" + container.dataset.activityId + "/";
     const activityId = parseInt(container.dataset.activityId || "", 10);
     const roundId = parseInt(container.dataset.roundId || "", 10);
     const locked = container.dataset.locked === "true";
@@ -116,6 +117,12 @@
         draftBaseVersion: null,
         conflicts: {},
     };
+    let realtimeSocket = null;
+    let realtimeReconnectTimer = null;
+    let realtimeHeartbeatTimer = null;
+    let refreshTimer = null;
+    let realtimeReconnectDelay = 1000;
+    let realtimeConnected = false;
     function key(singerId, judgeId) {
         return singerId + ":" + judgeId;
     }
@@ -623,6 +630,100 @@
             showError("无法获取最新评分；本机草稿仍已保留，请稍后重试。");
         });
     }
+    function realtimeUrl() {
+        const url = new URL(wsUrl, window.location.href);
+        url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return url.toString();
+    }
+    function scheduleRefresh(delay) {
+        if (refreshTimer !== null)
+            clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+            refreshTimer = null;
+            refreshFromServer();
+            scheduleRefresh(realtimeConnected ? 30000 : 5000);
+        }, delay);
+    }
+    function scheduleRealtimeReconnect() {
+        if (realtimeReconnectTimer !== null || state.locked)
+            return;
+        realtimeReconnectTimer = setTimeout(() => {
+            realtimeReconnectTimer = null;
+            connectRealtime();
+        }, realtimeReconnectDelay);
+        realtimeReconnectDelay = Math.min(10000, realtimeReconnectDelay * 2);
+    }
+    function closeRealtime() {
+        if (realtimeReconnectTimer !== null)
+            clearTimeout(realtimeReconnectTimer);
+        if (realtimeHeartbeatTimer !== null)
+            clearInterval(realtimeHeartbeatTimer);
+        if (refreshTimer !== null)
+            clearTimeout(refreshTimer);
+        realtimeReconnectTimer = null;
+        realtimeHeartbeatTimer = null;
+        refreshTimer = null;
+        const socket = realtimeSocket;
+        realtimeSocket = null;
+        realtimeConnected = false;
+        if (socket)
+            socket.close();
+    }
+    function connectRealtime() {
+        if (state.locked || realtimeSocket !== null || typeof WebSocket === "undefined")
+            return;
+        let socket;
+        try {
+            socket = new WebSocket(realtimeUrl());
+        }
+        catch {
+            scheduleRealtimeReconnect();
+            return;
+        }
+        realtimeSocket = socket;
+        socket.addEventListener("open", () => {
+            if (realtimeSocket !== socket)
+                return;
+            realtimeConnected = true;
+            realtimeReconnectDelay = 1000;
+            if (realtimeHeartbeatTimer !== null)
+                clearInterval(realtimeHeartbeatTimer);
+            realtimeHeartbeatTimer = setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN)
+                    socket.send(JSON.stringify({ type: "heartbeat" }));
+            }, 15000);
+            scheduleRefresh(30000);
+        });
+        socket.addEventListener("message", (event) => {
+            let payload;
+            try {
+                payload = JSON.parse(event.data);
+            }
+            catch {
+                return;
+            }
+            if (!isRecord(payload) || payload.type !== "score.grid_changed" ||
+                payload.resource !== "round-score:" + roundId || !isNonNegativeInteger(payload.revision))
+                return;
+            if (payload.revision > state.version)
+                refreshFromServer();
+        });
+        socket.addEventListener("error", () => {
+            if (realtimeSocket === socket)
+                socket.close();
+        });
+        socket.addEventListener("close", () => {
+            if (realtimeSocket !== socket)
+                return;
+            realtimeSocket = null;
+            realtimeConnected = false;
+            if (realtimeHeartbeatTimer !== null)
+                clearInterval(realtimeHeartbeatTimer);
+            realtimeHeartbeatTimer = null;
+            scheduleRefresh(5000);
+            scheduleRealtimeReconnect();
+        });
+    }
     function applyCellValue(input, value) {
         if (!input)
             return;
@@ -762,10 +863,17 @@
             return event.returnValue;
         });
     }
+    window.addEventListener("beforeunload", () => {
+        closeRealtime();
+    });
     initCells(initial.grid);
     restorePendingDraft();
     updateProgress();
     updatePendingCount();
     renderConflicts();
     setVersion(state.version);
+    if (!state.locked) {
+        connectRealtime();
+        scheduleRefresh(5000);
+    }
 })();

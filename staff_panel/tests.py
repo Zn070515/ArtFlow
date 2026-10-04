@@ -5303,6 +5303,24 @@ class RoundScoresApiTests(TestCase):
         self.assertTrue(data["matrix_complete"])
         self.assertEqual(ScoreRecord.objects.get(round=self.round).score, Decimal("91"))
 
+    @patch("singer_contest.services.schedule_activity_event")
+    def test_post_schedules_post_commit_grid_invalidation(self, event_mock):
+        response = self._post(
+            {
+                "base_version": 0,
+                "cells": [{"singer_id": self.singer.pk, "judge_id": self.judge.pk, "score": "91"}],
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event_mock.assert_called_once_with(
+            self.activity.pk,
+            event="score.grid_changed",
+            resource=f"round-score:{self.round.pk}",
+            revision=1,
+            actor={"id": self.admin.pk, "display": self.admin.get_username()},
+        )
+
     def test_post_corrects_existing_direct_judge_fact_through_formal_authority(self):
         from entry_access.services import redeem_access_grant
         from singer_contest.judge_authority import (
