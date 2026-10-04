@@ -39,6 +39,9 @@ class SubmissionFile(models.Model):
         blank=True,
         related_name="files",
     )
+
+    if TYPE_CHECKING:
+        group_id: int | None
     file = models.FileField(upload_to="submissions/%Y/%m/")
     original_name = models.CharField(max_length=255)
     file_size = models.IntegerField()
@@ -214,6 +217,9 @@ class MaterialCheck(models.Model):
         blank=True,
         related_name="material_checks",
     )
+
+    if TYPE_CHECKING:
+        group_id: int | None
     program = models.ForeignKey(
         "farewell_show.Program",
         on_delete=models.CASCADE,
@@ -245,6 +251,10 @@ class MaterialCheck(models.Model):
         ),
     )
     status = models.CharField(max_length=20, choices=Status, default=Status.MISSING)
+    required = models.BooleanField(
+        default=True,
+        help_text="该检查项是否属于当前正式材料契约；可选问卷题不阻塞 Group READY。",
+    )
     review_note = models.TextField(blank=True, default="")
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -364,10 +374,7 @@ class MaterialSlot(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    (
-                        Q(singer_registration__isnull=True)
-                        & Q(program__isnull=True)
-                    )
+                    (Q(singer_registration__isnull=True) & Q(program__isnull=True))
                     | (
                         Q(singer_registration__isnull=False)
                         & Q(program__isnull=True)

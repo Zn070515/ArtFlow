@@ -28,11 +28,12 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 from files.policies import effective_file_policy
 from ruleset.services import current_frozen_version
+from singer_contest.group_chorus import current_group_members
 from singer_contest.models import ContestRound, Group, GroupStage, SingerRegistration
 
 from .registration import (
-    build_submission_context,
     build_group_submission_context,
+    build_submission_context,
     current_answer_files,
     current_group_answer_files,
     get_or_create_draft_registration,
@@ -40,8 +41,8 @@ from .registration import (
     questionnaire_plan,
     save_draft,
     save_group_draft,
-    submit_registration,
     submit_group_response,
+    submit_registration,
     writable_group_question_keys,
     writable_question_keys,
 )
@@ -389,9 +390,7 @@ def group_form_view(request: HttpRequest, group_pk: int):
         else None
     )
     writable = (
-        None
-        if staff
-        else writable_group_question_keys(activity=activity, group=group, plan=plan)
+        None if staff else writable_group_question_keys(activity=activity, group=group, plan=plan)
     )
     answers = (response.answers if response else {}) or {}
     files = current_group_answer_files(group)
@@ -432,6 +431,7 @@ def group_form_view(request: HttpRequest, group_pk: int):
             "upload_url_template": f"/questionnaire/group/{group.pk}/file/__KEY__/",
             "submit_url": f"/questionnaire/group/{group.pk}/submit/",
             "group": group,
+            "current_members": current_group_members(group),
         },
     )
 
@@ -714,9 +714,7 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
     if not uploaded:
         return JsonResponse({"error": "请选择要上传的文件。"}, status=400)
     version, plan = _frozen_plan(group.stage.activity)
-    stale = _stale_or_missing_schema_hash(
-        {"schema_hash": request.POST.get("schema_hash")}, plan
-    )
+    stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
     if stale is not None:
         return stale
     try:
@@ -729,6 +727,4 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
         )
     except ValidationError:
         return _invalid_questionnaire_response()
-    return JsonResponse(
-        {"question_key": stored.question_key, "file_name": stored.original_name}
-    )
+    return JsonResponse({"question_key": stored.question_key, "file_name": stored.original_name})

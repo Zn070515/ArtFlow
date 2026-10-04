@@ -17,7 +17,7 @@
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
     {% if group %}
     <p class="text-sm text-gray-500 mb-2">{{ group.stage.name }} · {{ group.name }} · 共享材料</p>
-    <p class="text-xs text-gray-500 mb-6">当前成员：{% for membership in group.memberships.all %}{% if membership.is_current %}{{ membership.singer.name }}{% if not forloop.last %}、{% endif %}{% endif %}{% endfor %}</p>
+    <p class="text-xs text-gray-500 mb-6">当前成员：{% for membership in current_members %}{{ membership.singer.name }}{% if not forloop.last %}、{% endif %}{% empty %}暂无当前成员{% endfor %}</p>
     {% else %}
     <p class="text-sm text-gray-500 mb-6">资料完成度</p>
     {% endif %}

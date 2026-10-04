@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{{ group.name }} · 材料历史 · ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:group_stage_detail' group.stage.pk %}" class="hover:underline">返回分组合唱</a></p>
+    <h1 class="text-2xl font-bold text-gray-900">{{ group.group_order }}. {{ group.name }} · 材料历史</h1>
+    <p class="text-sm text-gray-500 mt-1">{{ group.stage.name }} · 只读追踪</p>
+
+    <section class="bg-white border border-gray-200 rounded-lg p-5 mt-6">
+        <p class="text-sm text-gray-600 mb-4">正常材料页只显示当前版本；此页用于确认组内成员连续修改过的文件和操作人。</p>
+        {% if files %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead><tr class="text-left border-b"><th class="py-2 pr-4">用途</th><th class="py-2 pr-4">题目</th><th class="py-2 pr-4">文件</th><th class="py-2 pr-4">版本</th><th class="py-2 pr-4">状态</th><th class="py-2 pr-4">操作者</th><th class="py-2">时间</th></tr></thead>
+                <tbody>
+                {% for file in files %}
+                <tr class="border-b border-gray-100 {% if file.is_current %}bg-green-50{% endif %}">
+                    <td class="py-2 pr-4">{{ file.get_file_purpose_display }}</td>
+                    <td class="py-2 pr-4">{% if file.question_key %}{{ file.question_key }}{% else %}—{% endif %}</td>
+                    <td class="py-2 pr-4">{{ file.original_name }}</td>
+                    <td class="py-2 pr-4">v{{ file.version }}</td>
+                    <td class="py-2 pr-4">{% if file.is_current %}当前{% else %}历史{% endif %}</td>
+                    <td class="py-2 pr-4">{{ file.uploaded_by|default:"—" }}</td>
+                    <td class="py-2">{{ file.uploaded_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}<p class="text-sm text-gray-500">暂无材料版本。</p>{% endif %}
+    </section>
+</div>
+{% endblock %}

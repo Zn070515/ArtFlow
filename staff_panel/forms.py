@@ -327,6 +327,88 @@ class RoundGroupsForm(forms.Form):
         return cleaned
 
 
+class GroupStageCreateForm(forms.Form):
+    stage_key = forms.CharField(
+        label="赛段标识", max_length=100, help_text="例如 chorus；创建后用于规则集绑定。"
+    )
+    name = forms.CharField(label="赛段名称", max_length=100)
+
+    def clean_stage_key(self):
+        value = self.cleaned_data["stage_key"].strip()
+        if not value:
+            raise forms.ValidationError("赛段标识不能为空。")
+        return value
+
+    def clean_name(self):
+        value = self.cleaned_data["name"].strip()
+        if not value:
+            raise forms.ValidationError("赛段名称不能为空。")
+        return value
+
+
+class GroupStageAssignmentForm(forms.Form):
+    """Bounded staff form for entering a complete external group result."""
+
+    MAX_GROUP_SLOTS = 20
+
+    def __init__(self, *args, singers=(), initial_groups=(), max_group_slots=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_group_slots = max(
+            1, int(max_group_slots or self.MAX_GROUP_SLOTS), len(initial_groups)
+        )
+        choices = [(str(singer.pk), singer.name) for singer in singers]
+        initial_by_slot = {
+            index: group
+            for index, group in enumerate(initial_groups, start=1)
+            if isinstance(group, dict)
+        }
+        for index in range(1, self.max_group_slots + 1):
+            group = initial_by_slot.get(index, {})
+            self.fields[f"group_name_{index}"] = forms.CharField(
+                label=f"第 {index} 组名称",
+                required=False,
+                max_length=100,
+                initial=group.get("name", ""),
+            )
+            self.fields[f"group_singer_ids_{index}"] = forms.MultipleChoiceField(
+                label=f"第 {index} 组成员",
+                required=False,
+                choices=choices,
+                widget=forms.CheckboxSelectMultiple,
+                initial=[str(value) for value in group.get("singer_ids", [])],
+            )
+
+    def clean(self):
+        cleaned = super().clean() or {}
+        groups = []
+        for index in range(1, self.max_group_slots + 1):
+            name = str(cleaned.get(f"group_name_{index}") or "").strip()
+            singer_ids = list(cleaned.get(f"group_singer_ids_{index}") or [])
+            if not name and not singer_ids:
+                continue
+            if not name:
+                self.add_error(f"group_name_{index}", "请填写分组名称。")
+            if not singer_ids:
+                self.add_error(f"group_singer_ids_{index}", "请选择至少一名成员。")
+            groups.append({"name": name, "singer_ids": singer_ids})
+        if not groups and not self.errors:
+            raise forms.ValidationError("至少需要一个分组合唱组。")
+        cleaned["groups"] = groups
+        return cleaned
+
+
+class GroupStageCorrectionForm(GroupStageAssignmentForm):
+    reason = forms.CharField(
+        label="修正原因", max_length=240, widget=forms.Textarea(attrs={"rows": 2})
+    )
+
+    def clean_reason(self):
+        value = self.cleaned_data["reason"].strip()
+        if not value:
+            raise forms.ValidationError("必须填写成员修正原因。")
+        return value
+
+
 class ScoringRubricProvisionForm(forms.Form):
     MAX_CRITERION_SLOTS = 10
 

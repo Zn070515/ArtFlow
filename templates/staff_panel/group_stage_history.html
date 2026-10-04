@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}{{ stage.name }} · 分组历史 · ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:group_stage_detail' stage.pk %}" class="hover:underline">返回分组合唱</a></p>
+    <h1 class="text-2xl font-bold text-gray-900">{{ stage.name }} · 分组历史</h1>
+    <p class="text-sm text-gray-500 mt-1">{{ stage.stage_key }} · {{ stage.get_status_display }}</p>
+
+    <section class="bg-white border border-gray-200 rounded-lg p-5 mt-6">
+        <h2 class="font-semibold text-gray-900 mb-3">成员变更历史</h2>
+        {% if history %}
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead><tr class="text-left border-b"><th class="py-2 pr-4">组</th><th class="py-2 pr-4">成员</th><th class="py-2 pr-4">加入</th><th class="py-2 pr-4">移出</th><th class="py-2">原因</th></tr></thead>
+                <tbody>
+                {% for item in history %}
+                <tr class="border-b border-gray-100"><td class="py-2 pr-4">{{ item.group.group_order }}. {{ item.group.name }}</td><td class="py-2 pr-4">{{ item.singer.name }}</td><td class="py-2 pr-4">{{ item.joined_at|date:"Y-m-d H:i" }}</td><td class="py-2 pr-4">{{ item.left_at|date:"Y-m-d H:i" }}</td><td class="py-2">{{ item.change_reason }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}<p class="text-sm text-gray-500">暂无历史成员关系。</p>{% endif %}
+    </section>
+
+    <section class="bg-white border border-gray-200 rounded-lg p-5 mt-6">
+        <h2 class="font-semibold text-gray-900 mb-3">操作审计</h2>
+        {% for audit in audits %}
+        <div class="border-b border-gray-100 py-3 text-sm"><div class="flex flex-wrap justify-between gap-2"><strong>{{ audit.get_action_type_display }}</strong><span class="text-gray-500">{{ audit.created_at|date:"Y-m-d H:i" }} · {{ audit.operator }}</span></div>{% if audit.note %}<p class="text-gray-600 mt-1">原因：{{ audit.note }}</p>{% endif %}</div>
+        {% empty %}<p class="text-sm text-gray-500">暂无审计记录。</p>{% endfor %}
+    </section>
+</div>
+{% endblock %}

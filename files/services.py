@@ -417,11 +417,10 @@ def store_questionnaire_group_file(
     if question is None or question["type"] != FILE_TYPE:
         raise ValidationError("问卷中没有这一道有效文件题。")
     current_actor = _require_group_member(group, actor)
-    writable = writable_group_question_keys(
-        activity=_owner_activity(group), group=group, plan=plan
-    )
+    writable = writable_group_question_keys(activity=_owner_activity(group), group=group, plan=plan)
     if writable is not None and question_key not in writable:
         raise ValidationError(f"当前阶段不可上传该题目的材料：{question_key!r}。")
+    reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
     config = question["file"]
     stored = _store_file(
         owner=group,
@@ -686,6 +685,7 @@ def reconcile_questionnaire_material_checks(*, registration, version, plan):
             "sort_order": index,
             "item_name": question["label"],
             "file_purpose": purpose,
+            "required": bool(question.get("required")),
             "source_ruleset_version": version,
         }
         if existing is not None and existing.file_purpose != purpose:
@@ -710,6 +710,70 @@ def reconcile_questionnaire_material_checks(*, registration, version, plan):
             defaults["status"] = existing.status
         check, _created = MaterialCheck.objects.update_or_create(
             question_key=key, defaults=defaults, **owner_filter
+        )
+        checks.append(check)
+    stale = [check for key, check in current.items() if key not in seen]
+    if stale:
+        MaterialCheck.objects.filter(pk__in=[check.pk for check in stale]).delete()
+    return checks
+
+
+@transaction.atomic
+def reconcile_group_questionnaire_material_checks(*, group, version, plan):
+    """Create one auditable material check per Group questionnaire question."""
+    from questionnaire.conditions import is_blank
+    from questionnaire.models import QuestionnaireResponse
+    from questionnaire.runtime import resolve_question_value
+    from questionnaire.schema import NOTICE_TYPE
+
+    owner_filter = _owner_filter(group)
+    response = QuestionnaireResponse.objects.filter(group=group, ruleset_version=version).first()
+    answers = (response.answers if response else {}) or {}
+    present = {
+        row.question_key: row
+        for row in SubmissionFile.objects.filter(**owner_filter, is_current=True).exclude(
+            question_key=""
+        )
+    }
+    current = {
+        check.question_key: check
+        for check in MaterialCheck.objects.filter(**owner_filter).exclude(question_key="")
+    }
+    seen = set()
+    checks = []
+    for index, question in enumerate(plan.questions):
+        if question["type"] == NOTICE_TYPE:
+            continue
+        key = question["key"]
+        seen.add(key)
+        purpose = (question.get("file") or {}).get("purpose") or ""
+        value = resolve_question_value(question, answers=answers, registration=None, files=present)
+        satisfied = bool(purpose) and key in present
+        if not purpose:
+            satisfied = not is_blank(value)
+        existing = current.get(key)
+        defaults = {
+            "sort_order": index,
+            "item_name": question["label"],
+            "file_purpose": purpose,
+            "required": bool(question.get("required")),
+            "source_ruleset_version": version,
+        }
+        if existing is None or existing.file_purpose != purpose:
+            defaults["status"] = (
+                MaterialCheck.Status.UPLOADED if satisfied else MaterialCheck.Status.MISSING
+            )
+            defaults.update({"review_note": "", "reviewed_by": None, "reviewed_at": None})
+        elif existing.status == MaterialCheck.Status.MISSING and satisfied:
+            defaults["status"] = MaterialCheck.Status.UPLOADED
+        elif existing.status != MaterialCheck.Status.MISSING and not satisfied:
+            defaults["status"] = MaterialCheck.Status.MISSING
+        else:
+            defaults["status"] = existing.status
+        check, _created = MaterialCheck.objects.update_or_create(
+            question_key=key,
+            defaults=defaults,
+            **owner_filter,
         )
         checks.append(check)
     stale = [check for key, check in current.items() if key not in seen]
@@ -757,6 +821,16 @@ def review_material_check(check, *, status, note, actor):
         new_value=f"{status}: {locked_check.review_note}",
         note=locked_check.item_name,
     )
+    if locked_check.group_id:
+        from realtime.events import schedule_group_material_event
+
+        schedule_group_material_event(
+            locked_check.group_id,
+            event="group.material_reviewed",
+            revision=locked_check.pk,
+            actor={"id": current_actor.pk, "username": current_actor.get_username()},
+            details={"check_id": locked_check.pk, "status": locked_check.status},
+        )
     return locked_check
 
 
@@ -869,7 +943,7 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
     # A questionnaire check carries its question, so the replacement occupies that
     # question's slot: uploading the second round's accompaniment must not demote the
     # first round's, which is exactly what a purpose-scoped write would do.
-    return _store_file(
+    stored = _store_file(
         owner=locked_owner,
         uploaded_file=uploaded_file,
         purpose=locked_check.file_purpose,
@@ -878,6 +952,17 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         source_ruleset_version=locked_check.source_ruleset_version,
         owner_total_quota=bool(locked_check.question_key),
     )
+    if getattr(locked_owner, "group_id", None):
+        from realtime.events import schedule_group_material_event
+
+        schedule_group_material_event(
+            locked_owner.group_id,
+            event="group.material_changed",
+            revision=stored.pk,
+            actor={"id": current_actor.pk, "username": current_actor.get_username()},
+            details={"file_id": stored.pk, "check_id": locked_check.pk},
+        )
+    return stored
 
 
 def _reconcile_owner_checks(owner, requirements):

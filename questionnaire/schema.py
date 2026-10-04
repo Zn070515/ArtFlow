@@ -437,7 +437,12 @@ def parse_questionnaire(questionnaire: dict | str | None) -> dict:
         )
 
     if subject == "group":
-        if any("binding" in question for page in pages for section in page["sections"] for question in section["questions"]):
+        if any(
+            "binding" in question
+            for page in pages
+            for section in page["sections"]
+            for question in section["questions"]
+        ):
             raise ValidationError("GROUP 问卷不能绑定个人报名字段。")
 
     result = {
@@ -446,6 +451,17 @@ def parse_questionnaire(questionnaire: dict | str | None) -> dict:
         "pages": pages,
         "notices": notices,
     }
+    if subject == "group":
+        group_file_purposes = {
+            (question.get("file") or {}).get("purpose")
+            for page in pages
+            for section in page["sections"]
+            for question in section["questions"]
+            if question.get("type") == FILE_TYPE
+        }
+        if not group_file_purposes.intersection({"accompaniment", "performance_video"}):
+            raise ValidationError("GROUP 问卷必须包含伴奏音频或视频文件题。")
+
     if subject != "participant":
         result["subject"] = subject
     return result

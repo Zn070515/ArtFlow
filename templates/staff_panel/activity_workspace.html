@@ -71,6 +71,25 @@
             </div>
         </section>
     </div>
+    <section class="mt-4 bg-white border border-gray-200 rounded-lg p-5">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <h2 class="font-semibold text-gray-900">条件性分组合唱</h2>
+                <p class="text-sm text-gray-500 mt-1">只有正式赛制包含分组合唱时才配置外部分组、成员确认和共享材料。</p>
+            </div>
+            {% if can_configure_singer %}<a class="text-brand hover:underline text-sm" href="{% url 'staff:group_stage_create' activity.pk %}">新建分组合唱赛段</a>{% endif %}
+        </div>
+        {% if group_stages %}
+        <div class="mt-4 space-y-2">
+            {% for stage in group_stages %}
+            <a class="block rounded border border-gray-200 px-3 py-2 hover:bg-gray-50" href="{% url 'staff:group_stage_detail' stage.pk %}">
+                <span class="font-medium text-gray-900">{{ stage.name }}</span>
+                <span class="text-xs text-gray-500 ml-2">{{ stage.get_status_display }} · {{ stage.groups.count }} 组</span>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}<p class="mt-4 text-sm text-gray-500">当前未配置分组合唱赛段。</p>{% endif %}
+    </section>
     {% if activity.is_test_mode and not activity.is_locked and activity.phase != "archived" %}
     <section class="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-5">
         <h2 class="font-semibold text-blue-900">评委彩排入口</h2>

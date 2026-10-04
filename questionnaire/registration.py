@@ -89,9 +89,9 @@ def current_answer_files(registration) -> dict:
     )
     return {
         row.question_key: row
-        for row in SubmissionFile.objects.filter(
-            **owner_filter, is_current=True
-        ).exclude(question_key="")
+        for row in SubmissionFile.objects.filter(**owner_filter, is_current=True).exclude(
+            question_key=""
+        )
     }
 
 
@@ -138,13 +138,10 @@ def writable_group_question_keys(*, activity, group: Group, plan) -> frozenset[s
 
     if activity.is_locked or group.stage.status == group.stage.Status.DRAFT:
         return frozenset()
-    if activity.phase in {
-        Activity.Phase.REGISTRATION_OPEN,
-        Activity.Phase.REGISTRATION_CLOSED,
-        Activity.Phase.REVIEWING,
-        Activity.Phase.REHEARSAL,
-    }:
+    if activity.phase == Activity.Phase.REGISTRATION_OPEN:
         return None
+    if activity.phase not in SUPPLEMENT_PHASES:
+        return frozenset()
     return frozenset(
         MaterialCheck.objects.filter(group=group, status=MaterialCheck.Status.NEEDS_SUPPLEMENT)
         .exclude(question_key="")
@@ -155,9 +152,12 @@ def writable_group_question_keys(*, activity, group: Group, plan) -> frozenset[s
 def _require_group_member(group: Group, actor):
     actor_pk = getattr(actor, "pk", None)
     current_actor = get_user_model().objects.filter(pk=actor_pk, is_active=True).first()
-    if current_actor is None or not GroupMembership.objects.filter(
-        group=group, is_current=True, singer__user_id=current_actor.pk
-    ).exists():
+    if (
+        current_actor is None
+        or not GroupMembership.objects.filter(
+            group=group, is_current=True, singer__user_id=current_actor.pk
+        ).exists()
+    ):
         raise PermissionDenied("只有当前分组合唱成员可以维护本组材料。")
     return current_actor
 
@@ -484,7 +484,7 @@ def submit_group_response(
     due_rounds=frozenset(),
     expected_schema_hash: str = "",
 ):
-    from files.services import reconcile_group_material_checks
+    from files.services import reconcile_group_questionnaire_material_checks
 
     current_actor = _require_group_member(group, actor)
     plan = questionnaire_plan(version)
@@ -517,7 +517,7 @@ def submit_group_response(
     if missing:
         raise ValidationError(f"以下必填项尚未填写：{'、'.join(missing)}。")
     saved = save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
-    reconcile_group_material_checks(group)
+    reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
     submitted = mark_submitted(saved)
     from common.models import AuditLog
 

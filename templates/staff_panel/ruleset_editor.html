@@ -162,6 +162,17 @@
                     <p class="mt-1 text-xs text-gray-500">把节点中的分组键绑定到当前活动轮次的分组结果。</p>
             </div>
             {% endfor %}
+            {% for row in binding_maps.group_stages %}
+            <div>
+                <label for="id_group_stage_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">分组合唱「{{ row.key }}」</label>
+                <input type="hidden" name="group_stage_binding_key" value="{{ row.key }}">
+                <select id="id_group_stage_binding_{{ forloop.counter }}" name="group_stage_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <option value="">暂不绑定</option>
+                    {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+                <p class="mt-1 text-xs text-gray-500">将 PARTITION 节点的分组来源绑定到已冻结的分组合唱赛段。</p>
+            </div>
+            {% endfor %}
             <details class="sm:col-span-2 border border-gray-200 rounded p-3">
                 <summary class="cursor-pointer text-sm font-medium text-gray-700">高级观众分绑定（JSON，仅人工/外部观众分需要）</summary>
                 <label for="id_audience_keys" class="block text-xs text-gray-700 mt-3 mb-0.5">观众分映射</label>
