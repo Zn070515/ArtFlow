@@ -565,9 +565,12 @@ class JudgePanelServiceTests(TestCase):
     def test_readonly_context_refreshes_the_heartbeat_only_after_the_throttle(self):
         token = self._materialized_judge_token()
         session = JudgeSession.objects.get()
+        ephemeral = EphemeralSession._base_manager.get(pk=session.ephemeral_session_id)
         stale = timezone.now() - timedelta(seconds=61)
         with authority_write(JUDGE_SESSION_STATE):
             JudgeSession._base_manager.filter(pk=session.pk).update(last_seen_at=stale)
+        with authority_write(EPHEMERAL_SESSION_STATE):
+            EphemeralSession._base_manager.filter(pk=ephemeral.pk).update(last_seen_at=stale)
 
         get_judge_context_readonly(token)
 
@@ -575,6 +578,10 @@ class JudgePanelServiceTests(TestCase):
         refreshed = session.last_seen_at
         assert refreshed is not None
         self.assertGreater(refreshed, stale)
+        ephemeral.refresh_from_db()
+        ephemeral_refreshed = ephemeral.last_seen_at
+        assert ephemeral_refreshed is not None
+        self.assertGreater(ephemeral_refreshed, stale)
 
     def test_readonly_context_refuses_a_revoked_seat(self):
         token = self._materialized_judge_token()
@@ -599,6 +606,30 @@ class JudgePanelServiceTests(TestCase):
 
         with self.assertRaises(ValidationError):
             get_judge_context_readonly(token)
+        with self.assertRaises(PermissionDenied):
+            get_judge_context(token)
+
+    def test_readonly_context_refuses_disallowed_phase_without_heartbeat(self):
+        token = self._materialized_judge_token()
+        session = JudgeSession.objects.get()
+        ephemeral = EphemeralSession._base_manager.get(pk=session.ephemeral_session_id)
+        stale = timezone.now() - timedelta(seconds=61)
+        with authority_write(JUDGE_SESSION_STATE):
+            JudgeSession._base_manager.filter(pk=session.pk).update(last_seen_at=stale)
+        with authority_write(EPHEMERAL_SESSION_STATE):
+            EphemeralSession._base_manager.filter(pk=ephemeral.pk).update(last_seen_at=stale)
+        with authority_write(ACTIVITY_STATE):
+            self.activity.phase = Activity.Phase.REVIEWING
+            self.activity.save(update_fields=["phase"])
+
+        with self.assertRaises(PermissionDenied):
+            get_judge_context_readonly(token)
+
+        session.refresh_from_db()
+        ephemeral.refresh_from_db()
+        self.assertEqual(session.last_seen_at, stale)
+        self.assertEqual(ephemeral.last_seen_at, stale)
+
         with self.assertRaises(PermissionDenied):
             get_judge_context(token)
 

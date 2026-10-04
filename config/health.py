@@ -6,7 +6,7 @@ probe was wasted work: those checks belong to startup (``manage.py check``), the
 ``doctor`` command and the deployment gate, not to a 10 s heartbeat.
 
 * ``/livez/``  — is this process able to answer? No database, no system checks.
-* ``/readyz/`` — can this process reach its database? One ``ensure_connection``.
+* ``/readyz/`` — can this process execute a lightweight database query?
 * ``/healthz/`` — readiness under its original name, kept because the deployed
   container, proxy and CI probes already point at it.
 
@@ -43,7 +43,9 @@ def readyz(request: HttpRequest) -> JsonResponse:
     if request.method != "GET":
         return _method_not_allowed()
     try:
-        connections["default"].ensure_connection()
+        with connections["default"].cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
     except Exception:
         return _unavailable_response()
     return JsonResponse({"status": "ok"})

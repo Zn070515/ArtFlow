@@ -240,6 +240,18 @@ class HealthEndpointTests(TestCase):
         self.assertEqual(response.json(), {"status": "unavailable"})
         self.assertNotIn("database-secret", response.content.decode())
 
+    def test_readyz_is_unavailable_when_a_database_query_fails(self):
+        with patch.object(connections["default"], "cursor") as cursor_factory:
+            cursor = cursor_factory.return_value.__enter__.return_value
+            cursor.execute.side_effect = DatabaseError("database-secret")
+
+            response = self.client.get("/readyz/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"status": "unavailable"})
+        cursor.execute.assert_called_once_with("SELECT 1")
+        self.assertNotIn("database-secret", response.content.decode())
+
     def test_readyz_rejects_non_get_requests(self):
         response = self.client.post("/readyz/")
 
@@ -387,7 +399,7 @@ class SettingsTests(SimpleTestCase):
                 SECURE_SSL_REDIRECT=True,
                 SECURE_REDIRECT_EXEMPT=[r"^livez/$", r"^readyz/$", r"^healthz/$"],
             ),
-            patch.object(connections["default"], "ensure_connection", return_value=None),
+            patch.object(connections["default"], "cursor"),
         ):
             probe_responses = [
                 self.client.get("/livez/"),

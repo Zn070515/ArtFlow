@@ -66,6 +66,7 @@ def test_production_compose_keeps_the_authoritative_stack_private_except_for_pro
     assert web["environment"]["APP_ENV"] == "production"
     assert web["environment"]["DATABASE_ENGINE"] == "postgresql"
     assert web["environment"]["RATE_LIMIT_BACKEND"] == "database"
+    assert web["environment"]["POSTGRES_CONN_MAX_AGE"] == "${POSTGRES_CONN_MAX_AGE:-60}"
     assert "ports" not in web
     assert "ports" not in db
     assert set(web["networks"]) == {"artflow_internal"}
@@ -129,6 +130,7 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     assert "ports" not in compose["services"]["db"]
     assert web_environment["DATABASE_ENGINE"] == "postgresql"
     assert web_environment["RATE_LIMIT_BACKEND"] == "database"
+    assert web_environment["POSTGRES_CONN_MAX_AGE"] == "${POSTGRES_CONN_MAX_AGE:-60}"
     assert web_environment["ALLOWED_HOSTS"] == (
         "${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}"
     )
