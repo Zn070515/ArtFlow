@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from accounts.models import User
 from core.models import Activity
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from singer_contest.models import SingerRegistration
@@ -119,7 +120,10 @@ class TicketTestDataCleanupTests(TestCase):
 
         with TemporaryDirectory() as root, override_settings(STATIC_ROOT=root, MEDIA_ROOT=root):
             output = StringIO()
-            call_command("doctor", stdout=output)
+            try:
+                call_command("doctor", stdout=output)
+            except CommandError as error:
+                self.fail(f"doctor failed: {error}; diagnostics={output.getvalue()}")
 
         self.assertIn("Ticket rows:", output.getvalue())
         self.assertIn("Stale ticket sessions: 1", output.getvalue())
