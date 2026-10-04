@@ -55,7 +55,7 @@ from django.http.request import QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from exports.models import ArticleTemplate
 from exports.services import (
     archive_activity,
@@ -86,6 +86,7 @@ from questionnaire.projection import (
     prime_questionnaire_answers,
     questionnaire_song_for_round,
 )
+from realtime.events import schedule_activity_event
 from ruleset import editor as ruleset_editor
 from ruleset.compiler import compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -460,6 +461,87 @@ def activity_edit(request, pk):
             "form_data_present": False,
         },
     )
+
+
+_ACTIVITY_COLLABORATIVE_FIELDS = {
+    "title": 200,
+    "subtitle": 400,
+    "description": 10000,
+}
+
+
+def _activity_field_etag(value: str) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+@admin_required
+@require_http_methods(["PATCH"])
+@transaction.atomic
+def activity_field_patch(request, pk, field):
+    """Apply one Activity text field with value-based optimistic concurrency."""
+    limit = _ACTIVITY_COLLABORATIVE_FIELDS.get(field)
+    if limit is None:
+        return JsonResponse({"detail": "该活动字段不支持协作保存。"}, status=404)
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"detail": "请求体不是有效 JSON。", "reason_code": "INVALID_REQUEST"}, status=400
+        )
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"base", "value"}
+        or not isinstance(payload["base"], str)
+        or not isinstance(payload["value"], str)
+    ):
+        return JsonResponse(
+            {"detail": "需要 base 和 value 文本。", "reason_code": "INVALID_REQUEST"}, status=400
+        )
+
+    activity = Activity.objects.select_for_update().filter(pk=pk).first()
+    if activity is None:
+        return JsonResponse({"detail": "活动不存在。"}, status=404)
+    _ensure_activity_mutable(activity)
+    current_value = getattr(activity, field)
+    if current_value != payload["base"]:
+        return JsonResponse(
+            {
+                "detail": "该字段已被其他工作人员更新。",
+                "reason_code": "FIELD_STALE",
+                "field": field,
+                "value": current_value,
+                "etag": _activity_field_etag(current_value),
+            },
+            status=409,
+        )
+    value = payload["value"].strip() if field != "description" else payload["value"]
+    if len(value) > limit:
+        return JsonResponse(
+            {"detail": f"{field} 长度不能超过 {limit} 个字符。", "reason_code": "INVALID_REQUEST"},
+            status=400,
+        )
+    if value == current_value:
+        return JsonResponse({"field": field, "value": value, "etag": _activity_field_etag(value)})
+
+    setattr(activity, field, value)
+    activity.save(update_fields=[field, "updated_at"])
+    log_action(
+        request,
+        AuditLog.ActionType.OTHER,
+        f"Activity:{activity.pk}:{field}",
+        old_value=current_value,
+        new_value=value,
+    )
+    schedule_activity_event(
+        activity.pk,
+        event="activity.field_changed",
+        resource=f"activity:{activity.pk}:field:{field}",
+        revision=_activity_field_etag(value),
+        actor={"id": request.user.pk, "display": request.user.get_username()},
+    )
+    return JsonResponse({"field": field, "value": value, "etag": _activity_field_etag(value)})
 
 
 @staff_required

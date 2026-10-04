@@ -50,6 +50,19 @@ socket is connected, and the existing short polling fallback resumes when it
 disconnects. HOLD, resume and performance transitions therefore keep the same
 HTTP authority and CAS behavior as before.
 
+Rapid Score follows the same boundary: its HTTP `base_version` and
+`command_id` CAS remains authoritative. A successful sparse save emits
+`score.grid_changed` for the activity room; other editors refetch the grid and
+the existing client keeps dirty cells visible as explicit conflicts. The
+activity editor also exposes value-CAS PATCH primitives for title, subtitle
+and description, so unrelated fields can converge without a universal field
+revision table.
+
+There is currently no Group/GroupMembership aggregate in the domain model. A
+group-material room is therefore intentionally not mounted yet; mapping a
+farewell `Program` to that room would weaken membership authorization and file
+slot ownership.
+
 Presence is not a database fact and is not audited. Redis records expire after a
 short TTL, and browser reconnect is advisory. A presence indicator must never
 become a hard edit lock: conflict correctness belongs to the server-side CAS or

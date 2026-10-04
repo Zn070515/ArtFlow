@@ -690,6 +690,35 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(formal_activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
         self.assertFalse(formal_activity.is_test_mode)
 
+    @patch("staff_panel.views.schedule_activity_event")
+    def test_activity_field_patch_uses_value_cas_and_notifies_after_write(self, event_mock):
+        login_admin(self.client, self.admin)
+        response = self.client.patch(
+            reverse("staff:activity_field_patch", args=[self.singer_activity.pk, "title"]),
+            data=json.dumps({"base": self.singer_activity.title, "value": "协作后的标题"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.singer_activity.refresh_from_db()
+        self.assertEqual(self.singer_activity.title, "协作后的标题")
+        self.assertEqual(response.json()["field"], "title")
+        event_mock.assert_called_once()
+        self.assertEqual(event_mock.call_args.kwargs["event"], "activity.field_changed")
+
+    def test_activity_field_patch_rejects_stale_base_without_overwriting(self):
+        login_admin(self.client, self.admin)
+        response = self.client.patch(
+            reverse("staff:activity_field_patch", args=[self.singer_activity.pk, "title"]),
+            data=json.dumps({"base": "旧标题", "value": "错误覆盖"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["reason_code"], "FIELD_STALE")
+        self.singer_activity.refresh_from_db()
+        self.assertNotEqual(self.singer_activity.title, "错误覆盖")
+
     def test_formal_activity_cannot_be_reopened_in_test_mode(self):
         formal_activity = _create_activity(
             title="Formal Contest",
