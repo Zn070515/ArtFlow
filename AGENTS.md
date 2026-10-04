@@ -37,6 +37,7 @@ pwsh -NoProfile -File scripts/verify_postgres_acceptance.ps1 -StartCompose -Veri
 npm ci
 npm run check:css
 npm run check:client
+npm run check:e2e
 npm run test:client
 npm run check:pyright
 npx playwright install chromium
@@ -44,7 +45,7 @@ npm run test:e2e
 pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1 -ComposeProjectName artflow -BackupPath backups/artflow-rehearsal.dump
 ```
 
-Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, `doctor` for read-only runtime diagnostics, and `test` before committing. Install the locked development environment with `uv sync --locked --extra dev`; use `check_docs.ps1` after user-facing documentation changes. `check:client` compiles every `frontend/**/*.ts` entry and fails when tracked `static/dist/` output is stale; `test:client` executes the compiled client artifact. `check:pyright` is the blocking project baseline and must be zero-diagnostic; it covers every app directory, including the hardened entry-access boundary. The PostgreSQL acceptance command requires Docker Compose and leaves its services and volumes intact; `-VerifyResetSafety` makes the demo-data reset check explicit. The CSS gate rebuilds the pinned Tailwind asset and fails if the tracked output is stale. `test:e2e` requires an already-running local or Compose web service and runs the read-only Playwright browser smoke. The backup/restore rehearsal creates a custom-format dump from the running Compose database, restores it into a separate temporary database container, runs Django checks, and cleans up only that temporary target. It must never use `docker compose down --volumes`, reset, or drop the source database/volumes.
+Use `migrate` after pulling migrations, `runserver` locally, `check` for Django validation, `doctor` for read-only runtime diagnostics, and `test` before committing. Install the locked development environment with `uv sync --locked --extra dev`; use `check_docs.ps1` after user-facing documentation changes. `check:client` compiles every `frontend/**/*.ts` entry and fails when tracked `static/dist/` output is stale; `test:client` executes the compiled client artifact. `check:pyright` is the blocking project baseline and must be zero-diagnostic; it covers every app directory, including the hardened entry-access boundary. `check:e2e` type-checks `tests/e2e/**` and `playwright.config.ts` against `tsconfig.e2e.json`; Playwright only transpiles those files, so without this gate they are checked by nothing. The PostgreSQL acceptance command requires Docker Compose and leaves its services and volumes intact; `-VerifyResetSafety` makes the demo-data reset check explicit. The CSS gate rebuilds the pinned Tailwind asset and fails if the tracked output is stale. `test:e2e` requires an already-running local or Compose web service and runs the read-only Playwright browser smoke. The backup/restore rehearsal creates a custom-format dump from the running Compose database, restores it into a separate temporary database container, runs Django checks, and cleans up only that temporary target. It must never use `docker compose down --volumes`, reset, or drop the source database/volumes.
 
 ## Coding Style & Naming Conventions
 Use Python 4-space indentation and Django conventions: models as `PascalCase`, functions/views as `snake_case`, URL names as concise action names such as `vote_session_unlock`. Keep cross-flow rules in shared helpers, e.g. `common/business_rules.py`. Do not enforce permissions only in templates; validate before mutation.
@@ -119,6 +120,7 @@ After each round of changes, check the configuration against what the tree now c
 - `pyrightconfig.json` `include` — every production module is covered, or the omission is deliberate and written down.
 - `pyproject.toml` `[tool.mypy] files` and `[tool.ruff] src` — every app directory is listed.
 - `tailwind.config.js` `content` — matches everywhere class names are actually written, including `frontend/**/*.ts`.
+- `tsconfig*.json` `include` — every TypeScript source is type-checked, not only transpiled: `frontend/**` by `check:client`, the browser specs and `playwright.config.ts` by `check:e2e`.
 - `.env.example` / `.env.production.example` / `.env.event.example` — every knob `config/settings.py` reads is documented, with its real default.
 - `.dockerignore` / `.gitignore` — local artifact directories (media, backups, node_modules, databases) are excluded.
 - `.github/dependabot.yml` — one entry per package ecosystem the repository actually uses.

@@ -177,8 +177,14 @@ then run:
 ```powershell
 npm ci
 npx playwright install chromium
+npm run check:e2e
 npm run test:e2e
 ```
+
+`npm run check:e2e` type-checks `tests/e2e/**` and `playwright.config.ts` against
+`tsconfig.e2e.json`. Playwright only transpiles those files, so without this gate they
+are checked by nothing; it runs in the Linux quality job beside `check:css` and
+`check:client`.
 
 The default base URL is `http://127.0.0.1:8000`; set `PLAYWRIGHT_BASE_URL` for
 another disposable local/CI service. The initial suite is read-only and checks

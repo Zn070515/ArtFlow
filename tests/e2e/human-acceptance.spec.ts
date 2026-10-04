@@ -1,9 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-const adminAccessKey = process.env.ARTFLOW_E2E_ADMIN_ACCESS_KEY;
-if (!adminAccessKey) {
-  throw new Error("ARTFLOW_E2E_ADMIN_ACCESS_KEY is required for the human acceptance flow.");
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} is required for the human acceptance flow.`);
+  }
+  return value;
 }
+
+const adminAccessKey = requiredEnv("ARTFLOW_E2E_ADMIN_ACCESS_KEY");
 
 // Both journeys intentionally exercise first-class account provisioning against the
 // same database. Keep them ordered so local SQLite rehearsal cannot race on writes;
@@ -12,7 +17,7 @@ test.describe.configure({ mode: "serial" });
 
 test.describe("human acceptance", () => {
 
-async function registerAndOpenWorkspace(page) {
+async function registerAndOpenWorkspace(page: Page) {
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const username = `human-acceptance-${suffix}`;
   // Keep the fixture independent of the random suffix's character composition:
@@ -94,7 +99,7 @@ test("the first admin bootstrap reaches the Singer workspace and preserves scope
   await expect(page.getByText("新建比赛轮次")).toHaveCount(0);
 });
 
-async function activityId(page, title: string) {
+async function activityId(page: Page, title: string) {
   await page.goto("/staff/activities/");
   const workspaceHref = await page
     .locator("tr", { hasText: title })

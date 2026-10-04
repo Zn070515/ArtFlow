@@ -53,6 +53,24 @@ check-in, judge connection and incident notes one-handed, in a dark room, in a h
 - The desktop `chromium` project ignores both mobile specs; the touch audit was otherwise
   running a second time at desktop widths.
 
+### Browser specs — the type-check gap that was hiding in plain sight
+
+Playwright only *transpiles* the specs in `tests/e2e/`; it never type-checks them. No
+tsconfig included them either — `tsconfig.client.json` covers `frontend/**` only — so the
+browser flows were the one part of the tree checked by nothing, the same shape of gap the
+type-check baseline just closed for the Python apps.
+
+- `tsconfig.e2e.json` + `npm run check:e2e` — `noEmit`, strict, and directory-level over
+  `tests/e2e/**` and `playwright.config.ts`, so a new spec is covered the day it lands
+  rather than the day someone remembers to add it. Wired into the Linux quality job beside
+  `check:css` and `check:client`.
+- `@types/node` becomes a devDependency: the specs read `process.env` and `node:fs`.
+- Turning it on surfaced eight real errors in specs written before the gate existed, all
+  fixed rather than suppressed: two implicitly-`any` `page` parameters and a
+  module-scope narrowing that did not survive into a nested function
+  (`human-acceptance.spec.ts`), and six unchecked array indexes
+  (`judge-shared-entry-flow.spec.ts`).
+
 ### Toolchain — the type-check baseline covers the whole project
 
 `pyrightconfig.json` was a hand-written list of twenty file names that stopped growing
