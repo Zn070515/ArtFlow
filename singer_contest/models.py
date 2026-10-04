@@ -2196,6 +2196,19 @@ class AudienceScore(models.Model):
     verify the numbers first — see the audience entry page's source rules.
     """
 
+    class Source(models.TextChoices):
+        """Where a manually verified audience score came from (GOAL §9.8).
+
+        This model is the manual / external channel, so an unrecorded source stays the
+        explicit default: a number whose origin nobody wrote down must not be presented
+        as if its provenance were known.
+        """
+
+        UNRECORDED = "", "未记录"
+        EXTERNAL_FORM = "external_form", "外部表单"
+        PAPER_TALLY = "paper_tally", "纸质统计"
+        MANUAL_OTHER = "manual_other", "其他人工核验"
+
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="audience_scores"
     )
@@ -2206,6 +2219,10 @@ class AudienceScore(models.Model):
         SingerRegistration, on_delete=models.CASCADE, related_name="audience_scores"
     )
     score = models.DecimalField(max_digits=8, decimal_places=2)
+    source = models.CharField(
+        max_length=20, choices=Source.choices, default=Source.UNRECORDED, blank=True
+    )
+    source_note = models.CharField(max_length=200, blank=True, default="")
     is_test_data = models.BooleanField(default=False)
     entered_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -2221,6 +2238,8 @@ class AudienceScore(models.Model):
 
     if TYPE_CHECKING:
         singer_id: int
+
+        def get_source_display(self) -> str: ...
 
     class Meta:
         base_manager_name = "objects"

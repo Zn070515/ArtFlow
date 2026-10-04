@@ -29,7 +29,7 @@
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6" data-audience-set>
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold flex items-center justify-between">
             <span>观众分组 <span class="font-mono text-gray-600">{{ set.set_key }}</span></span>
-            <span class="text-xs text-gray-500">赛段 <span class="font-mono">{{ set.stage_key }}</span></span>
+            <span class="text-xs text-gray-500">赛段 <span class="font-mono">{{ set.stage_key }}</span>{% if set.provenance.source or set.provenance.note %} · 已记来源：{{ set.provenance.source_label }}{% if set.provenance.note %}（{{ set.provenance.note }}）{% endif %}{% endif %}</span>
         </div>
         {% if set.rows %}
         <div class="overflow-x-auto rounded border border-gray-200">
@@ -66,6 +66,17 @@
         {% endif %}
     </div>
     {% endfor %}
+    <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4 grid gap-3 sm:grid-cols-2">
+        <label class="block text-sm text-gray-700">本次录入来源
+            <select data-source class="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                {% for val, label in source_choices %}<option value="{{ val }}"{% if val == default_source %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label class="block text-sm text-gray-700">来源备注（外部表单 / 纸质统计单号）
+            <input data-source-note type="text" maxlength="200" value="{{ default_source_note }}" class="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm">
+        </label>
+        <p class="sm:col-span-2 text-xs text-gray-500">留「未记录」时只更新分数，不会抹掉已登记的来源。</p>
+    </div>
     <button type="button" data-save class="bg-brand text-white px-5 py-2 rounded text-sm hover:bg-brand-light">保存观众分</button>
     {% endif %}
 </div>
@@ -104,10 +115,17 @@
             show(errBox, "还没有可保存的分数。");
             return;
         }
+        var sourceEl = root.querySelector("[data-source]");
+        var noteEl = root.querySelector("[data-source-note]");
+        var body = { cells: cells };
+        if (sourceEl && sourceEl.value) {
+            body.source = sourceEl.value;
+            body.note = noteEl ? (noteEl.value || "").trim() : "";
+        }
         fetch(apiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json", "X-CSRFToken": csrf },
-            body: JSON.stringify({ cells: cells }),
+            body: JSON.stringify(body),
         })
             .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
             .then(function (res) {

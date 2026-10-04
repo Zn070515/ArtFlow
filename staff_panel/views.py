@@ -2124,12 +2124,20 @@ def _audience_sets(activity, version):
         return []
     binding = _version_binding(version)
     audience_keys = binding.get("audience_keys") or {}
-    stored = {
-        (s.singer_id, s.stage_key): str(s.score)
-        for s in AudienceScore.objects.filter(
-            activity=activity, is_test_data=runtime_is_test(activity)
+    stored: dict[tuple[int, str], str] = {}
+    provenance: dict[str, dict[str, str]] = {}
+    for row in AudienceScore.objects.filter(
+        activity=activity, is_test_data=runtime_is_test(activity)
+    ):
+        stored[(row.singer_id, row.stage_key)] = str(row.score)
+        provenance.setdefault(
+            row.stage_key,
+            {
+                "source": row.source,
+                "source_label": row.get_source_display(),
+                "note": row.source_note,
+            },
         )
-    }
     sets = []
     for set_key, set_name in audience_keys.items():
         singers = prime_questionnaire_answers(_audience_pool(activity, version, set_key))
@@ -2139,6 +2147,7 @@ def _audience_sets(activity, version):
             {
                 "set_key": set_key,
                 "stage_key": set_name,
+                "provenance": provenance.get(set_name, {"source": "", "note": ""}),
                 "rows": [
                     {
                         "singer_id": singer.pk,
@@ -2163,6 +2172,10 @@ def audience_score_entry(request, activity_id):
         messages.error(request, domain_error_messages(error))
         return redirect("staff:audience_score_entry", activity_id=activity_id)
     sets = _audience_sets(activity, version)
+    recorded = next(
+        (s["provenance"] for s in sets if s["provenance"]["source"] or s["provenance"]["note"]),
+        {"source": "", "note": ""},
+    )
     return render(
         request,
         "staff_panel/audience_score_entry.html",
@@ -2170,6 +2183,9 @@ def audience_score_entry(request, activity_id):
             "activity": activity,
             "sets": sets,
             "api_url": reverse("staff:audience_scores_api", kwargs={"activity_id": activity_id}),
+            "source_choices": AudienceScore.Source.choices,
+            "default_source": recorded["source"],
+            "default_source_note": recorded["note"],
         },
     )
 
@@ -2204,6 +2220,15 @@ def audience_scores_api(request, activity_id):
     cells = payload.get("cells", [])
     if not cells:
         return JsonResponse({"detail": "缺少 cells。"}, status=400)
+    # §9.8: a degraded / external audience source must name where its numbers came from.
+    # Both keys stay optional so an existing caller that only sends cells keeps working.
+    source = str(payload.get("source", "") or "").strip()
+    source_note = str(payload.get("note", "") or "").strip()
+    valid_sources = {choice for choice, _label in AudienceScore.Source.choices}
+    if source not in valid_sources:
+        return JsonResponse({"detail": [f"未知观众分来源 {source}。"]}, status=400)
+    if len(source_note) > 200:
+        return JsonResponse({"detail": ["来源备注不能超过 200 字。"]}, status=400)
 
     pool_ids_by_set = {
         set_key: {singer.pk for singer in _audience_pool(activity, version, set_key)}
@@ -2251,15 +2276,21 @@ def audience_scores_api(request, activity_id):
                 ensure_audience_not_consumed_by_confirmed_stage(activity, stage_key)
             test_flag = runtime_is_test(activity)
             for singer_id, stage_key, score in rows:
+                defaults: dict[str, object] = {
+                    "score": score,
+                    "entered_by": request.user,
+                    "is_test_data": test_flag,
+                }
+                # Only restamp provenance when a source was supplied, so re-saving numbers
+                # without touching the source control does not erase what was recorded.
+                if source:
+                    defaults["source"] = source
+                    defaults["source_note"] = source_note
                 AudienceScore.objects.update_or_create(
                     activity=activity,
                     stage_key=stage_key,
                     singer_id=singer_id,
-                    defaults={
-                        "score": score,
-                        "entered_by": request.user,
-                        "is_test_data": test_flag,
-                    },
+                    defaults=defaults,
                 )
             # §14: a manually verified fallback score is a formal fact, so entering it must
             # be traceable. The audit carries the set names and row counts only — never the
@@ -2269,7 +2300,10 @@ def audience_scores_api(request, activity_id):
                 action_type=AuditLog.ActionType.ENTER_SCORE,
                 target=f"AudienceScore:{activity.pk}",
                 old_value="",
-                new_value=f"sets={sorted(stage_keys)}; rows={len(rows)}",
+                new_value=(
+                    f"sets={sorted(stage_keys)}; rows={len(rows)}; "
+                    f"source={source or AudienceScore.Source.UNRECORDED}"
+                ),
                 note="人工/外部核验观众分录入",
             )
     except ValidationError as error:
