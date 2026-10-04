@@ -552,8 +552,12 @@ class ResultReleaseRevokeForm(forms.Form):
 class IncidentForm(forms.Form):
     occurred_at = forms.DateTimeField(input_formats=DATETIME_INPUT_FORMATS)
     event_type = forms.ChoiceField(choices=IncidentRecord.EventType.choices)
+    authority_state = forms.ChoiceField(
+        choices=IncidentRecord.AuthorityState.choices, required=False
+    )
     resolution = forms.CharField(required=False)
     remark = forms.CharField(required=False)
+    needs_review = forms.BooleanField(required=False)
 
 
 class VoteSessionForm(forms.Form):
