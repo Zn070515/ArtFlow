@@ -43,6 +43,10 @@ class SubmissionFile(models.Model):
     if TYPE_CHECKING:
         group_id: int | None
     file = models.FileField(upload_to="submissions/%Y/%m/")
+    # The metadata-free rendition of an image upload (GOAL §19.3). ``file`` stays private;
+    # a caller whose only claim is ``is_public`` is served this instead. Empty for audio,
+    # video, documents and anything Pillow could not decode.
+    derivative = models.FileField(upload_to="derivatives/%Y/%m/", blank=True)
     original_name = models.CharField(max_length=255)
     file_size = models.IntegerField()
     file_purpose = models.CharField(max_length=24, choices=Purpose, default=Purpose.OTHER)

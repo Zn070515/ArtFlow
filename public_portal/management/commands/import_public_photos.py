@@ -7,6 +7,7 @@ from django.core.files import File
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
+from files.imaging import sanitize_upload
 
 from public_portal.models import PublicMedia, PublicPost
 
@@ -113,12 +114,14 @@ class Command(BaseCommand):
                     sort_order=index,
                 )
                 with image_path.open("rb") as image_file:
-                    media.image.save(image_path.name, File(image_file), save=True)
+                    media.image.save(image_path.name, sanitize_upload(File(image_file)), save=True)
                 imported_media += 1
 
                 if index == 0 and not post.cover_image:
                     with image_path.open("rb") as image_file:
-                        post.cover_image.save(image_path.name, File(image_file), save=True)
+                        post.cover_image.save(
+                            image_path.name, sanitize_upload(File(image_file)), save=True
+                        )
 
         summary = (
             f"Imported {imported_media} media item(s), {imported_posts} post(s); "
