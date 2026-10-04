@@ -158,6 +158,15 @@ class ResultRelease(models.Model):
     transition_at = models.DateTimeField(null=True, blank=True)
     note = models.TextField()
 
+    if TYPE_CHECKING:
+        # Django creates the ``<fk>_id`` shadow attributes at runtime; declare them so
+        # Pylance can see them (see AGENTS.md, Pylance & Pyright Type Checking).
+        post_id: int
+        stage_result_id: int
+        ruleset_version_id: int
+
+        def get_status_display(self) -> str: ...
+
     class Meta:
         ordering = ["-released_at", "-pk"]
         constraints = [

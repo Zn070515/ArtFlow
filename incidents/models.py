@@ -76,6 +76,12 @@ class IncidentRecord(models.Model):
         ordering = ["-occurred_at"]
 
     if TYPE_CHECKING:
+        # Django creates the ``<fk>_id`` shadow attributes at runtime; declare them so
+        # Pylance can see them (see AGENTS.md, Pylance & Pyright Type Checking).
+        activity_id: int
+        singer_id: int | None
+        program_id: int | None
+        round_id: int | None
 
         def get_event_type_display(self) -> str: ...
 

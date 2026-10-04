@@ -67,7 +67,7 @@ class StaffActivityConsumer(AsyncJsonWebsocketConsumer):
             },
         )
 
-    async def disconnect(self, close_code: int) -> None:
+    async def disconnect(self, code: int | None = None) -> None:
         if not hasattr(self, "room"):
             return
         if getattr(self, "presence_store", None) is not None:
@@ -225,7 +225,7 @@ class JudgeContextConsumer(AsyncJsonWebsocketConsumer):
             }
         )
 
-    async def disconnect(self, close_code: int) -> None:
+    async def disconnect(self, code: int | None = None) -> None:
         if hasattr(self, "room"):
             await self.channel_layer.group_discard(self.room, self.channel_name)
 
@@ -305,7 +305,7 @@ class GroupMaterialConsumer(AsyncJsonWebsocketConsumer):
         )
         await self._broadcast_presence("presence.join")
 
-    async def disconnect(self, close_code: int) -> None:
+    async def disconnect(self, code: int | None = None) -> None:
         if not hasattr(self, "room"):
             return
         try:
