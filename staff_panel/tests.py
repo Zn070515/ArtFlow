@@ -4000,6 +4000,97 @@ class MaterialReviewAndRequirementTests(TestCase):
         self.assertFalse(MaterialRequirement.objects.filter(pk=requirement.pk).exists())
 
 
+class IncidentAuthorityFieldTests(TestCase):
+    """GOAL §16: an incident records its round, the authority state and the review flag."""
+
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="incident-authority-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = _create_activity(
+            title="Incident Authority",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=True,
+        )
+        self.contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="决赛第一轮",
+            minimum_judge_count=1,
+            is_locked=False,
+        )
+        self.client.force_login(self.staff)
+
+    def _payload(self, **overrides):
+        payload = {
+            "activity_id": self.activity.pk,
+            "occurred_at": timezone.now().isoformat(),
+            "event_type": IncidentRecord.EventType.EQUIPMENT_ISSUE,
+            "authority_state": IncidentRecord.AuthorityState.HOLD,
+            "round_id": self.contest_round.pk,
+            "resolution": "切换到备用设备",
+            "remark": "评委手机没电",
+            "needs_review": "1",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_incident_records_round_authority_state_and_review_flag(self):
+        response = self.client.post(reverse("staff:incident_create"), self._payload())
+
+        self.assertRedirects(response, reverse("staff:incident_list"))
+        incident = IncidentRecord.objects.get(activity=self.activity)
+        self.assertEqual(incident.round_id, self.contest_round.pk)
+        self.assertEqual(incident.authority_state, IncidentRecord.AuthorityState.HOLD)
+        self.assertTrue(incident.needs_review)
+
+    def test_omitted_detail_defaults_to_unrecorded_and_no_review(self):
+        response = self.client.post(
+            reverse("staff:incident_create"),
+            self._payload(round_id="", authority_state="", needs_review=""),
+        )
+
+        self.assertRedirects(response, reverse("staff:incident_list"))
+        incident = IncidentRecord.objects.get(activity=self.activity)
+        self.assertIsNone(incident.round_id)
+        self.assertEqual(incident.authority_state, IncidentRecord.AuthorityState.UNRECORDED)
+        self.assertFalse(incident.needs_review)
+
+    def test_incident_rejects_a_round_from_another_activity(self):
+        other = _create_activity(
+            title="Other Incident Activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=True,
+        )
+        foreign_round = _create_round(
+            activity=other,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="别的轮次",
+            minimum_judge_count=1,
+            is_locked=False,
+        )
+
+        response = self.client.post(
+            reverse("staff:incident_create"), self._payload(round_id=foreign_round.pk)
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(IncidentRecord.objects.filter(activity=self.activity).exists())
+
+    def test_incident_form_offers_the_activity_rounds(self):
+        response = self.client.get(
+            reverse("staff:incident_create"), {"activity_id": self.activity.pk}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "涉及轮次")
+        self.assertContains(response, "事发时 authority 状态")
+        self.assertContains(response, "需要赛后复盘")
+        self.assertContains(response, str(self.contest_round.pk))
+
+
 class UserRoleAdministrationTests(TestCase):
     def setUp(self):
         self.actor = _create_provisioned_user(

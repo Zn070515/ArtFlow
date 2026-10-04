@@ -222,6 +222,11 @@ def _choices(enum_class):
     return enum_class.choices
 
 
+def _incident_rounds(activity_id):
+    """The rounds an incident on this activity may be filed against (GOAL §16)."""
+    return list(ContestRound.objects.filter(activity_id=activity_id).order_by("pk"))
+
+
 def _form_error(form):
     for field_errors in form.errors.values():
         if field_errors:
@@ -3445,7 +3450,7 @@ def activity_archive(request, pk):
 
 @staff_required
 def incident_list(request):
-    incidents = IncidentRecord.objects.select_related("activity", "singer", "handled_by")
+    incidents = IncidentRecord.objects.select_related("activity", "singer", "handled_by", "round")
     return render(request, "staff_panel/incident_list.html", {"incidents": incidents})
 
 
@@ -3473,7 +3478,10 @@ def incident_create(request):
                         )
                     ),
                     "event_types": _choices(IncidentRecord.EventType),
+                    "authority_states": _choices(IncidentRecord.AuthorityState),
+                    "rounds": _incident_rounds(activity),
                     "selected_activity_id": activity.pk,
+                    "selected_round_id": request.POST.get("round_id", ""),
                     "form": form,
                     "form_data": request.POST,
                     "selected_singer_id": request.POST.get("singer_id", ""),
@@ -3489,10 +3497,17 @@ def incident_create(request):
             program = get_object_or_404(Program, pk=request.POST["program_id"])
             ensure_same_activity(activity, program, label="Incident program")
             ensure_lifecycle_consistent(activity, program, label="涉事节目")
+        contest_round = None
+        if request.POST.get("round_id"):
+            contest_round = get_object_or_404(ContestRound, pk=request.POST["round_id"])
+            ensure_same_activity(activity, contest_round, label="Incident round")
         incident = IncidentRecord.objects.create(
             activity=activity,
             occurred_at=form.cleaned_data["occurred_at"],
             event_type=form.cleaned_data["event_type"],
+            round=contest_round,
+            authority_state=form.cleaned_data.get("authority_state", ""),
+            needs_review=form.cleaned_data.get("needs_review", False),
             singer=singer,
             program=program,
             handled_by_id=request.user.pk,
@@ -3523,7 +3538,12 @@ def incident_create(request):
             "activities": activities,
             "singers": singers,
             "event_types": _choices(IncidentRecord.EventType),
+            "authority_states": _choices(IncidentRecord.AuthorityState),
+            "rounds": _incident_rounds(int(selected_activity_id))
+            if selected_activity_id.isdigit()
+            else [],
             "selected_activity_id": selected_activity_id,
+            "selected_round_id": "",
             "form": form,
             "form_data": {},
             "selected_singer_id": "",
@@ -3539,14 +3559,27 @@ def incident_export(request):
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "异常记录"
-    ws.append(["活动", "时间", "类型", "选手", "处理人", "处理结果", "备注"])
+    ws.append(
+        [
+            "活动",
+            "时间",
+            "类型",
+            "轮次",
+            "选手",
+            "authority 状态",
+            "处理人",
+            "处理结果",
+            "备注",
+            "需要赛后复盘",
+        ]
+    )
     if activity is not None:
         incidents = IncidentRecord.objects.select_related(
-            "activity", "singer", "handled_by"
+            "activity", "singer", "handled_by", "round"
         ).filter(activity=activity, is_test=runtime_is_test(activity))
     else:
         incidents = IncidentRecord.objects.select_related(
-            "activity", "singer", "handled_by"
+            "activity", "singer", "handled_by", "round"
         ).filter(is_test=False)
     row_count = 0
     for inc in incidents:
@@ -3555,10 +3588,13 @@ def incident_export(request):
                 inc.activity.title,
                 inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
                 inc.get_event_type_display(),
+                inc.round.name if inc.round else "",
                 inc.singer.name if inc.singer else "",
+                inc.get_authority_state_display(),
                 inc.handled_by.username if inc.handled_by else "",
                 inc.resolution,
                 inc.remark,
+                "是" if inc.needs_review else "否",
             ]
         )
         row_count += 1

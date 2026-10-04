@@ -17,13 +17,16 @@
 
     {% if incidents %}
     <div class="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-        <table class="min-w-[640px] w-full text-sm">
+        <table class="min-w-[900px] w-full text-sm">
             <thead><tr class="bg-gray-50 text-gray-600">
                 <th class="text-left px-4 py-2 font-medium">活动</th>
                 <th class="text-left px-4 py-2 font-medium">时间</th>
                 <th class="text-left px-4 py-2 font-medium">类型</th>
+                <th class="text-left px-4 py-2 font-medium">轮次</th>
                 <th class="text-left px-4 py-2 font-medium">选手</th>
+                <th class="text-left px-4 py-2 font-medium">authority 状态</th>
                 <th class="text-left px-4 py-2 font-medium">处理结果</th>
+                <th class="text-left px-4 py-2 font-medium">复盘</th>
             </tr></thead>
             <tbody class="divide-y divide-gray-100">
                 {% for inc in incidents %}
@@ -31,8 +34,11 @@
                     <td class="px-4 py-2.5 text-gray-500">{{ inc.activity.title }}</td>
                     <td class="px-4 py-2.5">{{ inc.occurred_at|date:"Y-m-d H:i" }}</td>
                     <td class="px-4 py-2.5">{{ inc.get_event_type_display }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ inc.round.name|default:"-" }}</td>
                     <td class="px-4 py-2.5">{{ inc.singer.name|default:"-" }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ inc.get_authority_state_display }}</td>
                     <td class="px-4 py-2.5 text-gray-500">{{ inc.resolution|default:"-" }}</td>
+                    <td class="px-4 py-2.5">{% if inc.needs_review %}<span class="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded">需复盘</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
