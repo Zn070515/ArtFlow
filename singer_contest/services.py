@@ -1405,11 +1405,7 @@ def apply_scores_if_version(
                 )
             else:
                 applicable_values[pair] = score
-    changes = (
-        apply_scores(locked_round, applicable_values, current_operator, note=note)
-        if applicable_values
-        else []
-    )
+    changes = apply_scores(locked_round, applicable_values, current_operator, note=note)
     locked_round.refresh_from_db()
     result = {
         "status": ScoreWriteReceipt.Status.SUCCEEDED,
