@@ -13,7 +13,7 @@
     {% endif %}
 
     <div class="grid md:grid-cols-2 gap-6">
-        <div class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-2">
+        <div class="min-w-0 bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-2">
             <h3 class="font-medium text-gray-900 mb-3">基本信息</h3>
             <div class="flex justify-between"><span class="text-gray-500">活动</span><span>{{ reg.activity.title }}</span></div>
             <div class="flex justify-between"><span class="text-gray-500">学号</span><span>{{ reg.student_id }}</span></div>
@@ -25,7 +25,7 @@
             {% if reg.description %}<p class="text-gray-500 mt-2">{{ reg.description }}</p>{% endif %}
         </div>
 
-        <div class="space-y-4">
+        <div class="min-w-0 space-y-4">
             <form method="post" class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-3">
                 {% csrf_token %}
                 <h3 class="font-medium text-gray-900">状态管理</h3>
