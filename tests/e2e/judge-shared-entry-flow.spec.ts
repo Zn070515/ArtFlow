@@ -37,6 +37,11 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
   const staffContext = await browser.newContext();
   try {
     const pages = await Promise.all(contexts.map((context) => context.newPage()));
+    const firstPage = pages[0];
+    const sixthPage = pages[5];
+    if (!firstPage || !sixthPage) {
+      throw new Error("Expected six judge terminal pages.");
+    }
     const entryPath = `/e/${fixture.public_code}/judge/`;
     await Promise.all(pages.slice(0, 5).map((page) => page.goto(entryPath)));
 
@@ -46,8 +51,8 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
         "Judge browser fixture activity",
       );
     }
-    await pages[5].goto(entryPath);
-    await expect(pages[5].locator("[data-status]")).toHaveText(
+    await sixthPage.goto(entryPath);
+    await expect(sixthPage.locator("[data-status]")).toHaveText(
       "评委会话无效或已过期，请重新扫描现场二维码。",
     );
 
@@ -68,13 +73,13 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
     await staff.getByPlaceholder("暂停评委组原因").fill("浏览器验收暂停");
     await staff.getByRole("button", { name: "暂停评委组" }).click();
     await expect(staff.getByText("评委组已暂停")).toBeVisible();
-    await expect(pages[0].locator("[data-performance-state]")).toHaveText("现场暂停");
-    await expect(pages[0].locator("[data-submit]")).toBeDisabled();
+    await expect(firstPage.locator("[data-performance-state]")).toHaveText("现场暂停");
+    await expect(firstPage.locator("[data-submit]")).toBeDisabled();
 
     await staff.getByRole("button", { name: "恢复评委组" }).click();
     await expect(staff.getByText("评委组已恢复")).toBeVisible();
-    await expect(pages[0].locator("[data-performance-state]")).toHaveText("评分中");
-    await expect(pages[0].locator("[data-submit]")).toBeEnabled();
+    await expect(firstPage.locator("[data-performance-state]")).toHaveText("评分中");
+    await expect(firstPage.locator("[data-submit]")).toBeEnabled();
   } finally {
     await Promise.all(contexts.map((context) => context.close()));
     await staffContext.close();

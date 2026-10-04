@@ -59,6 +59,9 @@ jobs:
       - name: Verify compiled Rapid Score client
         run: npm run check:client
 
+      - name: Type-check the browser specs
+        run: npm run check:e2e
+
       - name: Collect static assets
         run: uv run python manage.py collectstatic --noinput
 
