@@ -9,7 +9,7 @@
         <a href="{% url 'staff:ruleset_template_list' %}" class="hover:underline">赛制模板库</a> /
         {{ template.name }}
     </p>
-    <div class="flex items-center justify-between gap-4 mb-2">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
         <h1 class="text-2xl font-bold text-gray-900">{{ template.name }}</h1>
         <span class="text-xs bg-gray-50 border border-gray-300 text-gray-600 px-3 py-1 rounded font-medium">v{{ template.schema_version }}</span>
     </div>

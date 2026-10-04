@@ -9,7 +9,7 @@
         <a href="{% url 'staff:activity_result_board' activity.pk %}" class="hover:underline">结果公示板</a> /
         {{ stage.stage_key }}
     </p>
-    <div class="flex items-center justify-between gap-4 mb-2" data-stage-status="{{ stage.status }}">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between gap-4 mb-2" data-stage-status="{{ stage.status }}">
         <h1 class="text-2xl font-bold text-gray-900">{{ stage.stage_key }}</h1>
         {% if stage.status == "confirmed" %}
         <span class="text-xs bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1 rounded font-medium">可抄手卡</span>
