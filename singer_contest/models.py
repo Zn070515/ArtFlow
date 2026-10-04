@@ -557,6 +557,14 @@ class Group(models.Model):
             ),
         ]
 
+    @property
+    def activity(self):
+        return self.stage.activity
+
+    @property
+    def activity_id(self):
+        return self.stage.activity_id
+
     def clean(self):
         if self.stage_id and self.stage.activity_id:
             from core.models import Activity
