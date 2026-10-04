@@ -2,3 +2,9 @@
 # shebang. Force LF regardless of the platform's core.autocrlf so a Windows
 # clone can `docker compose up --build` without the `bash\r` shebang error.
 *.sh text eol=lf
+
+# The client bundles are compiled output: `tsc` writes them with LF. On a machine with
+# core.autocrlf=true every checkout would give them CRLF, so each build rewrote them and
+# `git status` reported eight files as modified whose bytes were in fact identical. Pin
+# the working-copy line ending to what the compiler produces.
+static/dist/*.js text eol=lf
