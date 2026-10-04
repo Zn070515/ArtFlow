@@ -18,6 +18,7 @@ from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from questionnaire.schema import FILE_TYPE
 
+from .imaging import IMAGE_EXTENSIONS, sanitize_upload
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
 from .policies import FILE_PURPOSE_POLICIES, effective_file_policy
 
@@ -107,7 +108,7 @@ def _validate_file_signature(uploaded_file, extension: str) -> None:
     """Reject renamed/random bytes before a file reaches persistent storage."""
     header = _read_upload_header(uploaded_file)
     try:
-        if extension in {".jpg", ".jpeg", ".png", ".webp"}:
+        if extension in IMAGE_EXTENSIONS:
             uploaded_file.seek(0)
             with Image.open(uploaded_file) as image:
                 image.verify()
@@ -287,6 +288,10 @@ def _store_file(
         or 0
     )
     original_name = PurePath(str(uploaded_file.name)).name
+    # §19.3: derive the public rendition here, before the row exists, so the private
+    # original and its metadata-free derivative are produced by the one write path every
+    # upload already goes through. Non-images come back unchanged.
+    derivative = sanitize_upload(uploaded_file)
     created = SubmissionFile.objects.create(
         **owner_filter,
         question_key=question_key,
@@ -300,6 +305,9 @@ def _store_file(
         is_current=True,
         version=latest + 1,
     )
+    if derivative is not uploaded_file:
+        created.derivative.save(original_name, derivative, save=False)
+        created.save(update_fields=["derivative"])
     max_versions = settings.ARTFLOW_UPLOAD_MAX_VERSIONS
     if max_versions < 1:
         raise ValidationError("上传版本保留配置无效。")
@@ -309,9 +317,12 @@ def _store_file(
     for stale_file in stale_files:
         stale_storage = stale_file.file.storage
         stale_name = stale_file.file.name
+        stale_derivative = stale_file.derivative.name if stale_file.derivative else ""
         stale_file.delete()
         if stale_name:
             transaction.on_commit(partial(delete_storage_object, stale_storage, stale_name))
+        if stale_derivative:
+            transaction.on_commit(partial(delete_storage_object, stale_storage, stale_derivative))
     _reset_matching_check(locked_owner, purpose, question_key=question_key)
     return created
 

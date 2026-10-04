@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 import threading
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +16,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Count
 from django.test import TestCase, TransactionTestCase, override_settings
+from django.urls import reverse
+from PIL import Image
 from singer_contest.models import SingerRegistration
 from tests.helpers import postgresql_only
 
@@ -358,6 +361,116 @@ class SubmissionFileLifecycleTests(TestCase):
 
         # After the commit callback runs the physical object is finally removed.
         self.assertFalse(submission.file.storage.exists(stored_name))
+
+
+def _jpeg_with_metadata() -> bytes:
+    image = Image.new("RGB", (24, 16), (10, 120, 200))
+    exif = Image.Exif()
+    exif[0x010E] = "GPS 39.9,116.3"
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
+
+
+class PublicDerivativeDeliveryTests(TestCase):
+    """GOAL §19.3: a public viewer is served the metadata-free derivative."""
+
+    def setUp(self):
+        _clear_upload_rate_limit()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(username="derivative-singer", password="pass")
+        self.activity = _create_activity(
+            title="Derivative Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Singer",
+            student_id="20260999",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _store(self, name, payload, purpose, content_type):
+        return store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile(name, payload, content_type=content_type),
+            purpose=purpose,
+            uploaded_by=self.user,
+        )
+
+    def test_an_image_upload_gets_a_metadata_free_derivative(self):
+        stored = self._store(
+            "poster.jpg",
+            _jpeg_with_metadata(),
+            SubmissionFile.Purpose.PROGRAM_IMAGE,
+            "image/jpeg",
+        )
+
+        self.assertTrue(stored.derivative)
+        with stored.derivative.open("rb") as handle:
+            derived_bytes = handle.read()
+        with Image.open(BytesIO(derived_bytes)) as derived:
+            self.assertEqual(len(derived.getexif()), 0)
+
+        with stored.file.open("rb") as handle:
+            original_bytes = handle.read()
+        with Image.open(BytesIO(original_bytes)) as original:
+            # The private original keeps its metadata; only the derivative is publishable.
+            self.assertTrue(original.getexif())
+        self.assertNotEqual(derived_bytes, original_bytes)
+
+    def test_a_public_viewer_receives_the_derivative_not_the_original(self):
+        stored = self._store(
+            "poster.jpg",
+            _jpeg_with_metadata(),
+            SubmissionFile.Purpose.PROGRAM_IMAGE,
+            "image/jpeg",
+        )
+        SubmissionFile.objects.filter(pk=stored.pk).update(is_public=True)
+
+        response = self.client.get(reverse("controlled_media", kwargs={"path": stored.file.name}))
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content)
+        with stored.derivative.open("rb") as handle:
+            self.assertEqual(body, handle.read())
+
+    def test_the_owner_still_gets_the_private_original(self):
+        stored = self._store(
+            "poster.jpg",
+            _jpeg_with_metadata(),
+            SubmissionFile.Purpose.PROGRAM_IMAGE,
+            "image/jpeg",
+        )
+        SubmissionFile.objects.filter(pk=stored.pk).update(is_public=True)
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("controlled_media", kwargs={"path": stored.file.name}))
+
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content)
+        with stored.file.open("rb") as handle:
+            self.assertEqual(body, handle.read())
+
+    def test_a_non_image_upload_keeps_no_derivative(self):
+        stored = self._store(
+            "song.mp3",
+            b"ID3" + b"\x00" * 128,
+            SubmissionFile.Purpose.ACCOMPANIMENT,
+            "audio/mpeg",
+        )
+
+        self.assertFalse(stored.derivative)
 
 
 class MaterialCheckReviewTests(TestCase):
