@@ -55,6 +55,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from exports.models import ArticleTemplate
+from exports.pdf import render_stage_result_pdf
 from exports.services import (
     archive_activity,
     build_archive_package,
@@ -2433,6 +2434,28 @@ def stage_result_detail(request, pk):
             "can_unlock_stage_result": request.user.is_admin,
         },
     )
+
+
+@staff_required
+@require_GET
+def stage_result_pdf(request, pk):
+    """Download the stage result handcard as a PDF (GOAL §2.4).
+
+    Renders the same blocks the staff page shows, so the printed handcard and the page
+    can never disagree about what the result is.
+    """
+    stage = get_object_or_404(latest_stage_result_queryset(), pk=pk)
+    blocks = stage_decisions_by_blocks(stage)
+    decisions = [decision for block in blocks for decision in block["decisions"]]
+    prime_questionnaire_answers(decision.singer for decision in decisions)
+    for decision in decisions:
+        decision.song_label = generic_song_label(decision.singer)
+    response = HttpResponse(
+        render_stage_result_pdf(stage=stage, blocks=blocks), content_type="application/pdf"
+    )
+    response["Content-Disposition"] = f'inline; filename="stage_result_{stage.pk}.pdf"'
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 @admin_required
