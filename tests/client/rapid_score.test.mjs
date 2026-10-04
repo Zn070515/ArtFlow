@@ -258,6 +258,47 @@ test("a non-acknowledgement response retains the pending record", async () => {
   assertPendingRecord(runtime.storage.records()[0]);
 });
 
+test("partial accepted response clears saved cells and keeps stale cells", async () => {
+  let requestBody = null;
+  const runtime = boot({
+    initialGrid: grid("", "70"),
+    fetchImpl: async (_url, options) => {
+      if (options.method === "POST") {
+        requestBody = JSON.parse(options.body);
+        return response(200, {
+          version: 4,
+          matrix_complete: false,
+          applied: [{ singer_id: 1, judge_id: 9, score: "91" }],
+          conflicts: [{
+            singer_id: 1,
+            judge_id: 10,
+            base: "70",
+            server: "71",
+            local: "92",
+          }],
+        });
+      }
+      return response(200, { version: 4, matrix_complete: false, grid: grid("91", "71") });
+    },
+  });
+
+  runtime.input.value = "91";
+  runtime.tbody.dispatch("input", { target: runtime.input });
+  runtime.secondInput.value = "92";
+  runtime.tbody.dispatch("input", { target: runtime.secondInput });
+  runtime.runTimers();
+  await settle();
+
+  assert.deepEqual(requestBody.cells, [
+    { singer_id: 1, judge_id: 10, base: "70", score: "92" },
+    { singer_id: 1, judge_id: 9, base: "", score: "91" },
+  ]);
+  assert.equal(runtime.input.value, "91");
+  assert.equal(runtime.secondInput.value, "92");
+  assert.equal(runtime.pendingCount.textContent, "1");
+  assert.match(runtime.conflicts.textContent, /71/);
+});
+
 test("clearing an existing server score restores it without creating a mutation", () => {
   const runtime = boot({ initialGrid: grid("70") });
 
