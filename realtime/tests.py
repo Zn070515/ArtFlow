@@ -10,11 +10,11 @@ from channels.testing import WebsocketCommunicator
 from common.authority import ACCOUNT_AUTHORITY, authority_write
 from config.asgi import application
 from core.models import Activity
-from django.test import TestCase
 from django.db import transaction
+from django.test import TestCase
 from singer_contest.judge_authority import JudgeContext
 
-from .events import schedule_judge_context_event
+from .events import schedule_activity_event, schedule_judge_context_event
 
 
 class StaffActivityConsumerTests(TestCase):
@@ -212,6 +212,31 @@ class JudgeContextConsumerTests(TestCase):
 
 
 class RealtimeEventTests(TestCase):
+    @patch("realtime.events.get_channel_layer")
+    def test_activity_event_carries_accepted_patch_details_after_commit(
+        self, get_channel_layer_mock
+    ):
+        group_send = AsyncMock()
+        get_channel_layer_mock.return_value = SimpleNamespace(group_send=group_send)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            with transaction.atomic():
+                schedule_activity_event(
+                    12,
+                    event="score.grid_changed",
+                    resource="round-score:5",
+                    revision=8,
+                    details={"changes": [{"singer_id": 1, "judge_id": 2, "score": "91"}]},
+                )
+                group_send.assert_not_awaited()
+
+        group_send.assert_awaited_once()
+        self.assertEqual(group_send.await_args.args[0], "staff_activity_12")
+        self.assertEqual(
+            group_send.await_args.args[1]["details"],
+            {"changes": [{"singer_id": 1, "judge_id": 2, "score": "91"}]},
+        )
+
     @patch("realtime.events.get_channel_layer")
     def test_judge_event_publishes_only_after_commit(self, get_channel_layer_mock):
         group_send = AsyncMock()

@@ -1269,6 +1269,7 @@ def _score_command_payload_hash(
     contest_round: ContestRound,
     base_version: int,
     score_values: Mapping[tuple[int, int], object],
+    base_values: Mapping[tuple[int, int], object] | None = None,
 ) -> str:
     """Hash a canonical, non-sensitive description of the score command.
 
@@ -1280,7 +1281,16 @@ def _score_command_payload_hash(
         "activity_id": contest_round.activity_id,
         "base_version": base_version,
         "cells": [
-            {"judge_id": judge_id, "score": str(score).strip(), "singer_id": singer_id}
+            {
+                "base": (
+                    str(base_values[(singer_id, judge_id)]).strip()
+                    if base_values is not None
+                    else None
+                ),
+                "judge_id": judge_id,
+                "score": str(score).strip(),
+                "singer_id": singer_id,
+            }
             for (singer_id, judge_id), score in sorted(score_values.items())
         ],
         "operation": RAPID_SCORE_OPERATION,
@@ -1298,15 +1308,17 @@ def apply_scores_if_version(
     operator,
     *,
     command_id: str,
+    base_values: Mapping[tuple[int, int], object] | None = None,
     note: str = "",
 ) -> dict:
     """Apply a sparse cell save under the M0 Activity→Round lock order (M1-H).
 
-    The version check, score application, and version bump all happen inside one
+    The base checks, score application, and version bump all happen inside one
     transaction that takes the Activity lock first, then the ContestRound lock — never
-    ``Round → Activity``. A ``base_version`` mismatch raises
-    :class:`StaleScoreVersionError` (409) rather than being written over. Returns the
-    new ``score_version`` and whether the matrix is now complete.
+    ``Round → Activity``. Legacy callers without ``base_values`` retain the round-wide
+    version check. Modern callers receive partial success: cells whose current value
+    matches their submitted base are applied, while stale cells are returned as
+    conflicts.
     """
     if base_version is None:
         raise ValidationError("缺少 base_version。")
@@ -1323,7 +1335,11 @@ def apply_scores_if_version(
     )
     if locked_round.activity_id != locked_activity.pk:
         raise ValidationError("评分轮次活动上下文不一致。")
-    payload_hash = _score_command_payload_hash(locked_round, parsed_base_version, score_values)
+    if base_values is not None and set(base_values) != set(score_values):
+        raise ValidationError("每个评分单元格都必须提供 base。")
+    payload_hash = _score_command_payload_hash(
+        locked_round, parsed_base_version, score_values, base_values
+    )
     try:
         with transaction.atomic():
             receipt = ScoreWriteReceipt.objects.create(
@@ -1350,9 +1366,48 @@ def apply_scores_if_version(
     ensure_activity_action_allowed(locked_activity, ActivityAction.SCORE)
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备比赛轮次后再录入评分。")
-    if parsed_base_version != locked_round.score_version:
-        raise StaleScoreVersionError(locked_round.score_version)
-    changes = apply_scores(locked_round, score_values, current_operator, note=note)
+    if base_values is None:
+        if parsed_base_version != locked_round.score_version:
+            raise StaleScoreVersionError(locked_round.score_version)
+        applicable_values = score_values
+        conflicts: list[dict[str, int | str]] = []
+    else:
+        pairs = list(score_values)
+        ensure_score_records_belong_to_round(locked_round, pairs)
+        normalized = {pair: validate_score(value) for pair, value in score_values.items()}
+        records = {
+            (record.singer_id, record.judge_id): record
+            for record in ScoreRecord.objects.filter(
+                round=locked_round,
+                singer_id__in={singer_id for singer_id, _judge_id in pairs},
+                judge_id__in={judge_id for _singer_id, judge_id in pairs},
+            )
+        }
+        applicable_values = {}
+        conflicts = []
+        for pair, score in normalized.items():
+            singer_id, judge_id = pair
+            raw_base = str(base_values[pair]).strip()
+            base_score = validate_score(raw_base) if raw_base else None
+            record = records.get(pair)
+            current_score = record.score if record is not None else None
+            if current_score != base_score:
+                conflicts.append(
+                    {
+                        "singer_id": singer_id,
+                        "judge_id": judge_id,
+                        "base": raw_base,
+                        "server": str(current_score) if current_score is not None else "",
+                        "local": str(score),
+                    }
+                )
+            else:
+                applicable_values[pair] = score
+    changes = (
+        apply_scores(locked_round, applicable_values, current_operator, note=note)
+        if applicable_values
+        else []
+    )
     locked_round.refresh_from_db()
     result = {
         "status": ScoreWriteReceipt.Status.SUCCEEDED,
@@ -1360,19 +1415,31 @@ def apply_scores_if_version(
         "version": locked_round.score_version,
         "matrix_complete": not missing_score_cells(locked_round),
     }
+    if base_values is not None:
+        result["applied"] = [
+            {
+                "singer_id": change["singer"],
+                "judge_id": change["judge"],
+                "score": change["new"],
+            }
+            for change in changes
+        ]
+        result["conflicts"] = conflicts
     receipt.result_version = locked_round.score_version
     receipt.result_payload = result
     receipt.status = ScoreWriteReceipt.Status.SUCCEEDED
     receipt.full_clean(validate_unique=False)
     receipt.save(update_fields=["result_version", "result_payload", "status"])
     if changes:
-        schedule_activity_event(
-            locked_activity.pk,
-            event="score.grid_changed",
-            resource=f"round-score:{locked_round.pk}",
-            revision=locked_round.score_version,
-            actor={"id": current_operator.pk, "display": current_operator.get_username()},
-        )
+        event_kwargs = {
+            "event": "score.grid_changed",
+            "resource": f"round-score:{locked_round.pk}",
+            "revision": locked_round.score_version,
+            "actor": {"id": current_operator.pk, "display": current_operator.get_username()},
+        }
+        if base_values is not None:
+            event_kwargs["details"] = {"changes": result["applied"]}
+        schedule_activity_event(locked_activity.pk, **event_kwargs)
     return result
 
 

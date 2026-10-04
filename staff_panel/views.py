@@ -1726,13 +1726,36 @@ def round_scores_api(request, pk):
         )
 
     score_values = {}
+    base_values = {}
+    has_cell_base = False
+    has_legacy_cell = False
     for cell in cells:
         try:
             singer_id = int(cell["singer_id"])
             judge_id = int(cell["judge_id"])
         except (KeyError, TypeError, ValueError):
             return JsonResponse({"detail": "单元格缺少 singer_id/judge_id。"}, status=400)
-        score_values[(singer_id, judge_id)] = str(cell.get("score", "")).strip()
+        pair = (singer_id, judge_id)
+        score_values[pair] = str(cell.get("score", "")).strip()
+        if "base" in cell:
+            if not isinstance(cell["base"], str):
+                return JsonResponse(
+                    {"detail": "单元格 base 必须是文本。", "reason_code": "INVALID_REQUEST"},
+                    status=400,
+                )
+            has_cell_base = True
+            base_values[pair] = cell["base"]
+        else:
+            has_legacy_cell = True
+
+    if has_cell_base and has_legacy_cell:
+        return JsonResponse(
+            {
+                "detail": "评分请求不能混用逐格 base 和旧版单元格格式。",
+                "reason_code": "INVALID_REQUEST",
+            },
+            status=400,
+        )
 
     # ``apply_scores_if_version`` owns the Activity→Round transaction and its locks;
     # the view holds no row lock itself (M0 canonical order, §13.2 stale-guard).
@@ -1743,6 +1766,7 @@ def round_scores_api(request, pk):
             score_values,
             request.user,
             command_id=command_id,
+            base_values=base_values if has_cell_base else None,
         )
     except IdempotencyConflictError:
         return JsonResponse(

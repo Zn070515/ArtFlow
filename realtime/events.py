@@ -18,6 +18,7 @@ def schedule_realtime_event(
     resource: str,
     revision: int | str | None = None,
     actor: Mapping[str, Any] | None = None,
+    details: Mapping[str, Any] | None = None,
 ) -> None:
     """Broadcast a thin event only after the surrounding transaction commits.
 
@@ -33,6 +34,8 @@ def schedule_realtime_event(
         "revision": revision,
         "actor": dict(actor) if actor is not None else None,
     }
+    if details:
+        payload["details"] = dict(details)
 
     def publish() -> None:
         try:
@@ -57,6 +60,7 @@ def schedule_activity_event(
     resource: str,
     revision: int | str | None = None,
     actor: Mapping[str, Any] | None = None,
+    details: Mapping[str, Any] | None = None,
 ) -> None:
     """Publish an event to staff currently viewing one activity workspace."""
 
@@ -66,6 +70,7 @@ def schedule_activity_event(
         resource=resource,
         revision=revision,
         actor=actor,
+        details=details,
     )
 
 

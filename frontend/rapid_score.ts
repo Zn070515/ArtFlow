@@ -36,6 +36,13 @@
   interface PendingCell {
     singer_id: number;
     judge_id: number;
+    base: ScoreValue;
+    score: ScoreValue;
+  }
+
+  interface AppliedCell {
+    singer_id: number;
+    judge_id: number;
     score: ScoreValue;
   }
 
@@ -61,12 +68,15 @@
     version: number;
     matrix_complete?: boolean;
     resolved_status?: string | null;
+    applied?: AppliedCell[];
+    conflicts?: ConflictRecord[];
   }
 
   interface ScoreState {
     version: number;
     cells: Record<CellKey, ScoreValue>;
     dirty: Record<CellKey, ScoreValue>;
+    dirtyBase: Record<CellKey, ScoreValue>;
     total: number;
     filled: number;
     locked: boolean;
@@ -128,10 +138,29 @@
 
   function parseSaveResponse(value: unknown): SaveResponse | null {
     if (!isRecord(value) || !isNonNegativeInteger(value.version)) return null;
+    const applied = Array.isArray(value.applied) ? value.applied.flatMap((item: unknown) => {
+      if (!isRecord(item) || !isPositiveInteger(item.singer_id) || !isPositiveInteger(item.judge_id) ||
+        typeof item.score !== "string") return [];
+      return [{ singer_id: item.singer_id, judge_id: item.judge_id, score: item.score }];
+    }) : undefined;
+    const conflicts = Array.isArray(value.conflicts) ? value.conflicts.flatMap((item: unknown) => {
+      if (!isRecord(item) || !isPositiveInteger(item.singer_id) || !isPositiveInteger(item.judge_id) ||
+        !validScoreOrEmpty(item.base) || !validScoreOrEmpty(item.server) ||
+        typeof item.local !== "string" || scoreState(item.local) !== "valid") return [];
+      return [{
+        singer_id: item.singer_id,
+        judge_id: item.judge_id,
+        base: item.base,
+        server: item.server,
+        local: item.local,
+      }];
+    }) : undefined;
     return {
       version: value.version,
       matrix_complete: value.matrix_complete === true,
       resolved_status: typeof value.resolved_status === "string" ? value.resolved_status : null,
+      applied,
+      conflicts,
     };
   }
 
@@ -191,6 +220,7 @@
     version: initial.version,
     cells: {},
     dirty: {},
+    dirtyBase: {},
     total: 0,
     filled: 0,
     locked,
@@ -322,10 +352,12 @@
     }
     setVisual(input, false);
     const cellKey = key(input.dataset.singerId || "", input.dataset.judgeId || "");
+    const hadConflict = state.conflicts[cellKey] !== undefined;
     if (status === "empty") {
       const serverValue = state.cells[cellKey] || "";
       if (serverValue !== "") input.value = serverValue;
       delete state.dirty[cellKey];
+      delete state.dirtyBase[cellKey];
       delete state.conflicts[cellKey];
       persistDraft();
       updatePendingCount();
@@ -334,6 +366,9 @@
       return;
     }
     state.dirty[cellKey] = value.trim();
+    if (!(cellKey in state.dirtyBase) || hadConflict) {
+      state.dirtyBase[cellKey] = state.cells[cellKey] || "";
+    }
     delete state.conflicts[cellKey];
     state.draftCommandId = newCommandId();
     state.draftBaseVersion = state.version;
@@ -368,10 +403,14 @@
     for (const cellKey of Object.keys(state.dirty).sort()) {
       const [singerPart, judgePart] = cellKey.split(":");
       const score = state.dirty[cellKey];
-      if (singerPart === undefined || judgePart === undefined || score === undefined) return null;
+      const base = state.dirtyBase[cellKey];
+      if (singerPart === undefined || judgePart === undefined || score === undefined || base === undefined) {
+        return null;
+      }
       cells.push({
         singer_id: parseInt(singerPart, 10),
         judge_id: parseInt(judgePart, 10),
+        base,
         score,
       });
     }
@@ -381,7 +420,8 @@
   function validPendingCells(cells: unknown): cells is PendingCell[] {
     return Array.isArray(cells) && cells.length > 0 && cells.every((cell: unknown) => {
       return isRecord(cell) && isPositiveInteger(cell.singer_id) &&
-        isPositiveInteger(cell.judge_id) && typeof cell.score === "string" &&
+        isPositiveInteger(cell.judge_id) && typeof cell.base === "string" &&
+        validScoreOrEmpty(cell.base) && typeof cell.score === "string" &&
         scoreState(cell.score) === "valid";
     });
   }
@@ -500,6 +540,7 @@
         const cellKey = key(cell.singer_id, cell.judge_id);
         if (!(cellKey in state.cells)) return;
         state.dirty[cellKey] = cell.score;
+        state.dirtyBase[cellKey] = cell.base;
         const input = inputFor(cell.singer_id, cell.judge_id);
         if (input) {
           input.value = cell.score;
@@ -574,11 +615,29 @@
             return;
           }
           setVersion(saveData.version);
-          record.cells.forEach((cell) => {
+          const applied = saveData.applied || record.cells.map((cell) => ({
+            singer_id: cell.singer_id,
+            judge_id: cell.judge_id,
+            score: cell.score,
+          }));
+          applied.forEach((cell) => {
             const cellKey = key(cell.singer_id, cell.judge_id);
             state.cells[cellKey] = cell.score;
             if (state.dirty[cellKey] === cell.score) delete state.dirty[cellKey];
+            delete state.dirtyBase[cellKey];
             delete state.conflicts[cellKey];
+          });
+          (saveData.conflicts || []).forEach((conflict) => {
+            const cellKey = key(conflict.singer_id, conflict.judge_id);
+            state.cells[cellKey] = conflict.server;
+            state.dirty[cellKey] = conflict.local;
+            state.dirtyBase[cellKey] = conflict.base;
+            state.conflicts[cellKey] = conflict;
+            const input = inputFor(conflict.singer_id, conflict.judge_id);
+            if (input) {
+              input.value = conflict.local;
+              setVisual(input, false);
+            }
           });
           retryAttempt = 0;
           if (!Object.keys(state.dirty).length) {
@@ -588,6 +647,9 @@
           clearPendingAfterAck(record.command_id);
           persistDraft();
           clearError();
+          if (saveData.conflicts?.length) {
+            showError("部分评分已保存；冲突单元格请修改后重试。 ");
+          }
           updateProgress();
           updatePendingCount();
           renderConflicts();
@@ -633,11 +695,13 @@
         const data = parseGridResponse(rawData);
         if (!data) throw new Error("Invalid score grid response");
         const beforeRefresh: Record<CellKey, ScoreValue> = {};
+        const baseBeforeRefresh: Record<CellKey, ScoreValue> = {};
         const localDraft: Record<CellKey, ScoreValue> = {};
         for (const dirtyKey in state.dirty) {
           const localValue = state.dirty[dirtyKey];
           if (localValue === undefined) continue;
           beforeRefresh[dirtyKey] = state.cells[dirtyKey] || "";
+          baseBeforeRefresh[dirtyKey] = state.dirtyBase[dirtyKey] ?? beforeRefresh[dirtyKey];
           localDraft[dirtyKey] = localValue;
         }
         setVersion(data.version);
@@ -660,11 +724,11 @@
           const singerId = parseInt(singerPart, 10);
           const judgeId = parseInt(judgePart, 10);
           const input = inputFor(singerId, judgeId);
-          if (serverValue !== (beforeRefresh[cellKey] || "") && serverValue !== localValue) {
+          if (serverValue !== (baseBeforeRefresh[cellKey] || "") && serverValue !== localValue) {
             state.conflicts[cellKey] = {
               singer_id: singerId,
               judge_id: judgeId,
-              base: beforeRefresh[cellKey] || "",
+              base: baseBeforeRefresh[cellKey] || "",
               server: serverValue,
               local: localValue,
             };
@@ -718,6 +782,54 @@
     if (socket) socket.close();
   }
 
+  function applyRealtimeChanges(value: unknown, revision: number): boolean {
+    if (!Array.isArray(value)) return false;
+    const changes = value.flatMap((item: unknown) => {
+      if (!isRecord(item) || !isPositiveInteger(item.singer_id) ||
+        !isPositiveInteger(item.judge_id) || typeof item.score !== "string" ||
+        !validScoreOrEmpty(item.score)) return [];
+      return [{ singer_id: item.singer_id, judge_id: item.judge_id, score: item.score }];
+    });
+    if (changes.length !== value.length || changes.length === 0) return false;
+    for (const change of changes) {
+      const cellKey = key(change.singer_id, change.judge_id);
+      if (!(cellKey in state.cells)) return false;
+    }
+    for (const change of changes) {
+      const cellKey = key(change.singer_id, change.judge_id);
+      const local = state.dirty[cellKey];
+      const serverBefore = state.cells[cellKey] || "";
+      state.cells[cellKey] = change.score;
+      if (local === undefined || local === change.score) {
+        delete state.dirty[cellKey];
+        delete state.dirtyBase[cellKey];
+        delete state.conflicts[cellKey];
+        const input = inputFor(change.singer_id, change.judge_id);
+        if (input) {
+          input.value = change.score;
+          setVisual(input, false);
+        }
+        continue;
+      }
+      const base = state.dirtyBase[cellKey] ?? serverBefore;
+      if (change.score !== base) {
+        state.conflicts[cellKey] = {
+          singer_id: change.singer_id,
+          judge_id: change.judge_id,
+          base,
+          server: change.score,
+          local,
+        };
+      }
+    }
+    setVersion(revision);
+    persistDraft(state.draftCommandId || undefined);
+    updateProgress();
+    updatePendingCount();
+    renderConflicts();
+    return true;
+  }
+
   function connectRealtime(): void {
     if (state.locked || realtimeSocket !== null || typeof WebSocket === "undefined") return;
     let socket: WebSocket;
@@ -747,7 +859,9 @@
       }
       if (!isRecord(payload) || payload.type !== "score.grid_changed" ||
         payload.resource !== "round-score:" + roundId || !isNonNegativeInteger(payload.revision)) return;
-      if (payload.revision > state.version) refreshFromServer();
+      if (payload.revision <= state.version) return;
+      if (payload.revision === state.version + 1 && applyRealtimeChanges(payload.changes, payload.revision)) return;
+      refreshFromServer();
     });
     socket.addEventListener("error", () => {
       if (realtimeSocket === socket) socket.close();

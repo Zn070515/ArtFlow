@@ -50,10 +50,12 @@ socket is connected, and the existing short polling fallback resumes when it
 disconnects. HOLD, resume and performance transitions therefore keep the same
 HTTP authority and CAS behavior as before.
 
-Rapid Score follows the same boundary: its HTTP `base_version` and
-`command_id` CAS remains authoritative. A successful sparse save emits
-`score.grid_changed` for the activity room; other editors refetch the grid and
-the existing client keeps dirty cells visible as explicit conflicts. The
+Rapid Score follows the same boundary: its HTTP `command_id` idempotency and
+per-cell `base` CAS remain authoritative. A sparse save may accept independent
+cells and return explicit conflicts for stale cells. A successful save emits
+`score.grid_changed` with the accepted cells for the activity room; other editors
+apply a contiguous patch when possible and refetch the grid after a revision gap.
+The existing client keeps dirty cells visible as explicit conflicts. The
 activity editor also exposes value-CAS PATCH primitives for title, subtitle
 and description, so unrelated fields can converge without a universal field
 revision table.

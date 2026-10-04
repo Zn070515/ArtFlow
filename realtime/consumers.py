@@ -139,14 +139,16 @@ class StaffActivityConsumer(AsyncJsonWebsocketConsumer):
 
     async def realtime_event(self, event: dict[str, Any]) -> None:
         """Forward a post-commit invalidation without embedding business state."""
-        await self.send_json(
-            {
-                "type": event["event"],
-                "resource": event["resource"],
-                "revision": event.get("revision"),
-                "actor": event.get("actor"),
-            }
-        )
+        payload: dict[str, Any] = {
+            "type": event["event"],
+            "resource": event["resource"],
+            "revision": event.get("revision"),
+            "actor": event.get("actor"),
+        }
+        details = event.get("details")
+        if isinstance(details, dict):
+            payload.update(details)
+        await self.send_json(payload)
 
     async def _broadcast_presence(self, event_name: str) -> None:
         await self.channel_layer.group_send(
