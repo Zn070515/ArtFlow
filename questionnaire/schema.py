@@ -82,6 +82,7 @@ VALIDATION_FORMATS = frozenset({"phone_cn", "email"})
 # V1 has one answer authority. Staff-only content belongs in the staff designer/review
 # surface until a separate viewer-audience contract exists for rendering and writes.
 AUDIENCES = frozenset({"participant"})
+SUBMISSION_SUBJECTS = frozenset({"participant", "group"})
 # When an answer becomes due. ``upfront`` is the registration pass; ``before_round`` gates
 # it on a round existing/starting (round keys are resolved at freeze, §P2).
 DUE_MODES = frozenset({"upfront", "before_round"})
@@ -361,6 +362,11 @@ def parse_questionnaire(questionnaire: dict | str | None) -> dict:
         f"不支持的问卷 schema_version {version!r}；期望 {SCHEMA_VERSION}。",
     )
     key = _as_key(obj.get("key"), f"问卷 key 非法：{obj.get('key')!r}。")
+    subject = obj.get("subject", "participant")
+    _require(
+        isinstance(subject, str) and subject in SUBMISSION_SUBJECTS,
+        f"问卷 subject 非法：{subject!r}。",
+    )
     pages_raw = _as_list(obj.get("pages"), "问卷必须包含非空 'pages' 列表。")
     _require(bool(pages_raw), "问卷必须包含非空 'pages' 列表。")
 
@@ -430,12 +436,19 @@ def parse_questionnaire(questionnaire: dict | str | None) -> dict:
             {"key": page_key, "title": page.get("title") or page_key, "sections": sections}
         )
 
-    return {
+    if subject == "group":
+        if any("binding" in question for page in pages for section in page["sections"] for question in section["questions"]):
+            raise ValidationError("GROUP 问卷不能绑定个人报名字段。")
+
+    result = {
         "schema_version": SCHEMA_VERSION,
         "key": key,
         "pages": pages,
         "notices": notices,
     }
+    if subject != "participant":
+        result["subject"] = subject
+    return result
 
 
 def canonical_json(questionnaire: dict | str) -> str:

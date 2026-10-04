@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from enum import StrEnum
 from typing import Any
 
 from accounts.services import require_current_staff
@@ -311,3 +312,50 @@ def correct_group_stage(
 def current_group_members(group: Group):
     """Return only the membership rows that grant current Group access."""
     return group.memberships.filter(is_current=True).select_related("singer").order_by("singer_id")
+
+
+class GroupReadiness(StrEnum):
+    WAITING_FOR_CONFIRMATION = "waiting_for_confirmation"
+    MISSING_MEMBER = "missing_member"
+    MISSING_MATERIAL = "missing_material"
+    READY = "ready"
+
+
+def group_material_readiness(group: Group) -> GroupReadiness:
+    """Evaluate the minimum formal Group Chorus material contract."""
+    from files.models import MaterialCheck, SubmissionFile
+
+    if group.stage.status == GroupStage.Status.DRAFT or not group.is_active:
+        return GroupReadiness.WAITING_FOR_CONFIRMATION
+    if not group.memberships.filter(is_current=True).exists():
+        return GroupReadiness.MISSING_MEMBER
+    current_files = SubmissionFile.objects.filter(
+        group=group,
+        is_current=True,
+        file_purpose__in=[
+            SubmissionFile.Purpose.ACCOMPANIMENT,
+            SubmissionFile.Purpose.BACKGROUND_VIDEO,
+            SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+        ],
+    )
+    if not current_files.exists():
+        return GroupReadiness.MISSING_MATERIAL
+    checks = MaterialCheck.objects.filter(group=group, file_purpose__in=[
+        SubmissionFile.Purpose.ACCOMPANIMENT,
+        SubmissionFile.Purpose.BACKGROUND_VIDEO,
+        SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+    ])
+    if checks.exists() and not checks.filter(status=MaterialCheck.Status.APPROVED).exists():
+        return GroupReadiness.MISSING_MATERIAL
+    return GroupReadiness.READY
+
+
+def group_stage_readiness(stage: GroupStage) -> dict[str, Any]:
+    groups = list(stage.groups.filter(is_active=True).order_by("group_order", "pk"))
+    statuses = {group.pk: group_material_readiness(group) for group in groups}
+    return {
+        "ready": stage.status in (GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN)
+        and bool(groups)
+        and all(status == GroupReadiness.READY for status in statuses.values()),
+        "groups": statuses,
+    }

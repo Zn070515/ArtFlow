@@ -21,15 +21,21 @@ from decimal import Decimal, InvalidOperation
 
 from common.lifecycle import runtime_is_test
 from core.models import Activity
-from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from files.services import reconcile_questionnaire_material_checks
-from singer_contest.models import RoundEntry, SingerRegistration
+from singer_contest.models import Group, GroupMembership, RoundEntry, SingerRegistration
 
 from .compiler import QuestionnairePlan, compile_questionnaire
 from .models import QuestionnaireResponse
 from .runtime import missing_required
-from .services import get_or_create_response, mark_submitted, save_draft_answers
+from .services import (
+    get_or_create_group_response,
+    get_or_create_response,
+    mark_submitted,
+    save_draft_answers,
+)
 
 
 def questionnaire_plan(version) -> QuestionnairePlan:
@@ -57,6 +63,17 @@ def build_submission_context(*, version, registration) -> dict:
     return context
 
 
+def build_group_submission_context(*, version, group: Group) -> dict:
+    """Build condition context from the confirmed Group aggregate."""
+    activity = version.ruleset.activity
+    return {
+        "activity.phase": activity.phase,
+        "group.stage": group.stage.stage_key,
+        "group.order": group.group_order,
+        "group.member_count": group.memberships.filter(is_current=True).count(),
+    }
+
+
 def current_answer_files(registration) -> dict:
     """The current file answering each question, keyed by question key.
 
@@ -65,12 +82,21 @@ def current_answer_files(registration) -> dict:
     """
     from files.models import SubmissionFile
 
+    owner_filter = (
+        {"group": registration}
+        if isinstance(registration, Group)
+        else {"singer_registration": registration}
+    )
     return {
         row.question_key: row
         for row in SubmissionFile.objects.filter(
-            singer_registration=registration, is_current=True
+            **owner_filter, is_current=True
         ).exclude(question_key="")
     }
+
+
+def current_group_answer_files(group: Group) -> dict:
+    return current_answer_files(group)
 
 
 # Phases in which the questionnaire is closed to ordinary editing: only a question staff
@@ -104,6 +130,36 @@ def writable_question_keys(*, activity, registration, plan) -> frozenset[str] | 
         .exclude(question_key="")
         .values_list("question_key", flat=True)
     )
+
+
+def writable_group_question_keys(*, activity, group: Group, plan) -> frozenset[str] | None:
+    """Group equivalent of participant writable-question authority."""
+    from files.models import MaterialCheck
+
+    if activity.is_locked or group.stage.status == group.stage.Status.DRAFT:
+        return frozenset()
+    if activity.phase in {
+        Activity.Phase.REGISTRATION_OPEN,
+        Activity.Phase.REGISTRATION_CLOSED,
+        Activity.Phase.REVIEWING,
+        Activity.Phase.REHEARSAL,
+    }:
+        return None
+    return frozenset(
+        MaterialCheck.objects.filter(group=group, status=MaterialCheck.Status.NEEDS_SUPPLEMENT)
+        .exclude(question_key="")
+        .values_list("question_key", flat=True)
+    )
+
+
+def _require_group_member(group: Group, actor):
+    actor_pk = getattr(actor, "pk", None)
+    current_actor = get_user_model().objects.filter(pk=actor_pk, is_active=True).first()
+    if current_actor is None or not GroupMembership.objects.filter(
+        group=group, is_current=True, singer__user_id=current_actor.pk
+    ).exists():
+        raise PermissionDenied("只有当前分组合唱成员可以维护本组材料。")
+    return current_actor
 
 
 def _keys_of(plan: QuestionnairePlan, answers) -> set[str]:
@@ -389,5 +445,88 @@ def submit_registration(
         old_value=saved.status,
         new_value=submitted.status,
         note="questionnaire_submit",
+    )
+    return submitted
+
+
+@transaction.atomic
+def save_group_draft(*, version, group: Group, answers, actor, schema_hash: str = ""):
+    _require_group_member(group, actor)
+    plan = questionnaire_plan(version)
+    if plan.subject != "group":
+        raise ValidationError("当前赛制问卷不是分组合唱组问卷。")
+    if schema_hash and schema_hash != plan.schema_hash:
+        raise ValidationError("问卷已更新，请刷新后重试。")
+    normalized = normalize_answers(plan, answers)
+    writable = writable_group_question_keys(
+        activity=version.ruleset.activity, group=group, plan=plan
+    )
+    if writable is not None:
+        rejected = sorted(_keys_of(plan, normalized) - writable)
+        if rejected:
+            raise ValidationError(f"以下题目当前不可修改：{'、'.join(rejected)}。")
+    response = get_or_create_group_response(
+        group=group,
+        ruleset_version=version,
+        questionnaire_key=plan.key,
+        schema_hash=plan.schema_hash,
+    )
+    return save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
+
+
+@transaction.atomic
+def submit_group_response(
+    *,
+    version,
+    group: Group,
+    answers,
+    actor,
+    due_rounds=frozenset(),
+    expected_schema_hash: str = "",
+):
+    from files.services import reconcile_group_material_checks
+
+    current_actor = _require_group_member(group, actor)
+    plan = questionnaire_plan(version)
+    if plan.subject != "group":
+        raise ValidationError("当前赛制问卷不是分组合唱组问卷。")
+    if expected_schema_hash and expected_schema_hash != plan.schema_hash:
+        raise ValidationError("问卷已更新，请刷新后重试。")
+    normalized = normalize_answers(plan, answers)
+    writable = writable_group_question_keys(
+        activity=version.ruleset.activity, group=group, plan=plan
+    )
+    if writable is not None:
+        normalized = {key: value for key, value in normalized.items() if key in writable}
+    response = get_or_create_group_response(
+        group=group,
+        ruleset_version=version,
+        questionnaire_key=plan.key,
+        schema_hash=plan.schema_hash,
+    )
+    merged = dict(response.answers or {})
+    merged.update(normalized)
+    missing = missing_required(
+        plan,
+        registration=None,
+        answers=merged,
+        context=build_group_submission_context(version=version, group=group),
+        due_rounds=due_rounds,
+        files=current_group_answer_files(group),
+    )
+    if missing:
+        raise ValidationError(f"以下必填项尚未填写：{'、'.join(missing)}。")
+    saved = save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
+    reconcile_group_material_checks(group)
+    submitted = mark_submitted(saved)
+    from common.models import AuditLog
+
+    AuditLog.objects.create(
+        operator=current_actor,
+        action_type=AuditLog.ActionType.UPDATE_REGISTRATION,
+        target=f"QuestionnaireResponse:{submitted.pk}",
+        old_value=saved.status,
+        new_value=submitted.status,
+        note="group_questionnaire_submit",
     )
     return submitted

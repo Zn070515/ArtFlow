@@ -19,6 +19,10 @@ from django.db import models
 
 
 class QuestionnaireResponse(models.Model):
+    class Subject(models.TextChoices):
+        PARTICIPANT = "participant", "选手"
+        GROUP = "group", "分组合唱组"
+
     class Status(models.TextChoices):
         DRAFT = "draft", "草稿"
         SUBMITTED = "submitted", "已提交"
@@ -26,6 +30,15 @@ class QuestionnaireResponse(models.Model):
     singer_registration = models.ForeignKey(
         "singer_contest.SingerRegistration",
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="questionnaire_responses",
+    )
+    group = models.ForeignKey(
+        "singer_contest.Group",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="questionnaire_responses",
     )
     ruleset_version = models.ForeignKey(
@@ -34,6 +47,9 @@ class QuestionnaireResponse(models.Model):
         related_name="questionnaire_responses",
     )
     questionnaire_key = models.CharField(max_length=64)
+    subject = models.CharField(
+        max_length=16, choices=Subject.choices, default=Subject.PARTICIPANT
+    )
     # The questionnaire's identity when the response was written, so a browser holding an
     # older form can be told to refresh instead of overwriting answers it cannot see.
     schema_hash = models.CharField(max_length=64, blank=True)
@@ -48,9 +64,31 @@ class QuestionnaireResponse(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["singer_registration", "ruleset_version", "questionnaire_key"],
+                condition=models.Q(singer_registration__isnull=False),
                 name="questionnaire_one_response_per_registration_version",
+            ),
+            models.UniqueConstraint(
+                fields=["group", "ruleset_version", "questionnaire_key"],
+                condition=models.Q(group__isnull=False),
+                name="questionnaire_one_response_per_group_version",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (
+                        models.Q(subject="participant")
+                        & models.Q(singer_registration__isnull=False)
+                        & models.Q(group__isnull=True)
+                    )
+                    | (
+                        models.Q(subject="group")
+                        & models.Q(singer_registration__isnull=True)
+                        & models.Q(group__isnull=False)
+                    )
+                ),
+                name="questionnaire_subject_owner_xor",
             ),
         ]
 
     def __str__(self):
-        return f"{self.singer_registration} · {self.questionnaire_key} · {self.ruleset_version}"
+        owner = self.singer_registration or self.group
+        return f"{owner} · {self.questionnaire_key} · {self.ruleset_version}"

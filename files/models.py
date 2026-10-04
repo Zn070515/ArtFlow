@@ -32,6 +32,13 @@ class SubmissionFile(models.Model):
         blank=True,
         related_name="files",
     )
+    group = models.ForeignKey(
+        "singer_contest.Group",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="files",
+    )
     file = models.FileField(upload_to="submissions/%Y/%m/")
     original_name = models.CharField(max_length=255)
     file_size = models.IntegerField()
@@ -84,12 +91,36 @@ class SubmissionFile(models.Model):
                 condition=models.Q(is_current=True, program__isnull=False),
                 name="files_one_current_program_purpose",
             ),
+            models.UniqueConstraint(
+                fields=["group", "file_purpose"],
+                condition=models.Q(is_current=True, group__isnull=False, question_key=""),
+                name="files_one_current_group_purpose",
+            ),
+            models.UniqueConstraint(
+                fields=["group", "question_key"],
+                condition=models.Q(is_current=True, group__isnull=False)
+                & ~models.Q(question_key=""),
+                name="files_one_current_group_question",
+            ),
             models.CheckConstraint(
                 condition=(
-                    (Q(singer_registration__isnull=False) & Q(program__isnull=True))
-                    | (Q(singer_registration__isnull=True) & Q(program__isnull=False))
+                    (
+                        Q(singer_registration__isnull=False)
+                        & Q(program__isnull=True)
+                        & Q(group__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=False)
+                        & Q(group__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=True)
+                        & Q(group__isnull=False)
+                    )
                 ),
-                name="files_owner_singer_program_xor",
+                name="files_owner_subject_xor",
             ),
         ]
 
@@ -101,6 +132,7 @@ class MaterialRequirement(models.Model):
     class AppliesTo(models.TextChoices):
         SINGER = "singer", "歌手比赛报名"
         PROGRAM = "program", "毕晚节目"
+        GROUP = "group", "分组合唱组"
 
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="material_requirements"
@@ -175,6 +207,13 @@ class MaterialCheck(models.Model):
         blank=True,
         related_name="material_checks",
     )
+    group = models.ForeignKey(
+        "singer_contest.Group",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_checks",
+    )
     program = models.ForeignKey(
         "farewell_show.Program",
         on_delete=models.CASCADE,
@@ -222,10 +261,23 @@ class MaterialCheck(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    (Q(singer_registration__isnull=False) & Q(program__isnull=True))
-                    | (Q(singer_registration__isnull=True) & Q(program__isnull=False))
+                    (
+                        Q(singer_registration__isnull=False)
+                        & Q(program__isnull=True)
+                        & Q(group__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=False)
+                        & Q(group__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=True)
+                        & Q(group__isnull=False)
+                    )
                 ),
-                name="materialcheck_owner_singer_program_xor",
+                name="materialcheck_owner_subject_xor",
             ),
             # Two identities, like the files they track: a legacy requirement check is
             # unique per item name, a questionnaire check is unique per question. Without
@@ -244,6 +296,11 @@ class MaterialCheck(models.Model):
                 fields=["program", "item_name"],
                 condition=Q(program__isnull=False),
                 name="materialcheck_unique_program_item",
+            ),
+            models.UniqueConstraint(
+                fields=["group", "item_name"],
+                condition=Q(group__isnull=False),
+                name="materialcheck_unique_group_item",
             ),
         ]
 
@@ -289,6 +346,13 @@ class MaterialSlot(models.Model):
         blank=True,
         related_name="material_slots",
     )
+    group = models.ForeignKey(
+        "singer_contest.Group",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="material_slots",
+    )
     category = models.CharField(max_length=24, choices=Category.choices)
     label = models.CharField(max_length=100)
     is_required = models.BooleanField(default=True)
@@ -299,8 +363,28 @@ class MaterialSlot(models.Model):
         ordering = ["sequence", "pk"]
         constraints = [
             models.CheckConstraint(
-                condition=Q(singer_registration__isnull=True) | Q(program__isnull=True),
-                name="materialslot_owner_not_both",
+                condition=(
+                    (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=False)
+                        & Q(program__isnull=True)
+                        & Q(group__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=False)
+                        & Q(group__isnull=True)
+                    )
+                    | (
+                        Q(singer_registration__isnull=True)
+                        & Q(program__isnull=True)
+                        & Q(group__isnull=False)
+                    )
+                ),
+                name="materialslot_owner_subject_xor",
             ),
         ]
 
@@ -308,17 +392,20 @@ class MaterialSlot(models.Model):
         contest_round = self.round if self.round_id else None
         singer = self.singer_registration if self.singer_registration_id else None
         program = self.program if self.program_id else None
+        group = self.group if self.group_id else None
         if self.activity_id and contest_round and contest_round.activity_id != self.activity_id:
             raise ValidationError("材料槽必须属于轮次所在活动。")
         if self.activity_id and singer and singer.activity_id != self.activity_id:
             raise ValidationError("材料槽所属报名必须属于同一活动。")
         if self.activity_id and program and program.activity_id != self.activity_id:
             raise ValidationError("材料槽所属节目必须属于同一活动。")
+        if self.activity_id and group and group.stage.activity_id != self.activity_id:
+            raise ValidationError("材料槽所属分组必须属于同一活动。")
 
     def save(self, *args, **kwargs):
         self.clean()
         return super().save(*args, **kwargs)
 
     def __str__(self):
-        target = self.singer_registration or self.program
+        target = self.singer_registration or self.program or self.group
         return f"{self.label} — {target or '通用槽位'}"

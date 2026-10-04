@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from accounts.models import User
@@ -8,11 +9,20 @@ from core.models import Activity
 
 from .models import Group, GroupMembership, GroupStage, SingerRegistration
 from .group_chorus import (
+    GroupReadiness,
     confirm_group_stage,
     correct_group_stage,
     create_group_stage,
     freeze_group_stage,
+    group_material_readiness,
+    group_stage_readiness,
     record_group_stage,
+)
+from files.models import MaterialCheck, SubmissionFile
+from files.services import (
+    reconcile_group_material_checks,
+    review_material_check,
+    submit_participant_material_for_check,
 )
 
 
@@ -26,7 +36,7 @@ class GroupChorusStageServiceTests(TestCase):
             self.activity = Activity.objects.create(
                 title="院十佳",
                 activity_type=Activity.Type.SINGER_CONTEST,
-                phase=Activity.Phase.TESTING,
+                phase=Activity.Phase.REGISTRATION_OPEN,
                 is_test_mode=True,
             )
         self.singers = [
@@ -137,4 +147,47 @@ class GroupChorusStageServiceTests(TestCase):
                 activity=self.activity,
                 stage_key="raw",
                 name="越权分组",
+            )
+
+    def test_group_material_is_shared_but_upload_requires_current_membership(self):
+        stage = create_group_stage(
+            self.activity,
+            stage_key="chorus",
+            name="分组合唱",
+            operator=self.operator,
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        group = Group.objects.get(stage=stage, name="A组")
+        reconcile_group_material_checks(group)
+        check = MaterialCheck.objects.get(group=group, file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT)
+
+        upload = SimpleUploadedFile(
+            "a.mp3", b"ID3" + b"chorus", content_type="audio/mpeg"
+        )
+        stored = submit_participant_material_for_check(
+            owner=group,
+            check_id=check.pk,
+            uploaded_file=upload,
+            actor=self.singers[0].user,
+        )
+        self.assertEqual(stored.group_id, group.pk)
+        self.assertEqual(
+            SubmissionFile.objects.filter(group=group, is_current=True).count(), 1
+        )
+        self.assertEqual(group_material_readiness(group), GroupReadiness.MISSING_MATERIAL)
+        review_material_check(
+            check, status=MaterialCheck.Status.APPROVED, note="音频清晰", actor=self.operator
+        )
+        self.assertEqual(group_material_readiness(group), GroupReadiness.READY)
+        self.assertFalse(group_stage_readiness(stage)["ready"])
+
+        with self.assertRaises(ValidationError):
+            submit_participant_material_for_check(
+                owner=group,
+                check_id=check.pk,
+                uploaded_file=SimpleUploadedFile(
+                    "b.mp3", b"ID3" + b"chorus", content_type="audio/mpeg"
+                ),
+                actor=self.singers[2].user,
             )
