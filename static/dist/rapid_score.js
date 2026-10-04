@@ -120,6 +120,8 @@
     let realtimeSocket = null;
     let realtimeReconnectTimer = null;
     let realtimeHeartbeatTimer = null;
+    let realtimeSanityTimer = null;
+    let realtimeFallbackTimer = null;
     let realtimeReconnectDelay = 1000;
     let realtimeConnected = false;
     function key(singerId, judgeId) {
@@ -648,8 +650,14 @@
             clearTimeout(realtimeReconnectTimer);
         if (realtimeHeartbeatTimer !== null)
             clearInterval(realtimeHeartbeatTimer);
+        if (realtimeSanityTimer !== null)
+            clearInterval(realtimeSanityTimer);
+        if (realtimeFallbackTimer !== null)
+            clearInterval(realtimeFallbackTimer);
         realtimeReconnectTimer = null;
         realtimeHeartbeatTimer = null;
+        realtimeSanityTimer = null;
+        realtimeFallbackTimer = null;
         const socket = realtimeSocket;
         realtimeSocket = null;
         realtimeConnected = false;
@@ -709,6 +717,18 @@
             realtimeHeartbeatTimer = null;
             scheduleRealtimeReconnect();
         });
+    }
+    function startRealtimePolling() {
+        if (typeof setInterval !== "function")
+            return;
+        realtimeSanityTimer = setInterval(() => {
+            if (realtimeConnected)
+                refreshFromServer();
+        }, 30000);
+        realtimeFallbackTimer = setInterval(() => {
+            if (!realtimeConnected)
+                refreshFromServer();
+        }, 2000);
     }
     function applyCellValue(input, value) {
         if (!input)
@@ -858,5 +878,6 @@
     setVersion(state.version);
     if (!state.locked) {
         connectRealtime();
+        startRealtimePolling();
     }
 })();

@@ -202,6 +202,8 @@
   let realtimeSocket: WebSocket | null = null;
   let realtimeReconnectTimer: number | null = null;
   let realtimeHeartbeatTimer: number | null = null;
+  let realtimeSanityTimer: number | null = null;
+  let realtimeFallbackTimer: number | null = null;
   let realtimeReconnectDelay = 1000;
   let realtimeConnected = false;
 
@@ -704,8 +706,12 @@
   function closeRealtime(): void {
     if (realtimeReconnectTimer !== null) clearTimeout(realtimeReconnectTimer);
     if (realtimeHeartbeatTimer !== null) clearInterval(realtimeHeartbeatTimer);
+    if (realtimeSanityTimer !== null) clearInterval(realtimeSanityTimer);
+    if (realtimeFallbackTimer !== null) clearInterval(realtimeFallbackTimer);
     realtimeReconnectTimer = null;
     realtimeHeartbeatTimer = null;
+    realtimeSanityTimer = null;
+    realtimeFallbackTimer = null;
     const socket = realtimeSocket;
     realtimeSocket = null;
     realtimeConnected = false;
@@ -754,6 +760,16 @@
       realtimeHeartbeatTimer = null;
       scheduleRealtimeReconnect();
     });
+  }
+
+  function startRealtimePolling(): void {
+    if (typeof setInterval !== "function") return;
+    realtimeSanityTimer = setInterval(() => {
+      if (realtimeConnected) refreshFromServer();
+    }, 30000);
+    realtimeFallbackTimer = setInterval(() => {
+      if (!realtimeConnected) refreshFromServer();
+    }, 2000);
   }
 
   function applyCellValue(input: HTMLInputElement | null, value: string): void {
@@ -894,5 +910,6 @@
   setVersion(state.version);
   if (!state.locked) {
     connectRealtime();
+    startRealtimePolling();
   }
 })();
