@@ -48,6 +48,7 @@ backups/
 
 logs/**
 test-results/
+.playwright-mcp/
 
 docs/advices/**
 docs/superpowers/**

@@ -7,7 +7,7 @@
     <p class="text-sm text-gray-500 mb-2">
         <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> / 赛制编辑
     </p>
-    <div class="flex items-center justify-between gap-4 mb-2">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
         <h1 class="text-2xl font-bold text-gray-900">{{ ruleset.name }}</h1>
         <span class="text-xs bg-gray-50 border border-gray-300 text-gray-600 px-3 py-1 rounded font-medium">
             v{{ version.version }} · {{ version.get_status_display }}

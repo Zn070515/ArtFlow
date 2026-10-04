@@ -59,6 +59,8 @@ const FIXTURE_TARGETS: Target[] = [
   { name: "activity-judge", path: "/e/{code}/judge/" },
   { name: "staff-dashboard", path: "/staff/", staff: true },
   { name: "staff-workspace", path: "/staff/activities/{activity}/workspace/", staff: true },
+  { name: "staff-activities", path: "/staff/activities/", staff: true },
+  { name: "staff-ruleset-templates", path: "/staff/ruleset-templates/", staff: true },
   { name: "staff-registrations", path: "/staff/registrations/", staff: true },
   { name: "staff-rounds", path: "/staff/rounds/", staff: true },
   { name: "staff-round-scores", path: "/staff/rounds/{round}/scores/", staff: true },

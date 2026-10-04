@@ -7,7 +7,7 @@
      data-round-status="{{ round.status }}"
      data-round-locked="{% if round.is_locked %}true{% else %}false{% endif %}">
     <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 排名</p>
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round.get_round_type_display }} — 排名</h1>
             <p class="text-sm text-gray-500 mt-1">{{ round.get_scoring_mode_display }} · {{ round.get_status_display }}{% if round.advance_count %} · 前 {{ round.advance_count }} 名晋级{% endif %}</p>
