@@ -25,11 +25,7 @@ def _operator(operator):
 
 
 def _stage_for_update(stage: GroupStage) -> GroupStage:
-    return (
-        GroupStage.objects.select_for_update()
-        .select_related("activity")
-        .get(pk=stage.pk)
-    )
+    return GroupStage.objects.select_for_update().select_related("activity").get(pk=stage.pk)
 
 
 def _approved_singers(activity) -> dict[str, SingerRegistration]:
@@ -51,9 +47,9 @@ def _normalize_specs(stage: GroupStage, specs: Iterable[dict[str, Any]], *, comp
     for index, raw in enumerate(specs, start=1):
         if not isinstance(raw, dict):
             raise ValidationError(f"第 {index} 个分组合唱组必须是对象。")
-        name = str(raw.get("name") or "").strip()
-        if not name or name in names:
-            raise ValidationError("分组合唱组名称必须非空且不能重复。")
+        name = str(raw.get("name") or "").strip() or f"第 {index} 组"
+        if name in names:
+            raise ValidationError("分组合唱组名称不能重复。")
         raw_ids = raw.get("singer_ids")
         if not isinstance(raw_ids, list) or not raw_ids:
             raise ValidationError(f"分组合唱组 {name} 必须包含至少一名成员。")
@@ -93,7 +89,7 @@ def _snapshot(stage: GroupStage) -> list[dict[str, Any]]:
 
 
 def _write_audit(*, operator, action_type, stage, old_value="", new_value="", note=""):
-    return AuditLog.objects.create(
+    audit = AuditLog.objects.create(
         operator=operator,
         action_type=action_type,
         target=f"GroupStage:{stage.pk}",
@@ -101,6 +97,17 @@ def _write_audit(*, operator, action_type, stage, old_value="", new_value="", no
         new_value=new_value,
         note=note,
     )
+    from realtime.events import schedule_activity_event
+
+    schedule_activity_event(
+        stage.activity_id,
+        event="group_stage.changed",
+        resource=f"group-stage:{stage.pk}",
+        revision=stage.updated_at.isoformat() if stage.updated_at else audit.pk,
+        actor={"id": operator.pk, "username": operator.get_username()},
+        details={"action": action_type, "status": stage.status},
+    )
+    return audit
 
 
 @transaction.atomic
@@ -183,7 +190,7 @@ def confirm_group_stage(stage: GroupStage, operator) -> GroupStage:
         }
         for group in locked_stage.groups.filter(is_active=True).order_by("group_order", "pk")
     ]
-    normalized = _normalize_specs(locked_stage, specs, complete=True)
+    _normalize_specs(locked_stage, specs, complete=True)
     now = timezone.now()
     with authority_write(GROUP_STAGE_STATE):
         locked_stage.status = GroupStage.Status.CONFIRMED
@@ -240,6 +247,10 @@ def correct_group_stage(
         raise PermissionDenied("分组合唱赛段不属于当前活动。")
     if locked_stage.status not in (GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN):
         raise ValidationError("只有已确认或已冻结的分组合唱赛段可以修正。")
+    from .services import ensure_group_stage_not_consumed_by_confirmed_stage
+
+    ensure_group_stage_not_consumed_by_confirmed_stage(locked_stage)
+    _ensure_group_stage_not_bound_by_frozen_ruleset(locked_stage)
     normalized = _normalize_specs(locked_stage, specs, complete=True)
     old_snapshot = _snapshot(locked_stage)
     old_status = locked_stage.status
@@ -256,8 +267,7 @@ def correct_group_stage(
             membership.save(update_fields=["is_current", "left_at", "removed_by", "change_reason"])
 
         active_groups = {
-            group.group_order: group
-            for group in locked_stage.groups.select_for_update().all()
+            group.group_order: group for group in locked_stage.groups.select_for_update().all()
         }
         wanted_orders = set(range(1, len(normalized) + 1))
         for group_order, group in active_groups.items():
@@ -314,6 +324,21 @@ def current_group_members(group: Group):
     return group.memberships.filter(is_current=True).select_related("singer").order_by("singer_id")
 
 
+def _ensure_group_stage_not_bound_by_frozen_ruleset(stage: GroupStage) -> None:
+    """A frozen ruleset owns an immutable GroupStage membership snapshot."""
+    from ruleset.models import RulesetVersion
+
+    for binding in RulesetVersion.objects.filter(
+        ruleset__activity_id=stage.activity_id,
+        status=RulesetVersion.Status.FROZEN,
+    ).values_list("binding", flat=True):
+        stage_ids = {
+            str(stage_id) for stage_id in (binding or {}).get("group_stage_keys", {}).values()
+        }
+        if str(stage.pk) in stage_ids:
+            raise ValidationError("该分组合唱赛段已被冻结赛制使用，请先建立后继赛制版本。")
+
+
 class GroupReadiness(StrEnum):
     WAITING_FOR_CONFIRMATION = "waiting_for_confirmation"
     MISSING_MEMBER = "missing_member"
@@ -329,23 +354,30 @@ def group_material_readiness(group: Group) -> GroupReadiness:
         return GroupReadiness.WAITING_FOR_CONFIRMATION
     if not group.memberships.filter(is_current=True).exists():
         return GroupReadiness.MISSING_MEMBER
+    required_purposes = [
+        SubmissionFile.Purpose.ACCOMPANIMENT,
+        SubmissionFile.Purpose.PERFORMANCE_VIDEO,
+    ]
     current_files = SubmissionFile.objects.filter(
         group=group,
         is_current=True,
-        file_purpose__in=[
-            SubmissionFile.Purpose.ACCOMPANIMENT,
-            SubmissionFile.Purpose.BACKGROUND_VIDEO,
-            SubmissionFile.Purpose.PERFORMANCE_VIDEO,
-        ],
+        file_purpose__in=required_purposes,
     )
     if not current_files.exists():
         return GroupReadiness.MISSING_MATERIAL
-    checks = MaterialCheck.objects.filter(group=group, file_purpose__in=[
-        SubmissionFile.Purpose.ACCOMPANIMENT,
-        SubmissionFile.Purpose.BACKGROUND_VIDEO,
-        SubmissionFile.Purpose.PERFORMANCE_VIDEO,
-    ])
-    if checks.exists() and not checks.filter(status=MaterialCheck.Status.APPROVED).exists():
+    checks = MaterialCheck.objects.filter(group=group, required=True)
+    questionnaire_checks = checks.exclude(question_key="")
+    if questionnaire_checks.exclude(status=MaterialCheck.Status.APPROVED).exists():
+        return GroupReadiness.MISSING_MATERIAL
+    # The legacy "合唱伴奏" check is an either/or contract: an approved audio file or
+    # a current performance video is enough. A missing legacy audio check must not reject
+    # a group that has chosen the video branch.
+    if current_files.filter(file_purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO).exists():
+        return GroupReadiness.READY
+    legacy_check = checks.filter(
+        question_key="", file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT
+    ).first()
+    if legacy_check is not None and legacy_check.status != MaterialCheck.Status.APPROVED:
         return GroupReadiness.MISSING_MATERIAL
     return GroupReadiness.READY
 

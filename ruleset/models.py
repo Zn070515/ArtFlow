@@ -149,6 +149,11 @@ class ContestRuleset(models.Model):
         blank=True,
         help_text="Maps a group 'by' key to a ContestRound pk, e.g. {'initial_group': 3}.",
     )
+    group_stage_keys = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Maps a Group Chorus 'by' key to a frozen GroupStage pk.",
+    )
     audience_keys = models.JSONField(
         default=dict,
         blank=True,

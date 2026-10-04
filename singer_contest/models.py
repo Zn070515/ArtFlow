@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from common.authority import (
     CONTEST_ROUND_STATE,
+    GROUP_STAGE_STATE,
     JUDGE_PANEL_STATE,
     JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
@@ -13,7 +14,6 @@ from common.authority import (
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
     TEST_DATA_SEED,
-    GROUP_STAGE_STATE,
     AuthorityQuerySetMixin,
     authority_authorized,
     parse_bulk_create_options,
@@ -429,7 +429,7 @@ class SingerRegistration(models.Model):
 
 class GroupChorusQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_write_authorized(self):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱配置必须通过正式服务修改。")
 
     def update(self, **kwargs):
@@ -495,6 +495,10 @@ class GroupStage(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     objects = GroupChorusManager()
 
+    if TYPE_CHECKING:
+        activity_id: int
+        groups: models.Manager["Group"]
+
     class Meta:
         ordering = ["created_at", "pk"]
         constraints = [
@@ -514,7 +518,7 @@ class GroupStage(models.Model):
             raise ValidationError("分组合唱赛段必须有名称。")
 
     def save(self, *args, **kwargs):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱配置必须通过正式服务修改。")
         self.clean()
         if self._state.adding and not self.is_test_data:
@@ -522,7 +526,7 @@ class GroupStage(models.Model):
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱配置必须通过正式服务删除。")
         return super().delete(*args, **kwargs)
 
@@ -541,6 +545,16 @@ class Group(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     objects = GroupChorusManager()
+
+    if TYPE_CHECKING:
+        stage_id: int
+        memberships: models.Manager["GroupMembership"]
+        files: models.Manager["SubmissionFile"]
+        material_checks: models.Manager["MaterialCheck"]
+        readiness: str
+        readiness_label: str
+        missing_materials: list[str]
+        current_members: list["GroupMembership"]
 
     class Meta:
         ordering = ["group_order", "pk"]
@@ -577,7 +591,7 @@ class Group(models.Model):
             raise ValidationError("分组合唱组顺序必须从 1 开始。")
 
     def save(self, *args, **kwargs):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱配置必须通过正式服务修改。")
         self.clean()
         if self._state.adding and not self.is_test_data:
@@ -585,7 +599,7 @@ class Group(models.Model):
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱配置必须通过正式服务删除。")
         return super().delete(*args, **kwargs)
 
@@ -625,6 +639,10 @@ class GroupMembership(models.Model):
     change_reason = models.TextField(blank=True, default="")
     objects = GroupChorusManager()
 
+    if TYPE_CHECKING:
+        group_id: int
+        singer_id: int
+
     class Meta:
         ordering = ["group__group_order", "singer_id", "pk"]
         constraints = [
@@ -645,13 +663,13 @@ class GroupMembership(models.Model):
             raise ValidationError("历史分组合唱成员必须记录离组时间。")
 
     def save(self, *args, **kwargs):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱成员必须通过正式服务修改。")
         self.clean()
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        if not authority_authorized(GROUP_STAGE_STATE):
+        if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):
             raise ValidationError("分组合唱成员历史不可直接删除。")
         return super().delete(*args, **kwargs)
 

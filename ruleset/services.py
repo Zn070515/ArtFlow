@@ -67,6 +67,7 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
         "vote_keys": dict(ruleset.vote_keys or {}),
         "vote_scoring_rule_keys": dict(ruleset.vote_scoring_rule_keys or {}),
         "group_keys": dict(ruleset.group_keys or {}),
+        "group_stage_keys": dict(ruleset.group_stage_keys or {}),
         "audience_keys": dict(ruleset.audience_keys or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
         "announcement_blocks_by_checkpoint": dict(ruleset.announcement_blocks_by_checkpoint or {}),
@@ -113,6 +114,7 @@ def _binding_signature(ruleset: ContestRuleset) -> str:
             "vote_keys": dict(ruleset.vote_keys or {}),
             "vote_scoring_rule_keys": dict(ruleset.vote_scoring_rule_keys or {}),
             "group_keys": dict(ruleset.group_keys or {}),
+            "group_stage_keys": dict(ruleset.group_stage_keys or {}),
             "audience_keys": dict(ruleset.audience_keys or {}),
             "announcement_blocks": list(ruleset.announcement_blocks or []),
             "announcement_blocks_by_checkpoint": dict(
@@ -201,6 +203,12 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         binding.get("vote_scoring_rule_keys"), label="vote_scoring_rule_keys"
     )
     group_keys = _normalize_pk_map(binding.get("group_keys"), label="group_keys")
+    group_stage_keys = _normalize_pk_map(binding.get("group_stage_keys"), label="group_stage_keys")
+    overlapping_group_keys = set(group_keys) & set(group_stage_keys)
+    if overlapping_group_keys:
+        raise ValidationError(
+            f"同一个分组键不能同时绑定轮次分组和分组合唱赛段：{sorted(overlapping_group_keys)}"
+        )
     audience_keys = _normalize_string_map(binding.get("audience_keys"), label="audience_keys")
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
@@ -214,7 +222,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         if not isinstance(cp_blocks, list):
             raise ValidationError(f"announcement_blocks_by_checkpoint['{cp_key}'] 必须是列表。")
 
-    from singer_contest.models import ContestRound
+    from singer_contest.models import ContestRound, GroupStage
     from voting.models import VoteSession
 
     round_ids = list(normalized_round_keys.values())
@@ -240,6 +248,23 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     missing_groups = [gid for gid in group_ids if gid not in owned_groups]
     if missing_groups:
         raise ValidationError(f"赛制绑定的分组成员轮次不属于该活动：{missing_groups}")
+
+    group_stage_ids = list(group_stage_keys.values())
+    owned_group_stages = {
+        stage.pk
+        for stage in GroupStage.objects.filter(
+            pk__in=group_stage_ids,
+            activity=ruleset.activity_id,
+            status=GroupStage.Status.FROZEN,
+        )
+    }
+    missing_group_stages = [
+        stage_id for stage_id in group_stage_ids if stage_id not in owned_group_stages
+    ]
+    if missing_group_stages:
+        raise ValidationError(
+            f"赛制绑定的分组合唱赛段不存在、未冻结或不属于该活动：{missing_group_stages}"
+        )
 
     # §6.1: a conversion rule is only meaningful for the vote source it converts, so the
     # binding must name an existing rule of exactly that bound session.
@@ -273,6 +298,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         "vote_keys": vote_keys,
         "vote_scoring_rule_keys": scoring_rule_keys,
         "group_keys": group_keys,
+        "group_stage_keys": group_stage_keys,
         "audience_keys": audience_keys,
         "announcement_blocks": announcement_blocks,
         "announcement_blocks_by_checkpoint": dict(blocks_by_checkpoint),
@@ -392,6 +418,7 @@ def update_ruleset_binding(
     locked.vote_keys = normalized["vote_keys"]
     locked.vote_scoring_rule_keys = normalized["vote_scoring_rule_keys"]
     locked.group_keys = normalized["group_keys"]
+    locked.group_stage_keys = normalized["group_stage_keys"]
     locked.audience_keys = normalized["audience_keys"]
     locked.announcement_blocks = normalized["announcement_blocks"]
     locked.announcement_blocks_by_checkpoint = normalized["announcement_blocks_by_checkpoint"]
@@ -402,6 +429,7 @@ def update_ruleset_binding(
             "vote_keys",
             "vote_scoring_rule_keys",
             "group_keys",
+            "group_stage_keys",
             "audience_keys",
             "announcement_blocks",
             "announcement_blocks_by_checkpoint",
@@ -523,6 +551,25 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
         caps = list(_annotated_capacity(rpk, activity))
         if caps:
             groups[by] = {"capacity": caps}
+    from singer_contest.models import GroupStage
+
+    for by, stage_pk in (binding.get("group_stage_keys") or {}).items():
+        stage = (
+            GroupStage.objects.filter(
+                pk=stage_pk,
+                activity=activity,
+                status=GroupStage.Status.FROZEN,
+            )
+            .prefetch_related("groups__memberships")
+            .first()
+        )
+        if stage is not None:
+            capacities = [
+                group.memberships.filter(is_current=True).count()
+                for group in stage.groups.filter(is_active=True).order_by("group_order", "pk")
+            ]
+            if capacities:
+                groups[by] = {"capacity": capacities}
 
     return {
         "entry_roster_final": roster_final,
@@ -676,8 +723,16 @@ def _carry_questionnaire_answers(
     carried = 0
     for old in QuestionnaireResponse.objects.filter(ruleset_version=previous):
         answers = carry_answers(before, plan, old.answers)
+        identity = (
+            {"group_id": old.group_id, "subject": QuestionnaireResponse.Subject.GROUP}
+            if old.group_id
+            else {
+                "singer_registration_id": old.singer_registration_id,
+                "subject": QuestionnaireResponse.Subject.PARTICIPANT,
+            }
+        )
         QuestionnaireResponse.objects.update_or_create(
-            singer_registration_id=old.singer_registration_id,
+            **identity,
             ruleset_version=version,
             questionnaire_key=plan.key,
             defaults={

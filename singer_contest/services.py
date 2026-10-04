@@ -1601,7 +1601,11 @@ def _version_binding(version) -> dict:
     unmigrated rows.
     """
     binding = version.binding or {}
-    if not binding.get("stage_key") and not binding.get("round_keys"):
+    if (
+        not binding.get("stage_key")
+        and not binding.get("round_keys")
+        and not binding.get("group_stage_keys")
+    ):
         ruleset = version.ruleset
         if ruleset.round_keys or ruleset.stage_key:
             binding = {
@@ -1609,6 +1613,7 @@ def _version_binding(version) -> dict:
                 "round_keys": dict(ruleset.round_keys or {}),
                 "vote_keys": dict(ruleset.vote_keys or {}),
                 "group_keys": dict(ruleset.group_keys or {}),
+                "group_stage_keys": dict(ruleset.group_stage_keys or {}),
                 "audience_keys": dict(ruleset.audience_keys or {}),
                 "announcement_blocks": list(ruleset.announcement_blocks or []),
                 "announcement_blocks_by_checkpoint": dict(
@@ -1942,14 +1947,13 @@ def bind_resolve_input(
 
 
 def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
-    """Source the ``group_of`` ResolveInput from the binding's ``group_keys``.
+    """Source the ``group_of`` ResolveInput from frozen group bindings.
 
-    Each ``by`` key resolves to a ContestRound; a singer's group is the
-    ``PerformanceGroup`` of their ``Performance`` in that round.
+    Legacy ``group_keys`` resolve to a ContestRound and its PerformanceGroup rows.
+    ``group_stage_keys`` resolve to the frozen GroupStage membership snapshot.
     """
     group_keys = binding.get("group_keys") or {}
-    if not group_keys:
-        return {}
+    group_stage_keys = binding.get("group_stage_keys") or {}
     out: dict[str, dict[str, str]] = {}
     for by, round_pk in group_keys.items():
         current_entry_ids = list(
@@ -1964,6 +1968,23 @@ def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
             assert p.group is not None
             entry[str(p.singer_id)] = p.group.name
         out[by] = entry
+    if group_stage_keys:
+        from .models import GroupStage
+
+        stages = GroupStage.objects.filter(
+            pk__in=group_stage_keys.values(),
+            activity=activity,
+            status=GroupStage.Status.FROZEN,
+        ).prefetch_related("groups__memberships")
+        stage_by_id = {stage.pk: stage for stage in stages}
+        for by, stage_pk in group_stage_keys.items():
+            stage = stage_by_id.get(stage_pk)
+            entry: dict[str, str] = {}
+            if stage is not None:
+                for group in stage.groups.filter(is_active=True).order_by("group_order", "pk"):
+                    for membership in group.memberships.filter(is_current=True):
+                        entry[str(membership.singer_id)] = group.name
+            out[by] = entry
     return out
 
 
@@ -2468,7 +2489,21 @@ def _ensure_stage_dependencies_final(version, activity, stage_key: str) -> None:
 
     binding = _version_binding(version)
     checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
-    round_keys, vote_keys, _, _ = stage_consumed_scopes(version.definition, checkpoint)
+    round_keys, vote_keys, group_keys, _ = stage_consumed_scopes(version.definition, checkpoint)
+    group_stage_map = binding.get("group_stage_keys") or {}
+    group_stage_ids = [group_stage_map[key] for key in group_keys if key in group_stage_map]
+    if group_stage_ids:
+        from .models import GroupStage
+
+        if (
+            GroupStage.objects.filter(
+                pk__in=group_stage_ids,
+                activity=activity,
+            )
+            .exclude(status=GroupStage.Status.FROZEN)
+            .exists()
+        ):
+            raise ValidationError("分组合唱赛段必须先冻结，才能核定结果。")
     bound_round_ids = [
         rid for k, rid in (binding.get("round_keys") or {}).items() if k in round_keys
     ]
@@ -2508,10 +2543,16 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
     duel_keys = stage_consumed_duel_keys(version.definition, checkpoint)
     round_map = binding.get("round_keys") or {}
     group_map = binding.get("group_keys") or {}
+    group_stage_map = binding.get("group_stage_keys") or {}
     vote_map = binding.get("vote_keys") or {}
     audience_map = binding.get("audience_keys") or {}
-    round_pks = {round_map.get(k) for k in round_keys} | {group_map.get(k) for k in group_keys}
+    legacy_group_keys = set(group_keys) - set(group_stage_map)
+    round_pks = {round_map.get(k) for k in round_keys} | {
+        group_map.get(k) for k in legacy_group_keys
+    }
     round_pks.discard(None)
+    group_stage_pks = {group_stage_map.get(k) for k in group_keys if k in group_stage_map}
+    group_stage_pks.discard(None)
     # Audience sources ride the vote channel but are keyed by audience_keys, not a
     # VoteSession; split them out so the vote lock/finality check does not mis-read them.
     audience_source_keys = {k for k in vote_keys if k in audience_map}
@@ -2521,6 +2562,7 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
     audience_names = {audience_map[k] for k in audience_source_keys}
     return {
         "rounds": round_pks,
+        "group_stages": group_stage_pks,
         "votes": vote_pks,
         "audience": audience_names,
         "manual": set(manual_keys),
@@ -2536,6 +2578,17 @@ def ensure_round_not_consumed_by_confirmed_stage(contest_round) -> None:
     for stage_pk in consumed:
         stage = StageResult.objects.get(pk=stage_pk["pk"])
         if contest_round.pk in _stage_consumed_facts(stage)["rounds"]:
+            raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+
+
+def ensure_group_stage_not_consumed_by_confirmed_stage(group_stage) -> None:
+    """Reject correcting a GroupStage already read by a confirmed result."""
+    consumed = StageResult.objects.filter(
+        activity_id=group_stage.activity_id, status=StageResult.Status.CONFIRMED
+    ).values("pk")
+    for stage_pk in consumed:
+        stage = StageResult.objects.get(pk=stage_pk["pk"])
+        if group_stage.pk in _stage_consumed_facts(stage)["group_stages"]:
             raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
 
 
@@ -3253,19 +3306,34 @@ def _closure_required_raw_facts(version, activity, stage_key: str) -> dict[str, 
     binding = _version_binding(version)
     round_map = binding.get("round_keys") or {}
     group_map = binding.get("group_keys") or {}
+    group_stage_map = binding.get("group_stage_keys") or {}
     vote_map = binding.get("vote_keys") or {}
     audience_map = binding.get("audience_keys") or {}
     round_ids = _coerce_bound_ids(
-        [round_map.get(key) for key in round_keys] + [group_map.get(key) for key in group_keys]
+        [round_map.get(key) for key in round_keys]
+        + [group_map.get(key) for key in group_keys if key not in group_stage_map]
+    )
+    group_stage_ids = _coerce_bound_ids(
+        [group_stage_map.get(key) for key in group_keys if key in group_stage_map]
     )
     audience_keys = {key for key in vote_keys if key in audience_map}
     vote_ids = _coerce_bound_ids([vote_map.get(key) for key in vote_keys - audience_keys])
     round_qs = ContestRound.objects.filter(activity=activity, pk__in=round_ids)
     vote_qs = VoteSession.objects.filter(activity=activity, pk__in=vote_ids)
-    if round_qs.count() != len(round_ids) or vote_qs.count() != len(vote_ids):
+    from .models import GroupStage
+
+    group_stage_qs = GroupStage.objects.filter(
+        activity=activity, pk__in=group_stage_ids, status=GroupStage.Status.FROZEN
+    )
+    if (
+        round_qs.count() != len(round_ids)
+        or vote_qs.count() != len(vote_ids)
+        or group_stage_qs.count() != len(group_stage_ids)
+    ):
         raise ValueError("规则绑定的原始轮次或投票不存在。")
     return {
         "rounds": tuple(sorted(round_ids)),
+        "group_stages": tuple(sorted(group_stage_ids)),
         "votes": tuple(sorted(vote_ids)),
     }
 

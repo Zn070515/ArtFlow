@@ -1,13 +1,17 @@
-from django.core.exceptions import ValidationError
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
-
 from accounts.models import User
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase
+from files.models import MaterialCheck, SubmissionFile
+from files.services import (
+    reconcile_group_material_checks,
+    review_material_check,
+    submit_participant_material_for_check,
+)
 
-from .models import Group, GroupMembership, GroupStage, SingerRegistration
 from .group_chorus import (
     GroupReadiness,
     confirm_group_stage,
@@ -18,12 +22,7 @@ from .group_chorus import (
     group_stage_readiness,
     record_group_stage,
 )
-from files.models import MaterialCheck, SubmissionFile
-from files.services import (
-    reconcile_group_material_checks,
-    review_material_check,
-    submit_participant_material_for_check,
-)
+from .models import Group, GroupMembership, GroupStage, SingerRegistration
 
 
 class GroupChorusStageServiceTests(TestCase):
@@ -105,6 +104,27 @@ class GroupChorusStageServiceTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "必须覆盖当前全部审核通过的选手"):
             confirm_group_stage(stage, self.operator)
 
+    def test_group_order_supplies_default_display_names(self):
+        stage = create_group_stage(
+            self.activity,
+            stage_key="chorus",
+            name="分组合唱",
+            operator=self.operator,
+        )
+        record_group_stage(
+            stage,
+            [
+                {"singer_ids": [self.singers[0].pk, self.singers[1].pk]},
+                {"singer_ids": [self.singers[2].pk, self.singers[3].pk]},
+            ],
+            self.operator,
+        )
+        confirm_group_stage(stage, self.operator)
+        self.assertEqual(
+            list(Group.objects.filter(stage=stage).values_list("name", flat=True)),
+            ["第 1 组", "第 2 组"],
+        )
+
     def test_correction_preserves_membership_history_and_requires_reason(self):
         stage = create_group_stage(
             self.activity,
@@ -160,11 +180,11 @@ class GroupChorusStageServiceTests(TestCase):
         confirm_group_stage(stage, self.operator)
         group = Group.objects.get(stage=stage, name="A组")
         reconcile_group_material_checks(group)
-        check = MaterialCheck.objects.get(group=group, file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT)
-
-        upload = SimpleUploadedFile(
-            "a.mp3", b"ID3" + b"chorus", content_type="audio/mpeg"
+        check = MaterialCheck.objects.get(
+            group=group, file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT
         )
+
+        upload = SimpleUploadedFile("a.mp3", b"ID3" + b"chorus", content_type="audio/mpeg")
         stored = submit_participant_material_for_check(
             owner=group,
             check_id=check.pk,
@@ -172,9 +192,7 @@ class GroupChorusStageServiceTests(TestCase):
             actor=self.singers[0].user,
         )
         self.assertEqual(stored.group_id, group.pk)
-        self.assertEqual(
-            SubmissionFile.objects.filter(group=group, is_current=True).count(), 1
-        )
+        self.assertEqual(SubmissionFile.objects.filter(group=group, is_current=True).count(), 1)
         self.assertEqual(group_material_readiness(group), GroupReadiness.MISSING_MATERIAL)
         review_material_check(
             check, status=MaterialCheck.Status.APPROVED, note="音频清晰", actor=self.operator
@@ -191,3 +209,24 @@ class GroupChorusStageServiceTests(TestCase):
                 ),
                 actor=self.singers[2].user,
             )
+
+    def test_background_video_does_not_satisfy_the_accompaniment_contract(self):
+        stage = create_group_stage(
+            self.activity,
+            stage_key="chorus",
+            name="分组合唱",
+            operator=self.operator,
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        group = Group.objects.get(stage=stage, name="A组")
+        SubmissionFile.objects.create(
+            group=group,
+            file_purpose=SubmissionFile.Purpose.BACKGROUND_VIDEO,
+            file=SimpleUploadedFile("background.mp4", b"video"),
+            original_name="background.mp4",
+            file_size=5,
+            is_current=True,
+            is_test_data=True,
+        )
+        self.assertEqual(group_material_readiness(group), GroupReadiness.MISSING_MATERIAL)
