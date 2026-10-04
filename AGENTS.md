@@ -111,6 +111,19 @@ python manage.py test
 
 PRs should summarize behavior changes, list migrations, note verification, and include screenshots for UI changes.
 
+## Configuration Sweep
+
+Configuration files drift silently: a whitelist keeps passing while the tree grows past it, and a new module that appears in no list is checked by nothing.
+
+After each round of changes, check the configuration against what the tree now contains:
+
+- `pyrightconfig.json` `include` — every production module is covered, or the omission is deliberate and written down.
+- `pyproject.toml` `[tool.mypy] files` and `[tool.ruff] src` — every app directory is listed.
+- `tailwind.config.js` `content` — matches everywhere class names are actually written, including `frontend/**/*.ts`.
+- `.env.example` / `.env.production.example` / `.env.event.example` — every knob `config/settings.py` reads is documented, with its real default.
+- `.dockerignore` / `.gitignore` — local artifact directories (media, backups, node_modules, databases) are excluded.
+- `.github/dependabot.yml` — one entry per package ecosystem the repository actually uses.
+
 ## Security & Configuration Tips
 Never commit `.env`, SQLite databases, generated exports, archives, or uploaded files. Use `.env.example` for required variables such as `SECRET_KEY`, `STAFF_ACCESS_KEY`, `ADMIN_ACCESS_KEY`, database settings, and `ALLOWED_HOSTS`. Internal submission files must go through controlled access views; do not reintroduce direct static media serving for private files.
 
