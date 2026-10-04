@@ -648,6 +648,15 @@ class DatabaseRateLimitTests(TransactionTestCase):
         self.assertEqual(set(vars(decision)), {"allowed", "retry_after_seconds"})
 
 
+class InstallationStateFlushLifecycleTests(TransactionTestCase):
+    def test_flush_recreates_installation_state_singleton(self):
+        call_command("flush", verbosity=0, interactive=False)
+
+        state = InstallationState.objects.get(pk=InstallationState.SINGLETON_PK)
+
+        self.assertIsNone(state.initialized_at)
+
+
 @postgresql_only
 class DatabaseRateLimitConcurrencyTests(TransactionTestCase):
     @override_settings(RATE_LIMIT_BACKEND="database")
