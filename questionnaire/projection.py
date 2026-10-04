@@ -119,7 +119,7 @@ def questionnaire_song_for_round(registration, contest_round, *, default="") -> 
     round_key = round_key_for_round(contest_round)
     if not round_key:
         return str(default or "")
-    value = questionnaire_value(registration, f"{round_key}.song", default=None)
+    value = questionnaire_value(registration, f"{round_key}.song", default="")
     if isinstance(value, str) and value.strip():
         return value.strip()
     if getattr(registration, "song_name", "") and not getattr(

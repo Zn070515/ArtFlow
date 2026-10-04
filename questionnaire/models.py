@@ -15,6 +15,8 @@ Not part of the V1 model, by design: a scoring link. Answers never feed the reso
 everywhere else.
 """
 
+from typing import TYPE_CHECKING
+
 from django.db import models
 
 
@@ -57,6 +59,12 @@ class QuestionnaireResponse(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
+
+    if TYPE_CHECKING:
+        # Django creates the ``<fk>_id`` shadow attribute at runtime; declare it here so
+        # Pylance can see it (see AGENTS.md, Pylance & Pyright Type Checking).
+        singer_registration_id: int
+        ruleset_version_id: int
 
     class Meta:
         constraints = [

@@ -173,6 +173,9 @@ class Ticket(models.Model):
 
     if TYPE_CHECKING:
         ballots: models.Manager[VoteBallot]
+        activity_id: int
+
+        def get_state_display(self) -> str: ...
 
     class Meta:
         base_manager_name = "objects"
@@ -314,6 +317,9 @@ class TicketAccessSession(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = models.Manager.from_queryset(TicketAccessSessionQuerySet)()
+
+    if TYPE_CHECKING:
+        ticket_id: int
 
     class Meta:
         base_manager_name = "objects"
