@@ -11,9 +11,11 @@ import os
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
-from channels.auth import AuthMiddlewareStack
-from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.security.websocket import AllowedHostsOriginValidator
+from channels.auth import AuthMiddlewareStack  # type: ignore[import-untyped]
+from channels.routing import ProtocolTypeRouter, URLRouter  # type: ignore[import-untyped]
+from channels.security.websocket import (  # type: ignore[import-untyped]
+    AllowedHostsOriginValidator,
+)
 from django.core.asgi import get_asgi_application
 
 django_asgi_application = get_asgi_application()

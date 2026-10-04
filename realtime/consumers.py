@@ -6,7 +6,7 @@ from typing import Any
 
 from accounts.models import User
 from asgiref.sync import sync_to_async
-from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from channels.generic.websocket import AsyncJsonWebsocketConsumer  # type: ignore[import-untyped]
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 
