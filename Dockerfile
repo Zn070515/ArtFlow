@@ -51,6 +51,7 @@ COPY --chown=artflow:artflow farewell_show ./farewell_show
 COPY --chown=artflow:artflow files ./files
 COPY --chown=artflow:artflow incidents ./incidents
 COPY --chown=artflow:artflow public_portal ./public_portal
+COPY --chown=artflow:artflow realtime ./realtime
 COPY --chown=artflow:artflow questionnaire ./questionnaire
 COPY --chown=artflow:artflow ruleset ./ruleset
 COPY --chown=artflow:artflow singer_contest ./singer_contest

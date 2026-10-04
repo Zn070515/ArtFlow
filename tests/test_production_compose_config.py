@@ -42,6 +42,7 @@ CONFIG_ENVIRONMENT = {
     "ARTFLOW_RELEASE_SHA": "a" * 40,
     "ARTFLOW_PYTHON_IMAGE": "python:3.12-slim@sha256:" + "b" * 64,
     "ARTFLOW_POSTGRES_IMAGE": "postgres:16-alpine@sha256:" + "c" * 64,
+    "ARTFLOW_REDIS_IMAGE": "redis:7-alpine@sha256:" + "e" * 64,
     "ARTFLOW_CADDY_IMAGE": "caddy:2-alpine@sha256:" + "d" * 64,
     "ARTFLOW_WEB_IMAGE": "artflow-web:" + "a" * 40,
 }
@@ -102,6 +103,7 @@ def test_production_images_are_digest_pinned_and_python_base_is_explicit():
     services = compose["services"]
 
     assert services["db"]["image"] == "${ARTFLOW_POSTGRES_IMAGE:?Set ARTFLOW_POSTGRES_IMAGE}"
+    assert services["redis"]["image"] == "${ARTFLOW_REDIS_IMAGE:?Set ARTFLOW_REDIS_IMAGE}"
     assert services["proxy"]["image"] == "${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}"
     assert services["web"]["image"] == (
         "${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}"
@@ -128,6 +130,7 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
         "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_EVENT_PORT:-8000}:8000"
     ]
     assert "ports" not in compose["services"]["db"]
+    assert "ports" not in compose["services"]["redis"]
     assert web_environment["DATABASE_ENGINE"] == "postgresql"
     assert web_environment["RATE_LIMIT_BACKEND"] == "database"
     assert web_environment["POSTGRES_CONN_MAX_AGE"] == "${POSTGRES_CONN_MAX_AGE:-60}"
@@ -137,6 +140,9 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     assert web_environment["CSRF_TRUSTED_ORIGINS"] == ""
     assert set(services["web"]["networks"]) == {"artflow_event_frontend"}
     assert set(services["db"]["networks"]) == {"artflow_event_frontend"}
+    assert compose["services"]["realtime"]["ports"] == [
+        "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_REALTIME_PORT:-8001}:8001"
+    ]
     assert compose["networks"]["artflow_event_frontend"]["internal"] is False
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
@@ -463,6 +469,7 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert values["ARTFLOW_RELEASE_SHA"] == "replace-me-with-the-deployed-commit-sha"
     assert values["ARTFLOW_WEB_IMAGE"] == "artflow-web:replace-me-with-the-release-sha"
     assert "ARTFLOW_POSTGRES_IMAGE" in values
+    assert "ARTFLOW_REDIS_IMAGE" in values
     assert "ARTFLOW_CADDY_IMAGE" in values
     assert "ARTFLOW_PYTHON_IMAGE" in values
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")

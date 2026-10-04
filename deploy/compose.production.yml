@@ -17,6 +17,19 @@ services:
     networks:
       - artflow_internal
 
+  redis:
+    image: ${ARTFLOW_REDIS_IMAGE:?Set ARTFLOW_REDIS_IMAGE}
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - artflow_internal
+
   web:
     image: ${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}
     restart: unless-stopped
@@ -34,6 +47,7 @@ services:
       ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
       ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
+      ARTFLOW_PROCESS_ROLE: web
       SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
       SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
       SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
@@ -70,11 +84,64 @@ services:
     networks:
       - artflow_internal
 
+  realtime:
+    image: ${ARTFLOW_WEB_IMAGE:?Set ARTFLOW_WEB_IMAGE to the prebuilt release image}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the deployment environment}
+      QR_SIGNING_KEY: ${QR_SIGNING_KEY:?Set QR_SIGNING_KEY in the deployment environment}
+      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the deployment environment}
+      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the deployment environment}
+      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
+      ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
+      ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
+      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
+      ARTFLOW_PROCESS_ROLE: realtime
+      ARTFLOW_REALTIME_REDIS_URL: redis://redis:6379/0
+      SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
+      SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
+      SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in the deployment environment}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in the deployment environment}
+      TRUST_X_FORWARDED_FOR: "true"
+      RATE_LIMIT_BACKEND: database
+      DATABASE_ENGINE: postgresql
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the deployment environment}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the deployment environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8001/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - artflow_internal
+
   proxy:
     image: ${ARTFLOW_CADDY_IMAGE:?Set ARTFLOW_CADDY_IMAGE}
     restart: unless-stopped
     depends_on:
       web:
+        condition: service_healthy
+      realtime:
         condition: service_healthy
     healthcheck:
       test:
