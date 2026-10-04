@@ -17,8 +17,11 @@ MYPY_FILES = [
     "public_portal",
     "questionnaire",
     "ruleset",
+    "realtime",
     "singer_contest",
     "staff_panel",
+    "tests",
+    "tickets",
     "voting",
 ]
 STRICT_MODULES = {
