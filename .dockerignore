@@ -4,6 +4,7 @@
 .github/
 .superpowers/
 .venv/
+node_modules/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -13,6 +14,7 @@ __pycache__/
 db.sqlite3
 media/
 staticfiles/
+backups/
 docs/
 htmlcov/
 .coverage
