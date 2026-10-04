@@ -202,7 +202,6 @@
   let realtimeSocket: WebSocket | null = null;
   let realtimeReconnectTimer: number | null = null;
   let realtimeHeartbeatTimer: number | null = null;
-  let refreshTimer: number | null = null;
   let realtimeReconnectDelay = 1000;
   let realtimeConnected = false;
 
@@ -693,15 +692,6 @@
     return url.toString();
   }
 
-  function scheduleRefresh(delay: number): void {
-    if (refreshTimer !== null) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      refreshTimer = null;
-      refreshFromServer();
-      scheduleRefresh(realtimeConnected ? 30000 : 5000);
-    }, delay);
-  }
-
   function scheduleRealtimeReconnect(): void {
     if (realtimeReconnectTimer !== null || state.locked) return;
     realtimeReconnectTimer = setTimeout(() => {
@@ -714,10 +704,8 @@
   function closeRealtime(): void {
     if (realtimeReconnectTimer !== null) clearTimeout(realtimeReconnectTimer);
     if (realtimeHeartbeatTimer !== null) clearInterval(realtimeHeartbeatTimer);
-    if (refreshTimer !== null) clearTimeout(refreshTimer);
     realtimeReconnectTimer = null;
     realtimeHeartbeatTimer = null;
-    refreshTimer = null;
     const socket = realtimeSocket;
     realtimeSocket = null;
     realtimeConnected = false;
@@ -742,7 +730,7 @@
       realtimeHeartbeatTimer = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "heartbeat" }));
       }, 15000);
-      scheduleRefresh(30000);
+      refreshFromServer();
     });
     socket.addEventListener("message", (event) => {
       let payload: unknown;
@@ -764,7 +752,6 @@
       realtimeConnected = false;
       if (realtimeHeartbeatTimer !== null) clearInterval(realtimeHeartbeatTimer);
       realtimeHeartbeatTimer = null;
-      scheduleRefresh(5000);
       scheduleRealtimeReconnect();
     });
   }
@@ -890,16 +877,14 @@
       flushSave();
     });
     window.addEventListener("beforeunload", (event) => {
-      if (!Object.keys(state.dirty).length) return;
-      event.preventDefault();
-      event.returnValue = "仍有未保存的评分草稿。";
+      if (Object.keys(state.dirty).length) {
+        event.preventDefault();
+        event.returnValue = "仍有未保存的评分草稿。";
+      }
+      closeRealtime();
       return event.returnValue;
     });
   }
-
-  window.addEventListener("beforeunload", () => {
-    closeRealtime();
-  });
 
   initCells(initial.grid);
   restorePendingDraft();
@@ -909,6 +894,5 @@
   setVersion(state.version);
   if (!state.locked) {
     connectRealtime();
-    scheduleRefresh(5000);
   }
 })();
