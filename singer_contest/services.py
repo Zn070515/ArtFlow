@@ -1979,12 +1979,12 @@ def _source_group_of(activity, binding) -> dict[str, dict[str, str]]:
         stage_by_id = {stage.pk: stage for stage in stages}
         for by, stage_pk in group_stage_keys.items():
             stage = stage_by_id.get(stage_pk)
-            entry: dict[str, str] = {}
+            stage_entry: dict[str, str] = {}
             if stage is not None:
                 for group in stage.groups.filter(is_active=True).order_by("group_order", "pk"):
                     for membership in group.memberships.filter(is_current=True):
-                        entry[str(membership.singer_id)] = group.name
-            out[by] = entry
+                        stage_entry[str(membership.singer_id)] = group.name
+            out[by] = stage_entry
     return out
 
 
