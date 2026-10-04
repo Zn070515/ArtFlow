@@ -643,6 +643,7 @@ class GroupMembership(models.Model):
     objects = GroupChorusManager()
 
     if TYPE_CHECKING:
+        removed_by_id: int | None
         group_id: int
         singer_id: int
 
@@ -867,6 +868,7 @@ class ContestRound(models.Model):
     objects = ContestRoundManager()
 
     if TYPE_CHECKING:
+        performances: models.Manager["Performance"]
         activity_id: int
         rubric_id: int | None
         entries: models.Manager["RoundEntry"]
@@ -1119,6 +1121,7 @@ class RoundEntry(RoundSnapshotMixin, models.Model):
     objects = RoundEntryManager()
 
     if TYPE_CHECKING:
+        round_id: int
         singer_id: int
 
     class Meta:
@@ -1686,6 +1689,7 @@ class ScoreRecord(models.Model):
     objects = ScoreRecordManager()
 
     if TYPE_CHECKING:
+        round_id: int
         singer_id: int
         judge_id: int
         panel_snapshot_id: int | None
@@ -2242,6 +2246,7 @@ class AudienceScore(models.Model):
     objects = AudienceScoreManager()
 
     if TYPE_CHECKING:
+        activity_id: int
         singer_id: int
 
         def get_source_display(self) -> str: ...
@@ -2441,6 +2446,13 @@ class Award(models.Model):
     source_node = models.CharField(max_length=100, blank=True)
 
     objects = AwardManager()
+
+    if TYPE_CHECKING:
+        activity_id: int
+        singer_id: int
+        source_award_decision_id: int | None
+        source_stage_result_id: int | None
+        source_vote_session_id: int | None
 
     class Meta:
         base_manager_name = "objects"
@@ -2666,6 +2678,8 @@ class PerformanceGroup(models.Model):
     objects = RoundSetupFactManager()
 
     if TYPE_CHECKING:
+        activity_id: int
+        round_id: int
         performances: models.Manager["Performance"]
 
     class Meta:
@@ -2717,6 +2731,9 @@ class Performance(models.Model):
     objects = RoundSetupFactManager()
 
     if TYPE_CHECKING:
+        activity_id: int
+        group_id: int | None
+        round_id: int
         singer_id: int
 
     class Meta:
@@ -2767,6 +2784,7 @@ class ScoringRubric(models.Model):
     objects = ScoringRubricManager()
 
     if TYPE_CHECKING:
+        rounds: models.Manager["ContestRound"]
         criteria: models.Manager["RubricCriterion"]
 
     class Meta:
@@ -2800,6 +2818,9 @@ class RubricCriterion(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = RubricCriterionManager()
+
+    if TYPE_CHECKING:
+        rubric_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -2888,6 +2909,10 @@ class CriterionScore(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = CriterionScoreManager()
+
+    if TYPE_CHECKING:
+        criterion_id: int
+        score_record_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -3025,6 +3050,9 @@ class StageResult(models.Model):
     objects = StageResultManager()
 
     if TYPE_CHECKING:
+
+        def get_status_display(self) -> str: ...
+
         activity_id: int
         ruleset_version_id: int
         decisions: models.Manager["StageDecision"]
@@ -3193,6 +3221,7 @@ class StageDecision(models.Model):
     objects = StageDecisionManager()
 
     if TYPE_CHECKING:
+        stage_result_id: int
         singer_id: int
 
     class Meta:
@@ -3308,6 +3337,11 @@ class StageAwardDecision(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = StageAwardDecisionManager()
+
+    if TYPE_CHECKING:
+        activity_id: int
+        singer_id: int
+        stage_result_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -3425,6 +3459,10 @@ class CompositeResult(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = CompositeResultManager()
+
+    if TYPE_CHECKING:
+        singer_id: int
+        stage_result_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -3545,6 +3583,9 @@ class ManualDecision(models.Model):
 
     objects = ManualDecisionManager()
 
+    if TYPE_CHECKING:
+        activity_id: int
+
     class Meta:
         base_manager_name = "objects"
         unique_together = ("ruleset_version", "manual_key", "group")
@@ -3635,6 +3676,10 @@ class DuelDecision(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     objects = DuelDecisionManager()
+
+    if TYPE_CHECKING:
+        activity_id: int
+        ruleset_version_id: int
 
     class Meta:
         base_manager_name = "objects"
