@@ -18,6 +18,19 @@
     {% if group %}
     <p class="text-sm text-gray-500 mb-2">{{ group.stage.name }} · {{ group.name }} · 共享材料</p>
     <p class="text-xs text-gray-500 mb-6">当前成员：{% for membership in current_members %}{{ membership.singer.name }}{% if not forloop.last %}、{% endif %}{% empty %}暂无当前成员{% endfor %}</p>
+    <section class="mb-6 rounded border border-gray-200 bg-gray-50 px-3 py-2"
+             data-collab-presence
+             data-collab-resource="group:{{ group.pk }}:materials"
+             data-collab-ws-url="/ws/group/{{ group.pk }}/materials/"
+             data-collab-empty-text="当前没有其他组员在线"
+             data-collab-refresh-events="group.material_changed,group.material_reviewed">
+        <p class="text-xs text-gray-500" data-collab-status>正在连接协作提示…</p>
+        <ul class="mt-2 space-y-1 text-sm text-gray-700" data-collab-members></ul>
+        <div class="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-collab-refresh hidden>
+            本组材料已被其他成员或工作人员更新。
+            <button type="button" class="underline" data-collab-refresh-action>刷新查看</button>
+        </div>
+    </section>
     {% else %}
     <p class="text-sm text-gray-500 mb-6">资料完成度</p>
     {% endif %}
@@ -126,4 +139,5 @@
 
 {% block extra_js %}
 <script src="{% static 'dist/questionnaire_form.js' %}" defer></script>
+{% if group %}<script src="{% static 'dist/collab_presence.js' %}" defer></script>{% endif %}
 {% endblock %}

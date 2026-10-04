@@ -4915,6 +4915,19 @@ class PublicPortalPublicationTests(TestCase):
         self.assertTrue(response["Location"].startswith(reverse("accounts:admin_login")))
         self.assertFalse(PublicPost.objects.filter(title="A Post").exists())
 
+    def test_post_list_links_to_the_staff_preview(self):
+        self.client.force_login(self.staff)
+        self.client.post(
+            reverse("staff:post_create"),
+            self._post_payload(status=PublicPost.Status.DRAFT, related_activity_id=self.testing.pk),
+        )
+        post = PublicPost.objects.get(title="A Post")
+
+        response = self.client.get(reverse("staff:post_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("staff:post_preview", args=[post.pk]))
+
     def test_staff_post_form_does_not_offer_published_status(self):
         self.client.force_login(self.staff)
         response = self.client.get(reverse("staff:post_create"))
@@ -7523,6 +7536,21 @@ class JudgeControlHTTPTests(TestCase):
             reverse("staff:judge_prepare", args=[self.contest_round.pk]),
             {"attending_judge_ids": [str(self.judge.pk)]},
         )
+
+    def test_control_page_links_the_per_seat_qr_fallback(self):
+        """The legacy single-seat QR stays reachable without becoming the default entry."""
+        self._prepare_panel()
+
+        response = self.client.get(reverse("staff:judge_control", args=[self.contest_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        seats = response.context["seat_rows"]
+        self.assertTrue(seats)
+        self.assertContains(
+            response,
+            reverse("staff:judge_seat_qr", args=[self.contest_round.pk, seats[0]["seat"].pk]),
+        )
+        self.assertContains(response, "单席位二维码")
 
     def test_control_page_is_staff_only_and_readable(self):
         self.client.logout()

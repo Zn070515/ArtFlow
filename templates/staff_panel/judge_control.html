@@ -51,12 +51,20 @@
         </div>
         <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {% for row in seat_rows %}
-            <form method="post" action="{% url 'staff:judge_seat_label' round.pk row.seat.pk %}" class="flex items-center gap-2 rounded border border-gray-200 p-2">
-                {% csrf_token %}
-                <span class="shrink-0 text-sm font-medium text-gray-700">{{ row.seat_label }}</span>
-                <input class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" name="display_label" maxlength="100" value="{{ row.seat.display_label }}" placeholder="可选备注">
-                <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700" type="submit">保存</button>
-            </form>
+            <div class="rounded border border-gray-200 p-2">
+                <form method="post" action="{% url 'staff:judge_seat_label' round.pk row.seat.pk %}" class="flex items-center gap-2">
+                    {% csrf_token %}
+                    <span class="shrink-0 text-sm font-medium text-gray-700">{{ row.seat_label }}</span>
+                    <input class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" name="display_label" maxlength="100" value="{{ row.seat.display_label }}" placeholder="可选备注">
+                    <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700" type="submit">保存</button>
+                </form>
+                {% if panel_snapshot.state == 'active' %}
+                <form method="post" action="{% url 'staff:judge_seat_qr' round.pk row.seat.pk %}" class="mt-1 flex justify-end">
+                    {% csrf_token %}
+                    <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-600" type="submit" title="旧版单席位终端备用入口，现场共享二维码优先">单席位二维码</button>
+                </form>
+                {% endif %}
+            </div>
             {% endfor %}
         </div>
         <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">

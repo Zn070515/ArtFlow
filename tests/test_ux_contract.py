@@ -1,3 +1,5 @@
+import types
+
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.messages import constants
 from django.contrib.messages.storage.base import Message
@@ -65,3 +67,64 @@ class GlobalUxContractTests(SimpleTestCase):
 
         self.assertIn("不要重复提交敏感信息", cases[-1][0].content.decode())
         self.assertNotIn("请刷新", cases[-1][0].content.decode())
+
+
+class GroupMaterialPresenceContractTests(SimpleTestCase):
+    """The group material page must join the realtime room the backend already mounts.
+
+    ``realtime`` publishes to ``/ws/group/<pk>/materials/`` and the consuming service
+    exists, but a page nobody subscribes to is still a dead channel. This pins the
+    browser-side glue only; presence stays advisory and never becomes an edit lock.
+    """
+
+    def setUp(self):
+        self.request = RequestFactory().get("/")
+        self.request.user = AnonymousUser()
+
+    def _group(self):
+        return types.SimpleNamespace(pk=3, name="第一组", stage=types.SimpleNamespace(name="合唱"))
+
+    def _render(self, *, group):
+        return render_to_string(
+            "questionnaire/form.html",
+            {
+                "messages": [],
+                "artflow_organization_name": "",
+                "artflow_icp_number": "",
+                "artflow_icp_url": "",
+                "activity": types.SimpleNamespace(title="院十佳决赛"),
+                "group": group,
+                "current_members": [],
+                "completion": {
+                    "required": 0,
+                    "required_answered": 0,
+                    "answered": 0,
+                    "upcoming": 0,
+                },
+                "pages": [],
+                "editable": False,
+                "preview": False,
+                "submitted": False,
+                "schema_hash": "test-schema-hash",
+                "autosave_url": "/questionnaire/group/3/autosave/",
+                "upload_url_template": "/questionnaire/group/3/file/__KEY__/",
+                "submit_url": "/questionnaire/group/3/submit/",
+            },
+            request=self.request,
+        )
+
+    def test_group_page_joins_the_material_collaboration_room(self):
+        rendered = self._render(group=self._group())
+
+        self.assertIn("data-collab-presence", rendered)
+        self.assertIn("/ws/group/3/materials/", rendered)
+        self.assertIn("group:3:materials", rendered)
+        self.assertIn("group.material_changed", rendered)
+        self.assertIn("当前没有其他组员在线", rendered)
+        self.assertIn("dist/collab_presence.js", rendered)
+
+    def test_a_personal_form_does_not_join_a_group_room(self):
+        rendered = self._render(group=None)
+
+        self.assertNotIn("data-collab-presence", rendered)
+        self.assertNotIn("collab_presence.js", rendered)
