@@ -63,6 +63,33 @@
     return answers;
   };
 
+  // A shared group response is edited by several members at once, so the page declares
+  // which answer base it is looking at and the server refuses a base that has moved. The
+  // bases come from the server (one token per stored answer), so an untouched checkbox —
+  // absent in the database, `false` in the DOM — can never look like a change.
+  const casEnabled = root.dataset.cas === "1";
+  const bases = new Map<string, string>();
+  const synced = new Map<string, unknown>();
+  const initial = collect();
+  for (const [key, value] of Object.entries(initial)) synced.set(key, value);
+  const basesScript = document.getElementById("questionnaire-answer-bases");
+  if (basesScript?.textContent) {
+    try {
+      const parsed = JSON.parse(basesScript.textContent) as Record<string, string>;
+      for (const [key, base] of Object.entries(parsed)) bases.set(key, base);
+    } catch {
+      // An unreadable map only means the page edits as a whole form, as it did before.
+    }
+  }
+  const applyBases = (incoming: Record<string, string> | undefined): void => {
+    if (!incoming) return;
+    for (const [key, base] of Object.entries(incoming)) bases.set(key, base);
+  };
+  const currentChanges = (): Array<{ key: string; base: string; value: unknown }> =>
+    Object.entries(collect())
+      .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(synced.get(key)))
+      .map(([key, value]) => ({ key, base: bases.get(key) ?? "", value }));
+
   let timer: number | undefined;
   let inFlight = false;
   let dirty = false;
@@ -74,16 +101,35 @@
     }
     inFlight = true;
     setSaveState("保存中…");
+    const snapshot = collect();
+    const changes = casEnabled ? currentChanges() : null;
+    if (casEnabled && changes && changes.length === 0) {
+      inFlight = false;
+      setSaveState("已保存");
+      return;
+    }
     try {
       const response = await fetch(autosaveUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
-        body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
+        body: JSON.stringify(
+          casEnabled
+            ? { changes, schema_hash: schemaHash }
+            : { answers: snapshot, schema_hash: schemaHash },
+        ),
       });
       const body = (await response.json()) as {
         completion?: { required?: number; required_answered?: number; answered?: number };
+        answer_bases?: Record<string, string>;
+        conflicts?: Array<{ key?: unknown; server?: unknown; base?: unknown }>;
+        code?: string;
         error?: string;
       };
+      if (response.status === 409 && body.code === "QUESTION_STALE") {
+        setSaveState("");
+        handleQuestionStale(changes ?? [], body.conflicts ?? []);
+        return;
+      }
       if (!response.ok) {
         // A 409 means this page is out of date — either the questionnaire changed under
         // it or the response was already submitted. Never overwrite from a stale form.
@@ -92,6 +138,15 @@
         return;
       }
       clearError();
+      if (casEnabled && changes) {
+        // Only what this request actually carried. Marking the whole snapshot synced would
+        // swallow anything typed while the request was in flight, and the next save would
+        // then find nothing to send.
+        for (const change of changes) synced.set(change.key, change.value);
+      } else {
+        for (const [key, value] of Object.entries(snapshot)) synced.set(key, value);
+      }
+      applyBases(body.answer_bases);
       if (body.completion) {
         if (requiredCount) requiredCount.textContent = String(body.completion.required ?? 0);
         if (requiredAnsweredCount) {
@@ -110,6 +165,52 @@
         void save();
       }
     }
+  };
+
+  const handleQuestionStale = (
+    changes: Array<{ key: string; base: string; value: unknown }>,
+    conflicts: Array<{ key?: unknown; server?: unknown; base?: unknown }>,
+  ): void => {
+    const staleKeys = new Set(
+      conflicts.map((conflict) => String(conflict.key ?? "")).filter(Boolean),
+    );
+    const shown = [...staleKeys].map((key) => {
+      const conflict = conflicts.find((entry) => String(entry.key ?? "") === key);
+      return `· ${key}: 服务器「${String(conflict?.server ?? "")}」`;
+    });
+    const overwrite = window.confirm(
+      `以下内容已被其他成员修改：\n\n${shown.join("\n")}\n\n` +
+        `选择“确定”用你的内容覆盖；选择“取消”保留服务器上的版本。`,
+    );
+    if (!overwrite) {
+      // Keep the teammate's text, and re-sync so the next edit is built on it.
+      void fetch(autosaveUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
+        body: JSON.stringify({ changes: [], schema_hash: schemaHash }),
+      })
+        .then(async (response) => {
+          const body = (await response.json()) as { answer_bases?: Record<string, string> };
+          applyBases(body.answer_bases);
+          window.location.reload();
+        })
+        .catch(() => showError("保存失败，请刷新后重试。"));
+      return;
+    }
+    // Retry against the base the server just reported, so a third edit in between is
+    // caught again rather than overwritten.
+    for (const conflict of conflicts) {
+      const key = String(conflict.key ?? "");
+      if (key) bases.set(key, String(conflict.base ?? ""));
+    }
+    for (const change of changes) {
+      if (staleKeys.has(change.key)) {
+        const conflict = conflicts.find((entry) => String(entry.key ?? "") === change.key);
+        change.base = String(conflict?.base ?? "");
+      }
+    }
+    dirty = true;
+    void save();
   };
 
   const schedule = (): void => {

@@ -492,14 +492,43 @@ def submit_registration(
 
 
 @transaction.atomic
-def save_group_draft(*, version, group: Group, answers, actor, schema_hash: str = ""):
+def save_group_draft(
+    *, version, group: Group, actor, answers=None, changes=None, schema_hash: str = ""
+):
+    """Save a group's draft, either as a whole form (``answers``) or as a CAS (``changes``).
+
+    A group shares one response, so the whole-form form of this is only safe for a single
+    writer. ``changes`` carries, per question, the answer base the editor was looking at;
+    the writer refuses a base that has moved instead of overwriting a teammate's text.
+    """
     _require_group_member(group, actor)
     plan = questionnaire_plan(version)
     if plan.subject != "group":
         raise ValidationError("当前赛制问卷不是分组合唱组问卷。")
     if schema_hash and schema_hash != plan.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
-    normalized = normalize_answers(plan, answers)
+    normalized_changes = None
+    if changes is not None:
+        if not isinstance(changes, list):
+            raise ValidationError("changes 必须是列表。")
+        normalized_changes = []
+        for change in changes:
+            if not isinstance(change, dict):
+                raise ValidationError("changes 的每一项必须是对象。")
+            key = str(change.get("key") or "")
+            question = plan.question(key)
+            if question is None:
+                continue
+            normalized_changes.append(
+                {
+                    "key": key,
+                    "base": str(change.get("base") or ""),
+                    "value": normalize_answer(question, change.get("value")),
+                }
+            )
+        normalized = {change["key"]: change["value"] for change in normalized_changes}
+    else:
+        normalized = normalize_answers(plan, answers)
     writable = writable_group_question_keys(group=group, plan=plan)
     if writable is not None:
         rejected = sorted(_keys_of(plan, normalized) - writable)
@@ -511,6 +540,10 @@ def save_group_draft(*, version, group: Group, answers, actor, schema_hash: str 
         questionnaire_key=plan.key,
         schema_hash=plan.schema_hash,
     )
+    if normalized_changes is not None:
+        return save_draft_answers(
+            response, changes=normalized_changes, schema_hash=plan.schema_hash
+        )
     return save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
 
 

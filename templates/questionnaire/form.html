@@ -10,9 +10,11 @@
      data-upload-url-template="{{ upload_url_template }}"
      data-schema-hash="{{ schema_hash }}"
      data-editable="{% if editable %}1{% else %}0{% endif %}"
+     data-cas="{% if group %}1{% else %}0{% endif %}"
      data-submit-url="{{ submit_url }}"
      data-submitted="{% if submitted %}1{% else %}0{% endif %}">
     {% csrf_token %}
+    {{ answer_bases|json_script:"questionnaire-answer-bases" }}
 
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
     {% if group %}

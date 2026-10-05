@@ -11,11 +11,43 @@ where the actor is known.
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from .models import QuestionnaireResponse
+
+
+def answer_base(value) -> str:
+    """A stable, opaque token for one stored answer.
+
+    The page renders these back, and a write says which base it was built on. Comparing
+    tokens rather than raw values keeps the comparison independent of the shape a client
+    happens to send: the server owns the canonical form, so an untouched checkbox
+    (``False`` stored, ``false`` in the DOM, absent in the database) can never look like a
+    change.
+    """
+    canonical = json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def answer_bases(answers: dict) -> dict[str, str]:
+    return {key: answer_base(value) for key, value in (answers or {}).items()}
+
+
+class QuestionStale(ValidationError):
+    """A write was built on an answer someone else has since changed.
+
+    Carries the server's value and the writer's so the page can show the difference
+    instead of silently picking a winner.
+    """
+
+    def __init__(self, *, conflicts: list[dict]) -> None:
+        super().__init__("部分题目已被其他成员修改。")
+        self.conflicts = conflicts
 
 
 @transaction.atomic
@@ -66,21 +98,48 @@ def get_or_create_group_response(*, group, ruleset_version, questionnaire_key, s
 
 @transaction.atomic
 def save_draft_answers(
-    response: QuestionnaireResponse, *, answers: dict, schema_hash: str = ""
+    response: QuestionnaireResponse,
+    *,
+    answers: dict | None = None,
+    changes: list[dict] | None = None,
+    schema_hash: str = "",
 ) -> QuestionnaireResponse:
-    """Merge ``answers`` into the stored response, under the row lock.
+    """Merge ``answers`` (or apply ``changes``) under the row lock.
 
     This is the low-level writer and it does not decide *who* may write — authority belongs
     to the activity's phase and the staff supplement grants, checked by
     :func:`questionnaire.registration.save_draft`. What it refuses is a write built on a
     questionnaire shape the version no longer has, so an open browser is told to refresh
     instead of merging answers the current form cannot show.
+
+    ``changes`` is the compare-and-set form, used where more than one person edits the same
+    response: each entry names the answer base it was built on, and a base that no longer
+    matches raises :class:`QuestionStale` instead of overwriting. Two people editing
+    different questions both succeed; two editing the same one are told, rather than one of
+    them silently losing their text — which is what a whole-form merge does.
     """
     locked = QuestionnaireResponse.objects.select_for_update().get(pk=response.pk)
     if schema_hash and locked.schema_hash and schema_hash != locked.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
     merged = dict(locked.answers or {})
-    merged.update(answers)
+    if changes is not None:
+        conflicts = [
+            {
+                "key": change["key"],
+                "server": merged.get(change["key"]),
+                "local": change.get("value"),
+                # The base to retry against if the author decides their version should win.
+                "base": answer_base(merged.get(change["key"])),
+            }
+            for change in changes
+            if answer_base(merged.get(change["key"])) != str(change.get("base") or "")
+        ]
+        if conflicts:
+            raise QuestionStale(conflicts=conflicts)
+        for change in changes:
+            merged[change["key"]] = change["value"]
+    else:
+        merged.update(answers or {})
     locked.answers = merged
     if schema_hash:
         locked.schema_hash = schema_hash
