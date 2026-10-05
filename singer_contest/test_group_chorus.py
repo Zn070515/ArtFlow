@@ -21,6 +21,7 @@ from .group_chorus import (
     group_material_readiness,
     group_stage_readiness,
     record_group_stage,
+    set_group_material_status,
 )
 from .models import Group, GroupMembership, GroupStage, SingerRegistration
 
@@ -178,6 +179,7 @@ class GroupChorusStageServiceTests(TestCase):
         )
         record_group_stage(stage, self._groups(), self.operator)
         confirm_group_stage(stage, self.operator)
+        set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
         group = Group.objects.get(stage=stage, name="A组")
         reconcile_group_material_checks(group)
         check = MaterialCheck.objects.get(
@@ -209,6 +211,73 @@ class GroupChorusStageServiceTests(TestCase):
                 ),
                 actor=self.singers[2].user,
             )
+
+    def test_group_material_window_decides_independently_of_the_activity_phase(self):
+        """The group's own window decides, not the registration phase.
+
+        Grouping happens after registration closed — the roster comes from an external draw
+        taken while the contest is already running — so a group's first submission must be
+        possible in a phase whose action set contains no ``UPLOAD_MATERIAL`` at all.
+        """
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        group = Group.objects.get(stage=stage, name="A组")
+        reconcile_group_material_checks(group)
+        check = MaterialCheck.objects.get(
+            group=group, file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT
+        )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.LIVE)
+
+        def upload(name: str):
+            return submit_participant_material_for_check(
+                owner=group,
+                check_id=check.pk,
+                uploaded_file=SimpleUploadedFile(
+                    name, b"ID3" + b"chorus", content_type="audio/mpeg"
+                ),
+                actor=self.singers[0].user,
+            )
+
+        # Closed by default. The activity is past registration, and no phase can reopen it.
+        with self.assertRaisesMessage(ValidationError, "不接受材料提交"):
+            upload("closed.mp3")
+
+        set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
+        self.assertEqual(upload("open.mp3").group_id, group.pk)
+
+        set_group_material_status(stage, GroupStage.MaterialStatus.CLOSED, self.operator)
+        with self.assertRaisesMessage(ValidationError, "不接受材料提交"):
+            upload("closed-again.mp3")
+
+    def test_group_material_window_is_audited_and_rejects_unknown_states(self):
+        draft = create_group_stage(
+            self.activity, stage_key="draft", name="草稿组", operator=self.operator
+        )
+        with self.assertRaisesMessage(ValidationError, "只有已确认"):
+            set_group_material_status(draft, GroupStage.MaterialStatus.OPEN, self.operator)
+
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
+        # Re-setting the same window is a no-op, so the audit trail records decisions
+        # rather than button presses.
+        set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
+        audits = AuditLog.objects.filter(
+            target=f"GroupStage:{stage.pk}",
+            action_type=AuditLog.ActionType.SET_GROUP_MATERIAL_STATUS,
+        )
+        self.assertEqual(audits.count(), 1)
+        self.assertEqual(audits.get().new_value, GroupStage.MaterialStatus.OPEN)
+
+        with self.assertRaisesMessage(ValidationError, "未知的分组合唱材料窗口状态"):
+            set_group_material_status(stage, "bogus", self.operator)
 
     def test_background_video_does_not_satisfy_the_accompaniment_contract(self):
         stage = create_group_stage(

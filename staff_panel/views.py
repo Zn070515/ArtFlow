@@ -107,6 +107,7 @@ from singer_contest.group_chorus import (
     freeze_group_stage,
     group_material_readiness,
     record_group_stage,
+    set_group_material_status,
 )
 from singer_contest.judge_authority import (
     advance_performance,
@@ -424,6 +425,7 @@ def group_stage_detail(request, pk):
             "groups": groups,
             "assignment_form": assignment_form,
             "correction_form": correction_form,
+            "material_status_choices": GroupStage.MaterialStatus.choices,
             "can_record": stage.status == GroupStage.Status.DRAFT and not stage.activity.is_locked,
             "can_correct": stage.status in (GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN)
             and not stage.activity.is_locked,
@@ -513,6 +515,26 @@ def group_stage_confirm(request, pk):
         messages.error(request, domain_error_messages(error))
     else:
         messages.success(request, "分组合唱分组已确认。")
+    return redirect("staff:group_stage_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def group_stage_material_status(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    try:
+        set_group_material_status(
+            stage,
+            request.POST.get("material_status", ""),
+            request.user,
+            note=request.POST.get("note", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, domain_error_messages(error))
+    else:
+        messages.success(
+            request, f"分组合唱材料窗口已设为：{stage.get_material_status_display()}。"
+        )
     return redirect("staff:group_stage_detail", pk=stage.pk)
 
 

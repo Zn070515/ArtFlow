@@ -319,6 +319,46 @@ def correct_group_stage(
     return locked_stage
 
 
+@transaction.atomic
+def set_group_material_status(
+    stage: GroupStage, status: str, operator, *, note: str = ""
+) -> GroupStage:
+    """Open, close, or narrow this group stage's material submission window.
+
+    Operational state, not phase state: staff open the window once the groups are settled
+    (which happens after registration closed and possibly during the live show), close it
+    when the material is in, or narrow it to single questions to collect supplements. The
+    activity row is locked, but no phase action is required — the window is exactly the
+    authority that is allowed to be open in a phase whose action set has no
+    ``UPLOAD_MATERIAL``.
+    """
+    current_operator = _operator(operator)
+    target = str(status or "").strip()
+    if target not in {choice.value for choice in GroupStage.MaterialStatus}:
+        raise ValidationError("未知的分组合唱材料窗口状态。")
+    locked_activity = lock_activity_for_action(stage.activity)
+    locked_stage = _stage_for_update(stage)
+    if locked_stage.activity_id != locked_activity.pk:
+        raise PermissionDenied("分组合唱赛段不属于当前活动。")
+    if locked_stage.status == GroupStage.Status.DRAFT:
+        raise ValidationError("只有已确认的分组合唱赛段可以设置材料窗口。")
+    old_value = locked_stage.material_status
+    if old_value == target:
+        return locked_stage
+    with authority_write(GROUP_STAGE_STATE):
+        locked_stage.material_status = target
+        locked_stage.save(update_fields=["material_status", "updated_at"])
+    _write_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.SET_GROUP_MATERIAL_STATUS,
+        stage=locked_stage,
+        old_value=old_value,
+        new_value=target,
+        note=str(note or "").strip(),
+    )
+    return locked_stage
+
+
 def current_group_members(group: Group):
     """Return only the membership rows that grant current Group access."""
     return group.memberships.filter(is_current=True).select_related("singer").order_by("singer_id")

@@ -469,6 +469,26 @@ class GroupStage(models.Model):
         CONFIRMED = "confirmed", "已确认"
         FROZEN = "frozen", "已冻结"
 
+    class MaterialStatus(models.TextChoices):
+        """The group's own material submission window.
+
+        Grouping happens *after* registration closes — the roster comes from an external
+        draw taken once the contest is already running — so the activity's registration
+        phase cannot describe when a group's materials are due. The window is its own
+        server-side state: staff open it when the groups are settled and the performers
+        should submit, close it when the material is in, or send individual questions
+        back one at a time. Defaults to ``CLOSED`` so a newly confirmed stage never
+        accepts material until someone says it should.
+        """
+
+        OPEN = "open", "开放提交"
+        CLOSED = "closed", "已关闭"
+        SUPPLEMENT_ONLY = "supplement_only", "仅补交"
+
+    material_status = models.CharField(
+        max_length=16, choices=MaterialStatus, default=MaterialStatus.CLOSED
+    )
+
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="group_stages"
     )
@@ -501,6 +521,8 @@ class GroupStage(models.Model):
         groups: models.Manager["Group"]
 
         def get_status_display(self) -> str: ...
+
+        def get_material_status_display(self) -> str: ...
 
     class Meta:
         ordering = ["created_at", "pk"]

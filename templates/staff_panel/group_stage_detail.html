@@ -85,6 +85,30 @@
     </form>
     {% endif %}
 
+    {% if stage.status != 'draft' %}
+    <section class="bg-white border border-gray-200 rounded-lg p-5 mb-6">
+        <h2 class="font-semibold text-gray-900 mb-1">分组合唱材料窗口</h2>
+        <p class="text-sm text-gray-500 mb-3">
+            当前：<span class="font-medium text-gray-700">{{ stage.get_material_status_display }}</span>。
+            窗口独立于活动阶段——分组在报名结束后才产生，所以组员什么时候能提交材料由这里决定，
+            而不是由报名阶段决定。
+        </p>
+        <form method="post" action="{% url 'staff:group_stage_material_status' stage.pk %}" class="flex flex-wrap items-end gap-2">
+            {% csrf_token %}
+            <label class="text-xs text-gray-500">
+                <span class="block mb-1">窗口状态</span>
+                <select name="material_status" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                    {% for value, label in material_status_choices %}
+                    <option value="{{ value }}" {% if value == stage.material_status %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <input type="text" name="note" placeholder="说明（选填）" class="text-xs border border-gray-300 rounded px-2 py-1">
+            <button class="rounded border border-gray-300 px-3 py-1.5 text-sm" type="submit">更新材料窗口</button>
+        </form>
+    </section>
+    {% endif %}
+
     {% if can_correct %}
     <details class="bg-white border border-amber-200 rounded-lg p-5">
         <summary class="font-semibold text-amber-900 cursor-pointer">受控修正成员</summary>
