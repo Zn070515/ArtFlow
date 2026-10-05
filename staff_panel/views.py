@@ -2312,6 +2312,23 @@ def audience_scores_api(request, activity_id):
             for stage_key in stage_keys:
                 ensure_audience_not_consumed_by_confirmed_stage(activity, stage_key)
             test_flag = runtime_is_test(activity)
+            # §9.8: a manually entered fallback score is a formal fact, so the *first* row
+            # for a slot has to say where its number came from. Correcting a number later
+            # may still omit the source — the rule protects against inventing provenance,
+            # not against erasing a record the caller never touched.
+            existing_slots = {
+                (stage_key, singer_id)
+                for stage_key, singer_id in AudienceScore.objects.filter(
+                    activity=activity,
+                    stage_key__in=stage_keys,
+                    singer_id__in=[row[0] for row in rows],
+                ).values_list("stage_key", "singer_id")
+            }
+            if not source and any(
+                (stage_key, singer_id) not in existing_slots
+                for singer_id, stage_key, _score in rows
+            ):
+                raise ValidationError("首次录入观众分必须注明来源（外部表单 / 纸质统计 / 其他）。")
             for singer_id, stage_key, score in rows:
                 defaults: dict[str, object] = {
                     "score": score,
