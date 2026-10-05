@@ -340,6 +340,9 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
                     "ARTFLOW_EVENT_BIND_ADDRESS=127.0.0.1",
                     f"ARTFLOW_EVENT_PORT={event_port}",
                     "ARTFLOW_EVENT_ALLOWED_HOSTS=localhost,127.0.0.1",
+                    # The proxy keeps its own Caddyfile from the manifest; pinning the
+                    # image this way avoids mounting a second file at the same path.
+                    f"ARTFLOW_CADDY_IMAGE={CADDY_RUNTIME_TEST_IMAGE}",
                     "",
                 ]
             ),
@@ -350,9 +353,8 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
             yaml.safe_dump(
                 {
                     "services": {
-                        # Both roles are stood in for: the event stack now publishes the
-                        # proxy's port, not web's, and this test only cares which port is
-                        # reachable and that the database has none.
+                        # The published port now belongs to `proxy`, which keeps the
+                        # manifest's own Caddyfile; only `web` is stood in for.
                         role: {
                             "image": CADDY_RUNTIME_TEST_IMAGE,
                             "entrypoint": ["caddy"],
@@ -381,7 +383,7 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
                                 "start_period": "2s",
                             },
                         }
-                        for role in ("web", "proxy")
+                        for role in ("web",)
                     }
                 }
             ),
