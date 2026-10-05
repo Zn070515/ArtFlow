@@ -28,12 +28,13 @@
         <p class="mt-2 text-sm text-gray-600" data-live-waiting-label>请继续观看比赛，投票开放后本页面会显示入口。</p>
     </section>
 
-    {% if result_post %}
-    <section class="mt-6 rounded border border-gray-200 bg-white p-5">
+    {# Always rendered, hidden until there is a release. The audience is told to keep the
+       same QR page open all night, so a release must appear on a page that was opened
+       long before it — a server-rendered-only block would only ever show up on refresh. #}
+    <section class="mt-6 rounded border border-gray-200 bg-white p-5{% if not result_post %} hidden{% endif %}" data-live-result>
         <p class="text-sm text-gray-600">结果公示</p>
-        <a class="mt-1 inline-block text-sm text-brand underline" href="{% url 'public_portal:post_detail' result_post.pk %}">{{ result_post.title }}</a>
+        <a class="mt-1 inline-block text-sm text-brand underline" href="{% if result_post %}{% url 'public_portal:post_detail' result_post.pk %}{% else %}#{% endif %}" data-live-result-link>{{ result_post.title|default:"" }}</a>
     </section>
-    {% endif %}
 </main>
 {% endblock %}
 

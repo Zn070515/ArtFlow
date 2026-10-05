@@ -5897,7 +5897,12 @@ class RoundScoresApiTests(TestCase):
         response = self.client.post(
             reverse("staff:audience_scores_api", args=[self.activity.pk]),
             data=json.dumps(
-                {"cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}]}
+                {
+                    "cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}],
+                    # A first row has to name its provenance (§9.8); this test is about
+                    # the save/resolve mechanics.
+                    "source": "paper_tally",
+                }
             ),
             content_type="application/json",
         )
@@ -6104,7 +6109,12 @@ class RoundScoresApiTests(TestCase):
         response = self.client.post(
             reverse("staff:audience_scores_api", args=[self.activity.pk]),
             data=json.dumps(
-                {"cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}]}
+                {
+                    "cells": [{"singer_id": self.singer.pk, "set_key": "audience1", "score": "90"}],
+                    # A first row has to name its provenance (§9.8); this test is about
+                    # the save/resolve mechanics.
+                    "source": "paper_tally",
+                }
             ),
             content_type="application/json",
         )
@@ -6201,6 +6211,25 @@ class RoundScoresApiTests(TestCase):
             target=f"AudienceScore:{self.activity.pk}",
         )
         self.assertTrue(any("source=external_form" in audit.new_value for audit in audits))
+
+    def test_a_first_row_must_name_its_source_but_a_correction_need_not(self):
+        """§9.8: provenance is required to *invent* a number, not to fix one.
+
+        The rule is about the first row for a slot. Correcting an existing number without
+        touching the source control must keep working, and must not erase what was
+        recorded — otherwise staff would have to restamp provenance to fix a typo.
+        """
+        self._frozen_audience_ruleset()
+
+        refused = self._save_audience()
+        self.assertEqual(refused.status_code, 400)
+        self.assertFalse(AudienceScore.objects.filter(activity=self.activity).exists())
+
+        self.assertEqual(self._save_audience(source="paper_tally").status_code, 200)
+        corrected = self._save_audience()
+        self.assertEqual(corrected.status_code, 200)
+        row = AudienceScore.objects.get(activity=self.activity, singer=self.singer)
+        self.assertEqual(row.source, AudienceScore.Source.PAPER_TALLY)
 
     def test_audience_score_rejects_an_unknown_source(self):
         self._frozen_audience_ruleset()

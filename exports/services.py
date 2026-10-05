@@ -30,7 +30,11 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
-from singer_contest.group_chorus import current_group_members, group_material_readiness
+from singer_contest.group_chorus import (
+    current_group_members,
+    group_material_readiness,
+    group_stage_archive_blocker,
+)
 from singer_contest.models import ContestRound, GroupStage, ScoreSummary, SingerRegistration
 from singer_contest.services import (
     _eligible_singers,
@@ -926,8 +930,9 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         is_test_data=locked_activity.is_test_mode,
     ).prefetch_related("groups__memberships", "groups__files")
     for group_stage in group_stages:
-        if group_stage.status != GroupStage.Status.FROZEN:
-            raise PermissionDenied(f"分组合唱赛段「{group_stage.name}」尚未冻结，不能归档。")
+        blocker = group_stage_archive_blocker(group_stage)
+        if blocker:
+            raise PermissionDenied(blocker)
         if not all(
             group_material_readiness(group).value == "ready"
             for group in group_stage.groups.filter(is_active=True)

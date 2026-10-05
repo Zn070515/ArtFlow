@@ -14,6 +14,8 @@
     const voteLabel = root.querySelector("[data-live-vote-label]");
     const voteLink = root.querySelector("[data-live-vote-link]");
     const ticketStatus = root.querySelector("[data-live-ticket-status]");
+    const resultSection = root.querySelector("[data-live-result]");
+    const resultLink = root.querySelector("[data-live-result-link]");
     // A fixed 2.5 s cadence made every open page poll in lockstep, so a whole
     // audience arrives as one spike. Jitter spreads the wave; the failure ladder
     // and the hidden-tab interval keep a struggling or backgrounded client from
@@ -69,6 +71,18 @@
         if (voteLink) {
             voteLink.href = typeof value.vote_url === "string" ? value.vote_url : "#";
             voteLink.classList.toggle("hidden", !open);
+        }
+        // The release can land while this page is open — that is the whole point of keeping
+        // one QR up all night — so the section is a shell the poll fills in, not something
+        // only a reload can reveal.
+        const hasResult = typeof value.result_url === "string" && value.result_url.length > 0;
+        if (resultSection)
+            resultSection.classList.toggle("hidden", !hasResult);
+        if (resultLink) {
+            resultLink.href = hasResult ? value.result_url : "#";
+            if (typeof value.result_title === "string" && value.result_title) {
+                resultLink.textContent = value.result_title;
+            }
         }
         if (ticketStatus && typeof value.ticket_status === "string") {
             ticketStatus.textContent = value.ticket_status === "checked_in"

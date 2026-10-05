@@ -101,6 +101,7 @@ from ruleset.services import (
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.group_chorus import (
+    cancel_group_stage,
     confirm_group_stage,
     correct_group_stage,
     create_group_stage,
@@ -515,6 +516,19 @@ def group_stage_confirm(request, pk):
         messages.error(request, domain_error_messages(error))
     else:
         messages.success(request, "分组合唱分组已确认。")
+    return redirect("staff:group_stage_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def group_stage_cancel(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    try:
+        cancel_group_stage(stage, request.user, reason=request.POST.get("reason", ""))
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, domain_error_messages(error))
+    else:
+        messages.success(request, "分组合唱赛段已取消。")
     return redirect("staff:group_stage_detail", pk=stage.pk)
 
 
@@ -2298,6 +2312,23 @@ def audience_scores_api(request, activity_id):
             for stage_key in stage_keys:
                 ensure_audience_not_consumed_by_confirmed_stage(activity, stage_key)
             test_flag = runtime_is_test(activity)
+            # §9.8: a manually entered fallback score is a formal fact, so the *first* row
+            # for a slot has to say where its number came from. Correcting a number later
+            # may still omit the source — the rule protects against inventing provenance,
+            # not against erasing a record the caller never touched.
+            existing_slots = {
+                (stage_key, singer_id)
+                for stage_key, singer_id in AudienceScore.objects.filter(
+                    activity=activity,
+                    stage_key__in=stage_keys,
+                    singer_id__in=[row[0] for row in rows],
+                ).values_list("stage_key", "singer_id")
+            }
+            if not source and any(
+                (stage_key, singer_id) not in existing_slots
+                for singer_id, stage_key, _score in rows
+            ):
+                raise ValidationError("首次录入观众分必须注明来源（外部表单 / 纸质统计 / 其他）。")
             for singer_id, stage_key, score in rows:
                 defaults: dict[str, object] = {
                     "score": score,

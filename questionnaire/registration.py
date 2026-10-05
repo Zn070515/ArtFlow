@@ -160,7 +160,11 @@ def group_material_write_scope(group: Group) -> GroupMaterialWriteScope:
     the activity.
     """
     stage = group.stage
-    if stage.activity.is_locked or stage.status == GroupStage.Status.DRAFT or not group.is_active:
+    if (
+        stage.activity.is_locked
+        or stage.status in (GroupStage.Status.DRAFT, GroupStage.Status.CANCELLED)
+        or not group.is_active
+    ):
         return GroupMaterialWriteScope.NONE
     status = stage.material_status
     if status == GroupStage.MaterialStatus.OPEN:

@@ -468,6 +468,11 @@ class GroupStage(models.Model):
         DRAFT = "draft", "待录入"
         CONFIRMED = "confirmed", "已确认"
         FROZEN = "frozen", "已冻结"
+        # Whether the contest has a group chorus is decided by the year's ruleset, and that
+        # can be settled *after* somebody has already started recording one. Without a
+        # terminal state the abandoned stage could never be retired: it would block the
+        # activity's archive forever, because archiving requires every stage to be frozen.
+        CANCELLED = "cancelled", "已取消"
 
     class MaterialStatus(models.TextChoices):
         """The group's own material submission window.

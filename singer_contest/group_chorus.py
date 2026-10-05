@@ -340,7 +340,7 @@ def set_group_material_status(
     locked_stage = _stage_for_update(stage)
     if locked_stage.activity_id != locked_activity.pk:
         raise PermissionDenied("分组合唱赛段不属于当前活动。")
-    if locked_stage.status == GroupStage.Status.DRAFT:
+    if locked_stage.status in (GroupStage.Status.DRAFT, GroupStage.Status.CANCELLED):
         raise ValidationError("只有已确认的分组合唱赛段可以设置材料窗口。")
     old_value = locked_stage.material_status
     if old_value == target:
@@ -357,6 +357,62 @@ def set_group_material_status(
         note=str(note or "").strip(),
     )
     return locked_stage
+
+
+@transaction.atomic
+def cancel_group_stage(stage: GroupStage, operator, *, reason: str) -> GroupStage:
+    """Retire a group stage that the year's ruleset turned out not to need.
+
+    A stage that has been consumed — bound by a frozen ruleset, or read by a confirmed
+    stage result — is history, not a draft: cancelling it would rewrite what a formal
+    result was built from. Everything else can be retired, which is what stops a stage
+    created while the format was still open from blocking the activity's archive.
+    """
+    current_operator = _operator(operator)
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValidationError("必须说明取消分组合唱赛段的原因。")
+    locked_activity = lock_activity_for_action(stage.activity, ActivityAction.SCORE)
+    locked_stage = _stage_for_update(stage)
+    if locked_stage.activity_id != locked_activity.pk:
+        raise PermissionDenied("分组合唱赛段不属于当前活动。")
+    if locked_stage.status == GroupStage.Status.CANCELLED:
+        return locked_stage
+    if locked_stage.status == GroupStage.Status.FROZEN:
+        raise ValidationError("已冻结的分组合唱赛段不能被取消。")
+    from .services import ensure_group_stage_not_consumed_by_confirmed_stage
+
+    ensure_group_stage_not_consumed_by_confirmed_stage(locked_stage)
+    _ensure_group_stage_not_bound_by_frozen_ruleset(locked_stage)
+    old_status = locked_stage.status
+    with authority_write(GROUP_STAGE_STATE):
+        locked_stage.status = GroupStage.Status.CANCELLED
+        # Materials stop being writable in the same act as the retirement.
+        locked_stage.material_status = GroupStage.MaterialStatus.CLOSED
+        locked_stage.save(update_fields=["status", "material_status", "updated_at"])
+    _write_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CANCEL_GROUP_STAGE,
+        stage=locked_stage,
+        old_value=old_status,
+        new_value=GroupStage.Status.CANCELLED,
+        note=reason,
+    )
+    return locked_stage
+
+
+def group_stage_archive_blocker(stage: GroupStage) -> str:
+    """Why this stage blocks archiving, or ``""`` when it does not.
+
+    A cancelled stage is retired, not pending: the year's format turned out not to need a
+    group chorus, so there is nothing to freeze. Every other unfrozen stage is genuinely
+    unfinished work.
+    """
+    if stage.status == GroupStage.Status.CANCELLED:
+        return ""
+    if stage.status != GroupStage.Status.FROZEN:
+        return f"分组合唱赛段「{stage.name}」尚未冻结，不能归档。"
+    return ""
 
 
 def current_group_members(group: Group):
@@ -390,7 +446,9 @@ def group_material_readiness(group: Group) -> GroupReadiness:
     """Evaluate the minimum formal Group Chorus material contract."""
     from files.models import MaterialCheck, SubmissionFile
 
-    if group.stage.status == GroupStage.Status.DRAFT or not group.is_active:
+    if group.stage.status in (GroupStage.Status.DRAFT, GroupStage.Status.CANCELLED) or not (
+        group.is_active
+    ):
         return GroupReadiness.WAITING_FOR_CONFIRMATION
     if not group.memberships.filter(is_current=True).exists():
         return GroupReadiness.MISSING_MEMBER
