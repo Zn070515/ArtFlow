@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 from decimal import Decimal, InvalidOperation
+from enum import StrEnum
 
 from common.lifecycle import runtime_is_test
 from core.models import Activity
@@ -25,7 +26,13 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from files.services import reconcile_questionnaire_material_checks
-from singer_contest.models import Group, GroupMembership, RoundEntry, SingerRegistration
+from singer_contest.models import (
+    Group,
+    GroupMembership,
+    GroupStage,
+    RoundEntry,
+    SingerRegistration,
+)
 
 from .compiler import QuestionnairePlan, compile_questionnaire
 from .models import QuestionnaireResponse
@@ -132,15 +139,50 @@ def writable_question_keys(*, activity, registration, plan) -> frozenset[str] | 
     )
 
 
-def writable_group_question_keys(*, activity, group: Group, plan) -> frozenset[str] | None:
-    """Group equivalent of participant writable-question authority."""
+class GroupMaterialWriteScope(StrEnum):
+    """What a Group Chorus group may write right now."""
+
+    ALL = "all"
+    SUPPLEMENT_ONLY = "supplement_only"
+    NONE = "none"
+
+
+def group_material_write_scope(group: Group) -> GroupMaterialWriteScope:
+    """The single authority for Group Chorus material writability.
+
+    A group's material window is **not** the activity's registration phase. Grouping
+    happens after registration closes — the roster comes from an external draw taken once
+    the contest is already running — so a first submission under the participant rule
+    would be impossible (the phase is past ``REGISTRATION_OPEN``) or would need a fake
+    per-question supplement grant. The window lives on the stage instead
+    (:attr:`GroupStage.material_status`), so material can open during rehearsal or even
+    live, and closing it is a deliberate staff act rather than a side effect of advancing
+    the activity.
+    """
+    stage = group.stage
+    if stage.activity.is_locked or stage.status == GroupStage.Status.DRAFT or not group.is_active:
+        return GroupMaterialWriteScope.NONE
+    status = stage.material_status
+    if status == GroupStage.MaterialStatus.OPEN:
+        return GroupMaterialWriteScope.ALL
+    if status == GroupStage.MaterialStatus.SUPPLEMENT_ONLY:
+        return GroupMaterialWriteScope.SUPPLEMENT_ONLY
+    return GroupMaterialWriteScope.NONE
+
+
+def writable_group_question_keys(*, group: Group, plan) -> frozenset[str] | None:
+    """Group equivalent of participant writable-question authority.
+
+    Returns ``None`` for "any question", an explicit key set for "only these", and an
+    empty set for "nothing". The stage's material window decides; the activity phase is
+    deliberately not consulted (see :func:`group_material_write_scope`).
+    """
     from files.models import MaterialCheck
 
-    if activity.is_locked or group.stage.status == group.stage.Status.DRAFT:
-        return frozenset()
-    if activity.phase == Activity.Phase.REGISTRATION_OPEN:
+    scope = group_material_write_scope(group)
+    if scope is GroupMaterialWriteScope.ALL:
         return None
-    if activity.phase not in SUPPLEMENT_PHASES:
+    if scope is GroupMaterialWriteScope.NONE:
         return frozenset()
     return frozenset(
         MaterialCheck.objects.filter(group=group, status=MaterialCheck.Status.NEEDS_SUPPLEMENT)
@@ -458,9 +500,7 @@ def save_group_draft(*, version, group: Group, answers, actor, schema_hash: str 
     if schema_hash and schema_hash != plan.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
     normalized = normalize_answers(plan, answers)
-    writable = writable_group_question_keys(
-        activity=version.ruleset.activity, group=group, plan=plan
-    )
+    writable = writable_group_question_keys(group=group, plan=plan)
     if writable is not None:
         rejected = sorted(_keys_of(plan, normalized) - writable)
         if rejected:
@@ -493,10 +533,15 @@ def submit_group_response(
     if expected_schema_hash and expected_schema_hash != plan.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
     normalized = normalize_answers(plan, answers)
-    writable = writable_group_question_keys(
-        activity=version.ruleset.activity, group=group, plan=plan
-    )
-    if writable is not None:
+    scope = group_material_write_scope(group)
+    if scope is GroupMaterialWriteScope.NONE:
+        # A closed window means "not now", not "submit nothing": silently dropping every
+        # answer would record a submission that contains nothing the group actually wrote.
+        raise ValidationError("该分组合唱组当前不接受材料提交。")
+    if scope is GroupMaterialWriteScope.SUPPLEMENT_ONLY:
+        # Partial submit is the point of the supplement flow: the page sends the whole
+        # form, and only the questions staff sent back are written.
+        writable = writable_group_question_keys(group=group, plan=plan) or frozenset()
         normalized = {key: value for key, value in normalized.items() if key in writable}
     response = get_or_create_group_response(
         group=group,

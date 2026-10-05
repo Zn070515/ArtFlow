@@ -227,6 +227,7 @@ def _store_file(
     max_mb=None,
     owner_total_quota=False,
     allowed_extensions=None,
+    phase_action: ActivityAction | None = ActivityAction.UPLOAD_MATERIAL,
 ):
     """The one storage path both the legacy and the questionnaire uploads go through.
 
@@ -234,6 +235,13 @@ def _store_file(
     storage quota is counted per slot (legacy, unchanged) or across everything the owner
     has (questionnaire — otherwise every question would hand out a fresh copy of the whole
     per-purpose budget and multiply the disk ceiling by the number of questions).
+
+    ``phase_action`` is the activity-phase policy the store re-checks under the activity
+    lock. Group Chorus passes ``None``: a group's material window is its own authoritative
+    state (``GroupStage.material_status``) and is already enforced by the caller, and the
+    window is explicitly allowed to be open during ``LIVE`` — a phase whose action set
+    deliberately contains no ``UPLOAD_MATERIAL``, because it was written for participants
+    uploading to their own registration. The activity row is still locked either way.
     """
     validate_upload(
         uploaded_file,
@@ -261,7 +269,7 @@ def _store_file(
         )
     except RateLimitExceeded:
         raise ValidationError("上传操作过于频繁，请稍后再试。") from None
-    activity = lock_activity_for_action(owner.activity, ActivityAction.UPLOAD_MATERIAL)
+    activity = lock_activity_for_action(owner.activity, phase_action)
     # Serialize all file operations for the same owner, including the first
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
@@ -428,9 +436,9 @@ def store_questionnaire_group_file(
     if question is None or question["type"] != FILE_TYPE:
         raise ValidationError("问卷中没有这一道有效文件题。")
     current_actor = _require_group_member(group, actor)
-    writable = writable_group_question_keys(activity=_owner_activity(group), group=group, plan=plan)
+    writable = writable_group_question_keys(group=group, plan=plan)
     if writable is not None and question_key not in writable:
-        raise ValidationError(f"当前阶段不可上传该题目的材料：{question_key!r}。")
+        raise ValidationError(f"当前分组合唱材料窗口不接受该题目：{question_key!r}。")
     reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
     config = question["file"]
     stored = _store_file(
@@ -443,6 +451,9 @@ def store_questionnaire_group_file(
         max_mb=config["max_mb"],
         owner_total_quota=True,
         allowed_extensions=config["extensions"],
+        # The stage's material window already authorized this write; the activity phase
+        # policy would reject it outright during LIVE, where group material is legitimate.
+        phase_action=None,
     )
     from common.models import AuditLog
 
@@ -863,10 +874,19 @@ def participant_uploadable_check_ids(owner) -> set[int]:
     rendering only. Hiding a button is never the authorization boundary; a crafted POST
     is judged by the service alone.
     """
+    from questionnaire.registration import GroupMaterialWriteScope
+
     activity = _owner_activity(owner)
     if activity.is_locked:
         return set()
-    if activity.phase in _PARTICIPANT_FREE_UPLOAD_PHASES:
+    group_scope = _group_material_scope(owner)
+    if group_scope is GroupMaterialWriteScope.ALL:
+        eligible_status = None
+    elif group_scope is GroupMaterialWriteScope.SUPPLEMENT_ONLY:
+        eligible_status = MaterialCheck.Status.NEEDS_SUPPLEMENT
+    elif group_scope is GroupMaterialWriteScope.NONE:
+        return set()
+    elif activity.phase in _PARTICIPANT_FREE_UPLOAD_PHASES:
         eligible_status = None
     elif activity.phase in _PARTICIPANT_SUPPLEMENT_PHASES:
         eligible_status = MaterialCheck.Status.NEEDS_SUPPLEMENT
@@ -899,6 +919,42 @@ def _require_owner_actor(actor, owner):
     else:
         raise ValidationError(UNKNOWN_CHECK_MESSAGE)
     return current_actor
+
+
+def _group_material_scope(owner):
+    """The Group material window for a Group owner, or ``None`` for any other owner.
+
+    Group material is deliberately **not** governed by the activity phase: the roster is
+    drawn once the contest is already running, so a group's first submission can land long
+    after registration closed. The stage carries its own window instead.
+    """
+    from questionnaire.registration import group_material_write_scope
+    from singer_contest.models import Group
+
+    if not isinstance(owner, Group):
+        return None
+    return group_material_write_scope(owner)
+
+
+def _supplement_rule_allows(activity, group_scope, check) -> bool:
+    """Whether the owner's current window permits a write to this specific check.
+
+    A window that is open to everything allows it; a supplement-only window allows only
+    the checks staff explicitly sent back. Participants keep the phase rule.
+    """
+    from questionnaire.registration import GroupMaterialWriteScope
+
+    if group_scope is GroupMaterialWriteScope.ALL:
+        return True
+    if group_scope is GroupMaterialWriteScope.SUPPLEMENT_ONLY:
+        return check.status == MaterialCheck.Status.NEEDS_SUPPLEMENT
+    if group_scope is GroupMaterialWriteScope.NONE:
+        # Reported by the caller before the check is even read; reaching here means the
+        # window closed between the two reads, which must deny rather than fall through.
+        return False
+    if activity.phase in _PARTICIPANT_SUPPLEMENT_PHASES:
+        return check.status == MaterialCheck.Status.NEEDS_SUPPLEMENT
+    return True
 
 
 def _ensure_participant_upload_phase(activity) -> None:
@@ -935,7 +991,13 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
     if _owner_activity(locked_owner).pk != locked_activity.pk:
         raise PermissionDenied("材料检查项不属于当前活动。")
     current_actor = _require_owner_actor(actor, locked_owner)
-    _ensure_participant_upload_phase(locked_activity)
+    from questionnaire.registration import GroupMaterialWriteScope
+
+    group_scope = _group_material_scope(locked_owner)
+    if group_scope is None:
+        _ensure_participant_upload_phase(locked_activity)
+    elif group_scope is GroupMaterialWriteScope.NONE:
+        raise ValidationError("该分组合唱组当前不接受材料提交。")
     check_token = str(check_id or "").strip()
     locked_check = None
     if check_token.isdigit():
@@ -946,10 +1008,7 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         )
     if locked_check is None or not locked_check.file_purpose:
         raise ValidationError(UNKNOWN_CHECK_MESSAGE)
-    if (
-        locked_activity.phase in _PARTICIPANT_SUPPLEMENT_PHASES
-        and locked_check.status != MaterialCheck.Status.NEEDS_SUPPLEMENT
-    ):
+    if not _supplement_rule_allows(locked_activity, group_scope, locked_check):
         raise ValidationError("该材料项当前未要求补交，请联系工作人员。")
     # A questionnaire check carries its question, so the replacement occupies that
     # question's slot: uploading the second round's accompaniment must not demote the
@@ -962,6 +1021,9 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         question_key=locked_check.question_key,
         source_ruleset_version=locked_check.source_ruleset_version,
         owner_total_quota=bool(locked_check.question_key),
+        # A Group owner was already authorized by the stage's material window, which is
+        # allowed to be open in phases whose action set has no UPLOAD_MATERIAL.
+        phase_action=None if group_scope is not None else ActivityAction.UPLOAD_MATERIAL,
     )
     if getattr(locked_owner, "group_id", None):
         from realtime.events import schedule_group_material_event

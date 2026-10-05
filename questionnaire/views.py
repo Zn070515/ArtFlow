@@ -92,15 +92,17 @@ def _group_or_404(request: HttpRequest, group_pk: int) -> Group:
 
 
 def _require_group_page(activity: Activity) -> None:
+    """A group member may always *read* their group's material page.
+
+    Only a locked activity closes the page. What may be *written* is the stage's material
+    window (``GroupStage.material_status``), enforced by ``writable_group_question_keys``
+    and the file services — not by the activity's registration phase. Gating reading on
+    the phase too would hide a group's own submitted material from them for the rest of
+    the contest, and would tie a group drawn during the live show to a registration
+    deadline that closed weeks earlier.
+    """
     if activity.is_locked:
         raise PermissionDenied("活动已锁定，无法打开分组合唱材料页。")
-    if activity.phase not in {
-        Activity.Phase.REGISTRATION_OPEN,
-        Activity.Phase.REGISTRATION_CLOSED,
-        Activity.Phase.REVIEWING,
-        Activity.Phase.REHEARSAL,
-    }:
-        raise PermissionDenied("当前活动阶段不允许维护分组合唱材料。")
 
 
 def _require_participant_writer(request: HttpRequest, activity: Activity) -> None:
@@ -391,9 +393,7 @@ def group_form_view(request: HttpRequest, group_pk: int):
         if not staff
         else None
     )
-    writable = (
-        None if staff else writable_group_question_keys(activity=activity, group=group, plan=plan)
-    )
+    writable = None if staff else writable_group_question_keys(group=group, plan=plan)
     answers = (response.answers if response else {}) or {}
     files = current_group_answer_files(group)
     due_rounds = _due_rounds(version)
