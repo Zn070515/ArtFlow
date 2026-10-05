@@ -80,6 +80,22 @@ pwsh -NoProfile -File scripts/start-event.ps1 -Lan -Port 18180
 
 LAN 模式不是公网部署：不要把端口转发到 Internet，不要为它配置公网 DNS，也不要把它当作 DDoS/WAF/TLS 方案。
 
+### LAN HTTP 下的检票
+
+LAN 模式走的是 `http://<局域网地址>:<端口>`，而**不是安全上下文**，所以浏览器根本不会提供
+`getUserMedia`——手机实时扫码在这条路径上不可用，且这不是 ArtFlow 的 bug，是 Web 平台的
+限制（摄像头只对 HTTPS / localhost 开放）。检票页因此提供三级方式，按可用性自动降级：
+
+```text
+HTTPS（生产）        → 实时摄像头连续扫码
+LAN HTTP / 摄像头不可用 → 拍一张二维码照片，前端解码照片
+都不可用             → 手工输入票据码或完整二维码链接
+```
+
+第二级用的是系统相机应用（`<input type="file" accept="image/*" capture="environment">`），
+它不受安全上下文限制；照片由同一个 ZXing reader 解码。不要为了 LAN 部署给所有工作人员的
+手机装自签证书。
+
 ## 账号注册
 
 Compose 首次启动只会迁移数据库，不会自动创建账号。确认启动壳输出的 `doctor` 和健康检查正常后，在本机浏览器打开：

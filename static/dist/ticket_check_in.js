@@ -79,8 +79,41 @@
         event.preventDefault();
         void checkIn(input?.value || "");
     });
+    const photoFallback = root.querySelector("[data-ticket-photo-fallback]");
+    const photoInput = root.querySelector("[data-ticket-photo]");
+    const offerPhotoFallback = (message, tone) => {
+        photoFallback?.classList.remove("hidden");
+        setStatus(message, tone);
+    };
+    // Scanning a still photo. `getUserMedia` only exists in a secure context, so on the
+    // no-ICP LAN fallback (`http://192.168.x.x:8000`) it is not merely refused — the API is
+    // absent and there is no error to catch. A file input with `capture` goes through the
+    // system camera app instead, which no secure-context rule restricts, and ZXing decodes
+    // the still image the same way.
+    photoInput?.addEventListener("change", () => {
+        const file = photoInput.files && photoInput.files[0];
+        if (!file)
+            return;
+        const url = URL.createObjectURL(file);
+        const reader = new ZXingBrowser.BrowserQRCodeReader();
+        setStatus("正在识别照片……");
+        void reader
+            .decodeFromImageUrl(url)
+            .then((result) => checkIn(result.getText()))
+            .catch(() => {
+            setStatus("照片里没有识别到二维码，请对准二维码重拍，或手工输入票据码。", "error");
+        })
+            .finally(() => {
+            URL.revokeObjectURL(url);
+            photoInput.value = "";
+        });
+    });
+    if (!navigator.mediaDevices?.getUserMedia) {
+        offerPhotoFallback("当前页面不是 HTTPS，浏览器不提供实时摄像头。请拍一张二维码照片，或手工输入票据码。", "info");
+        return;
+    }
     if (!video) {
-        setStatus("当前浏览器不支持摄像头，请使用下方手工输入。", "error");
+        offerPhotoFallback("当前浏览器不支持实时摄像头，请拍照识别或手工输入。", "error");
         return;
     }
     const reader = new ZXingBrowser.BrowserQRCodeReader();
@@ -88,6 +121,6 @@
         if (result)
             void checkIn(result.getText());
     }).catch(() => {
-        setStatus("无法打开摄像头，请允许权限或使用下方手工输入。", "error");
+        offerPhotoFallback("无法打开摄像头，请拍照识别或手工输入。", "error");
     });
 })();
