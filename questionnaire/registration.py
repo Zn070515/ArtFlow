@@ -501,7 +501,7 @@ def save_group_draft(
     writer. ``changes`` carries, per question, the answer base the editor was looking at;
     the writer refuses a base that has moved instead of overwriting a teammate's text.
     """
-    _require_group_member(group, actor)
+    current_actor = _require_group_member(group, actor)
     plan = questionnaire_plan(version)
     if plan.subject != "group":
         raise ValidationError("当前赛制问卷不是分组合唱组问卷。")
@@ -541,10 +541,24 @@ def save_group_draft(
         schema_hash=plan.schema_hash,
     )
     if normalized_changes is not None:
-        return save_draft_answers(
+        saved = save_draft_answers(
             response, changes=normalized_changes, schema_hash=plan.schema_hash
         )
-    return save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
+    else:
+        saved = save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
+    # Tell the other members' open pages. Their form holds values this save has just made
+    # stale, and without the nudge they keep editing against them until they happen to
+    # reload. Published on commit, like every other realtime event here.
+    from realtime.events import schedule_group_material_event
+
+    schedule_group_material_event(
+        group.pk,
+        event="group.questionnaire_changed",
+        revision=saved.updated_at.isoformat() if saved.updated_at else None,
+        actor={"id": current_actor.pk, "username": current_actor.get_username()},
+        details={"keys": sorted(normalized)},
+    )
+    return saved
 
 
 @transaction.atomic
