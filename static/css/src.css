@@ -5,6 +5,14 @@
 @layer base {
   body {
     @apply bg-[#f5f7fa] text-gray-900 antialiased;
+    /* An activity title's word, a ruleset code, a template name: a long token has no
+       break opportunity, so once the reader raises the font size the token alone is
+       wider than the phone's content column and drags the whole page sideways. It is
+       also what sizes a single-column grid track, and a track never goes below its
+       items' min-content. `anywhere` rather than `break-word` is required for that
+       second half — only `anywhere` lowers min-content, letting the track shrink.
+       Breaks happen only when the token genuinely cannot fit its line. */
+    overflow-wrap: anywhere;
   }
 
   a {
