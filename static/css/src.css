@@ -37,11 +37,14 @@
     min-width: 0;
   }
 
-  /* A form widget Django renders directly carries no class at all, so it keeps the
-     user-agent's 20-character default width — wider than its container once the reader
-     raises the font size. Only unclassed text-like inputs are touched; anything already
-     styled by a utility, and checkboxes and radios, keep their own width. */
-  input:not([class]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]) {
+  /* A text-like control sizes itself from the user agent's 20-character default unless
+     something gives it a width — and that default is wider than a phone card once the
+     reader raises the font size, so it drags the whole grid track sideways with it.
+     "Has a class" is not the right test: `text-xs border ...` styles the control without
+     sizing it, which is exactly how the export center's note fields kept the default.
+     Width utilities live in the utilities layer and still win, so `w-full`, `w-20`,
+     `flex-1` ... keep their own width and only the unsized controls are capped. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]) {
     width: 100%;
   }
 
