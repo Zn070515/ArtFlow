@@ -88,6 +88,29 @@ nothing. `[tool.mypy] files` and `[tool.ruff] src` were each missing two apps.
   retention window and the live-state cache TTL, with their real defaults. `.dockerignore`
   gains `node_modules/` and `backups/`; dependabot gains the npm ecosystem.
 
+### Phone layout — the raised-font half of the contract, and why only CI could see it
+
+The scroll-free phone contract had been red on `main` for five commits: eleven layout
+tests failed in CI while the same commit passed locally. Two causes, both reachable only
+once the reader raises the font size to the gate's 1.75×.
+
+- `static/css/src.css` — `body { overflow-wrap: anywhere }`. An activity title's word, a
+  ruleset code, a template name: a long token has nowhere to break, and what it actually
+  blows out is the min-content of a single-column grid track — a track never goes below
+  its items' min-content. `break-word` does not help, because it only breaks while
+  painting; only `anywhere` also lowers min-content, which is what lets the track shrink.
+- `static/css/src.css` — the "unsized form control gets `width: 100%`" rule asked whether
+  the control had *no class at all*, but `text-xs border …` styles a control without
+  sizing it, so the export center's note fields kept the user agent's 20-character default
+  and stretched their card on every phone width. The test is now whether a width was set,
+  not whether a class exists; width utilities sit in the later cascade layer, so `w-full`,
+  `w-20` and `flex-1` keep their own width and only genuinely unsized controls are capped.
+- The local/CI split was engine, not code: the iPhone projects run WebKit, and Linux
+  WebKit resolves the system sans stack to a fallback roughly a fifth wider than Windows',
+  which is what pushed each marginal case over. Reproducing it needs that engine *and* the
+  same data state — the note fields only render once an activity is locked, which the local
+  layout fixture never did.
+
 ## 2026-10-04
 
 ### Judge entry — one shared QR, and the participant gets told when group material changes
