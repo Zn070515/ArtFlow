@@ -640,3 +640,35 @@ def test_rendered_caddyfile_adapts_when_caddy_image_is_available(
 
     assert result.returncode == 0, result.stderr
     assert '"artflow.internal"' in result.stdout
+
+
+def test_production_media_runs_in_its_own_worker_pool():
+    """A slow download must not be able to occupy the workers that answer the show.
+
+    Measured in docs/production-readiness.md: three concurrent slow downloads take the
+    whole application down, because each one pins a Gunicorn sync worker for the length of
+    the transfer. The bytes therefore leave through a pool of their own, while
+    authorization stays on the same view and the same database as everything else.
+    """
+    compose = load_compose(PRODUCTION_COMPOSE_PATH)
+    media = compose["services"]["media"]
+    web = compose["services"]["web"]
+
+    assert media["environment"]["ARTFLOW_PROCESS_ROLE"] == "media"
+    assert "8002" in " ".join(media["command"])
+    assert media["command"] != web.get("command")
+    assert "ports" not in media
+    assert set(media["networks"]) == {"artflow_internal"}
+
+    assert "media_data:/app/media" in media["volumes"]
+    # Same database, same release, same authorization code — only the worker pool differs.
+    for key in ("DATABASE_ENGINE", "POSTGRES_HOST", "SECRET_KEY", "ARTFLOW_RELEASE_SHA"):
+        assert media["environment"][key] == web["environment"][key]
+    assert "healthcheck" in media
+
+    caddyfile = (PRODUCTION_COMPOSE_PATH.parent / "Caddyfile").read_text(encoding="utf-8")
+    assert "@media path /media/*" in caddyfile
+    assert "reverse_proxy @media media:8002" in caddyfile
+
+    entrypoint = (PROJECT_ROOT / "scripts" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    assert "ARTFLOW_PROCESS_ROLE must be web, realtime or media" in entrypoint

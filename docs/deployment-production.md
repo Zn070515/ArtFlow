@@ -20,10 +20,22 @@
         ↓ HTTPS 443
 production `proxy`（Caddy，负责删除或覆盖客户端传入的 X-Forwarded-For）
         ↓ `artflow_internal` 私有网络
-Gunicorn（`web` 不发布主机端口）
+        ├── /*        → Gunicorn `web`（不发布主机端口）
+        ├── /ws/*     → `realtime`（Daphne）
+        └── /media/*  → Gunicorn `media`
         ↓
 PostgreSQL（持久化）+ Media 持久化卷
 ```
+
+`media` 是为了**把字节从回答现场请求的 worker 里挪走**：一个下载会占住一个 Gunicorn
+sync worker 直到传输结束，演练实测三个慢下载就会把整个应用拖停（见
+[生产准备演练](production-readiness.md)「媒体下载负载演练」）。它跑的是**同一个
+`controlled_media` 视图、同一个数据库、同一个 media 卷**——授权判定完全没变，只是
+worker 池独立；私密文件仍然在产生任何字节之前被拒。`proxy` 的 `/media/*` 路由到
+`media:8002`。
+
+> 这不是 ADR-012 seam 的终点。等对象存储可用后，`DeliveryBackend` 换成签名 URL 重定向，
+> `media` 服务可以整体退役，而授权仍然留在 Django。
 
 关键约束：**Gunicorn 不能直接暴露给客户端**，必须经过一个可信反向代理。理由见「来源 IP 与 X-Forwarded-For」一节。
 

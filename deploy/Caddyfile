@@ -16,6 +16,14 @@ https://{$CADDY_SITE_ADDRESS} {
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto https
 	}
+	# Authorized media bytes go to their own worker pool, so a slow download cannot
+	# occupy the workers that answer scoring, voting and judge requests. Authorization is
+	# unchanged; that service runs the same controlled_media view.
+	@media path /media/*
+	reverse_proxy @media media:8002 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+	}
 	reverse_proxy web:8000 {
 		header_up X-Forwarded-For {remote_host}
 		header_up X-Forwarded-Proto https
