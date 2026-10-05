@@ -48,8 +48,14 @@ case "$process_role" in
         # static collection. It only verifies that the Django configuration loads.
         python manage.py check
         ;;
+    media)
+        # The media pool exists so slow downloads cannot occupy the workers that answer
+        # scoring, voting and judge requests. It serves the same controlled_media view
+        # against the same database, so it must not race the web container either.
+        python manage.py check
+        ;;
     *)
-        printf 'ARTFLOW_PROCESS_ROLE must be web or realtime, got: %s\n' "$process_role" >&2
+        printf 'ARTFLOW_PROCESS_ROLE must be web, realtime or media, got: %s\n' "$process_role" >&2
         exit 64
         ;;
 esac

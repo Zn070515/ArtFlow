@@ -4,7 +4,16 @@
 
 公网 HTTPS 部署不使用本文件的事件 Compose，而使用 [`deploy/compose.production.yml`](../deploy/compose.production.yml) 和 [生产部署说明](deployment-production.md)。事件启动壳不提供 TLS、公网入口或 DDoS 防护。
 
-事件 Compose 将 web 同时连接到一个可发布本机 loopback 端口的 frontend bridge 和一个 `internal: true` backend network；PostgreSQL 只连接 backend network，且不发布 host port。不要把 backend network 改成 frontend network，也不要把 web 端口绑定到 `0.0.0.0`，除非明确选择并遵循下方的 LAN 模式。
+事件 Compose 只发布**一个** loopback 端口，属于 `proxy`（Caddy，见
+[`deploy/Caddyfile.event`](../deploy/Caddyfile.event)）。`web`、`media`、`realtime` 都只在
+内部网络里，谁都不发布 host port；PostgreSQL 同样不发布。不要把端口绑定到 `0.0.0.0`，
+除非明确选择并遵循下方的 LAN 模式。
+
+**为什么必须只有一个来源**：每个页面的 socket URL 都是从 `window.location` 拼出来的。
+如果 web 发布 `8000`、realtime 发布 `8001`，浏览器会去连 `ws://<地址>:8000/ws/...` —— 那是
+Gunicorn，根本不讲 WebSocket 协议。HTTP fallback 会让数据仍然正确，所以这个故障是**无声的**：
+整场活动的实时协作退化成轮询。同源代理让 `/ws/*` 走 realtime、`/media/*` 走独立的媒体
+worker 池、其余走 web，与会话和 cookie 的作用域也保持一致。
 
 ## 首次准备
 
@@ -53,7 +62,7 @@ pwsh -NoProfile -File scripts/start-event.ps1
 pwsh -NoProfile -File scripts/start-event.ps1 -Lan
 ```
 
-启动壳会检测一个有默认网关的非 loopback IPv4 地址，使用 `0.0.0.0` 发布 web 端口，并只把检测到的地址加入 `ALLOWED_HOSTS`。输出中的 LAN URL 才是手机访问地址。
+启动壳会检测一个有默认网关的非 loopback IPv4 地址，使用 `0.0.0.0` 发布 `proxy` 端口，并只把检测到的地址加入 `ALLOWED_HOSTS`。输出中的 LAN URL 才是手机访问地址。
 
 电脑有多个网卡时，显式指定地址：
 
@@ -70,6 +79,22 @@ pwsh -NoProfile -File scripts/start-event.ps1 -Lan -Port 18180
 脚本不会自动创建 Windows Firewall 规则。如果 Windows 弹出 Docker Desktop 网络访问提示，只允许 Private networks；不要为此打开 Public networks。若网络仍不可达，先检查主机和手机是否在同一私人网络、是否启用了客户端隔离，以及 Windows Firewall 的 Private 网络规则。
 
 LAN 模式不是公网部署：不要把端口转发到 Internet，不要为它配置公网 DNS，也不要把它当作 DDoS/WAF/TLS 方案。
+
+### LAN HTTP 下的检票
+
+LAN 模式走的是 `http://<局域网地址>:<端口>`，而**不是安全上下文**，所以浏览器根本不会提供
+`getUserMedia`——手机实时扫码在这条路径上不可用，且这不是 ArtFlow 的 bug，是 Web 平台的
+限制（摄像头只对 HTTPS / localhost 开放）。检票页因此提供三级方式，按可用性自动降级：
+
+```text
+HTTPS（生产）        → 实时摄像头连续扫码
+LAN HTTP / 摄像头不可用 → 拍一张二维码照片，前端解码照片
+都不可用             → 手工输入票据码或完整二维码链接
+```
+
+第二级用的是系统相机应用（`<input type="file" accept="image/*" capture="environment">`），
+它不受安全上下文限制；照片由同一个 ZXing reader 解码。不要为了 LAN 部署给所有工作人员的
+手机装自签证书。
 
 ## 账号注册
 

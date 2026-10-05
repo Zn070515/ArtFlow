@@ -14,7 +14,7 @@ def test_realtime_runtime_is_a_separate_process_without_duplicate_bootstrap():
     assert (
         'command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]' in compose
     )
-    assert "ARTFLOW_PROCESS_ROLE must be web or realtime" in entrypoint
+    assert "ARTFLOW_PROCESS_ROLE must be web, realtime or media" in entrypoint
     assert 'process_role="${ARTFLOW_PROCESS_ROLE:-web}"' in entrypoint
     assert "python manage.py migrate --noinput" in entrypoint
 

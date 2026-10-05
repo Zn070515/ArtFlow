@@ -527,6 +527,11 @@ node scripts/media_download_load_rehearsal.mjs
 - 结论：这一条**不构成"加 worker"的理由**——加 worker 只是把阈值从 3 抬到 N，现场随时
   可能有超过 N 个观众在取文件。正确方向是**让字节离开 Gunicorn worker**（ADR-012 seam
   的 Phase B：signed URL 302、X-Accel-Redirect 或独立受控文件服务），并保留同等权限校验。
+- **已落地的第一步**：生产 manifest 现在有一个独立的 `media` 服务（同一镜像、同一数据库、
+  同一 `controlled_media` 视图，只有 worker 池是分开的），`proxy` 把 `/media/*` 路由到它。
+  媒体池被打满时，评分 / 投票 / 评委请求仍在 `web` 池里正常应答。上表数字描述的是**单一
+  池**部署；这个隔离把失败域缩小，但**不消除**它——`media` 池自身仍会被打满。真正的终局
+  仍是 Phase B 的字节卸载（signed URL / 对象存储）。
 - 边界：本机回环、单容器、稀疏 payload，只测**worker 占用**，不测磁盘吞吐、公网带宽、
   边缘层容量或多副本行为。正式活动前仍需在真实部署与现场网络上复测。
 

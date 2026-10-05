@@ -65,8 +65,6 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
       POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
-    ports:
-      - "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_EVENT_PORT:-8000}:8000"
     volumes:
       - static_data:/app/staticfiles
       - media_data:/app/media
@@ -126,8 +124,6 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
     command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]
-    ports:
-      - "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_REALTIME_PORT:-8001}:8001"
     healthcheck:
       test:
         [
@@ -143,6 +139,106 @@ services:
     networks:
       - artflow_event_frontend
 
+  # Same image, same database, same controlled_media view as `web` — only the worker pool
+  # is separate, so a slow download cannot take the scoring, voting and judge requests with
+  # it. See docs/production-readiness.md (media download load rehearsal).
+  media:
+    build:
+      context: ..
+      args:
+        ARTFLOW_BUILD_SHA: ${ARTFLOW_RELEASE_SHA:-}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      DEBUG: "False"
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in the event environment}
+      QR_SIGNING_KEY: ${QR_SIGNING_KEY:?Set QR_SIGNING_KEY in the event environment}
+      STAFF_ACCESS_KEY: ${STAFF_ACCESS_KEY:?Set STAFF_ACCESS_KEY in the event environment}
+      ADMIN_ACCESS_KEY: ${ADMIN_ACCESS_KEY:?Set ADMIN_ACCESS_KEY in the event environment}
+      ARTFLOW_ORGANIZATION_NAME: ${ARTFLOW_ORGANIZATION_NAME:-}
+      ARTFLOW_ICP_NUMBER: ${ARTFLOW_ICP_NUMBER:-}
+      ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
+      ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:-}
+      ARTFLOW_PROCESS_ROLE: media
+      SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-0}
+      SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
+      SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
+      ALLOWED_HOSTS: ${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      CSRF_TRUSTED_ORIGINS: ""
+      RATE_LIMIT_BACKEND: database
+      DATABASE_ENGINE: postgresql
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the event environment}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the event environment}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the event environment}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_CONN_MAX_AGE: ${POSTGRES_CONN_MAX_AGE:-60}
+    command:
+      [
+        "gunicorn",
+        "config.wsgi:application",
+        "--bind",
+        "0.0.0.0:8002",
+        "--workers",
+        "2",
+        "--timeout",
+        "120",
+        "--graceful-timeout",
+        "30",
+      ]
+    volumes:
+      - media_data:/app/media
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8002/livez/', timeout=3); raise SystemExit(0 if response.status == 200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - artflow_event_frontend
+
+  # The single origin this profile publishes. Everything the browser does is same-origin,
+  # exactly as behind the production proxy; see deploy/Caddyfile.event.
+  proxy:
+    image: ${ARTFLOW_CADDY_IMAGE:-caddy:2-alpine}
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+      media:
+        condition: service_healthy
+      # The container must exist so Caddy can resolve the upstream when it loads its
+      # config; it does not have to be healthy. Requiring health made a Redis outage take
+      # the whole HTTP site down with it.
+      realtime:
+        condition: service_started
+    ports:
+      - "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_EVENT_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:8000/livez/",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    configs:
+      - source: caddyfile_event
+        target: /etc/caddy/Caddyfile
+    networks:
+      - artflow_event_frontend
+
 volumes:
   postgres_data:
   static_data:
@@ -150,10 +246,13 @@ volumes:
   backup_data:
 
 networks:
-  # The event web service must stay on a normal bridge for Docker Desktop to
-  # publish its loopback-only host port. The database remains unpublished;
-  # this profile is still host-loopback-only and never replaces production's
-  # internal frontend/backend topology.
+  # The proxy must stay on a normal bridge for Docker Desktop to publish its
+  # loopback-only host port; web, media and realtime talk to it over the same network and
+  # publish nothing. The database remains unpublished; this profile is still
+  # host-loopback-only and never replaces production's internal frontend/backend topology.
   artflow_event_frontend:
     driver: bridge
     internal: false
+configs:
+  caddyfile_event:
+    file: ./Caddyfile.event
