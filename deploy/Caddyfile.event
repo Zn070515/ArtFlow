@@ -1,0 +1,20 @@
+# The event runtime's single origin.
+#
+# The browser must never learn that the websocket and the media bytes live on other ports:
+# every page here builds its socket URL from `window.location`, so a stack that published
+# web on 8000 and realtime on 8001 handed the browser `ws://<lan-ip>:8000/ws/...` — Gunicorn,
+# which speaks no websocket protocol at all. HTTP fallbacks kept the data correct, so the
+# failure was invisible: collaboration silently degraded to polling for the whole event.
+#
+# No TLS: this profile is loopback/LAN only and never replaces the production topology.
+:8000 {
+	@realtime path /ws/*
+	reverse_proxy @realtime realtime:8001
+
+	# Same split as production: authorized media bytes get their own worker pool so a slow
+	# download cannot occupy the workers answering scoring, voting and judge requests.
+	@media path /media/*
+	reverse_proxy @media media:8002
+
+	reverse_proxy web:8000
+}

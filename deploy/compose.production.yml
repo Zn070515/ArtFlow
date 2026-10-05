@@ -213,8 +213,14 @@ services:
         condition: service_healthy
       media:
         condition: service_healthy
+      # The container must exist, because Caddy resolves the `realtime` upstream when it
+      # loads its config; it does not have to be healthy. Requiring health made a Redis
+      # outage a total outage: realtime would not start, so the proxy would not start, so
+      # the entire HTTP site was unreachable even though nothing on it needs Redis. Every
+      # realtime client already degrades to HTTP (judge polling, rapid-score refetch,
+      # group forms), and those mutations never went through the socket in the first place.
       realtime:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test:
         [

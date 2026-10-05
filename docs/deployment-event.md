@@ -4,7 +4,16 @@
 
 公网 HTTPS 部署不使用本文件的事件 Compose，而使用 [`deploy/compose.production.yml`](../deploy/compose.production.yml) 和 [生产部署说明](deployment-production.md)。事件启动壳不提供 TLS、公网入口或 DDoS 防护。
 
-事件 Compose 将 web 同时连接到一个可发布本机 loopback 端口的 frontend bridge 和一个 `internal: true` backend network；PostgreSQL 只连接 backend network，且不发布 host port。不要把 backend network 改成 frontend network，也不要把 web 端口绑定到 `0.0.0.0`，除非明确选择并遵循下方的 LAN 模式。
+事件 Compose 只发布**一个** loopback 端口，属于 `proxy`（Caddy，见
+[`deploy/Caddyfile.event`](../deploy/Caddyfile.event)）。`web`、`media`、`realtime` 都只在
+内部网络里，谁都不发布 host port；PostgreSQL 同样不发布。不要把端口绑定到 `0.0.0.0`，
+除非明确选择并遵循下方的 LAN 模式。
+
+**为什么必须只有一个来源**：每个页面的 socket URL 都是从 `window.location` 拼出来的。
+如果 web 发布 `8000`、realtime 发布 `8001`，浏览器会去连 `ws://<地址>:8000/ws/...` —— 那是
+Gunicorn，根本不讲 WebSocket 协议。HTTP fallback 会让数据仍然正确，所以这个故障是**无声的**：
+整场活动的实时协作退化成轮询。同源代理让 `/ws/*` 走 realtime、`/media/*` 走独立的媒体
+worker 池、其余走 web，与会话和 cookie 的作用域也保持一致。
 
 ## 首次准备
 
@@ -53,7 +62,7 @@ pwsh -NoProfile -File scripts/start-event.ps1
 pwsh -NoProfile -File scripts/start-event.ps1 -Lan
 ```
 
-启动壳会检测一个有默认网关的非 loopback IPv4 地址，使用 `0.0.0.0` 发布 web 端口，并只把检测到的地址加入 `ALLOWED_HOSTS`。输出中的 LAN URL 才是手机访问地址。
+启动壳会检测一个有默认网关的非 loopback IPv4 地址，使用 `0.0.0.0` 发布 `proxy` 端口，并只把检测到的地址加入 `ALLOWED_HOSTS`。输出中的 LAN URL 才是手机访问地址。
 
 电脑有多个网卡时，显式指定地址：
 

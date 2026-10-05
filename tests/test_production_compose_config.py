@@ -126,11 +126,13 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     services = compose["services"]
     web_environment = compose["services"]["web"]["environment"]
 
-    assert compose["services"]["web"]["ports"] == [
+    # One published port, and it belongs to the proxy: the browser must see a single
+    # origin, or its socket URL is built against whatever port the page happened to load on.
+    assert compose["services"]["proxy"]["ports"] == [
         "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_EVENT_PORT:-8000}:8000"
     ]
-    assert "ports" not in compose["services"]["db"]
-    assert "ports" not in compose["services"]["redis"]
+    for name in ("web", "media", "realtime", "db", "redis"):
+        assert "ports" not in compose["services"][name], name
     assert web_environment["DATABASE_ENGINE"] == "postgresql"
     assert web_environment["RATE_LIMIT_BACKEND"] == "database"
     assert web_environment["POSTGRES_CONN_MAX_AGE"] == "${POSTGRES_CONN_MAX_AGE:-60}"
@@ -140,9 +142,6 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     assert web_environment["CSRF_TRUSTED_ORIGINS"] == ""
     assert set(services["web"]["networks"]) == {"artflow_event_frontend"}
     assert set(services["db"]["networks"]) == {"artflow_event_frontend"}
-    assert compose["services"]["realtime"]["ports"] == [
-        "${ARTFLOW_EVENT_BIND_ADDRESS:-127.0.0.1}:${ARTFLOW_REALTIME_PORT:-8001}:8001"
-    ]
     assert compose["networks"]["artflow_event_frontend"]["internal"] is False
     assert "postgres_data" in compose["volumes"]
     assert "media_data" in compose["volumes"]
@@ -151,6 +150,11 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
     event_manifest = EVENT_COMPOSE_PATH.read_text(encoding="utf-8").lower()
     assert "tunnel" not in event_manifest
     assert "ipv6" not in event_manifest
+
+    assert compose["services"]["media"]["environment"]["ARTFLOW_PROCESS_ROLE"] == "media"
+    assert compose["services"]["proxy"]["depends_on"]["realtime"]["condition"] == "service_started"
+    for path in ("/*", "/ws/*", "/media/*"):
+        assert path in (EVENT_COMPOSE_PATH.parent / "Caddyfile.event").read_text(encoding="utf-8")
 
 
 def test_compose_manifests_forward_optional_branding_to_web():
@@ -346,7 +350,10 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
             yaml.safe_dump(
                 {
                     "services": {
-                        "web": {
+                        # Both roles are stood in for: the event stack now publishes the
+                        # proxy's port, not web's, and this test only cares which port is
+                        # reachable and that the database has none.
+                        role: {
                             "image": CADDY_RUNTIME_TEST_IMAGE,
                             "entrypoint": ["caddy"],
                             "command": [
@@ -374,6 +381,7 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
                                 "start_period": "2s",
                             },
                         }
+                        for role in ("web", "proxy")
                     }
                 }
             ),
@@ -408,7 +416,7 @@ def test_event_runtime_publishes_only_the_loopback_web_port():
             up = run("up", "--no-build", "--wait")
             assert up.returncode == 0, "\n".join((up.stdout + up.stderr).splitlines()[-80:])
 
-            web_port = run("port", "web", "8000")
+            web_port = run("port", "proxy", "8000")
             assert web_port.returncode == 0, web_port.stderr
             assert web_port.stdout.strip() == f"127.0.0.1:{event_port}"
 
