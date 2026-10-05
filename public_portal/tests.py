@@ -87,6 +87,41 @@ class LiveStateSharedCacheTests(TestCase):
             1 for query in captured.captured_queries if "PUBLICPOST" in query["sql"].upper()
         )
 
+    def test_live_state_payload_carries_the_release_title(self):
+        """An open page must be able to render a release that lands later.
+
+        The audience is told to keep one QR page open all night, so a release has to
+        appear without a reload — the title travels with the URL rather than forcing a
+        second request when the poll sees one.
+        """
+        response = self.client.get(self.url)
+
+        body = response.json()
+        self.assertIn("result_url", body)
+        self.assertEqual(body["result_url"], None)
+        self.assertEqual(body["result_title"], "")
+
+    def test_a_retitled_release_changes_the_revision(self):
+        from dataclasses import replace
+
+        from .live_state import SharedLiveState
+
+        original = SharedLiveState(
+            vote_session_id=None,
+            vote_name="",
+            state="waiting",
+            label="",
+            can_submit=False,
+            start_timestamp=None,
+            end_timestamp=None,
+            result_post_id=7,
+            result_title="结果公示",
+        )
+        self.assertNotEqual(
+            original.revision("none"),
+            replace(original, result_title="结果公示（已更正）").revision("none"),
+        )
+
     def test_shared_state_is_recomputed_only_once_per_ttl(self):
         _, first = self._live_state_queries()
 

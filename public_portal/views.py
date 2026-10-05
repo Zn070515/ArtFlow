@@ -114,6 +114,7 @@ def activity_live_state(request, public_code: str):
                 if shared.result_post_id
                 else None
             ),
+            "result_title": shared.result_title,
             "ticket_status": ticket_status,
         }
     )

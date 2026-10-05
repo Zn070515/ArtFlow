@@ -54,6 +54,10 @@ class SharedLiveState:
     start_timestamp: float | None
     end_timestamp: float | None
     result_post_id: int | None
+    # The title travels with the id so a page that was already open can render the link
+    # without a second request when the release appears. It is part of the revision
+    # because a retitled release is a change the open page should pick up.
+    result_title: str
 
     def revision(self, ticket_status: str) -> str:
         """The client's change token: identical inputs must produce one string."""
@@ -64,6 +68,7 @@ class SharedLiveState:
                 str(self.start_timestamp if self.start_timestamp is not None else 0),
                 str(self.end_timestamp if self.end_timestamp is not None else 0),
                 str(self.result_post_id or 0),
+                self.result_title,
                 ticket_status,
             ]
         )
@@ -135,4 +140,5 @@ def _compute_shared_live_state(activity: Activity) -> SharedLiveState:
         start_timestamp=vote_session.start_time.timestamp() if vote_session else None,
         end_timestamp=vote_session.end_time.timestamp() if vote_session else None,
         result_post_id=result_post.pk if result_post else None,
+        result_title=result_post.title if result_post else "",
     )
