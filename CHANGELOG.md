@@ -88,6 +88,28 @@ nothing. `[tool.mypy] files` and `[tool.ruff] src` were each missing two apps.
   retention window and the live-state cache TTL, with their real defaults. `.dockerignore`
   gains `node_modules/` and `backups/`; dependabot gains the npm ecosystem.
 
+### Media downloads — a load rehearsal, and the capacity ceiling it found
+
+`controlled_media` authorizes a private path and then streams the bytes through the
+Gunicorn worker that is handling the request; there is no separate file service and no
+`X-Accel-Redirect`. The production doc has always required a load rehearsal before the
+first live event — this makes it repeatable instead of a promise.
+
+- `scripts/media_download_load_rehearsal.mjs` drives N slow readers, because client
+  back-pressure is what holds a worker open (a loopback client drains the file and lets
+  go). It probes `/livez/` on an independent connection, so "the app stopped answering"
+  becomes a number, and it re-checks *while the workers are saturated* that an
+  unauthenticated request still never receives bytes — a timeout is the starvation being
+  measured, not a bypass.
+- `prepare_media_download_rehearsal` / `cleanup_media_download_rehearsal` create and
+  remove exactly one TEST activity, registration and 100 MiB submission file, the largest
+  payload a formal activity accepts today.
+- Result on the shipped three-worker pool: two slow downloads are invisible, the third
+  stalls the application (probe p50 ≈ 4.9 s, half of the probes timing out). Adding
+  workers only moves the threshold, so the evidence points at the delivery seam's Phase B
+  — getting the bytes off the worker — rather than at pool size. Numbers and boundaries
+  are recorded in `docs/production-readiness.md`.
+
 ### Phone layout — the raised-font half of the contract, and why only CI could see it
 
 The scroll-free phone contract had been red on `main` for five commits: eleven layout

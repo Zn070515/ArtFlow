@@ -153,6 +153,9 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 - 内部提交文件和生成文档由 Django 受控媒体视图流式返回，当前没有独立的媒体下载 worker。
   正式活动前必须按最大文件尺寸和并发下载量做一次负载演练；若下载占满 Gunicorn worker，
   应把媒体交给独立的受控文件服务，并保留同等权限校验，不能直接暴露 `/media/` 目录。
+  该演练已实现为 `scripts/media_download_load_rehearsal.mjs`（配套 fixture 生命周期命令
+  `prepare_media_download_rehearsal` / `cleanup_media_download_rehearsal`），结论与数据见
+  [生产准备演练](production-readiness.md) 的「媒体下载负载演练」一节。
 
 ## 公网入口的滥用与 DDoS 边界
 

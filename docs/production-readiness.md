@@ -484,3 +484,49 @@ uv run python manage.py benchmark_ballot_burst --vote-session <pk> --clients 300
   **服务层锁行为**的测量，不是生产吞吐预测。
 - 未覆盖：经 Caddy/Gunicorn 的 HTTP 与 worker 容量、2C4G 硬件、公网与现场网络、
   多进程下的连接池上限。这些仍按部署前置 `HOLD` 处理，需要现场彩排的独立证据。
+
+### 2026-10-05 媒体下载负载演练记录
+
+`deploy/compose.production.yml` 的 web 容器跑 Gunicorn `--workers 3 --timeout 120`，而
+`controlled_media` 授权后由 `LocalFilesystemDelivery` **在该 worker 内**把字节发出去
+（ADR-012 只立了 seam，没有做字节卸载）。所以"并发大文件下载占满 worker"是一个容量
+failure mode，不是代码缺陷。本轮把它从判断变成测量。
+
+环境：本机 Docker Compose 的 web + PostgreSQL，回环 `127.0.0.1:8000`，payload 100 MiB
+（`ARTFLOW_VIDEO_UPLOAD_MAX_MB` 的默认值，即正式活动允许的最大视频），文件为稀疏文件。
+每个模拟客户端读取一块后停 50 ms，用背压模拟现场 wifi 上的手机；一条**独立**连接每
+250 ms 探一次 `/livez/`（不碰数据库的存活探针），单次 5 s 超时。命令为
+[`scripts/media_download_load_rehearsal.mjs`](../scripts/media_download_load_rehearsal.mjs)：
+
+```powershell
+# 在 web 容器内生成 fixture，拷出后可重复使用
+docker compose exec -T web python manage.py prepare_media_download_rehearsal --output-file /tmp/media-load.json
+docker compose cp web:/tmp/media-load.json "$env:TEMP\media-load.json"
+$env:ARTFLOW_MEDIA_LOAD_FIXTURE_PATH = "$env:TEMP\media-load.json"
+$env:ARTFLOW_MEDIA_LOAD_DURATION_MS = "10000"
+$env:ARTFLOW_MEDIA_LOAD_CLIENTS = "3"
+node scripts/media_download_load_rehearsal.mjs
+```
+
+| 并发下载 | `/livez/` 成功 | >1 s | 超时(5 s) | p50 / p95 / p99（ms） | 同一窗口的无凭据请求 |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 1（空闲 worker） | 39/39 | 0 | 0 | 7 / 12 / 17 | 403 被拒 |
+| 2（空闲 worker） | 39/39 | 0 | 0 | 7 / 12 / 14 | 403 被拒 |
+| 3（= worker 数） | 20/39 | 16 | 19 | 4953 / 5000 / 5000 | 403 被拒 |
+| 4（> worker 数） | 20/39 | 16 | 19 | 4947 / 5000 / 5000 | 请求超时 |
+
+基线 `/livez/` p50 为 4–9 ms；四档下每个下载都以 200 正常完成（窗口内各约 23 MB）。
+判定：
+
+- **1–2 个慢下载对应用无影响**（仍有空闲 worker），**3 个即等于 worker 数，应用在下载
+  期间基本不可用**：一半以上探测 5 s 超时，p50 接近 5 s。4 个与 3 个同级——瓶颈是
+  worker 数量，不是再多一个客户端。
+- **授权没有被打穿**：1–3 并发时无凭据请求仍被 403 拒绝；4 并发时它排队到超时，因为
+  没有空闲 worker 来执行这次拒绝——超时是本次要测的饥饿本身，不是绕过。四档下未授权
+  请求**从未拿到任何字节**。
+- 结论：这一条**不构成"加 worker"的理由**——加 worker 只是把阈值从 3 抬到 N，现场随时
+  可能有超过 N 个观众在取文件。正确方向是**让字节离开 Gunicorn worker**（ADR-012 seam
+  的 Phase B：signed URL 302、X-Accel-Redirect 或独立受控文件服务），并保留同等权限校验。
+- 边界：本机回环、单容器、稀疏 payload，只测**worker 占用**，不测磁盘吞吐、公网带宽、
+  边缘层容量或多副本行为。正式活动前仍需在真实部署与现场网络上复测。
+

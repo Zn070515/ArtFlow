@@ -42,6 +42,8 @@ class SubmissionFile(models.Model):
 
     if TYPE_CHECKING:
         group_id: int | None
+        # Django creates this attname at runtime; pyright cannot see it.
+        singer_registration_id: int | None
 
         def get_file_purpose_display(self) -> str: ...
 
