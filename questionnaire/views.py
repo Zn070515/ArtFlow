@@ -194,6 +194,7 @@ NOTICE_ROW: dict[str, object] = {
     "value_text": "",
     "checked": False,
     "file_name": "",
+    "file_version": 0,
     "editable": False,
 }
 
@@ -269,6 +270,9 @@ def _question_rows(
                         "checked": value is True,
                         "selected_values": value if isinstance(value, list) else [],
                         "file_name": getattr(value, "original_name", ""),
+                        # The version the page is showing, so an upload can say which
+                        # current file it is replacing (group material is shared).
+                        "file_version": getattr(value, "version", 0),
                         "editable": writable is None or key in writable,
                     }
                 )
@@ -706,7 +710,7 @@ def group_submit_view(request: HttpRequest, group_pk: int):
 @login_required
 @require_POST
 def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
-    from files.services import store_questionnaire_group_file
+    from files.services import FileSlotStale, store_questionnaire_group_file
 
     group = _group_or_404(request, group_pk)
     if _is_staff(request.user):
@@ -719,6 +723,9 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
     stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
     if stale is not None:
         return stale
+    expected_raw = str(request.POST.get("expected_current_version") or "").strip()
+    if expected_raw and not expected_raw.isdigit():
+        return JsonResponse({"error": "材料版本标识无效，请刷新后重试。"}, status=400)
     try:
         stored = store_questionnaire_group_file(
             group=group,
@@ -726,7 +733,28 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
             uploaded_file=uploaded,
             actor=request.user,
             expected_schema_hash=str(request.POST.get("schema_hash") or ""),
+            # Absent means "this client does not do the check", not "expect nothing":
+            # a group member working from a page opened before anyone uploaded sends 0.
+            expected_current_version=int(expected_raw) if expected_raw else None,
+        )
+    except FileSlotStale as conflict:
+        # A distinct code, because the client's next move is a choice rather than a
+        # refresh: keep the teammate's upload, or replace it deliberately.
+        return JsonResponse(
+            {
+                "error": "该材料槽位已被其他成员更新。",
+                "code": "FILE_SLOT_STALE",
+                "current_version": conflict.current_version,
+                "current_name": conflict.current_name,
+            },
+            status=409,
         )
     except ValidationError:
         return _invalid_questionnaire_response()
-    return JsonResponse({"question_key": stored.question_key, "file_name": stored.original_name})
+    return JsonResponse(
+        {
+            "question_key": stored.question_key,
+            "file_name": stored.original_name,
+            "version": stored.version,
+        }
+    )

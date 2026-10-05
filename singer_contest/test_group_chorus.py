@@ -9,6 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from files.models import MaterialCheck, SubmissionFile
 from files.services import (
+    FileSlotStale,
     reconcile_group_material_checks,
     review_material_check,
     submit_participant_material_for_check,
@@ -310,6 +311,52 @@ class GroupChorusStageServiceTests(TestCase):
             )
         notify.assert_called_once()
         self.assertEqual(notify.call_args.args[0], group.pk)
+
+    def test_shared_group_file_refuses_a_stale_replacement(self):
+        """A member working from a stale page must not silently replace the current file.
+
+        The accompaniment is the one artifact the group must produce; without this the
+        second uploader overwrites the first without ever seeing it.
+        """
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
+        group = Group.objects.get(stage=stage, name="A组")
+        reconcile_group_material_checks(group)
+        check = MaterialCheck.objects.get(
+            group=group, file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT
+        )
+
+        def upload(name: str, expected):
+            return submit_participant_material_for_check(
+                owner=group,
+                check_id=check.pk,
+                uploaded_file=SimpleUploadedFile(
+                    name, b"ID3" + b"chorus", content_type="audio/mpeg"
+                ),
+                actor=self.singers[0].user,
+                expected_current_version=expected,
+            )
+
+        first = upload("first.mp3", 0)
+        self.assertEqual(first.version, 1)
+
+        # A teammate's page still believes the slot is empty.
+        with self.assertRaises(FileSlotStale) as caught:
+            upload("stale.mp3", 0)
+        self.assertEqual(caught.exception.current_version, 1)
+        self.assertEqual(caught.exception.current_name, "first.mp3")
+        self.assertEqual(SubmissionFile.objects.filter(group=group, is_current=True).count(), 1)
+        self.assertEqual(
+            SubmissionFile.objects.get(group=group, is_current=True).original_name, "first.mp3"
+        )
+
+        # Choosing to replace against the version it was told about goes through.
+        replaced = upload("deliberate.mp3", caught.exception.current_version)
+        self.assertEqual(replaced.version, 2)
 
     def test_background_video_does_not_satisfy_the_accompaniment_contract(self):
         stage = create_group_stage(

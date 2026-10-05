@@ -215,6 +215,21 @@ def _slot_filter(owner_filter, *, purpose, question_key):
     return {**owner_filter, "file_purpose": purpose, "question_key": ""}
 
 
+class FileSlotStale(ValidationError):
+    """The slot this upload targets changed since the page was opened.
+
+    Raised instead of overwriting: a shared group file has one *current* version, and a
+    member working from a stale page would otherwise replace a teammate's final upload
+    without ever seeing it — last writer wins on the one artifact the group must produce.
+    The caller decides what to do next; the data told it what it is missing.
+    """
+
+    def __init__(self, *, current_version: int, current_name: str) -> None:
+        super().__init__("该材料槽位已被其他成员更新。")
+        self.current_version = current_version
+        self.current_name = current_name
+
+
 @transaction.atomic
 def _store_file(
     *,
@@ -228,6 +243,7 @@ def _store_file(
     owner_total_quota=False,
     allowed_extensions=None,
     phase_action: ActivityAction | None = ActivityAction.UPLOAD_MATERIAL,
+    expected_current_version: int | None = None,
 ):
     """The one storage path both the legacy and the questionnaire uploads go through.
 
@@ -275,6 +291,18 @@ def _store_file(
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
     owner_filter = _owner_filter(locked_owner)
     slot = _slot_filter(owner_filter, purpose=purpose, question_key=question_key)
+    if expected_current_version is not None:
+        # Checked under the owner lock, so a concurrent upload cannot slip between the
+        # comparison and the write that follows it.
+        current = (
+            SubmissionFile.objects.filter(**slot, is_current=True).order_by("-version").first()
+        )
+        actual = current.version if current is not None else 0
+        if actual != expected_current_version:
+            raise FileSlotStale(
+                current_version=actual,
+                current_name=current.original_name if current is not None else "",
+            )
     quota_filter = owner_filter if owner_total_quota else slot
     existing_bytes = SubmissionFile.objects.filter(**quota_filter).values_list(
         "file_size", flat=True
@@ -414,7 +442,13 @@ def store_questionnaire_file(
 
 @transaction.atomic
 def store_questionnaire_group_file(
-    *, group, question_key, uploaded_file, actor, expected_schema_hash=""
+    *,
+    group,
+    question_key,
+    uploaded_file,
+    actor,
+    expected_schema_hash="",
+    expected_current_version: int | None = None,
 ):
     """Store a file answer owned by a confirmed Group Chorus group."""
     from questionnaire.registration import (
@@ -454,6 +488,7 @@ def store_questionnaire_group_file(
         # The stage's material window already authorized this write; the activity phase
         # policy would reject it outright during LIVE, where group material is legitimate.
         phase_action=None,
+        expected_current_version=expected_current_version,
     )
     from common.models import AuditLog
 
@@ -964,7 +999,9 @@ def _ensure_participant_upload_phase(activity) -> None:
 
 
 @transaction.atomic
-def submit_participant_material_for_check(*, owner, check_id, uploaded_file, actor):
+def submit_participant_material_for_check(
+    *, owner, check_id, uploaded_file, actor, expected_current_version: int | None = None
+):
     """The participant material authority: one file, one staff-designated check.
 
     A participant upload is addressed by the *check* it fulfils, never by a
@@ -1024,6 +1061,7 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         # A Group owner was already authorized by the stage's material window, which is
         # allowed to be open in phases whose action set has no UPLOAD_MATERIAL.
         phase_action=None if group_scope is not None else ActivityAction.UPLOAD_MATERIAL,
+        expected_current_version=expected_current_version,
     )
     if group_scope is not None:
         # The owner *is* the group: a Group has no ``group_id`` — it is the row the other
