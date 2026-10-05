@@ -352,6 +352,11 @@ class GroupMaterialConsumer(AsyncJsonWebsocketConsumer):
         }
         if "member" in event:
             payload["member"] = event["member"]
+        # ``presence.leave`` carries no member, only who left: without this the client
+        # could not match the departure to a roster entry and the member stayed listed
+        # until a full snapshot.
+        if "client_id" in event:
+            payload["client_id"] = event["client_id"]
         await self.send_json(payload)
 
     async def realtime_event(self, event: dict[str, Any]) -> None:
@@ -374,6 +379,7 @@ class GroupMaterialConsumer(AsyncJsonWebsocketConsumer):
                 "event": event_name,
                 "resource": f"group:{self.group_id}:materials",
                 "member": self.member.as_dict(),
+                "client_id": self.client_id,
                 "origin": self.client_id,
             },
         )

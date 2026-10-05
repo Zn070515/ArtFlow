@@ -48,6 +48,7 @@ from .registration import (
 )
 from .runtime import completion_summary, resolve_question_value, resolve_questions
 from .schema import NOTICE_TYPE
+from .services import QuestionStale, answer_bases
 
 CONTEST_TYPE = Activity.Type.SINGER_CONTEST
 
@@ -194,6 +195,7 @@ NOTICE_ROW: dict[str, object] = {
     "value_text": "",
     "checked": False,
     "file_name": "",
+    "file_version": 0,
     "editable": False,
 }
 
@@ -269,6 +271,9 @@ def _question_rows(
                         "checked": value is True,
                         "selected_values": value if isinstance(value, list) else [],
                         "file_name": getattr(value, "original_name", ""),
+                        # The version the page is showing, so an upload can say which
+                        # current file it is replacing (group material is shared).
+                        "file_version": getattr(value, "version", 0),
                         "editable": writable is None or key in writable,
                     }
                 )
@@ -372,6 +377,7 @@ def form_view(request: HttpRequest, activity_pk: int):
             "autosave_url": f"/questionnaire/{activity.pk}/autosave/",
             "upload_url_template": f"/questionnaire/{activity.pk}/file/__KEY__/",
             "submit_url": f"/questionnaire/{activity.pk}/submit/",
+            "answer_bases": answer_bases(answers),
         },
     )
 
@@ -432,6 +438,7 @@ def group_form_view(request: HttpRequest, group_pk: int):
             "autosave_url": f"/questionnaire/group/{group.pk}/autosave/",
             "upload_url_template": f"/questionnaire/group/{group.pk}/file/__KEY__/",
             "submit_url": f"/questionnaire/group/{group.pk}/submit/",
+            "answer_bases": answer_bases(answers),
             "group": group,
             "current_members": current_group_members(group),
         },
@@ -630,8 +637,9 @@ def group_autosave_view(request: HttpRequest, group_pk: int):
     if plan.subject != "group":
         raise PermissionDenied("当前赛制没有启用分组合唱组问卷。")
     payload = _json_body(request)
-    if payload is None or not isinstance(payload.get("answers"), dict):
-        return JsonResponse({"error": "请求体必须包含 answers 对象。"}, status=400)
+    changes = payload.get("changes") if payload else None
+    if payload is None or (changes is None and not isinstance(payload.get("answers"), dict)):
+        return JsonResponse({"error": "请求体必须包含 answers 或 changes。"}, status=400)
     stale = _stale_or_missing_schema_hash(payload, plan)
     if stale is not None:
         return stale
@@ -639,9 +647,21 @@ def group_autosave_view(request: HttpRequest, group_pk: int):
         saved = save_group_draft(
             version=version,
             group=group,
-            answers=payload["answers"],
             actor=request.user,
+            answers=payload.get("answers"),
+            changes=changes,
             schema_hash=str(payload.get("schema_hash") or ""),
+        )
+    except QuestionStale as conflict:
+        # One member's text, not a corrupted form: the client shows the difference and the
+        # author decides, instead of the later writer silently winning.
+        return JsonResponse(
+            {
+                "error": "部分题目已被其他成员修改。",
+                "code": "QUESTION_STALE",
+                "conflicts": conflict.conflicts,
+            },
+            status=409,
         )
     except ValidationError:
         return _invalid_questionnaire_response()
@@ -656,6 +676,9 @@ def group_autosave_view(request: HttpRequest, group_pk: int):
                 files=current_group_answer_files(group),
             ),
             "schema_hash": saved.schema_hash,
+            # The bases to edit against next, so a second save does not report a conflict
+            # against a value the page has never seen.
+            "answer_bases": answer_bases(saved.answers or {}),
         }
     )
 
@@ -706,7 +729,7 @@ def group_submit_view(request: HttpRequest, group_pk: int):
 @login_required
 @require_POST
 def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
-    from files.services import store_questionnaire_group_file
+    from files.services import FileSlotStale, store_questionnaire_group_file
 
     group = _group_or_404(request, group_pk)
     if _is_staff(request.user):
@@ -719,6 +742,9 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
     stale = _stale_or_missing_schema_hash({"schema_hash": request.POST.get("schema_hash")}, plan)
     if stale is not None:
         return stale
+    expected_raw = str(request.POST.get("expected_current_version") or "").strip()
+    if expected_raw and not expected_raw.isdigit():
+        return JsonResponse({"error": "材料版本标识无效，请刷新后重试。"}, status=400)
     try:
         stored = store_questionnaire_group_file(
             group=group,
@@ -726,7 +752,28 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
             uploaded_file=uploaded,
             actor=request.user,
             expected_schema_hash=str(request.POST.get("schema_hash") or ""),
+            # Absent means "this client does not do the check", not "expect nothing":
+            # a group member working from a page opened before anyone uploaded sends 0.
+            expected_current_version=int(expected_raw) if expected_raw else None,
+        )
+    except FileSlotStale as conflict:
+        # A distinct code, because the client's next move is a choice rather than a
+        # refresh: keep the teammate's upload, or replace it deliberately.
+        return JsonResponse(
+            {
+                "error": "该材料槽位已被其他成员更新。",
+                "code": "FILE_SLOT_STALE",
+                "current_version": conflict.current_version,
+                "current_name": conflict.current_name,
+            },
+            status=409,
         )
     except ValidationError:
         return _invalid_questionnaire_response()
-    return JsonResponse({"question_key": stored.question_key, "file_name": stored.original_name})
+    return JsonResponse(
+        {
+            "question_key": stored.question_key,
+            "file_name": stored.original_name,
+            "version": stored.version,
+        }
+    )

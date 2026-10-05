@@ -10,9 +10,11 @@
      data-upload-url-template="{{ upload_url_template }}"
      data-schema-hash="{{ schema_hash }}"
      data-editable="{% if editable %}1{% else %}0{% endif %}"
+     data-cas="{% if group %}1{% else %}0{% endif %}"
      data-submit-url="{{ submit_url }}"
      data-submitted="{% if submitted %}1{% else %}0{% endif %}">
     {% csrf_token %}
+    {{ answer_bases|json_script:"questionnaire-answer-bases" }}
 
     <h1 class="text-xl font-bold text-gray-900 mb-1">{{ activity.title }}</h1>
     {% if group %}
@@ -23,7 +25,7 @@
              data-collab-resource="group:{{ group.pk }}:materials"
              data-collab-ws-url="/ws/group/{{ group.pk }}/materials/"
              data-collab-empty-text="当前没有其他组员在线"
-             data-collab-refresh-events="group.material_changed,group.material_reviewed">
+             data-collab-refresh-events="group.material_changed,group.material_reviewed,group.questionnaire_changed">
         <p class="text-xs text-gray-500" data-collab-status>正在连接协作提示…</p>
         <ul class="mt-2 space-y-1 text-sm text-gray-700" data-collab-members></ul>
         <div class="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-collab-refresh hidden>
@@ -91,7 +93,7 @@
                     <input type="file" id="q-{{ q.key }}" name="{{ q.key }}" data-file-answer="{{ q.key }}"
                            {% if not q.editable or not q.file.direct_upload_allowed %}disabled{% endif %}
                            class="text-sm text-gray-600">
-                    <span class="text-xs text-gray-500" data-file-name="{{ q.key }}">{{ q.file_name }}</span>
+                    <span class="text-xs text-gray-500" data-file-name="{{ q.key }}" data-file-version="{{ q.file_version }}">{{ q.file_name }}</span>
                 </div>
                 <p class="text-xs text-gray-400 mt-1">
                     支持 {{ q.file.extensions|join:"、" }}，单个文件不超过 {{ q.file.max_mb }} MB

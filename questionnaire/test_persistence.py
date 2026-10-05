@@ -19,7 +19,13 @@ from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import SingerRegistration
 
 from .models import QuestionnaireResponse
-from .services import get_or_create_response, mark_submitted, save_draft_answers
+from .services import (
+    QuestionStale,
+    answer_base,
+    get_or_create_response,
+    mark_submitted,
+    save_draft_answers,
+)
 
 DEFINITION = json.dumps(
     {
@@ -179,3 +185,86 @@ class QuestionnaireResponseDraftTests(_ResponseBase):
         mark_submitted(response)
         response.refresh_from_db()
         self.assertEqual(response.submitted_at, first)
+
+
+class AnswerCompareAndSetTests(_ResponseBase):
+    """``changes`` is the shared-response write: refuse a base that has moved.
+
+    A group shares one response between its members, and a whole-form merge means the
+    later writer wins on every question — including the ones they never touched, because
+    the form posted its whole state. Two people editing different questions must both
+    succeed; two editing the same one must be told.
+    """
+
+    def _response(self):
+        activity = self.make_activity(is_test_mode=True)
+        return get_or_create_response(
+            registration=self.registration(activity),
+            ruleset_version=self.version(activity),
+            questionnaire_key="q",
+        )
+
+    def test_a_change_built_on_the_current_base_applies(self):
+        response = self._response()
+        save_draft_answers(response, answers={"note": "first"})
+        response.refresh_from_db()
+        saved = save_draft_answers(
+            response,
+            changes=[{"key": "note", "base": answer_base("first"), "value": "second"}],
+        )
+        self.assertEqual(saved.answers, {"note": "second"})
+
+    def test_a_change_built_on_a_moved_base_is_refused_rather_than_merged(self):
+        response = self._response()
+        save_draft_answers(response, answers={"note": "theirs"})
+        response.refresh_from_db()
+        with self.assertRaises(QuestionStale) as caught:
+            save_draft_answers(
+                response,
+                changes=[{"key": "note", "base": answer_base("mine"), "value": "mine"}],
+            )
+        conflict = caught.exception.conflicts[0]
+        self.assertEqual(conflict["key"], "note")
+        self.assertEqual(conflict["server"], "theirs")
+        self.assertEqual(conflict["local"], "mine")
+        # The retry base is the server's, so a deliberate overwrite can be expressed.
+        self.assertEqual(conflict["base"], answer_base("theirs"))
+        response.refresh_from_db()
+        self.assertEqual(response.answers, {"note": "theirs"})
+
+    def test_two_people_editing_different_questions_both_succeed(self):
+        response = self._response()
+        save_draft_answers(response, answers={"a": "", "b": ""})
+        response.refresh_from_db()
+        save_draft_answers(response, changes=[{"key": "a", "base": answer_base(""), "value": "A"}])
+        response.refresh_from_db()
+        saved = save_draft_answers(
+            response, changes=[{"key": "b", "base": answer_base(""), "value": "B"}]
+        )
+        self.assertEqual(saved.answers, {"a": "A", "b": "B"})
+
+    def test_an_absent_answer_shares_a_base_with_an_empty_one(self):
+        response = self._response()
+        self.assertEqual(answer_base(response.answers.get("flag")), answer_base(None))
+
+    def test_a_deliberate_overwrite_uses_the_base_the_conflict_reported(self):
+        response = self._response()
+        save_draft_answers(response, answers={"note": "theirs"})
+        response.refresh_from_db()
+        with self.assertRaises(QuestionStale) as caught:
+            save_draft_answers(
+                response,
+                changes=[{"key": "note", "base": answer_base("mine"), "value": "mine"}],
+            )
+        response.refresh_from_db()
+        saved = save_draft_answers(
+            response,
+            changes=[
+                {
+                    "key": "note",
+                    "base": caught.exception.conflicts[0]["base"],
+                    "value": "mine",
+                }
+            ],
+        )
+        self.assertEqual(saved.answers, {"note": "mine"})

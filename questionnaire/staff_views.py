@@ -122,6 +122,7 @@ def _row(question, resolved, value) -> dict:
         "checked": value is True,
         "selected_values": value if isinstance(value, list) else [],
         "file_name": getattr(value, "original_name", ""),
+        "file_version": getattr(value, "version", 0),
     }
 
 
