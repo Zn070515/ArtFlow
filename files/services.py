@@ -1025,11 +1025,15 @@ def submit_participant_material_for_check(*, owner, check_id, uploaded_file, act
         # allowed to be open in phases whose action set has no UPLOAD_MATERIAL.
         phase_action=None if group_scope is not None else ActivityAction.UPLOAD_MATERIAL,
     )
-    if getattr(locked_owner, "group_id", None):
+    if group_scope is not None:
+        # The owner *is* the group: a Group has no ``group_id`` — it is the row the other
+        # members' pages are watching — so testing for that attribute silently dropped every
+        # member-upload notification while staff reviews (which go through ``check.group_id``)
+        # still worked.
         from realtime.events import schedule_group_material_event
 
         schedule_group_material_event(
-            locked_owner.group_id,
+            locked_owner.pk,
             event="group.material_changed",
             revision=stored.pk,
             actor={"id": current_actor.pk, "username": current_actor.get_username()},

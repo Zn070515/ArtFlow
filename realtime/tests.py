@@ -7,7 +7,7 @@ from accounts.models import User
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer  # type: ignore[import-untyped]
 from channels.testing import WebsocketCommunicator  # type: ignore[import-untyped]
-from common.authority import ACCOUNT_AUTHORITY, authority_write
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from config.asgi import application
 from core.models import Activity
 from django.db import transaction
@@ -28,6 +28,22 @@ def _recorded_call(mock: AsyncMock):
     return recorded
 
 
+def _session_cookie_headers(user) -> list[tuple[bytes, bytes]]:
+    """Handshake headers carrying a real session for ``user``."""
+    from django.contrib.sessions.backends.db import SessionStore
+
+    session = SessionStore()
+    session["_auth_user_id"] = str(user.pk)
+    session["_auth_user_backend"] = "django.contrib.auth.backends.ModelBackend"
+    session["_auth_user_hash"] = user.get_session_auth_hash()
+    session.save()
+    return [
+        (b"host", b"testserver"),
+        (b"origin", b"http://testserver"),
+        (b"cookie", f"sessionid={session.session_key}".encode("ascii")),
+    ]
+
+
 class StaffActivityConsumerTests(TestCase):
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
@@ -42,18 +58,7 @@ class StaffActivityConsumerTests(TestCase):
         )
 
     def _cookie_headers(self) -> list[tuple[bytes, bytes]]:
-        from django.contrib.sessions.backends.db import SessionStore
-
-        session = SessionStore()
-        session["_auth_user_id"] = str(self.staff.pk)
-        session["_auth_user_backend"] = "django.contrib.auth.backends.ModelBackend"
-        session["_auth_user_hash"] = self.staff.get_session_auth_hash()
-        session.save()
-        return [
-            (b"host", b"testserver"),
-            (b"origin", b"http://testserver"),
-            (b"cookie", f"sessionid={session.session_key}".encode("ascii")),
-        ]
+        return _session_cookie_headers(self.staff)
 
     def test_anonymous_activity_socket_is_rejected(self):
         async def exercise():
@@ -115,6 +120,85 @@ class StaffActivityConsumerTests(TestCase):
             left = await second.receive_json_from()
             self.assertEqual(left["type"], "presence.leave")
             self.assertEqual(left["client_id"], "clientone")
+            await second.disconnect()
+
+        async_to_sync(exercise)()
+
+
+class GroupMaterialConsumerTests(TestCase):
+    """Presence in a group material room must carry enough to remove the leaver."""
+
+    def setUp(self):
+        from singer_contest.group_chorus import (
+            confirm_group_stage,
+            create_group_stage,
+            record_group_stage,
+        )
+        from singer_contest.models import Group, SingerRegistration
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="group-room-staff",
+                password="password123!",
+                role=User.Role.STAFF,
+            )
+            singer_user = User.objects.create_user(
+                username="group-room-singer", password="password123!"
+            )
+        self.activity = Activity.objects.create(
+            title="Group Room Test",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.REHEARSAL)
+        self.activity.refresh_from_db()
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="选手",
+            student_id="20260001",
+            college="艺术学院",
+            class_name="一班",
+            phone="13800000000",
+            song_name="曲目",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.staff
+        )
+        record_group_stage(stage, [{"name": "A组", "singer_ids": [singer.pk]}], self.staff)
+        confirm_group_stage(stage, self.staff)
+        self.group = Group.objects.get(stage=stage, name="A组")
+
+    def test_group_presence_leave_names_the_client_that_left(self):
+        headers = _session_cookie_headers(self.staff)
+
+        async def exercise():
+            base = f"/ws/group/{self.group.pk}/materials/"
+            first = WebsocketCommunicator(
+                application, f"{base}?client_id=groupone", headers=headers
+            )
+            second = WebsocketCommunicator(
+                application, f"{base}?client_id=grouptwo", headers=headers
+            )
+            first_connected, _ = await first.connect()
+            self.assertTrue(first_connected)
+            self.assertEqual((await first.receive_json_from())["type"], "presence.snapshot")
+            self.assertEqual((await first.receive_json_from())["type"], "presence.join")
+
+            second_connected, _ = await second.connect()
+            self.assertTrue(second_connected)
+            self.assertEqual((await second.receive_json_from())["type"], "presence.snapshot")
+            self.assertEqual((await second.receive_json_from())["type"], "presence.join")
+            self.assertEqual((await first.receive_json_from())["type"], "presence.join")
+
+            await first.disconnect()
+            left = await second.receive_json_from()
+            self.assertEqual(left["type"], "presence.leave")
+            # Without this the client cannot match the departure to a roster entry, and the
+            # departed member stays listed until a full snapshot.
+            self.assertEqual(left["client_id"], "groupone")
             await second.disconnect()
 
         async_to_sync(exercise)()
