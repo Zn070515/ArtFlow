@@ -101,6 +101,7 @@ from ruleset.services import (
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.group_chorus import (
+    cancel_group_stage,
     confirm_group_stage,
     correct_group_stage,
     create_group_stage,
@@ -515,6 +516,19 @@ def group_stage_confirm(request, pk):
         messages.error(request, domain_error_messages(error))
     else:
         messages.success(request, "分组合唱分组已确认。")
+    return redirect("staff:group_stage_detail", pk=stage.pk)
+
+
+@staff_required
+@require_POST
+def group_stage_cancel(request, pk):
+    stage = get_object_or_404(GroupStage, pk=pk)
+    try:
+        cancel_group_stage(stage, request.user, reason=request.POST.get("reason", ""))
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, domain_error_messages(error))
+    else:
+        messages.success(request, "分组合唱赛段已取消。")
     return redirect("staff:group_stage_detail", pk=stage.pk)
 
 

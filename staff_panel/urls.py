@@ -46,6 +46,11 @@ urlpatterns = [
         name="group_stage_freeze",
     ),
     path(
+        "group-stages/<int:pk>/cancel/",
+        views.group_stage_cancel,
+        name="group_stage_cancel",
+    ),
+    path(
         "group-stages/<int:pk>/material-status/",
         views.group_stage_material_status,
         name="group_stage_material_status",

@@ -17,11 +17,13 @@ from files.services import (
 
 from .group_chorus import (
     GroupReadiness,
+    cancel_group_stage,
     confirm_group_stage,
     correct_group_stage,
     create_group_stage,
     freeze_group_stage,
     group_material_readiness,
+    group_stage_archive_blocker,
     group_stage_readiness,
     record_group_stage,
     set_group_material_status,
@@ -357,6 +359,78 @@ class GroupChorusStageServiceTests(TestCase):
         # Choosing to replace against the version it was told about goes through.
         replaced = upload("deliberate.mp3", caught.exception.current_version)
         self.assertEqual(replaced.version, 2)
+
+    def test_a_retired_group_stage_no_longer_has_to_be_frozen(self):
+        """The year's format can be settled after someone started recording groups.
+
+        Without a terminal state the abandoned stage could never be retired, and archiving
+        requires every stage to be frozen — so a format decision could block the archive.
+        """
+        from questionnaire.registration import GroupMaterialWriteScope, group_material_write_scope
+
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
+        group = Group.objects.get(stage=stage, name="A组")
+
+        cancelled = cancel_group_stage(stage, self.operator, reason="当届赛制无分组合唱")
+
+        self.assertEqual(cancelled.status, GroupStage.Status.CANCELLED)
+        self.assertEqual(cancelled.material_status, GroupStage.MaterialStatus.CLOSED)
+        self.assertIs(group_material_write_scope(group), GroupMaterialWriteScope.NONE)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target=f"GroupStage:{stage.pk}",
+                action_type=AuditLog.ActionType.CANCEL_GROUP_STAGE,
+                note="当届赛制无分组合唱",
+            ).exists()
+        )
+        # Idempotent, and the history is still there.
+        self.assertEqual(
+            cancel_group_stage(stage, self.operator, reason="再点一次").status,
+            GroupStage.Status.CANCELLED,
+        )
+        self.assertTrue(GroupMembership.objects.filter(group=group).exists())
+
+    def test_only_an_unfinished_stage_blocks_the_archive(self):
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        self.assertIn("尚未冻结", group_stage_archive_blocker(stage))
+
+        stage = record_group_stage(stage, self._groups(), self.operator)
+        stage = confirm_group_stage(stage, self.operator)
+        self.assertIn("尚未冻结", group_stage_archive_blocker(stage))
+
+        stage = freeze_group_stage(stage, self.operator)
+        self.assertEqual(group_stage_archive_blocker(stage), "")
+
+    def test_a_cancelled_stage_stops_blocking_the_archive(self):
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        stage = cancel_group_stage(stage, self.operator, reason="当届赛制无分组合唱")
+
+        self.assertEqual(group_stage_archive_blocker(stage), "")
+
+    def test_cancelling_requires_a_reason_and_spares_consumed_stages(self):
+        draft = create_group_stage(
+            self.activity, stage_key="draft", name="草稿组", operator=self.operator
+        )
+        with self.assertRaisesMessage(ValidationError, "必须说明取消"):
+            cancel_group_stage(draft, self.operator, reason="   ")
+
+        stage = create_group_stage(
+            self.activity, stage_key="chorus", name="分组合唱", operator=self.operator
+        )
+        record_group_stage(stage, self._groups(), self.operator)
+        confirm_group_stage(stage, self.operator)
+        freeze_group_stage(stage, self.operator)
+        with self.assertRaisesMessage(ValidationError, "已冻结的分组合唱赛段不能被取消"):
+            cancel_group_stage(stage, self.operator, reason="反悔")
 
     def test_background_video_does_not_satisfy_the_accompaniment_contract(self):
         stage = create_group_stage(

@@ -61,6 +61,7 @@ class AuditLog(models.Model):
         CONFIRM_GROUP_STAGE = "confirm_group_stage", "确认分组合唱分组"
         FREEZE_GROUP_STAGE = "freeze_group_stage", "冻结分组合唱分组"
         CORRECT_GROUP_STAGE = "correct_group_stage", "修正分组合唱成员"
+        CANCEL_GROUP_STAGE = "cancel_group_stage", "取消分组合唱赛段"
         SET_GROUP_MATERIAL_STATUS = "set_group_material_status", "设置分组合唱材料窗口"
         OTHER = "other", "其他"
 
