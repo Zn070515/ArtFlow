@@ -3,6 +3,7 @@ import os
 from typing import Any
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from accounts.models import User
@@ -15,6 +16,14 @@ class Command(BaseCommand):
         parser.add_argument("--username", default=os.environ.get("DEV_ADMIN_USERNAME", "admin"))
 
     def handle(self, *args: Any, **options: Any) -> None:
+        # This command creates a Django superuser with a password supplied on the command
+        # line or in the environment. That is a development convenience only: production
+        # provisioning goes through provision_first_admin, which deliberately does not
+        # create a superuser. The image ships this module, so the guard has to live here
+        # rather than in a deployment note.
+        if settings.APP_ENV == "production":
+            raise CommandError("seed_dev_admin is not available with APP_ENV=production.")
+
         password = os.environ.get("DEV_ADMIN_PASSWORD")
         if not password:
             try:
