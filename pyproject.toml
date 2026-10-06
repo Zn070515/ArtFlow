@@ -114,9 +114,11 @@ source = [
     "incidents",
     "public_portal",
     "questionnaire",
+    "realtime",
     "ruleset",
     "singer_contest",
     "staff_panel",
+    "tickets",
     "voting",
 ]
 omit = [
