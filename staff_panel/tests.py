@@ -213,7 +213,7 @@ class ContestRoundCreateHTTPTests(TestCase):
             "name": "Created round",
             "round_type": ContestRound.RoundType.PRELIMINARY,
             "scoring_mode": ContestRound.ScoringMode.AVERAGE,
-            "minimum_judge_count": "2",
+            "judge_count": "2",
             "sequence": sequence,
             "order_policy": ContestRound.OrderPolicy.REGISTRATION_ORDER,
             "tie_order_policy": ContestRound.TieOrderPolicy.REVIEW,
@@ -240,7 +240,7 @@ class ContestRoundCreateHTTPTests(TestCase):
         self.assertEqual(
             set(
                 ContestRound.objects.filter(activity=self.activity).values_list(
-                    "minimum_judge_count", flat=True
+                    "judge_count", flat=True
                 )
             ),
             {2},
@@ -256,6 +256,27 @@ class ContestRoundCreateHTTPTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "轮次序号已存在")
         self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 1)
+
+    def test_draft_round_can_update_judge_count_before_preparation(self):
+        created = self.client.post(reverse("staff:round_create"), self._round_create_data())
+        contest_round = ContestRound.objects.get(activity=self.activity)
+        self.assertEqual(created.status_code, 302)
+
+        payload = self._round_create_data()
+        payload.update(
+            {
+                "activity_id": self.activity.pk,
+                "name": "Updated round",
+                "judge_count": "3",
+                "sequence": str(contest_round.sequence),
+            }
+        )
+        response = self.client.post(reverse("staff:round_edit", args=[contest_round.pk]), payload)
+
+        self.assertEqual(response.status_code, 302)
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.judge_count, 3)
+        self.assertEqual(contest_round.minimum_judge_count, 3)
 
     @patch("staff_panel.views.ContestRound.objects.create", side_effect=IntegrityError)
     def test_round_create_reports_race_duplicate_as_form_error(self, _create):
