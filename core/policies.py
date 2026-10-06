@@ -9,6 +9,7 @@ from django.core.exceptions import PermissionDenied
 class ActivityAction(StrEnum):
     SUBMIT_REGISTRATION = "submit_registration"
     REVIEW_REGISTRATION = "review_registration"
+    REVIEW_GROUP_MATERIAL = "review_group_material"
     UPLOAD_MATERIAL = "upload_material"
     SCORE = "score"
     CAST_VOTE = "cast_vote"
@@ -32,6 +33,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
         {
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.REVIEW_REGISTRATION,
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
             ActivityAction.MANAGE_AWARD,
@@ -41,6 +43,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
         {
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.REVIEW_REGISTRATION,
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
@@ -53,6 +56,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
         {
             ActivityAction.SUBMIT_REGISTRATION,
             ActivityAction.REVIEW_REGISTRATION,
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
@@ -63,6 +67,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
     "registration_closed": frozenset(
         {
             ActivityAction.REVIEW_REGISTRATION,
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.UPLOAD_MATERIAL,
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
@@ -74,12 +79,14 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
     "reviewing": frozenset(
         {
             ActivityAction.REVIEW_REGISTRATION,
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.UPLOAD_MATERIAL,
         }
     ),
     "rehearsal": frozenset(
         {
             ActivityAction.UPLOAD_MATERIAL,
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,
@@ -89,6 +96,7 @@ _PHASE_ACTIONS: dict[str, frozenset[ActivityAction]] = {
     ),
     "live": frozenset(
         {
+            ActivityAction.REVIEW_GROUP_MATERIAL,
             ActivityAction.SCORE,
             ActivityAction.CAST_VOTE,
             ActivityAction.MANAGE_VOTE,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable
 from enum import StrEnum
@@ -17,7 +18,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Group, GroupMembership, GroupStage, SingerRegistration
+from .models import ContestRound, Group, GroupMembership, GroupStage, SingerRegistration
 
 
 def _operator(operator):
@@ -41,6 +42,9 @@ def _roster_singers(stage: GroupStage) -> dict[str, SingerRegistration]:
         round_ = stage.roster_source_round
         if round_ is None:
             raise ValidationError("按轮次晋级分组的赛段必须指定来源轮次。")
+        from .services import ensure_round_final_for_advancement
+
+        ensure_round_final_for_advancement(round_)
         advanced_ids = ScoreSummary.objects.filter(
             round=round_, is_advanced=True, is_test_data=stage.is_test_data
         ).values_list("singer_id", flat=True)
@@ -54,6 +58,50 @@ def _roster_singers(stage: GroupStage) -> dict[str, SingerRegistration]:
             activity=stage.activity, pre_status=SingerRegistration.PreStatus.APPROVED
         )
     return {str(singer.pk): singer for singer in queryset.order_by("pk")}
+
+
+def group_stage_roster_singers(stage: GroupStage) -> list[SingerRegistration]:
+    """Return the one authoritative roster that staff may assign to groups."""
+    return list(_roster_singers(stage).values())
+
+
+def _source_roster_fingerprint(source_round: ContestRound, *, is_test_data: bool) -> str:
+    from .models import ScoreSummary
+
+    advanced_ids = list(
+        ScoreSummary.objects.filter(
+            round=source_round,
+            is_advanced=True,
+            is_test_data=is_test_data,
+            singer__pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        .order_by("singer_id")
+        .values_list("singer_id", flat=True)
+    )
+    payload = {
+        "round_id": source_round.pk,
+        "score_version": source_round.score_version,
+        "status": source_round.status,
+        "advancement_status": source_round.advancement_status,
+        "advanced_singer_ids": advanced_ids,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _lock_and_validate_source_round(stage: GroupStage) -> str:
+    if stage.roster_source != GroupStage.RosterSource.ROUND_ADVANCED:
+        return ""
+    if stage.roster_source_round_id is None:
+        raise ValidationError("按轮次晋级分组的赛段必须指定来源轮次。")
+    from .services import ensure_round_final_for_advancement
+
+    source_round = ContestRound.objects.select_for_update().get(
+        pk=stage.roster_source_round_id, activity_id=stage.activity_id
+    )
+    ensure_round_final_for_advancement(source_round)
+    return _source_roster_fingerprint(source_round, is_test_data=stage.is_test_data)
 
 
 def _normalize_specs(stage: GroupStage, specs: Iterable[dict[str, Any]], *, complete: bool):
@@ -229,13 +277,23 @@ def confirm_group_stage(stage: GroupStage, operator) -> GroupStage:
         }
         for group in locked_stage.groups.filter(is_active=True).order_by("group_order", "pk")
     ]
+    source_fingerprint = _lock_and_validate_source_round(locked_stage)
     _normalize_specs(locked_stage, specs, complete=True)
     now = timezone.now()
     with authority_write(GROUP_STAGE_STATE):
         locked_stage.status = GroupStage.Status.CONFIRMED
         locked_stage.confirmed_at = now
         locked_stage.confirmed_by = current_operator
-        locked_stage.save(update_fields=["status", "confirmed_at", "confirmed_by", "updated_at"])
+        locked_stage.source_roster_fingerprint = source_fingerprint
+        locked_stage.save(
+            update_fields=[
+                "status",
+                "confirmed_at",
+                "confirmed_by",
+                "source_roster_fingerprint",
+                "updated_at",
+            ]
+        )
     _write_audit(
         operator=current_operator,
         action_type=AuditLog.ActionType.CONFIRM_GROUP_STAGE,
@@ -257,6 +315,9 @@ def freeze_group_stage(stage: GroupStage, operator) -> GroupStage:
         raise PermissionDenied("分组合唱赛段不属于当前活动。")
     if locked_stage.status != GroupStage.Status.CONFIRMED:
         raise ValidationError("只有已确认的分组合唱赛段可以冻结。")
+    source_fingerprint = _lock_and_validate_source_round(locked_stage)
+    if source_fingerprint and locked_stage.source_roster_fingerprint != source_fingerprint:
+        raise ValidationError("来源轮次晋级名单已变化，不能冻结当前分组。")
     now = timezone.now()
     with authority_write(GROUP_STAGE_STATE):
         locked_stage.status = GroupStage.Status.FROZEN

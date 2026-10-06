@@ -933,6 +933,8 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         blocker = group_stage_archive_blocker(group_stage)
         if blocker:
             raise PermissionDenied(blocker)
+        if group_stage.status == GroupStage.Status.CANCELLED:
+            continue
         if not all(
             group_material_readiness(group).value == "ready"
             for group in group_stage.groups.filter(is_active=True)
