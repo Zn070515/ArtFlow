@@ -294,7 +294,8 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     with authority_write(TEST_DATA_CLEANUP):
         Ticket.objects.filter(activity=locked_activity, is_test_data=True).delete()
     Program.objects.filter(activity=locked_activity, is_test_data=True).delete()
-    SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    with authority_write(TEST_DATA_CLEANUP):
+        SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=locked_activity, is_test=True).delete()
     AuditLog.objects.create(
         operator=operator,

@@ -588,8 +588,15 @@ class VoteBallot(models.Model):
     class Meta:
         base_manager_name = "objects"
         constraints = [
+            # Conditional on the absence of a ticket. GOAL §9.6 defines ballot uniqueness as
+            # Ticket + VoteSession, and §9.7 rules out browser- and device-derived
+            # restrictions; an unconditional browser key denied the second audience member
+            # of a shared phone their ballot even though their own ticket was checked in.
+            # A legacy session with no ticket has no identity but the browser, so the key
+            # still applies there.
             models.UniqueConstraint(
                 fields=["vote_session", "browser_session_key"],
+                condition=Q(ticket__isnull=True),
                 name="voting_one_ballot_per_browser_session",
             ),
             models.UniqueConstraint(
@@ -779,13 +786,23 @@ class VoteRecord(models.Model):
 
     class Meta:
         base_manager_name = "objects"
-        unique_together = [("vote_session", "browser_session_key", "vote_option")]
+        # The legacy per-browser de-duplication, kept for records that carry no ballot.
+        # It is conditional for the same reason the ballot key is: a ticket-backed record's
+        # authority is its ballot, and `voting_one_choice_per_ballot_option` below already
+        # stops one ballot from choosing the same option twice. Leaving this unconditional
+        # blocked the second audience member of a shared phone even though their own ticket
+        # was checked in (GOAL §9.6, §9.7).
         constraints = [
+            models.UniqueConstraint(
+                fields=["vote_session", "browser_session_key", "vote_option"],
+                condition=models.Q(ballot__isnull=True),
+                name="voting_one_legacy_record_per_browser_option",
+            ),
             models.UniqueConstraint(
                 fields=["ballot", "vote_option"],
                 condition=models.Q(ballot__isnull=False),
                 name="voting_one_choice_per_ballot_option",
-            )
+            ),
         ]
 
     def clean(self):

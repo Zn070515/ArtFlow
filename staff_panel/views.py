@@ -116,6 +116,7 @@ from singer_contest.judge_authority import (
     hold_judge_panel,
     hold_performance,
     prepare_judge_panel,
+    release_judge_seat,
     resume_judge_panel,
     resume_performance,
     set_judge_seat_display_label,
@@ -130,6 +131,7 @@ from singer_contest.models import (
     GroupStage,
     Judge,
     JudgeSeat,
+    JudgeSession,
     Performance,
     PerformanceGroup,
     PerformanceRunState,
@@ -1404,18 +1406,31 @@ def activity_material_requirements(request, activity_id):
                     request, "当前活动的选手材料由已确认问卷管理，不能再配置旧式材料项。"
                 )
             else:
-                MaterialRequirement.objects.update_or_create(
-                    activity=locked_activity,
-                    applies_to=applies_to,
-                    item_name=item_name,
-                    defaults={
-                        "file_purpose": request.POST.get("file_purpose", "") or "",
-                        "is_required": True,
-                        "sort_order": request.POST.get("sort_order", 0),
-                    },
-                )
-                reconcile_activity_material_checks(locked_activity, applies_to)
-                messages.success(request, "材料检查项已保存。")
+                # Validate before the ORM call. The form posts these as text and the
+                # model fields are typed, so an unparseable sort_order or an over-long
+                # name used to reach the database and surface as a 500 rather than as a
+                # message on the page the operator is already looking at.
+                sort_order_raw = (request.POST.get("sort_order") or "0").strip()
+                file_purpose = (request.POST.get("file_purpose") or "").strip()
+                if not sort_order_raw.isdigit():
+                    messages.error(request, "排序必须是数字。")
+                elif len(item_name) > 100:
+                    messages.error(request, "检查项名称不能超过 100 个字符。")
+                elif file_purpose and file_purpose not in SubmissionFile.Purpose.values:
+                    messages.error(request, "无效的文件用途。")
+                else:
+                    MaterialRequirement.objects.update_or_create(
+                        activity=locked_activity,
+                        applies_to=applies_to,
+                        item_name=item_name,
+                        defaults={
+                            "file_purpose": file_purpose,
+                            "is_required": True,
+                            "sort_order": int(sort_order_raw),
+                        },
+                    )
+                    reconcile_activity_material_checks(locked_activity, applies_to)
+                    messages.success(request, "材料检查项已保存。")
         return redirect("staff:activity_material_requirements", activity_id=activity.pk)
     requirements = MaterialRequirement.objects.filter(activity=activity)
     questionnaire_authority = questionnaire_material_authority_active(activity)
@@ -1442,7 +1457,9 @@ def activity_material_requirement_delete(request, activity_id, pk):
         locked_activity = lock_activity_for_action(activity)
         _ensure_activity_mutable(locked_activity)
         requirement = MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).first()
-        if requirement is not None:
+        if requirement is None:
+            messages.error(request, "材料检查项不存在，未做任何修改。")
+        else:
             applies_to = requirement.applies_to
             if (
                 applies_to == MaterialRequirement.AppliesTo.SINGER
@@ -1450,9 +1467,12 @@ def activity_material_requirement_delete(request, activity_id, pk):
             ):
                 messages.error(request, "当前活动的选手材料由已确认问卷管理，不能删除旧式材料项。")
             else:
+                # Report success only where a row was actually removed. The unconditional
+                # message meant a refused delete showed the failure and the success banner
+                # at the same time, so the page contradicted itself about what happened.
                 requirement.delete()
                 reconcile_activity_material_checks(locked_activity, applies_to)
-    messages.success(request, "材料检查项已删除。")
+                messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 
 
@@ -2319,8 +2339,11 @@ def audience_score_entry(request, activity_id):
     try:
         version = _current_frozen_version(activity)
     except ValidationError as error:
+        # Render the empty state with the reason. Redirecting back into this same view
+        # re-raises the same error on the redirected GET, so the page used to loop until
+        # the browser gave up with ERR_TOO_MANY_REDIRECTS and the grid stayed unreachable.
         messages.error(request, domain_error_messages(error))
-        return redirect("staff:audience_score_entry", activity_id=activity_id)
+        version = None
     sets = _audience_sets(activity, version)
     recorded = next(
         (s["provenance"] for s in sets if s["provenance"]["source"] or s["provenance"]["note"]),
@@ -2597,6 +2620,10 @@ def stage_result_detail(request, pk):
             "stage": stage,
             "activity": stage.activity,
             "blocks": blocks,
+            # GOAL §8.5/§26.6: confirming a stage result is an admin authority, and
+            # `stage_result_confirm` is `@admin_required`. `is_admin` here mirrors that
+            # decorator so the page does not offer a button whose POST is refused.
+            "can_confirm_stage_result": request.user.is_admin,
             "can_unlock_stage_result": request.user.is_admin,
         },
     )
@@ -2775,6 +2802,16 @@ def _judge_control_context(
             seat.panel_member_id: seat
             for seat in JudgeSeat.objects.filter(panel_member__in=panel_members).order_by("pk")
         }
+        # Which seats currently hold a live session. GOAL §12.6 lets staff release a seat
+        # when a device is lost or swapped, and that action only means anything for a seat
+        # that is actually occupied, so the control page needs to say which those are.
+        connected_seat_ids = set(
+            JudgeSession.objects.filter(
+                seat__in=[seat for seat in seats.values() if seat is not None],
+                state=JudgeSession.State.ACTIVE,
+                expires_at__gt=timezone.now(),
+            ).values_list("seat_id", flat=True)
+        )
         for member in panel_members:
             seat = seats.get(member.pk)
             seat_label = (
@@ -2788,6 +2825,7 @@ def _judge_control_context(
                     "member": member,
                     "seat": seat,
                     "seat_label": seat_label,
+                    "connected": seat is not None and seat.pk in connected_seat_ids,
                 }
             )
 
@@ -2980,6 +3018,32 @@ def judge_seat_label(request, pk, seat_id):
         messages.error(request, f"保存评委席位备注失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "评委席位备注已保存。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_seat_release(request, pk, seat_id):
+    """Free a seat's live session so a replacement device can take over (GOAL §12.4)."""
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        seat = get_object_or_404(
+            JudgeSeat,
+            pk=seat_id,
+            panel_member__panel_snapshot__round=contest_round,
+        )
+        released = release_judge_seat(
+            seat.pk,
+            operator=request.user,
+            reason=request.POST.get("reason", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"释放评委席位失败：{domain_error_messages(error)}")
+    else:
+        if released is None:
+            messages.info(request, "该席位当前没有已连接的评委终端。")
+        else:
+            messages.success(request, "评委席位已释放，该席位下一台设备可直接扫码接入。")
     return redirect("staff:judge_control", pk=pk)
 
 
@@ -3690,8 +3754,14 @@ def incident_create(request):
     form = IncidentForm(request.POST or None)
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        # An incident is deliberately NOT gated on the activity lock. GOAL §16 makes the
+        # incident record a first-class object for the failures that happen around a
+        # lock — a restart, a restore, a manual override — and IncidentRecord even
+        # carries an authority_state of LOCKED for exactly that case. Rejecting the write
+        # when the activity is locked would make the record unavailable precisely when it
+        # is needed. The lock is still taken, so this row serializes with the rest of the
+        # activity's writes.
         activity = lock_activity_for_runtime_data(activity)
-        ensure_activity_unlocked(activity)
         if not form.is_valid():
             return render(
                 request,
@@ -4544,7 +4614,16 @@ def contest_ruleset_create(request):
         template = None
         template_pk = request.POST.get("template")
         if template_pk:
-            template = get_object_or_404(RulesetTemplate, pk=template_pk)
+            # The page only lists production templates, but a POST is not bound by what
+            # the page rendered. `staff:ruleset_clone_from_template` already filters on
+            # capability status; this second clone entry point has to apply the same
+            # gate, or an experimental/unsupported template can be cloned into a live
+            # workflow by picking its pk directly.
+            template = get_object_or_404(
+                RulesetTemplate,
+                pk=template_pk,
+                capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
+            )
         # One activity owns one ContestRuleset (versions live on RulesetVersion). If a
         # ruleset already exists, reuse it instead of creating a competing authority that
         # would make recompute_activity_result's single-authority assumption ambiguous.

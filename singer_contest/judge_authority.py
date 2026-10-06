@@ -654,6 +654,57 @@ def set_judge_seat_display_label(seat_id: int, *, operator, display_label: str) 
 
 
 @transaction.atomic
+def release_judge_seat(seat_id: int, *, operator, reason: str = "") -> JudgeSession | None:
+    """Free a seat so a replacement device can claim it (GOAL §12.4, §12.6).
+
+    Without this the only thing that ever revoked a JudgeSession was its own expiry, so a
+    judge whose phone died, was lost or was swapped could not be replaced: the session held
+    the seat for the rest of its eight-hour TTL and *every* other device was refused, which
+    left the operator entering scores by hand through STAFF_PROXY for the whole evening.
+
+    The seat itself stays ASSIGNED. Claiming walks the seats in order and skips one that
+    already has a live session, so revoking the session is exactly what makes the seat
+    available again — the same write the expiry path performs.
+    """
+    current_operator = require_current_staff(operator)
+    seat = (
+        JudgeSeat.objects.select_for_update()
+        .select_related("panel_member__panel_snapshot__round__activity")
+        .get(pk=seat_id)
+    )
+    snapshot = seat.panel_member.panel_snapshot
+    if snapshot.state == RoundPanelSnapshot.State.SUPERSEDED:
+        raise ValidationError("已替换的评委组不能释放席位。")
+    if seat.state != JudgeSeat.State.ASSIGNED:
+        raise ValidationError("当前评委席位不可释放。")
+    # Take the activity lock the same way the other judge operations do, so a release
+    # serialises with a claim and with a score submission rather than racing them.
+    lock_activity_for_action(snapshot.round.activity, ActivityAction.SCORE)
+    now = timezone.now()
+    active = (
+        JudgeSession._base_manager.select_for_update()
+        .filter(seat=seat, state=JudgeSession.State.ACTIVE)
+        .first()
+    )
+    if active is None:
+        return None
+    active.state = JudgeSession.State.REVOKED
+    active.revoked_at = now
+    active.revocation_reason = (reason.strip() or "工作人员释放席位。")[:240]
+    with authority_write(JUDGE_SESSION_STATE):
+        active.save(update_fields=["state", "revoked_at", "revocation_reason"])
+    _audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.JUDGE_SESSION_REVOKE,
+        target=f"JudgeSeat:{seat.pk}",
+        old_value="state=active",
+        new_value="state=revoked",
+        note=active.revocation_reason,
+    )
+    return active
+
+
+@transaction.atomic
 def advance_performance(round_id: int, performance_id: int, *, operator) -> PerformanceRunState:
     locked = _lock_judge_round(round_id, operator)
     if locked.contest_round.status == ContestRound.Status.LOCKED:

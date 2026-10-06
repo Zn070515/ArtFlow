@@ -22,6 +22,13 @@ def _normalize_confirmed_trail(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # `_normalize_confirmed_trail` writes `stageresult.confirmed_by` (an FK column), and
+    # the RemoveConstraint/AddConstraint that follow ALTER the same table in the same
+    # transaction. PostgreSQL runs FK rules as deferred triggers and refuses that
+    # ("cannot ALTER TABLE ... because it has pending trigger events"); an empty database
+    # never enqueues the events, so only upgrading a populated database fails. Same fix,
+    # and same reasoning, as ruleset/migrations/0011.
+    atomic = False
 
     dependencies = [
         ('core', '0004_alter_activity_options'),

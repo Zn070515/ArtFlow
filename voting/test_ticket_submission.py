@@ -162,25 +162,55 @@ class TicketVoteSubmissionTests(TestCase):
                 ticket_session=revoked_redeemed.session,
             )
 
-    def test_same_browser_cannot_switch_to_another_ticket(self):
+    def test_two_tickets_can_vote_from_the_same_browser(self):
+        """GOAL §9.6/§9.7: the key is Ticket + VoteSession, not the browser session.
+
+        Two audience members sharing one phone both hold checked-in tickets, so both are
+        entitled to their own ballot. The browser key was applied unconditionally, which
+        refused the second person a vote they were entitled to while §9.7 explicitly rules
+        out device-derived restrictions.
+        """
         _issued, first_redeemed = self._ticket_session()
         _issued, second_redeemed = self._ticket_session()
-        submit_ballot(
+
+        first = submit_ballot(
             self.vote_session,
-            browser_session_key="ticket-browser-switch",
+            browser_session_key="shared-phone",
             option_ids=[self.option.pk],
             ip_address="10.0.0.17",
             ticket_session=first_redeemed.session,
         )
+        second = submit_ballot(
+            self.vote_session,
+            browser_session_key="shared-phone",
+            option_ids=[self.option.pk],
+            ip_address="10.0.0.18",
+            ticket_session=second_redeemed.session,
+        )
 
-        with self.assertRaises(ValidationError):
-            submit_ballot(
-                self.vote_session,
-                browser_session_key="ticket-browser-switch",
-                option_ids=[self.option.pk],
-                ip_address="10.0.0.18",
-                ticket_session=second_redeemed.session,
-            )
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(VoteBallot.objects.filter(vote_session=self.vote_session).count(), 2)
+
+    def test_the_same_ticket_stays_idempotent_whatever_the_browser(self):
+        _issued, redeemed = self._ticket_session()
+
+        first = submit_ballot(
+            self.vote_session,
+            browser_session_key="first-browser",
+            option_ids=[self.option.pk],
+            ip_address="10.0.0.19",
+            ticket_session=redeemed.session,
+        )
+        second = submit_ballot(
+            self.vote_session,
+            browser_session_key="second-browser",
+            option_ids=[self.option.pk],
+            ip_address="10.0.0.20",
+            ticket_session=redeemed.session,
+        )
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(VoteBallot.objects.filter(vote_session=self.vote_session).count(), 1)
 
     def test_no_ticket_vote_ignores_supplied_ticket_context(self):
         close_vote_session(self.vote_session, self.staff)

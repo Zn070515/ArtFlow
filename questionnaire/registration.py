@@ -36,7 +36,7 @@ from singer_contest.models import (
 
 from .compiler import QuestionnairePlan, compile_questionnaire
 from .models import QuestionnaireResponse
-from .runtime import missing_required
+from .runtime import missing_required, resolve_question_value
 from .services import (
     get_or_create_group_response,
     get_or_create_response,
@@ -210,6 +210,47 @@ def _require_group_member(group: Group, actor):
 
 def _keys_of(plan: QuestionnairePlan, answers) -> set[str]:
     return {key for key in (answers or {}) if plan.question(key) is not None}
+
+
+def _echoes_stored_value(question: dict, submitted, stored) -> bool:
+    """Whether a submitted value merely repeats what is already stored.
+
+    An autosave posts every input the page rendered, including the ones the server told
+    it to disable, so "this key is present" says nothing about intent. What matters is
+    whether the value moved. Both sides are pushed through the same normaliser so a
+    number stored as a Decimal and posted back as text still compare equal; anything the
+    normaliser refuses (including a file question, whose value never travels in the
+    answers payload) is treated as a real change so the check stays fail-closed.
+    """
+    if stored is None:
+        return submitted in (None, "", [])
+    try:
+        return normalize_answer(question, submitted) == normalize_answer(question, stored)
+    except ValidationError:
+        return False
+
+
+def _changed_locked_keys(
+    *,
+    plan: QuestionnairePlan,
+    answers: dict,
+    writable: frozenset[str],
+    stored_answers: dict,
+    owner,
+    files: dict,
+) -> list[str]:
+    """Which non-writable keys in a posted payload actually carry a new value."""
+    changed = []
+    for key in sorted(_keys_of(plan, answers) - writable):
+        question = plan.question(key)
+        if question is None:  # unreachable: _keys_of only returns known questions
+            continue
+        stored = resolve_question_value(
+            question, answers=stored_answers, registration=owner, files=files
+        )
+        if not _echoes_stored_value(question, answers[key], stored):
+            changed.append(key)
+    return changed
 
 
 def normalize_answer(question: dict, raw):
@@ -400,11 +441,22 @@ def save_draft(*, version, registration, answers, schema_hash: str = "") -> Ques
     )
     writable = writable_question_keys(activity=activity, registration=registration, plan=plan)
     if writable is not None:
-        rejected = sorted(_keys_of(plan, answers) - writable)
-        if rejected:
-            # A crafted POST is judged here, not by whether the form rendered the field as
-            # disabled: hiding an input has never been the authorization boundary.
-            raise ValidationError(f"以下题目当前不可修改：{'、'.join(rejected)}。")
+        # A crafted POST is judged here, not by whether the form rendered the field as
+        # disabled: hiding an input has never been the authorization boundary. But a real
+        # form posts every input it rendered, so presence alone is not evidence of intent —
+        # only a value that actually moved is. Rejecting on mere presence made the
+        # supplement window unusable: staff send one question back, the browser posts the
+        # whole form, and every autosave of the one open question returned 409.
+        changed = _changed_locked_keys(
+            plan=plan,
+            answers=answers,
+            writable=writable,
+            stored_answers=dict(response.answers or {}),
+            owner=registration,
+            files=current_answer_files(registration),
+        )
+        if changed:
+            raise ValidationError(f"以下题目当前不可修改：{'、'.join(changed)}。")
     bound, unbound = split_answers(plan, answers)
     _save_bound_fields(registration, _apply_bound_fields(registration, bound))
     return save_draft_answers(response, answers=unbound, schema_hash=schema_hash)
@@ -479,8 +531,17 @@ def submit_registration(
     # Re-reconcile on the way in: a question added by a successor, or a file that arrived
     # since the last reconcile, has to be visible to staff from the moment it is submitted.
     reconcile_questionnaire_material_checks(registration=registration, version=version, plan=plan)
-    registration.pre_status = SingerRegistration.PreStatus.SUBMITTED
-    registration.save(update_fields=["pre_status", "updated_at"])
+    # Only a status that is waiting on staff moves forward here. Writing SUBMITTED
+    # unconditionally meant that editing one answer after approval silently downgraded an
+    # APPROVED registration, which dropped it out of every `pre_status=APPROVED` roster —
+    # the vote candidate pool and the group-chorus roster — with nothing in the audit log
+    # to say why it disappeared.
+    if registration.pre_status in {
+        SingerRegistration.PreStatus.DRAFT,
+        SingerRegistration.PreStatus.NEED_SUPPLEMENT,
+    }:
+        registration.pre_status = SingerRegistration.PreStatus.SUBMITTED
+        registration.save(update_fields=["pre_status", "updated_at"])
     submitted = mark_submitted(saved)
     from common.models import AuditLog
 
@@ -533,17 +594,27 @@ def save_group_draft(
         normalized = {change["key"]: change["value"] for change in normalized_changes}
     else:
         normalized = normalize_answers(plan, answers)
-    writable = writable_group_question_keys(group=group, plan=plan)
-    if writable is not None:
-        rejected = sorted(_keys_of(plan, normalized) - writable)
-        if rejected:
-            raise ValidationError(f"以下题目当前不可修改：{'、'.join(rejected)}。")
     response = get_or_create_group_response(
         group=group,
         ruleset_version=version,
         questionnaire_key=plan.key,
         schema_hash=plan.schema_hash,
     )
+    writable = writable_group_question_keys(group=group, plan=plan)
+    if writable is not None:
+        # Same rule as the participant autosave: a key that is present but still holds the
+        # value it already had is the form echoing a field the server disabled, not a
+        # write. Only a value that moved is refused.
+        changed = _changed_locked_keys(
+            plan=plan,
+            answers=normalized,
+            writable=writable,
+            stored_answers=dict(response.answers or {}),
+            owner=group,
+            files=current_group_answer_files(group),
+        )
+        if changed:
+            raise ValidationError(f"以下题目当前不可修改：{'、'.join(changed)}。")
     if normalized_changes is not None:
         saved = save_draft_answers(
             response, changes=normalized_changes, schema_hash=plan.schema_hash

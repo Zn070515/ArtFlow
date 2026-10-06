@@ -311,9 +311,17 @@ class AdminAuthoritySurfaceTests(TestCase):
     def test_contest_profile_metadata_is_editable_and_rubric_is_observation_only(self):
         from .models import RubricCriterion, ScoringRubric
 
-        for metadata_model in (SingerRegistration, Judge):
-            with self.subTest(model=metadata_model.__name__):
-                self.assert_editable_metadata(metadata_model)
+        with self.subTest(model=Judge.__name__):
+            self.assert_editable_metadata(Judge)
+        # A registration keeps its editable profile surface, but not the delete action:
+        # one row is the root of a CASCADE tree into ScoreRecord, VoteOption/VoteRecord,
+        # Performance, StageDecision, StageAwardDecision and Award, and Django's collector
+        # runs that cascade with raw SQL, so the guards on those models never execute
+        # (GOAL §19.1 keeps scoring and voting facts durable).
+        singer_admin = admin.site._registry[SingerRegistration]
+        self.assertTrue(singer_admin.has_add_permission(self.request))
+        self.assertTrue(singer_admin.has_change_permission(self.request))
+        self.assertFalse(singer_admin.has_delete_permission(self.request))
         for rubric_model in (ScoringRubric, RubricCriterion):
             with self.subTest(model=rubric_model.__name__):
                 self.assert_observation_only(rubric_model)

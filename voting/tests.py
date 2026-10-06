@@ -325,6 +325,24 @@ class VoteBallotTests(TestCase):
 
         self.assertEqual(VoteBallot.objects.filter(vote_session=self.session).count(), 0)
 
+    def test_submit_ballot_rejects_a_non_numeric_option_id(self):
+        """A crafted option id must be refused, not reach `pk__in` as a bare ValueError.
+
+        The view catches ValidationError and answers 400; a ValueError escaped it as a
+        500, so a hand-written POST could turn a user error into a server error.
+        """
+        with self.assertRaises(ValidationError):
+            submit_ballot(
+                self.session,
+                browser_session_key="browser-non-numeric",
+                option_ids=["abc"],
+                ip_address="10.0.0.9",
+            )
+
+        self.assertFalse(
+            VoteBallot.objects.filter(browser_session_key="browser-non-numeric").exists()
+        )
+
 
 class VoteActivityLockOverlayTests(TestCase):
     """The Activity global lock is an overlay that rejects public ballots."""

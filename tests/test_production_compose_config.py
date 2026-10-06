@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -483,6 +484,62 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert "ARTFLOW_CADDY_IMAGE" in values
     assert "ARTFLOW_PYTHON_IMAGE" in values
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+
+
+def test_production_env_example_documents_every_interpolated_variable():
+    """Every variable the manifest interpolates must also be documented.
+
+    A `${VAR:?}` entry aborts `docker compose config` when VAR is unset, so an
+    undocumented one turns "copy the template and deploy" into a failed startup.
+    Reading the names out of the manifest keeps this honest in both directions:
+    adding a `${...}` reference without documenting it fails here, not on the host.
+    """
+    manifest = PRODUCTION_COMPOSE_PATH.read_text(encoding="utf-8")
+    referenced = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)(?::[-?])", manifest))
+
+    documented = set()
+    for line in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            documented.add(line.split("=", 1)[0].strip())
+
+    assert referenced <= documented, (
+        "deploy/compose.production.yml reads variables that .env.production.example "
+        f"does not document: {sorted(referenced - documented)}"
+    )
+
+
+def test_production_manifest_forwards_every_documented_settings_knob():
+    """Every knob the settings module reads must reach the containers.
+
+    The manifest sets `environment:` per service and never uses `env_file:`, so a
+    variable that is documented in `.env.production.example` but absent from every
+    service's `environment:` mapping is silently ignored — the operator changes it,
+    nothing happens, and the code keeps its built-in default. This is the same
+    collection-difference shape as the type-checker include lists: compare the
+    settings module against the manifest instead of trusting either one.
+    """
+    settings_source = (PROJECT_ROOT / "config" / "settings.py").read_text(encoding="utf-8")
+    settings_source += (PROJECT_ROOT / "config" / "runtime.py").read_text(encoding="utf-8")
+    read_by_settings = set(re.findall(r"""["']([A-Z][A-Z0-9_]{2,})["']""", settings_source))
+
+    documented = set()
+    for line in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            documented.add(line.split("=", 1)[0].strip())
+
+    knobs = read_by_settings & documented
+
+    forwarded: set[str] = set()
+    for service in load_compose(PRODUCTION_COMPOSE_PATH)["services"].values():
+        if isinstance(service, dict):
+            forwarded |= set((service.get("environment") or {}).keys())
+
+    assert knobs <= forwarded, (
+        ".env.production.example documents knobs that no service forwards: "
+        f"{sorted(knobs - forwarded)}"
+    )
 
 
 def test_environment_examples_document_optional_public_metadata_and_staged_hsts():

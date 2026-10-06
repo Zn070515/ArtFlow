@@ -24,6 +24,16 @@ def normalize_submission_versions(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # The data step in this migration's operations writes rows in the same table that
+    # the constraints below ALTER, all inside one transaction. PostgreSQL runs foreign
+    # keys as DEFERRABLE INITIALLY DEFERRED triggers, so those writes leave pending
+    # trigger events and the ALTER TABLE is refused ("cannot ALTER TABLE ... because it
+    # has pending trigger events"). A fresh database has no rows for the data step to
+    # touch, which is why CI passes while upgrading a populated database fails — and
+    # these data steps exist precisely to normalise pre-existing production rows.
+    # Running non-atomically lets the data step commit before the constraint is added.
+    # Same failure mode and same fix as ruleset/migrations/0011.
+    atomic = False
 
     dependencies = [
         ('farewell_show', '0002_program_is_test_data'),

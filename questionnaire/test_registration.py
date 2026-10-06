@@ -534,6 +534,22 @@ class SubmitTests(_RegistrationBase):
         registration.refresh_from_db()
         self.assertEqual(registration.student_id, "")
 
+    def test_resubmitting_after_approval_keeps_the_staff_decision(self):
+        """Approval is a staff decision; a participant edit must not silently undo it.
+
+        The submit wrote SUBMITTED unconditionally, so one edited answer dropped an
+        approved registration out of every ``pre_status=APPROVED`` roster — the vote
+        candidate pool and the group-chorus roster — with no audit entry explaining it.
+        """
+        version, registration, _response = self.draft()
+        registration.pre_status = SingerRegistration.PreStatus.APPROVED
+        registration.save(update_fields=["pre_status"])
+
+        self._submit(version, registration, {"name": "陈", "r1.song": "歌"})
+
+        registration.refresh_from_db()
+        self.assertEqual(registration.pre_status, SingerRegistration.PreStatus.APPROVED)
+
     def test_submit_needs_the_versions_frozen_authority(self):
         """A superscript draft is not an authority to submit against."""
         version, registration, _response = self.draft()

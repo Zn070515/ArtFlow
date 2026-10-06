@@ -89,6 +89,18 @@ def test_quality_configuration_enforces_the_engineering_baseline():
     assert any(marker.startswith("postgresql:") for marker in pytest_options["markers"])
     assert coverage["run"]["branch"] is True
     assert coverage["report"]["fail_under"] >= 75
+    # Compare the coverage list against the tree, not against another hand-written
+    # list: `realtime` and `tickets` were each absent here for a while, so the
+    # fail-under threshold was silently not measured over the websocket authorization
+    # boundary and the whole ticket app. An app directory is one that ships an
+    # `apps.py`; `config` is the project package and is measured explicitly.
+    measured_directories = sorted(
+        path.name
+        for path in REPOSITORY_ROOT.iterdir()
+        if path.is_dir() and ((path / "apps.py").exists() or path.name == "config")
+    )
+    assert coverage["run"]["source"] == measured_directories
+    assert set(measured_directories) <= set(mypy["files"])
     assert mypy["files"] == MYPY_FILES
     assert mypy["check_untyped_defs"] is True
     assert mypy["disallow_untyped_defs"] is False

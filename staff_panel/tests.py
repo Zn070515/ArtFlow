@@ -66,6 +66,8 @@ from singer_contest.models import (
     ContestRound,
     Judge,
     JudgeScoreReceipt,
+    JudgeSeat,
+    JudgeSession,
     Performance,
     RoundEntry,
     RoundJudge,
@@ -4041,6 +4043,40 @@ class MaterialReviewAndRequirementTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(MaterialRequirement.objects.filter(pk=requirement.pk).exists())
 
+    def test_material_requirement_rejects_a_non_numeric_sort_order(self):
+        """A text value in the sort field must be refused, not reach the ORM as a 500."""
+        self.client.force_login(self.staff)
+        url = reverse("staff:activity_material_requirements", args=[self.activity.pk])
+
+        response = self.client.post(
+            url,
+            {
+                "applies_to": MaterialRequirement.AppliesTo.SINGER,
+                "item_name": "异常排序",
+                "file_purpose": SubmissionFile.Purpose.LYRICS_SCRIPT,
+                "sort_order": "abc",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "排序必须是数字")
+        self.assertFalse(MaterialRequirement.objects.filter(item_name="异常排序").exists())
+
+    def test_deleting_a_missing_requirement_does_not_report_success(self):
+        """The page used to print the failure and the success banner at the same time."""
+        self.client.force_login(self.staff)
+        url = reverse(
+            "staff:activity_material_requirement_delete",
+            args=[self.activity.pk, 999999],
+        )
+
+        response = self.client.post(url, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "材料检查项不存在")
+        self.assertNotContains(response, "材料检查项已删除")
+
 
 class IncidentAuthorityFieldTests(TestCase):
     """GOAL §16: an incident records its round, the authority state and the review flag."""
@@ -4121,6 +4157,26 @@ class IncidentAuthorityFieldTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(IncidentRecord.objects.filter(activity=self.activity).exists())
 
+    def test_incident_can_be_recorded_while_the_activity_is_locked(self):
+        """GOAL §16: the failures worth recording happen around a lock.
+
+        A restart, a restore or a manual override takes place while the activity is
+        already locked, and ``IncidentRecord.authority_state`` carries a ``LOCKED``
+        value for exactly that case, so the activity lock must not make the record
+        unwritable.
+        """
+        self.activity.is_locked = True
+        _save_activity_state(self.activity, ["is_locked"])
+
+        response = self.client.post(
+            reverse("staff:incident_create"),
+            self._payload(authority_state=IncidentRecord.AuthorityState.LOCKED),
+        )
+
+        self.assertRedirects(response, reverse("staff:incident_list"))
+        incident = IncidentRecord.objects.get(activity=self.activity)
+        self.assertEqual(incident.authority_state, IncidentRecord.AuthorityState.LOCKED)
+
     def test_incident_form_offers_the_activity_rounds(self):
         response = self.client.get(
             reverse("staff:incident_create"), {"activity_id": self.activity.pk}
@@ -4131,6 +4187,40 @@ class IncidentAuthorityFieldTests(TestCase):
         self.assertContains(response, "事发时 authority 状态")
         self.assertContains(response, "需要赛后复盘")
         self.assertContains(response, str(self.contest_round.pk))
+
+
+class AudienceScoreEntryPageTests(TestCase):
+    """The audience grid page must render its empty state, never redirect into itself."""
+
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="audience-entry-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = _create_activity(
+            title="Audience Entry",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.staff)
+
+    def test_ambiguous_ruleset_renders_instead_of_redirecting_to_itself(self):
+        """A ruleset error must not turn the page into an infinite redirect loop.
+
+        The handler redirected back into this same view, which re-raised the same
+        error on the redirected GET, so the page ended in ERR_TOO_MANY_REDIRECTS and
+        stayed unreachable for as long as the ambiguity existed.
+        """
+        url = reverse("staff:audience_score_entry", args=[self.activity.pk])
+
+        with patch(
+            "staff_panel.views._current_frozen_version",
+            side_effect=ValidationError("该活动存在多个自动重算赛制，请先清理重复。"),
+        ):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["sets"], [])
 
 
 class UserRoleAdministrationTests(TestCase):
@@ -6543,6 +6633,33 @@ class ResultBoardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, reverse("staff:stage_result_unlock", args=[ready.pk]))
 
+    def test_staff_stage_detail_does_not_render_the_admin_confirm_form(self):
+        """GOAL §8.5/§26.6: confirming is admin authority, so the button must match it.
+
+        The form was rendered for every staff member while `stage_result_confirm` is
+        `@admin_required`, so the page offered a button whose POST was refused.
+        """
+        ready = self._stage(
+            status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-confirm"
+        )
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("staff:stage_result_confirm", args=[ready.pk]))
+        self.assertContains(response, "等待管理员核定")
+
+    def test_admin_stage_detail_renders_the_confirm_form(self):
+        ready = self._stage(
+            status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-admin-confirm"
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("staff:stage_result_confirm", args=[ready.pk]))
+
     def test_stage_result_confirm_flips_to_confirmed(self):
         """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state.
 
@@ -6771,6 +6888,44 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(version.status, "draft")
         self.assertEqual(version.definition, template.definition)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_clone_entry_point_rejects_a_non_production_template(self):
+        """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
+        from ruleset.models import ContestRuleset, RulesetTemplate
+
+        experimental = RulesetTemplate.objects.get(builtin_key="multivenue_merge")
+        self.assertEqual(
+            experimental.capability_status, RulesetTemplate.CapabilityStatus.EXPERIMENTAL
+        )
+        activity = self._clone_activity("院十佳2026实验模板")
+
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[experimental.pk]),
+            {"activity": activity.pk, "name": "非法克隆"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ContestRuleset.objects.filter(activity=activity).exists())
+
+    def test_create_entry_point_rejects_a_non_production_template(self):
+        """The second clone entry point must apply the same gate as the first.
+
+        The create page only renders production templates, but a POST is not bound by
+        what the page rendered, so picking an experimental pk directly used to bypass
+        the gate that `ruleset_clone_from_template` enforces.
+        """
+        from ruleset.models import ContestRuleset, RulesetTemplate
+
+        experimental = RulesetTemplate.objects.get(builtin_key="multivenue_merge")
+        activity = self._clone_activity("院十佳2026实验模板二")
+
+        response = self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": activity.pk, "name": "非法新建", "template": experimental.pk},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ContestRuleset.objects.filter(activity=activity).exists())
 
     def test_clone_rejects_non_singer_and_archived_activities(self):
         from ruleset.models import ContestRuleset, RulesetTemplate
@@ -7793,6 +7948,42 @@ class JudgeControlHTTPTests(TestCase):
             reverse("staff:judge_prepare", args=[self.contest_round.pk]),
             {"attending_judge_ids": [str(self.judge.pk)]},
         )
+
+    def _claim_seat(self):
+        from singer_contest.judge_authority import claim_judge_session
+
+        return claim_judge_session(self.activity)
+
+    def test_staff_can_release_a_connected_judge_seat(self):
+        """GOAL §12.6: losing or swapping a device must not strand a scoring channel."""
+        self._prepare_panel()
+        claimed = self._claim_seat()
+        seat = JudgeSeat.objects.get(pk=claimed.session.seat_id)
+
+        response = self.client.post(
+            reverse("staff:judge_seat_release", args=[self.contest_round.pk, seat.pk]),
+            {"reason": "老师换手机"},
+        )
+
+        self.assertRedirects(response, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        claimed.session.refresh_from_db()
+        self.assertEqual(claimed.session.state, JudgeSession.State.REVOKED)
+        self.assertEqual(claimed.session.revocation_reason, "老师换手机")
+
+    def test_participant_cannot_release_a_judge_seat(self):
+        self._prepare_panel()
+        claimed = self._claim_seat()
+        seat = JudgeSeat.objects.get(pk=claimed.session.seat_id)
+        self.client.force_login(self.participant)
+
+        response = self.client.post(
+            reverse("staff:judge_seat_release", args=[self.contest_round.pk, seat.pk]),
+            {"reason": "不该成功"},
+        )
+
+        self.assertIn(response.status_code, {302, 403})
+        claimed.session.refresh_from_db()
+        self.assertEqual(claimed.session.state, JudgeSession.State.ACTIVE)
 
     def test_control_page_presents_one_shared_judge_qr(self):
         """Judges get exactly one entry QR, produced by the shared entry endpoint."""

@@ -90,9 +90,15 @@ def _ticket_for_credential(raw_credential: Any) -> Ticket | None:
         )
     # Once a ticket has a versioned public credential, a rotated legacy secret
     # must never become a back door to the supposedly invalidated QR code.
+    # `isascii` is part of the guard, not an optimisation: `_token_digest` hashes the
+    # ASCII encoding, so an operator typing non-ASCII text into the manual check-in box
+    # used to raise UnicodeEncodeError here — before `_validate_raw_token` could turn it
+    # into the ordinary "invalid ticket" answer — and the server-rendered check-in page
+    # does not catch ValueError, so the page returned 500 instead of rejecting the code.
     if (
         isinstance(raw_credential, str)
         and raw_credential
+        and raw_credential.isascii()
         and Ticket.objects.filter(
             secret_digest=_token_digest(raw_credential),
             public_code__isnull=False,
@@ -395,8 +401,12 @@ def redeem_ticket(
 def rotate_ticket_credential(ticket: Ticket, *, actor: Any) -> str:
     current_actor = require_current_staff(actor)
     with transaction.atomic():
+        # Activity first, then the ticket row — the same order as `revoke_ticket` and
+        # `revoke_ticket_session`. `submit_ballot` holds the activity lock and only then
+        # locks the ticket, so taking the ticket first here (as this function used to)
+        # formed an ABBA deadlock against a vote being cast at the same moment.
+        lock_activity_for_action(_activity_for_ticket(ticket.pk), ActivityAction.MANAGE_TICKETS)
         locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
-        lock_activity_for_action(locked.activity, ActivityAction.MANAGE_TICKETS)
         if locked.state not in {Ticket.State.ISSUED, Ticket.State.CHECKED_IN}:
             raise ValidationError("当前票据状态不能重置凭证。")
         if not locked.public_code:
@@ -407,11 +417,35 @@ def rotate_ticket_credential(ticket: Ticket, *, actor: Any) -> str:
             locked.save(
                 update_fields=["secret_digest", "public_code", "credential_version", "updated_at"]
             )
+        # Rotating the credential invalidates the printed QR code, so it has to invalidate
+        # the browser sessions that QR code already produced. Without this the reset only
+        # stopped *future* redemptions: anyone who had already redeemed the leaked code
+        # kept a working session for the rest of its TTL.
+        now = timezone.now()
+        live_sessions = list(
+            TicketAccessSession.objects.select_for_update()
+            .filter(ticket=locked, revoked_at__isnull=True, expires_at__gt=now)
+            .order_by("pk")
+        )
+        for session in live_sessions:
+            session.revoked_at = now
+            with authority_write(TICKET_SESSION_STATE):
+                session.save(update_fields=["revoked_at"])
+            AuditLog.objects.create(
+                operator=current_actor,
+                action_type=AuditLog.ActionType.TICKET_SESSION_REVOKE,
+                target=f"TicketAccessSession:{session.pk}",
+                new_value=f"revoked_at={now.isoformat()}",
+                note="credential rotated",
+            )
         _audit_ticket(
             operator=current_actor,
             action_type=AuditLog.ActionType.TICKET_ISSUE,
             ticket=locked,
-            note=f"credential_version={locked.credential_version}",
+            note=(
+                f"credential_version={locked.credential_version};"
+                f"revoked_sessions={len(live_sessions)}"
+            ),
         )
         return ticket_credential(locked)
 
