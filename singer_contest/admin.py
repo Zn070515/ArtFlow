@@ -30,15 +30,19 @@ class ObservationOnlyAdmin(admin.ModelAdmin):
 
 
 @admin.register(SingerRegistration)
-class SingerRegistrationAdmin(admin.ModelAdmin):
+class SingerRegistrationAdmin(ObservationOnlyAdmin):
+    """Expose registrations without a second write path.
+
+    Every other authoritative model in this app is observation-only; this one was
+    registered as a plain ModelAdmin, so the admin delete action removed a
+    registration and Django's collector cascaded to ScoreRecord, VoteOption/
+    VoteRecord, Performance, StageDecision and Award with raw SQL, bypassing the
+    guards on each of those models.
+    """
+
     list_display = ["name", "song_name", "activity", "pre_status", "live_status", "created_at"]
     list_filter = ["pre_status", "live_status", "activity"]
     search_fields = ["name", "student_id", "song_name"]
-
-    def get_readonly_fields(self, request, obj=None):
-        if obj is None:
-            return super().get_readonly_fields(request, obj)
-        return (*super().get_readonly_fields(request, obj), "activity", "user")
 
 
 @admin.register(ContestRound)

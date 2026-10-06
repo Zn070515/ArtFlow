@@ -96,6 +96,7 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    TEST_DATA_CLEANUP,
     TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
@@ -522,6 +523,26 @@ class AuthorityMutationMatrixTests(TestCase):
                         self.assertTrue(model._base_manager.filter(pk=instance.pk).exists())
                     finally:
                         transaction.set_rollback(True)
+
+    def test_singer_registration_deletion_requires_test_data_cleanup(self):
+        """A registration is the row that has to carry the cascade gate.
+
+        Deleting one cascades with raw SQL into ScoreRecord, VoteOption/VoteRecord,
+        Performance, StageDecision/StageAwardDecision, AudienceScore and Award, so the
+        guards on those models never execute. Test-data cleanup is the one legitimate
+        removal flow, so it is the only authority that opens this door.
+        """
+        with self.assertRaises(ValidationError):
+            SingerRegistration.objects.filter(pk=self.singer.pk).delete()
+        self.assertTrue(SingerRegistration.objects.filter(pk=self.singer.pk).exists())
+
+        with self.assertRaises(ValidationError):
+            self.singer.delete()
+        self.assertTrue(SingerRegistration.objects.filter(pk=self.singer.pk).exists())
+
+        with authority_write(TEST_DATA_CLEANUP):
+            self.singer.delete()
+        self.assertFalse(SingerRegistration.objects.filter(pk=self.singer.pk).exists())
 
     def test_unauthorized_mutation_matrix(self):
         for descriptor in MODEL_MATRIX:
@@ -1466,18 +1487,17 @@ class AuthorityMutationMatrixTests(TestCase):
             ("role", "is_active", "is_superuser", "is_staff"),
         )
         self.assertEqual(
-            SingerRegistrationAdmin(SingerRegistration, admin.site).get_readonly_fields(
-                None, self.singer
-            ),
-            ("activity", "user"),
-        )
-        self.assertEqual(
             JudgeAdmin(Judge, admin.site).get_readonly_fields(None, self.judge), ("activity",)
         )
         self.assertFalse(
             ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(None, self.round)
         )
         for readonly_admin_class, readonly_model, instance in (
+            # A registration is the root of a CASCADE tree into ScoreRecord, VoteOption/
+            # VoteRecord, Performance and Award, and Django's collector performs that
+            # cascade with raw SQL, so the guards on those models never run. The admin
+            # must not be a write path to it.
+            (SingerRegistrationAdmin, SingerRegistration, self.singer),
             (ScoreRecordAdmin, ScoreRecord, self.score),
             (CriterionScoreAdmin, CriterionScore, self.criterion_score),
             (ScoreSummaryAdmin, ScoreSummary, None),

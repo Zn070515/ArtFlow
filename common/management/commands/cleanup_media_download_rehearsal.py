@@ -21,6 +21,8 @@ from django.db import connection, transaction
 from files.models import SubmissionFile
 from singer_contest.models import SingerRegistration
 
+from common.authority import TEST_DATA_CLEANUP, authority_write
+
 REHEARSAL_TARGET_PREFIX = "Media download rehearsal "
 
 
@@ -78,7 +80,7 @@ class Command(BaseCommand):
         if media_root not in media_file.parents:
             raise CommandError("Refusing to remove media outside MEDIA_ROOT.")
 
-        with transaction.atomic():
+        with transaction.atomic(), authority_write(TEST_DATA_CLEANUP):
             SubmissionFile._base_manager.filter(pk=submission_file_id).delete()
             SingerRegistration._base_manager.filter(pk=registration_id).delete()
             self._delete_exact_activity_row(activity_id)

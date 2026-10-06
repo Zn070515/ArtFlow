@@ -195,6 +195,18 @@ class IdentityOwnershipQuerySet(AuthorityQuerySetMixin, models.QuerySet):
 class SingerRegistrationQuerySet(IdentityOwnershipQuerySet):
     ownership_fields = frozenset({"activity_id", "user_id"})
 
+    def delete(self):
+        # A registration is the root of a CASCADE tree that reaches ScoreRecord,
+        # VoteOption/VoteRecord, Performance, StageDecision/StageAwardDecision,
+        # AudienceScore and Award. Django's collector performs that cascade with raw
+        # SQL, so the guards on those models never run: deleting one row here destroys
+        # formal scoring and voting facts (GOAL §19.1). Test-data cleanup is the one
+        # flow that legitimately removes a registration, so it is the only authority
+        # that opens this door.
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("删除报名会级联删除其评分与投票事实，只允许测试数据清理执行。")
+        return super().delete()
+
 
 class JudgeQuerySet(IdentityOwnershipQuerySet):
     ownership_fields = frozenset({"activity_id"})
@@ -426,6 +438,13 @@ class SingerRegistration(models.Model):
     def save(self, *args, **kwargs):
         _ensure_identity_ownership_unchanged(self, frozenset({"activity_id", "user_id"}))
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # See SingerRegistrationQuerySet.delete: the cascade reaches formal scoring and
+        # voting facts through raw SQL, so a single-instance delete needs the same gate.
+        if not authority_authorized(TEST_DATA_CLEANUP):
+            raise ValidationError("删除报名会级联删除其评分与投票事实，只允许测试数据清理执行。")
+        return super().delete(*args, **kwargs)
 
 
 class GroupChorusQuerySet(AuthorityQuerySetMixin, models.QuerySet):
