@@ -8,7 +8,7 @@
     <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">{{ stage.name }}</h1>
-            <p class="text-sm text-gray-500 mt-1">标识：{{ stage.stage_key }} · 状态：{{ stage.get_status_display }}</p>
+            <p class="text-sm text-gray-500 mt-1">标识：{{ stage.stage_key }} · 状态：{{ stage.get_status_display }} · 名单来源：{{ stage.get_roster_source_display }}{% if stage.roster_source_round %}（{{ stage.roster_source_round.name }}）{% endif %}</p>
         </div>
         <div class="text-sm text-gray-600">当前分组 {{ groups|length }} 组</div>
     </div>

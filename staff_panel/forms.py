@@ -8,7 +8,12 @@ from farewell_show.models import Program
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from ruleset.schema import parse_definition
-from singer_contest.models import ContestRound, ScoringRubric, SingerRegistration
+from singer_contest.models import (
+    ContestRound,
+    GroupStage,
+    ScoringRubric,
+    SingerRegistration,
+)
 from singer_contest.services import validate_score
 from voting.models import VoteSession
 from voting.policies import formal_singer_contest_requires_ticket
@@ -332,6 +337,33 @@ class GroupStageCreateForm(forms.Form):
         label="赛段标识", max_length=100, help_text="例如 chorus；创建后用于规则集绑定。"
     )
     name = forms.CharField(label="赛段名称", max_length=100)
+    roster_source = forms.ChoiceField(
+        label="名单来源",
+        choices=GroupStage.RosterSource.choices,
+        initial=GroupStage.RosterSource.ALL_APPROVED,
+        help_text="分组要把哪些选手全部覆盖：全部审核通过的，还是某个轮次的晋级者。",
+    )
+    roster_source_round = forms.ModelChoiceField(
+        label="来源轮次",
+        queryset=ContestRound.objects.none(),
+        required=False,
+        help_text="仅在名单来源为“指定轮次的晋级选手”时需要。",
+    )
+
+    def __init__(self, *args, rounds=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields["roster_source_round"]
+        assert isinstance(field, forms.ModelChoiceField)
+        field.queryset = ContestRound.objects.none() if rounds is None else rounds
+
+    def clean(self):
+        cleaned = super().clean() or {}
+        if (
+            cleaned.get("roster_source") == GroupStage.RosterSource.ROUND_ADVANCED
+            and cleaned.get("roster_source_round") is None
+        ):
+            self.add_error("roster_source_round", "按轮次晋级分组时必须选择来源轮次。")
+        return cleaned
 
     def clean_stage_key(self):
         value = self.cleaned_data["stage_key"].strip()

@@ -28,19 +28,38 @@ def _stage_for_update(stage: GroupStage) -> GroupStage:
     return GroupStage.objects.select_for_update().select_related("activity").get(pk=stage.pk)
 
 
-def _approved_singers(activity) -> dict[str, SingerRegistration]:
-    return {
-        str(singer.pk): singer
-        for singer in SingerRegistration.objects.filter(
-            activity=activity, pre_status=SingerRegistration.PreStatus.APPROVED
-        ).order_by("pk")
-    }
+def _roster_singers(stage: GroupStage) -> dict[str, SingerRegistration]:
+    """The contestants this stage's groups must partition, resolved from its source.
+
+    ``ALL_APPROVED`` is everyone the activity approved; ``ROUND_ADVANCED`` is the singers
+    a chosen round marked as advanced. Resolving it here — rather than at each call site —
+    is what keeps "who may be in a group" one answer instead of a convention.
+    """
+    from .models import ScoreSummary
+
+    if stage.roster_source == GroupStage.RosterSource.ROUND_ADVANCED:
+        round_ = stage.roster_source_round
+        if round_ is None:
+            raise ValidationError("按轮次晋级分组的赛段必须指定来源轮次。")
+        advanced_ids = ScoreSummary.objects.filter(
+            round=round_, is_advanced=True, is_test_data=stage.is_test_data
+        ).values_list("singer_id", flat=True)
+        queryset = SingerRegistration.objects.filter(
+            activity=stage.activity,
+            pk__in=list(advanced_ids),
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+    else:
+        queryset = SingerRegistration.objects.filter(
+            activity=stage.activity, pre_status=SingerRegistration.PreStatus.APPROVED
+        )
+    return {str(singer.pk): singer for singer in queryset.order_by("pk")}
 
 
 def _normalize_specs(stage: GroupStage, specs: Iterable[dict[str, Any]], *, complete: bool):
     if not isinstance(specs, list):
         raise ValidationError("分组合唱分组必须是列表。")
-    approved = _approved_singers(stage.activity)
+    approved = _roster_singers(stage)
     seen: set[str] = set()
     normalized: list[tuple[str, list[SingerRegistration]]] = []
     names: set[str] = set()
@@ -68,7 +87,7 @@ def _normalize_specs(stage: GroupStage, specs: Iterable[dict[str, Any]], *, comp
         raise ValidationError("至少需要一个分组合唱组。")
     if complete and seen != set(approved):
         missing = sorted(set(approved) - seen, key=int)
-        raise ValidationError(f"必须覆盖当前全部审核通过的选手，缺少：{missing}。")
+        raise ValidationError(f"必须覆盖该赛段应有的全部选手，缺少：{missing}。")
     return normalized
 
 
@@ -111,14 +130,34 @@ def _write_audit(*, operator, action_type, stage, old_value="", new_value="", no
 
 
 @transaction.atomic
-def create_group_stage(activity: Activity, *, stage_key: str, name: str, operator) -> GroupStage:
+def create_group_stage(
+    activity: Activity,
+    *,
+    stage_key: str,
+    name: str,
+    operator,
+    roster_source: str = GroupStage.RosterSource.ALL_APPROVED,
+    roster_source_round=None,
+) -> GroupStage:
     current_operator = _operator(operator)
     locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
+    source = str(roster_source or GroupStage.RosterSource.ALL_APPROVED).strip()
+    if source not in {choice.value for choice in GroupStage.RosterSource}:
+        raise ValidationError("未知的分组合唱名单来源。")
+    if source == GroupStage.RosterSource.ROUND_ADVANCED:
+        if roster_source_round is None:
+            raise ValidationError("按轮次晋级分组的赛段必须指定来源轮次。")
+        if roster_source_round.activity_id != locked_activity.pk:
+            raise ValidationError("来源轮次不属于当前活动。")
+    else:
+        roster_source_round = None
     with authority_write(GROUP_STAGE_STATE):
         stage = GroupStage.objects.create(
             activity=locked_activity,
             stage_key=str(stage_key or "").strip(),
             name=str(name or "").strip(),
+            roster_source=source,
+            roster_source_round=roster_source_round,
             is_test_data=locked_activity.is_test_mode,
         )
     _write_audit(

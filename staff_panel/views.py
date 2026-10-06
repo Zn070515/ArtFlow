@@ -334,7 +334,8 @@ def group_stage_create(request, activity_id):
     activity = get_object_or_404(Activity, pk=activity_id)
     if activity.activity_type != Activity.Type.SINGER_CONTEST:
         raise PermissionDenied("只有歌手比赛支持分组合唱赛段。")
-    form = GroupStageCreateForm(request.POST or None)
+    rounds = ContestRound.objects.filter(activity=activity).order_by("pk")
+    form = GroupStageCreateForm(request.POST or None, rounds=rounds)
     if request.method == "POST" and form.is_valid():
         try:
             stage = create_group_stage(
@@ -342,6 +343,8 @@ def group_stage_create(request, activity_id):
                 stage_key=form.cleaned_data["stage_key"],
                 name=form.cleaned_data["name"],
                 operator=request.user,
+                roster_source=form.cleaned_data["roster_source"],
+                roster_source_round=form.cleaned_data["roster_source_round"],
             )
         except (PermissionDenied, ValidationError) as error:
             form.add_error(None, domain_error_messages(error))
