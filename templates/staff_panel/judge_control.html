@@ -51,12 +51,23 @@
         </div>
         <div class="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {% for row in seat_rows %}
-            <form method="post" action="{% url 'staff:judge_seat_label' round.pk row.seat.pk %}" class="flex items-center gap-2 rounded border border-gray-200 p-2">
-                {% csrf_token %}
-                <span class="shrink-0 text-sm font-medium text-gray-700">{{ row.seat_label }}</span>
-                <input class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" name="display_label" maxlength="100" value="{{ row.seat.display_label }}" placeholder="可选备注">
-                <button class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700" type="submit">保存</button>
-            </form>
+            <div class="rounded border border-gray-200 p-2">
+                <form method="post" action="{% url 'staff:judge_seat_label' round.pk row.seat.pk %}" class="flex items-center gap-2">
+                    {% csrf_token %}
+                    <span class="shrink-0 text-sm font-medium text-gray-700">{{ row.seat_label }}</span>
+                    <input class="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm" name="display_label" maxlength="100" value="{{ row.seat.display_label }}" placeholder="可选备注">
+                    <button class="touch-target rounded border border-gray-300 px-2 py-1 text-xs text-gray-700" type="submit">保存</button>
+                </form>
+                {% if row.connected %}
+                <form method="post" action="{% url 'staff:judge_seat_release' round.pk row.seat.pk %}" class="mt-2 flex items-center gap-2" onsubmit="return confirm('释放该席位会让已连接的评委终端失效，需要重新扫码。确认设备确实需要更换？');">
+                    {% csrf_token %}
+                    <input class="min-w-0 flex-1 rounded border border-red-200 px-2 py-1 text-xs" name="reason" maxlength="240" placeholder="释放原因，例如：老师手机没电换机">
+                    <button class="touch-target shrink-0 rounded border border-red-300 px-2 py-1 text-xs text-red-700" type="submit">释放席位</button>
+                </form>
+                {% else %}
+                <p class="mt-2 text-xs text-gray-400">该席位暂无已连接的评委终端。</p>
+                {% endif %}
+            </div>
             {% endfor %}
         </div>
         <div class="mt-4 rounded border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">

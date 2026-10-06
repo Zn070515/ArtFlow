@@ -66,6 +66,8 @@ from singer_contest.models import (
     ContestRound,
     Judge,
     JudgeScoreReceipt,
+    JudgeSeat,
+    JudgeSession,
     Performance,
     RoundEntry,
     RoundJudge,
@@ -7946,6 +7948,42 @@ class JudgeControlHTTPTests(TestCase):
             reverse("staff:judge_prepare", args=[self.contest_round.pk]),
             {"attending_judge_ids": [str(self.judge.pk)]},
         )
+
+    def _claim_seat(self):
+        from singer_contest.judge_authority import claim_judge_session
+
+        return claim_judge_session(self.activity)
+
+    def test_staff_can_release_a_connected_judge_seat(self):
+        """GOAL §12.6: losing or swapping a device must not strand a scoring channel."""
+        self._prepare_panel()
+        claimed = self._claim_seat()
+        seat = JudgeSeat.objects.get(pk=claimed.session.seat_id)
+
+        response = self.client.post(
+            reverse("staff:judge_seat_release", args=[self.contest_round.pk, seat.pk]),
+            {"reason": "老师换手机"},
+        )
+
+        self.assertRedirects(response, reverse("staff:judge_control", args=[self.contest_round.pk]))
+        claimed.session.refresh_from_db()
+        self.assertEqual(claimed.session.state, JudgeSession.State.REVOKED)
+        self.assertEqual(claimed.session.revocation_reason, "老师换手机")
+
+    def test_participant_cannot_release_a_judge_seat(self):
+        self._prepare_panel()
+        claimed = self._claim_seat()
+        seat = JudgeSeat.objects.get(pk=claimed.session.seat_id)
+        self.client.force_login(self.participant)
+
+        response = self.client.post(
+            reverse("staff:judge_seat_release", args=[self.contest_round.pk, seat.pk]),
+            {"reason": "不该成功"},
+        )
+
+        self.assertIn(response.status_code, {302, 403})
+        claimed.session.refresh_from_db()
+        self.assertEqual(claimed.session.state, JudgeSession.State.ACTIVE)
 
     def test_control_page_presents_one_shared_judge_qr(self):
         """Judges get exactly one entry QR, produced by the shared entry endpoint."""

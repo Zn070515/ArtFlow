@@ -116,6 +116,7 @@ from singer_contest.judge_authority import (
     hold_judge_panel,
     hold_performance,
     prepare_judge_panel,
+    release_judge_seat,
     resume_judge_panel,
     resume_performance,
     set_judge_seat_display_label,
@@ -130,6 +131,7 @@ from singer_contest.models import (
     GroupStage,
     Judge,
     JudgeSeat,
+    JudgeSession,
     Performance,
     PerformanceGroup,
     PerformanceRunState,
@@ -2800,6 +2802,16 @@ def _judge_control_context(
             seat.panel_member_id: seat
             for seat in JudgeSeat.objects.filter(panel_member__in=panel_members).order_by("pk")
         }
+        # Which seats currently hold a live session. GOAL §12.6 lets staff release a seat
+        # when a device is lost or swapped, and that action only means anything for a seat
+        # that is actually occupied, so the control page needs to say which those are.
+        connected_seat_ids = set(
+            JudgeSession.objects.filter(
+                seat__in=[seat for seat in seats.values() if seat is not None],
+                state=JudgeSession.State.ACTIVE,
+                expires_at__gt=timezone.now(),
+            ).values_list("seat_id", flat=True)
+        )
         for member in panel_members:
             seat = seats.get(member.pk)
             seat_label = (
@@ -2813,6 +2825,7 @@ def _judge_control_context(
                     "member": member,
                     "seat": seat,
                     "seat_label": seat_label,
+                    "connected": seat is not None and seat.pk in connected_seat_ids,
                 }
             )
 
@@ -3005,6 +3018,32 @@ def judge_seat_label(request, pk, seat_id):
         messages.error(request, f"保存评委席位备注失败：{domain_error_messages(error)}")
     else:
         messages.success(request, "评委席位备注已保存。")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_seat_release(request, pk, seat_id):
+    """Free a seat's live session so a replacement device can take over (GOAL §12.4)."""
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        seat = get_object_or_404(
+            JudgeSeat,
+            pk=seat_id,
+            panel_member__panel_snapshot__round=contest_round,
+        )
+        released = release_judge_seat(
+            seat.pk,
+            operator=request.user,
+            reason=request.POST.get("reason", ""),
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"释放评委席位失败：{domain_error_messages(error)}")
+    else:
+        if released is None:
+            messages.info(request, "该席位当前没有已连接的评委终端。")
+        else:
+            messages.success(request, "评委席位已释放，该席位下一台设备可直接扫码接入。")
     return redirect("staff:judge_control", pk=pk)
 
 

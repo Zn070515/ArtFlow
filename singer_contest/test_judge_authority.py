@@ -32,12 +32,14 @@ from .judge_authority import (
     JudgeRoundOnHold,
     advance_performance,
     authenticate_judge_session,
+    claim_judge_session,
     get_judge_context,
     get_judge_context_readonly,
     hold_judge_panel,
     hold_performance,
     issue_judge_grant,
     prepare_judge_panel,
+    release_judge_seat,
     resume_judge_panel,
     resume_performance,
     set_judge_seat_display_label,
@@ -412,6 +414,39 @@ class JudgePanelServiceTests(TestCase):
             authenticate_judge_session(claimed.token).pk,
             claimed.session.pk,
         )
+
+    def test_releasing_a_seat_revokes_its_session_and_frees_it_for_a_new_device(self):
+        """GOAL §12.4/§12.6: a lost or swapped device must be replaceable on the spot.
+
+        The only thing that used to revoke a JudgeSession was the session's own expiry, so
+        a phone that died mid-evening held its seat for the rest of the eight-hour TTL and
+        every other device was refused — the operator had to enter that judge's scores by
+        hand through STAFF_PROXY for the rest of the night.
+        """
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        claimed = claim_judge_session(self.activity)
+
+        released = release_judge_seat(
+            claimed.session.seat_id, operator=self.operator, reason="老师手机没电"
+        )
+
+        self.assertIsNotNone(released)
+        assert released is not None
+        released.refresh_from_db()
+        self.assertEqual(released.state, JudgeSession.State.REVOKED)
+        self.assertEqual(released.revocation_reason, "老师手机没电")
+        with self.assertRaises(ValidationError):
+            authenticate_judge_session(claimed.token)
+
+        replacement = claim_judge_session(self.activity)
+        self.assertEqual(replacement.session.seat_id, claimed.session.seat_id)
+        self.assertNotEqual(replacement.session.pk, claimed.session.pk)
+
+    def test_releasing_a_seat_without_a_live_session_changes_nothing(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = JudgeSeat.objects.get(panel_member__panel_snapshot__round=self.round)
+
+        self.assertIsNone(release_judge_seat(seat.pk, operator=self.operator))
 
     def test_anonymous_judge_seat_can_have_optional_display_note(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
