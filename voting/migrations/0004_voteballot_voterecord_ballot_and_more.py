@@ -26,6 +26,15 @@ def migrate_records_to_ballots(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # PostgreSQL runs FK rules as deferred triggers, and `migrate_records_to_ballots`
+    # writes `voterecord.ballot` (an FK column) in this same transaction. The following
+    # AddConstraint then ALTERs `voterecord`, which PostgreSQL refuses while trigger
+    # events are pending ("cannot ALTER TABLE ... because it has pending trigger
+    # events"). An empty database never enqueues those events, so CI on a fresh SQLite
+    # or PostgreSQL database passes either way and only an upgrade of a populated
+    # database fails. SQLite (ADD CONSTRAINT via table rebuild) is unaffected.
+    # See ruleset/migrations/0011 for the same fix on the same failure mode.
+    atomic = False
 
     dependencies = [
         ('voting', '0003_voteoption_is_test_data_voterecord_is_test_data'),
