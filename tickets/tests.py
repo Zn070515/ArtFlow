@@ -330,6 +330,29 @@ class TicketLifecycleServiceTests(TestCase):
             issued.ticket.pk,
         )
 
+    def test_rotating_the_credential_revokes_the_sessions_it_already_produced(self):
+        """A credential reset has to kill the sessions that credential already created.
+
+        Rotating only stopped *future* redemptions, so a leaked code that had already
+        been redeemed kept a working session for the rest of its TTL while the staff
+        page reported the old QR as invalidated.
+        """
+        ticket = self._service("create_ticket")(
+            self.activity, actor=self.staff, serial_number="rotate-revokes"
+        )
+        issued = self._service("issue_ticket")(ticket, actor=self.staff)
+        credential = self._service("ticket_credential")(issued.ticket)
+        redeemed = self._service("redeem_ticket")(credential)
+
+        self._service("rotate_ticket_credential")(issued.ticket, actor=self.staff)
+
+        redeemed.session.refresh_from_db()
+        self.assertIsNotNone(redeemed.session.revoked_at)
+        with self.assertRaises(ValidationError):
+            self._service("authenticate_ticket_session_for_mutation")(
+                redeemed.token, activity=self.activity
+            )
+
     def test_batch_issue_creates_sequential_issued_tickets_atomically(self):
         issue_batch = self._service("issue_ticket_batch")
 
@@ -730,6 +753,29 @@ class TicketStaffHttpTests(TestCase):
 
         query_attempt = self.client.get(f"/staff/tickets/check-in/?secret={issued.secret}")
         self.assertIn(query_attempt.status_code, {404, 405})
+
+    def test_manual_check_in_of_a_non_ascii_code_is_rejected_not_a_server_error(self):
+        """An operator typing Chinese text must get the ordinary rejection.
+
+        The legacy-secret guard hashed the raw input with the ASCII encoding before the
+        shared validation ran, so a non-ASCII string raised UnicodeEncodeError, which the
+        check-in page does not catch, and the page returned 500 instead of "invalid".
+        """
+        self._issue(serial_number="non-ascii")
+        self.client.force_login(self.staff)
+        transition_activity_phase(
+            self.activity,
+            Activity.Phase.REGISTRATION_CLOSED,
+            actor=self.admin,
+        )
+
+        response = self.client.post(
+            reverse("ticket_staff:check_in_page"),
+            data={"secret": "票据无效"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "票据无效或当前活动尚未进入检票阶段")
 
     def test_participant_cannot_issue_or_check_in_ticket(self):
         self.client.force_login(self.participant)
