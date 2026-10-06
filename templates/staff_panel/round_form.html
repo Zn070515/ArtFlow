@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}新增轮次 — ArtFlow{% endblock %}
+{% block title %}{% if editing_round %}编辑轮次{% else %}新增轮次{% endif %} — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-lg mx-auto px-4 py-10">
-    <h1 class="text-2xl font-bold text-gray-900 mb-6">新增比赛轮次</h1>
+    <h1 class="text-2xl font-bold text-gray-900 mb-6">{% if editing_round %}编辑比赛轮次{% else %}新增比赛轮次{% endif %}</h1>
     {% if error %}
     <div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">{{ error }}</div>
     {% endif %}
@@ -12,10 +12,10 @@
         {% csrf_token %}
         <div>
             <label for="id_activity_id" class="block text-sm font-medium text-gray-700 mb-1">活动</label>
-            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm" onchange="this.form.method='get'; this.form.submit();">
+            <select id="id_activity_id" name="activity_id" required class="w-full border border-gray-300 rounded px-3 py-2 text-sm"{% if editing_round %} disabled{% else %} onchange="this.form.method='get'; this.form.submit();"{% endif %}>
                 {% for a in activities %}<option value="{{ a.pk }}"{% if selected_activity_id|stringformat:"s" == a.pk|stringformat:"s" %} selected{% endif %}>{{ a.title }}</option>{% endfor %}
             </select>
-            <p class="text-xs text-gray-500 mt-1">切换活动后会重新加载对应的赛制、评分标准和上游赛段。</p>
+            <p class="text-xs text-gray-500 mt-1">{% if editing_round %}轮次不能更换所属活动。{% else %}切换活动后会重新加载对应的赛制、评分标准和上游赛段。{% endif %}</p>
         </div>
         <div>
             {{ form.name.label_tag }}{{ form.name }}
@@ -35,11 +35,6 @@
             {{ form.judge_count.label_tag }}{{ form.judge_count }}
             {% for error in form.judge_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
             <p class="text-xs text-gray-500 mt-1">现场会自动使用 J1、J2 等通道，不需要提前录入老师姓名。</p>
-        </div>
-        <div>
-            {{ form.minimum_judge_count.label_tag }}{{ form.minimum_judge_count }}
-            {% for error in form.minimum_judge_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
-            <p class="text-xs text-gray-500 mt-1">留空时按准备名单人数执行 fail-safe；轮次准备后不可修改。</p>
         </div>
         <div>
             {{ form.sequence.label_tag }}{{ form.sequence }}
@@ -71,7 +66,7 @@
             {{ form.advance_count.label_tag }}{{ form.advance_count }}
             {% for error in form.advance_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
-        <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">创建轮次</button>
+        <button type="submit" class="bg-brand text-white px-4 py-2 rounded text-sm hover:bg-brand-light">{% if editing_round %}保存轮次配置{% else %}创建轮次{% endif %}</button>
     </form>
 </div>
 {% endblock %}

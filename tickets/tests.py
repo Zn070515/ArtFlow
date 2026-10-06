@@ -853,6 +853,30 @@ class TicketPublicHttpTests(TestCase):
         self.assertEqual(oversized["Cache-Control"], "no-store")
 
     @override_settings(RATE_LIMIT_BACKEND="locmem")
+    def test_distinct_tickets_sharing_one_nat_ip_are_not_mutually_rate_limited(self):
+        issued_tickets = [self.issued]
+        for index in range(2, 51):
+            ticket = ticket_services.create_ticket(
+                self.activity, actor=self.staff, serial_number=f"pub-{index}"
+            )
+            issued_tickets.append(ticket_services.issue_ticket(ticket, actor=self.staff))
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.get("/tickets/scan/")
+        csrf_token = csrf_client.cookies["csrftoken"].value
+        responses = [
+            csrf_client.post(
+                "/tickets/redeem/",
+                data=json.dumps({"secret": issued.secret}),
+                content_type="application/json",
+                HTTP_X_CSRFTOKEN=csrf_token,
+            )
+            for issued in issued_tickets
+        ]
+
+        self.assertEqual([response.status_code for response in responses], [200] * 50)
+
+    @override_settings(RATE_LIMIT_BACKEND="locmem")
     def test_redeem_rate_limit_returns_retry_after(self):
         csrf_client = Client(enforce_csrf_checks=True)
         for _ in range(30):

@@ -819,6 +819,24 @@ class ScoringServiceTests(TestCase):
             ["J1", "J2", "J3"],
         )
 
+    def test_configured_judge_count_is_also_the_minimum_panel_size(self):
+        self.judge.is_active = False
+        self.judge.save(update_fields=["is_active"])
+        self.round.judge_count = 3
+        self.round.minimum_judge_count = 1
+        self.round.save(update_fields=["judge_count", "minimum_judge_count"])
+
+        prepare_round(self.round, self.user)
+        attending_judge_id = list(
+            self.round.round_judges.order_by("pk").values_list("judge_id", flat=True)
+        )[0]
+        with self.assertRaisesMessage(ValidationError, "INSUFFICIENT_JUDGES"):
+            prepare_judge_panel(
+                self.round.pk,
+                operator=self.user,
+                attending_judge_ids=[attending_judge_id],
+            )
+
     def test_prepare_round_rejects_drop_high_low_with_fewer_than_three_judges(self):
         self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
         _save_round_state(self.round)

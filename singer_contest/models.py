@@ -516,6 +516,12 @@ class GroupStage(models.Model):
         blank=True,
         related_name="group_stages_sourcing",
     )
+    source_roster_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="ROUND_ADVANCED 来源在确认时的晋级名单指纹。",
+    )
 
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="group_stages"

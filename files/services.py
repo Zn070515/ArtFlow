@@ -856,7 +856,14 @@ def review_material_check(check, *, status, note, actor):
     owner = check.singer_registration or check.group or check.program
     if owner is None:
         raise ValidationError("材料检查项未关联有效报名，无法审核。")
-    activity = lock_activity_for_action(_owner_activity(owner), ActivityAction.REVIEW_REGISTRATION)
+    group_stage = getattr(owner, "stage", None)
+    if group_stage is not None:
+        if group_stage.status in {"draft", "cancelled"}:
+            raise ValidationError("当前分组合唱赛段不可审核材料。")
+        review_action = ActivityAction.REVIEW_GROUP_MATERIAL
+    else:
+        review_action = ActivityAction.REVIEW_REGISTRATION
+    activity = lock_activity_for_action(_owner_activity(owner), review_action)
     # A left outer join is invalid with FOR UPDATE on PostgreSQL (the nullable
     # singer_registration / program FKs become the null side), so lock the row
     # without select_related and resolve the owner lazily.

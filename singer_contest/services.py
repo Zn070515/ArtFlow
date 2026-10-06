@@ -501,6 +501,8 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
             ]
         elif len(judges) != locked_round.judge_count:
             raise ValidationError("匿名评委通道数与本轮已配置评委不一致。")
+        locked_round.minimum_judge_count = locked_round.judge_count
+        locked_round.save(update_fields=["minimum_judge_count"])
     else:
         judges = list(
             Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")
@@ -2579,6 +2581,14 @@ def ensure_round_not_consumed_by_confirmed_stage(contest_round) -> None:
         stage = StageResult.objects.get(pk=stage_pk["pk"])
         if contest_round.pk in _stage_consumed_facts(stage)["rounds"]:
             raise ValidationError(_CONSUMED_BY_CONFIRMED_MSG)
+    from .models import GroupStage
+
+    if GroupStage.objects.filter(
+        roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
+        roster_source_round_id=contest_round.pk,
+        status__in=[GroupStage.Status.CONFIRMED, GroupStage.Status.FROZEN],
+    ).exists():
+        raise ValidationError("该轮次晋级名单已被确认的分组合唱赛段使用，不能解锁。")
 
 
 def ensure_group_stage_not_consumed_by_confirmed_stage(group_stage) -> None:

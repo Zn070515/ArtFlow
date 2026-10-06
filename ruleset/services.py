@@ -521,7 +521,11 @@ def build_bound_context(version: RulesetVersion, binding: dict) -> dict:
         contest_round = ContestRound.objects.filter(pk=rpk, activity=activity).first()
         if contest_round is None:
             continue
-        judge_count = contest_round.round_judges.count()
+        judge_count = (
+            contest_round.judge_count
+            if contest_round.judge_count is not None
+            else contest_round.round_judges.count()
+        )
         item: dict = {"judge_count": judge_count}
         if roster_final:
             entry_count = contest_round.entries.count()

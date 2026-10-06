@@ -98,14 +98,8 @@ class ContestRoundForm(forms.Form):
     judge_count = forms.IntegerField(
         label="评委通道数（匿名现场）",
         min_value=1,
-        required=False,
-        help_text="填写后现场自动生成 J1、J2… 评分通道；留空时沿用历史评委名单。",
-    )
-    minimum_judge_count = forms.IntegerField(
-        label="最低有效到场评委数",
-        min_value=1,
-        required=False,
-        help_text="留空时按准备名单人数作为最低人数。",
+        required=True,
+        help_text="赛前可在草稿轮次中调整；现场会自动生成 J1、J2… 评分通道。",
     )
     advance_count = forms.IntegerField(
         label="晋级人数（0 表示不限制）", min_value=0, required=False, initial=0

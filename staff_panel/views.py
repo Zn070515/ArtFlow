@@ -107,6 +107,7 @@ from singer_contest.group_chorus import (
     create_group_stage,
     freeze_group_stage,
     group_material_readiness,
+    group_stage_roster_singers,
     record_group_stage,
     set_group_material_status,
 )
@@ -366,11 +367,11 @@ def group_stage_detail(request, pk):
         ),
         pk=pk,
     )
-    singers = list(
-        SingerRegistration.objects.filter(
-            activity=stage.activity, pre_status=SingerRegistration.PreStatus.APPROVED
-        ).order_by("pk")
-    )
+    try:
+        singers = group_stage_roster_singers(stage)
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"当前分组合唱名单暂不可用：{domain_error_messages(error)}")
+        return redirect("staff:activity_workspace", pk=stage.activity_id)
     initial_groups = [
         {
             "name": group.name,
@@ -1718,7 +1719,7 @@ def round_create(request):
                         "round_type": form.cleaned_data["round_type"],
                         "scoring_mode": form.cleaned_data["scoring_mode"],
                         "judge_count": form.cleaned_data["judge_count"],
-                        "minimum_judge_count": form.cleaned_data["minimum_judge_count"],
+                        "minimum_judge_count": form.cleaned_data["judge_count"],
                         "name": form.cleaned_data["name"],
                         "advance_count": form.cleaned_data["advance_count"],
                         "order_policy": form.cleaned_data["order_policy"],
@@ -1791,6 +1792,115 @@ def round_create(request):
             "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
             "rubrics": rubrics,
             "selected_activity_id": selected_activity_id,
+        },
+    )
+
+
+@staff_required
+def round_edit(request, pk):
+    contest_round = get_object_or_404(ContestRound.objects.select_related("activity"), pk=pk)
+    activities = _editable_singer_activities()
+    activity = contest_round.activity
+    if contest_round.status != ContestRound.Status.DRAFT or activity.is_locked:
+        raise PermissionDenied("只有未准备且未锁定活动中的轮次可以修改配置。")
+    rubrics = ScoringRubric.objects.filter(activity=activity)
+    initial = {
+        "name": contest_round.name,
+        "round_type": contest_round.round_type,
+        "scoring_mode": contest_round.scoring_mode,
+        "judge_count": contest_round.judge_count,
+        "advance_count": contest_round.advance_count,
+        "sequence": contest_round.sequence,
+        "order_policy": contest_round.order_policy,
+        "tie_order_policy": contest_round.tie_order_policy,
+        "roster_source": contest_round.roster_source,
+        "roster_source_stage": contest_round.roster_source_stage,
+        "rubric": contest_round.rubric_id,
+    }
+    if request.method == "POST":
+        form = ContestRoundForm(
+            request.POST,
+            rubrics=rubrics,
+            stage_choices=round_roster_stage_choices(activity),
+        )
+        if form.is_valid():
+            if form.cleaned_data["roster_source"] == ContestRound.RosterSource.STAGE:
+                try:
+                    validate_roster_source_stage(activity, form.cleaned_data["roster_source_stage"])
+                except ValidationError as error:
+                    form.add_error("roster_source_stage", domain_error_messages(error))
+            sequence = form.cleaned_data.get("sequence")
+            if (
+                not form.errors
+                and sequence is not None
+                and ContestRound.objects.filter(activity=activity, sequence=sequence)
+                .exclude(pk=contest_round.pk)
+                .exists()
+            ):
+                form.add_error("sequence", "轮次序号已存在，请填写其他序号。")
+            if form.is_valid():
+                with transaction.atomic():
+                    locked_round = ContestRound.objects.select_for_update().get(pk=contest_round.pk)
+                    if locked_round.status != ContestRound.Status.DRAFT:
+                        raise PermissionDenied("轮次已准备，不能修改配置。")
+                    for field in (
+                        "name",
+                        "round_type",
+                        "scoring_mode",
+                        "advance_count",
+                        "sequence",
+                        "order_policy",
+                        "tie_order_policy",
+                        "roster_source",
+                        "roster_source_stage",
+                        "rubric",
+                    ):
+                        setattr(locked_round, field, form.cleaned_data[field])
+                    locked_round.judge_count = form.cleaned_data["judge_count"]
+                    locked_round.minimum_judge_count = form.cleaned_data["judge_count"]
+                    locked_round.save(
+                        update_fields=[
+                            "name",
+                            "round_type",
+                            "scoring_mode",
+                            "judge_count",
+                            "minimum_judge_count",
+                            "advance_count",
+                            "sequence",
+                            "order_policy",
+                            "tie_order_policy",
+                            "roster_source",
+                            "roster_source_stage",
+                            "rubric",
+                        ]
+                    )
+                log_action(
+                    request,
+                    AuditLog.ActionType.OTHER,
+                    f"ContestRound:{contest_round.pk}",
+                    new_value="configuration_updated",
+                )
+                return redirect("staff:round_list")
+    else:
+        form = ContestRoundForm(
+            rubrics=rubrics,
+            stage_choices=round_roster_stage_choices(activity),
+            initial=initial,
+        )
+    return render(
+        request,
+        "staff_panel/round_form.html",
+        {
+            "form": form,
+            "activities": activities,
+            "round_types": _choices(ContestRound.RoundType),
+            "scoring_modes": _choices(ContestRound.ScoringMode),
+            "order_policies": _choices(ContestRound.OrderPolicy),
+            "tie_order_policies": _choices(ContestRound.TieOrderPolicy),
+            "roster_sources": [("", "自动判定"), *_choices(ContestRound.RosterSource)],
+            "rubrics": rubrics,
+            "selected_activity_id": str(activity.pk),
+            "editing_round": contest_round,
         },
     )
 
@@ -2691,12 +2801,18 @@ def _judge_control_context(
         .select_related("singer")
         .order_by("sequence", "pk")
     )
-    expected_judge_count = len(round_judges)
+    expected_judge_count = (
+        contest_round.judge_count if contest_round.judge_count is not None else len(round_judges)
+    )
     actual_judge_count = len(panel_members)
     minimum_judge_count = (
         panel_snapshot.minimum_judge_count
         if panel_snapshot is not None
-        else contest_round.minimum_judge_count or expected_judge_count
+        else (
+            expected_judge_count
+            if contest_round.judge_count is not None
+            else contest_round.minimum_judge_count or expected_judge_count
+        )
     )
     if panel_snapshot is None:
         policy_state = "PREPARE_REQUIRED"

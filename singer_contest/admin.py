@@ -47,6 +47,7 @@ class ContestRoundAdmin(ObservationOnlyAdmin):
         "activity",
         "round_type",
         "scoring_mode",
+        "judge_count",
         "minimum_judge_count",
         "name",
         "sequence",
@@ -91,7 +92,11 @@ class ContestRoundAdmin(ObservationOnlyAdmin):
 
     @admin.display(description="评委快照数", ordering="judge_count_value")
     def judge_count(self, contest_round):
-        return getattr(contest_round, "judge_count_value", contest_round.round_judges.count())
+        return (
+            contest_round.judge_count
+            if contest_round.judge_count is not None
+            else getattr(contest_round, "judge_count_value", contest_round.round_judges.count())
+        )
 
 
 @admin.register(Judge)

@@ -57,6 +57,7 @@ services:
       SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
       ALLOWED_HOSTS: ${ARTFLOW_EVENT_ALLOWED_HOSTS:-localhost,127.0.0.1}
       CSRF_TRUSTED_ORIGINS: ""
+      TRUST_X_FORWARDED_FOR: "true"
       RATE_LIMIT_BACKEND: database
       DATABASE_ENGINE: postgresql
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the event environment}

@@ -93,6 +93,7 @@ urlpatterns = [
     path("export/programs/", views.export_programs, name="export_programs"),
     path("rounds/", views.round_list, name="round_list"),
     path("rounds/new/", views.round_create, name="round_create"),
+    path("rounds/<int:pk>/edit/", views.round_edit, name="round_edit"),
     path("rounds/<int:pk>/prepare/", views.round_prepare, name="round_prepare"),
     path("rounds/<int:pk>/running-order/", views.round_running_order, name="round_running_order"),
     path("rounds/<int:pk>/groups/", views.round_groups, name="round_groups"),

@@ -5,6 +5,7 @@ from accounts.models import User
 from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
     authority_write,
 )
@@ -39,6 +40,10 @@ from .models import (
     Group,
     GroupMembership,
     GroupStage,
+    Judge,
+    RoundEntry,
+    RoundJudge,
+    ScoreRecord,
     ScoreSummary,
     SingerRegistration,
 )
@@ -266,6 +271,14 @@ class GroupChorusStageServiceTests(TestCase):
 
         set_group_material_status(stage, GroupStage.MaterialStatus.OPEN, self.operator)
         self.assertEqual(upload("open.mp3").group_id, group.pk)
+        review_material_check(
+            check,
+            status=MaterialCheck.Status.APPROVED,
+            note="现场材料已核验",
+            actor=self.operator,
+        )
+        check.refresh_from_db()
+        self.assertEqual(check.status, MaterialCheck.Status.APPROVED)
 
         set_group_material_status(stage, GroupStage.MaterialStatus.CLOSED, self.operator)
         with self.assertRaisesMessage(ValidationError, "不接受材料提交"):
@@ -457,6 +470,18 @@ class GroupChorusStageServiceTests(TestCase):
             round_type=ContestRound.RoundType.PRELIMINARY,
             name="第一轮",
         )
+        judge = Judge.objects.create(activity=self.activity, name="评委")
+        for singer in self.singers:
+            RoundEntry.objects.create(round=contest_round, singer=singer, running_order=singer.pk)
+        RoundJudge.objects.create(round=contest_round, judge=judge)
+        for singer in self.singers:
+            ScoreRecord.objects.create(
+                round=contest_round,
+                singer=singer,
+                judge=judge,
+                score=90,
+                is_test_data=True,
+            )
         for index, singer in enumerate(self.singers):
             with authority_write(SCORE_SUMMARY_RECALCULATE):
                 ScoreSummary.objects.create(
@@ -467,6 +492,10 @@ class GroupChorusStageServiceTests(TestCase):
                     is_advanced=index < 2,
                     is_test_data=True,
                 )
+        contest_round.status = ContestRound.Status.LOCKED
+        contest_round.is_locked = True
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status", "is_locked"])
         stage = create_group_stage(
             self.activity,
             stage_key="chorus",
@@ -487,6 +516,8 @@ class GroupChorusStageServiceTests(TestCase):
             )
         record_group_stage(stage, [{"name": "A组", "singer_ids": advanced}], self.operator)
         confirm_group_stage(stage, self.operator)
+        stage.refresh_from_db()
+        self.assertTrue(stage.source_roster_fingerprint)
         self.assertEqual(
             GroupMembership.objects.filter(group__stage=stage, is_current=True).count(), 2
         )
@@ -500,6 +531,24 @@ class GroupChorusStageServiceTests(TestCase):
                 operator=self.operator,
                 roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
             )
+
+    def test_a_round_sourced_stage_requires_a_final_source_round(self):
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="尚未完成的第一轮",
+        )
+        stage = create_group_stage(
+            self.activity,
+            stage_key="chorus",
+            name="分组合唱",
+            operator=self.operator,
+            roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
+            roster_source_round=contest_round,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "尚未锁定"):
+            confirm_group_stage(stage, self.operator)
 
     def test_background_video_does_not_satisfy_the_accompaniment_contract(self):
         stage = create_group_stage(
