@@ -547,6 +547,28 @@ class ClosedRegistrationTests(_FormBase):
         self.assertEqual(self._post({"r3.song": "重新提交的曲目"}).status_code, 200)
         self.assertEqual(self._post({"name": "偷改的名字"}).status_code, 409)
 
+    def test_a_whole_form_autosave_during_supplement_writes_only_the_granted_question(self):
+        """The browser posts every input it rendered, including the disabled ones.
+
+        The closed page disables the questions outside the window, but a form submission
+        carries their current values anyway. The server rejected the whole payload for
+        containing a non-writable key, so the one question staff sent back could never be
+        saved: every autosave answered 409.
+        """
+        self._post({"name": "陈昭艺", "r1.song": "歌", "r3.song": "旧曲目"})
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.name, "陈昭艺")
+        self._close()
+        self._grant_supplement("r3.song")
+
+        response = self._post({"name": "陈昭艺", "r1.song": "歌", "r3.song": "新曲目"})
+
+        self.assertEqual(response.status_code, 200)
+        saved = QuestionnaireResponse.objects.get(singer_registration=self.registration)
+        self.assertEqual(saved.answers.get("r3.song"), "新曲目")
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.name, "陈昭艺")
+
     def test_the_closed_page_marks_the_supplemented_question_editable(self):
         self._close()
         self._grant_supplement("r3.song")

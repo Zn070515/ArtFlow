@@ -44,6 +44,12 @@
 
   // Only what the participant actually typed is sent. The server decides what each key
   // means — whether it is a bound field, a stored answer, or not a question at all.
+  //
+  // A field the server rendered as disabled is not something the participant typed: it is
+  // a question outside the current write window (a closed registration, or a question
+  // staff did not send back). Posting it back anyway used to make every autosave fail —
+  // the server saw a key it did not grant and refused the whole form, so a participant
+  // could not save the one question they were asked to supplement.
   const collect = (): Record<string, unknown> => {
     const answers: Record<string, unknown> = {};
     root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -51,6 +57,8 @@
     ).forEach((field) => {
       const key = field.dataset.answer;
       if (!key) return;
+      if (field.disabled) return;
+      if (!(field instanceof HTMLSelectElement) && field.readOnly) return;
       if (field instanceof HTMLInputElement && field.type === "checkbox") {
         const question = field.closest<HTMLElement>("[data-question]");
         if (question?.dataset.questionType === "multiple_choice") {
