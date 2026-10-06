@@ -1603,11 +1603,14 @@ def _version_binding(version) -> dict:
     unmigrated rows.
     """
     binding = version.binding or {}
-    if (
-        not binding.get("stage_key")
-        and not binding.get("round_keys")
-        and not binding.get("group_stage_keys")
-    ):
+    # "No snapshot stored" is the legacy case, and it is the only case that may read the
+    # still-editable ContestRuleset. The previous test asked whether the snapshot lacked a
+    # stage key, round keys and group-stage keys — which a legitimate vote-only ruleset also
+    # does, since _snapshot_binding always writes all nine keys and leaves the irrelevant
+    # ones empty. Such a version therefore read the live ruleset, and editing that ruleset
+    # after the freeze silently changed what the frozen version resolved — including
+    # dropping the frozen vote_scoring_rule_keys, which the fallback does not carry.
+    if not binding:
         ruleset = version.ruleset
         if ruleset.round_keys or ruleset.stage_key:
             binding = {

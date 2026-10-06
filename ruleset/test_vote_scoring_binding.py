@@ -272,6 +272,50 @@ class FrozenVoteScoringBindingTests(_RulesetModelBase):
         self.assertEqual(snapshot["mode"], "ballot_share_percent")
         self.assertEqual(snapshot["scale"], "hundred")
 
+    def test_a_present_snapshot_is_the_authority_even_without_round_keys(self):
+        """A stored snapshot is self-authoritative; only a missing one may read the ruleset.
+
+        The fallback used to fire whenever the snapshot had no stage key, round keys and
+        group-stage keys — which is exactly the shape of a vote-only snapshot, because
+        _snapshot_binding always writes all nine keys and leaves the irrelevant ones empty.
+        A frozen vote-only version therefore resolved against the still-editable
+        ContestRuleset, so binding the ruleset after the freeze silently changed the frozen
+        version's meaning, and the fallback dropped vote_scoring_rule_keys entirely.
+        """
+        from singer_contest.services import _version_binding
+
+        admin, ruleset, session, rule, version = self._fixture()
+        frozen = freeze_ruleset_version(version, admin)
+        snapshot = {
+            "stage_key": "",
+            "round_keys": {},
+            "vote_keys": {"audience1": session.pk},
+            "vote_scoring_rule_keys": {
+                "audience1": {
+                    "rule": rule.pk,
+                    "mode": "ballot_share_percent",
+                    "scale": "hundred",
+                }
+            },
+            "group_keys": {},
+            "group_stage_keys": {},
+            "audience_keys": {},
+            "announcement_blocks": [],
+            "announcement_blocks_by_checkpoint": {},
+        }
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.filter(pk=frozen.pk).update(binding=snapshot)
+
+        # Move the editable ruleset to a different vote source, as `ruleset_bind` may.
+        ruleset.vote_keys = {"audience1": 424242}
+        ruleset.save(update_fields=["vote_keys"])
+
+        frozen.refresh_from_db()
+        binding = _version_binding(frozen)
+
+        self.assertEqual(binding["vote_keys"], {"audience1": session.pk})
+        self.assertIn("vote_scoring_rule_keys", binding)
+
     def test_freeze_refuses_a_score_component_without_a_conversion_rule(self):
         admin, _ruleset, _session, _rule, version = self._fixture(with_rule=False)
         with self.assertRaises(RulesetInvalidError) as caught:
