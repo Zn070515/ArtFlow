@@ -1,7 +1,13 @@
+from decimal import Decimal
 from unittest.mock import patch
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    SCORE_SUMMARY_RECALCULATE,
+    authority_write,
+)
 from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import ValidationError
@@ -28,7 +34,14 @@ from .group_chorus import (
     record_group_stage,
     set_group_material_status,
 )
-from .models import Group, GroupMembership, GroupStage, SingerRegistration
+from .models import (
+    ContestRound,
+    Group,
+    GroupMembership,
+    GroupStage,
+    ScoreSummary,
+    SingerRegistration,
+)
 
 
 class GroupChorusStageServiceTests(TestCase):
@@ -107,7 +120,7 @@ class GroupChorusStageServiceTests(TestCase):
             self.operator,
         )
 
-        with self.assertRaisesMessage(ValidationError, "必须覆盖当前全部审核通过的选手"):
+        with self.assertRaisesMessage(ValidationError, "必须覆盖该赛段应有的全部选手"):
             confirm_group_stage(stage, self.operator)
 
     def test_group_order_supplies_default_display_names(self):
@@ -431,6 +444,62 @@ class GroupChorusStageServiceTests(TestCase):
         freeze_group_stage(stage, self.operator)
         with self.assertRaisesMessage(ValidationError, "已冻结的分组合唱赛段不能被取消"):
             cancel_group_stage(stage, self.operator, reason="反悔")
+
+    def test_a_stage_can_source_its_roster_from_one_rounds_advancers(self):
+        """GOAL §6: the year's format decides who sings in the chorus.
+
+        Hard-coding "every approved registration" made the "only the survivors of an
+        earlier round" case inexpressible, so the source is declared on the stage and
+        resolved on the server from there.
+        """
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮",
+        )
+        for index, singer in enumerate(self.singers):
+            with authority_write(SCORE_SUMMARY_RECALCULATE):
+                ScoreSummary.objects.create(
+                    round=contest_round,
+                    singer=singer,
+                    average_score=Decimal("90"),
+                    rank=index + 1,
+                    is_advanced=index < 2,
+                    is_test_data=True,
+                )
+        stage = create_group_stage(
+            self.activity,
+            stage_key="chorus",
+            name="分组合唱",
+            operator=self.operator,
+            roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
+            roster_source_round=contest_round,
+        )
+        advanced = [singer.pk for singer in self.singers[:2]]
+
+        # A group may only contain advanced singers: a non-advancer is not in the roster
+        # at all, so the partition can never be completed with one.
+        with self.assertRaisesMessage(ValidationError, "必须是当前活动已审核通过的选手"):
+            record_group_stage(
+                stage,
+                [{"name": "A组", "singer_ids": advanced + [self.singers[2].pk]}],
+                self.operator,
+            )
+        record_group_stage(stage, [{"name": "A组", "singer_ids": advanced}], self.operator)
+        confirm_group_stage(stage, self.operator)
+        self.assertEqual(
+            GroupMembership.objects.filter(group__stage=stage, is_current=True).count(), 2
+        )
+
+    def test_a_round_sourced_stage_must_name_its_round(self):
+        with self.assertRaisesMessage(ValidationError, "必须指定来源轮次"):
+            create_group_stage(
+                self.activity,
+                stage_key="chorus",
+                name="分组合唱",
+                operator=self.operator,
+                roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
+            )
 
     def test_background_video_does_not_satisfy_the_accompaniment_contract(self):
         stage = create_group_stage(

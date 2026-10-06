@@ -494,6 +494,29 @@ class GroupStage(models.Model):
         max_length=16, choices=MaterialStatus, default=MaterialStatus.CLOSED
     )
 
+    class RosterSource(models.TextChoices):
+        """Which contestants this stage's groups must partition.
+
+        GOAL §6 lets the year's format decide whether everyone advanced sings in the
+        chorus or only the survivors of an earlier round do. Hard-coding "every approved
+        registration" made the second case inexpressible, so the source is declared when
+        the stage is created and resolved on the server from there.
+        """
+
+        ALL_APPROVED = "all_approved", "全部审核通过的选手"
+        ROUND_ADVANCED = "round_advanced", "指定轮次的晋级选手"
+
+    roster_source = models.CharField(
+        max_length=20, choices=RosterSource, default=RosterSource.ALL_APPROVED
+    )
+    roster_source_round = models.ForeignKey(
+        "singer_contest.ContestRound",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="group_stages_sourcing",
+    )
+
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="group_stages"
     )
@@ -523,11 +546,14 @@ class GroupStage(models.Model):
 
     if TYPE_CHECKING:
         activity_id: int
+        roster_source_round_id: int | None
         groups: models.Manager["Group"]
 
         def get_status_display(self) -> str: ...
 
         def get_material_status_display(self) -> str: ...
+
+        def get_roster_source_display(self) -> str: ...
 
     class Meta:
         ordering = ["created_at", "pk"]
@@ -546,6 +572,21 @@ class GroupStage(models.Model):
             raise ValidationError("分组合唱赛段必须有稳定的赛段标识。")
         if not str(self.name or "").strip():
             raise ValidationError("分组合唱赛段必须有名称。")
+        source = self.roster_source or self.RosterSource.ALL_APPROVED
+        if source not in self.RosterSource.values:
+            raise ValidationError({"roster_source": "未知的分组合唱名单来源。"})
+        if source == self.RosterSource.ROUND_ADVANCED:
+            if not self.roster_source_round_id:
+                raise ValidationError({"roster_source_round": "按轮次晋级分组时必须指定来源轮次。"})
+            source_activity_id = (
+                ContestRound._base_manager.filter(pk=self.roster_source_round_id)
+                .values_list("activity_id", flat=True)
+                .first()
+            )
+            if source_activity_id != self.activity_id:
+                raise ValidationError({"roster_source_round": "来源轮次必须属于当前活动。"})
+        elif self.roster_source_round_id:
+            raise ValidationError({"roster_source_round": "全部审核通过的名单不需要来源轮次。"})
 
     def save(self, *args, **kwargs):
         if not (authority_authorized(GROUP_STAGE_STATE) or authority_authorized(TEST_DATA_CLEANUP)):

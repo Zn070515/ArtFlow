@@ -1,5 +1,12 @@
 # Production Readiness Rehearsal
 
+> 当前运行基线以 [`GOAL.md`](../GOAL.md)、代码中的 authority service 和本文件的
+> “发布门禁”/“Production Rehearsal Report”为准。下面的 M2-A、M2-B、M2-C、M2-D1
+> 段落是 **Historical Rehearsal Record**：它们保留当时的边界、证据和外部 HOLD，
+> 不代表当前 Judge、Ticket、Result 或登录流程仍处于旧的实验状态。当前实现已使用
+> recoverable ticket credential、HttpOnly Judge session、冻结规则集 authority、媒体
+> 独立 worker pool，以及 realtime 不阻断 HTTP 的降级拓扑。
+
 ArtFlow 首次正式活动前必须完成一次完整彩排，并保留验证记录。目标不是只确认 happy path，而是确认错误、重试、并发和恢复路径不会污染正式数据。
 
 ## 事件日检查矩阵
@@ -51,7 +58,7 @@ Award 只保留可追溯性，不能冒充当前正式奖项。
 授权 Award 创建、重算或替换；删除该字段或清理历史值前，必须先审计真实历史数据并
 通过显式迁移处理。
 
-## M2-A 入口访问能力状态
+## Historical Rehearsal Record: M2-A 入口访问能力状态
 
 M2-A 当前标记为 `EXPERIMENTAL`，只提供工程基础能力，不代表 Judge/Ticket 的正式业务
 流程已经上线。已具备的边界是：Staff/Admin 可创建入口并签发一次性短期 grant；公共兑换
@@ -70,7 +77,7 @@ Admin 检查页不保存或展示原始 token。公共兑换端点是刻意的�
 JudgeSeat、正式扫码页或业务工作区前，仍必须完成 PostgreSQL 并发/恢复彩排和真实角色
 流程验证；因此 M2-A 继续保持 `EXPERIMENTAL`，不会被误标为 Judge/Ticket 已上线。
 
-## M2-B Ticket / Check-in / Audience Entitlement
+## Historical Rehearsal Record: M2-B Ticket / Check-in / Audience Entitlement
 
 M2-B 的票据是非个人化的权威输入：Ticket 只保存 SHA-256 digest、活动和库存标识，
 原始 secret 只在 Staff 签发响应中出现一次。生命周期由服务层审计并锁定活动与票据：
@@ -101,7 +108,7 @@ ballot 和 audit。数据库故障时 `doctor` 只报告连接失败，不继续
 DDoS、WAF challenge/黑名单和学校公网入口审批仍由部署方、学校网络或边缘服务负责，
 必须在正式接入前单独验证并保留证据。
 
-## M2 渐进式能力门禁
+## Historical Rehearsal Record: M2 渐进式能力门禁
 
 ### M2-C Judge authority / 学校接入准备状态
 
