@@ -127,13 +127,19 @@ def submit_ballot(
         )
         if ticket_ballot:
             return ticket_ballot
-        ballot = VoteBallot.objects.filter(
-            vote_session=locked_session, browser_session_key=browser_session_key
-        ).first()
-        if ballot:
-            if ticket is not None and ballot.ticket_id != ticket.pk:
-                raise ValidationError("该浏览器会话已使用其他入场票投票。")
-            return ballot
+        if ticket is None:
+            # A session without a ticket has no identity other than the browser session,
+            # so that remains its uniqueness key and a repeat submit is idempotent.
+            ballot = VoteBallot.objects.filter(
+                vote_session=locked_session, browser_session_key=browser_session_key
+            ).first()
+            if ballot is not None:
+                return ballot
+        # A ticket-backed submit is unique by ticket: the lookup above already returned if
+        # this ticket had voted, and GOAL §9.6 makes Ticket + VoteSession the whole key.
+        # GOAL §9.7 rules out browser- or device-derived limits, and two audience members
+        # sharing one phone both hold checked-in tickets — refusing the second one denied a
+        # entitled ballot to someone standing at the venue with a valid ticket.
         try:
             with transaction.atomic():
                 ballot = VoteBallot.objects.create(
@@ -145,11 +151,14 @@ def submit_ballot(
                 )
         except IntegrityError:
             if ticket is not None:
+                # The only constraint a ticket-backed insert can hit is the per-ticket one,
+                # so a concurrent submit of the same ticket is the whole recovery case.
                 ticket_ballot = VoteBallot.objects.filter(
                     vote_session=locked_session, ticket=ticket
                 ).first()
-                if ticket_ballot:
+                if ticket_ballot is not None:
                     return ticket_ballot
+                raise
             return VoteBallot.objects.get(
                 vote_session=locked_session, browser_session_key=browser_session_key
             )
