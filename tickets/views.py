@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from base64 import b64encode
+from hashlib import sha256
 from io import BytesIO
 from typing import Any, TypeVar
 from urllib.parse import quote
@@ -35,6 +36,10 @@ from .services import (
 BODY_MAX_BYTES = 4096
 REDEEM_RATE_LIMIT = 30
 REDEEM_RATE_WINDOW_SECONDS = 60
+# A credential bucket is the strict replay/guessing boundary. The address bucket is
+# deliberately broad: a school Wi-Fi or event Caddy commonly represents hundreds of
+# legitimate phones with one source address.
+REDEEM_IP_RATE_LIMIT = 600
 
 
 class RequestBodyTooLarge(Exception):
@@ -151,19 +156,27 @@ def scan(request: HttpRequest):
 
 @require_POST
 def redeem(request: HttpRequest) -> JsonResponse:
-    decision = allow(
-        f"ticket-redeem:{client_ip(request) or 'unknown'}",
-        limit=REDEEM_RATE_LIMIT,
+    source_ip = client_ip(request) or "unknown"
+    ip_decision = allow(
+        f"ticket-redeem-ip:{source_ip}",
+        limit=REDEEM_IP_RATE_LIMIT,
         window_seconds=REDEEM_RATE_WINDOW_SECONDS,
     )
-    if not decision.allowed:
-        return _rate_limited_response(decision.retry_after_seconds)
+    if not ip_decision.allowed:
+        return _rate_limited_response(ip_decision.retry_after_seconds)
     try:
         payload = _json_payload(request)
         raw_secret = _credential_from_payload(payload)
+        credential_decision = allow(
+            f"ticket-redeem-credential:{sha256(raw_secret.encode('utf-8')).hexdigest()}",
+            limit=REDEEM_RATE_LIMIT,
+            window_seconds=REDEEM_RATE_WINDOW_SECONDS,
+        )
+        if not credential_decision.allowed:
+            return _rate_limited_response(credential_decision.retry_after_seconds)
         result = redeem_ticket(
             raw_secret,
-            request_meta=TicketRequestMeta(ip_address=client_ip(request)),
+            request_meta=TicketRequestMeta(ip_address=source_ip),
         )
     except RequestBodyTooLarge:
         return _too_large_response()

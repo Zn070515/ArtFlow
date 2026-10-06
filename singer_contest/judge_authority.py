@@ -418,10 +418,19 @@ def prepare_judge_panel(
     round_judges = list(
         RoundJudge.objects.filter(round=contest_round).select_related("judge").order_by("pk")
     )
-    expected_judge_count = len(round_judges)
+    configured_judge_count = contest_round.judge_count
+    expected_judge_count = (
+        configured_judge_count if configured_judge_count is not None else len(round_judges)
+    )
     if expected_judge_count < 1:
         raise ValidationError("本轮次没有预备评委名单。")
-    minimum_judges = _minimum_judges(contest_round, expected_judge_count)
+    if configured_judge_count is not None and len(round_judges) != configured_judge_count:
+        raise ValidationError("匿名评委通道数与本轮已配置评委不一致。")
+    minimum_judges = (
+        expected_judge_count
+        if configured_judge_count is not None
+        else _minimum_judges(contest_round, expected_judge_count)
+    )
     attending_round_judges = _attending_round_judges(round_judges, attending_judge_ids)
     if len(attending_round_judges) < minimum_judges:
         raise ValidationError(
