@@ -48,6 +48,21 @@ services:
       ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
       ARTFLOW_PROCESS_ROLE: web
+      # Tunable runtime knobs, documented in .env.production.example. They are listed
+      # here explicitly because this manifest sets `environment:` per service and never
+      # uses `env_file:`, so a knob that is not listed here silently keeps its built-in
+      # default no matter what the deployment .env says.
+      ARTFLOW_DELIVERY_BACKEND: ${ARTFLOW_DELIVERY_BACKEND:-local}
+      ARTFLOW_VIDEO_UPLOAD_MAX_MB: ${ARTFLOW_VIDEO_UPLOAD_MAX_MB:-100}
+      ARTFLOW_UPLOAD_QUOTA_MB: ${ARTFLOW_UPLOAD_QUOTA_MB:-512}
+      ARTFLOW_UPLOAD_MAX_VERSIONS: ${ARTFLOW_UPLOAD_MAX_VERSIONS:-5}
+      ARTFLOW_UPLOAD_MIN_FREE_MB: ${ARTFLOW_UPLOAD_MIN_FREE_MB:-256}
+      ARTFLOW_UPLOAD_RATE_LIMIT: ${ARTFLOW_UPLOAD_RATE_LIMIT:-10}
+      ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS: ${ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS:-3600}
+      ARTFLOW_PII_RETENTION_DAYS: ${ARTFLOW_PII_RETENTION_DAYS:-365}
+      LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
+      ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
+      TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
       SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
       SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
       SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
@@ -108,6 +123,20 @@ services:
       ARTFLOW_ICP_URL: ${ARTFLOW_ICP_URL:-}
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
       ARTFLOW_PROCESS_ROLE: media
+      # Same explicit list as `web`: every Django process loads the same settings
+      # module, so a knob forwarded to one service but not another makes two pools
+      # disagree about the running configuration.
+      ARTFLOW_DELIVERY_BACKEND: ${ARTFLOW_DELIVERY_BACKEND:-local}
+      ARTFLOW_VIDEO_UPLOAD_MAX_MB: ${ARTFLOW_VIDEO_UPLOAD_MAX_MB:-100}
+      ARTFLOW_UPLOAD_QUOTA_MB: ${ARTFLOW_UPLOAD_QUOTA_MB:-512}
+      ARTFLOW_UPLOAD_MAX_VERSIONS: ${ARTFLOW_UPLOAD_MAX_VERSIONS:-5}
+      ARTFLOW_UPLOAD_MIN_FREE_MB: ${ARTFLOW_UPLOAD_MIN_FREE_MB:-256}
+      ARTFLOW_UPLOAD_RATE_LIMIT: ${ARTFLOW_UPLOAD_RATE_LIMIT:-10}
+      ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS: ${ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS:-3600}
+      ARTFLOW_PII_RETENTION_DAYS: ${ARTFLOW_PII_RETENTION_DAYS:-365}
+      LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
+      ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
+      TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
       SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
       SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
       SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
@@ -160,8 +189,14 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # `service_started`, not `service_healthy`, for the same reason `proxy` below
+      # only requires the container to exist: with a health gate, an unhealthy Redis
+      # means this container is never created, which leaves `proxy`'s
+      # `realtime: service_started` permanently unsatisfied and takes the whole HTTP
+      # site down even though nothing on it needs Redis. `restart: unless-stopped`
+      # retries the process until Redis accepts connections.
       redis:
-        condition: service_healthy
+        condition: service_started
     environment:
       APP_ENV: production
       DEBUG: "False"
@@ -175,6 +210,20 @@ services:
       ARTFLOW_RELEASE_SHA: ${ARTFLOW_RELEASE_SHA:?Set ARTFLOW_RELEASE_SHA to the deployed commit SHA}
       ARTFLOW_PROCESS_ROLE: realtime
       ARTFLOW_REALTIME_REDIS_URL: redis://redis:6379/0
+      # Same explicit list as `web`: every Django process loads the same settings
+      # module, so a knob forwarded to one service but not another makes two pools
+      # disagree about the running configuration.
+      ARTFLOW_DELIVERY_BACKEND: ${ARTFLOW_DELIVERY_BACKEND:-local}
+      ARTFLOW_VIDEO_UPLOAD_MAX_MB: ${ARTFLOW_VIDEO_UPLOAD_MAX_MB:-100}
+      ARTFLOW_UPLOAD_QUOTA_MB: ${ARTFLOW_UPLOAD_QUOTA_MB:-512}
+      ARTFLOW_UPLOAD_MAX_VERSIONS: ${ARTFLOW_UPLOAD_MAX_VERSIONS:-5}
+      ARTFLOW_UPLOAD_MIN_FREE_MB: ${ARTFLOW_UPLOAD_MIN_FREE_MB:-256}
+      ARTFLOW_UPLOAD_RATE_LIMIT: ${ARTFLOW_UPLOAD_RATE_LIMIT:-10}
+      ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS: ${ARTFLOW_UPLOAD_RATE_WINDOW_SECONDS:-3600}
+      ARTFLOW_PII_RETENTION_DAYS: ${ARTFLOW_PII_RETENTION_DAYS:-365}
+      LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
+      ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
+      TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
       SECURE_HSTS_SECONDS: ${SECURE_HSTS_SECONDS:-300}
       SECURE_HSTS_INCLUDE_SUBDOMAINS: ${SECURE_HSTS_INCLUDE_SUBDOMAINS:-false}
       SECURE_HSTS_PRELOAD: ${SECURE_HSTS_PRELOAD:-false}
