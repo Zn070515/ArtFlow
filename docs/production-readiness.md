@@ -542,3 +542,21 @@ node scripts/media_download_load_rehearsal.mjs
 - 边界：本机回环、单容器、稀疏 payload，只测**worker 占用**，不测磁盘吞吐、公网带宽、
   边缘层容量或多副本行为。正式活动前仍需在真实部署与现场网络上复测。
 
+### 2026-10-06 Release Candidate 冻结流程
+
+P1 收口后进入 RC 的发布面冻结。RC SHA 确定后停止向 `main` 连续合入普通功能，
+只允许可回归验证的 blocker 修复；最终彩排、镜像构建和部署必须引用同一个完整 SHA。
+不通过修改 GitHub branch protection 来替代流程控制，仓库保护策略仍由维护者另行决定。
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+bash scripts/build_release.sh release-artifacts
+```
+
+`build_release.sh` 会以完整 Git SHA 构建并校验 OCI image revision；部署使用带该 SHA
+的预构建镜像、`ARTFLOW_RELEASE_SHA` 和生产 Compose manifest。RC 验证至少包括 Django
+check/migrations、全量 SQLite/pytest、PostgreSQL acceptance、client/e2e smoke、备份恢复
+演练和 13 人现场彩排。任何 blocker 修复都必须重新生成 RC SHA、重新执行受影响门禁并
+重新彩排；不得把彩排 SHA A 的结果带到生产 SHA B。
+
