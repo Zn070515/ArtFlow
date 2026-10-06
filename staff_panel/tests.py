@@ -459,6 +459,27 @@ class StaffPanelSmokeTests(TestCase):
             f"{reverse('staff:singer_registration_list')}?activity_id={self.singer_activity.pk}",
         )
 
+    def test_admin_activity_workspace_exposes_cas_metadata_editor(self):
+        login_admin(self.client, self.admin)
+        response = self.client.get(
+            reverse("staff:activity_workspace", args=[self.singer_activity.pk])
+        )
+
+        self.assertContains(response, "data-activity-field-editor")
+        for field in ("title", "subtitle", "description"):
+            self.assertContains(
+                response,
+                reverse("staff:activity_field_patch", args=[self.singer_activity.pk, field]),
+            )
+
+    def test_staff_activity_workspace_does_not_expose_admin_cas_editor(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:activity_workspace", args=[self.singer_activity.pk])
+        )
+
+        self.assertNotContains(response, "data-activity-field-editor")
+
     def test_activity_workspace_dispatches_farewell_show_domain(self):
         login_admin(self.client, self.admin)
         response = self.client.get(
