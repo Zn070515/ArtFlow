@@ -71,7 +71,17 @@ def submit_ballot(
 ):
     if not browser_session_key:
         raise ValidationError("浏览器会话无效。")
-    unique_ids = list(dict.fromkeys(str(option_id) for option_id in option_ids))
+    normalized_ids: list[str] = []
+    for option_id in option_ids:
+        try:
+            normalized_ids.append(str(int(option_id)))
+        except (TypeError, ValueError):
+            # The cast view renders the browser form, but a POST is not bound by that.
+            # Passing a non-numeric value straight into `pk__in` raised a bare
+            # ValueError, which the view does not catch, so a crafted option id came
+            # back as a 500 instead of the ordinary rejection below.
+            raise ValidationError("候选项不属于当前投票。") from None
+    unique_ids = list(dict.fromkeys(normalized_ids))
     if not unique_ids:
         raise ValidationError("请选择至少一个候选项。")
     if vote_session.selection_type == VoteSession.SelectionType.SINGLE and len(unique_ids) != 1:
