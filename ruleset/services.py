@@ -725,7 +725,10 @@ def _carry_questionnaire_answers(
     if before is None:
         return 0
     carried = 0
-    for old in QuestionnaireResponse.objects.filter(ruleset_version=previous):
+    rows = QuestionnaireResponse.objects.filter(ruleset_version=previous).select_related(
+        "group", "singer_registration"
+    )
+    for old in rows:
         answers = carry_answers(before, plan, old.answers)
         identity = (
             {"group_id": old.group_id, "subject": QuestionnaireResponse.Subject.GROUP}
@@ -745,6 +748,17 @@ def _carry_questionnaire_answers(
                 "is_test_data": old.is_test_data,
             },
         )
+        # A successor can add a question to a response that already existed, and the
+        # per-question material checks are otherwise created on the form's *first open* —
+        # which for this participant has already happened. Without this the new question has
+        # no check at all, `writable_question_keys` therefore offers nothing, and staff have
+        # no way to grant a supplement for it either: once registration is closed that
+        # participant can never answer a question they were never asked to answer.
+        owner = old.group if old.group_id else old.singer_registration
+        if owner is not None:
+            from files.services import reconcile_questionnaire_material_checks
+
+            reconcile_questionnaire_material_checks(registration=owner, version=version, plan=plan)
         carried += 1
     return carried
 
