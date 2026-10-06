@@ -77,6 +77,7 @@ test("the first admin bootstrap reaches the Singer workspace and preserves scope
   await expect(page.locator('[class~="bg-brand"][class~="text-brand"]')).toHaveCount(0);
 
   await page.getByLabel("轮次名称").fill("第一轮");
+  await page.getByLabel("评委通道数（匿名现场）").fill("3");
   await page.locator("#id_sequence").fill("1");
   await page.locator("#id_rubric").selectOption({ label: "第一轮评分" });
   await page.getByRole("button", { name: "创建轮次" }).click();
