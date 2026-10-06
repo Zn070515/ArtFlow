@@ -2319,8 +2319,11 @@ def audience_score_entry(request, activity_id):
     try:
         version = _current_frozen_version(activity)
     except ValidationError as error:
+        # Render the empty state with the reason. Redirecting back into this same view
+        # re-raises the same error on the redirected GET, so the page used to loop until
+        # the browser gave up with ERR_TOO_MANY_REDIRECTS and the grid stayed unreachable.
         messages.error(request, domain_error_messages(error))
-        return redirect("staff:audience_score_entry", activity_id=activity_id)
+        version = None
     sets = _audience_sets(activity, version)
     recorded = next(
         (s["provenance"] for s in sets if s["provenance"]["source"] or s["provenance"]["note"]),
@@ -3690,8 +3693,14 @@ def incident_create(request):
     form = IncidentForm(request.POST or None)
     if request.method == "POST":
         activity = get_object_or_404(Activity, pk=request.POST["activity_id"])
+        # An incident is deliberately NOT gated on the activity lock. GOAL §16 makes the
+        # incident record a first-class object for the failures that happen around a
+        # lock — a restart, a restore, a manual override — and IncidentRecord even
+        # carries an authority_state of LOCKED for exactly that case. Rejecting the write
+        # when the activity is locked would make the record unavailable precisely when it
+        # is needed. The lock is still taken, so this row serializes with the rest of the
+        # activity's writes.
         activity = lock_activity_for_runtime_data(activity)
-        ensure_activity_unlocked(activity)
         if not form.is_valid():
             return render(
                 request,
@@ -4544,7 +4553,16 @@ def contest_ruleset_create(request):
         template = None
         template_pk = request.POST.get("template")
         if template_pk:
-            template = get_object_or_404(RulesetTemplate, pk=template_pk)
+            # The page only lists production templates, but a POST is not bound by what
+            # the page rendered. `staff:ruleset_clone_from_template` already filters on
+            # capability status; this second clone entry point has to apply the same
+            # gate, or an experimental/unsupported template can be cloned into a live
+            # workflow by picking its pk directly.
+            template = get_object_or_404(
+                RulesetTemplate,
+                pk=template_pk,
+                capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
+            )
         # One activity owns one ContestRuleset (versions live on RulesetVersion). If a
         # ruleset already exists, reuse it instead of creating a competing authority that
         # would make recompute_activity_result's single-authority assumption ambiguous.

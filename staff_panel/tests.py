@@ -4121,6 +4121,26 @@ class IncidentAuthorityFieldTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(IncidentRecord.objects.filter(activity=self.activity).exists())
 
+    def test_incident_can_be_recorded_while_the_activity_is_locked(self):
+        """GOAL §16: the failures worth recording happen around a lock.
+
+        A restart, a restore or a manual override takes place while the activity is
+        already locked, and ``IncidentRecord.authority_state`` carries a ``LOCKED``
+        value for exactly that case, so the activity lock must not make the record
+        unwritable.
+        """
+        self.activity.is_locked = True
+        _save_activity_state(self.activity, ["is_locked"])
+
+        response = self.client.post(
+            reverse("staff:incident_create"),
+            self._payload(authority_state=IncidentRecord.AuthorityState.LOCKED),
+        )
+
+        self.assertRedirects(response, reverse("staff:incident_list"))
+        incident = IncidentRecord.objects.get(activity=self.activity)
+        self.assertEqual(incident.authority_state, IncidentRecord.AuthorityState.LOCKED)
+
     def test_incident_form_offers_the_activity_rounds(self):
         response = self.client.get(
             reverse("staff:incident_create"), {"activity_id": self.activity.pk}
@@ -4131,6 +4151,40 @@ class IncidentAuthorityFieldTests(TestCase):
         self.assertContains(response, "事发时 authority 状态")
         self.assertContains(response, "需要赛后复盘")
         self.assertContains(response, str(self.contest_round.pk))
+
+
+class AudienceScoreEntryPageTests(TestCase):
+    """The audience grid page must render its empty state, never redirect into itself."""
+
+    def setUp(self):
+        self.staff = _create_provisioned_user(
+            username="audience-entry-staff", password="pass", role=User.Role.STAFF
+        )
+        self.activity = _create_activity(
+            title="Audience Entry",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.staff)
+
+    def test_ambiguous_ruleset_renders_instead_of_redirecting_to_itself(self):
+        """A ruleset error must not turn the page into an infinite redirect loop.
+
+        The handler redirected back into this same view, which re-raised the same
+        error on the redirected GET, so the page ended in ERR_TOO_MANY_REDIRECTS and
+        stayed unreachable for as long as the ambiguity existed.
+        """
+        url = reverse("staff:audience_score_entry", args=[self.activity.pk])
+
+        with patch(
+            "staff_panel.views._current_frozen_version",
+            side_effect=ValidationError("该活动存在多个自动重算赛制，请先清理重复。"),
+        ):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["sets"], [])
 
 
 class UserRoleAdministrationTests(TestCase):
@@ -6771,6 +6825,44 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(version.status, "draft")
         self.assertEqual(version.definition, template.definition)
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_clone_entry_point_rejects_a_non_production_template(self):
+        """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
+        from ruleset.models import ContestRuleset, RulesetTemplate
+
+        experimental = RulesetTemplate.objects.get(builtin_key="multivenue_merge")
+        self.assertEqual(
+            experimental.capability_status, RulesetTemplate.CapabilityStatus.EXPERIMENTAL
+        )
+        activity = self._clone_activity("院十佳2026实验模板")
+
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[experimental.pk]),
+            {"activity": activity.pk, "name": "非法克隆"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ContestRuleset.objects.filter(activity=activity).exists())
+
+    def test_create_entry_point_rejects_a_non_production_template(self):
+        """The second clone entry point must apply the same gate as the first.
+
+        The create page only renders production templates, but a POST is not bound by
+        what the page rendered, so picking an experimental pk directly used to bypass
+        the gate that `ruleset_clone_from_template` enforces.
+        """
+        from ruleset.models import ContestRuleset, RulesetTemplate
+
+        experimental = RulesetTemplate.objects.get(builtin_key="multivenue_merge")
+        activity = self._clone_activity("院十佳2026实验模板二")
+
+        response = self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": activity.pk, "name": "非法新建", "template": experimental.pk},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ContestRuleset.objects.filter(activity=activity).exists())
 
     def test_clone_rejects_non_singer_and_archived_activities(self):
         from ruleset.models import ContestRuleset, RulesetTemplate
