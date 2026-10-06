@@ -1492,12 +1492,17 @@ class AuthorityMutationMatrixTests(TestCase):
         self.assertFalse(
             ContestRoundAdmin(ContestRound, admin.site).has_delete_permission(None, self.round)
         )
+        # A registration keeps its editable admin surface on purpose, so it is not in the
+        # observation-only loop below. It must not be deletable, though: one row is the
+        # root of a CASCADE tree into ScoreRecord, VoteOption/VoteRecord, Performance and
+        # Award, and Django's collector performs that cascade with raw SQL, so the guards
+        # on those models never run.
+        self.assertFalse(
+            SingerRegistrationAdmin(SingerRegistration, admin.site).has_delete_permission(
+                request, self.singer
+            )
+        )
         for readonly_admin_class, readonly_model, instance in (
-            # A registration is the root of a CASCADE tree into ScoreRecord, VoteOption/
-            # VoteRecord, Performance and Award, and Django's collector performs that
-            # cascade with raw SQL, so the guards on those models never run. The admin
-            # must not be a write path to it.
-            (SingerRegistrationAdmin, SingerRegistration, self.singer),
             (ScoreRecordAdmin, ScoreRecord, self.score),
             (CriterionScoreAdmin, CriterionScore, self.criterion_score),
             (ScoreSummaryAdmin, ScoreSummary, None),

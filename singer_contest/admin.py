@@ -30,19 +30,28 @@ class ObservationOnlyAdmin(admin.ModelAdmin):
 
 
 @admin.register(SingerRegistration)
-class SingerRegistrationAdmin(ObservationOnlyAdmin):
-    """Expose registrations without a second write path.
+class SingerRegistrationAdmin(admin.ModelAdmin):
+    """Editable profile metadata, but never a delete path.
 
-    Every other authoritative model in this app is observation-only; this one was
-    registered as a plain ModelAdmin, so the admin delete action removed a
-    registration and Django's collector cascaded to ScoreRecord, VoteOption/
-    VoteRecord, Performance, StageDecision and Award with raw SQL, bypassing the
-    guards on each of those models.
+    Registration keeps an editable admin surface for the non-authoritative profile fields
+    — that is a deliberate staff convenience the app's own admin tests pin. What it must
+    not have is the delete action: one registration is the root of a CASCADE tree into
+    ScoreRecord, VoteOption/VoteRecord, Performance, StageDecision, StageAwardDecision,
+    AudienceScore and Award, and Django's collector performs that cascade with raw SQL, so
+    the guards on each of those models never run (GOAL §19.1).
     """
 
     list_display = ["name", "song_name", "activity", "pre_status", "live_status", "created_at"]
     list_filter = ["pre_status", "live_status", "activity"]
     search_fields = ["name", "student_id", "song_name"]
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return super().get_readonly_fields(request, obj)
+        return (*super().get_readonly_fields(request, obj), "activity", "user")
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(ContestRound)
