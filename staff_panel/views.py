@@ -1404,18 +1404,31 @@ def activity_material_requirements(request, activity_id):
                     request, "当前活动的选手材料由已确认问卷管理，不能再配置旧式材料项。"
                 )
             else:
-                MaterialRequirement.objects.update_or_create(
-                    activity=locked_activity,
-                    applies_to=applies_to,
-                    item_name=item_name,
-                    defaults={
-                        "file_purpose": request.POST.get("file_purpose", "") or "",
-                        "is_required": True,
-                        "sort_order": request.POST.get("sort_order", 0),
-                    },
-                )
-                reconcile_activity_material_checks(locked_activity, applies_to)
-                messages.success(request, "材料检查项已保存。")
+                # Validate before the ORM call. The form posts these as text and the
+                # model fields are typed, so an unparseable sort_order or an over-long
+                # name used to reach the database and surface as a 500 rather than as a
+                # message on the page the operator is already looking at.
+                sort_order_raw = (request.POST.get("sort_order") or "0").strip()
+                file_purpose = (request.POST.get("file_purpose") or "").strip()
+                if not sort_order_raw.isdigit():
+                    messages.error(request, "排序必须是数字。")
+                elif len(item_name) > 100:
+                    messages.error(request, "检查项名称不能超过 100 个字符。")
+                elif file_purpose and file_purpose not in SubmissionFile.Purpose.values:
+                    messages.error(request, "无效的文件用途。")
+                else:
+                    MaterialRequirement.objects.update_or_create(
+                        activity=locked_activity,
+                        applies_to=applies_to,
+                        item_name=item_name,
+                        defaults={
+                            "file_purpose": file_purpose,
+                            "is_required": True,
+                            "sort_order": int(sort_order_raw),
+                        },
+                    )
+                    reconcile_activity_material_checks(locked_activity, applies_to)
+                    messages.success(request, "材料检查项已保存。")
         return redirect("staff:activity_material_requirements", activity_id=activity.pk)
     requirements = MaterialRequirement.objects.filter(activity=activity)
     questionnaire_authority = questionnaire_material_authority_active(activity)
@@ -1442,7 +1455,9 @@ def activity_material_requirement_delete(request, activity_id, pk):
         locked_activity = lock_activity_for_action(activity)
         _ensure_activity_mutable(locked_activity)
         requirement = MaterialRequirement.objects.filter(pk=pk, activity=locked_activity).first()
-        if requirement is not None:
+        if requirement is None:
+            messages.error(request, "材料检查项不存在，未做任何修改。")
+        else:
             applies_to = requirement.applies_to
             if (
                 applies_to == MaterialRequirement.AppliesTo.SINGER
@@ -1450,9 +1465,12 @@ def activity_material_requirement_delete(request, activity_id, pk):
             ):
                 messages.error(request, "当前活动的选手材料由已确认问卷管理，不能删除旧式材料项。")
             else:
+                # Report success only where a row was actually removed. The unconditional
+                # message meant a refused delete showed the failure and the success banner
+                # at the same time, so the page contradicted itself about what happened.
                 requirement.delete()
                 reconcile_activity_material_checks(locked_activity, applies_to)
-    messages.success(request, "材料检查项已删除。")
+                messages.success(request, "材料检查项已删除。")
     return redirect("staff:activity_material_requirements", activity_id=activity.pk)
 
 
@@ -2600,6 +2618,10 @@ def stage_result_detail(request, pk):
             "stage": stage,
             "activity": stage.activity,
             "blocks": blocks,
+            # GOAL §8.5/§26.6: confirming a stage result is an admin authority, and
+            # `stage_result_confirm` is `@admin_required`. `is_admin` here mirrors that
+            # decorator so the page does not offer a button whose POST is refused.
+            "can_confirm_stage_result": request.user.is_admin,
             "can_unlock_stage_result": request.user.is_admin,
         },
     )

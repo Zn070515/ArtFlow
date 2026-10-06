@@ -4041,6 +4041,40 @@ class MaterialReviewAndRequirementTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(MaterialRequirement.objects.filter(pk=requirement.pk).exists())
 
+    def test_material_requirement_rejects_a_non_numeric_sort_order(self):
+        """A text value in the sort field must be refused, not reach the ORM as a 500."""
+        self.client.force_login(self.staff)
+        url = reverse("staff:activity_material_requirements", args=[self.activity.pk])
+
+        response = self.client.post(
+            url,
+            {
+                "applies_to": MaterialRequirement.AppliesTo.SINGER,
+                "item_name": "异常排序",
+                "file_purpose": SubmissionFile.Purpose.LYRICS_SCRIPT,
+                "sort_order": "abc",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "排序必须是数字")
+        self.assertFalse(MaterialRequirement.objects.filter(item_name="异常排序").exists())
+
+    def test_deleting_a_missing_requirement_does_not_report_success(self):
+        """The page used to print the failure and the success banner at the same time."""
+        self.client.force_login(self.staff)
+        url = reverse(
+            "staff:activity_material_requirement_delete",
+            args=[self.activity.pk, 999999],
+        )
+
+        response = self.client.post(url, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "材料检查项不存在")
+        self.assertNotContains(response, "材料检查项已删除")
+
 
 class IncidentAuthorityFieldTests(TestCase):
     """GOAL §16: an incident records its round, the authority state and the review flag."""
@@ -6596,6 +6630,33 @@ class ResultBoardTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, reverse("staff:stage_result_unlock", args=[ready.pk]))
+
+    def test_staff_stage_detail_does_not_render_the_admin_confirm_form(self):
+        """GOAL §8.5/§26.6: confirming is admin authority, so the button must match it.
+
+        The form was rendered for every staff member while `stage_result_confirm` is
+        `@admin_required`, so the page offered a button whose POST was refused.
+        """
+        ready = self._stage(
+            status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-confirm"
+        )
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("staff:stage_result_confirm", args=[ready.pk]))
+        self.assertContains(response, "等待管理员核定")
+
+    def test_admin_stage_detail_renders_the_confirm_form(self):
+        ready = self._stage(
+            status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-admin-confirm"
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("staff:stage_result_confirm", args=[ready.pk]))
 
     def test_stage_result_confirm_flips_to_confirmed(self):
         """§36-37: the 核定 POST locks a READY_TO_CONFIRM result into its handcard state.

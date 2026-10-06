@@ -37,6 +37,7 @@
     {% endif %}
 
     {% if stage.status == "ready_to_confirm" %}
+    {% if can_confirm_stage_result %}
     <form method="post" action="{% url 'staff:stage_result_confirm' stage.pk %}" class="mb-6 flex items-center gap-3" onsubmit="return confirm('确认核定并锁定该赛段结果？确认后将成为正式手卡依据。');">
         {% csrf_token %}
         <span class="text-sm text-gray-500">机器已算完该赛段，核定并锁定后方可用于抄写主持手卡。</span>
@@ -44,6 +45,9 @@
             核定并锁定
         </button>
     </form>
+    {% else %}
+    <p class="mb-6 text-sm text-gray-500">该赛段已算出候选结果，等待管理员核定。</p>
+    {% endif %}
     {% elif stage.status == "confirmed" %}
     <div class="mb-6 space-y-3">
         <p class="text-sm text-emerald-700">
