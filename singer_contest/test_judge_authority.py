@@ -1058,6 +1058,97 @@ class JudgePanelServiceTests(TestCase):
                 reason="重复录入测试",
             )
 
+    def test_repeat_prepare_while_the_panel_is_on_hold_is_idempotent(self):
+        """A HOLD keeps the panel, so pressing 准备评委组 again must not open a second one.
+
+        It used to fall through to the create branch and collide with
+        ``judge_panel_snapshot_round_version`` — an IntegrityError surfaced as a 500.
+        """
+        first = prepare_judge_panel(self.round.pk, operator=self.operator)
+        hold_judge_panel(self.round.pk, operator=self.operator, reason="舞台调整")
+
+        again = prepare_judge_panel(self.round.pk, operator=self.operator)
+
+        self.assertEqual(again.pk, first.pk)
+        self.assertEqual(RoundPanelSnapshot.objects.filter(round=self.round).count(), 1)
+
+    def test_a_replay_of_an_accepted_score_survives_the_show_moving_on(self):
+        """The receipt is the answer to "did my score land?" — even after the pause.
+
+        A retry sent after the response was lost arrives with a context the run has moved
+        past (HOLD bumps ``context_version``), and the old order answered it with
+        STALE_CONTEXT/ROUND_ON_HOLD for a score that was already recorded.
+        """
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+
+        first = submit_judge_score(
+            redeemed.token,
+            command_id="judge-replay-1",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+        hold_judge_panel(self.round.pk, operator=self.operator, reason="舞台调整")
+
+        replay = submit_judge_score(
+            redeemed.token,
+            command_id="judge-replay-1",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+
+        self.assertEqual(replay.receipt_id, first.receipt_id)
+        self.assertEqual(replay.score_record_id, first.score_record_id)
+        self.assertEqual(ScoreRecord.objects.count(), 1)
+
+    def test_a_paused_panel_is_reported_as_a_pause_not_as_a_panel_change(self):
+        """§12.6: HOLD stops formal submissions and the door has to say so.
+
+        Both submit paths asked for the *ACTIVE* snapshot first, so a pause came back as
+        "the panel changed" and the ROUND_ON_HOLD branch was unreachable.
+        """
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+        hold_judge_panel(self.round.pk, operator=self.operator, reason="舞台调整")
+
+        with self.assertRaises(JudgeRoundOnHold):
+            submit_staff_proxy_score(
+                self.round.pk,
+                self.performance.pk,
+                seat.pk,
+                operator=self.operator,
+                command_id="proxy-hold-1",
+                expected_context_version=2,
+                score_payload={"score": "89"},
+                source_reference="现场代录表-002",
+                reason="评委终端临时不可用",
+            )
+        self.assertFalse(ScoreRecord.objects.exists())
+
+    def test_claim_refusals_carry_a_reason_the_door_can_act_on(self):
+        """A full panel, a paused one and a missing one are three different situations."""
+        with self.assertRaises(ValidationError) as unprepared:
+            claim_judge_session(self.activity)
+        self.assertEqual(unprepared.exception.messages[0], "PANEL_NOT_READY")
+
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        hold_judge_panel(self.round.pk, operator=self.operator, reason="舞台调整")
+        with self.assertRaises(ValidationError) as paused:
+            claim_judge_session(self.activity)
+        self.assertEqual(paused.exception.messages[0], "ROUND_ON_HOLD")
+
+        resume_judge_panel(self.round.pk, operator=self.operator)
+        claim_judge_session(self.activity)
+        with self.assertRaises(ValidationError) as full:
+            claim_judge_session(self.activity)
+        self.assertEqual(full.exception.messages[0], "JUDGE_TERMINALS_FULL")
+
 
 class ActualPanelPolicyTests(TestCase):
     def setUp(self):

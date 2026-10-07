@@ -420,12 +420,36 @@
             return null;
         }
     }
+    // The three ways the door can turn a teacher away — a full panel (§12.3), a paused one
+    // (§12.6), and a round with no panel yet — used to arrive as one "terminals full", which
+    // sent someone whose panel was merely paused hunting for an occupied seat.
+    const CLAIM_FAILURE_MESSAGES = {
+        JUDGE_TERMINALS_FULL: "评委席已满，请联系现场工作人员处理。",
+        PANEL_NOT_READY: "评委组尚未准备，请等待现场工作人员。",
+        ROUND_ON_HOLD: "现场评分已暂停，请等待工作人员恢复。",
+    };
+    class ClaimRejected extends Error {
+        constructor(reasonCode) {
+            super(reasonCode);
+            this.reasonCode = reasonCode;
+        }
+    }
+    function claimFailureMessage(error) {
+        if (error instanceof ClaimRejected) {
+            return (CLAIM_FAILURE_MESSAGES[error.reasonCode] ?? "未能加入评委组，请联系现场工作人员。");
+        }
+        return "评委会话无效或已过期，请重新扫描现场二维码。";
+    }
     async function claim() {
         const response = await fetch(claimUrl, {
             method: "POST",
             credentials: "same-origin",
         });
-        return response.ok;
+        if (response.ok)
+            return true;
+        const data = await jsonResponse(response);
+        const reasonCode = isRecord(data) && typeof data.reason_code === "string" ? data.reason_code : "";
+        throw new ClaimRejected(reasonCode);
     }
     async function redeem(fragment) {
         const response = await fetch(redeemUrl, {
@@ -690,8 +714,9 @@
                 cookieSession = false;
             }
             else {
-                if (!(await claim()))
-                    throw new Error("claim failed");
+                // `claim()` throws ClaimRejected with the server's reason code, so the catch below
+                // can tell a full panel from a paused one.
+                await claim();
                 sessionToken = "cookie";
                 cookieSession = true;
             }
@@ -703,11 +728,11 @@
             connectRealtime();
             schedulePoll(realtimeConnected ? 30000 : pollDelay);
         }
-        catch {
+        catch (error) {
             sessionToken = null;
             context = null;
             stopped = true;
-            statusText(terminalRoot, "评委会话无效或已过期，请重新扫描现场二维码。");
+            statusText(terminalRoot, claimFailureMessage(error));
         }
     }
     scoreField.addEventListener("input", scheduleDraftPersistence);

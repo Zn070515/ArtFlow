@@ -33,7 +33,9 @@ _JUDGE_SCORE_IP_LIMIT = 120
 _KNOWN_REASON_CODES = {
     "DUPLICATE_SCORE_FACT",
     "IDEMPOTENCY_CONFLICT",
+    "JUDGE_TERMINALS_FULL",
     "PANEL_CHANGED_MID_ROUND",
+    "PANEL_NOT_READY",
     "PERFORMANCE_NOT_SCORABLE",
     "ROUND_ON_HOLD",
     "RUBRIC_CONFIGURATION_INVALID",
@@ -186,8 +188,11 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
                 return response
     try:
         claimed = claim_judge_session(activity)
-    except (ValidationError, PermissionDenied):
-        return _error("JUDGE_TERMINALS_FULL", 409)
+    except (ValidationError, PermissionDenied) as error:
+        # Not every refusal is "the seats are taken": a paused panel (§12.6) and a round
+        # with no panel yet have their own reason codes, and the door has to tell them
+        # apart to say something actionable.
+        return _error(_reason_from_messages(error), 409)
     response = _no_store(
         JsonResponse(
             {
