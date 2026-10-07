@@ -21,6 +21,7 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
@@ -5273,18 +5274,19 @@ class ResultReleaseHttpTests(TestCase):
                 authority_hash="f" * 64,
             )
         with authority_write(STAGE_RESULT_CONFIRM):
-            self.stage_result = StageResult.objects.create(
-                activity=self.activity,
-                ruleset_version=self.version,
-                stage_key="final",
-                status=StageResult.Status.CONFIRMED,
-                ruleset_hash=self.version.authority_hash,
-                input_fingerprint="1" * 64,
-                result_version=1,
-                is_test_data=False,
-                confirmed_by=self.admin,
-                confirmed_at=timezone.now(),
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                self.stage_result = StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    stage_key="final",
+                    status=StageResult.Status.CONFIRMED,
+                    ruleset_hash=self.version.authority_hash,
+                    input_fingerprint="1" * 64,
+                    result_version=1,
+                    is_test_data=False,
+                    confirmed_by=self.admin,
+                    confirmed_at=timezone.now(),
+                )
         self.post = PublicPost.objects.create(
             title="HTTP Final Result",
             post_type=PublicPost.PostType.RESULT_PUBLICATION,
@@ -5360,15 +5362,16 @@ class ResultReleaseHttpTests(TestCase):
                 is_current=True,
                 authority_hash="2" * 64,
             )
-        other_stage = StageResult.objects.create(
-            activity=other_activity,
-            ruleset_version=other_version,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=other_version.authority_hash,
-            input_fingerprint="3" * 64,
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            other_stage = StageResult.objects.create(
+                activity=other_activity,
+                ruleset_version=other_version,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=other_version.authority_hash,
+                input_fingerprint="3" * 64,
+                is_test_data=False,
+            )
         login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
         response = self.client.post(
@@ -6444,23 +6447,24 @@ class ResultBoardTests(TestCase):
             or 0
         )
         with authority_write(STAGE_RESULT_CONFIRM):
-            return StageResult.objects.create(
-                activity=self.activity,
-                ruleset_version=self.version,
-                created_by=self.staff,
-                stage_key=stage_key,
-                status=status,
-                reasons=reasons or [],
-                ruleset_hash=ruleset_hash,
-                result_version=last + 1,
-                # Identity is (ruleset_version, input_fingerprint): every distinct result
-                # needs its own fingerprint so one version can publish multiple rows.
-                input_fingerprint=f"fp-{ruleset_hash}",
-                is_test_data=False,
-                # M1-R9-Final: a confirmed row must carry its confirming trail (DB CHECK).
-                confirmed_at=timezone.now() if status == StageResult.Status.CONFIRMED else None,
-                confirmed_by=self.staff if status == StageResult.Status.CONFIRMED else None,
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                return StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    created_by=self.staff,
+                    stage_key=stage_key,
+                    status=status,
+                    reasons=reasons or [],
+                    ruleset_hash=ruleset_hash,
+                    result_version=last + 1,
+                    # Identity is (ruleset_version, input_fingerprint): every distinct result
+                    # needs its own fingerprint so one version can publish multiple rows.
+                    input_fingerprint=f"fp-{ruleset_hash}",
+                    is_test_data=False,
+                    # M1-R9-Final: a confirmed row must carry its confirming trail (DB CHECK).
+                    confirmed_at=timezone.now() if status == StageResult.Status.CONFIRMED else None,
+                    confirmed_by=self.staff if status == StageResult.Status.CONFIRMED else None,
+                )
 
     def _confirm(self, stage):
         # Decisions are created while the result is non-confirmed; this flips a READY
@@ -6480,14 +6484,15 @@ class ResultBoardTests(TestCase):
             reasons=["缺少第三轮"],
         )
         ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-2")
-        StageDecision.objects.create(
-            stage_result=ready,
-            singer=self._singer(1),
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("91.00"),
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=ready,
+                singer=self._singer(1),
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("91.00"),
+                is_test_data=False,
+            )
         self._confirm(ready)
         response = self.client.get(reverse("staff:activity_result_board", args=[self.activity.pk]))
         self.assertEqual(response.status_code, 200)
@@ -6512,30 +6517,33 @@ class ResultBoardTests(TestCase):
         direct = self._singer(2)
         repechage = self._singer(3)
         eliminated = self._singer(4)
-        StageDecision.objects.create(
-            stage_result=ready,
-            singer=direct,
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("92.00"),
-            is_test_data=False,
-        )
-        StageDecision.objects.create(
-            stage_result=ready,
-            singer=repechage,
-            outcome_code="repechage",
-            rank=2,
-            score=Decimal("85.00"),
-            is_test_data=False,
-        )
-        StageDecision.objects.create(
-            stage_result=ready,
-            singer=eliminated,
-            outcome_code="eliminated",
-            rank=3,
-            score=Decimal("70.00"),
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=ready,
+                singer=direct,
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("92.00"),
+                is_test_data=False,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=ready,
+                singer=repechage,
+                outcome_code="repechage",
+                rank=2,
+                score=Decimal("85.00"),
+                is_test_data=False,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=ready,
+                singer=eliminated,
+                outcome_code="eliminated",
+                rank=3,
+                score=Decimal("70.00"),
+                is_test_data=False,
+            )
         self._confirm(ready)
         response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
         self.assertEqual(response.status_code, 200)
@@ -6573,16 +6581,17 @@ class ResultBoardTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
             )
         with authority_write(STAGE_RESULT_CONFIRM):
-            stage = StageResult.objects.create(
-                activity=activity_b,
-                ruleset_version=version_b,
-                created_by=self.staff,
-                stage_key="无分组",
-                status=StageResult.Status.READY_TO_CONFIRM,
-                reasons=[],
-                ruleset_hash="hash-fb",
-                is_test_data=False,
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                stage = StageResult.objects.create(
+                    activity=activity_b,
+                    ruleset_version=version_b,
+                    created_by=self.staff,
+                    stage_key="无分组",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    reasons=[],
+                    ruleset_hash="hash-fb",
+                    is_test_data=False,
+                )
         singer = SingerRegistration.objects.create(
             activity=activity_b,
             user=_create_provisioned_user(username="fb-singer", password="pass"),
@@ -6593,14 +6602,15 @@ class ResultBoardTests(TestCase):
             song_name="Song 5",
             pre_status=SingerRegistration.PreStatus.APPROVED,
         )
-        StageDecision.objects.create(
-            stage_result=stage,
-            singer=singer,
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("88.00"),
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=stage,
+                singer=singer,
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("88.00"),
+                is_test_data=False,
+            )
         self._confirm(stage)
         response = self.client.get(reverse("staff:stage_result_detail", args=[stage.pk]))
         self.assertEqual(response.status_code, 200)
@@ -6814,14 +6824,15 @@ class ResultBoardTests(TestCase):
     def test_stage_decisions_by_blocks_helper(self):
         ready = self._stage(status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-helper")
         singer = self._singer(6)
-        StageDecision.objects.create(
-            stage_result=ready,
-            singer=singer,
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("90.00"),
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=ready,
+                singer=singer,
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("90.00"),
+                is_test_data=False,
+            )
         self._confirm(ready)
         blocks = stage_decisions_by_blocks(ready)
         self.assertEqual(blocks[0]["label"], "直接晋级第三轮")
@@ -8321,17 +8332,18 @@ class ResultClosureViewTests(TestCase):
             )
         from singer_contest.services import _current_input_fingerprint
 
-        return StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.staff,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=[],
-            ruleset_hash=version.authority_hash,
-            input_fingerprint=_current_input_fingerprint(version, self.activity, "final"),
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            return StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.staff,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                ruleset_hash=version.authority_hash,
+                input_fingerprint=_current_input_fingerprint(version, self.activity, "final"),
+                is_test_data=True,
+            )
 
     def test_closure_view_requires_staff(self):
         response = self.client.get(
@@ -8442,17 +8454,18 @@ class StageResultPdfTests(TestCase):
                 is_current=True,
                 status=RulesetVersion.Status.FROZEN,
             )
-        self.stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.staff,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=version.authority_hash,
-            input_fingerprint="pdf",
-            result_version=1,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.staff,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=version.authority_hash,
+                input_fingerprint="pdf",
+                result_version=1,
+                is_test_data=True,
+            )
         singer = SingerRegistration.objects.create(
             activity=self.activity,
             user=self.participant,
@@ -8465,14 +8478,15 @@ class StageResultPdfTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=True,
         )
-        StageDecision.objects.create(
-            stage_result=self.stage,
-            singer=singer,
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("92.50"),
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=self.stage,
+                singer=singer,
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("92.50"),
+                is_test_data=True,
+            )
 
     def test_stage_result_pdf_is_staff_only(self):
         self.client.logout()
@@ -8533,30 +8547,32 @@ class StageResultAuthorityDetailTests(TestCase):
                 is_current=True,
                 status=RulesetVersion.Status.FROZEN,
             )
-        old = StageResult.objects.create(
-            activity=activity,
-            ruleset_version=version,
-            created_by=staff,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=["old"],
-            ruleset_hash=version.authority_hash,
-            input_fingerprint="old",
-            result_version=1,
-            is_test_data=True,
-        )
-        StageResult.objects.create(
-            activity=activity,
-            ruleset_version=version,
-            created_by=staff,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=["current"],
-            ruleset_hash=version.authority_hash,
-            input_fingerprint="current",
-            result_version=2,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            old = StageResult.objects.create(
+                activity=activity,
+                ruleset_version=version,
+                created_by=staff,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=["old"],
+                ruleset_hash=version.authority_hash,
+                input_fingerprint="old",
+                result_version=1,
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageResult.objects.create(
+                activity=activity,
+                ruleset_version=version,
+                created_by=staff,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=["current"],
+                ruleset_hash=version.authority_hash,
+                input_fingerprint="current",
+                result_version=2,
+                is_test_data=True,
+            )
         self.client.force_login(staff)
 
         response = self.client.get(reverse("staff:stage_result_detail", args=[old.pk]))

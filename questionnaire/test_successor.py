@@ -222,6 +222,48 @@ class SuccessorFreezeTests(_SuccessorBase):
             ),
         )
 
+    def test_a_question_added_by_a_successor_gets_a_material_check(self):
+        """The new question has to be answerable, not merely carried.
+
+        The per-question checks are created on the form's first open, which for this
+        participant already happened, so a successor's new question arrived with no check:
+        `writable_question_keys` offered nothing, staff had no check to send back, and once
+        registration closed that participant could never answer a question they had never
+        been asked.
+        """
+        from files.models import MaterialCheck
+
+        ruleset = self.ruleset()
+        first = self.version(ruleset, _questionnaire())
+        freeze_ruleset_version(first, self.admin())
+        first.refresh_from_db()
+        participant = self.make_user(f"succ-check-{uuid4().hex[:8]}")
+        registration, _response = get_or_create_draft_registration(version=first, user=participant)
+        self.assertFalse(
+            MaterialCheck.objects.filter(
+                singer_registration=registration, question_key="r3.host_material"
+            ).exists()
+        )
+
+        successor = supersede_ruleset_version(first, created_by=self.admin())
+        successor.definition = json.dumps(
+            {
+                **json.loads(successor.definition),
+                "questionnaire": _questionnaire(
+                    extra={"key": "r3.host_material", "type": "text", "label": "主持稿素材"}
+                ),
+            },
+            ensure_ascii=False,
+        )
+        successor.save(update_fields=["definition"])
+        freeze_ruleset_version(successor, self.admin())
+
+        self.assertTrue(
+            MaterialCheck.objects.filter(
+                singer_registration=registration, question_key="r3.host_material"
+            ).exists()
+        )
+
     def test_a_new_question_is_simply_missing_in_the_successor(self):
         ruleset = self.ruleset()
         first = self.version(ruleset, _questionnaire())

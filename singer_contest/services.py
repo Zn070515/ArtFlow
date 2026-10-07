@@ -20,6 +20,7 @@ from common.authority import (
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
     VOTE_SESSION_STATE,
     authority_write,
@@ -1603,11 +1604,14 @@ def _version_binding(version) -> dict:
     unmigrated rows.
     """
     binding = version.binding or {}
-    if (
-        not binding.get("stage_key")
-        and not binding.get("round_keys")
-        and not binding.get("group_stage_keys")
-    ):
+    # "No snapshot stored" is the legacy case, and it is the only case that may read the
+    # still-editable ContestRuleset. The previous test asked whether the snapshot lacked a
+    # stage key, round keys and group-stage keys — which a legitimate vote-only ruleset also
+    # does, since _snapshot_binding always writes all nine keys and leaves the irrelevant
+    # ones empty. Such a version therefore read the live ruleset, and editing that ruleset
+    # after the freeze silently changed what the frozen version resolved — including
+    # dropping the frozen vote_scoring_rule_keys, which the fallback does not carry.
+    if not binding:
         ruleset = version.ruleset
         if ruleset.round_keys or ruleset.stage_key:
             binding = {
@@ -2182,9 +2186,10 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         latest.reasons = list(result.reasons)
         latest.created_by = computed_by
         latest.save(update_fields=["status", "reasons", "created_by"])
-        StageDecision.objects.filter(stage_result=latest).delete()
-        CompositeResult.objects.filter(stage_result=latest).delete()
-        StageAwardDecision.objects.filter(stage_result=latest).delete()
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.filter(stage_result=latest).delete()
+            CompositeResult.objects.filter(stage_result=latest).delete()
+            StageAwardDecision.objects.filter(stage_result=latest).delete()
         _create_children(latest, result, singer_by_key, is_test)
         materialize_round_entry_from_stage(latest, operator=computed_by)
         return latest
@@ -2195,20 +2200,21 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         )["m"]
         or 0
     )
-    stage = StageResult.objects.create(
-        activity=activity,
-        ruleset_version=version,
-        created_by=computed_by,
-        stage_key=stage_key,
-        status=status,
-        reasons=list(result.reasons),
-        ruleset_hash=authority_hash,
-        input_fingerprint=fingerprint,
-        schema_version=result.schema_version,
-        plan_version=result.plan_version,
-        result_version=last_version + 1,
-        is_test_data=is_test,
-    )
+    with authority_write(STAGE_RESULT_RESOLVE):
+        stage = StageResult.objects.create(
+            activity=activity,
+            ruleset_version=version,
+            created_by=computed_by,
+            stage_key=stage_key,
+            status=status,
+            reasons=list(result.reasons),
+            ruleset_hash=authority_hash,
+            input_fingerprint=fingerprint,
+            schema_version=result.schema_version,
+            plan_version=result.plan_version,
+            result_version=last_version + 1,
+            is_test_data=is_test,
+        )
     _create_children(stage, result, singer_by_key, is_test)
     materialize_round_entry_from_stage(stage, operator=computed_by)
     from public_portal.services import _supersede_releases_for_new_result
@@ -2219,57 +2225,60 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
 
 def _create_children(stage, result, singer_by_key, is_test):
     """Bulk-create a result's decisions + composites onto a stage result."""
-    StageDecision.objects.bulk_create(
-        [
-            StageDecision(
-                stage_result=stage,
-                singer=singer_by_key[d.contestant],
-                outcome_code=d.outcome_code.value,
-                source_node=d.source_node,
-                rank=d.rank,
-                score=d.score,
-                reason=d.reason,
-                is_test_data=is_test,
-            )
-            for d in result.decisions
-        ]
-    )
-    CompositeResult.objects.bulk_create(
-        [
-            CompositeResult(
-                stage_result=stage,
-                singer=singer_by_key[c.contestant],
-                node_key=c.node_key,
-                value=c.value,
-                components=[
-                    {
-                        "source": source,
-                        "weight": str(weight),
-                        "value": str(value),
-                        "contribution": str(contribution),
-                    }
-                    for (source, weight, value, contribution) in c.components
-                ],
-                is_test_data=is_test,
-            )
-            for c in result.composites
-            if c.contestant in singer_by_key
-        ]
-    )
-    StageAwardDecision.objects.bulk_create(
-        [
-            StageAwardDecision(
-                activity=stage.activity,
-                stage_result=stage,
-                singer=singer_by_key[award.contestant],
-                name=award.award,
-                is_test_data=is_test,
-                source_node=award.source_node,
-            )
-            for award in result.awards
-            if award.contestant in singer_by_key
-        ]
-    )
+    # Only the resolver may write a stage's candidate rows, so the write happens under
+    # the resolve scope (see _ensure_resolver_owns_stage_children for why).
+    with authority_write(STAGE_RESULT_RESOLVE):
+        StageDecision.objects.bulk_create(
+            [
+                StageDecision(
+                    stage_result=stage,
+                    singer=singer_by_key[d.contestant],
+                    outcome_code=d.outcome_code.value,
+                    source_node=d.source_node,
+                    rank=d.rank,
+                    score=d.score,
+                    reason=d.reason,
+                    is_test_data=is_test,
+                )
+                for d in result.decisions
+            ]
+        )
+        CompositeResult.objects.bulk_create(
+            [
+                CompositeResult(
+                    stage_result=stage,
+                    singer=singer_by_key[c.contestant],
+                    node_key=c.node_key,
+                    value=c.value,
+                    components=[
+                        {
+                            "source": source,
+                            "weight": str(weight),
+                            "value": str(value),
+                            "contribution": str(contribution),
+                        }
+                        for (source, weight, value, contribution) in c.components
+                    ],
+                    is_test_data=is_test,
+                )
+                for c in result.composites
+                if c.contestant in singer_by_key
+            ]
+        )
+        StageAwardDecision.objects.bulk_create(
+            [
+                StageAwardDecision(
+                    activity=stage.activity,
+                    stage_result=stage,
+                    singer=singer_by_key[award.contestant],
+                    name=award.award,
+                    is_test_data=is_test,
+                    source_node=award.source_node,
+                )
+                for award in result.awards
+                if award.contestant in singer_by_key
+            ]
+        )
 
 
 @transaction.atomic

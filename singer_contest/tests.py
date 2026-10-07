@@ -16,6 +16,7 @@ from common.authority import (
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
     TEST_DATA_SEED,
     VOTE_SESSION_STATE,
@@ -2722,7 +2723,8 @@ class StageResultModelTests(TestCase):
             "is_test_data": True,
         }
         payload.update(overrides)
-        return StageResult.objects.create(**payload)
+        with authority_write(STAGE_RESULT_RESOLVE):
+            return StageResult.objects.create(**payload)
 
     def test_stage_result_roundtrips_with_fks(self):
         result = self._result()
@@ -2734,24 +2736,26 @@ class StageResultModelTests(TestCase):
 
     def test_children_roundtrip_with_parent(self):
         result = self._result()
-        decision = StageDecision.objects.create(
-            stage_result=result,
-            singer=self.singer,
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("92.46"),
-            is_test_data=True,
-        )
-        composite = CompositeResult.objects.create(
-            stage_result=result,
-            singer=self.singer,
-            node_key="stage2",
-            value=Decimal("92.46"),
-            components=[
-                {"source": "stage1", "weight": "0.6", "value": "88.10", "contribution": "52.86"}
-            ],
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            decision = StageDecision.objects.create(
+                stage_result=result,
+                singer=self.singer,
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("92.46"),
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            composite = CompositeResult.objects.create(
+                stage_result=result,
+                singer=self.singer,
+                node_key="stage2",
+                value=Decimal("92.46"),
+                components=[
+                    {"source": "stage1", "weight": "0.6", "value": "88.10", "contribution": "52.86"}
+                ],
+                is_test_data=True,
+            )
         self.assertEqual(result.decisions.get(pk=decision.pk).stage_result, result)
         self.assertEqual(result.composites.get(pk=composite.pk).singer, self.singer)
         self.assertEqual(StageResult.Status.CONFIRMED.value, StageResult.Status.CONFIRMED.value)
@@ -2787,14 +2791,15 @@ class StageResultModelTests(TestCase):
 
     def test_child_immutable_when_parent_ready(self):
         result = self._result()
-        decision = StageDecision.objects.create(
-            stage_result=result,
-            singer=self.singer,
-            outcome_code="direct",
-            rank=1,
-            score=Decimal("92.46"),
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            decision = StageDecision.objects.create(
+                stage_result=result,
+                singer=self.singer,
+                outcome_code="direct",
+                rank=1,
+                score=Decimal("92.46"),
+                is_test_data=True,
+            )
         with authority_write(STAGE_RESULT_CONFIRM):
             StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
                 status=StageResult.Status.CONFIRMED,
@@ -2971,7 +2976,8 @@ class ResultClosureServiceTests(TestCase):
             "is_test_data": True,
         }
         payload.update(overrides)
-        return StageResult.objects.create(**payload)
+        with authority_write(STAGE_RESULT_RESOLVE):
+            return StageResult.objects.create(**payload)
 
     def test_closure_reports_no_current_frozen_ruleset(self):
         with authority_write(RULESET_FREEZE):
@@ -3053,18 +3059,19 @@ class ResultClosureServiceTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
             )
-        StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=successor,
-            created_by=self.operator,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=[],
-            ruleset_hash=successor.authority_hash,
-            input_fingerprint="successor-fingerprint",
-            result_version=2,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=successor,
+                created_by=self.operator,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                ruleset_hash=successor.authority_hash,
+                input_fingerprint="successor-fingerprint",
+                result_version=2,
+                is_test_data=True,
+            )
 
         from .services import ResultClosureCode, build_result_closure
 
@@ -3212,13 +3219,14 @@ class ResultClosureServiceTests(TestCase):
         from .services import materialize_stage_awards, official_stage_award_queryset
 
         old = self._stage(result_version=1)
-        old_candidate = StageAwardDecision.objects.create(
-            stage_result=old,
-            activity=self.activity,
-            singer=singer,
-            name="旧奖",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            old_candidate = StageAwardDecision.objects.create(
+                stage_result=old,
+                activity=self.activity,
+                singer=singer,
+                name="旧奖",
+                is_test_data=True,
+            )
         with authority_write(STAGE_RESULT_CONFIRM):
             old.status = StageResult.Status.CONFIRMED
             old.confirmed_by = self.operator
@@ -3227,13 +3235,14 @@ class ResultClosureServiceTests(TestCase):
         old_award = materialize_stage_awards(old, operator=self.operator)[0]
 
         current = self._stage(result_version=2)
-        current_candidate = StageAwardDecision.objects.create(
-            stage_result=current,
-            activity=self.activity,
-            singer=singer,
-            name="新奖",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            current_candidate = StageAwardDecision.objects.create(
+                stage_result=current,
+                activity=self.activity,
+                singer=singer,
+                name="新奖",
+                is_test_data=True,
+            )
         with authority_write(STAGE_RESULT_CONFIRM):
             current.status = StageResult.Status.CONFIRMED
             current.confirmed_by = self.operator
@@ -3282,18 +3291,19 @@ class ResultClosureServiceTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
             )
-        other_stage = StageResult.objects.create(
-            activity=other_activity,
-            ruleset_version=other_version,
-            created_by=self.operator,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=[],
-            ruleset_hash=other_version.authority_hash,
-            input_fingerprint="foreign-fingerprint",
-            result_version=1,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            other_stage = StageResult.objects.create(
+                activity=other_activity,
+                ruleset_version=other_version,
+                created_by=self.operator,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                ruleset_hash=other_version.authority_hash,
+                input_fingerprint="foreign-fingerprint",
+                result_version=1,
+                is_test_data=True,
+            )
         other_singer = SingerRegistration.objects.create(
             activity=other_activity,
             user=_create_provisioned_user(username="closure-foreign-singer", password="pass"),
@@ -3305,13 +3315,14 @@ class ResultClosureServiceTests(TestCase):
             pre_status=SingerRegistration.PreStatus.APPROVED,
             is_test_data=True,
         )
-        StageAwardDecision.objects.create(
-            stage_result=other_stage,
-            activity=other_activity,
-            singer=other_singer,
-            name="跨活动候选",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageAwardDecision.objects.create(
+                stage_result=other_stage,
+                activity=other_activity,
+                singer=other_singer,
+                name="跨活动候选",
+                is_test_data=True,
+            )
         from .services import materialize_stage_awards, official_stage_award_queryset
 
         with authority_write(STAGE_RESULT_CONFIRM):
@@ -3360,18 +3371,19 @@ class ResultClosureConfirmationConcurrencyTests(TransactionTestCase):
             )
         from .services import _current_input_fingerprint
 
-        self.stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            created_by=self.operator,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=[],
-            ruleset_hash=self.version.authority_hash,
-            input_fingerprint=_current_input_fingerprint(self.version, self.activity, "final"),
-            result_version=1,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.operator,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                ruleset_hash=self.version.authority_hash,
+                input_fingerprint=_current_input_fingerprint(self.version, self.activity, "final"),
+                result_version=1,
+                is_test_data=True,
+            )
 
     def test_concurrent_confirmation_creates_one_audit_and_one_authority_state(self):
         from .services import confirm_stage_result
@@ -3879,15 +3891,16 @@ class StageResolverBindingTests(TestCase):
 
         self.activity.phase = Activity.Phase.RESULTS_PENDING
         _save_activity_state(self.activity, ["phase"])
-        stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            created_by=self.user,
-            stage_key="选拔",
-            status=StageResult.Status.HOLD,
-            reasons=["缺分数"],
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.user,
+                stage_key="选拔",
+                status=StageResult.Status.HOLD,
+                reasons=["缺分数"],
+                is_test_data=True,
+            )
         with self.assertRaises(ValidationError):
             confirm_stage_result(stage, confirmed_by=self.user)
         stage.refresh_from_db()
@@ -4096,15 +4109,16 @@ class StageResolverBindingTests(TestCase):
         # only persisted result is one written BEFORE it was demoted. Simulate exactly
         # that historical row: it is READY_TO_CONFIRM but grounded on a non-current
         # authority, which 核定 must reject.
-        stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.user,
-            stage_key="选拔",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=[],
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.user,
+                stage_key="选拔",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                is_test_data=True,
+            )
         with self.assertRaises(ValidationError):
             confirm_stage_result(stage, confirmed_by=self.user)
         stage.refresh_from_db()
@@ -4140,29 +4154,32 @@ class StageResolverBindingTests(TestCase):
                     },
                 },
             )
-        stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.user,
-            stage_key="stage2",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            reasons=[],
-            is_test_data=True,
-        )
-        StageDecision.objects.create(
-            stage_result=stage,
-            singer=self.singers[0],
-            outcome_code="advanced",
-            rank=1,
-            is_test_data=True,
-        )
-        StageDecision.objects.create(
-            stage_result=stage,
-            singer=self.singers[1],
-            outcome_code="direct",
-            rank=2,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.user,
+                stage_key="stage2",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                reasons=[],
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=stage,
+                singer=self.singers[0],
+                outcome_code="advanced",
+                rank=1,
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=stage,
+                singer=self.singers[1],
+                outcome_code="direct",
+                rank=2,
+                is_test_data=True,
+            )
         blocks = stage_decisions_by_blocks(stage)
         labels = [b["label"] for b in blocks]
         self.assertIn("赛段专属", labels)
@@ -4292,15 +4309,16 @@ class RoundEntryBridgeTests(TestCase):
         # upstream stage it consumes is CONFIRMED. Resolver-authority setup (a CONFIRMED
         # stage) belongs here; the round-bridging behaviour is the actual case under test.
         with authority_write(STAGE_RESULT_CONFIRM):
-            return StageResult.objects.create(
-                activity=self.activity,
-                ruleset_version=self.version,
-                stage_key="stage1",
-                status=StageResult.Status.CONFIRMED,
-                confirmed_at=timezone.now(),
-                confirmed_by=self.admin,
-                is_test_data=True,
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                return StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    stage_key="stage1",
+                    status=StageResult.Status.CONFIRMED,
+                    confirmed_at=timezone.now(),
+                    confirmed_by=self.admin,
+                    is_test_data=True,
+                )
 
     def test_stage1_bridges_next_round_entry_to_top3(self):
         from .services import run_ruleset
@@ -4349,27 +4367,29 @@ class RoundEntryBridgeTests(TestCase):
         )
 
         def stage_with_decisions(version, singers):
-            stage = StageResult.objects.create(
-                activity=self.activity,
-                ruleset_version=self.version,
-                created_by=self.admin,
-                stage_key="stage1",
-                status=StageResult.Status.READY_TO_CONFIRM,
-                result_version=version,
-                is_test_data=True,
-            )
-            StageDecision.objects.bulk_create(
-                [
-                    StageDecision(
-                        stage_result=stage,
-                        singer=singer,
-                        outcome_code="direct",
-                        rank=index,
-                        is_test_data=True,
-                    )
-                    for index, singer in enumerate(singers, start=1)
-                ]
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                stage = StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    created_by=self.admin,
+                    stage_key="stage1",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    result_version=version,
+                    is_test_data=True,
+                )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                StageDecision.objects.bulk_create(
+                    [
+                        StageDecision(
+                            stage_result=stage,
+                            singer=singer,
+                            outcome_code="direct",
+                            rank=index,
+                            is_test_data=True,
+                        )
+                        for index, singer in enumerate(singers, start=1)
+                    ]
+                )
             return stage
 
         first = stage_with_decisions(1, self.singers[:3])
@@ -6106,18 +6126,19 @@ class ConfirmedDependencyClosureTests(TestCase):
             definition, {"stage_key": "选拔", "vote_keys": {"audience": self.vs.pk}}
         )
         with authority_write(STAGE_RESULT_CONFIRM):
-            StageResult.objects.create(
-                activity=self.activity,
-                ruleset_version=version,
-                created_by=self.user,
-                stage_key="选拔",
-                status=StageResult.Status.CONFIRMED,
-                input_fingerprint="x",
-                result_version=1,
-                is_test_data=True,
-                confirmed_by=self.user,
-                confirmed_at=timezone.now(),
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=version,
+                    created_by=self.user,
+                    stage_key="选拔",
+                    status=StageResult.Status.CONFIRMED,
+                    input_fingerprint="x",
+                    result_version=1,
+                    is_test_data=True,
+                    confirmed_by=self.user,
+                    confirmed_at=timezone.now(),
+                )
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
             ensure_vote_not_consumed_by_confirmed_stage(self.vs)
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
@@ -6144,18 +6165,19 @@ class ConfirmedDependencyClosureTests(TestCase):
         }
         version = self._frozen_version(definition, {"stage_key": "选拔"})
         with authority_write(STAGE_RESULT_CONFIRM):
-            StageResult.objects.create(
-                activity=self.activity,
-                ruleset_version=version,
-                created_by=self.user,
-                stage_key="选拔",
-                status=StageResult.Status.CONFIRMED,
-                input_fingerprint="x",
-                result_version=1,
-                is_test_data=True,
-                confirmed_by=self.user,
-                confirmed_at=timezone.now(),
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=version,
+                    created_by=self.user,
+                    stage_key="选拔",
+                    status=StageResult.Status.CONFIRMED,
+                    input_fingerprint="x",
+                    result_version=1,
+                    is_test_data=True,
+                    confirmed_by=self.user,
+                    confirmed_at=timezone.now(),
+                )
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):
             ensure_manual_not_consumed_by_confirmed_stage(version, "manual")
         with self.assertRaisesMessage(ValidationError, "该原始数据已被已核定赛段结果使用"):

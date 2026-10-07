@@ -5,6 +5,7 @@ from accounts.models import User
 from common.authority import (
     CONTEST_ROUND_STATE,
     SCORE_SUMMARY_RECALCULATE,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_SEED,
     VOTE_SESSION_STATE,
     authority_write,
@@ -192,13 +193,14 @@ class M1CoreFinalAuthorityTests(TestCase):
             definition={"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
             authority_hash="m1-award-hash",
         )
-        stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            stage_key="m1-award",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                stage_key="m1-award",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                is_test_data=True,
+            )
         with self.assertRaisesMessage(ValidationError, "正式结果或受控测试数据服务"):
             Award.objects.create(
                 activity=self.activity,

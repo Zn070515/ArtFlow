@@ -18,6 +18,7 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     authority_write,
 )
 from common.models import AuditLog
@@ -1086,17 +1087,18 @@ class RulesetFreezeServiceTests(_RulesetModelBase):
             is_current=True,
         )
         with authority_write(STAGE_RESULT_CONFIRM):
-            StageResult.objects.create(
-                activity=ruleset.activity,
-                ruleset_version=prior,
-                created_by=admin,
-                stage_key="选拔",
-                status=StageResult.Status.CONFIRMED,
-                reasons=[],
-                is_test_data=True,
-                confirmed_at=timezone.now(),
-                confirmed_by=admin,
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                StageResult.objects.create(
+                    activity=ruleset.activity,
+                    ruleset_version=prior,
+                    created_by=admin,
+                    stage_key="选拔",
+                    status=StageResult.Status.CONFIRMED,
+                    reasons=[],
+                    is_test_data=True,
+                    confirmed_at=timezone.now(),
+                    confirmed_by=admin,
+                )
         successor = self._draft(ruleset=ruleset, version=2, is_current=False)
         with self.assertRaises(ValidationError):
             freeze_ruleset_version(successor, admin)

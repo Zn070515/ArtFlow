@@ -25,6 +25,7 @@ from django.core.exceptions import ValidationError
 # Write-authority scope identifiers.
 RULESET_FREEZE = "ruleset.freeze"
 STAGE_RESULT_CONFIRM = "stageresult.confirm"
+STAGE_RESULT_RESOLVE = "stageresult.resolve"
 ACTIVITY_STATE = "activity.state"
 CONTEST_ROUND_STATE = "contestround.state"
 VOTE_SESSION_STATE = "votesession.state"

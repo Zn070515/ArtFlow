@@ -20,6 +20,7 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     authority_write,
 )
 from common.models import AuditLog
@@ -102,12 +103,13 @@ class AuthorityClosureAcceptanceTests(TestCase):
             self.round.save(update_fields=["status"])
 
     def _confirmed(self):
-        result = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            stage_key="s",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            result = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="s",
+                is_test_data=True,
+            )
         with authority_write(STAGE_RESULT_CONFIRM):
             StageResult.objects.filter(pk=result.pk).update(  # type: ignore[misc]
                 status=StageResult.Status.CONFIRMED,
@@ -146,18 +148,56 @@ class AuthorityClosureAcceptanceTests(TestCase):
                 status=StageResult.Status.CONFIRMED
             )
 
+    # 3. ORM cannot manufacture the candidate that confirmation publishes.
+    def test_orm_cannot_manufacture_a_stage_candidate(self):
+        """Only the resolver may open a stage result or write its candidate rows.
+
+        confirm_stage_result re-checks everything it consumes — the input fingerprint, the
+        currency of the frozen version, the finality of the upstream stages — but none of
+        that says *where the candidate came from*. Before the resolve scope existed, a
+        StageResult carrying the real fingerprint plus hand-written StageDecision rows was
+        confirmable, which turned the audited confirmation service into a way to publish an
+        invented result.
+        """
+        with self.assertRaises(ValidationError):
+            # is_test_data is set so the only possible refusal is the resolve scope: without
+            # it this raises for the test-marker check instead and the test would pass for
+            # the wrong reason.
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="s",
+                is_test_data=self.activity.is_test_mode,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="s",
+                is_test_data=True,
+            )
+        with self.assertRaises(ValidationError):
+            StageDecision.objects.create(
+                stage_result=stage,
+                singer=self.singer,
+                outcome_code="selected",
+                is_test_data=True,
+            )
+        self.assertFalse(StageDecision.objects.filter(stage_result=stage).exists())
+
     # 3. A CONFIRMED StageResult cannot gain a StageDecision via .objects.create().
     def test_confirmed_cannot_gain_stagedecision_via_create(self):
         result = self._confirmed()
         with self.assertRaises(ValidationError):
-            StageDecision.objects.create(
-                stage_result=result,
-                singer=self.singer,
-                outcome_code="direct",
-                rank=1,
-                score=Decimal("92"),
-                is_test_data=True,
-            )
+            with authority_write(STAGE_RESULT_RESOLVE):
+                StageDecision.objects.create(
+                    stage_result=result,
+                    singer=self.singer,
+                    outcome_code="direct",
+                    rank=1,
+                    score=Decimal("92"),
+                    is_test_data=True,
+                )
 
     # 4. A CONFIRMED StageResult cannot gain a CompositeResult via .save().
     def test_confirmed_cannot_gain_compositeresult_via_save(self):
