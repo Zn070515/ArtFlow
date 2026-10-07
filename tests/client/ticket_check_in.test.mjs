@@ -32,7 +32,7 @@ function element(extra = {}) {
   };
 }
 
-function boot({ camera = true } = {}) {
+function boot({ camera = true, payload = { state: "checked_in" }, ok = true } = {}) {
   const status = element({ textContent: "", dataset: {} });
   const video = element();
   const photoFallback = element();
@@ -65,7 +65,7 @@ function boot({ camera = true } = {}) {
     window: { location: { origin: "http://192.168.1.20:8000" } },
     navigator: camera ? { mediaDevices: { getUserMedia() {} } } : {},
     URL: { createObjectURL: () => "blob:photo", revokeObjectURL() {} },
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({ state: "checked_in" }) }),
+    fetch: async () => ({ ok, status: ok ? 200 : 400, json: async () => payload }),
     ZXingBrowser: {
       BrowserQRCodeReader: class {
         constructor() {
@@ -88,7 +88,17 @@ function boot({ camera = true } = {}) {
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(source, context);
-  return { status, photoFallback, readerCalls, root };
+  return { status, photoFallback, readerCalls, root, form, secretInput };
+}
+
+/** Drive the manual box, the way a staff member typing a ticket code would. */
+async function submit({ credential = "ticket-secret", ...options } = {}) {
+  const harness = boot(options);
+  harness.secretInput.value = credential;
+  const handler = harness.form.listeners.get("submit");
+  handler({ preventDefault() {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return harness;
 }
 
 test("an insecure page offers photo capture instead of a camera that cannot exist", () => {
@@ -106,4 +116,36 @@ test("a secure page keeps the live camera and leaves the fallback out of the way
 
   assert.equal(photoFallback.classList.values.has("hidden"), true);
   assert.deepEqual(readerCalls, ["constructed", "video"]);
+});
+
+test("a fresh admit reads as a success", async () => {
+  const { status } = await submit({
+    payload: { state: "checked_in", already_checked_in: false, checked_in_at: null },
+  });
+
+  assert.equal(status.dataset.statusTone, "success");
+  assert.match(status.textContent, /检票成功/);
+});
+
+test("a repeat scan names the earlier admit instead of claiming a success", async () => {
+  // GOAL §10.3 asks the door for 成功 / 已检票 / 无效. Reporting the repeat as another
+  // success let one ticket be walked past two scanners unnoticed.
+  const { status } = await submit({
+    payload: {
+      state: "checked_in",
+      already_checked_in: true,
+      checked_in_at: "2026-10-07T11:04:00+00:00",
+    },
+  });
+
+  assert.equal(status.dataset.statusTone, "warn");
+  assert.match(status.textContent, /此前已检票/);
+  assert.match(status.textContent, /未重复计入/);
+});
+
+test("an invalid credential stays the third state", async () => {
+  const { status } = await submit({ ok: false, payload: { detail: "票据操作无效。" } });
+
+  assert.equal(status.dataset.statusTone, "error");
+  assert.match(status.textContent, /无效票据/);
 });

@@ -8,7 +8,8 @@
     <h1 class="text-2xl font-bold text-gray-900">票据检票</h1>
     <p class="mt-2 text-sm text-gray-600">打开摄像头扫描票据二维码，检票成功后可继续扫描。</p>
     {% if error %}<div class="mt-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">{{ error }}</div>{% endif %}
-    {% if checked_in_ticket %}<div class="mt-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">已完成检票：{{ checked_in_ticket.serial_number|default:"无编号" }}。重复扫描不会重复改变票据状态。</div>{% endif %}
+    {% if checked_in_ticket and already_checked_in %}<div class="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">该票此前已检票：{{ checked_in_ticket.serial_number|default:"无编号" }}，检票时间 {{ checked_in_ticket.checked_in_at|date:"H:i" }}。本次未重复计入。</div>
+    {% elif checked_in_ticket %}<div class="mt-4 rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">已完成检票：{{ checked_in_ticket.serial_number|default:"无编号" }}。</div>{% endif %}
     <div class="mt-6 overflow-hidden rounded-lg border border-gray-200 bg-black">
         <video data-ticket-camera class="aspect-video w-full object-cover" autoplay muted playsinline></video>
     </div>

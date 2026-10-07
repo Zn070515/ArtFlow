@@ -225,9 +225,19 @@ class EntryAccessIssuanceTests(TestCase):
         )
 
     def test_issue_rejects_expired_or_overlong_ttl(self):
-        for ttl in (timedelta(0), timedelta(minutes=31)):
+        # The cap is the event-length window (§12.5), so a 31-minute grant is now a legal
+        # one; only something longer than the whole session window is refused.
+        for ttl in (timedelta(0), timedelta(hours=8, seconds=1)):
             with self.subTest(ttl=ttl), self.assertRaises(ValidationError):
                 issue_access_grant(self.entry_point, actor=self.staff, ttl=ttl)
+
+    def test_redeemed_session_runs_to_the_end_of_its_grant(self):
+        """§12.5: the session is the issuer's window, not a shorter countdown of its own."""
+        issued = issue_access_grant(self.entry_point, actor=self.staff, ttl=timedelta(hours=4))
+
+        redeemed = redeem_access_grant(issued.token)
+
+        self.assertEqual(redeemed.session.expires_at, issued.grant.expires_at)
 
     def test_issue_rejects_inactive_entry_point(self):
         deactivate_entry_point(self.entry_point, actor=self.staff)

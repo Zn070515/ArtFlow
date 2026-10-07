@@ -16,6 +16,7 @@ from decimal import Decimal
 
 from accounts.models import User
 from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -212,6 +213,20 @@ class AudienceFactBoundaryTests(TestCase):
 
         self.assertTrue(VoteBallot.objects.filter(pk=ballot.pk).exists())
         self.assertTrue(VoteRecord.objects.filter(ballot=ballot, vote_option=self.option).exists())
+
+    def test_revoking_a_ticket_records_which_ballots_it_invalidated(self):
+        """The ballot rows stay (§19.1), so the audit entry has to name the change."""
+        redeemed = self._ticket_session()
+        self._cast(redeemed, browser="audience-browser-audit", ip="10.0.0.17")
+
+        revoke_ticket(redeemed.session.ticket, actor=self.admin, note="leaked code")
+
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.TICKET_REVOKE,
+            target=f"Ticket:{redeemed.session.ticket_id}",
+        )
+        self.assertIn("leaked code", audit.note)
+        self.assertIn(f"VoteSession:{self.vote_session.pk}", audit.note)
 
 
 class VoteEntryPasscodeTests(TestCase):

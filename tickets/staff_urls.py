@@ -14,6 +14,11 @@ urlpatterns = [
     path("<int:ticket_id>/detail/", views.detail_page, name="detail"),
     path("<int:ticket_id>/action/", views.action_page, name="action"),
     path("<int:ticket_id>/reset-credential/", views.reset_credential_page, name="reset_credential"),
+    path(
+        "sessions/<int:session_id>/revoke/",
+        views.revoke_session_page,
+        name="revoke_session",
+    ),
     path("<int:ticket_id>/void/", views.void, name="void"),
     path("<int:ticket_id>/revoke/", views.revoke, name="revoke"),
 ]

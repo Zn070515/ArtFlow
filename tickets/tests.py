@@ -5,7 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from accounts.services import mark_admin_verified
-from common.authority import ACCOUNT_AUTHORITY, authority_write
+from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from core.services import transition_activity_phase
@@ -941,3 +941,125 @@ class TicketPublicHttpTests(TestCase):
         self.assertEqual(limited.status_code, 429)
         self.assertTrue(limited["Retry-After"].isdigit())
         self.assertEqual(limited["Cache-Control"], "no-store")
+
+
+class TicketDoorStateAndSessionRevokeTests(TestCase):
+    """GOAL §10.3's three door states and §12.6's single-device revoke.
+
+    The door UI used to collapse 成功 and 已检票 into one "success" because
+    ``check_in_ticket`` returned the same ``CHECKED_IN`` row either way — so one ticket
+    could be walked past two scanners without the second one noticing. And
+    ``revoke_ticket_session`` existed as a service with no way to reach it, so a single
+    lost phone could only be handled by rotating the credential and revoking every device.
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        self.staff = User.objects.create_user(username="door-staff", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff.role = User.Role.STAFF
+            self.staff.save(update_fields=["role", "is_staff"])
+        # REGISTRATION_CLOSED is the phase that grants MANAGE_TICKETS + CHECK_IN, and an
+        # activity may only be created in DRAFT, so the phase is set under authority.
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="Door state activity",
+                activity_type=Activity.Type.GENERAL,
+                phase=Activity.Phase.REGISTRATION_CLOSED,
+                is_test_mode=True,
+            )
+        self.ticket = ticket_services.create_ticket(
+            self.activity, actor=self.staff, serial_number="door-0001"
+        )
+        self.issued = ticket_services.issue_ticket(self.ticket, actor=self.staff)
+
+    def _check_in_page(self):
+        return self.client.post("/staff/tickets/check-in-page/", {"secret": self.issued.secret})
+
+    def test_first_scan_and_repeat_scan_are_reported_as_different_states(self):
+        self.client.force_login(self.staff)
+
+        first = ticket_services.check_in_ticket_outcome(self.issued.secret, actor=self.staff)
+        self.assertFalse(first.already_checked_in)
+        self.assertEqual(first.ticket.state, "checked_in")
+
+        repeat = ticket_services.check_in_ticket_outcome(self.issued.secret, actor=self.staff)
+        self.assertTrue(repeat.already_checked_in)
+        self.assertEqual(repeat.ticket.pk, first.ticket.pk)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.TICKET_CHECK_IN,
+                target=f"Ticket:{self.ticket.pk}",
+            ).count(),
+            1,
+        )
+
+    def test_check_in_json_api_reports_the_repeat(self):
+        self.client.force_login(self.staff)
+        url = "/staff/tickets/check-in/"
+        first = self.client.post(
+            url,
+            data=json.dumps({"credential": self.issued.secret}),
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertFalse(first.json()["already_checked_in"])
+
+        repeat = self.client.post(
+            url,
+            data=json.dumps({"credential": self.issued.secret}),
+            content_type="application/json",
+        )
+        self.assertTrue(repeat.json()["already_checked_in"])
+        self.assertIsNotNone(repeat.json()["checked_in_at"])
+
+    def test_check_in_page_shows_the_repeat_as_already_checked_in(self):
+        self.client.force_login(self.staff)
+
+        first = self._check_in_page()
+        self.assertContains(first, "已完成检票")
+        self.assertNotContains(first, "此前已检票")
+
+        repeat = self._check_in_page()
+        self.assertContains(repeat, "此前已检票")
+
+    def test_an_invalid_credential_stays_the_third_state(self):
+        self.client.force_login(self.staff)
+
+        with self.assertRaises(ValidationError):
+            ticket_services.check_in_ticket_outcome("not-a-credential", actor=self.staff)
+
+    def test_staff_can_revoke_one_browser_session_from_the_ticket_page(self):
+        redeemed = ticket_services.redeem_ticket(self.issued.secret)
+        self.client.force_login(self.staff)
+
+        detail = self.client.get(reverse("ticket_staff:detail", args=[self.ticket.pk]))
+        self.assertContains(detail, "有效中")
+
+        response = self.client.post(
+            reverse("ticket_staff:revoke_session", args=[redeemed.session.pk])
+        )
+
+        self.assertRedirects(response, reverse("ticket_staff:detail", args=[self.ticket.pk]))
+        redeemed.session.refresh_from_db()
+        self.assertIsNotNone(redeemed.session.revoked_at)
+        with self.assertRaises(ValidationError):
+            ticket_services.authenticate_ticket_session_readonly(
+                redeemed.token, activity=self.activity
+            )
+
+    def test_revoking_a_session_does_not_touch_the_other_devices(self):
+        first = ticket_services.redeem_ticket(self.issued.secret)
+        second = ticket_services.redeem_ticket(self.issued.secret)
+        self.client.force_login(self.staff)
+
+        self.client.post(reverse("ticket_staff:revoke_session", args=[first.session.pk]))
+
+        with self.assertRaises(ValidationError):
+            ticket_services.authenticate_ticket_session_readonly(
+                first.token, activity=self.activity
+            )
+        still_live = ticket_services.authenticate_ticket_session_readonly(
+            second.token, activity=self.activity
+        )
+        self.assertEqual(still_live.pk, second.session.pk)

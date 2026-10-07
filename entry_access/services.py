@@ -21,8 +21,16 @@ from singer_contest.models import ContestRound
 
 from .models import AccessGrant, EntryPoint, EphemeralSession
 
-MAX_GRANT_TTL = timedelta(minutes=30)
-MAX_SESSION_TTL = timedelta(minutes=15)
+# GOAL §12.5: a session covers the working period and its TTL is a backstop, not a
+# countdown the operators have to manage. The old pairing (30-minute grant, 15-minute
+# session) was exactly such a countdown — and an internally inconsistent one, since a
+# freshly redeemed grant silently produced a session *shorter* than the window its issuer
+# had asked for. The grant is the operator-declared window; the session now runs to the end
+# of it, and both may cover an event's main period, which is the same eight hours
+# ``judge_authority.claim_judge_session`` already mints for the stable shared judge QR.
+EVENT_SESSION_TTL = timedelta(hours=8)
+MAX_GRANT_TTL = EVENT_SESSION_TTL
+MAX_SESSION_TTL = EVENT_SESSION_TTL
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
@@ -88,7 +96,7 @@ def deactivate_entry_point(entry_point, *, actor):
 def issue_access_grant(entry_point, *, actor, ttl, round=None):
     current_actor = require_current_staff(actor)
     if not isinstance(ttl, timedelta) or ttl <= timedelta(0) or ttl > MAX_GRANT_TTL:
-        raise ValidationError("临时访问授权有效期必须大于 0 且不超过 30 分钟。")
+        raise ValidationError("临时访问授权有效期必须大于 0 且不超过 8 小时。")
 
     with transaction.atomic():
         locked_entry_point = (
