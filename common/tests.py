@@ -57,6 +57,7 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_SEED,
     authority_write,
 )
@@ -293,15 +294,16 @@ class M1StageResultTestDataCleanupTests(TestCase):
                 is_current=True,
                 status=RulesetVersion.Status.FROZEN,
             )
-        StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.operator,
-            stage_key="院十佳",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash="abcdef",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.operator,
+                stage_key="院十佳",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash="abcdef",
+                is_test_data=True,
+            )
 
         counts = clear_activity_test_data(self.activity, operator=self.operator)
 
@@ -351,23 +353,25 @@ class M1StageResultTestDataCleanupTests(TestCase):
                 is_current=True,
                 status=RulesetVersion.Status.FROZEN,
             )
-        stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.operator,
-            stage_key="confirmed-cleanup-stage",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=version.authority_hash,
-            input_fingerprint="0" * 64,
-            is_test_data=True,
-        )
-        StageAwardDecision.objects.create(
-            stage_result=stage,
-            activity=self.activity,
-            singer=singer,
-            name="Confirmed cleanup award",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.operator,
+                stage_key="confirmed-cleanup-stage",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=version.authority_hash,
+                input_fingerprint="0" * 64,
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageAwardDecision.objects.create(
+                stage_result=stage,
+                activity=self.activity,
+                singer=singer,
+                name="Confirmed cleanup award",
+                is_test_data=True,
+            )
         stage.status = StageResult.Status.CONFIRMED
         stage.confirmed_by = admin
         stage.confirmed_at = timezone.now()
@@ -465,15 +469,16 @@ class M1StageResultTestDataCleanupTests(TestCase):
                 is_current=True,
                 status=RulesetVersion.Status.FROZEN,
             )
-        StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            created_by=self.operator,
-            stage_key="院十佳",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash="ffff",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                created_by=self.operator,
+                stage_key="院十佳",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash="ffff",
+                is_test_data=True,
+            )
 
         leave_test_mode(self.activity, operator=self.operator, clear=True, reason="R0 cleanup")
 

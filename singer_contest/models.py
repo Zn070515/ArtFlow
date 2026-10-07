@@ -12,6 +12,7 @@ from common.authority import (
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
     TEST_DATA_SEED,
     AuthorityQuerySetMixin,
@@ -239,6 +240,36 @@ def _ensure_stage_result_origins(*stage_result_ids: int | None) -> None:
         stage_result_id for stage_result_id in stage_result_ids if stage_result_id
     ):
         _ensure_stage_result_mutable(stage_result_id)
+
+
+def _ensure_resolver_owns_stage_children(*stage_result_ids: int | None) -> None:
+    """Only the resolver may write a stage result's candidate rows.
+
+    ``confirm_stage_result()`` re-checks the freshness of everything it consumes — the
+    input fingerprint, the currency of the frozen version, the finality of the upstream
+    stages — but none of that says *where the candidate rows came from*. Nothing guarded
+    their origin either, so any ORM-level path could build a StageResult carrying the real
+    fingerprint, attach hand-written StageDecision/CompositeResult/StageAwardDecision rows,
+    and have the audited confirmation service turn them into a formal result.
+
+    Requiring the resolve scope makes the candidate's provenance explicit, in the same shape
+    as ``RULESET_FREEZE`` guarding a frozen version. The rows of an already-confirmed stage
+    are covered by :func:`_ensure_stage_result_mutable` and stay immutable regardless.
+    """
+    if authority_authorized(STAGE_RESULT_RESOLVE):
+        return
+    if StageResult._base_manager.filter(
+        pk__in=[pk for pk in dict.fromkeys(stage_result_ids) if pk]
+    ).exists():
+        raise ValidationError("赛段候选结果只能由结果解析器写入。")
+
+
+def _ensure_resolver_owns_stage_child_rows(queryset) -> None:
+    """The queryset form of :func:`_ensure_resolver_owns_stage_children`."""
+    if authority_authorized(STAGE_RESULT_RESOLVE):
+        return
+    if queryset.exists():
+        raise ValidationError("赛段候选结果只能由结果解析器写入。")
 
 
 def _stage_result_activity_id(stage_result_id: int | None) -> int | None:
@@ -3215,6 +3246,11 @@ class StageResult(models.Model):
         if self._state.adding:
             if not confirm_authorized and self.status == self.Status.CONFIRMED:
                 raise ValidationError("只在核定服务中产生已核定赛段结果。")
+            # Creating the row is the resolver's job too. Without this, any ORM-level path
+            # could open a candidate and then confirm it; the children carry their own guard,
+            # but an empty result is still a result that can be confirmed and handed downstream.
+            if not authority_authorized(STAGE_RESULT_RESOLVE):
+                raise ValidationError("赛段结果只能由结果解析器写入。")
         elif not confirm_authorized:
             if stored and stored["status"] == self.Status.CONFIRMED:
                 modified = [f for f in self._immutable_fields if getattr(self, f) != stored[f]]
@@ -3247,6 +3283,7 @@ class StageDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
+        _ensure_resolver_owns_stage_child_rows(self)
 
     def update(self, **kwargs):
         self._ensure_mutable()
@@ -3287,6 +3324,7 @@ class StageDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             pk__in=parent_ids, status=StageResult.Status.CONFIRMED
         ).exists():
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
+        _ensure_resolver_owns_stage_children(*parent_ids)
         return super().bulk_create(objs, *args, **kwargs)
 
 
@@ -3350,6 +3388,7 @@ class StageDecision(models.Model):
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Decisions of a confirmed stage result are immutable.")
+        _ensure_resolver_owns_stage_children(self.stage_result_id)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -3366,6 +3405,7 @@ class StageAwardDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
             raise ValidationError("已核定赛段的奖项候选不可修改。")
+        _ensure_resolver_owns_stage_child_rows(self)
 
     def update(self, **kwargs):
         self._ensure_mutable()
@@ -3406,6 +3446,7 @@ class StageAwardDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             pk__in=parent_ids, status=StageResult.Status.CONFIRMED
         ).exists():
             raise ValidationError("已核定赛段的奖项候选不可修改。")
+        _ensure_resolver_owns_stage_children(*parent_ids)
         return super().bulk_create(objs, *args, **kwargs)
 
 
@@ -3468,6 +3509,7 @@ class StageAwardDecision(models.Model):
             ).exists()
         ):
             raise ValidationError("已核定赛段的奖项候选不可修改。")
+        _ensure_resolver_owns_stage_children(self.stage_result_id)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -3491,6 +3533,7 @@ class CompositeResultQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     def _ensure_mutable(self):
         if self.filter(stage_result__status=StageResult.Status.CONFIRMED).exists():
             raise ValidationError("Composites of a confirmed stage result are immutable.")
+        _ensure_resolver_owns_stage_child_rows(self)
 
     def update(self, **kwargs):
         self._ensure_mutable()
@@ -3531,6 +3574,7 @@ class CompositeResultQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             pk__in=parent_ids, status=StageResult.Status.CONFIRMED
         ).exists():
             raise ValidationError("Composites of a confirmed stage result are immutable.")
+        _ensure_resolver_owns_stage_children(*parent_ids)
         return super().bulk_create(objs, *args, **kwargs)
 
 
@@ -3590,6 +3634,7 @@ class CompositeResult(models.Model):
         _ensure_stage_result_origins(_stored_fk_id(self, "stage_result"), self.stage_result_id)
         if self._parent_confirmed() == StageResult.Status.CONFIRMED:
             raise ValidationError("Composites of a confirmed stage result are immutable.")
+        _ensure_resolver_owns_stage_children(self.stage_result_id)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

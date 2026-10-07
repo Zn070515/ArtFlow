@@ -23,7 +23,13 @@ from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import StageResult
 from singer_contest.services import _current_input_fingerprint
 
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_RESOLVE,
+    authority_write,
+)
 
 
 class Command(BaseCommand):
@@ -166,20 +172,21 @@ class Command(BaseCommand):
 
     @staticmethod
     def _create_stage(activity: Activity, version: RulesetVersion, operator: User) -> StageResult:
-        return cast(
-            StageResult,
-            StageResult.objects.create(  # type: ignore[no-untyped-call]
-                activity=activity,
-                ruleset_version=version,
-                created_by=operator,
-                stage_key="final",
-                status=StageResult.Status.READY_TO_CONFIRM,
-                ruleset_hash=version.authority_hash,
-                input_fingerprint=_current_input_fingerprint(version, activity, "final"),
-                result_version=1,
-                is_test_data=False,
-            ),
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            return cast(
+                StageResult,
+                StageResult.objects.create(  # type: ignore[no-untyped-call]
+                    activity=activity,
+                    ruleset_version=version,
+                    created_by=operator,
+                    stage_key="final",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    ruleset_hash=version.authority_hash,
+                    input_fingerprint=_current_input_fingerprint(version, activity, "final"),
+                    result_version=1,
+                    is_test_data=False,
+                ),
+            )
 
     @staticmethod
     def _create_session(operator: User) -> tuple[str, str]:

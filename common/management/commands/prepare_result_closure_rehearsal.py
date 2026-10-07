@@ -21,7 +21,13 @@ from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import SingerRegistration, StageAwardDecision, StageResult
 from singer_contest.services import _current_input_fingerprint, confirm_stage_result
 
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    RULESET_FREEZE,
+    STAGE_RESULT_RESOLVE,
+    authority_write,
+)
 
 
 class Command(BaseCommand):
@@ -109,20 +115,21 @@ class Command(BaseCommand):
         current_stage = cls._create_ready_stage(
             activity, current_version, current_singer, operator, "current-stage", current_marker
         )
-        stale_stage = cast(
-            StageResult,
-            StageResult.objects.create(  # type: ignore[no-untyped-call]
-                activity=activity,
-                ruleset_version=current_version,
-                created_by=operator,
-                stage_key="stale-stage",
-                status=StageResult.Status.READY_TO_CONFIRM,
-                ruleset_hash=current_version.authority_hash,
-                input_fingerprint="0" * 64,
-                result_version=1,
-                is_test_data=True,
-            ),
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stale_stage = cast(
+                StageResult,
+                StageResult.objects.create(  # type: ignore[no-untyped-call]
+                    activity=activity,
+                    ruleset_version=current_version,
+                    created_by=operator,
+                    stage_key="stale-stage",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    ruleset_hash=current_version.authority_hash,
+                    input_fingerprint="0" * 64,
+                    result_version=1,
+                    is_test_data=True,
+                ),
+            )
         foreign_stage = cls._create_ready_stage(
             foreign_activity,
             foreign_version,
@@ -210,27 +217,29 @@ class Command(BaseCommand):
         stage_key: str,
         award_name: str,
     ) -> StageResult:
-        stage = cast(
-            StageResult,
-            StageResult.objects.create(  # type: ignore[no-untyped-call]
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = cast(
+                StageResult,
+                StageResult.objects.create(  # type: ignore[no-untyped-call]
+                    activity=activity,
+                    ruleset_version=version,
+                    created_by=operator,
+                    stage_key=stage_key,
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    ruleset_hash=version.authority_hash,
+                    input_fingerprint=_current_input_fingerprint(version, activity, stage_key),
+                    result_version=1,
+                    is_test_data=True,
+                ),
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageAwardDecision.objects.create(
+                stage_result=stage,
                 activity=activity,
-                ruleset_version=version,
-                created_by=operator,
-                stage_key=stage_key,
-                status=StageResult.Status.READY_TO_CONFIRM,
-                ruleset_hash=version.authority_hash,
-                input_fingerprint=_current_input_fingerprint(version, activity, stage_key),
-                result_version=1,
+                singer=singer,
+                name=award_name,
                 is_test_data=True,
-            ),
-        )
-        StageAwardDecision.objects.create(
-            stage_result=stage,
-            activity=activity,
-            singer=singer,
-            name=award_name,
-            is_test_data=True,
-        )
+            )
         return stage
 
     @staticmethod

@@ -7,6 +7,7 @@ from common.authority import (
     CONTEST_ROUND_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -196,22 +197,24 @@ class CoreRawAuthorityTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
             )
-        stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=version,
-            stage_key="award",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash="hash",
-            input_fingerprint="fingerprint",
-            is_test_data=True,
-        )
-        candidate = StageAwardDecision.objects.create(
-            stage_result=stage,
-            activity=self.activity,
-            singer=self.singer,
-            name="Best",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                stage_key="award",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash="hash",
+                input_fingerprint="fingerprint",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            candidate = StageAwardDecision.objects.create(
+                stage_result=stage,
+                activity=self.activity,
+                singer=self.singer,
+                name="Best",
+                is_test_data=True,
+            )
         with self.assertRaises(ValidationError):
             from singer_contest.models import Award
 

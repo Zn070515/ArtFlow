@@ -13,6 +13,7 @@ from common.authority import (
     ACTIVITY_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -600,16 +601,17 @@ class ResultReleaseModelTests(TestCase):
                 is_current=True,
                 authority_hash="a" * 64,
             )
-        self.stage_result = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.ruleset_version,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=self.ruleset_version.authority_hash,
-            input_fingerprint="b" * 64,
-            result_version=3,
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.stage_result = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.ruleset_version,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=self.ruleset_version.authority_hash,
+                input_fingerprint="b" * 64,
+                result_version=3,
+                is_test_data=False,
+            )
         self.post = PublicPost.objects.create(
             title="Final Result",
             post_type=PublicPost.PostType.RESULT_PUBLICATION,
@@ -798,16 +800,17 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         self.confirm_stage_result()
         release = self.make_release()
         release.save()
-        StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.ruleset_version,
-            stage_key=self.stage_result.stage_key,
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=self.ruleset_version.authority_hash,
-            input_fingerprint="c" * 64,
-            result_version=self.stage_result.result_version + 1,
-            is_test_data=False,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.ruleset_version,
+                stage_key=self.stage_result.stage_key,
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=self.ruleset_version.authority_hash,
+                input_fingerprint="c" * 64,
+                result_version=self.stage_result.result_version + 1,
+                is_test_data=False,
+            )
 
         self.client.raise_request_exception = False
         response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
@@ -860,15 +863,16 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
                 is_current=True,
                 authority_hash="d" * 64,
             )
-        test_stage = StageResult.objects.create(
-            activity=test_activity,
-            ruleset_version=test_version,
-            stage_key="final",
-            status=StageResult.Status.READY_TO_CONFIRM,
-            ruleset_hash=test_version.authority_hash,
-            input_fingerprint="e" * 64,
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            test_stage = StageResult.objects.create(
+                activity=test_activity,
+                ruleset_version=test_version,
+                stage_key="final",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash=test_version.authority_hash,
+                input_fingerprint="e" * 64,
+                is_test_data=True,
+            )
         test_post = PublicPost.objects.create(
             title="Test Result",
             post_type=PublicPost.PostType.RESULT_PUBLICATION,

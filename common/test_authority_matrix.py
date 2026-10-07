@@ -96,6 +96,7 @@ from common.authority import (
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
+    STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
     TEST_DATA_SEED,
     VOTE_SESSION_STATE,
@@ -377,58 +378,66 @@ class AuthorityMutationMatrixTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
             )
-        self.stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            stage_key="matrix-stage",
-            is_test_data=True,
-        )
-        self.alternate_stage = StageResult.objects.create(
-            activity=self.activity,
-            ruleset_version=self.version,
-            stage_key="alternate-stage",
-            is_test_data=True,
-        )
-        self.decision = StageDecision.objects.create(
-            stage_result=self.stage,
-            singer=self.singer,
-            outcome_code="selected",
-            is_test_data=True,
-        )
-        self.alternate_decision = StageDecision.objects.create(
-            stage_result=self.alternate_stage,
-            singer=self.spare_singer,
-            outcome_code="selected",
-            is_test_data=True,
-        )
-        self.award_decision = StageAwardDecision.objects.create(
-            stage_result=self.stage,
-            activity=self.activity,
-            singer=self.singer,
-            name="Matrix award",
-            is_test_data=True,
-        )
-        self.alternate_award_decision = StageAwardDecision.objects.create(
-            stage_result=self.alternate_stage,
-            activity=self.activity,
-            singer=self.spare_singer,
-            name="Alternate matrix award",
-            is_test_data=True,
-        )
-        self.composite = CompositeResult.objects.create(
-            stage_result=self.stage,
-            singer=self.singer,
-            node_key="matrix-node",
-            value=Decimal("90"),
-            is_test_data=True,
-        )
-        self.alternate_composite = CompositeResult.objects.create(
-            stage_result=self.alternate_stage,
-            singer=self.spare_singer,
-            node_key="alternate-node",
-            value=Decimal("80"),
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="matrix-stage",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.alternate_stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                stage_key="alternate-stage",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.decision = StageDecision.objects.create(
+                stage_result=self.stage,
+                singer=self.singer,
+                outcome_code="selected",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.alternate_decision = StageDecision.objects.create(
+                stage_result=self.alternate_stage,
+                singer=self.spare_singer,
+                outcome_code="selected",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.award_decision = StageAwardDecision.objects.create(
+                stage_result=self.stage,
+                activity=self.activity,
+                singer=self.singer,
+                name="Matrix award",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.alternate_award_decision = StageAwardDecision.objects.create(
+                stage_result=self.alternate_stage,
+                activity=self.activity,
+                singer=self.spare_singer,
+                name="Alternate matrix award",
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.composite = CompositeResult.objects.create(
+                stage_result=self.stage,
+                singer=self.singer,
+                node_key="matrix-node",
+                value=Decimal("90"),
+                is_test_data=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            self.alternate_composite = CompositeResult.objects.create(
+                stage_result=self.alternate_stage,
+                singer=self.spare_singer,
+                node_key="alternate-node",
+                value=Decimal("80"),
+                is_test_data=True,
+            )
         self.audience = AudienceScore.objects.create(
             activity=self.activity,
             stage_key="matrix-audience",
@@ -891,12 +900,13 @@ class AuthorityMutationMatrixTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
             )
-        other_stage = StageResult.objects.create(
-            activity=self.other_activity,
-            ruleset_version=other_version,
-            stage_key="other-stage",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            other_stage = StageResult.objects.create(
+                activity=self.other_activity,
+                ruleset_version=other_version,
+                stage_key="other-stage",
+                is_test_data=True,
+            )
 
         for model, obj in (
             (StageDecision, self.decision),
@@ -934,12 +944,13 @@ class AuthorityMutationMatrixTests(TestCase):
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
             )
-        other_stage = StageResult.objects.create(
-            activity=self.other_activity,
-            ruleset_version=other_version,
-            stage_key="other-stage-bulk",
-            is_test_data=True,
-        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            other_stage = StageResult.objects.create(
+                activity=self.other_activity,
+                ruleset_version=other_version,
+                stage_key="other-stage-bulk",
+                is_test_data=True,
+            )
 
         for model, source in (
             (StageDecision, self.decision),
@@ -964,26 +975,30 @@ class AuthorityMutationMatrixTests(TestCase):
                 )
 
     def test_stage_children_allow_same_activity_queryset_updates_before_confirmation(self):
-        updated = StageDecision.objects.filter(pk=self.decision.pk).update(
-            stage_result_id=self.alternate_stage.pk
-        )
-        self.assertEqual(updated, 1)
-        self.decision.refresh_from_db()
-        self.assertEqual(self.decision.stage_result_id, self.alternate_stage.pk)
+        # Pre-confirmation writes to a stage's candidate rows are the resolver's, so they
+        # carry the resolve scope; what this test pins is that they succeed when the
+        # activity matches.
+        with authority_write(STAGE_RESULT_RESOLVE):
+            updated = StageDecision.objects.filter(pk=self.decision.pk).update(
+                stage_result_id=self.alternate_stage.pk
+            )
+            self.assertEqual(updated, 1)
+            self.decision.refresh_from_db()
+            self.assertEqual(self.decision.stage_result_id, self.alternate_stage.pk)
 
-        updated = StageAwardDecision._base_manager.filter(pk=self.award_decision.pk).update(
-            stage_result_id=self.alternate_stage.pk
-        )
-        self.assertEqual(updated, 1)
-        self.award_decision.refresh_from_db()
-        self.assertEqual(self.award_decision.stage_result_id, self.alternate_stage.pk)
+            updated = StageAwardDecision._base_manager.filter(pk=self.award_decision.pk).update(
+                stage_result_id=self.alternate_stage.pk
+            )
+            self.assertEqual(updated, 1)
+            self.award_decision.refresh_from_db()
+            self.assertEqual(self.award_decision.stage_result_id, self.alternate_stage.pk)
 
-        updated = CompositeResult.objects.filter(pk=self.composite.pk).update(
-            singer_id=self.spare_singer.pk
-        )
-        self.assertEqual(updated, 1)
-        self.composite.refresh_from_db()
-        self.assertEqual(self.composite.singer_id, self.spare_singer.pk)
+            updated = CompositeResult.objects.filter(pk=self.composite.pk).update(
+                singer_id=self.spare_singer.pk
+            )
+            self.assertEqual(updated, 1)
+            self.composite.refresh_from_db()
+            self.assertEqual(self.composite.singer_id, self.spare_singer.pk)
 
     def test_vote_children_reject_cross_session_queryset_updates_before_lock(self):
         other_option = VoteOption.objects.create(
@@ -1228,7 +1243,11 @@ class AuthorityMutationMatrixTests(TestCase):
             ordinary_factory,
         ) in stage_relation_upserts:
             with self.subTest(model=name, path="ordinary-bulk-create"):
-                created = model.objects.bulk_create([ordinary_factory()])
+                # Stage children are resolver-owned, so an ordinary bulk_create is the
+                # resolver's write and has to carry its scope. The vote loop passes
+                # through here too; the extra scope is inert for it.
+                with authority_write(STAGE_RESULT_RESOLVE):
+                    created = model.objects.bulk_create([ordinary_factory()])
                 self.assertEqual(len(created), 1)
 
             before = model._base_manager.filter(pk=candidate_factory().pk).values(*snapshot_fields)[
@@ -1372,7 +1391,11 @@ class AuthorityMutationMatrixTests(TestCase):
             ordinary_factory,
         ) in vote_relation_upserts:
             with self.subTest(model=name, path="ordinary-bulk-create"):
-                created = model.objects.bulk_create([ordinary_factory()])
+                # Stage children are resolver-owned, so an ordinary bulk_create is the
+                # resolver's write and has to carry its scope. The vote loop passes
+                # through here too; the extra scope is inert for it.
+                with authority_write(STAGE_RESULT_RESOLVE):
+                    created = model.objects.bulk_create([ordinary_factory()])
                 self.assertEqual(len(created), 1)
 
             before = model._base_manager.filter(pk=candidate_factory().pk).values(*snapshot_fields)[
