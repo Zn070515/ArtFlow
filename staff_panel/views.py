@@ -181,13 +181,15 @@ from singer_contest.services import (
     unlock_stage_result,
     validate_roster_source_stage,
 )
-from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
+from voting.models import VoteOption, VoteScoringRule, VoteSession
 from voting.policies import formal_singer_contest_requires_ticket
 from voting.services import (
     close_vote_session,
     lock_vote_session,
     open_vote_session,
     unlock_vote_session,
+    valid_record_queryset,
+    valid_ticket_condition,
     vote_session_configuration_facts,
 )
 
@@ -3362,11 +3364,17 @@ def vote_session_create(request):
 @staff_required
 def vote_session_detail(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
+    # §9.1 / §9.3: the screen has to reconcile against the *valid* ballots the conversion
+    # will publish, so a revoked or voided ticket's ballot is not counted here either.
     options = list(
-        vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
+        vote_session.options.select_related("singer").annotate(
+            vote_count=Count("records", filter=valid_ticket_condition("records__"))
+        )
     )
     _with_generic_song_labels(option.singer for option in options)
-    total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
+    total_votes = valid_record_queryset(
+        vote_session, test_flag=runtime_is_test(vote_session.activity)
+    ).count()
     _, top = _popularity_top_tie(vote_session)
     # §9: a score-component session must be reconcilable by hand — valid ballot count,
     # per-candidate votes and support rate next to the conversion mode and lock state.
@@ -3489,7 +3497,7 @@ def _popularity_top_tie(vote_session):
     """
     leaderboard = list(
         vote_session.options.select_related("singer")
-        .annotate(vote_count=Count("records"))
+        .annotate(vote_count=Count("records", filter=valid_ticket_condition("records__")))
         .filter(vote_count__gt=0)
         .order_by("-vote_count", "sort_order", "pk")
     )

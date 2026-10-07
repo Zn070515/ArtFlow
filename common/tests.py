@@ -49,6 +49,7 @@ from singer_contest.models import (
 )
 from tests.helpers import postgresql_only
 from voting.models import VoteOption, VoteRecord, VoteSession
+from voting.testing import create_legacy_vote_record
 
 from common.audit import client_ip
 from common.authority import (
@@ -1541,7 +1542,7 @@ class DemoSeedCommandTests(TestCase):
         vote_session = VoteSession.objects.get(name="Demo Audience Choice")
         vote_option = VoteOption.objects.get(vote_session=vote_session, sort_order=1)
         seeded_award = Award.objects.get(name="Demo First Place")
-        unowned_record = VoteRecord.objects.create(
+        unowned_record = create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=vote_option,
             browser_session_key="unowned-browser-session",

@@ -1,6 +1,11 @@
 from datetime import timedelta
 
-from common.authority import RULESET_FREEZE, TICKET_STATE, authority_write
+from common.authority import (
+    RULESET_FREEZE,
+    TICKET_STATE,
+    VOTE_BALLOT_WRITE,
+    authority_write,
+)
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -105,35 +110,39 @@ class TicketVoteAuthorityTests(TestCase):
             self.session.save(update_fields=["requires_ticket"])
 
     def test_ticket_ballot_rejects_cross_activity_relation(self):
-        ballot = VoteBallot(
-            vote_session=self.session,
-            browser_session_key="ticket-browser",
-            ip_address="127.0.0.1",
-            ticket=self.ticket,
-            is_test_data=True,
-        )
-        ballot.save()
-
-        ballot.ticket = self.other_ticket
-        with self.assertRaises(ValidationError):
-            ballot.save(update_fields=["ticket"])
-        with self.assertRaises(ValidationError):
-            VoteBallot.objects.filter(pk=ballot.pk).update(ticket=self.other_ticket)
-
-    def test_one_ticket_has_at_most_one_ballot_per_vote_session(self):
-        VoteBallot.objects.create(
-            vote_session=self.session,
-            browser_session_key="ticket-browser-one",
-            ip_address="127.0.0.1",
-            ticket=self.ticket,
-            is_test_data=True,
-        )
-
-        with self.assertRaises(IntegrityError):
-            VoteBallot.objects.create(
+        # `submit_ballot` is the only writer of a ballot (GOAL §8.4 raw audience fact), so a
+        # fixture that writes one has to hold the same authority the service holds.
+        with authority_write(VOTE_BALLOT_WRITE):
+            ballot = VoteBallot(
                 vote_session=self.session,
-                browser_session_key="ticket-browser-two",
+                browser_session_key="ticket-browser",
                 ip_address="127.0.0.1",
                 ticket=self.ticket,
                 is_test_data=True,
             )
+            ballot.save()
+
+            ballot.ticket = self.other_ticket
+            with self.assertRaises(ValidationError):
+                ballot.save(update_fields=["ticket"])
+            with self.assertRaises(ValidationError):
+                VoteBallot.objects.filter(pk=ballot.pk).update(ticket=self.other_ticket)
+
+    def test_one_ticket_has_at_most_one_ballot_per_vote_session(self):
+        with authority_write(VOTE_BALLOT_WRITE):
+            VoteBallot.objects.create(
+                vote_session=self.session,
+                browser_session_key="ticket-browser-one",
+                ip_address="127.0.0.1",
+                ticket=self.ticket,
+                is_test_data=True,
+            )
+
+            with self.assertRaises(IntegrityError):
+                VoteBallot.objects.create(
+                    vote_session=self.session,
+                    browser_session_key="ticket-browser-two",
+                    ip_address="127.0.0.1",
+                    ticket=self.ticket,
+                    is_test_data=True,
+                )

@@ -8,6 +8,11 @@
     {% if error %}
     <div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">{{ error }}</div>
     {% endif %}
+    {% if form.non_field_errors %}
+    <div class="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded">
+        {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+    {% endif %}
     <form method="post" class="space-y-4">
         {% csrf_token %}
         <div>

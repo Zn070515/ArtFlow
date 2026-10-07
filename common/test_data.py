@@ -15,6 +15,7 @@ from common.authority import (
     STAGE_RESULT_CONFIRM,
     TEST_DATA_CLEANUP,
     TICKET_SESSION_STATE,
+    VOTE_BALLOT_WRITE,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -264,16 +265,19 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     ScoreRecord.objects.filter(round__activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
     with authority_write(SCORE_SUMMARY_RECALCULATE):
         ScoreSummary.objects.filter(round__activity=locked_activity, is_test_data=True).delete()  # type: ignore[no-untyped-call]
-    VoteRecord.objects.filter(
-        vote_session__activity=locked_activity,
-        vote_session__is_test_data=True,
-        is_test_data=True,
-    ).delete()  # type: ignore[no-untyped-call]
-    VoteBallot.objects.filter(
-        vote_session__activity=locked_activity,
-        vote_session__is_test_data=True,
-        is_test_data=True,
-    ).delete()  # type: ignore[no-untyped-call]
+    # Ballots and their choices are written only by the voting service (GOAL §8.4 raw
+    # audience facts); the test-data cleanup is the other authorized mutator of those rows.
+    with authority_write(VOTE_BALLOT_WRITE):
+        VoteRecord.objects.filter(
+            vote_session__activity=locked_activity,
+            vote_session__is_test_data=True,
+            is_test_data=True,
+        ).delete()  # type: ignore[no-untyped-call]
+        VoteBallot.objects.filter(
+            vote_session__activity=locked_activity,
+            vote_session__is_test_data=True,
+            is_test_data=True,
+        ).delete()  # type: ignore[no-untyped-call]
     VoteOption.objects.filter(  # type: ignore[no-untyped-call]
         vote_session__activity=locked_activity,
         vote_session__is_test_data=True,

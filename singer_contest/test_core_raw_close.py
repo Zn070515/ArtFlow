@@ -20,6 +20,7 @@ from ruleset.schema import parse_definition
 from ruleset.templates import seed_ruleset_templates
 from voting.models import VoteBallot, VoteOption, VoteSession
 from voting.services import lock_vote_session
+from voting.testing import ballot_write_authority
 
 from singer_contest.models import (
     ContestRound,
@@ -120,11 +121,12 @@ class CoreRawAuthorityTests(TestCase):
             start_time="2026-01-01T10:00:00Z",
             end_time="2026-01-01T11:00:00Z",
         )
-        ballot = VoteBallot.objects.create(
-            vote_session=session,
-            browser_session_key="browser-raw",
-            ip_address="127.0.0.1",
-        )
+        with ballot_write_authority():
+            ballot = VoteBallot.objects.create(
+                vote_session=session,
+                browser_session_key="browser-raw",
+                ip_address="127.0.0.1",
+            )
         session.is_locked = True
         session.is_open = False
         with authority_write(VOTE_SESSION_STATE):

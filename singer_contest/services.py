@@ -2006,6 +2006,7 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     publishing a fabricated 0.
     """
     from voting.models import VoteOption, VoteRecord
+    from voting.services import valid_ticket_condition
 
     vote_keys = binding.get("vote_keys") or {}
     if not vote_keys:
@@ -2026,9 +2027,13 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
         counts: dict[str, int] = {
             str(o.singer_id): 0 for o in VoteOption.objects.filter(vote_session_id=vs_pk)
         }
-        records = VoteRecord.objects.filter(
-            vote_session_id=vs_pk, is_test_data=test_flag
-        ).select_related("vote_option")
+        # Only *valid* ballots (§9.1 / §9.3): a ballot whose ticket was later revoked or
+        # voided stays on record as evidence but must not reach the official count.
+        records = (
+            VoteRecord.objects.filter(vote_session_id=vs_pk, is_test_data=test_flag)
+            .filter(valid_ticket_condition())
+            .select_related("vote_option")
+        )
         for rec in records:
             sid = str(rec.vote_option.singer_id)
             counts[sid] = counts.get(sid, 0) + 1

@@ -646,6 +646,13 @@ class VoteSessionForm(forms.Form):
                 raise forms.ValidationError("结束时间必须晚于开始时间。")
         if purpose == VoteSession.Purpose.SCORE_COMPONENT and not cleaned.get("requires_ticket"):
             raise forms.ValidationError("「成绩组成」投票必须启用入场票校验。")
+        # A ticket-less session's only entry credential is the passcode (GOAL §9.4), and
+        # `VoteSession.passcode` is `blank=True, default=""` — leaving it empty used to mean
+        # "anyone who submits an empty form is in". Refuse to create a session that has no
+        # credential at all rather than letting it open with an open door. Reported on the
+        # field (not as a non-field error) so the operator sees which input is missing.
+        if not cleaned.get("requires_ticket") and not (cleaned.get("passcode") or "").strip():
+            self.add_error("passcode", "非票券投票必须设置现场口令。")
         cleaned["selection_type"] = selection_type
         cleaned["max_selections"] = max_selections
         cleaned["purpose"] = purpose

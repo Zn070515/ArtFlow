@@ -48,6 +48,7 @@ from ruleset.models import ContestRuleset, RulesetVersion
 from staff_panel.views import activity_material_requirements
 from tests.helpers import postgresql_only
 from voting.models import VoteSession
+from voting.testing import create_legacy_vote_record
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .judge_authority import prepare_judge_panel
@@ -5405,7 +5406,7 @@ class BindingSourceHelperTests(TestCase):
         )
 
     def test_source_vote_scores_returns_raw_counts(self):
-        from voting.models import VoteOption, VoteRecord
+        from voting.models import VoteOption
 
         from .services import _source_vote_scores
 
@@ -5416,7 +5417,7 @@ class BindingSourceHelperTests(TestCase):
         ]
         # 2 + 1 + 1 votes across the three singers: raw counts, never a normalized score.
         for key, opt in (("a", opts[0]), ("b", opts[0]), ("c", opts[1]), ("d", opts[2])):
-            VoteRecord.objects.create(
+            create_legacy_vote_record(
                 vote_session=vs,
                 vote_option=opt,
                 browser_session_key=key,
@@ -6461,19 +6462,18 @@ class VoteBoundaryRegressionTests(TestCase):
         }
 
     def test_source_vote_scores_returns_raw_counts_not_normalized(self):
-        from voting.models import VoteRecord
 
         from .services import _source_vote_scores
 
         for i in range(3):
-            VoteRecord.objects.create(
+            create_legacy_vote_record(
                 vote_session=self.vs,
                 vote_option=self.options[self.singers[0].pk],
                 browser_session_key=f"mb{i}",
                 ip_address="127.0.0.1",
                 is_test_data=True,
             )
-        VoteRecord.objects.create(
+        create_legacy_vote_record(
             vote_session=self.vs,
             vote_option=self.options[self.singers[1].pk],
             browser_session_key="mb-solo",

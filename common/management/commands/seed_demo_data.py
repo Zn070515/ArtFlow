@@ -29,6 +29,7 @@ from tickets.models import Ticket
 from tickets.services import create_ticket, issue_ticket
 from voting.models import VoteOption, VoteRecord, VoteSession
 from voting.services import close_vote_session, open_vote_session
+from voting.testing import ballot_write_authority
 
 from common.authority import (
     ACCOUNT_AUTHORITY,
@@ -502,28 +503,31 @@ class Command(BaseCommand):
                 "is_test_data": singer_is_test,
             },
         )
-        self._upsert(
-            "demo.vote_record.one",
-            VoteRecord,
-            {
-                "vote_session": vote_session,
-                "vote_option": option_one,
-                "browser_session_key": "demo-browser-session-one",
-                "ip_address": "127.0.0.1",
-                "is_test_data": singer_is_test,
-            },
-        )
-        self._upsert(
-            "demo.vote_record.two",
-            VoteRecord,
-            {
-                "vote_session": vote_session,
-                "vote_option": option_two,
-                "browser_session_key": "demo-browser-session-two",
-                "ip_address": "127.0.0.2",
-                "is_test_data": singer_is_test,
-            },
-        )
+        # A vote record is a raw audience fact, written only by the voting service
+        # (GOAL §8.4); the demo seeder stands in for it and says so.
+        with ballot_write_authority():
+            self._upsert(
+                "demo.vote_record.one",
+                VoteRecord,
+                {
+                    "vote_session": vote_session,
+                    "vote_option": option_one,
+                    "browser_session_key": "demo-browser-session-one",
+                    "ip_address": "127.0.0.1",
+                    "is_test_data": singer_is_test,
+                },
+            )
+            self._upsert(
+                "demo.vote_record.two",
+                VoteRecord,
+                {
+                    "vote_session": vote_session,
+                    "vote_option": option_two,
+                    "browser_session_key": "demo-browser-session-two",
+                    "ip_address": "127.0.0.2",
+                    "is_test_data": singer_is_test,
+                },
+            )
         if not vote_session.is_open:
             open_vote_session(vote_session, admin)  # type: ignore[no-untyped-call]
         demo_ticket = self._owned_object_or_none("demo.ticket.audience", Ticket)

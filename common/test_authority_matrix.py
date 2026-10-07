@@ -88,6 +88,7 @@ from singer_contest.services import (
 )
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import close_vote_session, lock_vote_session, open_vote_session
+from voting.testing import ballot_write_authority
 
 from common.authority import (
     ACCOUNT_AUTHORITY,
@@ -139,6 +140,15 @@ class AuthorityMutationMatrixTests(TestCase):
     """A common, table-driven safety net for authoritative model mutations."""
 
     def setUp(self):
+        # The matrix manufactures every guarded child row directly, including raw audience
+        # facts: a ballot and its choices are written only by
+        # ``voting.services.submit_ballot`` (GOAL §8.4), so the fixture has to hold that
+        # scope. Holding it for the whole case keeps each case proving its *own* guard
+        # (locked session, cross-session origin, conflict upsert) instead of tripping over
+        # the service boundary, which ``voting.test_audience_fact_boundaries`` covers.
+        self._ballot_authority = ballot_write_authority()
+        self._ballot_authority.__enter__()
+        self.addCleanup(self._ballot_authority.__exit__, None, None, None)
         self.operator = User.objects.create_user(username="matrix-operator", password="pass")
         self.other_user = User.objects.create_user(username="matrix-other", password="pass")
         with authority_write(ACCOUNT_AUTHORITY):

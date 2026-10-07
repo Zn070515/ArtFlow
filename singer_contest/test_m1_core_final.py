@@ -18,6 +18,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 from voting.models import VoteBallot, VoteOption, VoteSession
+from voting.testing import ballot_write_authority
 
 from .models import (
     Award,
@@ -139,11 +140,12 @@ class M1CoreFinalAuthorityTests(TestCase):
             start_time=now - timedelta(minutes=1),
             end_time=now + timedelta(minutes=10),
         )
-        ballot = VoteBallot.objects.create(
-            vote_session=old_session,
-            browser_session_key="m1-browser",
-            ip_address="192.0.2.1",
-        )
+        with ballot_write_authority():
+            ballot = VoteBallot.objects.create(
+                vote_session=old_session,
+                browser_session_key="m1-browser",
+                ip_address="192.0.2.1",
+            )
         old_session.is_locked = True
         with authority_write(VOTE_SESSION_STATE):
             old_session.save(update_fields=["is_locked"])
