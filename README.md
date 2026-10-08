@@ -25,6 +25,8 @@
 </p>
 
 <p>
+  <a href="#模块与流程--modules--flows">模块与流程 · Modules &amp; flows</a> ·
+  <a href="#角色手册--role-handbooks">角色手册 · Role handbooks</a> ·
   <a href="#快速开始--setup">快速开始 · Get started</a> ·
   <a href="#先读这些--read-these-first">文档索引 · Docs</a> ·
   <a href="#部署--deployment">部署 · Deployment</a> ·
@@ -68,6 +70,126 @@ ArtFlow 是面向学院文艺部的 **EventOps 活动运行平台**：把原本�
 |---|---|
 | **歌手比赛（`singer_contest` + `ruleset`）** | 把赛制表达为受 schema 约束的版本化 JSON 规则图（`ContestRuleset` / `RulesetVersion`），经编译器 / 验证器检查后可 `FROZEN`，再由 resolver 产生 `HOLD / REVIEW / READY_TO_CONFIRM / CONFIRMED` 结果。2025 院十佳（历史模板 `golden_schidui`）与校十佳屏峰有 Golden 模拟，后台提供 Rapid Score Entry 与 Backstage Result Board 抄卡模式。当年决赛的操作流程见[院十佳决赛生产流程](docs/singer-final-production-flow.md)。 |
 | **活动运行（`public_portal` / `files` / `farewell_show` / `voting` / `exports` / `archive` …）** | 报名、材料槽、审核、投票、导出、归档与审计，遵守 Activity 作为 mutation 边界的锁定与权限规则。 |
+
+## 模块与流程 · Modules & flows
+
+下面的图由 [archify](https://github.com/tt-a1i/archify) v3.0.1 依据仓库源码生成，**每个节点都锚定到具体的文件与函数**，并在仓库里留下可核对的图源。图源与再生成方式见[流程图目录](docs/diagrams/README.md)。
+
+### 前后端模块 · Frontend & backend modules
+
+**前端**是一组 TypeScript 入口，编译到 `static/dist/`，每个入口只服务一个现场页面：观众端的直播页、票据验证与投票页；选手与评委端的问卷材料、评委终端与在线协作；工作人员端的手机检票、快速录分与活动字段协作。它们共用一套构建，`npm run check:client` 守住编译产物与源码一致。
+
+**后端**按领域切成 Django app，浏览器不直连数据层，所有写入都从视图进入领域服务：
+
+| 域 | app | 职责 |
+|---|---|---|
+| 账号与活动 | `accounts`、`core`、`common` | 自定义用户与角色、Activity 与阶段/锁定状态、审计与 authority 授权、业务规则守卫、测试数据与保留期维护。 |
+| 赛制与问卷 | `ruleset`、`questionnaire` | 版本化规则图、编译器与 resolver；问卷 DSL、编译计划、报名草稿与提交、后台设计器。 |
+| 比赛与材料 | `singer_contest`、`files` | 报名、轮次、评委席位与评分、奖项；提交文件、材料槽与材料核查。 |
+| 观众侧 | `tickets`、`voting`、`entry_access` | 票券与检票会话；投票会话、选项与选票；入场通行证与临时入场会话。 |
+| 运营与产物 | `staff_panel`、`exports`、`archive`、`incidents`、`realtime`、`public_portal`、`farewell_show` | 运营后台、导出、归档、异常登记、在线协作广播、公开门户与毕晚节目单。 |
+
+横切边界只有三条：私有文件走受控媒体视图按所有权判读权；写操作先取 Activity 行锁、再按域显式授权；敏感操作、导出、解锁与事故登记全部留痕。
+
+<div align="center">
+
+<img src="docs/diagrams/12-module-map.svg" alt="前后端模块全景" width="100%">
+
+</div>
+
+### 端到端流程 · End-to-end flows
+
+<div align="center">
+
+<img src="docs/diagrams/01-activity-lifecycle.svg" alt="活动生命周期" width="100%">
+
+</div>
+
+一场活动从**测试活动**起步：赛制先绑定真实事实并冻结，之后每一次阶段推进都由服务端状态机与冻结规则共同约束；HOLD 优先于公示。阶段是单向闸门，规则先冻结再运行。
+
+<div align="center">
+
+<img src="docs/diagrams/02-ruleset-questionnaire-registration.svg" alt="规则集、问卷与报名" width="100%">
+
+</div>
+
+规则集是问卷的唯一输入：问卷计划由规则集编译得出，选手增量填写（草稿与提交分离，草稿同时落在浏览器本地），提交后进入审核与**补交窗口**——补交只放行被退回的题目，不等于重新报名。
+
+<div align="center">
+
+<img src="docs/diagrams/03-live-contest-operations.svg" alt="现场比赛运行" width="100%">
+
+</div>
+
+现场由工作人员推进状态，评委、选手与观众各自持一条**受控凭证**完成操作：评委扫码认领席位、选手按轮次上台、观众凭有效票据换入场会话再投票。四路输入并行，但写入统一受 Activity 行锁与锁定状态约束；故障时降级到代录与纸面，HOLD 不改变任何人的身份。
+
+<div align="center">
+
+<img src="docs/diagrams/04-result-authority-release.svg" alt="结果权威与发布" width="100%">
+
+</div>
+
+原始事实先被 resolver 解析成**候选**，经过 `READY_TO_CONFIRM` 与管理员确认才成为对外结果。候选与权威严格分离：输入过期（stale）必须拒绝，解锁只产生新版本、不改写历史。
+
+<div align="center">
+
+<img src="docs/diagrams/05-deployment-and-fallback.svg" alt="部署与降级" width="100%">
+
+</div>
+
+部署拓扑只有一条硬约束：反向代理是唯一入口，PostgreSQL 是权威。Realtime 与 Redis 是**增强层**——它们失效时退回 HTTP 轮询与人工 DR，而不是让流程停下。
+
+<div align="center">
+
+<img src="docs/diagrams/06-role-handbook.svg" alt="角色使用手册总览" width="100%">
+
+</div>
+
+六类角色的分工总览，公开端只作为结果输出端。下面按角色展开。
+
+## 角色手册 · Role handbooks
+
+每个角色一张图：左边是你实际要做的事，右边是平台为这一步承担的责任。
+
+<div align="center">
+
+<img src="docs/diagrams/07-role-participant.svg" alt="选手使用手册" width="100%">
+
+</div>
+
+**选手**：扫码进入活动 → 报名 → 按题填报 → 逐题上传材料 → 提交 → （被退回时）补交 → 现场候场 → 查看结果。断网也不丢：草稿实时写入浏览器本地存储，重开页面会恢复并重试；同一题被队友改过时先提示，不静默覆盖。分组合唱由外部抽签产生，本组材料共享，任一当前成员都可提交。
+
+<div align="center">
+
+<img src="docs/diagrams/08-role-staff.svg" alt="工作人员使用手册" width="100%">
+
+</div>
+
+**工作人员**：登录 → 审核报名与材料 → 准备轮次 → 录分 → 现场推进 → 结果与收尾。每一步都在服务端再判一次权限与锁定状态。异常先 HOLD；评分终端不可用时走代录或纸面评分（来源与原因必填）；重复提交是安全的，同一命令只产生一条评分事实。工作人员不能核定正式结果、不能解锁、不能替评委决定给谁打分。
+
+<div align="center">
+
+<img src="docs/diagrams/09-role-admin.svg" alt="管理员使用手册" width="100%">
+
+</div>
+
+**管理员**：登录 → 活动与阶段 → 冻结赛制版本 → 彩排与清残留 → 核定赛段结果 → 归档与权限。管理员是唯一能推进阶段、冻结规则、核定结果、解锁与改角色的角色，敏感动作要过二次密钥。彩排与正式不能混：离开测试模式前必须先清空运行时残留，有残留就不许转正式。
+
+<div align="center">
+
+<img src="docs/diagrams/10-role-judge.svg" alt="评委使用手册" width="100%">
+
+</div>
+
+**评委**：扫一次共享二维码，整晚在同一台手机上评分——认领空闲席位 → 看当前选手 → 输入并提交 → 等待切换。评分对象由服务器决定，评委不能自己挑人；现场暂停（HOLD）保留评委会话，恢复后原设备继续，只有释放席位、换组、丢设备或正式结束才需要重新扫码。
+
+<div align="center">
+
+<img src="docs/diagrams/11-role-audience.svg" alt="观众使用手册" width="100%">
+
+</div>
+
+**观众**：拿到入场票（印刷或电子）→ 扫码验证票据 → 由工作人员检票（成功 / 此前已检票 / 无效）→ 换取入场会话 → 在开放窗口投票。唯一性落在**票据加场次**上，不含设备与浏览器：一张有效票据只能换一条有效会话、投一份有效选票，票据作废或重发时旧会话与旧选票一并失效。
 
 ## 快速开始 · Setup
 
@@ -199,6 +321,7 @@ exports/ archive/ incidents/  导出、归档与异常事件记录。
 frontend/            浏览器端 TypeScript 入口（评分、投票、检票等）。
 deploy/              生产与现场事件 Compose 契约。
 docs/                开发基线、部署、演练与现场运行手册。
+docs/diagrams/       流程图产物与图源定义（archify 生成，可持续再生成）。
 scripts/             引导、校验、备份恢复与启动脚本。
 ```
 
