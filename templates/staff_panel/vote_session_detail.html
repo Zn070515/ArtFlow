@@ -47,7 +47,9 @@
                 <span class="font-bold">{{ total_votes }}</span>
             </div>
         </div>
-        <div class="flex gap-2 mt-4">
+        {# The toolbar holds up to five nowrap controls; without wrapping its min-content is
+           wider than a phone card at a raised font size and dragged the page sideways. #}
+        <div class="flex flex-wrap gap-2 mt-4">
             {% if not vote_session.is_locked %}
             {% if vote_session.is_open %}
             <form method="post" action="{% url 'staff:vote_session_close' vote_session.pk %}" onsubmit="return confirm('确认关闭投票？关闭后观众不能继续提交。');">
