@@ -12,14 +12,29 @@ from public_portal.models import PublicMedia, PublicPost
 from .delivery import get_delivery_backend
 
 
+def _is_current_group_member(group_id: int, user_pk: int) -> bool:
+    """Mirror of the group-material *write* rule for the read side (GOAL §6.5/§6.6)."""
+    from singer_contest.models import GroupMembership
+
+    return GroupMembership.objects.filter(
+        group_id=group_id, is_current=True, singer__user_id=user_pk
+    ).exists()
+
+
 def _submission_file_access(user, submission_file) -> str:
     """Why this caller may read the file: ``"staff"``, ``"owner"``, ``"public"`` or ``""``.
 
     The reason is not decoration: a caller whose only claim is ``is_public`` is served the
     metadata-free derivative, while staff and the owner keep seeing the private original
-    (GOAL §19.3). The owner rule mirrors the previous behaviour exactly — when a
-    registration or program is attached, that relation alone decides, and ``uploaded_by``
-    is only consulted for an unowned row.
+    (GOAL §19.3). When a registration or program is attached, that relation alone decides,
+    and ``uploaded_by`` is only consulted for an unowned row.
+
+    A group-owned file is judged by *membership*, not by who uploaded it: GOAL §6.5 makes
+    the Group the owner of its material and §6.6 gives every current member one shared
+    permission set. Both write paths already read membership
+    (``files.services._require_owner_actor``, ``questionnaire.registration.
+    _require_group_member``), so falling back to ``uploaded_by`` here meant the member who
+    actually pressed upload could read the file while their teammates could not.
     """
     if user.is_authenticated and user.is_staff_or_admin:
         return "staff"
@@ -29,6 +44,9 @@ def _submission_file_access(user, submission_file) -> str:
                 return "owner"
         elif submission_file.program_id:
             if submission_file.program.user_id == user.pk:
+                return "owner"
+        elif submission_file.group_id:
+            if _is_current_group_member(submission_file.group_id, user.pk):
                 return "owner"
         elif submission_file.uploaded_by_id == user.pk:
             return "owner"

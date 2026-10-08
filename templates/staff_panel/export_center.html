@@ -46,6 +46,12 @@
             </div>
 
             <div class="flex flex-wrap gap-1.5">
+                {# Every action in this row is @admin_required (test toggle, clear test data, #}
+                {# lock, unlock, unarchive, clone). The row used to render them all to staff, #}
+                {# so the page offered buttons whose POST the server refuses — the sibling #}
+                {# activity list gates the same actions behind `user.is_admin` and shows #}
+                {# 只读 otherwise. #}
+                {% if user.is_admin %}
                 {% if not a.is_locked and a.is_test_mode %}
                 <form method="post" action="{% url 'staff:activity_test_toggle' a.pk %}" onsubmit="return confirm('确认切换测试模式？请确认当前活动数据生命周期仍符合预期。');">
                     {% csrf_token %}
@@ -57,30 +63,29 @@
                 </form>
                 {% endif %}
                 {% if a.phase == 'archived' %}
-                {% if user.is_admin %}
                 <form method="post" action="{% url 'staff:activity_unarchive' a.pk %}" class="inline" onsubmit="return confirm('确认解归档该活动？');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-blue-200 text-blue-600 px-2 py-1 rounded hover:bg-blue-50">解归档</button>
                 </form>
-                {% endif %}
                 {% elif not a.is_locked %}
                 <form method="post" action="{% url 'staff:activity_lock' a.pk %}" onsubmit="return confirm('确认锁定活动？锁定后运行数据不能直接修改。');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">锁定活动</button>
                 </form>
                 {% else %}
-                {% if user.is_admin and a.phase != 'archived' %}
                 <form method="post" action="{% url 'staff:activity_unlock' a.pk %}" onsubmit="return confirm('确认解锁活动？请先填写解锁原因。');">
                     {% csrf_token %}
                     <input type="text" name="note" placeholder="解锁原因（选填）" class="text-xs border border-red-200 rounded px-2 py-1">
                     <button type="submit" class="text-xs border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-50">解锁活动</button>
                 </form>
                 {% endif %}
-                {% endif %}
                 <form method="post" action="{% url 'staff:activity_clone' a.pk %}" onsubmit="return confirm('确认克隆该活动？将创建新的测试活动副本。');">
                     {% csrf_token %}
                     <button type="submit" class="text-xs border border-gray-300 text-gray-600 px-2 py-1 rounded hover:bg-gray-50">克隆活动</button>
                 </form>
+                {% else %}
+                <span class="text-xs text-gray-400">只读</span>
+                {% endif %}
             </div>
         </div>
         {% endwith %}

@@ -4,6 +4,7 @@ from common.authority import (
     ACCESS_GRANT_STATE,
     ENTRY_POINT_CONFIG,
     EPHEMERAL_SESSION_STATE,
+    RETENTION_CLEANUP,
     TEST_DATA_CLEANUP,
     AuthorityQuerySetMixin,
     authority_authorized,
@@ -16,6 +17,18 @@ from django.db import models
 
 def _require_authority(scope: str, message: str) -> None:
     if not authority_authorized(scope):
+        raise ValidationError(message)
+
+
+def _require_cleanup_authority(message: str) -> None:
+    """A grant or session may be unwound by the test-data cleanup or by retention.
+
+    Same shape as ``GROUP_STAGE_STATE``/``TEST_DATA_CLEANUP`` on the group-chorus rows: the
+    lifecycle service owns the ordinary path, and the two bulk cleanups that exist to remove
+    rows nobody should keep (GOAL §19.2 names ticket credentials, judge sessions and access
+    grants) are the other explicit owners.
+    """
+    if not (authority_authorized(TEST_DATA_CLEANUP) or authority_authorized(RETENTION_CLEANUP)):
         raise ValidationError(message)
 
 
@@ -83,7 +96,7 @@ class AccessGrantQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_update(objs, list(fields), *args, **kwargs)
 
     def delete(self):
-        _require_authority(TEST_DATA_CLEANUP, "测试数据访问授权删除需要显式清理 authority。")
+        _require_cleanup_authority("临时访问授权删除需要显式清理 authority。")
         return super().delete()
 
 
@@ -114,7 +127,7 @@ class EphemeralSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_update(objs, list(fields), *args, **kwargs)
 
     def delete(self):
-        _require_authority(TEST_DATA_CLEANUP, "测试数据访问会话删除需要显式清理 authority。")
+        _require_cleanup_authority("临时访问会话删除需要显式清理 authority。")
         return super().delete()
 
 

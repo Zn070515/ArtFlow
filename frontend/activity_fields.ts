@@ -46,6 +46,69 @@
     status.className = className;
   }
 
+  // Local durability, the same shape the questionnaire form uses. An operator editing on a
+  // venue phone lost whatever was typed but not yet saved the moment the page reloaded or
+  // the browser was killed — the debounce is 800 ms and the PATCH can fail on the venue's
+  // wifi. The text now lives in localStorage keyed by the field, so a reload restores it and
+  // re-sends it; `state.base` still holds the value the *server* rendered, which is what the
+  // compare-and-set has to declare.
+  const DRAFT_STORAGE_KEY = `artflow:activity-fields:${window.location.pathname}`;
+
+  function fieldKey(input: FieldInput): string {
+    return input.dataset.activityField || input.name || input.id || "field";
+  }
+
+  function draftStore(): Storage | null {
+    try {
+      return window.localStorage || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function readDrafts(): Record<string, string> {
+    const raw = draftStore()?.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      return parsed as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  function writeDrafts(drafts: Record<string, string>): void {
+    const store = draftStore();
+    if (!store) return;
+    if (Object.keys(drafts).length === 0) store.removeItem(DRAFT_STORAGE_KEY);
+    else store.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  }
+
+  function stashDraft(input: FieldInput, state: FieldState): void {
+    const drafts = readDrafts();
+    const key = fieldKey(input);
+    if (input.value === state.base) delete drafts[key];
+    else drafts[key] = input.value;
+    writeDrafts(drafts);
+  }
+
+  function restoreDrafts(): void {
+    const drafts = readDrafts();
+    if (Object.keys(drafts).length === 0) return;
+    const scope = root;
+    if (!scope) return;
+    for (const row of scope.querySelectorAll<HTMLElement>("[data-activity-field-row]")) {
+      const parts = rowParts(row);
+      if (!parts) continue;
+      const value = drafts[fieldKey(parts.input)];
+      if (value === undefined || value === parts.input.value) continue;
+      parts.input.value = value;
+      setStatus(parts.status, "已恢复未保存的修改", "text-amber-700");
+      schedule(row);
+    }
+  }
+
   function clearConflict(parts: ReturnType<typeof rowParts>): void {
     if (!parts) return;
     parts.useRemote.hidden = true;
@@ -83,6 +146,7 @@
       state.base = base;
       state.remoteValue = undefined;
       clearConflict(parts);
+      stashDraft(parts.input, state);
       setStatus(parts.status, "已同步", "text-gray-500");
       return;
     }
@@ -119,6 +183,7 @@
         state.remoteValue = undefined;
         clearConflict(parts);
         if (parts.input.value === sentValue) parts.input.value = payload.value;
+        stashDraft(parts.input, state);
         setStatus(parts.status, "已保存", "text-green-700");
         if (parts.input.value !== state.base) schedule(row);
       } else {
@@ -140,8 +205,14 @@
     const parts = rowParts(row);
     if (!parts) continue;
     stateFor(row, parts.input);
-    parts.input.addEventListener("input", () => schedule(row));
-    parts.input.addEventListener("blur", () => schedule(row, true));
+    parts.input.addEventListener("input", () => {
+      stashDraft(parts.input, stateFor(row, parts.input));
+      schedule(row);
+    });
+    parts.input.addEventListener("blur", () => {
+      stashDraft(parts.input, stateFor(row, parts.input));
+      schedule(row, true);
+    });
     parts.save.addEventListener("click", () => schedule(row, true));
     parts.useRemote.addEventListener("click", () => {
       const state = stateFor(row, parts.input);
@@ -157,5 +228,6 @@
     });
   }
 
+  restoreDrafts();
   root.addEventListener("submit", (event) => event.preventDefault());
 })();

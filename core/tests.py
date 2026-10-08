@@ -6,6 +6,7 @@ from django.apps import apps
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import connection
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
 
@@ -695,3 +696,50 @@ class ActivityUnarchiveTests(TestCase):
                 new_value=Activity.Phase.RESULTS_PUBLISHED,
             ).exists()
         )
+
+
+class ActivityPublicCodeBackfillTests(TestCase):
+    """The public-code backfill has to work on a database that already ran 0011.
+
+    0011 was edited to carry a backfill after some databases had recorded it as applied, and
+    Django applies a migration by name — so those databases never ran the added step and can
+    still hold NULL or empty codes. 0012 calls the same function under a name no database has
+    applied yet.
+
+    The rows are written through the *historical* model the migration itself sees: the live
+    ``Activity`` guards ``public_code`` (it is immutable by design, which is the rule the
+    backfill exists to repair), so no test can put a broken code in place otherwise.
+    """
+
+    def _historical_activity(self):
+        from django.db.migrations.executor import MigrationExecutor
+
+        state = MigrationExecutor(connection).loader.project_state(
+            [("core", "0012_backfill_public_codes_again")]
+        )
+        return state.apps.get_model("core", "Activity")
+
+    def test_an_empty_public_code_is_replaced_and_a_used_one_is_left_alone(self):
+        from core.models import backfill_missing_activity_public_codes
+
+        historical = self._historical_activity()
+        blank = historical.objects.create(
+            title="Backfill", activity_type="singer_contest", public_code=""
+        )
+        healthy = historical.objects.create(title="Healthy", activity_type="singer_contest")
+
+        filled = backfill_missing_activity_public_codes(historical)
+
+        self.assertEqual(filled, 1)
+        codes = dict(historical.objects.values_list("pk", "public_code"))
+        self.assertEqual(len(codes[blank.pk]), 8)
+        self.assertNotEqual(codes[blank.pk], codes[healthy.pk])
+
+    def test_the_backfill_is_idempotent(self):
+        from core.models import backfill_missing_activity_public_codes
+
+        historical = self._historical_activity()
+        historical.objects.create(title="Backfill", activity_type="singer_contest", public_code="")
+
+        self.assertEqual(backfill_missing_activity_public_codes(historical), 1)
+        self.assertEqual(backfill_missing_activity_public_codes(historical), 0)

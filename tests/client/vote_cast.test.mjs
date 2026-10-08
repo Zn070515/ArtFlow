@@ -14,7 +14,7 @@ class FakeInput {
   dispatch(type) { this.listeners.get(type)?.(); }
 }
 
-function boot(confirmResult = true) {
+function boot(confirmResult = true, maxSelections = "2") {
   const first = new FakeInput();
   const second = new FakeInput();
   const counter = { textContent: "" };
@@ -30,7 +30,7 @@ function boot(confirmResult = true) {
     },
   };
   const root = {
-    dataset: { maxSelections: "2" },
+    dataset: { maxSelections },
     querySelector(selector) {
       if (selector === "[data-vote-form]") return form;
       if (selector === "[data-vote-submit]") return submit;
@@ -65,4 +65,21 @@ test("vote cast asks for confirmation before an irreversible submit", () => {
 
   const event = runtime.form.dispatch("submit");
   assert.equal(event.prevented, true);
+});
+
+test("over-selection keeps its warning instead of the running count", () => {
+  // The warning was written and then immediately overwritten by `update()`, so the box
+  // un-ticked itself with no explanation.
+  const runtime = boot(true, "1");
+  runtime.first.checked = true;
+  runtime.first.dispatch("change");
+  runtime.second.checked = true;
+  runtime.second.dispatch("change");
+
+  assert.equal(runtime.second.checked, false);
+  assert.equal(runtime.counter.textContent, "最多选择 1 位选手");
+
+  // The next deliberate change goes back to the count.
+  runtime.first.dispatch("change");
+  assert.equal(runtime.counter.textContent, "已选择 1 / 1");
 });

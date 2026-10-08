@@ -16,8 +16,32 @@
     </div>
 
     {% if incidents %}
-    <div class="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-        <table class="min-w-[900px] w-full text-sm">
+    {# GOAL §13.2 makes the phone a first-class现场 terminal, so the record reads as cards #}
+    {# there and only becomes a table once the screen can hold one. The old single 900px #}
+    {# table forced a phone to scroll sideways to reach 处理结果. #}
+    <div class="space-y-3 md:hidden">
+        {% for inc in incidents %}
+        <div class="rounded-lg border border-gray-200 bg-white p-4 text-sm">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <p class="font-medium text-gray-900">{{ inc.get_event_type_display }}</p>
+                    <p class="text-xs text-gray-500 mt-0.5">{{ inc.activity.title }} · {{ inc.occurred_at|date:"Y-m-d H:i" }}</p>
+                </div>
+                {% if inc.needs_review %}<span class="shrink-0 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded">需复盘</span>{% endif %}
+            </div>
+            <dl class="mt-3 space-y-1.5 text-xs text-gray-600">
+                <div><dt class="inline text-gray-500">轮次：</dt><dd class="inline">{{ inc.round.name|default:"-" }}</dd></div>
+                <div><dt class="inline text-gray-500">选手：</dt><dd class="inline">{{ inc.singer.name|default:"-" }}</dd></div>
+                <div><dt class="inline text-gray-500">authority 状态：</dt><dd class="inline">{{ inc.get_authority_state_display }}</dd></div>
+                <div><dt class="inline text-gray-500">问题：</dt><dd class="inline">{{ inc.problem|default:"-" }}</dd></div>
+                <div><dt class="inline text-gray-500">采取动作：</dt><dd class="inline">{{ inc.action_taken|default:"-" }}</dd></div>
+                <div><dt class="inline text-gray-500">处理结果：</dt><dd class="inline">{{ inc.resolution|default:"-" }}</dd></div>
+            </dl>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="hidden md:block bg-white border border-gray-200 rounded-lg overflow-x-auto">
+        <table class="w-full text-sm">
             <thead><tr class="bg-gray-50 text-gray-600">
                 <th class="text-left px-4 py-2 font-medium">活动</th>
                 <th class="text-left px-4 py-2 font-medium">时间</th>
@@ -25,6 +49,8 @@
                 <th class="text-left px-4 py-2 font-medium">轮次</th>
                 <th class="text-left px-4 py-2 font-medium">选手</th>
                 <th class="text-left px-4 py-2 font-medium">authority 状态</th>
+                <th class="text-left px-4 py-2 font-medium">问题</th>
+                <th class="text-left px-4 py-2 font-medium">采取动作</th>
                 <th class="text-left px-4 py-2 font-medium">处理结果</th>
                 <th class="text-left px-4 py-2 font-medium">复盘</th>
             </tr></thead>
@@ -32,11 +58,13 @@
                 {% for inc in incidents %}
                 <tr class="hover:bg-gray-50">
                     <td class="px-4 py-2.5 text-gray-500">{{ inc.activity.title }}</td>
-                    <td class="px-4 py-2.5">{{ inc.occurred_at|date:"Y-m-d H:i" }}</td>
+                    <td class="px-4 py-2.5 whitespace-nowrap">{{ inc.occurred_at|date:"Y-m-d H:i" }}</td>
                     <td class="px-4 py-2.5">{{ inc.get_event_type_display }}</td>
                     <td class="px-4 py-2.5 text-gray-500">{{ inc.round.name|default:"-" }}</td>
                     <td class="px-4 py-2.5">{{ inc.singer.name|default:"-" }}</td>
                     <td class="px-4 py-2.5 text-gray-500">{{ inc.get_authority_state_display }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ inc.problem|default:"-" }}</td>
+                    <td class="px-4 py-2.5 text-gray-500">{{ inc.action_taken|default:"-" }}</td>
                     <td class="px-4 py-2.5 text-gray-500">{{ inc.resolution|default:"-" }}</td>
                     <td class="px-4 py-2.5">{% if inc.needs_review %}<span class="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded">需复盘</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
                 </tr>

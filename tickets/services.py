@@ -272,12 +272,27 @@ def issue_ticket_batch(
         return [issue_ticket(ticket, actor=current_actor) for ticket in created_tickets]
 
 
-def check_in_ticket(
+@dataclass(frozen=True)
+class CheckInOutcome:
+    """What a check-in attempt actually did.
+
+    GOAL §10.3 asks the door to show three states — 成功 / 已检票 / 无效 — and the caller
+    cannot tell the first two apart from the ticket alone: an idempotent repeat returns the
+    same ``CHECKED_IN`` row. ``already_checked_in`` is the missing bit, so the scanner can
+    say "this one already went in at 19:04" instead of claiming a fresh success for a
+    person walking past a second phone.
+    """
+
+    ticket: Ticket
+    already_checked_in: bool
+
+
+def check_in_ticket_outcome(
     raw_secret: str,
     *,
     actor: Any,
     request_meta: TicketRequestMeta | None = None,
-) -> Ticket:
+) -> CheckInOutcome:
     current_actor = require_current_staff(actor)
     with transaction.atomic():
         candidate = _ticket_for_credential(raw_secret)
@@ -286,7 +301,7 @@ def check_in_ticket(
         lock_activity_for_action(candidate.activity, ActivityAction.CHECK_IN)
         locked_ticket = Ticket.objects.select_for_update().get(pk=candidate.pk)
         if locked_ticket.state == Ticket.State.CHECKED_IN:
-            return locked_ticket
+            return CheckInOutcome(ticket=locked_ticket, already_checked_in=True)
         if locked_ticket.state != Ticket.State.ISSUED:
             raise ValidationError(INVALID_TICKET_MESSAGE)
         old_state = locked_ticket.state
@@ -305,7 +320,17 @@ def check_in_ticket(
             new_state=locked_ticket.state,
             ip_address=(request_meta.ip_address if request_meta else None),
         )
-        return locked_ticket
+        return CheckInOutcome(ticket=locked_ticket, already_checked_in=False)
+
+
+def check_in_ticket(
+    raw_secret: str,
+    *,
+    actor: Any,
+    request_meta: TicketRequestMeta | None = None,
+) -> Ticket:
+    """The ticket-only view of :func:`check_in_ticket_outcome`."""
+    return check_in_ticket_outcome(raw_secret, actor=actor, request_meta=request_meta).ticket
 
 
 def void_ticket(ticket: Ticket, *, actor: Any, note: str = "") -> Ticket:
@@ -355,9 +380,35 @@ def revoke_ticket(ticket: Ticket, *, actor: Any, note: str = "") -> Ticket:
             ticket=locked_ticket,
             old_state=old_state,
             new_state=locked_ticket.state,
-            note=note[:1000],
+            note=_with_ballot_invalidation(note, locked_ticket),
         )
         return locked_ticket
+
+
+def _with_ballot_invalidation(note: str, ticket: Ticket) -> str:
+    """Append the audience ballots this revocation takes out of the valid set.
+
+    GOAL §9.1 makes a valid ticket the whole audience qualification and §9.3 divides by the
+    session's *valid* ballot count, so revoking a ticket that already voted silently changes
+    the published denominator. The ballot rows stay — they are the evidence of what happened
+    at the door (§19.1) — which means the audit entry is the only place that records the
+    change. Naming the sessions is what makes that change traceable afterwards.
+    """
+    from voting.models import VoteBallot
+
+    session_ids = list(
+        VoteBallot.objects.filter(ticket=ticket)
+        .order_by("vote_session_id")
+        .values_list("vote_session_id", flat=True)
+        .distinct()
+    )
+    if not session_ids:
+        return note[:1000]
+    invalidated = "invalidated_ballots=" + ",".join(
+        f"VoteSession:{session_id}" for session_id in session_ids
+    )
+    combined = f"{note}; {invalidated}" if note else invalidated
+    return combined[:1000]
 
 
 def redeem_ticket(

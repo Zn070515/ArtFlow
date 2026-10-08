@@ -11,6 +11,7 @@ from common.authority import (
     VOTE_SESSION_STATE,
     authority_write,
 )
+from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -20,8 +21,10 @@ from ruleset.schema import parse_definition
 from ruleset.templates import seed_ruleset_templates
 from voting.models import VoteBallot, VoteOption, VoteSession
 from voting.services import lock_vote_session
+from voting.testing import ballot_write_authority
 
 from singer_contest.models import (
+    Award,
     ContestRound,
     CriterionScore,
     Judge,
@@ -120,11 +123,12 @@ class CoreRawAuthorityTests(TestCase):
             start_time="2026-01-01T10:00:00Z",
             end_time="2026-01-01T11:00:00Z",
         )
-        ballot = VoteBallot.objects.create(
-            vote_session=session,
-            browser_session_key="browser-raw",
-            ip_address="127.0.0.1",
-        )
+        with ballot_write_authority():
+            ballot = VoteBallot.objects.create(
+                vote_session=session,
+                browser_session_key="browser-raw",
+                ip_address="127.0.0.1",
+            )
         session.is_locked = True
         session.is_open = False
         with authority_write(VOTE_SESSION_STATE):
@@ -233,6 +237,121 @@ class CoreRawAuthorityTests(TestCase):
 
         award = materialize_stage_awards(stage, operator=self.user)[0]
         self.assertEqual(award.source_award_decision_id, candidate.pk)
+
+    def test_unlock_retires_a_stage_awards_and_reconfirmation_rematerializes_them(self):
+        """An award whose decision a re-resolve replaced used to be handed back as the result.
+
+        `materialize_stage_awards` returned whatever Award rows it found for the stage, and a
+        re-resolve replaces the decisions in place — the award's `SET_NULL` provenance went
+        to NULL while the row stayed, so the "official" award set no longer named anything
+        and the current decisions never got their awards. Unlocking is the moment the result
+        stops being final (its public releases are superseded at the same point), and it is
+        the only moment those rows can be taken back: a confirmed award is immutable by guard.
+        """
+        admin = User.objects.create_user(username="award-admin", password="pass")
+        with authority_write(ACCOUNT_AUTHORITY):
+            admin.role = User.Role.ADMIN
+            admin.save(update_fields=["role", "is_staff"])
+        second_user = User.objects.create_user(username="award-second", password="pass")
+        second = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=second_user,
+            name="Second",
+            student_id="raw-2",
+            college="College",
+            class_name="Class",
+            phone="13800000002",
+            song_name="Song 2",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="award-refresh", is_test_data=True
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition='{"schema_version": 1, "nodes": [{"key": "r", "type": "ROSTER"}]}',
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=version,
+                stage_key="award",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                ruleset_hash="hash",
+                input_fingerprint="fingerprint",
+                is_test_data=True,
+            )
+            first_decision = StageAwardDecision.objects.create(
+                stage_result=stage,
+                activity=self.activity,
+                singer=self.singer,
+                name="Best",
+                is_test_data=True,
+            )
+            second_decision = StageAwardDecision.objects.create(
+                stage_result=stage,
+                activity=self.activity,
+                singer=second,
+                name="Runner up",
+                is_test_data=True,
+            )
+        self._confirm(stage, admin)
+        from singer_contest.services import materialize_stage_awards
+
+        initial = materialize_stage_awards(stage, operator=admin)
+        self.assertEqual(
+            {award.source_award_decision_id for award in initial},
+            {first_decision.pk, second_decision.pk},
+        )
+
+        from singer_contest.services import unlock_stage_result
+
+        # Unlocking also supersedes the result's public releases, which needs the phase's
+        # PUBLISH_RESULT authority; the fixture starts in REHEARSAL.
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(phase=Activity.Phase.LIVE)
+        unlock_stage_result(stage, operator=admin, note="拉错名单")
+
+        self.assertFalse(Award.objects.filter(source_stage_result=stage).exists())
+        audit = AuditLog.objects.get(
+            action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
+            target=f"StageResult:{stage.pk}",
+        )
+        self.assertIn("retired_awards=2", audit.note)
+
+        # The raw facts are open again, so the decisions move: one is retired, another added.
+        with authority_write(STAGE_RESULT_RESOLVE):
+            first_decision.delete()
+            replacement = StageAwardDecision.objects.create(
+                stage_result=stage,
+                activity=self.activity,
+                singer=self.singer,
+                name="Best singer",
+                is_test_data=True,
+            )
+        self._confirm(stage, admin)
+
+        refreshed = materialize_stage_awards(stage, operator=admin)
+
+        self.assertEqual(
+            {award.source_award_decision_id for award in refreshed},
+            {replacement.pk, second_decision.pk},
+        )
+        self.assertFalse(
+            Award.objects.filter(source_award_decision__isnull=True).exists(),
+            "no award may be left without the decision that produced it",
+        )
+
+    def _confirm(self, stage, operator):
+        stage.status = StageResult.Status.CONFIRMED
+        stage.confirmed_by = operator
+        stage.confirmed_at = timezone.now()
+        with authority_write(STAGE_RESULT_CONFIRM):
+            stage.save(update_fields=["status", "confirmed_by", "confirmed_at"])
 
 
 class CapabilityAndPairContractTests(TestCase):

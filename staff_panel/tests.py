@@ -23,6 +23,7 @@ from common.authority import (
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
     TEST_DATA_SEED,
+    VOTE_BALLOT_WRITE,
     VOTE_SESSION_STATE,
     authority_write,
 )
@@ -93,6 +94,7 @@ from tests.helpers import postgresql_only
 from tickets.services import check_in_ticket, create_ticket, issue_ticket, redeem_ticket
 from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
 from voting.services import open_vote_session
+from voting.testing import create_legacy_vote_record
 
 from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
 from staff_panel.views import _round_grid_payload, post_edit
@@ -124,6 +126,15 @@ def _create_round(**kwargs):
 def _create_vote_session(**kwargs):
     with authority_write(VOTE_SESSION_STATE):
         return VoteSession.objects.create(**kwargs)
+
+
+def _create_legacy_vote_record(**kwargs):
+    """Manufacture a raw audience fact the way ``submit_ballot`` would.
+
+    A ballot and its choices are written only by the audited voting service (GOAL §8.4),
+    so a fixture standing in for it has to hold the same authority.
+    """
+    return create_legacy_vote_record(**kwargs)
 
 
 def _create_score_summary(**kwargs):
@@ -974,6 +985,36 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(qr_image.status_code, 200)
         self.assertEqual(qr_image["Content-Type"], "image/png")
 
+    def test_qr_pages_warn_when_the_code_is_not_built_for_the_real_host(self):
+        """GOAL §11.5: printing needs the production HTTPS host.
+
+        Outside production the code is built from whatever host served the page, so a poster
+        printed from here resolves to nothing for the audience — and nothing on the page said
+        so.
+        """
+        self.client.force_login(self.staff)
+
+        development = self.client.get(reverse("staff:qr_generate", args=[self.singer_activity.pk]))
+        self.assertContains(development, "打印前必须在正式域名下重新生成")
+
+        with override_settings(APP_ENV="production"):
+            production = self.client.get(
+                reverse("staff:qr_generate", args=[self.singer_activity.pk]), secure=True
+            )
+        self.assertNotContains(production, "打印前必须在正式域名下重新生成")
+
+        # A production deployment reached over plain HTTP is still not printable.
+        with override_settings(APP_ENV="production"):
+            insecure = self.client.get(reverse("staff:qr_generate", args=[self.singer_activity.pk]))
+        self.assertContains(insecure, "打印前必须在正式域名下重新生成")
+
+    def test_qr_center_carries_the_same_warning(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:qr_center"))
+
+        self.assertContains(response, "打印前必须在正式域名下重新生成")
+
     def test_round_score_entry_requires_prepared_round(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
@@ -1768,20 +1809,21 @@ class StaffPanelSmokeTests(TestCase):
             singer=registration,
             is_test_data=False,
         )
-        ballot = VoteBallot.objects.create(
-            vote_session=vote_session,
-            browser_session_key="formal-ballot",
-            ip_address="127.0.0.1",
-            is_test_data=False,
-        )
-        record = VoteRecord.objects.create(
-            ballot=ballot,
-            vote_session=vote_session,
-            vote_option=option,
-            browser_session_key="formal-ballot",
-            ip_address="127.0.0.1",
-            is_test_data=False,
-        )
+        with authority_write(VOTE_BALLOT_WRITE):
+            ballot = VoteBallot.objects.create(
+                vote_session=vote_session,
+                browser_session_key="formal-ballot",
+                ip_address="127.0.0.1",
+                is_test_data=False,
+            )
+            record = VoteRecord.objects.create(
+                ballot=ballot,
+                vote_session=vote_session,
+                vote_option=option,
+                browser_session_key="formal-ballot",
+                ip_address="127.0.0.1",
+                is_test_data=False,
+            )
         login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
 
@@ -1824,20 +1866,21 @@ class StaffPanelSmokeTests(TestCase):
             singer=test_registration,
             is_test_data=False,
         )
-        formal_ballot = VoteBallot.objects.create(
-            vote_session=formal_session,
-            browser_session_key="formal-singer-ballot",
-            ip_address="127.0.0.1",
-            is_test_data=False,
-        )
-        formal_record = VoteRecord.objects.create(
-            ballot=formal_ballot,
-            vote_session=formal_session,
-            vote_option=formal_option,
-            browser_session_key="formal-singer-ballot",
-            ip_address="127.0.0.1",
-            is_test_data=False,
-        )
+        with authority_write(VOTE_BALLOT_WRITE):
+            formal_ballot = VoteBallot.objects.create(
+                vote_session=formal_session,
+                browser_session_key="formal-singer-ballot",
+                ip_address="127.0.0.1",
+                is_test_data=False,
+            )
+            formal_record = VoteRecord.objects.create(
+                ballot=formal_ballot,
+                vote_session=formal_session,
+                vote_option=formal_option,
+                browser_session_key="formal-singer-ballot",
+                ip_address="127.0.0.1",
+                is_test_data=False,
+            )
         login_admin(self.client, self.admin)
         self.client.raise_request_exception = False
 
@@ -2654,7 +2697,7 @@ class StaffPanelSmokeTests(TestCase):
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=registration)
         vote_session = open_vote_session(vote_session, self.staff)
-        VoteRecord.objects.create(
+        _create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=option,
             browser_session_key="visitor-1",
@@ -2704,7 +2747,7 @@ class StaffPanelSmokeTests(TestCase):
         first_option = VoteOption.objects.create(vote_session=vote_session, singer=first)
         second_option = VoteOption.objects.create(vote_session=vote_session, singer=second)
         vote_session = open_vote_session(vote_session, self.staff)
-        VoteRecord.objects.create(
+        _create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=first_option,
             browser_session_key="winner-1",
@@ -2716,13 +2759,13 @@ class StaffPanelSmokeTests(TestCase):
             reverse("staff:vote_session_unlock", args=[vote_session.pk]),
             {"note": "recount"},
         )
-        VoteRecord.objects.create(
+        _create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=second_option,
             browser_session_key="winner-2",
             ip_address="127.0.0.2",
         )
-        VoteRecord.objects.create(
+        _create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=second_option,
             browser_session_key="winner-3",
@@ -2767,13 +2810,13 @@ class StaffPanelSmokeTests(TestCase):
         option1 = VoteOption.objects.create(vote_session=vote_session, singer=reg1)
         option2 = VoteOption.objects.create(vote_session=vote_session, singer=reg2)
         vote_session = open_vote_session(vote_session, self.staff)
-        VoteRecord.objects.create(
+        _create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=option1,
             browser_session_key="tie-1",
             ip_address="127.0.0.1",
         )
-        VoteRecord.objects.create(
+        _create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=option2,
             browser_session_key="tie-2",
@@ -3314,18 +3357,19 @@ class StaffPanelSmokeTests(TestCase):
         )
         option = VoteOption.objects.create(vote_session=vote_session, singer=singer)
         vote_session = open_vote_session(vote_session, self.staff)
-        ballot = VoteBallot.objects.create(
-            vote_session=vote_session,
-            browser_session_key="runtime-browser",
-            ip_address="127.0.0.1",
-        )
-        VoteRecord.objects.create(
-            ballot=ballot,
-            vote_session=vote_session,
-            vote_option=option,
-            browser_session_key="runtime-browser",
-            ip_address="127.0.0.1",
-        )
+        with authority_write(VOTE_BALLOT_WRITE):
+            ballot = VoteBallot.objects.create(
+                vote_session=vote_session,
+                browser_session_key="runtime-browser",
+                ip_address="127.0.0.1",
+            )
+            VoteRecord.objects.create(
+                ballot=ballot,
+                vote_session=vote_session,
+                vote_option=option,
+                browser_session_key="runtime-browser",
+                ip_address="127.0.0.1",
+            )
         GeneratedDocument.objects.create(
             activity=self.singer_activity,
             title="Runtime document",
@@ -3561,6 +3605,38 @@ class RuntimeLifecycleMatrixTests(TestCase):
         session = VoteSession.objects.get(name="Ticket Vote")
         self.assertTrue(session.requires_ticket)
 
+    def test_vote_session_create_requires_a_passcode_without_a_ticket(self):
+        """No ticket and no passcode leaves the session with no entry credential at all.
+
+        ``VoteSession.passcode`` is ``blank=True, default=""``, and an empty submission
+        matched an empty stored passcode, so such a session opened its ballot page to
+        anyone holding the link.
+        """
+        activity = _create_activity(
+            title="Blank Passcode Vote",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        singer = self._singer(activity, "Blank Passcode Singer", True, "20260304")
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:vote_session_create"),
+            {
+                "activity_id": activity.pk,
+                "name": "Blank Passcode",
+                "passcode": "",
+                "start_time": "2026-08-27T10:00",
+                "end_time": "2026-08-27T11:00",
+                "singers": [str(singer.pk)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "非票券投票必须设置现场口令")
+        self.assertFalse(VoteSession.objects.filter(name="Blank Passcode").exists())
+
     def test_incident_create_rejects_wrong_lifecycle_singer(self):
         activity = _create_activity(
             title="Incident Test",
@@ -3590,6 +3666,68 @@ class RuntimeLifecycleMatrixTests(TestCase):
         )
         self.assertEqual(accepted.status_code, 302)
         self.assertTrue(IncidentRecord.objects.get(resolution="good").is_test)
+
+    def test_incident_records_the_problem_and_the_action_taken(self):
+        """GOAL §16: 问题 and 采取动作 are their own fields, not a free note.
+
+        A record used to be able to name a type and a resolution without ever stating what
+        went wrong or what was done about it — the two things the review reads first.
+        """
+        activity = _create_activity(
+            title="Incident Section 16",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:incident_create"),
+            {
+                "activity_id": activity.pk,
+                "occurred_at": timezone.now().isoformat(),
+                "event_type": IncidentRecord.EventType.EQUIPMENT_ISSUE,
+                "authority_state": IncidentRecord.AuthorityState.HOLD,
+                "problem": "2 号评委手机无法提交评分",
+                "action_taken": "改用纸面评分并由工作人员代录",
+                "resolution": "该评委本场成绩按纸面录入",
+                "needs_review": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        incident = IncidentRecord.objects.get(activity=activity)
+        self.assertEqual(incident.problem, "2 号评委手机无法提交评分")
+        self.assertEqual(incident.action_taken, "改用纸面评分并由工作人员代录")
+        self.assertEqual(incident.resolution, "该评委本场成绩按纸面录入")
+        self.assertTrue(incident.needs_review)
+
+    def test_incident_export_carries_the_section_16_columns(self):
+        activity = _create_activity(
+            title="Incident Export",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        IncidentRecord.objects.create(
+            activity=activity,
+            occurred_at=timezone.now(),
+            event_type=IncidentRecord.EventType.OTHER,
+            problem="问题文本",
+            action_taken="动作文本",
+            is_test=True,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:incident_export"), {"activity_id": activity.pk})
+
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content))
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertIn("问题", rows[0])
+        self.assertIn("采取动作", rows[0])
+        self.assertIn("问题文本", rows[1])
+        self.assertIn("动作文本", rows[1])
 
     def test_prepare_round_uses_approved_singers_scoped_to_activity(self):
         activity = _create_activity(
@@ -8653,20 +8791,21 @@ class ScoreComponentVoteUiTests(TestCase):
         )
         configure_vote_scoring_rule(session, self.staff)
         for index in range(4):
-            ballot = VoteBallot.objects.create(
-                vote_session=session,
-                browser_session_key=f"ui-browser-{index}",
-                ip_address="127.0.0.1",
-                is_test_data=True,
-            )
-            VoteRecord.objects.create(
-                ballot=ballot,
-                vote_session=session,
-                vote_option=option,
-                browser_session_key=f"ui-browser-{index}",
-                ip_address="127.0.0.1",
-                is_test_data=True,
-            )
+            with authority_write(VOTE_BALLOT_WRITE):
+                ballot = VoteBallot.objects.create(
+                    vote_session=session,
+                    browser_session_key=f"ui-browser-{index}",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                )
+                VoteRecord.objects.create(
+                    ballot=ballot,
+                    vote_session=session,
+                    vote_option=option,
+                    browser_session_key=f"ui-browser-{index}",
+                    ip_address="127.0.0.1",
+                    is_test_data=True,
+                )
 
         response = self.client.get(reverse("staff:vote_session_detail", args=[session.pk]))
 

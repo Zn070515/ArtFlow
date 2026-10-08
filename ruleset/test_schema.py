@@ -257,6 +257,48 @@ class SchemaAcceptanceStructureParsingTests(SimpleTestCase):
         self.assertEqual(outputs["top1_each_group"], OutputType.ROSTER)
 
 
+class AssessTrimSchemaTests(SimpleTestCase):
+    def test_trims_require_a_trimmed_mean(self):
+        """A trim declared next to `mode: "mean"` was accepted and then ignored.
+
+        Both the compiler (which returned early for non-trimmed modes) and the resolver
+        (which averaged everything) dropped the trim, so the ruleset said "drop the highest
+        and lowest" while the score silently kept them.
+        """
+        for mode, code in (("mean", "trim_high"), ("mean", "trim_low")):
+            with self.subTest(code=code), self.assertRaises(ValidationError):
+                parse_definition(
+                    _def(
+                        [
+                            {
+                                "key": "a",
+                                "type": "ASSESS",
+                                "source": ENTRY_KEY,
+                                "mode": mode,
+                                code: 1,
+                            }
+                        ]
+                    )
+                )
+
+    def test_a_trimmed_mean_still_parses(self):
+        parsed = parse_definition(
+            _def(
+                [
+                    {
+                        "key": "a",
+                        "type": "ASSESS",
+                        "source": ENTRY_KEY,
+                        "mode": "trimmed_mean",
+                        "trim_high": 1,
+                        "trim_low": 1,
+                    }
+                ]
+            )
+        )
+        self.assertEqual(parsed["nodes"][0]["mode"], "trimmed_mean")
+
+
 class SchemaRejectionTests(SimpleTestCase):
     def test_unknown_node_type_rejected(self):
         bad = _def([{"key": "x", "type": "BLAH", "source": ENTRY_KEY}])

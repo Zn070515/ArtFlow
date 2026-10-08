@@ -4,13 +4,19 @@ from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from accounts.services import require_current_admin, require_current_staff
-from common.authority import VOTE_SCORING_RULE, VOTE_SESSION_STATE, authority_write
+from common.authority import (
+    VOTE_BALLOT_WRITE,
+    VOTE_SCORING_RULE,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from ruleset.services import require_runtime_readiness
 from tickets.models import Ticket, TicketAccessSession
@@ -28,6 +34,11 @@ from .models import (
 # replay is byte-identical instead of inheriting whatever the ambient Decimal context says
 # (0.0001 is far finer than the two decimals staff ever display).
 SUPPORT_RATE_QUANTUM = Decimal("0.0001")
+
+# GOAL §10.1 closes the ticket lifecycle at CREATED / ISSUED / CHECKED_IN / VOID / REVOKED.
+# Only the first three describe a ticket that entitles its holder to an audience ballot;
+# VOID and REVOKED do not, so a ballot they produced is not a *valid* ballot (§9.1 / §9.3).
+_VALID_TICKET_STATES = (Ticket.State.CREATED, Ticket.State.ISSUED, Ticket.State.CHECKED_IN)
 
 
 def _locked_ticket_for_vote(
@@ -140,39 +151,85 @@ def submit_ballot(
         # GOAL §9.7 rules out browser- or device-derived limits, and two audience members
         # sharing one phone both hold checked-in tickets — refusing the second one denied a
         # entitled ballot to someone standing at the venue with a valid ticket.
-        try:
-            with transaction.atomic():
-                ballot = VoteBallot.objects.create(
+        with authority_write(VOTE_BALLOT_WRITE):
+            try:
+                with transaction.atomic():
+                    ballot = VoteBallot.objects.create(
+                        vote_session=locked_session,
+                        ticket=ticket,
+                        browser_session_key=browser_session_key,
+                        ip_address=ip_address,
+                        is_test_data=locked_activity.is_test_mode,
+                    )
+            except IntegrityError:
+                if ticket is not None:
+                    # The only constraint a ticket-backed insert can hit is the per-ticket
+                    # one, so a concurrent submit of the same ticket is the whole recovery
+                    # case.
+                    ticket_ballot = VoteBallot.objects.filter(
+                        vote_session=locked_session, ticket=ticket
+                    ).first()
+                    if ticket_ballot is not None:
+                        return ticket_ballot
+                    raise
+                return VoteBallot.objects.get(
+                    vote_session=locked_session, browser_session_key=browser_session_key
+                )
+            for option_id in unique_ids:
+                option = by_id[option_id]
+                VoteRecord.objects.create(
+                    ballot=ballot,
                     vote_session=locked_session,
-                    ticket=ticket,
+                    vote_option=option,
                     browser_session_key=browser_session_key,
                     ip_address=ip_address,
                     is_test_data=locked_activity.is_test_mode,
                 )
-        except IntegrityError:
-            if ticket is not None:
-                # The only constraint a ticket-backed insert can hit is the per-ticket one,
-                # so a concurrent submit of the same ticket is the whole recovery case.
-                ticket_ballot = VoteBallot.objects.filter(
-                    vote_session=locked_session, ticket=ticket
-                ).first()
-                if ticket_ballot is not None:
-                    return ticket_ballot
-                raise
-            return VoteBallot.objects.get(
-                vote_session=locked_session, browser_session_key=browser_session_key
-            )
-        for option_id in unique_ids:
-            option = by_id[option_id]
-            VoteRecord.objects.create(
-                ballot=ballot,
-                vote_session=locked_session,
-                vote_option=option,
-                browser_session_key=browser_session_key,
-                ip_address=ip_address,
-                is_test_data=locked_activity.is_test_mode,
-            )
         return ballot
+
+
+def valid_ticket_condition(prefix: str = "") -> Q:
+    """The GOAL §9.1 "有效 Ticket" condition for a record reached through *prefix*.
+
+    *prefix* is the ORM path to the :class:`VoteRecord` (``""`` on a record queryset,
+    ``"records__"`` for an annotation hung off :class:`VoteOption`). A ballot written
+    before ticket checking existed carries no ticket and nothing that can invalidate it, so
+    a null ticket stays valid (GOAL §9.4 keeps that path for compatibility). The valid set
+    is stated **positively**: GOAL §10.1 closes the ticket lifecycle, while a bare
+    ``NOT IN (revoked, void)`` compares against NULL for those legacy rows and quietly
+    drops them.
+    """
+    valid_states = list(_VALID_TICKET_STATES)
+    return (
+        Q(**{f"{prefix}ballot__isnull": True})
+        | Q(**{f"{prefix}ballot__ticket__isnull": True})
+        | Q(**{f"{prefix}ballot__ticket__state__in": valid_states})
+    )
+
+
+def valid_ballot_queryset(vote_session: VoteSession, *, test_flag: bool):
+    """The GOAL §9.3 "有效 ballot" set for one session.
+
+    GOAL §9.1 makes ``有效 Ticket + CHECKED_IN`` the whole audience qualification and §9.3
+    divides by the session's **valid** ballot count, not by every row ever written. A ticket
+    revoked after it voted (leaked code, duplicated print, fraud at the door) keeps its
+    ballot row — GOAL §19.1 keeps business facts durable and the ballot is evidence — but
+    that ballot is no longer valid, so it must not inflate a candidate's numerator or the
+    denominator. Legacy no-ticket ballots have no ticket that can be invalidated and stay
+    valid.
+    """
+    return VoteBallot.objects.filter(
+        vote_session=vote_session,
+        is_test_data=test_flag,
+    ).filter(Q(ticket__isnull=True) | Q(ticket__state__in=_VALID_TICKET_STATES))
+
+
+def valid_record_queryset(vote_session: VoteSession, *, test_flag: bool):
+    """The choices belonging to the valid ballots of :func:`valid_ballot_queryset`."""
+    return VoteRecord.objects.filter(
+        vote_session=vote_session,
+        is_test_data=test_flag,
+    ).filter(valid_ticket_condition())
 
 
 def recent_ballot_from_ip(vote_session, ip_address):
@@ -257,9 +314,7 @@ def ballot_share_percentages(
     100%. Candidates with no ballot are a real 0; a session with **no** valid ballot returns
     ``None`` (0/0 is not a zero score, so the caller holds instead of publishing).
     """
-    valid_ballots = VoteBallot.objects.filter(
-        vote_session=vote_session, is_test_data=test_flag
-    ).count()
+    valid_ballots = valid_ballot_queryset(vote_session, test_flag=test_flag).count()
     if valid_ballots == 0:
         return None
     counts: dict[int, int] = {
@@ -268,9 +323,9 @@ def ballot_share_percentages(
             "singer_id", flat=True
         )
     }
-    records = VoteRecord.objects.filter(
-        vote_session=vote_session, is_test_data=test_flag
-    ).values_list("vote_option__singer_id", flat=True)
+    records = valid_record_queryset(vote_session, test_flag=test_flag).values_list(
+        "vote_option__singer_id", flat=True
+    )
     for singer_id in records:
         counts[singer_id] = counts.get(singer_id, 0) + 1
     divisor = Decimal(valid_ballots)
@@ -289,9 +344,7 @@ def vote_session_configuration_facts(vote_session: VoteSession, *, test_flag: bo
     votes, support rate, conversion mode, session state and ticket requirement. Staff have to
     be able to reconcile the screen against the raw ballots by hand.
     """
-    valid_ballots = VoteBallot.objects.filter(
-        vote_session=vote_session, is_test_data=test_flag
-    ).count()
+    valid_ballots = valid_ballot_queryset(vote_session, test_flag=test_flag).count()
     percentages = ballot_share_percentages(vote_session, test_flag=test_flag) or {}
     counts: dict[int, int] = {
         singer_id: 0
@@ -299,9 +352,9 @@ def vote_session_configuration_facts(vote_session: VoteSession, *, test_flag: bo
             "singer_id", flat=True
         )
     }
-    for singer_id in VoteRecord.objects.filter(
-        vote_session=vote_session, is_test_data=test_flag
-    ).values_list("vote_option__singer_id", flat=True):
+    for singer_id in valid_record_queryset(vote_session, test_flag=test_flag).values_list(
+        "vote_option__singer_id", flat=True
+    ):
         counts[singer_id] = counts.get(singer_id, 0) + 1
     rule = VoteScoringRule.objects.filter(vote_session_id=vote_session.pk).first()
     return {

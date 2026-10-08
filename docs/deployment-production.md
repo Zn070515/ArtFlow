@@ -169,6 +169,15 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
   `prepare_media_download_rehearsal` / `cleanup_media_download_rehearsal`），结论与数据见
   [生产准备演练](production-readiness.md) 的「媒体下载负载演练」一节。
 
+## 二维码打印前提（GOAL §11.5）
+
+- 交给印刷的二维码只能从正式 HTTPS 域名下的 `/staff/qr/` 生成：二维码的地址由发起请求的 host
+  拼出，非正式来源（`127.0.0.1`、Compose 的 `localhost`、LAN IP、临时 tunnel）得到的是观众
+  打不开的地址。这两个页面在非 production HTTPS 来源下会显示明确警告。
+- 备案审批完成并把正式域名接入 443 之前不要印刷任何二维码；彩排与内部走查可以用本地或 LAN
+  二维码验证流程，但该 PNG 不是印刷件。完整流程见
+  [生产准备演练](production-readiness.md) 的「二维码打印前提」。
+
 ## 公网入口的滥用与 DDoS 边界
 
 - 登录和注册 POST 在进入密码哈希/表单深处理前按客户端 IP 限流；生产限流桶必须使用 PostgreSQL，不能使用每个 Gunicorn worker 独立的本地缓存。

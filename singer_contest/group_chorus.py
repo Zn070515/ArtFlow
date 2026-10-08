@@ -563,20 +563,19 @@ def group_material_readiness(group: Group) -> GroupReadiness:
     )
     if not current_files.exists():
         return GroupReadiness.MISSING_MATERIAL
+    # A question the *frozen ruleset* declares required is a requirement in its own right
+    # (§6.8: other group material is optional "除非当届赛制明确提出"), and an answer counts
+    # as answered when staff have accepted it. That is a declared contract, not a hidden
+    # extra gate, so it stays.
     checks = MaterialCheck.objects.filter(group=group, required=True)
     questionnaire_checks = checks.exclude(question_key="")
     if questionnaire_checks.exclude(status=MaterialCheck.Status.APPROVED).exists():
         return GroupReadiness.MISSING_MATERIAL
-    # The legacy "合唱伴奏" check is an either/or contract: an approved audio file or
-    # a current performance video is enough. A missing legacy audio check must not reject
-    # a group that has chosen the video branch.
-    if current_files.filter(file_purpose=SubmissionFile.Purpose.PERFORMANCE_VIDEO).exists():
-        return GroupReadiness.READY
-    legacy_check = checks.filter(
-        question_key="", file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT
-    ).first()
-    if legacy_check is not None and legacy_check.status != MaterialCheck.Status.APPROVED:
-        return GroupReadiness.MISSING_MATERIAL
+    # The legacy "合唱伴奏" row is the *transport* for the upload, not a second gate:
+    # §6.7 states the accompaniment contract as "audio exists OR video exists 即可通过" and
+    # §6.9 lists only the existence of a current accompaniment. The video branch was
+    # already read that way, so requiring staff approval on the audio branch made the same
+    # either/or contract stricter for one of its two branches.
     return GroupReadiness.READY
 
 

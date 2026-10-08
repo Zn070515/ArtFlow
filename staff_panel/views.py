@@ -181,13 +181,15 @@ from singer_contest.services import (
     unlock_stage_result,
     validate_roster_source_stage,
 )
-from voting.models import VoteOption, VoteRecord, VoteScoringRule, VoteSession
+from voting.models import VoteOption, VoteScoringRule, VoteSession
 from voting.policies import formal_singer_contest_requires_ticket
 from voting.services import (
     close_vote_session,
     lock_vote_session,
     open_vote_session,
     unlock_vote_session,
+    valid_record_queryset,
+    valid_ticket_condition,
     vote_session_configuration_facts,
 )
 
@@ -3362,11 +3364,17 @@ def vote_session_create(request):
 @staff_required
 def vote_session_detail(request, pk):
     vote_session = get_object_or_404(VoteSession.objects.select_related("activity"), pk=pk)
+    # §9.1 / §9.3: the screen has to reconcile against the *valid* ballots the conversion
+    # will publish, so a revoked or voided ticket's ballot is not counted here either.
     options = list(
-        vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
+        vote_session.options.select_related("singer").annotate(
+            vote_count=Count("records", filter=valid_ticket_condition("records__"))
+        )
     )
     _with_generic_song_labels(option.singer for option in options)
-    total_votes = VoteRecord.objects.filter(vote_session=vote_session).count()
+    total_votes = valid_record_queryset(
+        vote_session, test_flag=runtime_is_test(vote_session.activity)
+    ).count()
     _, top = _popularity_top_tie(vote_session)
     # §9: a score-component session must be reconcilable by hand — valid ballot count,
     # per-candidate votes and support rate next to the conversion mode and lock state.
@@ -3489,7 +3497,7 @@ def _popularity_top_tie(vote_session):
     """
     leaderboard = list(
         vote_session.options.select_related("singer")
-        .annotate(vote_count=Count("records"))
+        .annotate(vote_count=Count("records", filter=valid_ticket_condition("records__")))
         .filter(vote_count__gt=0)
         .order_by("-vote_count", "sort_order", "pk")
     )
@@ -3505,9 +3513,30 @@ def _popularity_top_tie(vote_session):
 
 
 @staff_required
+def qr_print_host_warning(request) -> str:
+    """GOAL §11.5: a QR is only printable from the real HTTPS host.
+
+    Outside production the code is built from whatever host served the page — 127.0.0.1 or a
+    LAN address — so a poster printed from here resolves to nothing for the audience, and
+    nothing on any of these pages said so. The warning is returned (not raised) because the
+    page itself is legitimate for checking the code at a rehearsal.
+    """
+    if settings.APP_ENV == "production" and request.is_secure():
+        return ""
+    return (
+        f"当前二维码由 {request.get_host()} 生成，不是正式 HTTPS 域名。"
+        "打印前必须在正式域名下重新生成（GOAL §11.5）。"
+    )
+
+
+@staff_required
 def qr_center(request):
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    return render(request, "staff_panel/qr_center.html", {"activities": activities})
+    return render(
+        request,
+        "staff_panel/qr_center.html",
+        {"activities": activities, "qr_host_warning": qr_print_host_warning(request)},
+    )
 
 
 @staff_required
@@ -3517,7 +3546,11 @@ def qr_generate(request, pk):
         pk=pk,
         activity_type=Activity.Type.SINGER_CONTEST,
     )
-    return render(request, "staff_panel/qr_detail.html", {"activity": activity})
+    return render(
+        request,
+        "staff_panel/qr_detail.html",
+        {"activity": activity, "qr_host_warning": qr_print_host_warning(request)},
+    )
 
 
 @staff_required
@@ -3810,6 +3843,8 @@ def incident_create(request):
             singer=singer,
             program=program,
             handled_by_id=request.user.pk,
+            problem=form.cleaned_data.get("problem", ""),
+            action_taken=form.cleaned_data.get("action_taken", ""),
             resolution=form.cleaned_data.get("resolution", ""),
             remark=form.cleaned_data.get("remark", ""),
             is_test=activity.is_test_mode,
@@ -3867,6 +3902,8 @@ def incident_export(request):
             "选手",
             "authority 状态",
             "处理人",
+            "问题",
+            "采取动作",
             "处理结果",
             "备注",
             "需要赛后复盘",
@@ -3891,6 +3928,8 @@ def incident_export(request):
                 inc.singer.name if inc.singer else "",
                 inc.get_authority_state_display(),
                 inc.handled_by.username if inc.handled_by else "",
+                inc.problem,
+                inc.action_taken,
                 inc.resolution,
                 inc.remark,
                 "是" if inc.needs_review else "否",

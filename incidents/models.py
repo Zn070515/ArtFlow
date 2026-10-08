@@ -67,6 +67,13 @@ class IncidentRecord(models.Model):
         blank=True,
         related_name="handled_incidents",
     )
+    # GOAL §16 lists 问题 and 采取动作 as their own fields, between the authority state and
+    # the operator. They were missing, so a record could name a type and a resolution
+    # without ever stating what went wrong or what was actually done about it — the two
+    # things the post-event review reads first. `resolution` is the 结果, `remark` stays a
+    # free note.
+    problem = models.TextField(blank=True)
+    action_taken = models.TextField(blank=True)
     resolution = models.TextField(blank=True)
     remark = models.TextField(blank=True)
     is_test = models.BooleanField(default=False)

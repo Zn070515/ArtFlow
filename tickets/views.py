@@ -17,17 +17,19 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import Ticket
+from .models import Ticket, TicketAccessSession
 from .services import (
     TicketRequestMeta,
-    check_in_ticket,
+    check_in_ticket_outcome,
     create_ticket,
     issue_ticket,
     issue_ticket_batch,
     redeem_ticket,
     revoke_ticket,
+    revoke_ticket_session,
     rotate_ticket_credential,
     ticket_credential,
     void_ticket,
@@ -278,20 +280,28 @@ def issue_page(request: HttpRequest) -> HttpResponse:
 def check_in_page(request: HttpRequest) -> HttpResponse:
     error = ""
     checked_in_ticket = None
+    already_checked_in = False
     if request.method == "POST":
         raw_secret = request.POST.get("secret", "")
         try:
-            checked_in_ticket = check_in_ticket(
+            outcome = check_in_ticket_outcome(
                 raw_secret,
                 actor=request.user,
                 request_meta=TicketRequestMeta(ip_address=client_ip(request)),
             )
         except (TypeError, ValidationError, PermissionDenied):
             error = "票据无效或当前活动尚未进入检票阶段。"
+        else:
+            checked_in_ticket = outcome.ticket
+            already_checked_in = outcome.already_checked_in
     response = render(
         request,
         "staff_panel/ticket_check_in.html",
-        {"error": error, "checked_in_ticket": checked_in_ticket},
+        {
+            "error": error,
+            "checked_in_ticket": checked_in_ticket,
+            "already_checked_in": already_checked_in,
+        },
     )
     return _no_store(response)
 
@@ -300,6 +310,7 @@ def check_in_page(request: HttpRequest) -> HttpResponse:
 @require_GET
 def detail_page(request: HttpRequest, ticket_id: int) -> HttpResponse:
     ticket = get_object_or_404(Ticket.objects.select_related("activity"), pk=ticket_id)
+    now = timezone.now()
     response = render(
         request,
         "staff_panel/ticket_detail.html",
@@ -309,9 +320,35 @@ def detail_page(request: HttpRequest, ticket_id: int) -> HttpResponse:
             "qr_data_uri": (
                 _qr_data_uri(request, ticket_credential(ticket)) if ticket.public_code else None
             ),
+            # GOAL §10.2/§12.6: rotating the credential revokes every session the leaked QR
+            # produced, but a *single* lost phone is its own incident. `revoke_ticket_session`
+            # has existed as a service without any way to reach it from the door.
+            "access_sessions": [
+                {
+                    "session": session,
+                    "is_live": session.revoked_at is None and session.expires_at > now,
+                }
+                for session in TicketAccessSession.objects.filter(ticket=ticket).order_by(
+                    "-created_at", "-pk"
+                )[:20]
+            ],
+            "now": now,
         },
     )
     return _no_store(response)
+
+
+@staff_required
+@require_POST
+def revoke_session_page(request: HttpRequest, session_id: int):
+    session = get_object_or_404(TicketAccessSession.objects.select_related("ticket"), pk=session_id)
+    try:
+        revoke_ticket_session(session, actor=request.user, note=request.POST.get("note", ""))
+    except ValidationError as error:
+        messages.error(request, str(error))
+    else:
+        messages.success(request, "该浏览器会话已吊销，设备需要重新扫码才能继续。")
+    return redirect("ticket_staff:detail", ticket_id=session.ticket_id)
 
 
 @admin_required
@@ -406,14 +443,27 @@ def issue(request: HttpRequest) -> JsonResponse:
 def check_in(request: HttpRequest) -> JsonResponse:
     try:
         payload = _json_payload(request)
-        ticket = check_in_ticket(
+        outcome = check_in_ticket_outcome(
             _credential_from_payload(payload),
             actor=request.user,
             request_meta=TicketRequestMeta(ip_address=client_ip(request)),
         )
     except (KeyError, TypeError, ValueError, RequestBodyTooLarge, ValidationError):
         return _invalid_response()
-    return _no_store(JsonResponse({"ticket_id": ticket.pk, "state": ticket.state}))
+    ticket = outcome.ticket
+    # GOAL §10.3: the door shows three states, so the scanner has to be told which of the
+    # two successes this was. `checked_in_at` is what lets it answer "already went in at
+    # 19:04" rather than repeating a bare "success" for a second person.
+    return _no_store(
+        JsonResponse(
+            {
+                "ticket_id": ticket.pk,
+                "state": ticket.state,
+                "already_checked_in": outcome.already_checked_in,
+                "checked_in_at": ticket.checked_in_at.isoformat() if ticket.checked_in_at else None,
+            }
+        )
+    )
 
 
 @admin_required

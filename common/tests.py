@@ -31,6 +31,14 @@ from django.http import Http404, HttpRequest
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
+from entry_access.services import (
+    create_entry_point,
+    issue_access_grant,
+    redeem_access_grant,
+    revoke_access_grant,
+    revoke_ephemeral_session,
+)
 from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, StaffNote, SubmissionFile
@@ -49,12 +57,17 @@ from singer_contest.models import (
 )
 from tests.helpers import postgresql_only
 from voting.models import VoteOption, VoteRecord, VoteSession
+from voting.testing import create_legacy_vote_record
 
 from common.audit import client_ip
 from common.authority import (
+    ACCESS_GRANT_STATE,
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    EPHEMERAL_SESSION_STATE,
+    GROUP_STAGE_STATE,
+    RETENTION_CLEANUP,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
@@ -581,6 +594,34 @@ class M1StageResultTestDataCleanupTests(TestCase):
 
         with self.assertRaises(PermissionDenied):
             leave_test_mode(self.activity, operator=self.operator)
+
+    def test_group_stage_draw_is_residue_and_is_cleared_not_promoted(self):
+        """The rehearsal's group draw is a verified result (GOAL §6.4), not configuration.
+
+        It was invisible to all three lifecycle functions: not counted, not cleared, and
+        not promoted either — so a FORMAL activity could inherit the fabricated draw while
+        the marker contradicted its lifecycle.
+        """
+        from singer_contest.models import Group, GroupStage
+
+        with authority_write(GROUP_STAGE_STATE):
+            stage = GroupStage.objects.create(
+                activity=self.activity, stage_key="chorus", name="合唱", is_test_data=True
+            )
+            Group.objects.create(stage=stage, name="A组", group_order=1, is_test_data=True)
+
+        counts = get_test_data_counts(self.activity)
+        self.assertEqual(counts["group_stages"], 1)
+        self.assertEqual(counts["groups"], 1)
+        with self.assertRaises(PermissionDenied):
+            leave_test_mode(self.activity, operator=self.operator)
+
+        leave_test_mode(self.activity, operator=self.operator, clear=True, reason="彩排清理")
+
+        self.assertFalse(GroupStage.objects.filter(activity=self.activity).exists())
+        self.assertFalse(Group.objects.filter(stage__activity=self.activity).exists())
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
 
 
 class ActivityLifecycleBulkWriteTests(TestCase):
@@ -1541,7 +1582,7 @@ class DemoSeedCommandTests(TestCase):
         vote_session = VoteSession.objects.get(name="Demo Audience Choice")
         vote_option = VoteOption.objects.get(vote_session=vote_session, sort_order=1)
         seeded_award = Award.objects.get(name="Demo First Place")
-        unowned_record = VoteRecord.objects.create(
+        unowned_record = create_legacy_vote_record(
             vote_session=vote_session,
             vote_option=vote_option,
             browser_session_key="unowned-browser-session",
@@ -1711,6 +1752,26 @@ class AppBackupVerificationTests(TestCase):
         self.assertGreaterEqual(counts["activities"], 1)
         self.assertEqual(counts["registrations"], 1)
 
+    def test_the_manifest_counts_every_table(self):
+        """A hand-written list is a promise nobody can keep.
+
+        Seventeen of the ~57 tables were counted item by item, so a new model's rows were
+        covered only by `pg_restore --exit-on-error` — which proves the dump restored, not
+        that its rows are all there. The manifest now enumerates the model registry, and
+        this is the contract that keeps it that way.
+        """
+        from django.apps import apps
+
+        from common.management.commands.backup_artflow import count_models
+
+        expected = {
+            f"{model._meta.app_label}.{model._meta.model_name}"
+            for model in apps.get_models()
+            if not model._meta.proxy and not model._meta.auto_created
+        }
+
+        self.assertEqual(expected - set(count_models()), set())
+
     def test_media_content_digest_is_stable_and_sensitive_to_content(self):
         root = Path(self._media.name)
         (root / "a.txt").write_text("hello", encoding="utf-8")
@@ -1773,8 +1834,10 @@ class AppBackupVerificationTests(TestCase):
         manifest_path = next(output_root.glob("backup-*/manifest.json"))
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["git_sha"], release_sha)
-        self.assertEqual(
-            set(manifest["counts"]),
+        # The human labels the older manifests used are kept (a manifest is compared by
+        # label), and `test_the_manifest_counts_every_table` is what asserts the rest of the
+        # registry is covered too.
+        self.assertTrue(
             {
                 "activities",
                 "registrations",
@@ -1793,7 +1856,8 @@ class AppBackupVerificationTests(TestCase):
                 "tickets",
                 "ticket_access_sessions",
                 "audit_logs",
-            },
+            }
+            <= set(manifest["counts"])
         )
 
     def test_backup_artflow_holds_and_releases_the_global_write_barrier(self):
@@ -2001,6 +2065,225 @@ class RetentionCleanupCommandTests(TestCase):
                 staff.username,
                 "--confirm",
             )
+
+
+class PruneRetainedStateCommandTests(TestCase):
+    """GOAL §19.2: the PII and transport rows around the facts must not live forever."""
+
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="prune-admin", password="pass", role=User.Role.ADMIN
+            )
+        self.activity = Activity.objects.create(
+            title="Prune activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="prune-singer", password="pass"),
+            name="Prune singer",
+            student_id="prune-001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.old_note = StaffNote.objects.create(
+            singer_registration=self.singer, content="临时备注", created_by=self.admin
+        )
+        StaffNote.objects.filter(pk=self.old_note.pk).update(
+            created_at=timezone.now() - timedelta(days=200)
+        )
+        self.old_audit = AuditLog.objects.create(
+            operator=self.admin,
+            action_type=AuditLog.ActionType.LOGIN,
+            target="accounts",
+            ip_address="203.0.113.9",
+        )
+        AuditLog.objects.filter(pk=self.old_audit.pk).update(
+            created_at=timezone.now() - timedelta(days=200)
+        )
+        self.fresh_audit = AuditLog.objects.create(
+            operator=self.admin,
+            action_type=AuditLog.ActionType.LOGIN,
+            target="accounts",
+            ip_address="203.0.113.10",
+        )
+
+    def _prune(self, *extra):
+        call_command(
+            "prune_retained_state",
+            "--older-than-days",
+            "90",
+            "--actor-username",
+            self.admin.username,
+            "--confirm",
+            *extra,
+        )
+
+    def test_requires_admin_and_confirmation(self):
+        with self.assertRaises(CommandError):
+            call_command(
+                "prune_retained_state",
+                "--older-than-days",
+                "90",
+                "--actor-username",
+                self.admin.username,
+            )
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="prune-staff", password="pass", role=User.Role.STAFF
+            )
+        with self.assertRaises(CommandError):
+            call_command(
+                "prune_retained_state",
+                "--older-than-days",
+                "90",
+                "--actor-username",
+                staff.username,
+                "--confirm",
+            )
+
+    def test_dry_run_changes_nothing(self):
+        call_command(
+            "prune_retained_state",
+            "--older-than-days",
+            "90",
+            "--actor-username",
+            self.admin.username,
+            "--dry-run",
+            stdout=StringIO(),
+        )
+
+        self.old_audit.refresh_from_db()
+        self.assertEqual(self.old_audit.ip_address, "203.0.113.9")
+        self.assertTrue(StaffNote.objects.filter(pk=self.old_note.pk).exists())
+
+    def test_prune_clears_old_audit_ips_and_old_notes_but_keeps_the_trail(self):
+        self._prune()
+
+        self.old_audit.refresh_from_db()
+        self.assertEqual(self.old_audit.ip_address, None)
+        self.assertTrue(AuditLog.objects.filter(pk=self.old_audit.pk).exists())
+        self.fresh_audit.refresh_from_db()
+        self.assertEqual(self.fresh_audit.ip_address, "203.0.113.10")
+        self.assertFalse(StaffNote.objects.filter(pk=self.old_note.pk).exists())
+
+    def test_purging_audit_logs_is_opt_in(self):
+        self._prune()
+        self.assertTrue(AuditLog.objects.filter(pk=self.old_audit.pk).exists())
+
+        self._prune("--purge-audit-logs")
+
+        self.assertFalse(AuditLog.objects.filter(pk=self.old_audit.pk).exists())
+
+    def test_expired_grants_and_sessions_are_pruned_with_their_bindings(self):
+        issued = issue_access_grant(
+            create_entry_point(
+                self.activity,
+                kind=EntryPoint.Kind.JUDGE,
+                label="Prune judge entry",
+                actor=self.admin,
+            ),
+            actor=self.admin,
+            ttl=timedelta(minutes=30),
+        )
+        redeemed = redeem_access_grant(issued.token)
+        # `expires_at` is not a lifecycle field, so the fixture ages the row through the
+        # *revocation* the models do allow, and then moves that timestamp back.
+        revoke_access_grant(issued.grant, actor=self.admin)
+        revoke_ephemeral_session(redeemed.session, actor=self.admin)
+        old = timezone.now() - timedelta(days=200)
+        with authority_write(ACCESS_GRANT_STATE):
+            AccessGrant.objects.filter(pk=issued.grant.pk).update(revoked_at=old)
+        with authority_write(EPHEMERAL_SESSION_STATE):
+            EphemeralSession.objects.filter(pk=redeemed.session.pk).update(revoked_at=old)
+
+        self._prune()
+
+        self.assertFalse(AccessGrant.objects.filter(pk=issued.grant.pk).exists())
+        self.assertFalse(EphemeralSession.objects.filter(pk=redeemed.session.pk).exists())
+
+    def test_retention_cleanup_scope_is_what_lets_the_command_delete_them(self):
+        """The guard has to stay: a bare queryset delete is still refused."""
+        issued = issue_access_grant(
+            create_entry_point(
+                self.activity,
+                kind=EntryPoint.Kind.SCANNER,
+                label="Prune scanner entry",
+                actor=self.admin,
+            ),
+            actor=self.admin,
+            ttl=timedelta(minutes=30),
+        )
+
+        with self.assertRaises(ValidationError):
+            AccessGrant.objects.filter(pk=issued.grant.pk).delete()
+        with authority_write(RETENTION_CLEANUP):
+            AccessGrant.objects.filter(pk=issued.grant.pk).delete()
+
+
+class MediaGatewayIndexContractTests(TestCase):
+    def test_every_path_the_gateway_looks_up_is_indexed(self):
+        """`controlled_media` resolves each `/media/...` request by exact stored path.
+
+        Those columns are plain FileFields, so without an index the one query every media
+        byte goes through scanned the whole table.
+        """
+        from archive.models import ArchivePackage
+        from exports.models import ExportTask, GeneratedDocument
+        from files.models import SubmissionFile
+        from public_portal.models import PublicMedia, PublicPost
+
+        for model, field in (
+            (SubmissionFile, "file"),
+            (SubmissionFile, "derivative"),
+            (PublicPost, "cover_image"),
+            (PublicMedia, "image"),
+            (GeneratedDocument, "file"),
+            (ExportTask, "file"),
+            (ArchivePackage, "file"),
+        ):
+            with self.subTest(model=model.__name__, field=field):
+                indexed = model._meta.get_field(field).db_index or any(
+                    field in list(index.fields) for index in model._meta.indexes
+                )
+                self.assertTrue(
+                    indexed,
+                    f"{model.__name__}.{field} is looked up by exact path but not indexed",
+                )
+
+
+class LayoutFixtureCommandTests(TestCase):
+    """The mobile layout gate can only walk pages the fixture can address.
+
+    `tests/e2e/layout-targets.ts` resolves `/staff/vote-sessions/{vote}/` and
+    `/staff/judges/round/{round}/control/` from this payload; a key it does not carry makes
+    both specs visit an empty path and silently measure the home page instead.
+    """
+
+    def test_the_fixture_carries_every_placeholder_the_gate_resolves(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            call_command("prepare_layout_e2e", "--output-file", str(path))
+            fixture = json.loads(path.read_text(encoding="utf-8"))
+
+        for key in (
+            "public_code",
+            "activity_id",
+            "round_id",
+            "singer_id",
+            "vote_session_id",
+            "session_key",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, fixture)
+                self.assertTrue(fixture[key])
 
 
 class ClientIpTests(TestCase):

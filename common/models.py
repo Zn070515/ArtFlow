@@ -82,6 +82,14 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # Every reader orders by ``-created_at`` and the two staff/domain screens narrow by
+        # ``target`` (group-stage history) or ``action_type``; with no index at all each of
+        # those was a full scan of a table that only ever grows.
+        indexes = [
+            models.Index(fields=["-created_at"], name="auditlog_created_at_idx"),
+            models.Index(fields=["target", "-created_at"], name="auditlog_target_idx"),
+            models.Index(fields=["action_type", "-created_at"], name="auditlog_action_idx"),
+        ]
 
     def __str__(self) -> str:
         return (

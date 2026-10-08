@@ -35,6 +35,17 @@ def _uses_ticket_entry(vote_session: VoteSession) -> bool:
     return vote_session.requires_ticket
 
 
+def _has_entry_passcode(vote_session: VoteSession) -> bool:
+    """True only when a *non-empty* passcode is configured.
+
+    The field is ``blank=True, default=""``, so "no passcode set" and "the passcode is the
+    empty string" were the same value: submitting an empty form matched an empty stored
+    passcode and walked straight into the ballot page. GOAL §9.4 keeps the passcode as a
+    credential for the legacy ticket-less path, so an unset one has to fail closed.
+    """
+    return bool((vote_session.passcode or "").strip())
+
+
 def _get_vote_session_for_public_request(request, pk):
     """Activity-lifecycle boundary for a public vote session.
 
@@ -78,6 +89,8 @@ def vote_entry(request, pk):
         passcode = request.POST.get("passcode", "").strip()
         if not _vote_rate_limit_decision(request, pk).allowed:
             error = "尝试次数过多，请稍后再试。"
+        elif not _has_entry_passcode(vote_session):
+            error = "该投票尚未设置现场口令，请联系工作人员。"
         elif passcode != vote_session.passcode:
             error = "口令错误"
         elif not vote_session.is_open or vote_session.is_locked:

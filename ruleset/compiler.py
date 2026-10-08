@@ -493,7 +493,33 @@ def _check_quota(
     ntype = node["type"]
     if ntype == "SELECT":
         src_size = prov[node["source"]]["size"]
-        if src_size is None:
+        # A `by`-scoped select takes `count` *per group*, so the bound that can actually be
+        # violated is the smallest group's capacity. Comparing against the whole pool — what
+        # this used to do — cannot fail for any per-group count below the total, which is
+        # every realistic one: "top 4 of each group" against a 15-person pool passed even
+        # when a group held three people. The group sizes are only known once the binding
+        # names a partitioned round (GOAL §6.1 keeps the draw itself outside ArtFlow, so a
+        # freeze may legitimately happen before the groups exist); without them the pool
+        # total is still a true, if weak, bound and the check below applies as before.
+        scoped = node.get("by")
+        # `by` names the group map (a PARTITION node); the capacity facts are keyed by that
+        # partition's own `by` value, which is what `_partition_by` resolves.
+        group_key = _partition_by(by_key, scoped)
+        capacity = (
+            ((ctx.get("groups") or {}).get(group_key) or {}).get("capacity") if group_key else None
+        )
+        if isinstance(capacity, list) and capacity:
+            if node["count"] > min(capacity):
+                issues.append(
+                    ReportIssue(
+                        "GROUP_QUOTA_EXCEEDED",
+                        Severity.ERROR,
+                        node["key"],
+                        "count",
+                        f"每组晋级数 {node['count']} 超过最小组容量 {min(capacity)}。",
+                    )
+                )
+        elif src_size is None:
             issues.append(
                 _quota_warn(node, "QUOTA_UNVERIFIABLE", "无法校验 TopN：源候选池大小未知。")
             )

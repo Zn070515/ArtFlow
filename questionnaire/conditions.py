@@ -10,7 +10,8 @@ conditions or a leaf comparison::
 appears **earlier** in the document (forward-only), which makes cyclic visibility and
 cyclic required-ness structurally impossible — the same discipline the flow DSL uses for
 node references. ``source: "context"`` reads a server-generated fact (``qualified.r3``,
-``activity.phase``, ``supplement.r2.accompaniment``); the browser can never supply it.
+``activity.phase``, ``group.member_count``); the browser can never supply it, and the key
+must be one some server fact actually produces (``CONTEXT_KEYS``).
 """
 
 from __future__ import annotations
@@ -26,6 +27,28 @@ UNARY_OPERATORS = frozenset({"empty", "not_empty"})
 SOURCES = frozenset({"answer", "context"})
 
 COMBINATORS = ("all", "any")
+
+# The server-generated context facts a condition may read (§P1), plus the one open-ended
+# family. The browser can never supply a context value, so a key that no server fact
+# produces is not "a condition that happens to be false": `evaluate_condition` reads
+# ``None``, the comparison is False, and the question stays hidden — or silently stops
+# being required — with nothing anywhere naming the typo. `qualified.<round_key>` is
+# declared by prefix because there is one key per bound round; the round keys themselves
+# are checked against the frozen binding in `cross_domain`.
+CONTEXT_KEYS = frozenset(
+    {
+        "activity.phase",
+        "group.stage",
+        "group.order",
+        "group.member_count",
+    }
+)
+CONTEXT_KEY_PREFIXES = ("qualified.",)
+
+
+def is_known_context_key(key: str) -> bool:
+    """True when some server fact can produce *key* (GOAL §P1)."""
+    return key in CONTEXT_KEYS or key.startswith(CONTEXT_KEY_PREFIXES)
 
 
 def is_blank(value) -> bool:
@@ -108,6 +131,11 @@ def parse_condition(node, *, prior_keys: frozenset[str] | set[str], where: str) 
     if source == "answer" and key not in prior_keys:
         # Forward-only: an answer condition may only look backwards.
         raise ValidationError(f"{where}：条件引用了未出现或后置的问题 {key!r}。")
+    if source == "context" and not is_known_context_key(key):
+        raise ValidationError(
+            f"{where}：条件引用了服务器不提供的上下文键 {key!r}"
+            f"（可用：{sorted(CONTEXT_KEYS)} 或 qualified.<轮次键>）。"
+        )
 
     out: dict = {"source": source, "key": key, "op": op}
     if op in UNARY_OPERATORS:

@@ -2006,6 +2006,7 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
     publishing a fabricated 0.
     """
     from voting.models import VoteOption, VoteRecord
+    from voting.services import valid_ticket_condition
 
     vote_keys = binding.get("vote_keys") or {}
     if not vote_keys:
@@ -2026,9 +2027,13 @@ def _source_vote_scores(activity, binding) -> dict[str, dict[str, Decimal]]:
         counts: dict[str, int] = {
             str(o.singer_id): 0 for o in VoteOption.objects.filter(vote_session_id=vs_pk)
         }
-        records = VoteRecord.objects.filter(
-            vote_session_id=vs_pk, is_test_data=test_flag
-        ).select_related("vote_option")
+        # Only *valid* ballots (§9.1 / §9.3): a ballot whose ticket was later revoked or
+        # voided stays on record as evidence but must not reach the official count.
+        records = (
+            VoteRecord.objects.filter(vote_session_id=vs_pk, is_test_data=test_flag)
+            .filter(valid_ticket_condition())
+            .select_related("vote_option")
+        )
         for rec in records:
             sid = str(rec.vote_option.singer_id)
             counts[sid] = counts.get(sid, 0) + 1
@@ -2282,6 +2287,29 @@ def _create_children(stage, result, singer_by_key, is_test):
 
 
 @transaction.atomic
+def _stage_award_materialization_needed(existing: list[Award], candidates: list) -> list:
+    """The candidates that do not yet have their official award from this stage result."""
+    covered = {award.source_award_decision_id for award in existing}
+    return [candidate for candidate in candidates if candidate.pk not in covered]
+
+
+def _retire_stage_awards(stage: StageResult) -> int:
+    """Delete the official awards one stage result produced, and report how many.
+
+    Only legal while the result is not CONFIRMED, which is exactly the unlock window: the
+    award guard refuses to touch a confirmed result's awards, so this is the one moment the
+    rows can be taken back — and it is the moment at which they stop being official, the
+    same reason the unlock path supersedes the result's public releases.
+    """
+    awards = Award.objects.filter(source_stage_result=stage)
+    count = awards.count()
+    if not count:
+        return 0
+    with _authorized_award_materialization():
+        awards.delete()
+    return count
+
+
 def materialize_stage_awards(stage: StageResult, *, operator) -> list[Award]:
     """Publish computed award candidates only as part of stage confirmation."""
     locked_stage = StageResult.objects.select_for_update().get(pk=stage.pk)
@@ -2291,10 +2319,17 @@ def materialize_stage_awards(stage: StageResult, *, operator) -> list[Award]:
         StageAwardDecision.objects.filter(stage_result=locked_stage).select_related("singer")
     )
     existing = list(Award.objects.filter(source_stage_result=locked_stage))
-    if existing:
+    current_ids = {candidate.pk for candidate in candidates}
+    # Returning whatever rows happen to exist — what the first version did — reported a set
+    # that is not this stage's result: an award whose decision a re-resolve replaced (its
+    # SET_NULL provenance already cleared) came back as the official one, and a decision that
+    # never got its award stayed unawarded for good. Only an exact match is the result.
+    settled = [award for award in existing if award.source_award_decision_id in current_ids]
+    missing = _stage_award_materialization_needed(settled, candidates)
+    if not missing and len(settled) == len(existing):
         return existing
     with _authorized_award_materialization():
-        return Award.objects.bulk_create(
+        created = Award.objects.bulk_create(
             [
                 Award(
                     activity=locked_stage.activity,
@@ -2305,9 +2340,10 @@ def materialize_stage_awards(stage: StageResult, *, operator) -> list[Award]:
                     source_award_decision=candidate,
                     source_node=candidate.source_node,
                 )
-                for candidate in candidates
+                for candidate in missing
             ]
         )
+    return [*settled, *created]
 
 
 # Outcome codes that carry a contestant forward into the round bound to that stage.
@@ -3141,13 +3177,19 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
         current_operator,
         note=f"解锁赛段结果：{note}",
     )
+    # The awards this result produced stop being official the moment its finality does —
+    # the same reason its public releases are superseded just above. They cannot be *marked*
+    # stale (Award carries no lifecycle status), and they can only be removed here: a
+    # confirmed result's awards are immutable by guard, and after a re-confirm the stranded
+    # rows would be indistinguishable from the current ones.
+    retired_awards = _retire_stage_awards(locked)
     AuditLog.objects.create(
         operator=current_operator,
         action_type=AuditLog.ActionType.UNLOCK_STAGE_RESULT,
         target=f"StageResult:{locked.pk}",
         old_value=StageResult.Status.CONFIRMED,
         new_value=StageResult.Status.READY_TO_CONFIRM,
-        note=note,
+        note=f"{note}；retired_awards={retired_awards}",
     )
     return locked
 

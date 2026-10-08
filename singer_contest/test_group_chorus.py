@@ -218,11 +218,15 @@ class GroupChorusStageServiceTests(TestCase):
         )
         self.assertEqual(stored.group_id, group.pk)
         self.assertEqual(SubmissionFile.objects.filter(group=group, is_current=True).count(), 1)
-        self.assertEqual(group_material_readiness(group), GroupReadiness.MISSING_MATERIAL)
+        # §6.7 / §6.9 make the accompaniment contract "audio exists OR video exists"; the
+        # legacy 合唱伴奏 row is the upload's transport, not a second approval gate (the
+        # video branch was already read that way).
+        self.assertEqual(group_material_readiness(group), GroupReadiness.READY)
         review_material_check(
             check, status=MaterialCheck.Status.APPROVED, note="音频清晰", actor=self.operator
         )
         self.assertEqual(group_material_readiness(group), GroupReadiness.READY)
+        # The stage itself is not archived-ready yet (nothing freezes it here).
         self.assertFalse(group_stage_readiness(stage)["ready"])
 
         with self.assertRaises(ValidationError):

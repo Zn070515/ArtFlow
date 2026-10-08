@@ -48,6 +48,7 @@ from ruleset.models import ContestRuleset, RulesetVersion
 from staff_panel.views import activity_material_requirements
 from tests.helpers import postgresql_only
 from voting.models import VoteSession
+from voting.testing import create_legacy_vote_record
 
 from .admin import ContestRoundAdmin, RoundEntryAdmin, RoundJudgeAdmin
 from .judge_authority import prepare_judge_panel
@@ -5405,7 +5406,7 @@ class BindingSourceHelperTests(TestCase):
         )
 
     def test_source_vote_scores_returns_raw_counts(self):
-        from voting.models import VoteOption, VoteRecord
+        from voting.models import VoteOption
 
         from .services import _source_vote_scores
 
@@ -5416,7 +5417,7 @@ class BindingSourceHelperTests(TestCase):
         ]
         # 2 + 1 + 1 votes across the three singers: raw counts, never a normalized score.
         for key, opt in (("a", opts[0]), ("b", opts[0]), ("c", opts[1]), ("d", opts[2])):
-            VoteRecord.objects.create(
+            create_legacy_vote_record(
                 vote_session=vs,
                 vote_option=opt,
                 browser_session_key=key,
@@ -6461,19 +6462,18 @@ class VoteBoundaryRegressionTests(TestCase):
         }
 
     def test_source_vote_scores_returns_raw_counts_not_normalized(self):
-        from voting.models import VoteRecord
 
         from .services import _source_vote_scores
 
         for i in range(3):
-            VoteRecord.objects.create(
+            create_legacy_vote_record(
                 vote_session=self.vs,
                 vote_option=self.options[self.singers[0].pk],
                 browser_session_key=f"mb{i}",
                 ip_address="127.0.0.1",
                 is_test_data=True,
             )
-        VoteRecord.objects.create(
+        create_legacy_vote_record(
             vote_session=self.vs,
             vote_option=self.options[self.singers[1].pk],
             browser_session_key="mb-solo",
@@ -6669,3 +6669,65 @@ class ShadowRehearsalTests(TestCase):
             .values_list("singer_id", flat=True)
         )
         self.assertEqual(list(handcard), [s.pk for s in self.singers[:3]])
+
+
+class ParticipantSubmissionHistoryTests(TestCase):
+    """GOAL §7.1: a main view shows the latest version, not every version side by side.
+
+    The participant's own submission page listed all of them with a "（当前）" badge, which
+    left them comparing their old uploads against the current one and guessing which the
+    staff would read. §7.3 puts history on its own route.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="history-singer", password="pass")
+        self.activity = Activity.objects.create(
+            title="History",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="History singer",
+            student_id="20261234",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.client.force_login(self.user)
+
+    def test_only_the_current_file_version_is_listed(self):
+        from files.models import SubmissionFile
+
+        stale = SubmissionFile.objects.create(
+            singer_registration=self.registration,
+            file="submissions/2026/10/stale.mp3",
+            original_name="旧版本.mp3",
+            file_size=10,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            version=1,
+            is_current=False,
+            is_test_data=True,
+        )
+        current = SubmissionFile.objects.create(
+            singer_registration=self.registration,
+            file="submissions/2026/10/current.mp3",
+            original_name="当前版本.mp3",
+            file_size=10,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            version=2,
+            is_current=True,
+            is_test_data=True,
+        )
+
+        response = self.client.get(
+            reverse("singer_contest:my_registration_detail", args=[self.registration.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, current.original_name)
+        self.assertNotContains(response, stale.original_name)

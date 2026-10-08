@@ -20,7 +20,7 @@ from questionnaire.schema import FILE_TYPE
 
 from .imaging import IMAGE_EXTENSIONS, sanitize_upload
 from .models import MaterialCheck, MaterialRequirement, SubmissionFile
-from .policies import FILE_PURPOSE_POLICIES, effective_file_policy
+from .policies import FILE_PURPOSE_POLICIES, effective_file_policy, file_purpose_policy
 
 VIDEO_PURPOSES = (
     SubmissionFile.Purpose.BACKGROUND_VIDEO,
@@ -231,6 +231,34 @@ class FileSlotStale(ValidationError):
 
 
 @transaction.atomic
+def _purpose_for_upload(purposes, uploaded_file, *, where: str) -> str:
+    """Which of *purposes* this upload is, decided from the upload itself.
+
+    A question may accept more than one purpose — the chorus accompaniment is "audio OR
+    video" (GOAL §6.7) — and the browser never names a purpose (the server owns that), so
+    the purpose is the accepted one whose policy allows this file's extension. A
+    single-purpose caller gets that purpose back unchanged, which is every caller that
+    does not declare an alternative.
+    """
+    accepted = [purpose for purpose in purposes if purpose]
+    if len(accepted) <= 1:
+        return accepted[0] if accepted else ""
+    extension = Path(getattr(uploaded_file, "name", "") or "").suffix.lower()
+    for purpose in accepted:
+        if extension in file_purpose_policy(purpose).extensions:
+            return purpose
+    raise ValidationError(f"{where}：上传的文件类型不在允许范围内。")
+
+
+def questionnaire_file_purpose(config: dict, uploaded_file) -> str:
+    """The purpose a questionnaire file answer takes, from the question's own contract."""
+    return _purpose_for_upload(
+        [config.get("purpose"), *(config.get("accepts") or [])],
+        uploaded_file,
+        where=config.get("label") or "该题目",
+    )
+
+
 def _store_file(
     *,
     owner,
@@ -290,7 +318,16 @@ def _store_file(
     # upload where no current submission row yet exists to lock.
     locked_owner = type(owner).objects.select_for_update().get(pk=owner.pk)
     owner_filter = _owner_filter(locked_owner)
-    slot = _slot_filter(owner_filter, purpose=purpose, question_key=question_key)
+    # A questionnaire file answers a *question*, so the question is the slot: a question
+    # that accepts audio or video (GOAL §6.7) has one current file whichever branch the
+    # answer came from, and re-defining a question's purpose must replace what it held
+    # rather than leave both current. A legacy upload carries no question and keeps its
+    # purpose-scoped slot.
+    slot = (
+        {**owner_filter, "question_key": question_key}
+        if question_key
+        else _slot_filter(owner_filter, purpose=purpose, question_key="")
+    )
     if expected_current_version is not None:
         # Checked under the owner lock, so a concurrent upload cannot slip between the
         # comparison and the write that follows it.
@@ -420,7 +457,7 @@ def store_questionnaire_file(
     stored = _store_file(
         owner=registration,
         uploaded_file=uploaded_file,
-        purpose=config["purpose"],
+        purpose=questionnaire_file_purpose(config, uploaded_file),
         uploaded_by=actor,
         question_key=question_key,
         source_ruleset_version=version,
@@ -478,7 +515,7 @@ def store_questionnaire_group_file(
     stored = _store_file(
         owner=group,
         uploaded_file=uploaded_file,
-        purpose=config["purpose"],
+        purpose=questionnaire_file_purpose(config, uploaded_file),
         uploaded_by=current_actor,
         question_key=question_key,
         source_ruleset_version=version,
@@ -508,6 +545,11 @@ def delete_submission_file(submission_file: SubmissionFile) -> None:
     owner_filter = _owner_filter(owner)
     storage = submission_file.file.storage
     stored_name = submission_file.file.name
+    # GOAL §19.3 keeps a private original and its public derivative as two objects, so
+    # deleting the row has to delete both files. Only the original was removed here, which
+    # left the metadata-free rendition in storage forever with no row pointing at it — the
+    # replacement path below already knew to clean its stale derivative.
+    derivative_name = submission_file.derivative.name if submission_file.derivative else ""
     was_current = submission_file.is_current
     purpose = submission_file.file_purpose
     question_key = submission_file.question_key
@@ -515,7 +557,12 @@ def delete_submission_file(submission_file: SubmissionFile) -> None:
     if was_current:
         replacement = (
             SubmissionFile.objects.select_for_update()
-            .filter(**_slot_filter(owner_filter, purpose=purpose, question_key=question_key))
+            .filter(**{**owner_filter, "question_key": question_key})
+            .order_by("-version", "-pk")
+            .first()
+            if question_key
+            else SubmissionFile.objects.select_for_update()
+            .filter(**_slot_filter(owner_filter, purpose=purpose, question_key=""))
             .order_by("-version", "-pk")
             .first()
         )
@@ -524,6 +571,8 @@ def delete_submission_file(submission_file: SubmissionFile) -> None:
             replacement.save(update_fields=["is_current"])
     if stored_name:
         transaction.on_commit(partial(delete_storage_object, storage, stored_name))
+    if derivative_name:
+        transaction.on_commit(partial(delete_storage_object, storage, derivative_name))
 
 
 # Legacy. The fallback material table for a singer activity that has neither configured
@@ -672,8 +721,13 @@ def _reset_matching_check(owner, purpose, *, question_key=""):
     if not purpose:
         return
     owner_filter = _owner_filter(owner)
-    matching = MaterialCheck.objects.filter(**owner_filter, file_purpose=purpose)
-    matching = matching.filter(question_key=question_key)
+    if question_key:
+        # A questionnaire upload is identified by its question: the file's purpose may be
+        # either branch of an "audio OR video" question (§6.7), so matching on the purpose
+        # would miss the check the upload actually supersedes.
+        matching = MaterialCheck.objects.filter(**owner_filter, question_key=question_key)
+    else:
+        matching = MaterialCheck.objects.filter(**owner_filter, file_purpose=purpose)
     matching.update(
         status=MaterialCheck.Status.UPLOADED,
         review_note="",
@@ -726,7 +780,11 @@ def reconcile_questionnaire_material_checks(*, registration, version, plan):
             continue
         key = question["key"]
         seen.add(key)
-        purpose = (question.get("file") or {}).get("purpose") or ""
+        file_config = question.get("file") or {}
+        purpose = file_config.get("purpose") or ""
+        # The alternatives an "audio OR video" question also accepts (§6.7), so the check
+        # can validate whichever branch the answer arrived as.
+        accepted = list(file_config.get("accepts") or [])
         value = resolve_question_value(
             question, answers=answers, registration=registration, files=present
         )
@@ -742,10 +800,14 @@ def reconcile_questionnaire_material_checks(*, registration, version, plan):
             "sort_order": index,
             "item_name": question["label"],
             "file_purpose": purpose,
+            "accepted_file_purposes": accepted,
             "required": bool(question.get("required")),
             "source_ruleset_version": version,
         }
-        if existing is not None and existing.file_purpose != purpose:
+        if existing is not None and (
+            existing.file_purpose != purpose
+            or list(existing.accepted_file_purposes or []) != accepted
+        ):
             # The question no longer asks for the material the check was approved for.
             defaults["status"] = (
                 MaterialCheck.Status.UPLOADED if satisfied else MaterialCheck.Status.MISSING
@@ -803,7 +865,11 @@ def reconcile_group_questionnaire_material_checks(*, group, version, plan):
             continue
         key = question["key"]
         seen.add(key)
-        purpose = (question.get("file") or {}).get("purpose") or ""
+        file_config = question.get("file") or {}
+        purpose = file_config.get("purpose") or ""
+        # The alternatives an "audio OR video" question also accepts (§6.7), so the check
+        # can validate whichever branch the answer arrived as.
+        accepted = list(file_config.get("accepts") or [])
         value = resolve_question_value(question, answers=answers, registration=None, files=present)
         satisfied = bool(purpose) and key in present
         if not purpose:
@@ -813,10 +879,15 @@ def reconcile_group_questionnaire_material_checks(*, group, version, plan):
             "sort_order": index,
             "item_name": question["label"],
             "file_purpose": purpose,
+            "accepted_file_purposes": accepted,
             "required": bool(question.get("required")),
             "source_ruleset_version": version,
         }
-        if existing is None or existing.file_purpose != purpose:
+        if (
+            existing is None
+            or existing.file_purpose != purpose
+            or list(existing.accepted_file_purposes or []) != accepted
+        ):
             defaults["status"] = (
                 MaterialCheck.Status.UPLOADED if satisfied else MaterialCheck.Status.MISSING
             )
@@ -1060,7 +1131,11 @@ def submit_participant_material_for_check(
     stored = _store_file(
         owner=locked_owner,
         uploaded_file=uploaded_file,
-        purpose=locked_check.file_purpose,
+        purpose=_purpose_for_upload(
+            locked_check.accepted_file_purposes or [locked_check.file_purpose],
+            uploaded_file,
+            where=locked_check.item_name or "该材料项",
+        ),
         uploaded_by=current_actor,
         question_key=locked_check.question_key,
         source_ruleset_version=locked_check.source_ruleset_version,

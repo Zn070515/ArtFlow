@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Any
 
 from common.authority import (
     TEST_DATA_CLEANUP,
+    VOTE_BALLOT_WRITE,
     VOTE_SCORING_RULE,
     VOTE_SESSION_STATE,
     AuthorityQuerySetMixin,
@@ -31,6 +32,24 @@ def _ensure_vote_session_mutable(vote_session_id: int | None) -> None:
         return
     if VoteSession._base_manager.filter(pk=vote_session_id, is_locked=True).exists():
         raise ValidationError("已锁定投票的原始记录不可直接写入。")
+
+
+def _ensure_ballot_write_authorized() -> None:
+    """A ballot and its choices are written only by the audited voting service.
+
+    GOAL §8.4 makes a ballot the raw audience fact a stage result is computed from, and
+    GOAL §9.6 makes ``Ticket + VoteSession`` its whole identity. The previous guard only
+    fired once the session was already locked, so the window between "voting closed"
+    (``close_vote_session``) and "results locked" (the Activity lock) accepted a bare
+    ``VoteBallot.objects.create(...)``/``VoteRecord.objects.create(...)`` with no ticket
+    check, no session-state check and no audit — a fabricated vote sitting in the raw
+    facts the resolver reads. Like ``STAGE_RESULT_RESOLVE`` this is an anti-misuse
+    boundary, not a cryptographic proof: it makes "this ballot came from ``submit_ballot``"
+    an explicit contract, and direct ORM writers (rehearsal fixtures, test-data cleanup)
+    have to say so out loud.
+    """
+    if not authority_authorized(VOTE_BALLOT_WRITE):
+        raise ValidationError("原始投票记录只能通过投票服务写入（voting.services.submit_ballot）。")
 
 
 def _ensure_vote_option_mutable(vote_session_id: int | None) -> None:
@@ -75,7 +94,25 @@ def _ensure_vote_session_origins(*session_ids: int | None) -> None:
         _ensure_vote_session_mutable(session_id)
 
 
+# The fields that define what a bound vote session *means* to a frozen ruleset. A frozen
+# binding names the session by pk, so anything that changes its meaning afterwards silently
+# rewrites frozen authority: `purpose` decides whether the ballots are a selection or a
+# scored component, `selection_type`/`max_selections` decide what a ballot may contain, and
+# `requires_ticket` decides who may cast one. Operational fields (name, window, passcode)
+# are not in the set — changing them does not redefine the vote.
+_FROZEN_AUTHORITY_FIELDS = frozenset(
+    {"purpose", "requires_ticket", "selection_type", "max_selections"}
+)
+
+
 def _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id: int | None) -> None:
+    """Reject redefining a vote session a frozen ruleset version already binds.
+
+    The binding names the session by pk, so the ruleset's authority is only as stable as
+    the session's meaning: `purpose`, `selection_type`, `max_selections` and
+    `requires_ticket` all change it (`_FROZEN_AUTHORITY_FIELDS`), which is why the set — not
+    just the ticket flag it started with — is what this checks.
+    """
     if not vote_session_id:
         return
     from ruleset.models import RulesetVersion
@@ -307,7 +344,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("投票开放后，投票配置不可直接修改。")
         if self.filter(is_locked=True).exists():
             raise ValidationError("投票锁定后，投票配置不可直接修改。")
-        if "requires_ticket" in fields:
+        if _FROZEN_AUTHORITY_FIELDS.intersection(fields):
             for vote_session_id in self.values_list("pk", flat=True):
                 _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id)
 
@@ -339,7 +376,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                         else "投票锁定后，投票配置不可直接修改。"
                     )
                     raise ValidationError(message)
-                if "requires_ticket" in fields:
+                if _FROZEN_AUTHORITY_FIELDS.intersection(fields):
                     _ensure_vote_session_not_bound_to_frozen_ruleset(obj.pk)
                     if obj.requires_ticket is False and _formal_singer_contest_activity(
                         obj.activity_id
@@ -370,7 +407,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                             else "投票锁定后，投票配置不可直接修改。"
                         )
                         raise ValidationError(message)
-                    if existing and "requires_ticket" in update_fields:
+                    if existing and _FROZEN_AUTHORITY_FIELDS.intersection(update_fields):
                         _ensure_vote_session_not_bound_to_frozen_ruleset(existing["pk"])
         for vote_session in objs:
             if _formal_singer_contest_activity(vote_session.activity_id):
@@ -512,12 +549,13 @@ class VoteSession(models.Model):
                     else "投票锁定后，投票配置不可直接修改。"
                 )
                 raise ValidationError(message)
-            if (
-                stored
-                and "requires_ticket" in compared_configuration_fields
-                and stored["requires_ticket"] != self.requires_ticket
-            ):
-                _ensure_vote_session_not_bound_to_frozen_ruleset(self.pk)
+            if stored and _FROZEN_AUTHORITY_FIELDS.intersection(compared_configuration_fields):
+                if any(
+                    stored[field] != getattr(self, field)
+                    for field in _FROZEN_AUTHORITY_FIELDS
+                    if field in compared_configuration_fields
+                ):
+                    _ensure_vote_session_not_bound_to_frozen_ruleset(self.pk)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -531,6 +569,7 @@ class VoteBallotQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("已锁定投票的原始记录不可直接修改。")
 
     def update(self, **kwargs):
+        _ensure_ballot_write_authorized()
         self._ensure_mutable()
         if "vote_session" in kwargs or "vote_session_id" in kwargs:
             _ensure_vote_session_origins(
@@ -541,10 +580,12 @@ class VoteBallotQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().update(**kwargs)
 
     def delete(self):
+        _ensure_ballot_write_authorized()
         self._ensure_mutable()
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
@@ -553,6 +594,7 @@ class VoteBallotQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         objs = list(objs)
         for obj in objs:
             _ensure_vote_session_origins(
@@ -607,6 +649,7 @@ class VoteBallot(models.Model):
         ]
 
     def save(self, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
@@ -614,6 +657,7 @@ class VoteBallot(models.Model):
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         _ensure_vote_session_origins(
             _stored_relation_id(self, "vote_session"), self.vote_session_id
         )
@@ -711,6 +755,7 @@ class VoteRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("已锁定投票的原始记录不可直接修改。")
 
     def update(self, **kwargs):
+        _ensure_ballot_write_authorized()
         self._ensure_mutable()
         if "vote_session" in kwargs or "vote_session_id" in kwargs:
             _ensure_vote_session_origins(
@@ -734,10 +779,12 @@ class VoteRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().update(**kwargs)
 
     def delete(self):
+        _ensure_ballot_write_authorized()
         self._ensure_mutable()
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         _reject_conflict_upsert(args, kwargs, self.model.__name__)
         objs = list(objs)
         for obj in objs:
@@ -750,6 +797,7 @@ class VoteRecordQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         self._ensure_mutable()
         objs = list(objs)
         for obj in objs:
@@ -814,12 +862,14 @@ class VoteRecord(models.Model):
             raise ValidationError("Vote record option must belong to the vote session.")
 
     def save(self, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         self.clean()
         _ensure_vote_session_origins(*_vote_record_session_origins(self))
         _ensure_vote_record_instance_consistent(self)
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
+        _ensure_ballot_write_authorized()
         _ensure_vote_session_origins(*_vote_record_session_origins(self))
         return super().delete(*args, **kwargs)
 

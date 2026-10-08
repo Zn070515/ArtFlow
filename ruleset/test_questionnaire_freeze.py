@@ -184,6 +184,48 @@ class QuestionnaireFreezeGateTests(_QuestionnaireFreezeBase):
             )
         self.assertIn("r9", str(caught.exception))
 
+    def test_freeze_rejects_a_qualification_condition_on_an_unbound_round(self):
+        """`qualified.r9` is well-shaped and still answers nothing.
+
+        A misspelled or optimistic round key made the condition False forever, hiding the
+        question (or dropping its required-ness) for the whole contest with no error — the
+        static vocabulary in `conditions` cannot catch it, because only the binding knows
+        which rounds exist.
+        """
+        ruleset = self.ruleset()
+        root = json.loads(_flow_definition())
+        questionnaire = _questionnaire()
+        question = questionnaire["pages"][0]["sections"][0]["questions"][1]
+        question["visible_if"] = {
+            "source": "context",
+            "key": "qualified.r9",
+            "op": "eq",
+            "value": True,
+        }
+        root["questionnaire"] = questionnaire
+        with self.assertRaises(ValidationError) as caught:
+            freeze_ruleset_version(
+                self.version(ruleset, json.dumps(root, ensure_ascii=False)), self._operator()
+            )
+        self.assertIn("r9", str(caught.exception))
+
+    def test_freeze_accepts_a_qualification_condition_on_a_bound_round(self):
+        ruleset = self.ruleset()
+        root = json.loads(_flow_definition())
+        questionnaire = _questionnaire()
+        question = questionnaire["pages"][0]["sections"][0]["questions"][1]
+        question["required_if"] = {
+            "source": "context",
+            "key": "qualified.r2",
+            "op": "eq",
+            "value": True,
+        }
+        root["questionnaire"] = questionnaire
+        frozen = freeze_ruleset_version(
+            self.version(ruleset, json.dumps(root, ensure_ascii=False)), self._operator()
+        )
+        self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+
     def test_a_bound_round_may_carry_material_without_a_score_node(self):
         """r2 is bound but no node scores it: a round that is only materials is legal, so
         the cross-domain check must not demand an ASSESS node."""

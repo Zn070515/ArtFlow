@@ -141,16 +141,41 @@ def _parse_file_config(question: dict, where: str) -> dict:
     )
     if not isinstance(purpose, str) or purpose not in FILE_PURPOSES:
         raise ValidationError(f"{where}：未注册的文件用途 {purpose!r}。")
+    # An "audio OR video" question (GOAL §6.7 makes the chorus accompaniment exactly that)
+    # needs a second accepted purpose: with only one, a group holding a video cannot answer
+    # the question at all. `purpose` stays the default and the display value; `accepts`
+    # names the alternatives, in preference order.
+    raw_accepts = config.get("accepts", [])
+    _require(
+        isinstance(raw_accepts, list) and all(isinstance(item, str) for item in raw_accepts),
+        f"{where}：file.accepts 必须是文件用途字符串列表。",
+    )
+    # The alternatives, in declaration order. Kept under their own key (rather than folded
+    # into a separate `purposes` list) so the normalized document re-parses to itself:
+    # `schema_hash` canonicalises the *parsed* form, and a normalizer that answered a
+    # different question the second time around would fail its own round trip.
+    purposes = [purpose, *raw_accepts]
+    unknown = sorted({item for item in purposes if item not in FILE_PURPOSES})
+    _require(not unknown, f"{where}：未注册的文件用途 {unknown}。")
+    _require(
+        len(set(purposes)) == len(purposes),
+        f"{where}：file.accepts 不能重复声明文件用途（也不要重复 purpose）。",
+    )
+    alternatives = list(raw_accepts)
     extensions = _as_list(config.get("extensions"), f"{where}：file.extensions 必须是列表。")
     _require(
         bool(extensions) and all(isinstance(e, str) for e in extensions),
         f"{where}：file.extensions 必须是非空字符串列表。",
     )
-    policy = FILE_PURPOSE_POLICIES[purpose]
+    policies = [FILE_PURPOSE_POLICIES[item] for item in purposes]
     normalized_extensions = [str(extension).strip().lower() for extension in extensions]
+    # Every extension has to be legal for one of the accepted purposes, and the size cap
+    # has to hold for all of them: the question is answered by whichever branch the
+    # participant actually brings, and the contract must be valid for each branch.
+    allowed = frozenset().union(*(policy.extensions for policy in policies))
     _require(
-        all(extension in policy.extensions for extension in normalized_extensions),
-        f"{where}：{purpose} 只允许使用 {', '.join(sorted(policy.extensions))}。",
+        all(extension in allowed for extension in normalized_extensions),
+        f"{where}：{purposes} 只允许使用 {', '.join(sorted(allowed))}。",
     )
     max_mb = config.get("max_mb")
     _require(
@@ -161,21 +186,28 @@ def _parse_file_config(question: dict, where: str) -> dict:
         isinstance(max_mb, int) and max_mb <= MAX_FILE_MB_HARD_LIMIT,
         f"{where}：file.max_mb={max_mb} 超过服务器上限 {MAX_FILE_MB_HARD_LIMIT} MB。",
     )
+    tightest = min(policy.max_mb for policy in policies)
     _require(
-        isinstance(max_mb, int) and max_mb <= policy.max_mb,
-        f"{where}：{purpose} 的单文件上限为 {policy.max_mb} MB。",
+        isinstance(max_mb, int) and max_mb <= tightest,
+        f"{where}：{purposes} 的单文件上限为 {tightest} MB。",
     )
     max_files = config.get("max_files", 1)
     _require(
         max_files == 1,
         f"{where}：V1 文件题只支持 max_files=1。",
     )
-    return {
+    out = {
         "purpose": purpose,
         "extensions": normalized_extensions,
         "max_mb": max_mb,
         "max_files": max_files,
     }
+    if alternatives:
+        # Only present when declared, so a questionnaire that does not use it canonicalises
+        # byte-identically to before: `schema_hash` is stored on every response, and moving
+        # it would tell every open page its questionnaire had changed.
+        out["accepts"] = alternatives
+    return out
 
 
 def _parse_choice_options(question: dict, where: str, key: str) -> list[dict]:

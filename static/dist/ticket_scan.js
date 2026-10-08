@@ -50,7 +50,13 @@
         }
         return trimmed;
     }
+    // The scanned credential, held in memory only. The fragment is scrubbed from the URL
+    // before the request (it is a bearer secret, and the address bar ends up in screenshots
+    // and history), but scrubbing it *only* there meant a dropped request on venue wifi left
+    // the viewer with nothing to retry — they had to walk back to the poster and re-scan.
+    let lastCredential = "";
     async function redeem(secret, status) {
+        const credential = normalizeCredential(secret);
         try {
             const csrf = document.querySelector('[name="csrfmiddlewaretoken"]');
             const response = await fetch(redeemEndpoint, {
@@ -59,14 +65,32 @@
                     "Content-Type": "application/json",
                     ...(csrf?.value ? { "X-CSRFToken": csrf.value } : {}),
                 },
-                body: JSON.stringify({ secret: normalizeCredential(secret) }),
+                body: JSON.stringify({ secret: credential }),
             });
-            const payload = response.ok ? await response.json() : null;
-            setStatus(status, response.ok ? ticketStateMessage(payload?.ticket_state) : failureMessage, response.ok ? "success" : "error");
+            if (!response.ok) {
+                // The server answered: re-sending the same code will not change its mind.
+                lastCredential = "";
+                setRetryVisible(false);
+                setStatus(status, failureMessage, "error");
+                return;
+            }
+            const payload = await response.json();
+            lastCredential = "";
+            setRetryVisible(false);
+            setStatus(status, ticketStateMessage(payload?.ticket_state), "success");
         }
         catch {
-            setStatus(status, failureMessage, "error");
+            // A network failure, not a rejection: keep the credential so the retry button (or a
+            // second attempt) does not need the QR again.
+            lastCredential = credential;
+            setRetryVisible(true);
+            setStatus(status, "网络暂时不可用，请重试。", "error");
         }
+    }
+    function setRetryVisible(visible) {
+        if (!retryButton)
+            return;
+        retryButton.classList.toggle("hidden", !visible);
     }
     const root = document.querySelector("[data-ticket-scan-root]");
     if (!root)
@@ -74,6 +98,11 @@
     const status = document.querySelector("[data-ticket-scan-status]");
     const manualForm = root.querySelector("[data-ticket-manual-form]");
     const manualInput = root.querySelector("[name='secret']");
+    const retryButton = root.querySelector("[data-ticket-scan-retry]");
+    retryButton?.addEventListener("click", () => {
+        if (lastCredential)
+            void redeem(lastCredential, status);
+    });
     const startRedeem = (secret, scrubFragment) => {
         const normalized = secret.trim();
         if (!normalized) {

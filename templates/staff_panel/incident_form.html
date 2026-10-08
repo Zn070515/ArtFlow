@@ -47,6 +47,14 @@
             </select>
         </div>
         <div>
+            <label for="id_problem" class="block text-sm font-medium text-gray-700 mb-1">问题</label>
+            <textarea id="id_problem" name="problem" rows="2" placeholder="现场到底发生了什么" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ form_data.problem|default:"" }}</textarea>
+        </div>
+        <div>
+            <label for="id_action_taken" class="block text-sm font-medium text-gray-700 mb-1">采取动作</label>
+            <textarea id="id_action_taken" name="action_taken" rows="2" placeholder="当时实际做了什么处置" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">{{ form_data.action_taken|default:"" }}</textarea>
+        </div>
+        <div>
             <label for="id_resolution" class="block text-sm font-medium text-gray-700 mb-1">处理结果</label>
             <input id="id_resolution" type="text" name="resolution" value="{{ form_data.resolution|default:"" }}" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
         </div>

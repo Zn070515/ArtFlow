@@ -33,7 +33,9 @@ _JUDGE_SCORE_IP_LIMIT = 120
 _KNOWN_REASON_CODES = {
     "DUPLICATE_SCORE_FACT",
     "IDEMPOTENCY_CONFLICT",
+    "JUDGE_TERMINALS_FULL",
     "PANEL_CHANGED_MID_ROUND",
+    "PANEL_NOT_READY",
     "PERFORMANCE_NOT_SCORABLE",
     "ROUND_ON_HOLD",
     "RUBRIC_CONFIGURATION_INVALID",
@@ -135,8 +137,14 @@ def _body_payload(request: HttpRequest) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _reason_from_messages(error: ValidationError) -> str:
-    for message in error.messages:
+def _reason_from_messages(error: ValidationError | PermissionDenied) -> str:
+    """Pick the known reason code out of a domain error's messages.
+
+    The judge authority raises either class depending on which guard fired, and only
+    ``ValidationError`` carries ``messages`` (a ``PermissionDenied`` is a bare exception),
+    so the read is defensive in the same way ``staff_panel.domain_error_messages`` is.
+    """
+    for message in getattr(error, "messages", None) or []:
         if message in _KNOWN_REASON_CODES:
             return message
     return "INVALID_REQUEST"
@@ -186,8 +194,11 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
                 return response
     try:
         claimed = claim_judge_session(activity)
-    except (ValidationError, PermissionDenied):
-        return _error("JUDGE_TERMINALS_FULL", 409)
+    except (ValidationError, PermissionDenied) as error:
+        # Not every refusal is "the seats are taken": a paused panel (§12.6) and a round
+        # with no panel yet have their own reason codes, and the door has to tell them
+        # apart to say something actionable.
+        return _error(_reason_from_messages(error), 409)
     response = _no_store(
         JsonResponse(
             {

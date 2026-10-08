@@ -212,6 +212,24 @@ def _active_panel_snapshot(contest_round: ContestRound) -> RoundPanelSnapshot | 
     )
 
 
+def _current_panel_snapshot(contest_round: ContestRound) -> RoundPanelSnapshot | None:
+    """The round's live panel, ACTIVE or HOLD.
+
+    A paused panel (§12.6) is still this round's panel, so the question "is there already
+    a panel for this round?" has to include HOLD. Answering "no" and trying to open a
+    second one collides with ``judge_panel_snapshot_round_version`` instead of returning
+    the existing panel.
+    """
+    return (
+        RoundPanelSnapshot.objects.filter(
+            round=contest_round,
+            state__in=[RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD],
+        )
+        .order_by("-version")
+        .first()
+    )
+
+
 @transaction.atomic
 def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
     """Claim the first free prepared seat for the stable public judge entry."""
@@ -226,12 +244,19 @@ def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
         )
         .order_by("round_id", "-version")
     )
+    # Each refusal leads with its reason code (the same convention as
+    # `JudgeRoundOnHold("ROUND_ON_HOLD")`): the public claim endpoint forwards the code so
+    # the teacher's phone can say *why* it was turned away. The old strings all arrived as
+    # a bare “terminals full”, which sent someone whose panel was merely paused hunting for
+    # an occupied seat.
     if len(snapshots) != 1:
         if not snapshots:
-            raise ValidationError("当前尚未准备唯一的现场评委组。")
-        raise ValidationError("同一活动同时存在多个现场评委组，必须先关闭其他轮次。")
+            raise ValidationError(["PANEL_NOT_READY", "当前尚未准备唯一的现场评委组。"])
+        raise ValidationError(
+            ["PANEL_NOT_READY", "同一活动同时存在多个现场评委组，必须先关闭其他轮次。"]
+        )
     if snapshots[0].state != RoundPanelSnapshot.State.ACTIVE:
-        raise ValidationError("当前评委组已暂停，请等待工作人员恢复。")
+        raise ValidationError(["ROUND_ON_HOLD", "当前评委组已暂停，请等待工作人员恢复。"])
     now = timezone.now()
     for snapshot in snapshots:
         seats = (
@@ -317,7 +342,7 @@ def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
                 token=raw_session,
                 seat_label=seat_label,
             )
-    raise ValidationError("评委终端已全部连接，或当前尚未准备评委组。")
+    raise ValidationError(["JUDGE_TERMINALS_FULL", "评委终端已全部连接，或当前尚未准备评委组。"])
 
 
 def _panel_roster_digest(judges: list[Judge]) -> str:
@@ -399,7 +424,12 @@ def prepare_judge_panel(
     if contest_round.status == ContestRound.Status.LOCKED or contest_round.is_locked:
         raise PermissionDenied("已锁定轮次不能建立评委组快照。")
 
-    existing = _active_panel_snapshot(contest_round)
+    # A paused panel is still *this* round's panel (§12.6: HOLD keeps the panel and only
+    # stops formal submissions). Looking only for ACTIVE missed it, so a second press of
+    # "准备评委组" while the panel was on HOLD fell through to the create branch and hit
+    # `judge_panel_snapshot_round_version` — an IntegrityError rendered as a 500 — instead
+    # of the idempotent "already prepared" answer the ACTIVE case gives.
+    existing = _current_panel_snapshot(contest_round)
     if existing is not None:
         return existing
 
@@ -1289,20 +1319,6 @@ def submit_judge_score(
     )
     if seat.state != JudgeSeat.State.ASSIGNED:
         raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
-    if run_state.state == PerformanceRunState.State.HOLD:
-        raise JudgeRoundOnHold("ROUND_ON_HOLD")
-    if snapshot.state != RoundPanelSnapshot.State.ACTIVE:
-        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
-    if run_state.state not in {
-        PerformanceRunState.State.PERFORMING,
-        PerformanceRunState.State.ACCEPTING_SCORE,
-    }:
-        raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
-    if (
-        run_state.context_version != context_version
-        or run_state.current_performance_id != performance_id
-    ):
-        raise ValidationError("STALE_CONTEXT")
     performance = (
         Performance._base_manager.select_related("singer")
         .filter(
@@ -1312,9 +1328,8 @@ def submit_judge_score(
         )
         .first()
     )
-    if performance is None or performance.pk != run_state.current_performance_id:
+    if performance is None:
         raise ValidationError("PERFORMANCE_NOT_SCORABLE")
-
     payload_hash = _judge_payload_hash(
         locked=locked,
         snapshot=snapshot,
@@ -1324,6 +1339,11 @@ def submit_judge_score(
         payload=normalized_payload.canonical_payload,
         source=ScoreSource.DIRECT_JUDGE,
     )
+    # The receipt is resolved *before* the live-context gates. A retry of a command the
+    # server already committed is not a new submission: the operator has long since moved
+    # to the next contestant, so `context_version` no longer matches and the old order
+    # answered a successful replay with STALE_CONTEXT. The judge then saw "现场上下文已
+    # 变化，当前草稿未提交" for a score that was already recorded.
     receipt = (
         JudgeScoreReceipt.objects.select_for_update()
         .filter(command_id=normalized_command_id)
@@ -1345,6 +1365,21 @@ def submit_judge_score(
                 reason_code=receipt.result_code or "ACCEPTED",
                 status=receipt.status,
             )
+    if run_state.state == PerformanceRunState.State.HOLD:
+        raise JudgeRoundOnHold("ROUND_ON_HOLD")
+    if snapshot.state != RoundPanelSnapshot.State.ACTIVE:
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
+    if run_state.state not in {
+        PerformanceRunState.State.PERFORMING,
+        PerformanceRunState.State.ACCEPTING_SCORE,
+    }:
+        raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
+    if (
+        run_state.context_version != context_version
+        or run_state.current_performance_id != performance_id
+        or performance.pk != run_state.current_performance_id
+    ):
+        raise ValidationError("STALE_CONTEXT")
     existing = (
         ScoreRecord._base_manager.select_for_update()
         .filter(
@@ -1446,22 +1481,13 @@ def _submit_staff_bound_score(
     normalized_payload = _normalize_judge_score_payload(
         score_payload, contest_round=locked.contest_round
     )
-    snapshot = _active_panel_snapshot(locked.contest_round)
+    # ACTIVE *or* HOLD: a paused panel is still this round's panel, so asking only for the
+    # ACTIVE one made the §12.6 "现场暂停" answer unreachable — a hold was reported as
+    # "the panel changed" instead (and the ROUND_ON_HOLD branch below was dead code).
+    snapshot = _current_panel_snapshot(locked.contest_round)
     if snapshot is None:
         raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
-    if run_state.state == PerformanceRunState.State.HOLD:
-        raise JudgeRoundOnHold("ROUND_ON_HOLD")
-    if run_state.state not in {
-        PerformanceRunState.State.PERFORMING,
-        PerformanceRunState.State.ACCEPTING_SCORE,
-    }:
-        raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
-    if (
-        run_state.context_version != context_version
-        or run_state.current_performance_id != normalized_performance_id
-    ):
-        raise ValidationError("STALE_CONTEXT")
     performance = (
         Performance._base_manager.select_related("singer")
         .filter(
@@ -1493,6 +1519,8 @@ def _submit_staff_bound_score(
         payload=normalized_payload.canonical_payload,
         source=source,
     )
+    # Resolved before the live-context gates, for the same reason as the judge path: a
+    # replay of an already-committed command arrives with a context the run has moved past.
     receipt = (
         JudgeScoreReceipt.objects.select_for_update()
         .filter(command_id=normalized_command_id)
@@ -1514,6 +1542,20 @@ def _submit_staff_bound_score(
                 reason_code=receipt.result_code or "ACCEPTED",
                 status=receipt.status,
             )
+    if run_state.state == PerformanceRunState.State.HOLD:
+        raise JudgeRoundOnHold("ROUND_ON_HOLD")
+    if snapshot.state != RoundPanelSnapshot.State.ACTIVE:
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
+    if run_state.state not in {
+        PerformanceRunState.State.PERFORMING,
+        PerformanceRunState.State.ACCEPTING_SCORE,
+    }:
+        raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
+    if (
+        run_state.context_version != context_version
+        or run_state.current_performance_id != normalized_performance_id
+    ):
+        raise ValidationError("STALE_CONTEXT")
     if ScoreRecord._base_manager.filter(
         round=locked.contest_round,
         singer_id=performance.singer_id,

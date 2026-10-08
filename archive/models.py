@@ -22,6 +22,8 @@ class ArchivePackage(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # Same exact-path lookup as ExportTask.
+        indexes = [models.Index(fields=["file"], name="archivepackage_file_idx")]
         constraints = [
             models.UniqueConstraint(
                 fields=["activity", "version"],

@@ -158,7 +158,11 @@ def my_program_detail(request, pk):
         {
             "prog": prog,
             "can_edit": _participant_can_edit(prog),
-            "files": prog.files.all(),
+            # GOAL §7.1: a main view shows the latest version of each object, and §7.3 makes a
+            # separate route the place for history. Listing every version side by side
+            # here made the participant compare their own old uploads against the
+            # current one and then guess which the staff would read.
+            "files": prog.files.filter(is_current=True),
             "checks": prog.material_checks.all(),
             "uploadable_check_ids": participant_uploadable_check_ids(prog),
             "program_types": Program.ProgramType.choices,

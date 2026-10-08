@@ -81,6 +81,14 @@ class SubmissionFile(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        # `common.views.controlled_media` resolves every `/media/...` request by looking the
+        # stored path up exactly (`Q(file=path) | Q(derivative=path)`), and both columns are
+        # plain FileFields: without these the one query every media byte goes through was a
+        # full scan of the submissions table.
+        indexes = [
+            models.Index(fields=["file"], name="submissionfile_file_idx"),
+            models.Index(fields=["derivative"], name="submissionfile_derivative_idx"),
+        ]
         constraints = [
             # Two slots, not one: a legacy upload is unique per purpose, a questionnaire
             # upload is unique per question. Keeping them separate is what stops a second
@@ -259,6 +267,11 @@ class MaterialCheck(models.Model):
             "选手上传的用途以此为准，浏览器不得指定。"
         ),
     )
+    # The purposes this check accepts, in preference order, for a question whose contract
+    # is "audio OR video" (GOAL §6.7). `file_purpose` stays the first entry — the default a
+    # single-purpose check has always had, and what a display shows — so this is empty for
+    # every check that accepts exactly one kind of file.
+    accepted_file_purposes = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status, default=Status.MISSING)
     required = models.BooleanField(
         default=True,

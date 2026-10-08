@@ -69,6 +69,8 @@ class PublicPost(models.Model):
 
     class Meta:
         ordering = ["-is_pinned", "sort_order", "-created_at"]
+        # `cover_image` is the third exact-path lookup the media gateway makes.
+        indexes = [models.Index(fields=["cover_image"], name="publicpost_cover_idx")]
 
     @classmethod
     def published_public(cls):
@@ -232,6 +234,9 @@ class PublicMedia(models.Model):
 
     class Meta:
         ordering = ["sort_order", "pk"]
+        # Same reason as `SubmissionFile`: the media gateway finds a public image by exact
+        # path, on a column that had no index.
+        indexes = [models.Index(fields=["image"], name="publicmedia_image_idx")]
 
     def __str__(self):
         return self.caption or self.original_name or f"Media {self.pk}"

@@ -40,6 +40,8 @@ class ExportTask(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # The media gateway authorizes an export download by exact stored path.
+        indexes = [models.Index(fields=["file"], name="exporttask_file_idx")]
 
     if TYPE_CHECKING:
 
@@ -93,6 +95,8 @@ class GeneratedDocument(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # Same exact-path lookup as ExportTask.
+        indexes = [models.Index(fields=["file"], name="generateddocument_file_idx")]
 
     def __str__(self):
         return self.title or f"Document {self.pk}"

@@ -13,7 +13,12 @@ from datetime import timedelta
 from decimal import Decimal
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    VOTE_BALLOT_WRITE,
+    authority_write,
+)
 from core.models import Activity
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -92,21 +97,22 @@ class BallotShareConversionTests(TestCase):
         """Cast ``ballot_count`` ballots, each selecting ``ballot_selections`` singers."""
         for offset in range(ballot_count):
             key = f"browser-{index}-{offset}"
-            ballot = VoteBallot.objects.create(
-                vote_session=self.session,
-                browser_session_key=key,
-                ip_address="127.0.0.1",
-                is_test_data=True,
-            )
-            for option in ballot_selections:
-                VoteRecord.objects.create(
-                    ballot=ballot,
+            with authority_write(VOTE_BALLOT_WRITE):
+                ballot = VoteBallot.objects.create(
                     vote_session=self.session,
-                    vote_option=self.options[option],
                     browser_session_key=key,
                     ip_address="127.0.0.1",
                     is_test_data=True,
                 )
+                for option in ballot_selections:
+                    VoteRecord.objects.create(
+                        ballot=ballot,
+                        vote_session=self.session,
+                        vote_option=self.options[option],
+                        browser_session_key=key,
+                        ip_address="127.0.0.1",
+                        is_test_data=True,
+                    )
 
     def _binding(self, *, source="audience1", with_rule=True):
         binding = {"vote_keys": {source: self.session.pk}}

@@ -36,10 +36,22 @@ declare const ZXingBrowser: {
     return trimmed;
   }
 
-  function setStatus(message: string, tone: "info" | "success" | "error" = "info"): void {
+  function setStatus(
+    message: string,
+    tone: "info" | "success" | "warn" | "error" = "info",
+  ): void {
     if (!status) return;
     status.textContent = message;
     status.dataset.statusTone = tone;
+  }
+
+  /** " 19:04 已检票" when the server told us when, "" otherwise. */
+  function checkedInLabel(value: string | null | undefined): string {
+    if (!value) return "";
+    const at = new Date(value);
+    if (Number.isNaN(at.getTime())) return "";
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    return ` ${pad(at.getHours())}:${pad(at.getMinutes())} 已检票`;
   }
 
   async function checkIn(value: string): Promise<void> {
@@ -62,9 +74,18 @@ declare const ZXingBrowser: {
         },
         body: JSON.stringify({ credential: normalized }),
       });
-      const payload = await response.json().catch(() => null) as { state?: string } | null;
+      const payload = await response.json().catch(() => null) as {
+        state?: string;
+        already_checked_in?: boolean;
+        checked_in_at?: string | null;
+      } | null;
       if (!response.ok) {
         setStatus("无效票据，或票据已作废。", "error");
+      } else if (payload?.already_checked_in) {
+        // GOAL §10.3 asks the door for 成功 / 已检票 / 无效. An idempotent repeat is a
+        // different fact from a fresh admit, and calling it a success let one ticket be
+        // walked past two scanners without anyone noticing.
+        setStatus(`⚠ 该票此前已检票${checkedInLabel(payload.checked_in_at)}，本次未重复计入。`, "warn");
       } else if (payload?.state === "checked_in") {
         setStatus("✓ 检票成功，可继续扫描下一张。", "success");
       } else {

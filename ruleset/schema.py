@@ -183,6 +183,17 @@ def _validate_assess(name: str, node: dict) -> None:
     _require_one_of(name, node, "mode", ASSESS_MODES)
     _require_optional_non_negative_int(name, node, "trim_high")
     _require_optional_non_negative_int(name, node, "trim_low")
+    # A trim means something only to a trimmed mean. Declared next to `mode: "mean"` it was
+    # accepted and then ignored by both the compiler (which returned early) and the resolver
+    # (which averaged everything), so the ruleset said "drop the highest and lowest" and the
+    # score silently kept them — the §27-31 rule: implement it, or refuse it at the gate.
+    if node.get("mode") != "trimmed_mean" and (
+        node.get("trim_high") is not None or node.get("trim_low") is not None
+    ):
+        raise ValidationError(
+            f"Node {name}: 'trim_high'/'trim_low' only apply to mode 'trimmed_mean', "
+            f"got mode {node.get('mode')!r}."
+        )
     _require_optional_non_negative_int(name, node, "min_judges")
     _require_optional_non_empty_str(name, node, "vote_source")
     _require_one_of(name, node, "vote_purpose", VOTE_PURPOSES)
