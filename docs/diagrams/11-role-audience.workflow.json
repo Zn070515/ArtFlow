@@ -1,0 +1,367 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "观众使用手册 · Audience handbook",
+    "subtitle": "持票入场、扫码验证、检票后获得投票资格、在开放窗口投票；一张票每个场次一份选票",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a093d581dcd579ecb42c413c0936766a2c1553da"
+    },
+    "output": "11-role-audience.html"
+  },
+  "lanes": [
+    {
+      "id": "audience",
+      "label": "观众：入场与投票"
+    },
+    {
+      "id": "venue",
+      "label": "现场与服务：票券 + 投票"
+    }
+  ],
+  "phases": [
+    {
+      "id": "ticket",
+      "label": "验票入场",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "vote",
+      "label": "开放窗口投票",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "after",
+      "label": "投票之后",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "qualification",
+      "label": "资格只来自：有效票 + 已检票",
+      "lane": "venue",
+      "fromCol": 1,
+      "toCol": 2,
+      "variant": "security"
+    },
+    {
+      "id": "one_per_ticket",
+      "label": "唯一性：票 + 场次，不含设备与浏览器",
+      "lane": "venue",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "a_ticket",
+    "a_scan",
+    "a_check",
+    "a_entry",
+    "a_cast",
+    "a_done"
+  ],
+  "nodes": [
+    {
+      "id": "a_ticket",
+      "lane": "audience",
+      "col": 0,
+      "type": "external",
+      "label": "拿到入场票",
+      "sublabel": "印刷 / 电子都可",
+      "width": 124,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 182,
+          "end_line": 226,
+          "label": "issue_ticket"
+        }
+      ]
+    },
+    {
+      "id": "a_scan",
+      "lane": "audience",
+      "col": 1,
+      "type": "frontend",
+      "label": "扫码验证票据",
+      "sublabel": "/tickets/scan/",
+      "width": 124,
+      "sources": [
+        {
+          "path": "tickets/views.py",
+          "line": 155,
+          "end_line": 205,
+          "label": "scan 与 redeem"
+        }
+      ]
+    },
+    {
+      "id": "a_check",
+      "lane": "audience",
+      "col": 2,
+      "type": "cloud",
+      "label": "工作人员检票",
+      "sublabel": "成功 / 已检票 / 无效",
+      "width": 124,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 290,
+          "end_line": 336,
+          "label": "check_in_ticket_outcome"
+        }
+      ]
+    },
+    {
+      "id": "a_entry",
+      "lane": "audience",
+      "col": 3,
+      "type": "frontend",
+      "label": "打开投票入口",
+      "sublabel": "口令或票据资格",
+      "width": 124,
+      "sources": [
+        {
+          "path": "voting/views.py",
+          "line": 74,
+          "end_line": 116,
+          "label": "vote_entry"
+        }
+      ]
+    },
+    {
+      "id": "a_cast",
+      "lane": "audience",
+      "col": 4,
+      "type": "backend",
+      "label": "选人并提交",
+      "sublabel": "多选不超过上限",
+      "width": 124,
+      "sources": [
+        {
+          "path": "voting/views.py",
+          "line": 118,
+          "end_line": 194,
+          "label": "vote_cast"
+        }
+      ]
+    },
+    {
+      "id": "a_done",
+      "lane": "audience",
+      "col": 5,
+      "type": "frontend",
+      "label": "投票成功",
+      "sublabel": "看直播与公示",
+      "width": 124,
+      "sources": [
+        {
+          "path": "voting/views.py",
+          "line": 195,
+          "end_line": 208,
+          "label": "vote_done"
+        }
+      ]
+    },
+    {
+      "id": "v_session",
+      "lane": "venue",
+      "col": 1,
+      "type": "security",
+      "label": "浏览器会话",
+      "sublabel": "cookie 覆盖整场",
+      "width": 124,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 414,
+          "end_line": 450,
+          "label": "redeem_ticket"
+        }
+      ]
+    },
+    {
+      "id": "v_state",
+      "lane": "venue",
+      "col": 2,
+      "type": "database",
+      "label": "票据状态机",
+      "sublabel": "ISSUED → CHECKED_IN",
+      "width": 124,
+      "sources": [
+        {
+          "path": "tickets/models.py",
+          "line": 113,
+          "end_line": 150,
+          "label": "Ticket.State"
+        }
+      ]
+    },
+    {
+      "id": "v_window",
+      "lane": "venue",
+      "col": 3,
+      "type": "backend",
+      "label": "窗口与开关",
+      "sublabel": "开放中才可提交",
+      "width": 124,
+      "sources": [
+        {
+          "path": "voting/services.py",
+          "line": 371,
+          "end_line": 397,
+          "label": "open_vote_session"
+        }
+      ]
+    },
+    {
+      "id": "v_ballot",
+      "lane": "venue",
+      "col": 4,
+      "type": "database",
+      "label": "选票与选择",
+      "sublabel": "唯一性落数据库",
+      "width": 124,
+      "sources": [
+        {
+          "path": "voting/services.py",
+          "line": 75,
+          "end_line": 176,
+          "label": "submit_ballot"
+        }
+      ]
+    },
+    {
+      "id": "v_live",
+      "lane": "venue",
+      "col": 5,
+      "type": "external",
+      "label": "直播与公示",
+      "sublabel": "只读输出",
+      "width": 124,
+      "sources": [
+        {
+          "path": "public_portal/views.py",
+          "line": 63,
+          "end_line": 95,
+          "label": "activity_live"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "a_ticket",
+      "to": "a_scan",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_scan",
+      "to": "a_check",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_check",
+      "to": "a_entry",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_entry",
+      "to": "a_cast",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_cast",
+      "to": "a_done",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_scan",
+      "to": "v_session",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_check",
+      "to": "v_state",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_entry",
+      "to": "v_window",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_cast",
+      "to": "v_ballot",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_done",
+      "to": "v_live",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "观众的六步",
+      "items": [
+        "拿到票 → 现场扫码 → 工作人员检票 → 打开投票入口 → 选人提交 → 投票成功",
+        "检票后浏览器会记住票据资格，整场不需要反复扫码",
+        "票据可以重打；怀疑二维码泄漏时由管理员重置凭证，旧码与旧会话同时失效"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "投票资格从哪来",
+      "items": [
+        "有效票 + 已检票：两者缺一不可",
+        "正式歌手比赛不用现场口令，凭证就是你的票",
+        "被撤销的票立即失去资格，即使浏览器还留着 cookie"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "一张票一份选票",
+      "items": [
+        "唯一性是「票 + 场次」：同一张票可以在不同轮次各投一次",
+        "共用一部手机的两位持票观众都能投",
+        "不采集设备指纹、不做 IP 一票、不强制实名"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "窗口与结果",
+      "items": [
+        "只有开放中且在时间窗口内才能提交",
+        "投票一经提交不可修改；结果由赛制按支持率换算",
+        "公示结果与直播页是只读输出，观众不参与核定"
+      ]
+    }
+  ]
+}

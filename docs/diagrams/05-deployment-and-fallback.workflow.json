@@ -1,0 +1,188 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ArtFlow 部署与降级",
+    "subtitle": "Caddy 是唯一入口；PostgreSQL 是权威；Realtime / Redis 失效时回退到 HTTP 与人工 DR",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "bad157e4aa688513a58cb41b78b22ddc3baa68e6"
+    },
+    "output": "05-deployment-and-fallback.html"
+  },
+  "lanes": [
+    { "id": "entry", "label": "入口与客户端" },
+    { "id": "app", "label": "Django / Realtime" },
+    { "id": "data", "label": "PostgreSQL / Media" },
+    { "id": "operations", "label": "Staff 运行与恢复" },
+    { "id": "exceptions", "label": "降级 / HOLD", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "deploy", "label": "部署", "fromCol": 0, "toCol": 1, "variant": "emphasis" },
+    { "id": "operate", "label": "正常运行", "fromCol": 2, "toCol": 3 },
+    { "id": "degrade", "label": "局部故障", "fromCol": 4, "toCol": 4, "variant": "security" },
+    { "id": "restore", "label": "恢复与验收", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "single_public_entry", "label": "唯一公网入口", "lane": "entry", "fromCol": 0, "toCol": 2, "variant": "security" },
+    { "id": "authority_boundary", "label": "事实权威边界", "lane": "data", "fromCol": 2, "toCol": 5, "variant": "emphasis" },
+    { "id": "event_dr", "label": "现场 DR 预案", "lane": "operations", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": [
+    "caddy",
+    "web",
+    "postgres",
+    "health_check",
+    "event_run",
+    "backup",
+    "restore_verify"
+  ],
+  "nodes": [
+    {
+      "id": "caddy",
+      "lane": "entry",
+      "col": 0,
+      "type": "security",
+      "label": "Caddy",
+      "sublabel": "TLS、host 入口、/media 路由",
+      "width": 130,
+      "tag": "唯一发布端口",
+      "sources": [{ "path": "docs/deployment-production.md", "line": 58, "end_line": 61, "label": "生产入口约束" }]
+    },
+    {
+      "id": "web",
+      "lane": "app",
+      "col": 1,
+      "type": "backend",
+      "label": "Django Web",
+      "sublabel": "HTTP 页面与权威写入",
+      "sources": [{ "path": "docs/deployment-event.md", "line": 7, "end_line": 10, "label": "事件 Compose 网络" }]
+    },
+    {
+      "id": "realtime",
+      "lane": "app",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Realtime + Redis",
+      "sublabel": "presence / 推送增强",
+      "width": 120,
+      "sources": [{ "path": "docs/realtime-collaboration.md", "line": 3, "end_line": 21, "label": "Realtime 非权威" }]
+    },
+    {
+      "id": "postgres",
+      "lane": "data",
+      "col": 2,
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "状态、评分、投票、审计权威",
+      "width": 130,
+      "tag": "持久化卷",
+      "sources": [{ "path": "docs/deployment-production.md", "line": 27, "end_line": 34, "label": "生产持久化" }]
+    },
+    {
+      "id": "health_check",
+      "lane": "operations",
+      "col": 3,
+      "type": "security",
+      "label": "健康检查",
+      "sublabel": "/readyz + /healthz + 外部 HTTPS",
+      "width": 150,
+      "sources": [{ "path": "docs/deployment-production.md", "line": 157, "end_line": 159, "label": "readiness 探针" }]
+    },
+    {
+      "id": "event_run",
+      "lane": "operations",
+      "col": 4,
+      "type": "cloud",
+      "label": "现场 / 生产运行",
+      "sublabel": "移动端经 LAN / HTTPS 访问",
+      "width": 140,
+      "sources": [{ "path": "docs/deployment-event.md", "line": 50, "end_line": 65, "label": "事件启动与 LAN URL" }]
+    },
+    {
+      "id": "backup",
+      "lane": "data",
+      "col": 5,
+      "type": "cloud",
+      "label": "独立备份目标",
+      "sublabel": "数据库、媒体、文档",
+      "sources": [{ "path": "docs/deployment-production.md", "line": 130, "end_line": 151, "label": "备份与 HOLD" }]
+    },
+    {
+      "id": "restore_verify",
+      "lane": "operations",
+      "col": 5,
+      "type": "backend",
+      "label": "恢复演练与验收",
+      "sublabel": "doctor / check / 人工批准",
+      "yOffset": 70,
+      "width": 140,
+      "sources": [{ "path": "docs/production-rehearsal-runbook.md", "line": 36, "end_line": 45, "label": "PostgreSQL 恢复验收" }]
+    },
+    {
+      "id": "redis_loss",
+      "lane": "exceptions",
+      "col": 3,
+      "type": "messagebus",
+      "label": "Redis / Realtime 失效",
+      "sublabel": "不影响事实权威",
+      "width": 150,
+      "sources": [{ "path": "docs/realtime-collaboration.md", "line": 19, "end_line": 21, "label": "Redis 丢失边界" }]
+    },
+    {
+      "id": "http_polling",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "frontend",
+      "label": "回退 HTTP / polling",
+      "sublabel": "继续读取服务端状态",
+      "yOffset": -70,
+      "width": 140,
+      "sources": [{ "path": "docs/realtime-collaboration.md", "line": 3, "end_line": 7, "label": "HTTP fallback" }]
+    },
+    {
+      "id": "app_db_issue",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "security",
+      "label": "应用 / 数据库异常",
+      "sublabel": "暂停推进，保留现场证据",
+      "width": 130,
+      "sources": [{ "path": "docs/incident-response.md", "line": 9, "end_line": 9, "label": "事件审计字段" }]
+    },
+    {
+      "id": "staff_dr",
+      "lane": "operations",
+      "col": 5,
+      "type": "external",
+      "label": "Staff DR 继续活动",
+      "sublabel": "proxy / paper / 手工记录",
+      "width": 140,
+      "sources": [{ "path": "docs/production-rehearsal-runbook.md", "line": 107, "end_line": 107, "label": "投票与运行演练" }]
+    }
+  ],
+  "edges": [
+    { "from": "caddy", "to": "web", "variant": "emphasis", "role": "main" },
+    { "from": "web", "to": "postgres", "variant": "emphasis", "role": "main" },
+    { "from": "web", "to": "realtime", "variant": "dashed", "role": "async" },
+    { "from": "postgres", "to": "health_check", "variant": "emphasis", "role": "main" },
+    { "from": "health_check", "to": "event_run", "variant": "emphasis", "role": "main" },
+    { "from": "event_run", "to": "backup", "role": "main" },
+    { "from": "backup", "to": "restore_verify", "variant": "emphasis", "role": "main" },
+    { "from": "realtime", "to": "redis_loss", "variant": "security", "role": "error" },
+    { "from": "redis_loss", "to": "http_polling", "variant": "dashed", "role": "return" },
+    { "from": "app_db_issue", "to": "staff_dr", "variant": "security", "role": "branch" },
+    { "from": "event_run", "to": "app_db_issue", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    { "dot": "violet", "title": "拓扑约束", "items": ["Caddy 是唯一发布 80/443 的服务", "Web、Realtime、PostgreSQL 不直接暴露公网端口", "事件模式只把 proxy 端口发布到 LAN"] },
+    { "dot": "cyan", "title": "Realtime 是增强层", "items": ["PostgreSQL 与 Django 服务仍是唯一权威", "Redis 只存短生命周期 presence / channel group", "Realtime 不可用时回到 HTTP 与 polling"] },
+    { "dot": "rose", "title": "现场恢复原则", "items": ["数据库 / 应用异常先 HOLD，不盲目推进", "需要时用 Staff proxy / paper DR，记录来源与理由", "恢复必须经过备份、演练、检查与批准"] }
+  ]
+}

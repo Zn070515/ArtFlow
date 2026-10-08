@@ -8,3 +8,8 @@
 # `git status` reported eight files as modified whose bytes were in fact identical. Pin
 # the working-copy line ending to what the compiler produces.
 static/dist/*.js text eol=lf
+
+# Diagram artifacts have the same problem for the same reason: archify writes them with
+# LF, and core.autocrlf=true would hand every Windows checkout a CRLF copy that a
+# regeneration then reports as a rewrite. Pin them to the bytes the generator produces.
+docs/diagrams/*.svg text eol=lf

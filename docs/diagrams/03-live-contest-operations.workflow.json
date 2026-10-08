@@ -1,0 +1,414 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ArtFlow 现场比赛运行",
+    "subtitle": "工作人员推进现场状态；评委、选手与 Audience 各自通过受控凭证完成操作",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "bad157e4aa688513a58cb41b78b22ddc3baa68e6"
+    },
+    "output": "03-live-contest-operations.html"
+  },
+  "lanes": [
+    {
+      "id": "staff",
+      "label": "Staff 现场控制"
+    },
+    {
+      "id": "participant",
+      "label": "Participant 选手"
+    },
+    {
+      "id": "judge",
+      "label": "Judge 评委"
+    },
+    {
+      "id": "audience",
+      "label": "Audience 观众"
+    },
+    {
+      "id": "system",
+      "label": "ArtFlow 权威服务"
+    },
+    {
+      "id": "exceptions",
+      "label": "故障 / HOLD / DR",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "prepare",
+      "label": "准备",
+      "fromCol": 0,
+      "toCol": 1,
+      "variant": "emphasis"
+    },
+    {
+      "id": "enter",
+      "label": "入场与上台",
+      "fromCol": 2,
+      "toCol": 3
+    },
+    {
+      "id": "score",
+      "label": "评分与投票",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "groups": [
+    {
+      "id": "credentialed_entry",
+      "label": "凭证进入现场会话",
+      "lane": "system",
+      "fromCol": 1,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "parallel_inputs",
+      "label": "评分与观众投票并行",
+      "lane": "system",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    },
+    {
+      "id": "dr_path",
+      "label": "降级仍保留来源",
+      "lane": "exceptions",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "prepare_round",
+    "issue_credentials",
+    "check_in_participant",
+    "perform",
+    "judge_claim",
+    "judge_context",
+    "judge_score",
+    "lock_inputs",
+    "resolve_round"
+  ],
+  "nodes": [
+    {
+      "id": "prepare_round",
+      "lane": "staff",
+      "col": 0,
+      "type": "backend",
+      "label": "准备赛段",
+      "sublabel": "名单、顺序、评委席",
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 468,
+          "end_line": 520,
+          "label": "prepare_round"
+        }
+      ]
+    },
+    {
+      "id": "issue_credentials",
+      "lane": "system",
+      "col": 1,
+      "type": "security",
+      "label": "签发现场凭证",
+      "sublabel": "选手票 / 评委 QR / 观众票",
+      "width": 130,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 160,
+          "end_line": 182,
+          "label": "票据签发"
+        }
+      ]
+    },
+    {
+      "id": "check_in_participant",
+      "lane": "staff",
+      "col": 2,
+      "type": "frontend",
+      "label": "现场检票",
+      "sublabel": "扫描票据，建立会话",
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 290,
+          "end_line": 336,
+          "label": "check_in"
+        }
+      ]
+    },
+    {
+      "id": "perform",
+      "lane": "participant",
+      "col": 3,
+      "type": "external",
+      "label": "选手表演",
+      "sublabel": "由 Staff 推进当前表演",
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 738,
+          "end_line": 834,
+          "label": "表演运行状态"
+        }
+      ]
+    },
+    {
+      "id": "judge_claim",
+      "lane": "judge",
+      "col": 3,
+      "type": "security",
+      "label": "评委认领席位",
+      "sublabel": "扫码后绑定当前评委席",
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 234,
+          "end_line": 259,
+          "label": "claim_judge_session"
+        }
+      ]
+    },
+    {
+      "id": "judge_context",
+      "lane": "judge",
+      "col": 4,
+      "type": "frontend",
+      "label": "查看当前比赛上下文",
+      "sublabel": "当前选手、轮次、版本",
+      "width": 130,
+      "sources": [
+        {
+          "path": "singer_contest/judge_views.py",
+          "line": 224,
+          "end_line": 247,
+          "label": "judge_context"
+        }
+      ]
+    },
+    {
+      "id": "judge_score",
+      "lane": "judge",
+      "col": 5,
+      "type": "database",
+      "label": "直接提交评分",
+      "sublabel": "绑定 judge session + context",
+      "width": 130,
+      "tag": "来源 direct judge",
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 1292,
+          "end_line": 1399,
+          "label": "submit_judge_score"
+        }
+      ]
+    },
+    {
+      "id": "audience_ticket",
+      "lane": "audience",
+      "col": 3,
+      "type": "external",
+      "label": "观众出示票据",
+      "sublabel": "进入 Audience 会话",
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 504,
+          "end_line": 550,
+          "label": "票据会话认证"
+        }
+      ]
+    },
+    {
+      "id": "audience_vote",
+      "lane": "audience",
+      "col": 4,
+      "type": "frontend",
+      "label": "Audience 投票",
+      "sublabel": "一次会话按规则投票",
+      "tag": "ticket + VoteSession",
+      "sources": [
+        {
+          "path": "voting/services.py",
+          "line": 75,
+          "end_line": 167,
+          "label": "submit_ballot"
+        }
+      ]
+    },
+    {
+      "id": "lock_inputs",
+      "lane": "system",
+      "col": 5,
+      "type": "security",
+      "label": "锁定评分与投票输入",
+      "sublabel": "关闭 / lock 由 Staff 控制",
+      "width": 140,
+      "sources": [
+        {
+          "path": "voting/services.py",
+          "line": 371,
+          "end_line": 439,
+          "label": "投票关闭与锁定"
+        }
+      ]
+    },
+    {
+      "id": "resolve_round",
+      "lane": "system",
+      "col": 5,
+      "type": "backend",
+      "label": "解析赛段结果",
+      "sublabel": "产出候选，交给结果闸门",
+      "yOffset": 70,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 3706,
+          "end_line": 3800,
+          "label": "recompute_activity_result"
+        }
+      ]
+    },
+    {
+      "id": "hold_round",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "security",
+      "label": "赛段 HOLD",
+      "sublabel": "暂停不换评委组、不丢上下文",
+      "width": 130,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 544,
+          "end_line": 640,
+          "label": "panel HOLD / resume"
+        }
+      ]
+    },
+    {
+      "id": "staff_proxy",
+      "lane": "exceptions",
+      "col": 5,
+      "type": "backend",
+      "label": "Staff 代录 / 纸笔 DR",
+      "sublabel": "仍记录来源与理由",
+      "width": 150,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 1622,
+          "end_line": 1671,
+          "label": "proxy 与 paper score"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "prepare_round",
+      "to": "issue_credentials",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "issue_credentials",
+      "to": "check_in_participant",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "check_in_participant",
+      "to": "perform",
+      "role": "main"
+    },
+    {
+      "from": "perform",
+      "to": "judge_claim",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "judge_claim",
+      "to": "judge_context",
+      "role": "main"
+    },
+    {
+      "from": "judge_context",
+      "to": "judge_score",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "issue_credentials",
+      "to": "audience_ticket",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "audience_ticket",
+      "to": "audience_vote",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "judge_score",
+      "to": "lock_inputs",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "lock_inputs",
+      "to": "resolve_round",
+      "variant": "emphasis",
+      "role": "main"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "四类角色，四条凭证边界",
+      "items": [
+        "Staff 推进现场状态",
+        "Judge 只写自己的评分事实",
+        "Audience 只消费自己的票据会话并投票",
+        "Participant 负责表演与报名数据"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "并行输入，统一锁定",
+      "items": [
+        "评委评分与 Audience 投票可以并行产生",
+        "VoteSession 与评分事实分别保留来源",
+        "关闭 / lock 后才进入解析"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "HOLD 不改变身份",
+      "items": [
+        "暂停时保留本轮评委组与上下文",
+        "恢复后继续同一场景",
+        "无法在线评分时使用 Staff proxy 或 paper DR，并标记来源"
+      ]
+    }
+  ]
+}

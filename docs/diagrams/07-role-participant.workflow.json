@@ -1,0 +1,428 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "选手使用手册 · Participant handbook",
+    "subtitle": "从扫码入口到现场与结果：报名、填报、材料、补交、上台、查看结果",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a093d581dcd579ecb42c413c0936766a2c1553da"
+    },
+    "output": "07-role-participant.html"
+  },
+  "lanes": [
+    {
+      "id": "participant",
+      "label": "选手 Participant"
+    },
+    {
+      "id": "platform",
+      "label": "ArtFlow 平台"
+    },
+    {
+      "id": "staff",
+      "label": "工作人员 Staff"
+    }
+  ],
+  "phases": [
+    {
+      "id": "entry",
+      "label": "入口",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "fill",
+      "label": "填报与材料",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "submit",
+      "label": "提交与审核",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "groups": [
+    {
+      "id": "draft_autosave",
+      "label": "停止输入即自动保存 + 本地耐久",
+      "lane": "platform",
+      "fromCol": 2,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "server_purpose",
+      "label": "文件用途由服务端判定",
+      "lane": "platform",
+      "fromCol": 3,
+      "toCol": 3,
+      "variant": "security"
+    },
+    {
+      "id": "supplement_only",
+      "label": "补交只放行被退回的题",
+      "lane": "participant",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "p_entry",
+    "p_apply",
+    "p_route",
+    "p_form",
+    "p_upload",
+    "p_submit",
+    "p_review",
+    "p_onsite"
+  ],
+  "nodes": [
+    {
+      "id": "p_entry",
+      "lane": "participant",
+      "col": 0,
+      "type": "frontend",
+      "label": "扫码进入活动",
+      "sublabel": "/e/<code>/ 活动入口",
+      "width": 132,
+      "sources": [
+        {
+          "path": "public_portal/views.py",
+          "line": 48,
+          "end_line": 56,
+          "label": "activity_entry"
+        }
+      ]
+    },
+    {
+      "id": "p_apply",
+      "lane": "participant",
+      "col": 1,
+      "type": "frontend",
+      "label": "点「报名」",
+      "sublabel": "首次需要账号",
+      "width": 118,
+      "sources": [
+        {
+          "path": "public_portal/views.py",
+          "line": 58,
+          "end_line": 61,
+          "label": "activity_apply"
+        }
+      ]
+    },
+    {
+      "id": "p_route",
+      "lane": "platform",
+      "col": 2,
+      "type": "backend",
+      "label": "入口路由",
+      "sublabel": "有冻结问卷走问卷",
+      "width": 124,
+      "sources": [
+        {
+          "path": "questionnaire/views.py",
+          "line": 506,
+          "end_line": 543,
+          "label": "register_entry"
+        }
+      ]
+    },
+    {
+      "id": "p_legacy",
+      "lane": "platform",
+      "col": 2,
+      "type": "backend",
+      "label": "旧式报名表",
+      "sublabel": "无问卷的活动",
+      "width": 118,
+      "yOffset": 84,
+      "sources": [
+        {
+          "path": "singer_contest/views.py",
+          "line": 140,
+          "end_line": 200,
+          "label": "apply_view"
+        }
+      ]
+    },
+    {
+      "id": "p_form",
+      "lane": "participant",
+      "col": 2,
+      "type": "frontend",
+      "label": "按题填报",
+      "sublabel": "草稿自动保存",
+      "width": 118,
+      "sources": [
+        {
+          "path": "questionnaire/services.py",
+          "line": 115,
+          "end_line": 174,
+          "label": "save_draft_answers"
+        }
+      ]
+    },
+    {
+      "id": "p_upload",
+      "lane": "participant",
+      "col": 3,
+      "type": "external",
+      "label": "逐题上传材料",
+      "sublabel": "音频 / 视频 / 文档",
+      "width": 130,
+      "sources": [
+        {
+          "path": "files/services.py",
+          "line": 416,
+          "end_line": 466,
+          "label": "store_questionnaire_file"
+        }
+      ]
+    },
+    {
+      "id": "p_group",
+      "lane": "platform",
+      "col": 3,
+      "type": "security",
+      "label": "组内共享校验",
+      "sublabel": "任一当前成员可交本组材料",
+      "width": 150,
+      "yOffset": 88,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 198,
+          "end_line": 210,
+          "label": "_require_group_member"
+        }
+      ]
+    },
+    {
+      "id": "p_submit",
+      "lane": "participant",
+      "col": 4,
+      "type": "backend",
+      "label": "提交报名",
+      "sublabel": "必填校验通过才成立",
+      "width": 124,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 466,
+          "end_line": 556,
+          "label": "submit_registration"
+        }
+      ]
+    },
+    {
+      "id": "p_supplement",
+      "lane": "participant",
+      "col": 4,
+      "type": "frontend",
+      "label": "补交",
+      "sublabel": "只改被退回的几题",
+      "width": 118,
+      "yOffset": 86,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 114,
+          "end_line": 148,
+          "label": "writable_question_keys"
+        }
+      ]
+    },
+    {
+      "id": "p_review",
+      "lane": "staff",
+      "col": 5,
+      "type": "backend",
+      "label": "材料审核",
+      "sublabel": "通过 / 需补交",
+      "width": 116,
+      "sources": [
+        {
+          "path": "files/services.py",
+          "line": 914,
+          "end_line": 960,
+          "label": "review_material_check"
+        }
+      ]
+    },
+    {
+      "id": "p_onsite",
+      "lane": "participant",
+      "col": 5,
+      "type": "cloud",
+      "label": "现场候场",
+      "sublabel": "按轮次上台",
+      "width": 112,
+      "yOffset": -84,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 738,
+          "end_line": 796,
+          "label": "advance_performance"
+        }
+      ]
+    },
+    {
+      "id": "p_result",
+      "lane": "participant",
+      "col": 5,
+      "type": "frontend",
+      "label": "查看结果",
+      "sublabel": "公示页 / 我的报名",
+      "width": 124,
+      "yOffset": 84,
+      "sources": [
+        {
+          "path": "singer_contest/views.py",
+          "line": 243,
+          "end_line": 274,
+          "label": "my_registration_detail"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "p_entry",
+      "to": "p_apply",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "p_apply",
+      "to": "p_route",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "p_apply",
+      "to": "p_form",
+      "variant": "dashed",
+      "role": "branch",
+      "label": "已登录"
+    },
+    {
+      "from": "p_route",
+      "to": "p_form",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "p_route",
+      "to": "p_legacy",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "p_form",
+      "to": "p_upload",
+      "role": "main"
+    },
+    {
+      "from": "p_form",
+      "to": "p_group",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "p_group",
+      "to": "p_upload",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "p_upload",
+      "to": "p_submit",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "p_submit",
+      "to": "p_review",
+      "variant": "security",
+      "role": "main",
+      "label": "待审核"
+    },
+    {
+      "from": "p_submit",
+      "to": "p_supplement",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "p_supplement",
+      "to": "p_submit",
+      "variant": "dashed",
+      "role": "return"
+    },
+    {
+      "from": "p_review",
+      "to": "p_onsite",
+      "variant": "emphasis",
+      "role": "main",
+      "label": "通过"
+    },
+    {
+      "from": "p_onsite",
+      "to": "p_result",
+      "variant": "dashed",
+      "role": "main"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "选手要做的事",
+      "items": [
+        "扫活动二维码 → 报名 → 按题填报",
+        "材料按题目上传，停止输入即自动保存",
+        "提交前补齐必填项，提交后进入审核"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "断网也不丢",
+      "items": [
+        "草稿同时写入浏览器本地存储",
+        "重新打开页面会恢复未保存内容并重试",
+        "同一题被队友改过时先提示，不静默覆盖"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "分组合唱",
+      "items": [
+        "分组由外部抽签产生，本组材料共享",
+        "任一当前成员都可提交本组材料",
+        "补交窗口只放行工作人员退回的题目"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "选手不能做的事",
+      "items": [
+        "不能自选文件类型，用途由服务端按题目判定",
+        "不能绕开审核直接改已提交内容",
+        "不能自己推进轮次或提交评分 / 投票"
+      ]
+    }
+  ]
+}

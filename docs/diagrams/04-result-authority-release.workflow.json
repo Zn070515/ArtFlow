@@ -1,0 +1,357 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ArtFlow 结果权威与发布",
+    "subtitle": "事实输入先解析成候选，再经过 READY_TO_CONFIRM 与 Admin 确认，最后才生成对外结果",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "bad157e4aa688513a58cb41b78b22ddc3baa68e6"
+    },
+    "output": "04-result-authority-release.html"
+  },
+  "lanes": [
+    {
+      "id": "facts_resolver",
+      "label": "事实 → Resolver 解析"
+    },
+    {
+      "id": "authority",
+      "label": "Staff 复核 → Admin 确认"
+    },
+    {
+      "id": "output",
+      "label": "结果输出"
+    },
+    {
+      "id": "exceptions",
+      "label": "stale / HOLD / 解锁",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "collect",
+      "label": "收集事实",
+      "fromCol": 0,
+      "toCol": 1,
+      "variant": "emphasis"
+    },
+    {
+      "id": "resolve",
+      "label": "解析候选",
+      "fromCol": 2,
+      "toCol": 3
+    },
+    {
+      "id": "confirm",
+      "label": "确认权威",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "security"
+    },
+    {
+      "id": "publish",
+      "label": "生成输出",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "candidate_boundary",
+      "label": "候选不是正式结果",
+      "lane": "facts_resolver",
+      "fromCol": 2,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "authority_gate",
+      "label": "唯一正式 authority",
+      "lane": "authority",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "locked_facts",
+    "score_facts",
+    "resolve_stage",
+    "ready_candidate",
+    "staff_review",
+    "admin_confirm",
+    "materialize_award",
+    "release_results"
+  ],
+  "nodes": [
+    {
+      "id": "locked_facts",
+      "lane": "facts_resolver",
+      "col": 0,
+      "type": "database",
+      "label": "锁定输入事实",
+      "sublabel": "评分、投票、规则版本",
+      "sources": [
+        {
+          "path": "voting/services.py",
+          "line": 418,
+          "end_line": 439,
+          "label": "锁定投票会话"
+        }
+      ]
+    },
+    {
+      "id": "score_facts",
+      "lane": "facts_resolver",
+      "col": 1,
+      "type": "database",
+      "label": "评分事实",
+      "sublabel": "direct / proxy / paper 来源",
+      "width": 130,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 1237,
+          "end_line": 1291,
+          "label": "评分事实物化"
+        }
+      ]
+    },
+    {
+      "id": "resolve_stage",
+      "lane": "facts_resolver",
+      "col": 2,
+      "type": "backend",
+      "label": "resolve 赛段",
+      "sublabel": "校验 fingerprint 与版本",
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 2145,
+          "end_line": 2220,
+          "label": "解析服务"
+        }
+      ]
+    },
+    {
+      "id": "ready_candidate",
+      "lane": "facts_resolver",
+      "col": 3,
+      "type": "security",
+      "label": "READY_TO_CONFIRM",
+      "sublabel": "StageResult 候选",
+      "width": 130,
+      "tag": "尚未正式生效",
+      "sources": [
+        {
+          "path": "docs/production-rehearsal-runbook.md",
+          "line": 128,
+          "end_line": 130,
+          "label": "候选核定边界"
+        }
+      ]
+    },
+    {
+      "id": "staff_review",
+      "lane": "authority",
+      "col": 4,
+      "type": "frontend",
+      "label": "Staff 复核",
+      "sublabel": "查看排名、来源、异常",
+      "yOffset": -70,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 2550,
+          "end_line": 2589,
+          "label": "activity_result_board"
+        }
+      ]
+    },
+    {
+      "id": "admin_confirm",
+      "lane": "authority",
+      "col": 4,
+      "type": "security",
+      "label": "Admin 确认",
+      "sublabel": "CONFIRMED 才是权威",
+      "tag": "不可由 Staff 代替",
+      "yOffset": 70,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 2959,
+          "end_line": 3060,
+          "label": "confirm_stage_result"
+        }
+      ]
+    },
+    {
+      "id": "materialize_award",
+      "lane": "authority",
+      "col": 5,
+      "type": "database",
+      "label": "物化正式 Award",
+      "sublabel": "来源完整，重复确认幂等",
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 2313,
+          "end_line": 2400,
+          "label": "materialize_stage_awards"
+        }
+      ]
+    },
+    {
+      "id": "release_results",
+      "lane": "output",
+      "col": 5,
+      "type": "frontend",
+      "label": "发布结果页 / 导出",
+      "sublabel": "只读取已确认来源",
+      "width": 140,
+      "sources": [
+        {
+          "path": "public_portal/services.py",
+          "line": 156,
+          "end_line": 223,
+          "label": "公开结果服务"
+        }
+      ]
+    },
+    {
+      "id": "hold_candidate",
+      "lane": "exceptions",
+      "col": 3,
+      "type": "security",
+      "label": "候选 HOLD",
+      "sublabel": "输入缺失、stale 或校验失败",
+      "width": 130,
+      "sources": [
+        {
+          "path": "docs/production-rehearsal-runbook.md",
+          "line": 129,
+          "end_line": 130,
+          "label": "stale 拒绝"
+        }
+      ]
+    },
+    {
+      "id": "unlock_recompute",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "backend",
+      "label": "解锁后重新解析",
+      "sublabel": "旧来源失效，新候选重建",
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 3129,
+          "end_line": 3200,
+          "label": "unlock_stage_result"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "locked_facts",
+      "to": "score_facts",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "score_facts",
+      "to": "resolve_stage",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "resolve_stage",
+      "to": "ready_candidate",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "ready_candidate",
+      "to": "staff_review",
+      "role": "main"
+    },
+    {
+      "from": "staff_review",
+      "to": "admin_confirm",
+      "variant": "security",
+      "role": "main"
+    },
+    {
+      "from": "admin_confirm",
+      "to": "materialize_award",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "materialize_award",
+      "to": "release_results",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "resolve_stage",
+      "to": "hold_candidate",
+      "variant": "security",
+      "role": "error",
+      "route": "drop"
+    },
+    {
+      "from": "admin_confirm",
+      "to": "unlock_recompute",
+      "variant": "security",
+      "role": "branch",
+      "route": "drop"
+    },
+    {
+      "from": "unlock_recompute",
+      "to": "ready_candidate",
+      "variant": "dashed",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "候选与权威分离",
+      "items": [
+        "resolve 只产生 READY_TO_CONFIRM 候选",
+        "StageResult CONFIRMED 才是赛段正式来源",
+        "VoteSession 锁定本身不会生成 Award"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "stale 必须拒绝",
+      "items": [
+        "输入 fingerprint 或 result version 变化时不能沿用旧候选",
+        "解锁后旧来源不再进入正式列表",
+        "新输入必须重新 resolve 与确认"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "输出是下游消费",
+      "items": [
+        "结果页和导出只消费已确认来源",
+        "重复确认不重复物化 Award",
+        "Public 只是结果输出端，不是操作角色"
+      ]
+    }
+  ]
+}

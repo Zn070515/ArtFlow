@@ -1,0 +1,510 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "前后端模块全景 · Module map",
+    "subtitle": "9 个前端入口 → Django 视图 → 领域服务 → 数据库：浏览器不直连数据层，权威与审计都在服务层",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a093d581dcd579ecb42c413c0936766a2c1553da"
+    },
+    "output": "12-module-map.html",
+    "legend": {
+      "mode": "auto"
+    }
+  },
+  "layout": {
+    "mode": "grid",
+    "cols": 3,
+    "gapX": 90,
+    "gapY": 56,
+    "cellW": 210,
+    "cellH": 92
+  },
+  "components": [
+    {
+      "id": "fe_live",
+      "type": "frontend",
+      "label": "直播页",
+      "sublabel": "activity_live.ts",
+      "row": 0,
+      "col": 0,
+      "sources": [
+        {
+          "path": "frontend/activity_live.ts",
+          "line": 1,
+          "end_line": 25,
+          "label": "轮询现场状态"
+        }
+      ]
+    },
+    {
+      "id": "fe_scan",
+      "type": "frontend",
+      "label": "票据验证",
+      "sublabel": "ticket_scan.ts",
+      "row": 1,
+      "col": 0,
+      "sources": [
+        {
+          "path": "frontend/ticket_scan.ts",
+          "line": 1,
+          "end_line": 25,
+          "label": "扫码换会话与重试"
+        }
+      ]
+    },
+    {
+      "id": "fe_vote",
+      "type": "frontend",
+      "label": "投票页",
+      "sublabel": "vote_cast.ts",
+      "row": 2,
+      "col": 0,
+      "sources": [
+        {
+          "path": "frontend/vote_cast.ts",
+          "line": 1,
+          "end_line": 35,
+          "label": "选项上限与确认"
+        }
+      ]
+    },
+    {
+      "id": "fe_form",
+      "type": "frontend",
+      "label": "问卷与材料",
+      "sublabel": "questionnaire_form.ts",
+      "row": 0,
+      "col": 1,
+      "sources": [
+        {
+          "path": "frontend/questionnaire_form.ts",
+          "line": 1,
+          "end_line": 40,
+          "label": "草稿 / CAS / 本地耐久"
+        }
+      ]
+    },
+    {
+      "id": "fe_judge",
+      "type": "frontend",
+      "label": "评委终端",
+      "sublabel": "judge_terminal.ts",
+      "row": 1,
+      "col": 1,
+      "sources": [
+        {
+          "path": "frontend/judge_terminal.ts",
+          "line": 1,
+          "end_line": 40,
+          "label": "认领 / 上下文 / 提交"
+        }
+      ]
+    },
+    {
+      "id": "fe_collab",
+      "type": "frontend",
+      "label": "在线协作",
+      "sublabel": "collab_presence.ts",
+      "row": 2,
+      "col": 1,
+      "sources": [
+        {
+          "path": "frontend/collab_presence.ts",
+          "line": 1,
+          "end_line": 40,
+          "label": "在线成员与刷新提示"
+        }
+      ]
+    },
+    {
+      "id": "fe_checkin",
+      "type": "frontend",
+      "label": "手机检票",
+      "sublabel": "ticket_check_in.ts",
+      "row": 0,
+      "col": 2,
+      "sources": [
+        {
+          "path": "frontend/ticket_check_in.ts",
+          "line": 1,
+          "end_line": 40,
+          "label": "摄像头 / 拍照 / 三态"
+        }
+      ]
+    },
+    {
+      "id": "fe_score",
+      "type": "frontend",
+      "label": "快速录分",
+      "sublabel": "rapid_score.ts",
+      "row": 1,
+      "col": 2,
+      "sources": [
+        {
+          "path": "frontend/rapid_score.ts",
+          "line": 1,
+          "end_line": 40,
+          "label": "批量录入与草稿"
+        }
+      ]
+    },
+    {
+      "id": "fe_fields",
+      "type": "frontend",
+      "label": "活动字段",
+      "sublabel": "activity_fields.ts",
+      "row": 2,
+      "col": 2,
+      "sources": [
+        {
+          "path": "frontend/activity_fields.ts",
+          "line": 1,
+          "end_line": 40,
+          "label": "字段级 CAS 与耐久"
+        }
+      ]
+    },
+    {
+      "id": "v_public",
+      "type": "backend",
+      "label": "公开视图",
+      "sublabel": "公开与现场路由",
+      "row": 3,
+      "col": 0,
+      "sources": [
+        {
+          "path": "public_portal/urls.py",
+          "line": 1,
+          "end_line": 19,
+          "label": "公开与现场路由"
+        }
+      ]
+    },
+    {
+      "id": "v_entry",
+      "type": "backend",
+      "label": "选手与评委视图",
+      "sublabel": "选手与评委入口",
+      "row": 3,
+      "col": 1,
+      "sources": [
+        {
+          "path": "questionnaire/urls.py",
+          "line": 1,
+          "end_line": 20,
+          "label": "问卷与材料入口"
+        }
+      ]
+    },
+    {
+      "id": "v_staff",
+      "type": "backend",
+      "label": "运营后台视图",
+      "sublabel": "运营后台路由",
+      "row": 3,
+      "col": 2,
+      "sources": [
+        {
+          "path": "staff_panel/urls.py",
+          "line": 1,
+          "end_line": 30,
+          "label": "运营路由"
+        }
+      ]
+    },
+    {
+      "id": "s_audience",
+      "type": "backend",
+      "label": "票券与投票",
+      "sublabel": "tickets / voting",
+      "row": 4,
+      "col": 0,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 290,
+          "end_line": 336,
+          "label": "检票三态"
+        },
+        {
+          "path": "voting/services.py",
+          "line": 75,
+          "end_line": 176,
+          "label": "选票落库"
+        }
+      ]
+    },
+    {
+      "id": "s_contest",
+      "type": "backend",
+      "label": "赛制与比赛",
+      "sublabel": "ruleset / singer_contest",
+      "row": 4,
+      "col": 1,
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 816,
+          "end_line": 900,
+          "label": "冻结与绑定"
+        },
+        {
+          "path": "singer_contest/services.py",
+          "line": 2959,
+          "end_line": 3060,
+          "label": "结果核定"
+        }
+      ]
+    },
+    {
+      "id": "s_ops",
+      "type": "backend",
+      "label": "账号与运营",
+      "sublabel": "accounts / core / common",
+      "row": 4,
+      "col": 2,
+      "sources": [
+        {
+          "path": "accounts/models.py",
+          "line": 1,
+          "end_line": 30,
+          "label": "用户与角色"
+        },
+        {
+          "path": "staff_panel/views.py",
+          "line": 295,
+          "end_line": 320,
+          "label": "运营视图"
+        }
+      ]
+    },
+    {
+      "id": "s_realtime",
+      "type": "messagebus",
+      "label": "实时协作",
+      "sublabel": "realtime · WebSocket",
+      "row": 5,
+      "col": 1,
+      "sources": [
+        {
+          "path": "realtime/consumers.py",
+          "line": 1,
+          "end_line": 45,
+          "label": "广播在线与刷新事件"
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "数据库",
+      "sublabel": "PostgreSQL / SQLite",
+      "row": 5,
+      "col": 2,
+      "sources": [
+        {
+          "path": "config/settings.py",
+          "line": 148,
+          "end_line": 176,
+          "label": "双数据库切换"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "前端入口（TypeScript → static/dist，9 个构建产物）",
+      "wraps": [
+        "fe_live",
+        "fe_scan",
+        "fe_vote",
+        "fe_form",
+        "fe_judge",
+        "fe_collab",
+        "fe_checkin",
+        "fe_score",
+        "fe_fields"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "领域服务（19 个 Django app；权威、审计、生命周期都在这一层）",
+      "wraps": [
+        "s_audience",
+        "s_contest",
+        "s_ops",
+        "s_realtime"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "每个视图先判权限与锁定；私有文件只走受控媒体视图",
+      "wraps": [
+        "v_public",
+        "v_entry",
+        "v_staff"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "fe_live",
+      "to": "v_public",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "label": "读现场状态"
+    },
+    {
+      "from": "fe_scan",
+      "to": "v_public",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "兑换会话"
+    },
+    {
+      "from": "fe_vote",
+      "to": "v_public",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "label": "提交选票"
+    },
+    {
+      "from": "fe_form",
+      "to": "v_entry",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "label": "草稿与提交"
+    },
+    {
+      "from": "fe_judge",
+      "to": "v_entry",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "上下文与评分"
+    },
+    {
+      "from": "fe_collab",
+      "to": "v_entry",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "label": "订阅广播"
+    },
+    {
+      "from": "fe_checkin",
+      "to": "v_staff",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "label": "检票"
+    },
+    {
+      "from": "fe_score",
+      "to": "v_staff",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "批量录分"
+    },
+    {
+      "from": "fe_fields",
+      "to": "v_staff",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "label": "字段级写入"
+    },
+    {
+      "from": "v_public",
+      "to": "s_audience",
+      "variant": "security",
+      "label": "票与票"
+    },
+    {
+      "from": "v_entry",
+      "to": "s_contest",
+      "variant": "security",
+      "label": "赛制与材料"
+    },
+    {
+      "from": "v_staff",
+      "to": "s_ops",
+      "variant": "security",
+      "label": "运营与产物"
+    },
+    {
+      "from": "v_entry",
+      "to": "s_realtime",
+      "variant": "dashed",
+      "label": "广播来源"
+    },
+    {
+      "from": "s_audience",
+      "to": "db"
+    },
+    {
+      "from": "s_contest",
+      "to": "db"
+    },
+    {
+      "from": "s_ops",
+      "to": "db"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "前端：9 个入口，一个构建",
+      "items": [
+        "公开端：直播页、票据验证、投票页",
+        "选手与评委端：问卷与材料、评委终端、在线协作",
+        "现场端：手机检票、快速录分、活动字段协作",
+        "全部由 tsc 编译到 static/dist；npm run check:client 守住编译产物与源码一致"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "后端：按域拆分的 Django app",
+      "items": [
+        "账号与活动：accounts、core、common（权限、审计、生命周期、维护）",
+        "赛制与问卷：ruleset、questionnaire（编译、冻结、解析、报名）",
+        "比赛与材料：singer_contest、files（轮次、评委、评分、结果、材料检查项）",
+        "观众侧：tickets、voting、entry_access（票券、选票、入口授权）",
+        "运营与产物：staff_panel、exports、archive、incidents、realtime",
+        "未列入的 docs / scripts / deploy 只服务构建与部署，不参与运行时"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "横切边界只有三条",
+      "items": [
+        "受控媒体：私有文件走受控视图按所有权判读权，不挂静态路由",
+        "authority：写操作先取活动行锁，再按域显式授权（RULESET_FREEZE、STAGE_RESULT_RESOLVE…）",
+        "审计：敏感操作、导出、解锁、事故登记全部留痕"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "数据与运行",
+      "items": [
+        "开发默认 SQLite，生产用 PostgreSQL，同一套迁移",
+        "浏览器只与 Django 视图对话，没有直连数据层的路径",
+        "导出（Excel / Word）与归档包都在服务器侧生成"
+      ]
+    }
+  ]
+}

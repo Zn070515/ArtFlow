@@ -1,0 +1,175 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "评委使用手册 · Judge handbook",
+    "subtitle": "老师扫一次共享评委二维码，整晚在同一台手机上评分：认领席位、看当前选手、提交、等待切换，暂停时保留会话",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a093d581dcd579ecb42c413c0936766a2c1553da"
+    },
+    "output": "10-role-judge.html"
+  },
+  "lanes": [
+    { "id": "judge", "label": "评委：老师的手机" },
+    { "id": "venue", "label": "现场与服务：终端 + 权威" }
+  ],
+  "phases": [
+    { "id": "enter", "label": "入场认领", "fromCol": 0, "toCol": 1, "variant": "emphasis" },
+    { "id": "score", "label": "整场评分", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "end", "label": "换机与降级", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "server_decides", "label": "评分对象由服务器决定：老师不能选给谁打分", "lane": "venue", "fromCol": 2, "toCol": 2, "variant": "security" },
+    { "id": "hold_keeps", "label": "HOLD 保留会话，不踢老师", "lane": "venue", "fromCol": 4, "toCol": 4, "variant": "emphasis" },
+    { "id": "dr_kept", "label": "代录与纸面永远保留", "lane": "venue", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["j_qr", "j_claim", "j_context", "j_score", "j_wait", "j_switch"],
+  "nodes": [
+    {
+      "id": "j_qr",
+      "lane": "judge",
+      "col": 0,
+      "type": "security",
+      "label": "扫共享二维码",
+      "sublabel": "/e/<code>/judge/",
+      "width": 124,
+      "sources": [{ "path": "public_portal/views.py", "line": 126, "end_line": 150, "label": "activity_judge" }]
+    },
+    {
+      "id": "j_claim",
+      "lane": "judge",
+      "col": 1,
+      "type": "security",
+      "label": "认领空闲席位",
+      "sublabel": "按到达顺序 J1..Jn",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_views.py", "line": 160, "end_line": 222, "label": "judge_claim" }]
+    },
+    {
+      "id": "j_context",
+      "lane": "judge",
+      "col": 2,
+      "type": "frontend",
+      "label": "看当前选手",
+      "sublabel": "曲目与分项",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_views.py", "line": 224, "end_line": 247, "label": "judge_context" }]
+    },
+    {
+      "id": "j_score",
+      "lane": "judge",
+      "col": 3,
+      "type": "backend",
+      "label": "输入并提交",
+      "sublabel": "失败可安全重试",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_views.py", "line": 248, "end_line": 300, "label": "judge_score" }]
+    },
+    {
+      "id": "j_wait",
+      "lane": "judge",
+      "col": 4,
+      "type": "cloud",
+      "label": "等待切换选手",
+      "sublabel": "暂停时保持连接",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 545, "end_line": 601, "label": "hold_judge_panel" }]
+    },
+    {
+      "id": "j_switch",
+      "lane": "judge",
+      "col": 5,
+      "type": "security",
+      "label": "换设备 / 丢手机",
+      "sublabel": "由工作人员释放席位",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 687, "end_line": 736, "label": "release_judge_seat" }]
+    },
+    {
+      "id": "v_stable",
+      "lane": "venue",
+      "col": 0,
+      "type": "security",
+      "label": "稳定入口",
+      "sublabel": "一张码，长期有效",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 258, "end_line": 330, "label": "席位自动分配" }]
+    },
+    {
+      "id": "v_seat",
+      "lane": "venue",
+      "col": 1,
+      "type": "database",
+      "label": "席位唯一",
+      "sublabel": "一席一活动会话",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/models.py", "line": 1597, "end_line": 1665, "label": "JudgeSession" }]
+    },
+    {
+      "id": "v_ctx",
+      "lane": "venue",
+      "col": 2,
+      "type": "backend",
+      "label": "上下文版本",
+      "sublabel": "切人 / 暂停都推进",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 738, "end_line": 796, "label": "advance_performance" }]
+    },
+    {
+      "id": "v_receipt",
+      "lane": "venue",
+      "col": 3,
+      "type": "database",
+      "label": "幂等回执",
+      "sublabel": "同一命令只记一条",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 1292, "end_line": 1360, "label": "submit_judge_score" }]
+    },
+    {
+      "id": "v_hold",
+      "lane": "venue",
+      "col": 4,
+      "type": "security",
+      "label": "暂停与恢复",
+      "sublabel": "恢复后原设备继续",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 602, "end_line": 640, "label": "resume_judge_panel" }]
+    },
+    {
+      "id": "v_proxy",
+      "lane": "venue",
+      "col": 5,
+      "type": "external",
+      "label": "代录与纸面",
+      "sublabel": "终端故障时的 DR",
+      "width": 124,
+      "sources": [{ "path": "singer_contest/judge_authority.py", "line": 1415, "end_line": 1445, "label": "staff_proxy 评分" }]
+    }
+  ],
+  "edges": [
+    { "from": "j_qr", "to": "j_claim", "variant": "emphasis", "role": "main" },
+    { "from": "j_claim", "to": "j_context", "variant": "emphasis", "role": "main" },
+    { "from": "j_context", "to": "j_score", "variant": "emphasis", "role": "main" },
+    { "from": "j_score", "to": "j_wait", "variant": "emphasis", "role": "main" },
+    { "from": "j_wait", "to": "j_switch", "variant": "emphasis", "role": "main" },
+    { "from": "j_qr", "to": "v_stable", "variant": "security", "role": "branch" },
+    { "from": "j_claim", "to": "v_seat", "variant": "security", "role": "branch" },
+    { "from": "j_context", "to": "v_ctx", "variant": "security", "role": "branch" },
+    { "from": "j_score", "to": "v_receipt", "variant": "security", "role": "branch" },
+    { "from": "j_wait", "to": "v_hold", "variant": "security", "role": "branch" },
+    { "from": "j_switch", "to": "v_proxy", "variant": "dashed", "role": "branch" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "老师的六步", "items": ["扫共享码 → 认领席位 → 看当前选手 → 提交评分 → 等切换 → （丢手机时）换设备", "刷新、锁屏、短暂切后台都不需要重新扫码"] },
+    { "dot": "violet", "title": "评分对象不由老师决定", "items": ["服务器下发当前活动、轮次、评委组、席位、选手与评分表", "老师只看到当前这一位选手，不能自己挑人", "下一次提交用一个新命令号，重复提交不会产生第二条事实"] },
+    { "dot": "amber", "title": "现场暂停（HOLD）", "items": ["暂停时保留评委会话，前端显示现场暂停", "恢复后原设备继续，不需要重新扫码", "只有释放席位、换组、设备丢失或正式结束才需要重新扫码"] },
+    { "dot": "rose", "title": "老师不能做的事", "items": ["不能修改已提交的评分（更正走工作人员代录或纸面）", "不能看到其他评委的分数", "不能代替工作人员推进选手"] }
+  ]
+}
