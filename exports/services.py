@@ -19,7 +19,7 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import Count, Max
+from django.db.models import Max
 from django.urls import reverse
 from django.utils import timezone
 from farewell_show.models import Program
@@ -35,16 +35,25 @@ from singer_contest.group_chorus import (
     group_material_readiness,
     group_stage_archive_blocker,
 )
-from singer_contest.models import ContestRound, GroupStage, ScoreSummary, SingerRegistration
+from singer_contest.models import (
+    ContestRound,
+    GroupStage,
+    ScoreSummary,
+    SingerRegistration,
+    StageResult,
+)
 from singer_contest.services import (
+    ResultClosureCode,
     _eligible_singers,
     authoritative_panel_judges,
     bound_ruleset_version_label,
+    build_result_closure,
     missing_score_cells,
     official_stage_award_queryset,
     snapshot_fingerprint,
 )
 from voting.models import VoteOption
+from voting.services import valid_vote_count
 
 from .models import ArticleTemplate, GeneratedDocument
 
@@ -558,6 +567,72 @@ def _score_results_workbook(activity: Activity) -> Workbook:
     return wb
 
 
+def _stage_results_workbook(activity: Activity) -> Workbook:
+    """The confirmed result line, which `score_results` alone no longer describes.
+
+    ``ScoreSummary`` is a per-round average and rank; the formal outcome of the contest
+    is a ``StageResult`` and its ``StageDecision`` rows, and only a CONFIRMED one is
+    authoritative (GOAL §8.4). A package that calls itself the authoritative record while
+    containing only the former cannot answer "which version of the result was confirmed,
+    by whom, and what did it decide". No fingerprints, hashes or reasons are exported
+    here — the point is the decision, not the resolver's internals.
+    """
+    wb = Workbook()
+    ws = _active_worksheet(wb)
+    ws.title = "Stage Results"
+    ws.append(
+        [
+            "Stage Key",
+            "Result Version",
+            "Ruleset Version",
+            "Status",
+            "Confirmed At",
+            "Confirmed By",
+            "Singer",
+            "Outcome",
+            "Rank",
+            "Score",
+        ]
+    )
+    test_flag = runtime_is_test(activity)
+    # Only the current version of each stage line: older versions are history, and the
+    # archive states which one the activity was closed on.
+    latest_by_stage: dict[str, StageResult] = {}
+    for result in (
+        StageResult.objects.filter(activity=activity, is_test_data=test_flag)
+        .select_related("ruleset_version__ruleset", "confirmed_by")
+        .order_by("stage_key", "result_version", "pk")
+    ):
+        latest_by_stage[result.stage_key] = result
+    for stage_key in sorted(latest_by_stage):
+        result = latest_by_stage[stage_key]
+        result_label = f"{result.ruleset_version.ruleset.name} v{result.ruleset_version.version}"
+        base = [
+            stage_key,
+            result.result_version,
+            result_label,
+            result.get_status_display(),
+            result.confirmed_at.strftime("%Y-%m-%d %H:%M") if result.confirmed_at else "",
+            result.confirmed_by.username if result.confirmed_by else "",
+        ]
+        decisions = list(result.decisions.select_related("singer").order_by("rank", "pk"))
+        if not decisions:
+            ws.append([*base, "", "", "", ""])
+            continue
+        for decision in decisions:
+            ws.append(
+                [
+                    *base,
+                    decision.singer.name if decision.singer else "",
+                    decision.outcome_code,
+                    decision.rank,
+                    decision.score,
+                ]
+            )
+    _autosize_sheet(ws)
+    return wb
+
+
 def _vote_results_workbook(activity: Activity) -> Workbook:
     wb = Workbook()
     ws = _active_worksheet(wb)
@@ -568,7 +643,7 @@ def _vote_results_workbook(activity: Activity) -> Workbook:
             vote_session__activity=activity, vote_session__is_test_data=runtime_is_test(activity)
         )
         .select_related("vote_session", "singer")
-        .annotate(vote_count=Count("records"))
+        .annotate(vote_count=valid_vote_count())
     )
     option_rows = list(options)
     prime_questionnaire_answers(option.singer for option in option_rows)
@@ -600,25 +675,63 @@ def _award_list_workbook(activity: Activity) -> Workbook:
     return wb
 
 
+INCIDENT_LIST_HEADERS: tuple[str, ...] = (
+    "活动",
+    "时间",
+    "类型",
+    "轮次",
+    "选手",
+    "节目",
+    "authority 状态",
+    "处理人",
+    "问题",
+    "采取动作",
+    "处理结果",
+    "备注",
+    "需要赛后复盘",
+)
+
+
+def incident_list_rows(incidents: Any) -> list[tuple[Any, ...]]:
+    """The GOAL §16 evidence for each incident, as spreadsheet rows.
+
+    Both the staff export and the permanent archive sheet read this one function. They
+    used to have separate column sets, and the archive — the copy that survives — kept
+    the older, thinner one: it lost the authority state at the time, the problem, the
+    action taken and whether the incident needed a post-event review, which is most of
+    what §16 asks for. Sharing the builder is the only thing that keeps the two from
+    drifting apart again.
+    """
+    return [
+        (
+            inc.activity.title,
+            inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
+            inc.get_event_type_display(),
+            inc.round.name if inc.round else "",
+            inc.singer.name if inc.singer else "",
+            inc.program.name if inc.program else "",
+            inc.get_authority_state_display(),
+            inc.handled_by.username if inc.handled_by else "",
+            inc.problem,
+            inc.action_taken,
+            inc.resolution,
+            inc.remark,
+            "是" if inc.needs_review else "否",
+        )
+        for inc in incidents
+    ]
+
+
 def _incident_list_workbook(activity: Activity) -> Workbook:
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "Incidents"
-    ws.append(["Time", "Type", "Singer", "Program", "Handler", "Resolution", "Remark"])
-    for inc in IncidentRecord.objects.filter(
+    ws.append(list(INCIDENT_LIST_HEADERS))
+    incidents = IncidentRecord.objects.filter(
         activity=activity, is_test=runtime_is_test(activity)
-    ).select_related("singer", "program", "handled_by"):
-        ws.append(
-            [
-                inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
-                inc.get_event_type_display(),
-                inc.singer.name if inc.singer else "",
-                inc.program.name if inc.program else "",
-                inc.handled_by.username if inc.handled_by else "",
-                inc.resolution,
-                inc.remark,
-            ]
-        )
+    ).select_related("activity", "round", "singer", "program", "handled_by")
+    for row in incident_list_rows(incidents):
+        ws.append(list(row))
     _autosize_sheet(ws)
     return wb
 
@@ -801,10 +914,15 @@ def build_archive_package(activity: Activity) -> list[PackageArtifact]:
         _xlsx("material_checklist", _material_checklist_workbook(activity)),
         _xlsx("program_list", _program_archive_workbook(activity)),
         _xlsx("score_results", _score_results_workbook(activity)),
+        _xlsx("stage_results", _stage_results_workbook(activity)),
         _xlsx("vote_results", _vote_results_workbook(activity)),
         _xlsx("award_list", _award_list_workbook(activity)),
         _xlsx("incident_list", _incident_list_workbook(activity)),
-        _xlsx("staff_notes", _staff_notes_workbook(activity)),
+        # No staff_notes. GOAL §19.2 forbids keeping 临时 Staff note permanently because
+        # of archiving, and this ZIP is the permanent copy: `prune_retained_state` deletes
+        # the database rows on the retention schedule while the workbook inside the
+        # archive would have outlived them forever. The pre-event execution package
+        # (`build_execution_package`) still carries them, which is where they belong.
         _xlsx("attachment_index", _attachment_index_workbook(activity)),
         _xlsx("group_chorus", _group_chorus_workbook(activity)),
         _xlsx("public_content_index", _public_content_index_workbook(activity)),
@@ -924,6 +1042,27 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
     for vote_session in locked_activity.vote_sessions.all():
         if not vote_session.is_locked:
             raise PermissionDenied(f"投票「{vote_session.name}」尚未锁定，不能归档。")
+
+    # GOAL §8.4: a candidate is not a formal result. This package calls itself the
+    # authoritative record, so it must not be frozen on a result line that is still
+    # READY_TO_CONFIRM / REVIEW / HOLD / stale — otherwise the archive certifies an
+    # outcome the system never confirmed, and unlock/confirm history ends up wrong.
+    #
+    # The check is the same closure the public release path uses rather than a local
+    # "is there a CONFIRMED StageResult" test, because the local test misses a stale
+    # candidate, an old ruleset version, a missing checkpoint, an unconfirmed upstream
+    # and a fingerprint mismatch.
+    #
+    # It only applies to activities that have a current frozen ruleset: a farewell show
+    # has no ruleset-driven result line, and refusing to archive it because it has no
+    # frozen version would be a different and wrong rule.
+    closure = build_result_closure(locked_activity)
+    if (
+        ResultClosureCode.NO_CURRENT_FROZEN_RULESET not in closure.blocking_reasons
+        and not closure.closeable
+    ):
+        reasons = "、".join(code.value for code in closure.blocking_reasons)
+        raise PermissionDenied(f"正式结果尚未核定闭环（{reasons}），不能归档。")
 
     group_stages = GroupStage.objects.filter(
         activity=locked_activity,

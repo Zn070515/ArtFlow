@@ -16,7 +16,7 @@ from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from ruleset.services import require_runtime_readiness
 from tickets.models import Ticket, TicketAccessSession
@@ -205,6 +205,22 @@ def valid_ticket_condition(prefix: str = "") -> Q:
         | Q(**{f"{prefix}ballot__ticket__isnull": True})
         | Q(**{f"{prefix}ballot__ticket__state__in": valid_states})
     )
+
+
+def valid_vote_count(relation: str = "records") -> Count:
+    """The GOAL §9.3 valid-ballot count, as a ``Count`` annotation.
+
+    Every surface that reports how many votes an option received has to read the same
+    population: the resolver that computes the official score, the staff vote detail
+    view, the standalone vote export and the permanent archive export. They drifted once
+    — the export counted raw ``records``, so a ticket revoked after it voted came back to
+    life in the Excel file and in the archive ZIP that the code calls the authoritative
+    record, while the result itself correctly excluded it.
+
+    Taking *relation* rather than the filter prefix keeps the annotation path and the
+    condition path from being written twice and from disagreeing.
+    """
+    return Count(relation, filter=valid_ticket_condition(f"{relation}__"))
 
 
 def valid_ballot_queryset(vote_session: VoteSession, *, test_flag: bool):
