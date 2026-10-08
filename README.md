@@ -349,9 +349,19 @@ scripts/             引导、校验、备份恢复与启动脚本。
 
 <div align="center">
 
-<p>由 <strong>昕序软件科技</strong> 设计与开发。</p>
+<p>由 <strong>衢州市柯城区昕序软件开发工作室</strong>（个体工商户）设计与开发。</p>
 
-<p><sub>Designed and developed by <strong>昕序软件科技</strong>.</sub></p>
+<p><sub>Designed and developed by <strong>XINXU Software Studio</strong>, Quzhou, Zhejiang.</sub></p>
 
 </div>
+
+| 登记事项 | 内容 |
+|---|---|
+| 统一社会信用代码 | `92330802MAKPJDXJ0U` |
+| 主体类型 | 个体工商户（个人经营） |
+| 登记机关 | 衢州市柯城区市场监督管理局 |
+| 注册日期 | 2026-09-24 |
+| 经营范围 | 软件销售；软件开发；软件外包服务；信息技术咨询服务；技术服务、技术开发、技术咨询、技术交流、技术转让、技术推广；网络技术服务；信息系统运行维护服务；互联网销售。 |
+
+> 经营范围照录执照原文。除依法须经批准的项目外，凭营业执照依法自主开展经营活动；本主体仅通过网络开展经营活动。
 
