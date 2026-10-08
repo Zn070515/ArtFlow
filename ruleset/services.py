@@ -29,7 +29,10 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 from questionnaire.compiler import QuestionnairePlan, compile_questionnaire
-from questionnaire.cross_domain import validate_questionnaire_rounds
+from questionnaire.cross_domain import (
+    validate_questionnaire_context_keys,
+    validate_questionnaire_rounds,
+)
 from questionnaire.schema import parse_questionnaire
 
 from .compiler import ExecutionPlan, ValidationReport, compile_definition
@@ -782,7 +785,9 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
     if raw is None:
         return
     plan = compile_questionnaire(raw)
-    validate_questionnaire_rounds(plan, binding.get("round_keys") or {})
+    bound_round_keys = binding.get("round_keys") or {}
+    validate_questionnaire_rounds(plan, bound_round_keys)
+    validate_questionnaire_context_keys(plan, bound_round_keys)
 
 
 def validate_ruleset_runtime_readiness(version: RulesetVersion) -> ValidationReport:

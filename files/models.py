@@ -259,6 +259,11 @@ class MaterialCheck(models.Model):
             "选手上传的用途以此为准，浏览器不得指定。"
         ),
     )
+    # The purposes this check accepts, in preference order, for a question whose contract
+    # is "audio OR video" (GOAL §6.7). `file_purpose` stays the first entry — the default a
+    # single-purpose check has always had, and what a display shows — so this is empty for
+    # every check that accepts exactly one kind of file.
+    accepted_file_purposes = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status, default=Status.MISSING)
     required = models.BooleanField(
         default=True,

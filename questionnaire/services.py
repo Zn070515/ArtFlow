@@ -97,11 +97,27 @@ def get_or_create_group_response(*, group, ruleset_version, questionnaire_key, s
 
 
 @transaction.atomic
+def _answer_conflicts(merged: dict, pairs) -> list[dict]:
+    """Pairs that name a base the server's current value no longer matches."""
+    return [
+        {
+            "key": key,
+            "server": merged.get(key),
+            "local": value,
+            # The base to retry against if the author decides their version should win.
+            "base": answer_base(merged.get(key)),
+        }
+        for key, value, base in pairs
+        if answer_base(merged.get(key)) != str(base or "")
+    ]
+
+
 def save_draft_answers(
     response: QuestionnaireResponse,
     *,
     answers: dict | None = None,
     changes: list[dict] | None = None,
+    bases: dict | None = None,
     schema_hash: str = "",
 ) -> QuestionnaireResponse:
     """Merge ``answers`` (or apply ``changes``) under the row lock.
@@ -117,27 +133,36 @@ def save_draft_answers(
     matches raises :class:`QuestionStale` instead of overwriting. Two people editing
     different questions both succeed; two editing the same one are told, rather than one of
     them silently losing their text — which is what a whole-form merge does.
+
+    ``answers`` plus ``bases`` is the same check for a caller that legitimately sends the
+    whole form: the submit path does, because a submission is the participant's statement
+    of record rather than a delta. Without the bases it was the one branch where a page
+    opened before a teammate's edit could put its older text back silently.
     """
     locked = QuestionnaireResponse.objects.select_for_update().get(pk=response.pk)
     if schema_hash and locked.schema_hash and schema_hash != locked.schema_hash:
         raise ValidationError("问卷已更新，请刷新后重试。")
     merged = dict(locked.answers or {})
     if changes is not None:
-        conflicts = [
-            {
-                "key": change["key"],
-                "server": merged.get(change["key"]),
-                "local": change.get("value"),
-                # The base to retry against if the author decides their version should win.
-                "base": answer_base(merged.get(change["key"])),
-            }
-            for change in changes
-            if answer_base(merged.get(change["key"])) != str(change.get("base") or "")
-        ]
+        conflicts = _answer_conflicts(
+            merged, [(change["key"], change.get("value"), change.get("base")) for change in changes]
+        )
         if conflicts:
             raise QuestionStale(conflicts=conflicts)
         for change in changes:
             merged[change["key"]] = change["value"]
+    elif bases is not None:
+        conflicts = _answer_conflicts(
+            merged,
+            [
+                (key, value, bases.get(key))
+                for key, value in (answers or {}).items()
+                if key in bases
+            ],
+        )
+        if conflicts:
+            raise QuestionStale(conflicts=conflicts)
+        merged.update(answers or {})
     else:
         merged.update(answers or {})
     locked.answers = merged

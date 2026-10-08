@@ -452,14 +452,29 @@
     void fetch(submitUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken() },
-      body: JSON.stringify({ answers: collect(), schema_hash: schemaHash }),
+      body: JSON.stringify({
+        answers: collect(),
+        schema_hash: schemaHash,
+        // A submission carries the whole form, so without the bases it was the one write
+        // where a page opened before a teammate's edit could put its older text back.
+        ...(casEnabled ? { bases: Object.fromEntries(bases) } : {}),
+      }),
     })
       .then(async (response) => {
         const body = (await response.json()) as {
           status?: string;
           error?: string;
+          code?: string;
+          conflicts?: Array<{ key?: unknown; server?: unknown; base?: unknown }>;
           completion?: { required?: number; required_answered?: number; answered?: number };
         };
+        if (response.status === 409 && body.code === "QUESTION_STALE") {
+          // Same decision as the autosave path: show the difference, and let the author
+          // choose between their text and the server's before re-submitting.
+          if (submitState) submitState.textContent = "";
+          handleQuestionStale(currentChanges(), body.conflicts ?? []);
+          return;
+        }
         if (!response.ok) {
           showError(body.error || "提交失败，请检查后重试。");
           return;

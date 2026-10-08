@@ -558,7 +558,14 @@ def submit_registration(
 
 @transaction.atomic
 def save_group_draft(
-    *, version, group: Group, actor, answers=None, changes=None, schema_hash: str = ""
+    *,
+    version,
+    group: Group,
+    actor,
+    answers=None,
+    changes=None,
+    bases=None,
+    schema_hash: str = "",
 ):
     """Save a group's draft, either as a whole form (``answers``) or as a CAS (``changes``).
 
@@ -620,7 +627,9 @@ def save_group_draft(
             response, changes=normalized_changes, schema_hash=plan.schema_hash
         )
     else:
-        saved = save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
+        saved = save_draft_answers(
+            response, answers=normalized, bases=bases, schema_hash=plan.schema_hash
+        )
     # Tell the other members' open pages. Their form holds values this save has just made
     # stale, and without the nudge they keep editing against them until they happen to
     # reload. Published on commit, like every other realtime event here.
@@ -645,6 +654,7 @@ def submit_group_response(
     actor,
     due_rounds=frozenset(),
     expected_schema_hash: str = "",
+    bases=None,
 ):
     from files.services import reconcile_group_questionnaire_material_checks
 
@@ -683,7 +693,9 @@ def submit_group_response(
     )
     if missing:
         raise ValidationError(f"以下必填项尚未填写：{'、'.join(missing)}。")
-    saved = save_draft_answers(response, answers=normalized, schema_hash=plan.schema_hash)
+    saved = save_draft_answers(
+        response, answers=normalized, bases=bases, schema_hash=plan.schema_hash
+    )
     reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
     submitted = mark_submitted(saved)
     from common.models import AuditLog

@@ -237,6 +237,45 @@ class QuestionnaireConditionTests(SimpleTestCase):
         )
         self.assertEqual(parsed["pages"][0]["sections"][0]["questions"][0]["key"], "r3.guest_name")
 
+    def test_context_condition_must_name_a_key_the_server_can_produce(self):
+        """A misspelled context key used to hide a required question forever.
+
+        `evaluate_condition` reads the context mapping and a missing key is simply "false",
+        so `qualifed.r3` silently dropped the question and its required-ness with no error
+        anywhere. The vocabulary is closed, so a typo is a schema error instead.
+        """
+        for key in ("qualifed.r3", "supplement.r2.accompaniment", "group.membercount"):
+            with self.subTest(key=key), self.assertRaises(ValidationError):
+                parse_questionnaire(
+                    _questionnaire(
+                        [
+                            _question(
+                                "r3.guest_name",
+                                required_if={
+                                    "source": "context",
+                                    "key": key,
+                                    "op": "eq",
+                                    "value": True,
+                                },
+                            )
+                        ]
+                    )
+                )
+
+    def test_every_real_context_key_is_accepted(self):
+        for key in ("activity.phase", "group.stage", "group.order", "group.member_count"):
+            with self.subTest(key=key):
+                parse_questionnaire(
+                    _questionnaire(
+                        [
+                            _question(
+                                "r3.guest_name",
+                                visible_if={"source": "context", "key": key, "op": "not_empty"},
+                            )
+                        ]
+                    )
+                )
+
 
 class QuestionnaireFileTests(SimpleTestCase):
     def _file_question(self, **file_overrides):
@@ -253,6 +292,57 @@ class QuestionnaireFileTests(SimpleTestCase):
         parsed = parse_questionnaire(_questionnaire([self._file_question()]))
         question = parsed["pages"][0]["sections"][0]["questions"][0]
         self.assertEqual(question["file"]["purpose"], "accompaniment")
+        # A single-purpose question canonicalises exactly as it did before `accepts`
+        # existed: `schema_hash` is stored on every response, and moving it would tell
+        # every open page its questionnaire had changed.
+        self.assertNotIn("accepts", question["file"])
+
+    def test_a_question_may_accept_the_other_branch_too(self):
+        """GOAL §6.7: the accompaniment contract is "audio exists OR video exists"."""
+        parsed = parse_questionnaire(
+            _questionnaire(
+                [
+                    self._file_question(
+                        accepts=["performance_video"], extensions=[".mp3", ".mp4"], max_mb=20
+                    )
+                ]
+            )
+        )
+        config = parsed["pages"][0]["sections"][0]["questions"][0]["file"]
+
+        self.assertEqual(config["purpose"], "accompaniment")
+        self.assertEqual(config["accepts"], ["performance_video"])
+        # The normalized document re-parses to itself, which is what `schema_hash` needs.
+        self.assertEqual(
+            parse_questionnaire(parsed)["pages"][0]["sections"][0]["questions"][0]["file"],
+            config,
+        )
+
+    def test_an_accepted_purpose_must_be_registered_and_distinct(self):
+        for accepts in (
+            ["任意用途"],
+            ["accompaniment"],
+            ["performance_video", "performance_video"],
+        ):
+            with self.subTest(accepts=accepts), self.assertRaises(ValidationError):
+                parse_questionnaire(_questionnaire([self._file_question(accepts=accepts)]))
+
+    def test_the_size_cap_must_hold_for_every_accepted_branch(self):
+        with self.assertRaises(ValidationError):
+            parse_questionnaire(
+                _questionnaire(
+                    [
+                        self._file_question(
+                            accepts=["performance_video"],
+                            extensions=[".mp3"],
+                            # The tightest branch wins (accompaniment caps at 100 MB) because
+                            # the value has to be legal for whichever branch the answer
+                            # arrives as, and 200 MB is not.
+                            max_mb=200,
+                        )
+                    ]
+                )
+            )
 
     def test_illegal_file_purpose_fails(self):
         self.assertRaises(

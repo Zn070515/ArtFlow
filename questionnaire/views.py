@@ -696,6 +696,14 @@ def group_submit_view(request: HttpRequest, group_pk: int):
     payload = _json_body(request)
     if payload is None or not isinstance(payload.get("answers"), dict):
         return JsonResponse({"error": "请求体必须包含 answers 对象。"}, status=400)
+    # A submission carries the whole form, and a group shares one response between its
+    # members, so the whole-form branch is exactly where a page opened before a teammate's
+    # edit could put its older text back. The bases are the same evidence the autosave path
+    # already uses; requiring them here means an old page is told to refresh instead of
+    # silently winning.
+    bases = payload.get("bases")
+    if not isinstance(bases, dict):
+        return JsonResponse({"error": "缺少表单基准版本，请刷新页面后重试。"}, status=400)
     stale = _stale_or_missing_schema_hash(payload, plan)
     if stale is not None:
         return stale
@@ -707,6 +715,16 @@ def group_submit_view(request: HttpRequest, group_pk: int):
             actor=request.user,
             due_rounds=_due_rounds(version),
             expected_schema_hash=str(payload["schema_hash"]),
+            bases={str(key): str(value) for key, value in bases.items()},
+        )
+    except QuestionStale as conflict:
+        return JsonResponse(
+            {
+                "error": "部分题目已被其他成员修改。",
+                "code": "QUESTION_STALE",
+                "conflicts": conflict.conflicts,
+            },
+            status=409,
         )
     except ValidationError:
         return _invalid_questionnaire_response()
@@ -743,8 +761,13 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
     if stale is not None:
         return stale
     expected_raw = str(request.POST.get("expected_current_version") or "").strip()
-    if expected_raw and not expected_raw.isdigit():
-        return JsonResponse({"error": "材料版本标识无效，请刷新后重试。"}, status=400)
+    if not expected_raw.isdigit():
+        # The page has always rendered the slot's version (`data-file-version`, absent for
+        # an as-yet-empty slot, which the client sends as 0). Treating a missing value as
+        # "this client does not do the check" made the upload the one group-material write
+        # that could replace a teammate's file with no evidence and no conflict — silently,
+        # which is the whole failure the version check exists to prevent.
+        return JsonResponse({"error": "缺少材料版本标识，请刷新页面后重试。"}, status=400)
     try:
         stored = store_questionnaire_group_file(
             group=group,
@@ -752,9 +775,7 @@ def group_upload_view(request: HttpRequest, group_pk: int, question_key: str):
             uploaded_file=uploaded,
             actor=request.user,
             expected_schema_hash=str(request.POST.get("schema_hash") or ""),
-            # Absent means "this client does not do the check", not "expect nothing":
-            # a group member working from a page opened before anyone uploaded sends 0.
-            expected_current_version=int(expected_raw) if expected_raw else None,
+            expected_current_version=int(expected_raw),
         )
     except FileSlotStale as conflict:
         # A distinct code, because the client's next move is a choice rather than a

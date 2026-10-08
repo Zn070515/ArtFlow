@@ -94,6 +94,11 @@ class Command(BaseCommand):
             phone="13800000000",
             song_name="Media download rehearsal",
             pre_status=SingerRegistration.PreStatus.APPROVED,
+            # The fixture's activity is TEST-lifecycle and its SubmissionFile is marked as
+            # test data, so the registration that owns it has to carry the same marker:
+            # otherwise the cleanup deletes the test file and leaves the "formal"
+            # registration behind as an orphan.
+            is_test_data=True,
         )
 
         media_path = f"{REHEARSAL_MEDIA_DIRECTORY}/load-{suffix}.bin"
