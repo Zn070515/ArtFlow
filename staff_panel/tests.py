@@ -3723,7 +3723,9 @@ class RuntimeLifecycleMatrixTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         workbook = load_workbook(BytesIO(response.content))
-        rows = list(workbook.active.iter_rows(values_only=True))
+        sheet = workbook.active
+        assert sheet is not None
+        rows = list(sheet.iter_rows(values_only=True))
         self.assertIn("问题", rows[0])
         self.assertIn("采取动作", rows[0])
         self.assertIn("问题文本", rows[1])

@@ -106,11 +106,11 @@ class Command(BaseCommand):
                 audit_logs.delete()
             staff_notes.delete()
             with authority_write(JUDGE_SESSION_STATE):
-                seat_grants.delete()
-                judge_sessions.delete()
+                seat_grants.delete()  # type: ignore[no-untyped-call]
+                judge_sessions.delete()  # type: ignore[no-untyped-call]
             with authority_write(RETENTION_CLEANUP):
-                ephemeral_sessions.delete()
-                access_grants.delete()
+                ephemeral_sessions.delete()  # type: ignore[no-untyped-call]
+                access_grants.delete()  # type: ignore[no-untyped-call]
             AuditLog.objects.create(
                 operator=actor,
                 action_type=AuditLog.ActionType.OTHER,

@@ -315,7 +315,9 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     # memberships and group-scoped material checks cascade from here. It has to go before
     # the singers its memberships point at.
     with authority_write(TEST_DATA_CLEANUP):
-        GroupStage.objects.filter(activity=locked_activity, is_test_data=True).delete()
+        GroupStage.objects.filter(  # type: ignore[no-untyped-call]
+            activity=locked_activity, is_test_data=True
+        ).delete()
     with authority_write(TEST_DATA_CLEANUP):
         SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=locked_activity, is_test=True).delete()
