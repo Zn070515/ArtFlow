@@ -49,11 +49,37 @@ COUNT_MODELS: dict[str, Any] = {
     "audit_logs": AuditLog,
 }
 
-FILE_MODELS: list[tuple[type[Any], str]] = [
-    (SubmissionFile, "file"),
-    (GeneratedDocument, "file"),
-    (ArchivePackage, "file"),
-]
+
+def file_fields() -> list[tuple[type[Any], str]]:
+    """Every ``FileField``/``ImageField`` in the project, discovered from the model registry.
+
+    ``verify_app_backup`` walks this to prove that every file the database points at is
+    physically present in the media tree. It used to read a three-entry hand-written list,
+    so ``SubmissionFile.derivative``, ``PublicPost.cover_image``, ``PublicMedia.image`` and
+    ``ExportTask.file`` were never checked: a cover image the database references but the
+    disk lost produced a *passing* restore verification, because the media digest only
+    proves the tree matches itself, not that the tree ever contained what the rows name.
+
+    Same reasoning as :func:`count_models`: a hand-maintained inventory of the schema is a
+    claim about the schema that nothing checks. A field deliberately outside the backup
+    scope goes in the exclusion list below with its reason written next to it.
+    """
+    from django.apps import apps
+    from django.db.models import FileField
+
+    discovered: list[tuple[type[Any], str]] = []
+    for model in apps.get_models():
+        if model._meta.proxy or model._meta.auto_created:
+            continue
+        for field in model._meta.get_fields():
+            if isinstance(field, FileField):
+                discovered.append((model, field.name))
+    return sorted(discovered, key=lambda entry: (entry[0]._meta.label_lower, entry[1]))
+
+
+# File fields that are intentionally not verified after a restore. Empty today: every
+# FileField in the project lives under the backed-up media tree.
+EXCLUDED_FILE_FIELDS: list[tuple[type[Any], str]] = []
 
 
 def count_models() -> dict[str, Any]:

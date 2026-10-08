@@ -2000,9 +2000,15 @@ class RetentionCleanupCommandTests(TestCase):
                 phase=Activity.Phase.ARCHIVED,
                 is_test_mode=False,
             )
-        Activity.objects.filter(pk=self.activity.pk).update(
-            updated_at=timezone.now() - timedelta(days=120)
-        )
+        # The retention window is measured from when the activity was archived, which is
+        # the lock stamp the archive flow writes — not from `updated_at`, which a
+        # long-dormant activity carries from whatever edit happened last.
+        with authority_write(ACTIVITY_STATE):
+            Activity.objects.filter(pk=self.activity.pk).update(
+                is_locked=True,
+                locked_at=timezone.now() - timedelta(days=120),
+                updated_at=timezone.now() - timedelta(days=120),
+            )
         self.participant = User.objects.create_user(
             username="retention-participant", password="pass"
         )
@@ -2049,6 +2055,47 @@ class RetentionCleanupCommandTests(TestCase):
         self.assertTrue(
             AuditLog.objects.filter(target=f"RetentionCleanup:Activity:{self.activity.pk}").exists()
         )
+
+    def test_retention_window_runs_from_the_archive_date_not_the_last_edit(self):
+        """A recently archived activity is not old just because nobody had touched it.
+
+        `updated_at` is an ordinary auto_now and `archive_activity` saves with an explicit
+        field list that excludes it, so an activity dormant for a year and archived today
+        looked a year old the moment it was archived — and the very first retention sweep
+        would anonymise the registration list of an activity that just finished.
+        """
+        with authority_write(ACTIVITY_STATE):
+            activity = Activity.objects.create(
+                title="Long dormant, archived today",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.ARCHIVED,
+                is_test_mode=False,
+            )
+            Activity.objects.filter(pk=activity.pk).update(
+                is_locked=True,
+                locked_at=timezone.now(),
+                updated_at=timezone.now() - timedelta(days=400),
+            )
+        registration = SingerRegistration.objects.create(
+            activity=activity,
+            user=self.participant,
+            name="Still Private",
+            student_id="PRIVATE-002",
+            phone="13900000000",
+        )
+
+        call_command(
+            "purge_retained_pii",
+            "--older-than-days",
+            "365",
+            "--actor-username",
+            self.admin.username,
+            "--confirm",
+        )
+
+        registration.refresh_from_db()
+        self.assertEqual(registration.name, "Still Private")
+        self.assertEqual(registration.phone, "13900000000")
 
     def test_retention_cleanup_rejects_non_admin_actor(self):
         with authority_write(ACCOUNT_AUTHORITY):
@@ -2257,6 +2304,50 @@ class MediaGatewayIndexContractTests(TestCase):
                     indexed,
                     f"{model.__name__}.{field} is looked up by exact path but not indexed",
                 )
+
+
+class BackupFileFieldInventoryTests(TestCase):
+    """Two inventories of the same schema must not drift apart.
+
+    `verify_app_backup` proves that every file the restored database points at exists and
+    is readable. It read a hand-written three-model list, so `SubmissionFile.derivative`,
+    `PublicPost.cover_image`, `PublicMedia.image` and `ExportTask.file` were never walked:
+    a cover image the database references but the disk lost produced a *passing*
+    verification, because the media digest only proves the tree matches itself, not that
+    the tree ever held what the rows name.
+    """
+
+    def test_the_restore_walk_covers_every_file_the_gateway_can_serve(self):
+        from archive.models import ArchivePackage
+        from exports.models import ExportTask, GeneratedDocument
+        from files.models import SubmissionFile
+        from public_portal.models import PublicMedia, PublicPost
+
+        from common.management.commands.backup_artflow import file_fields
+
+        walked = set(file_fields())
+        for model, field in (
+            (SubmissionFile, "file"),
+            (SubmissionFile, "derivative"),
+            (PublicPost, "cover_image"),
+            (PublicMedia, "image"),
+            (GeneratedDocument, "file"),
+            (ExportTask, "file"),
+            (ArchivePackage, "file"),
+        ):
+            with self.subTest(model=model.__name__, field=field):
+                self.assertIn((model, field), walked)
+
+    def test_the_discovered_inventory_is_real_file_fields(self):
+        from django.db.models import FileField
+
+        from common.management.commands.backup_artflow import file_fields
+
+        discovered = file_fields()
+        self.assertTrue(discovered)
+        for model, field_name in discovered:
+            with self.subTest(model=model.__name__, field=field_name):
+                self.assertIsInstance(model._meta.get_field(field_name), FileField)
 
 
 class LayoutFixtureCommandTests(TestCase):
