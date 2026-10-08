@@ -21,7 +21,7 @@ def test_event_launcher_declares_safe_runtime_contract():
     assert "ARTFLOW_EVENT_PORT" in launcher
     assert "ARTFLOW_EVENT_ALLOWED_HOSTS" in launcher
     assert "docker compose" in launcher
-    assert "@('up', '--build', '--wait')" in launcher
+    assert "@('up', '--build', '--detach')" in launcher
     assert "'manage.py', 'doctor', '--require-access-keys'" in launcher
     assert "/healthz/" in launcher
     assert "Test-UsableIpv4" in launcher
@@ -31,6 +31,27 @@ def test_event_launcher_declares_safe_runtime_contract():
     assert "Invoke-ComposeDiagnostics" in launcher
     assert "logs --tail 80 web db" in launcher
     assert "POSTGRES_PASSWORD" in launcher
+
+
+def test_event_launcher_waits_on_the_mandatory_set_not_on_every_container():
+    """The launcher's success criterion is the site, not every container's health.
+
+    `docker compose up --wait` exits non-zero when any container with a healthcheck is
+    unhealthy — verified against Compose 2.x with a dependency graph of exactly this
+    shape. An unhealthy Redis therefore aborted the launcher even though `proxy` and the
+    HTTP origin were already serving, and even though the event manifest no longer gates
+    anything on Redis's health. The launcher now starts detached and waits on the
+    mandatory services by name, the same set scripts/monitor.sh enforces at runtime.
+    """
+    launcher = read_if_present(EVENT_LAUNCHER_PATH)
+    monitor = read_if_present(PROJECT_ROOT / "scripts" / "monitor.sh")
+
+    assert "--wait'" not in launcher
+    assert "$mandatoryServices = @('db', 'web', 'media', 'proxy')" in launcher
+    assert "Wait-ForMandatoryServices -Services $mandatoryServices" in launcher
+    # The same split in both places, or the launcher and the monitor disagree about
+    # whether the show is running.
+    assert "for service in db web media proxy; do" in monitor
 
 
 def test_event_launcher_does_not_add_unsafe_network_or_data_operations():

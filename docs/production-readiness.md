@@ -258,8 +258,15 @@ volumetric DDoS、留存审批和部署 ownership 的外部 `HOLD`。
 
 以下事项不是仓库静态代码可以伪造的“已通过”证据，仍保持明确 `HOLD`：真实 OSS/另一
 故障域上传及独立恢复、真实 DNS/ACME/443 外部 smoke、WAF/连接保护/volumetric DDoS、
-学校 SSO/IdP/MFA、备案审批、数据保存责任和部署 ownership。只有完成对应环境的实测并
-保存报告后，才能把它们从 `HOLD` 改为 `PASS`。
+备案审批、数据保存责任和部署 ownership。只有完成对应环境的实测并保存报告后，才能把
+它们从 `HOLD` 改为 `PASS`。
+
+学校 SSO / IdP / MFA 单独归类为**条件性 `HOLD`**，不与上面并列。`GOAL.md` §24 明确
+不为了“学校以后可能要求”提前建设完整 SSO / IAM / MLPS 平台，当前的正式账号边界是
+`username`/`password` 加 `STAFF_ACCESS_KEY` / `ADMIN_ACCESS_KEY`，再叠加敏感管理员
+操作的二次验证。只有当学校把接入 IdP 或强制 MFA 作为正式上线的硬性前提时，它才成为
+阻塞项；在此之前它不是院十佳生产验收的必要条件。下文各 Gate 把它与其他部署方证据一起
+列为“本地证据不能替代”的清单，同样是这个含义——那是**义务归属**的声明，不是待建功能。
 
 最终发布 SHA 的 GitHub CI 也必须在本轮所有本地门禁通过后由合并到 `main` 的 push
 触发并观察；本地测试结果不得替代该远端证据。
