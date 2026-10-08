@@ -109,6 +109,74 @@ class TicketVoteAuthorityTests(TestCase):
         with self.assertRaises(ValidationError):
             self.session.save(update_fields=["requires_ticket"])
 
+    def test_a_bound_sessions_meaning_cannot_drift_after_the_freeze(self):
+        """A frozen binding names the session, so what the session *means* may not change.
+
+        `purpose` decides whether the ballots are a scored component, `selection_type` and
+        `max_selections` decide what a ballot may contain. None of them were checked against
+        the binding, so a staff edit after the freeze silently rewrote the authority the
+        frozen ruleset had bound — with no audit trace of the change.
+        """
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from ruleset.test_schema import DEF
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Frozen meaning binding",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=DEF,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                binding={"vote_keys": {"audience": self.session.pk}},
+            )
+
+        for field, value in (
+            ("purpose", VoteSession.Purpose.SCORE_COMPONENT),
+            ("selection_type", VoteSession.SelectionType.MULTI),
+            ("max_selections", 3),
+            ("requires_ticket", True),
+        ):
+            with self.subTest(field=field, path="instance"):
+                session = VoteSession._base_manager.get(pk=self.session.pk)
+                setattr(session, field, value)
+                with self.assertRaises(ValidationError):
+                    session.save(update_fields=[field])
+            with self.subTest(field=field, path="queryset"):
+                with self.assertRaises(ValidationError):
+                    VoteSession.objects.filter(pk=self.session.pk).update(**{field: value})
+
+        unchanged = VoteSession._base_manager.get(pk=self.session.pk)
+        self.assertEqual(unchanged.purpose, VoteSession.Purpose.SELECTION)
+        self.assertEqual(unchanged.max_selections, 1)
+
+    def test_operational_fields_still_change_after_the_freeze(self):
+        """The window and the label do not redefine the vote, so they stay editable."""
+        from ruleset.models import ContestRuleset, RulesetVersion
+        from ruleset.test_schema import DEF
+
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Frozen operational binding",
+            is_test_data=True,
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=DEF,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                binding={"vote_keys": {"audience": self.session.pk}},
+            )
+
+        self.session.name = "改名后的投票"
+        self.session.save(update_fields=["name"])
+
+        self.assertEqual(VoteSession._base_manager.get(pk=self.session.pk).name, "改名后的投票")
+
     def test_ticket_ballot_rejects_cross_activity_relation(self):
         # `submit_ballot` is the only writer of a ballot (GOAL §8.4 raw audience fact), so a
         # fixture that writes one has to hold the same authority the service holds.

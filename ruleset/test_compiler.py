@@ -491,6 +491,71 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "GROUP_QUOTA_EXCEEDED",
         )
 
+    def test_group_scoped_select_checks_the_group_capacity(self):
+        """A `by`-scoped select takes `count` *per group*, so the total pool proves nothing.
+
+        Comparing against the whole pool (what this did) cannot fail for any per-group count
+        below the total — "top 4 of each group" passed against a 20-person pool even when the
+        smallest group held three people.
+        """
+        self._assert_invalid(
+            _def(
+                [
+                    {"key": "p", "type": "PARTITION", "source": ENTRY_KEY, "by": "c"},
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a"},
+                    {"key": "s", "type": "SELECT", "source": "r", "count": 4, "by": "p"},
+                ],
+                context={"entry_size": 20, "groups": {"c": {"capacity": [7, 3, 10]}}},
+            ),
+            "GROUP_QUOTA_EXCEEDED",
+        )
+
+    def test_group_scoped_select_without_capacity_keeps_the_pool_bound(self):
+        """Group sizes may legitimately be unknown at freeze (GOAL §6.1), so the weak bound
+        still applies instead of refusing a template that can be bound later."""
+        report, _plan = compile_definition(
+            _def(
+                [
+                    {"key": "p", "type": "PARTITION", "source": ENTRY_KEY, "by": "c"},
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a"},
+                    {"key": "s", "type": "SELECT", "source": "r", "count": 4, "by": "p"},
+                ],
+                context={"entry_size": 20},
+            )
+        )
+        codes = [issue.code for issue in report.issues]
+        self.assertNotIn("GROUP_QUOTA_EXCEEDED", codes)
+        self.assertNotIn("QUOTA_UNVERIFIABLE", codes)
+
+        over = compile_definition(
+            _def(
+                [
+                    {"key": "p", "type": "PARTITION", "source": ENTRY_KEY, "by": "c"},
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a"},
+                    {"key": "s", "type": "SELECT", "source": "r", "count": 30, "by": "p"},
+                ],
+                context={"entry_size": 20},
+            )
+        )[0]
+        self.assertIn("QUOTA_EXCEEDED", [issue.code for issue in over.issues])
+
+    def test_group_scoped_select_fits_the_smallest_group(self):
+        report, _plan = compile_definition(
+            _def(
+                [
+                    {"key": "p", "type": "PARTITION", "source": ENTRY_KEY, "by": "c"},
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {"key": "r", "type": "RANK", "source": "a"},
+                    {"key": "s", "type": "SELECT", "source": "r", "count": 3, "by": "p"},
+                ],
+                context={"entry_size": 20, "groups": {"c": {"capacity": [7, 3, 10]}}},
+            )
+        )
+        self.assertNotIn("GROUP_QUOTA_EXCEEDED", [issue.code for issue in report.issues])
+
     def test_manual_limit_invalid(self):
         self._assert_invalid(
             _def(

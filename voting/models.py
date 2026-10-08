@@ -94,7 +94,25 @@ def _ensure_vote_session_origins(*session_ids: int | None) -> None:
         _ensure_vote_session_mutable(session_id)
 
 
+# The fields that define what a bound vote session *means* to a frozen ruleset. A frozen
+# binding names the session by pk, so anything that changes its meaning afterwards silently
+# rewrites frozen authority: `purpose` decides whether the ballots are a selection or a
+# scored component, `selection_type`/`max_selections` decide what a ballot may contain, and
+# `requires_ticket` decides who may cast one. Operational fields (name, window, passcode)
+# are not in the set — changing them does not redefine the vote.
+_FROZEN_AUTHORITY_FIELDS = frozenset(
+    {"purpose", "requires_ticket", "selection_type", "max_selections"}
+)
+
+
 def _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id: int | None) -> None:
+    """Reject redefining a vote session a frozen ruleset version already binds.
+
+    The binding names the session by pk, so the ruleset's authority is only as stable as
+    the session's meaning: `purpose`, `selection_type`, `max_selections` and
+    `requires_ticket` all change it (`_FROZEN_AUTHORITY_FIELDS`), which is why the set — not
+    just the ticket flag it started with — is what this checks.
+    """
     if not vote_session_id:
         return
     from ruleset.models import RulesetVersion
@@ -326,7 +344,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
             raise ValidationError("投票开放后，投票配置不可直接修改。")
         if self.filter(is_locked=True).exists():
             raise ValidationError("投票锁定后，投票配置不可直接修改。")
-        if "requires_ticket" in fields:
+        if _FROZEN_AUTHORITY_FIELDS.intersection(fields):
             for vote_session_id in self.values_list("pk", flat=True):
                 _ensure_vote_session_not_bound_to_frozen_ruleset(vote_session_id)
 
@@ -358,7 +376,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                         else "投票锁定后，投票配置不可直接修改。"
                     )
                     raise ValidationError(message)
-                if "requires_ticket" in fields:
+                if _FROZEN_AUTHORITY_FIELDS.intersection(fields):
                     _ensure_vote_session_not_bound_to_frozen_ruleset(obj.pk)
                     if obj.requires_ticket is False and _formal_singer_contest_activity(
                         obj.activity_id
@@ -389,7 +407,7 @@ class VoteSessionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
                             else "投票锁定后，投票配置不可直接修改。"
                         )
                         raise ValidationError(message)
-                    if existing and "requires_ticket" in update_fields:
+                    if existing and _FROZEN_AUTHORITY_FIELDS.intersection(update_fields):
                         _ensure_vote_session_not_bound_to_frozen_ruleset(existing["pk"])
         for vote_session in objs:
             if _formal_singer_contest_activity(vote_session.activity_id):
@@ -531,12 +549,13 @@ class VoteSession(models.Model):
                     else "投票锁定后，投票配置不可直接修改。"
                 )
                 raise ValidationError(message)
-            if (
-                stored
-                and "requires_ticket" in compared_configuration_fields
-                and stored["requires_ticket"] != self.requires_ticket
-            ):
-                _ensure_vote_session_not_bound_to_frozen_ruleset(self.pk)
+            if stored and _FROZEN_AUTHORITY_FIELDS.intersection(compared_configuration_fields):
+                if any(
+                    stored[field] != getattr(self, field)
+                    for field in _FROZEN_AUTHORITY_FIELDS
+                    if field in compared_configuration_fields
+                ):
+                    _ensure_vote_session_not_bound_to_frozen_ruleset(self.pk)
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
