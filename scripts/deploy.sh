@@ -30,7 +30,7 @@ is_release_image() {
 compose=(docker compose --env-file "$env_file" -p "$compose_project" -f "$compose_file")
 "${compose[@]}" config --quiet
 rendered="$("${compose[@]}" config --format json)"
-read -r release_sha site_address web_image postgres_image caddy_image < <(
+read -r release_sha site_address web_image postgres_image caddy_image redis_image < <(
     printf '%s' "$rendered" | python3 -c '
 import json
 import sys
@@ -39,12 +39,14 @@ config = json.load(sys.stdin)
 web = config["services"]["web"]
 proxy = config["services"]["proxy"]
 db = config["services"]["db"]
+redis = config["services"]["redis"]
 print(
     web["environment"]["ARTFLOW_RELEASE_SHA"],
     proxy["environment"]["CADDY_SITE_ADDRESS"],
     web["image"],
     db["image"],
     proxy["image"],
+    redis["image"],
 )
 '
 )
@@ -54,6 +56,10 @@ python3 "$hostname_validator" "$site_address" \
 is_release_image "$web_image" || die 'ARTFLOW_WEB_IMAGE must carry the deployed release SHA'
 is_digest_image "$postgres_image" || die 'ARTFLOW_POSTGRES_IMAGE must use a verified digest'
 is_digest_image "$caddy_image" || die 'ARTFLOW_CADDY_IMAGE must use a verified digest'
+# Every image the manifest names must be digest-pinned, not just the two that happen to
+# be validated above. `.env.production.example` states that rule for all of them, and a
+# mutable tag that passes the gate makes the gate a description rather than a check.
+is_digest_image "$redis_image" || die 'ARTFLOW_REDIS_IMAGE must use a verified digest'
 web_revision="$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$web_image" 2>/dev/null)" \
     || die 'the prebuilt web image is not loaded locally'
 [[ "$web_revision" == "$release_sha" ]] || die 'prebuilt web image revision does not match ARTFLOW_RELEASE_SHA'

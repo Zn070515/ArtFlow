@@ -31,7 +31,12 @@ site_address="$(printf '%s' "$rendered" | python3 -c 'import json,sys; print(jso
 python3 "$hostname_validator" "$site_address" \
     || die 'CADDY_SITE_ADDRESS must be a hostname without a scheme, port, or path'
 
-for service in db web proxy; do
+# `media` answers /media/* from its own pool, so a dead media worker means every
+# accompaniment, attachment and generated document is broken while the site still
+# answers /healthz/. It is part of the production topology, not an enhancement.
+# `realtime` is deliberately absent: it degrades to HTTP by design, so its health is
+# not a runtime failure.
+for service in db web media proxy; do
     container="$("${compose[@]}" ps -q "$service")"
     [[ -n "$container" ]] || die "$service container is not running"
     status="$(docker inspect -f '{{.State.Health.Status}}' "$container")"

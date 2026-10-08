@@ -55,6 +55,40 @@ def test_posix_restore_waits_for_the_stable_postgres_server():
     assert "pg_isready" not in restore
 
 
+def test_deploy_gate_digest_pins_every_image_the_manifest_names():
+    """Documented digest pinning has to be checked, not merely described.
+
+    `.env.production.example` requires a verified immutable manifest digest for every
+    production image, and the manifest names four. The gate read and validated postgres
+    and caddy only, so `ARTFLOW_REDIS_IMAGE=redis:latest` could reach a real deployment
+    through a gate that reported success.
+    """
+    deploy = (REPOSITORY_ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
+    rendered_read = deploy[deploy.index("read -r release_sha") : deploy.index('[[ "$release_sha"')]
+
+    for service, variable in (
+        ("db", "postgres_image"),
+        ("proxy", "caddy_image"),
+        ("redis", "redis_image"),
+    ):
+        assert f'config["services"]["{service}"]' in rendered_read
+        assert f'is_digest_image "${variable}"' in deploy
+
+
+def test_monitor_treats_the_media_pool_as_mandatory():
+    """A dead media pool must fail the monitor, not just break the downloads.
+
+    Caddy routes /media/* to a Gunicorn pool of its own. Checking only db/web/proxy let
+    the monitor report a pass while every accompaniment, attachment and generated
+    document was unreachable. `realtime` stays out of the hard set on purpose: it is
+    designed to degrade to HTTP.
+    """
+    monitor = (REPOSITORY_ROOT / "scripts" / "monitor.sh").read_text(encoding="utf-8")
+
+    assert "for service in db web media proxy; do" in monitor
+    assert "for service in db web proxy; do" not in monitor
+
+
 def test_production_hostname_validator_accepts_hostnames_only():
     valid = ("artflow.example.com", "artflow.internal", "xn--fiq228c.example")
     invalid = (
