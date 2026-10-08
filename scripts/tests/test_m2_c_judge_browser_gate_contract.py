@@ -52,11 +52,14 @@ def test_judge_browser_fixture_cannot_run_in_production_or_print_grant():
 
 
 def test_shared_judge_browser_gate_covers_fixed_capacity_and_stable_entry():
+    # The refusal marker is the §12.3 wording ("reject *and* tell them to contact staff").
+    # It used to be the generic "scan the QR again" line, which every refusal produced
+    # before the terminal learned to name its reason.
     for marker in (
         "shared judge entry assigns five terminals, survives HOLD, and rejects the sixth",
         "`/e/${fixture.public_code}/judge/`",
         "评委终端已就绪。",
-        "评委会话无效或已过期，请重新扫描现场二维码。",
+        "评委席已满，请联系现场工作人员处理。",
     ):
         assert marker in SHARED_JUDGE_FLOW
 
