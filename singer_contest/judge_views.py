@@ -137,8 +137,14 @@ def _body_payload(request: HttpRequest) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _reason_from_messages(error: ValidationError) -> str:
-    for message in error.messages:
+def _reason_from_messages(error: ValidationError | PermissionDenied) -> str:
+    """Pick the known reason code out of a domain error's messages.
+
+    The judge authority raises either class depending on which guard fired, and only
+    ``ValidationError`` carries ``messages`` (a ``PermissionDenied`` is a bare exception),
+    so the read is defensive in the same way ``staff_panel.domain_error_messages`` is.
+    """
+    for message in getattr(error, "messages", None) or []:
         if message in _KNOWN_REASON_CODES:
             return message
     return "INVALID_REQUEST"

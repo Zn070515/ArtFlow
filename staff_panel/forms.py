@@ -581,7 +581,9 @@ class IncidentForm(forms.Form):
     authority_state = forms.ChoiceField(
         choices=IncidentRecord.AuthorityState.choices, required=False
     )
-    resolution = forms.CharField(required=False)
+    problem = forms.CharField(label="问题", required=False)
+    action_taken = forms.CharField(label="采取动作", required=False)
+    resolution = forms.CharField(label="结果", required=False)
     remark = forms.CharField(required=False)
     needs_review = forms.BooleanField(required=False)
 

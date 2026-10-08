@@ -3637,6 +3637,68 @@ class RuntimeLifecycleMatrixTests(TestCase):
         self.assertEqual(accepted.status_code, 302)
         self.assertTrue(IncidentRecord.objects.get(resolution="good").is_test)
 
+    def test_incident_records_the_problem_and_the_action_taken(self):
+        """GOAL §16: 问题 and 采取动作 are their own fields, not a free note.
+
+        A record used to be able to name a type and a resolution without ever stating what
+        went wrong or what was done about it — the two things the review reads first.
+        """
+        activity = _create_activity(
+            title="Incident Section 16",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("staff:incident_create"),
+            {
+                "activity_id": activity.pk,
+                "occurred_at": timezone.now().isoformat(),
+                "event_type": IncidentRecord.EventType.EQUIPMENT_ISSUE,
+                "authority_state": IncidentRecord.AuthorityState.HOLD,
+                "problem": "2 号评委手机无法提交评分",
+                "action_taken": "改用纸面评分并由工作人员代录",
+                "resolution": "该评委本场成绩按纸面录入",
+                "needs_review": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        incident = IncidentRecord.objects.get(activity=activity)
+        self.assertEqual(incident.problem, "2 号评委手机无法提交评分")
+        self.assertEqual(incident.action_taken, "改用纸面评分并由工作人员代录")
+        self.assertEqual(incident.resolution, "该评委本场成绩按纸面录入")
+        self.assertTrue(incident.needs_review)
+
+    def test_incident_export_carries_the_section_16_columns(self):
+        activity = _create_activity(
+            title="Incident Export",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REGISTRATION_OPEN,
+            is_test_mode=True,
+        )
+        IncidentRecord.objects.create(
+            activity=activity,
+            occurred_at=timezone.now(),
+            event_type=IncidentRecord.EventType.OTHER,
+            problem="问题文本",
+            action_taken="动作文本",
+            is_test=True,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:incident_export"), {"activity_id": activity.pk})
+
+        self.assertEqual(response.status_code, 200)
+        workbook = load_workbook(BytesIO(response.content))
+        rows = list(workbook.active.iter_rows(values_only=True))
+        self.assertIn("问题", rows[0])
+        self.assertIn("采取动作", rows[0])
+        self.assertIn("问题文本", rows[1])
+        self.assertIn("动作文本", rows[1])
+
     def test_prepare_round_uses_approved_singers_scoped_to_activity(self):
         activity = _create_activity(
             title="Round Test",

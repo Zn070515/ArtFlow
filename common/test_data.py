@@ -38,6 +38,8 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         Award,
         CompositeResult,
         CriterionScore,
+        Group,
+        GroupStage,
         ManualDecision,
         Performance,
         ScoreRecord,
@@ -92,6 +94,14 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
             score_record__round__activity=activity, is_test_data=True
         ).count(),
         "performances": Performance.objects.filter(activity=activity, is_test_data=True).count(),
+        # A group stage is the operator's verified result of an external draw (GOAL §6.4),
+        # i.e. a runtime fact like the round facts above — not configuration to be promoted
+        # (see `_promote_retained_config`). Leaving it out of the count let a rehearsal's
+        # fabricated draw survive into the FORMAL activity.
+        "group_stages": GroupStage.objects.filter(activity=activity, is_test_data=True).count(),
+        "groups": Group.objects.filter(
+            stage__activity=activity, stage__is_test_data=True, is_test_data=True
+        ).count(),
         "manual_decisions": ManualDecision.objects.filter(
             activity=activity, is_test_data=True
         ).count(),
@@ -188,6 +198,7 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from singer_contest.models import (
         Award,
         ContestRound,
+        GroupStage,
         ManualDecision,
         ScoreRecord,
         ScoreSummary,
@@ -240,7 +251,9 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     ):
         reset_round_snapshots(contest_round, operator, reason="activity_test_cleanup")
     files = SubmissionFile.objects.filter(is_test_data=True).filter(
-        Q(singer_registration__activity=locked_activity) | Q(program__activity=locked_activity)
+        Q(singer_registration__activity=locked_activity)
+        | Q(program__activity=locked_activity)
+        | Q(group__stage__activity=locked_activity)
     )
     for submission_file in files:
         delete_submission_file(submission_file)
@@ -298,6 +311,11 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     with authority_write(TEST_DATA_CLEANUP):
         Ticket.objects.filter(activity=locked_activity, is_test_data=True).delete()
     Program.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    # The group draw is runtime fact, so it is removed rather than promoted: its Groups,
+    # memberships and group-scoped material checks cascade from here. It has to go before
+    # the singers its memberships point at.
+    with authority_write(TEST_DATA_CLEANUP):
+        GroupStage.objects.filter(activity=locked_activity, is_test_data=True).delete()
     with authority_write(TEST_DATA_CLEANUP):
         SingerRegistration.objects.filter(activity=locked_activity, is_test_data=True).delete()
     IncidentRecord.objects.filter(activity=locked_activity, is_test=True).delete()
@@ -318,7 +336,8 @@ def _promote_retained_config(activity: Any, *, operator: Any) -> dict[str, int]:
     with runtime facts. When the activity leaves test mode those markers must be promoted
     to ``is_test_data=False`` so a FORMAL activity never holds config whose marker
     contradicts its lifecycle. Runtime facts (stage results/decisions, criterion scores,
-    performances, manual decisions) are handled separately and never promoted.
+    performances, manual decisions, and the group-stage draw) are handled separately and
+    never promoted — see ``clear_activity_test_data``.
     """
     from django.utils import timezone
     from files.models import MaterialSlot

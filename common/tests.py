@@ -31,6 +31,14 @@ from django.http import Http404, HttpRequest
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
+from entry_access.services import (
+    create_entry_point,
+    issue_access_grant,
+    redeem_access_grant,
+    revoke_access_grant,
+    revoke_ephemeral_session,
+)
 from exports.models import ArticleTemplate, GeneratedDocument
 from farewell_show.models import Program
 from files.models import MaterialCheck, StaffNote, SubmissionFile
@@ -53,9 +61,13 @@ from voting.testing import create_legacy_vote_record
 
 from common.audit import client_ip
 from common.authority import (
+    ACCESS_GRANT_STATE,
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    EPHEMERAL_SESSION_STATE,
+    GROUP_STAGE_STATE,
+    RETENTION_CLEANUP,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
@@ -582,6 +594,34 @@ class M1StageResultTestDataCleanupTests(TestCase):
 
         with self.assertRaises(PermissionDenied):
             leave_test_mode(self.activity, operator=self.operator)
+
+    def test_group_stage_draw_is_residue_and_is_cleared_not_promoted(self):
+        """The rehearsal's group draw is a verified result (GOAL §6.4), not configuration.
+
+        It was invisible to all three lifecycle functions: not counted, not cleared, and
+        not promoted either — so a FORMAL activity could inherit the fabricated draw while
+        the marker contradicted its lifecycle.
+        """
+        from singer_contest.models import Group, GroupStage
+
+        with authority_write(GROUP_STAGE_STATE):
+            stage = GroupStage.objects.create(
+                activity=self.activity, stage_key="chorus", name="合唱", is_test_data=True
+            )
+            Group.objects.create(stage=stage, name="A组", group_order=1, is_test_data=True)
+
+        counts = get_test_data_counts(self.activity)
+        self.assertEqual(counts["group_stages"], 1)
+        self.assertEqual(counts["groups"], 1)
+        with self.assertRaises(PermissionDenied):
+            leave_test_mode(self.activity, operator=self.operator)
+
+        leave_test_mode(self.activity, operator=self.operator, clear=True, reason="彩排清理")
+
+        self.assertFalse(GroupStage.objects.filter(activity=self.activity).exists())
+        self.assertFalse(Group.objects.filter(stage__activity=self.activity).exists())
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
 
 
 class ActivityLifecycleBulkWriteTests(TestCase):
@@ -2002,6 +2042,167 @@ class RetentionCleanupCommandTests(TestCase):
                 staff.username,
                 "--confirm",
             )
+
+
+class PruneRetainedStateCommandTests(TestCase):
+    """GOAL §19.2: the PII and transport rows around the facts must not live forever."""
+
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="prune-admin", password="pass", role=User.Role.ADMIN
+            )
+        self.activity = Activity.objects.create(
+            title="Prune activity",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=User.objects.create_user(username="prune-singer", password="pass"),
+            name="Prune singer",
+            student_id="prune-001",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.old_note = StaffNote.objects.create(
+            singer_registration=self.singer, content="临时备注", created_by=self.admin
+        )
+        StaffNote.objects.filter(pk=self.old_note.pk).update(
+            created_at=timezone.now() - timedelta(days=200)
+        )
+        self.old_audit = AuditLog.objects.create(
+            operator=self.admin,
+            action_type=AuditLog.ActionType.LOGIN,
+            target="accounts",
+            ip_address="203.0.113.9",
+        )
+        AuditLog.objects.filter(pk=self.old_audit.pk).update(
+            created_at=timezone.now() - timedelta(days=200)
+        )
+        self.fresh_audit = AuditLog.objects.create(
+            operator=self.admin,
+            action_type=AuditLog.ActionType.LOGIN,
+            target="accounts",
+            ip_address="203.0.113.10",
+        )
+
+    def _prune(self, *extra):
+        call_command(
+            "prune_retained_state",
+            "--older-than-days",
+            "90",
+            "--actor-username",
+            self.admin.username,
+            "--confirm",
+            *extra,
+        )
+
+    def test_requires_admin_and_confirmation(self):
+        with self.assertRaises(CommandError):
+            call_command(
+                "prune_retained_state",
+                "--older-than-days",
+                "90",
+                "--actor-username",
+                self.admin.username,
+            )
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="prune-staff", password="pass", role=User.Role.STAFF
+            )
+        with self.assertRaises(CommandError):
+            call_command(
+                "prune_retained_state",
+                "--older-than-days",
+                "90",
+                "--actor-username",
+                staff.username,
+                "--confirm",
+            )
+
+    def test_dry_run_changes_nothing(self):
+        call_command(
+            "prune_retained_state",
+            "--older-than-days",
+            "90",
+            "--actor-username",
+            self.admin.username,
+            "--dry-run",
+            stdout=StringIO(),
+        )
+
+        self.old_audit.refresh_from_db()
+        self.assertEqual(self.old_audit.ip_address, "203.0.113.9")
+        self.assertTrue(StaffNote.objects.filter(pk=self.old_note.pk).exists())
+
+    def test_prune_clears_old_audit_ips_and_old_notes_but_keeps_the_trail(self):
+        self._prune()
+
+        self.old_audit.refresh_from_db()
+        self.assertEqual(self.old_audit.ip_address, None)
+        self.assertTrue(AuditLog.objects.filter(pk=self.old_audit.pk).exists())
+        self.fresh_audit.refresh_from_db()
+        self.assertEqual(self.fresh_audit.ip_address, "203.0.113.10")
+        self.assertFalse(StaffNote.objects.filter(pk=self.old_note.pk).exists())
+
+    def test_purging_audit_logs_is_opt_in(self):
+        self._prune()
+        self.assertTrue(AuditLog.objects.filter(pk=self.old_audit.pk).exists())
+
+        self._prune("--purge-audit-logs")
+
+        self.assertFalse(AuditLog.objects.filter(pk=self.old_audit.pk).exists())
+
+    def test_expired_grants_and_sessions_are_pruned_with_their_bindings(self):
+        issued = issue_access_grant(
+            create_entry_point(
+                self.activity,
+                kind=EntryPoint.Kind.JUDGE,
+                label="Prune judge entry",
+                actor=self.admin,
+            ),
+            actor=self.admin,
+            ttl=timedelta(minutes=30),
+        )
+        redeemed = redeem_access_grant(issued.token)
+        # `expires_at` is not a lifecycle field, so the fixture ages the row through the
+        # *revocation* the models do allow, and then moves that timestamp back.
+        revoke_access_grant(issued.grant, actor=self.admin)
+        revoke_ephemeral_session(redeemed.session, actor=self.admin)
+        old = timezone.now() - timedelta(days=200)
+        with authority_write(ACCESS_GRANT_STATE):
+            AccessGrant.objects.filter(pk=issued.grant.pk).update(revoked_at=old)
+        with authority_write(EPHEMERAL_SESSION_STATE):
+            EphemeralSession.objects.filter(pk=redeemed.session.pk).update(revoked_at=old)
+
+        self._prune()
+
+        self.assertFalse(AccessGrant.objects.filter(pk=issued.grant.pk).exists())
+        self.assertFalse(EphemeralSession.objects.filter(pk=redeemed.session.pk).exists())
+
+    def test_retention_cleanup_scope_is_what_lets_the_command_delete_them(self):
+        """The guard has to stay: a bare queryset delete is still refused."""
+        issued = issue_access_grant(
+            create_entry_point(
+                self.activity,
+                kind=EntryPoint.Kind.SCANNER,
+                label="Prune scanner entry",
+                actor=self.admin,
+            ),
+            actor=self.admin,
+            ttl=timedelta(minutes=30),
+        )
+
+        with self.assertRaises(ValidationError):
+            AccessGrant.objects.filter(pk=issued.grant.pk).delete()
+        with authority_write(RETENTION_CLEANUP):
+            AccessGrant.objects.filter(pk=issued.grant.pk).delete()
 
 
 class ClientIpTests(TestCase):
