@@ -8,6 +8,7 @@ from common.models import AuditLog
 from core.models import Activity
 from core.policies import ActivityAction
 from core.services import lock_activity_for_action
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -17,6 +18,27 @@ from singer_contest.models import StageResult
 from singer_contest.services import build_result_closure
 
 from .models import PublicPost, ResultRelease
+
+
+def qr_print_host_warning(request: Any) -> str:
+    """GOAL §11.5: a QR code is only printable from the real HTTPS host.
+
+    Outside production the code is built from whatever host served the page — 127.0.0.1
+    or a LAN address — so a poster printed from there resolves to nothing for the
+    audience. The warning is returned rather than raised, because the page itself is
+    legitimate for checking the code at a rehearsal.
+
+    Both the QR centre and the execution package ask this one function. The package used
+    to embed four ready-to-print PNGs with no warning at all, which is the same mistake
+    one step further down the path: the QR centre's page warning covers the operator who
+    looks at the screen, not the ZIP that reaches a print shop.
+    """
+    if settings.APP_ENV == "production" and request.is_secure():
+        return ""
+    return (
+        f"当前二维码由 {request.get_host()} 生成，不是正式 HTTPS 域名。"
+        "打印前必须在正式域名下重新生成（GOAL §11.5）。"
+    )
 
 
 def _require_note(note: str) -> str:

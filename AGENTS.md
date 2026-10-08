@@ -139,7 +139,17 @@ templates may be cloned into a production workflow. Vote sessions must declare t
 purpose, and a ruleset vote source must match that purpose at bound freeze time. An
 activity may be archived only while its result line is closed: the archive package is the
 permanent record, so it is built on `build_result_closure(...).closeable`, never on the
-phase or on the existence of any confirmed row. Exports, retention and the archive report
-the same populations the resolver computes (`voting.services.valid_vote_count`, never a
-raw record count), and the permanent archive carries only what GOAL §19.1 keeps durable —
-a temporary staff note stays in the pre-event execution package.
+phase or on the existence of any confirmed row — and the exemption for activities with no
+ruleset-driven result line is decided by `activity_type`, never by which blocker the
+closure happens to report. Exports, retention and the archive report the same populations
+the resolver computes (`voting.services.valid_vote_count`, never a raw record count), and
+the permanent archive carries only what GOAL §19.1 keeps durable — a temporary staff note
+stays in the pre-event execution package. The archive's stage view is likewise driven by
+the closure, so a checkpoint the current frozen ruleset no longer declares cannot appear
+beside the ones that are current.
+
+GOAL §19.3 holds on every staff path, not only the Django admin form: an image bound for
+the public site passes `forms.ImageField` (which rejects a payload that is not decodable)
+and `files.imaging.sanitize_upload` (which bakes EXIF orientation into the pixels and
+writes no metadata back). A view that assigns `request.FILES[...]` to a public image field
+is a bypass, however legitimate the page is.

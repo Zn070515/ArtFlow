@@ -81,7 +81,11 @@ from incidents.models import IncidentRecord
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost, ResultRelease
-from public_portal.services import release_result_post, revoke_result_release
+from public_portal.services import (
+    qr_print_host_warning,
+    release_result_post,
+    revoke_result_release,
+)
 from questionnaire.projection import (
     generic_song_label,
     prime_questionnaire_answers,
@@ -862,7 +866,7 @@ def _post_status_choices(request):
 @staff_required
 def post_create(request):
     if request.method == "POST":
-        form = PublicPostForm(request.POST)
+        form = PublicPostForm(request.POST, request.FILES)
         if not form.is_valid():
             return render(
                 request,
@@ -903,8 +907,8 @@ def post_create(request):
                 created_by=publication_actor,
                 updated_by=publication_actor,
             )
-            if request.FILES.get("cover_image"):
-                post.cover_image = request.FILES["cover_image"]
+            if data["cover_image"]:
+                post.cover_image = data["cover_image"]
             if data["status"] == PublicPost.Status.PUBLISHED:
                 post.published_at = timezone.now()
             post.save()
@@ -943,7 +947,7 @@ def post_preview(request, pk):
 def post_edit(request, pk):
     post = get_object_or_404(PublicPost, pk=pk)
     if request.method == "POST":
-        form = PublicPostForm(request.POST)
+        form = PublicPostForm(request.POST, request.FILES)
         if not form.is_valid():
             return render(
                 request,
@@ -1028,8 +1032,8 @@ def post_edit(request, pk):
         locked_post.related_activity_id = data["related_activity_id"]
         locked_post.updated_by = publication_actor
         locked_post.version += 1
-        if request.FILES.get("cover_image"):
-            locked_post.cover_image = request.FILES["cover_image"]
+        if data["cover_image"]:
+            locked_post.cover_image = data["cover_image"]
         if data["status"] == PublicPost.Status.PUBLISHED and not locked_post.published_at:
             locked_post.published_at = timezone.now()
         elif (
@@ -3510,23 +3514,6 @@ def _popularity_top_tie(vote_session):
 
 
 # --- QR code center ---
-
-
-@staff_required
-def qr_print_host_warning(request) -> str:
-    """GOAL §11.5: a QR is only printable from the real HTTPS host.
-
-    Outside production the code is built from whatever host served the page — 127.0.0.1 or a
-    LAN address — so a poster printed from here resolves to nothing for the audience, and
-    nothing on any of these pages said so. The warning is returned (not raised) because the
-    page itself is legitimate for checking the code at a rehearsal.
-    """
-    if settings.APP_ENV == "production" and request.is_secure():
-        return ""
-    return (
-        f"当前二维码由 {request.get_host()} 生成，不是正式 HTTPS 域名。"
-        "打印前必须在正式域名下重新生成（GOAL §11.5）。"
-    )
 
 
 @staff_required

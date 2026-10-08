@@ -29,6 +29,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost
+from public_portal.services import qr_print_host_warning
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 from singer_contest.group_chorus import (
     current_group_members,
@@ -43,7 +44,6 @@ from singer_contest.models import (
     StageResult,
 )
 from singer_contest.services import (
-    ResultClosureCode,
     _eligible_singers,
     authoritative_panel_judges,
     bound_ruleset_version_label,
@@ -520,6 +520,23 @@ def build_execution_package(activity: Activity, request: Any = None) -> list[Pac
         path = reverse(route_name, kwargs={"public_code": activity.public_code})
         url = request.build_absolute_uri(path) if request is not None else path
         artifacts.append(_qr_artifact(f"{kind}_qr", url))
+    # GOAL §11.5. The QR centre warns on screen; this ZIP is the artefact that actually
+    # reaches a printer, and it carried four ready-to-print PNGs built from whatever host
+    # served the request. A LAN rehearsal is a legitimate use — so the codes are still
+    # produced — but the package has to say what they are, or the warning only exists on
+    # the screen the operator looked at an hour earlier.
+    if request is not None:
+        warning = qr_print_host_warning(request)
+        if warning:
+            artifacts.append(
+                PackageArtifact(
+                    "QR-NOT-FOR-PRINT.txt",
+                    (
+                        f"{warning}\n\n本执行包中的 qr PNG 仅供彩排使用；"
+                        "正式印刷件必须从正式 HTTPS 域名下的二维码中心重新生成。\n"
+                    ).encode("utf-8"),
+                )
+            )
     return artifacts
 
 
@@ -576,6 +593,14 @@ def _stage_results_workbook(activity: Activity) -> Workbook:
     containing only the former cannot answer "which version of the result was confirmed,
     by whom, and what did it decide". No fingerprints, hashes or reasons are exported
     here — the point is the decision, not the resolver's internals.
+
+    The rows come from the result closure, not from a scan of the activity's whole
+    ``StageResult`` history. Scanning by hand was wrong in a way that only shows up when a
+    ruleset changes: a stage the current frozen ruleset no longer declares — a ``semifinal``
+    dropped in v2 — keeps its old confirmed row forever, and the archive would present it
+    as part of the authoritative record next to the stage keys that *are* current. The
+    closure already answers "which stage keys does the current ruleset declare, and which
+    result version is current for each", so the sheet asks it instead of re-deriving it.
     """
     wb = Workbook()
     ws = _active_worksheet(wb)
@@ -594,18 +619,22 @@ def _stage_results_workbook(activity: Activity) -> Workbook:
             "Score",
         ]
     )
-    test_flag = runtime_is_test(activity)
-    # Only the current version of each stage line: older versions are history, and the
-    # archive states which one the activity was closed on.
-    latest_by_stage: dict[str, StageResult] = {}
-    for result in (
-        StageResult.objects.filter(activity=activity, is_test_data=test_flag)
-        .select_related("ruleset_version__ruleset", "confirmed_by")
-        .order_by("stage_key", "result_version", "pk")
-    ):
-        latest_by_stage[result.stage_key] = result
-    for stage_key in sorted(latest_by_stage):
-        result = latest_by_stage[stage_key]
+    closure = build_result_closure(activity)
+    current_results = {
+        result.pk: result
+        for result in StageResult.objects.filter(
+            pk__in=[stage.current_result_id for stage in closure.stages if stage.current_result_id]
+        ).select_related("ruleset_version__ruleset", "confirmed_by")
+    }
+    for stage in closure.stages:
+        result = current_results.get(stage.current_result_id or -1)
+        if result is None:
+            # A current checkpoint with no result yet: name it, so the sheet shows the
+            # stage exists rather than silently omitting it. Only reachable from the
+            # preview package, since archiving requires a closed result line.
+            ws.append([stage.stage_key, "", "", "", "", "", "", "", "", ""])
+            continue
+        stage_key = result.stage_key
         result_label = f"{result.ruleset_version.ruleset.name} v{result.ruleset_version.version}"
         base = [
             stage_key,
@@ -1053,16 +1082,17 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
     # candidate, an old ruleset version, a missing checkpoint, an unconfirmed upstream
     # and a fingerprint mismatch.
     #
-    # It only applies to activities that have a current frozen ruleset: a farewell show
-    # has no ruleset-driven result line, and refusing to archive it because it has no
-    # frozen version would be a different and wrong rule.
-    closure = build_result_closure(locked_activity)
-    if (
-        ResultClosureCode.NO_CURRENT_FROZEN_RULESET not in closure.blocking_reasons
-        and not closure.closeable
-    ):
-        reasons = "、".join(code.value for code in closure.blocking_reasons)
-        raise PermissionDenied(f"正式结果尚未核定闭环（{reasons}），不能归档。")
+    # The exemption is by activity *type*, not by blocker. Exempting every activity that
+    # reports `no_current_frozen_ruleset` also exempts a singer contest that never froze
+    # one, and a singer contest's formal outcome is defined as a confirmed stage result —
+    # a contest with no frozen ruleset has no formal result at all, which is a reason to
+    # refuse, not a reason to skip. A farewell show or a general activity has no
+    # ruleset-driven result line, so the check does not apply to it.
+    if locked_activity.activity_type == Activity.Type.SINGER_CONTEST:
+        closure = build_result_closure(locked_activity)
+        if not closure.closeable:
+            reasons = "、".join(code.value for code in closure.blocking_reasons)
+            raise PermissionDenied(f"正式结果尚未核定闭环（{reasons}），不能归档。")
 
     group_stages = GroupStage.objects.filter(
         activity=locked_activity,
