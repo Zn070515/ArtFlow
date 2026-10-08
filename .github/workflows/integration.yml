@@ -198,8 +198,36 @@ jobs:
           done
           exit 1
 
+      - name: Restore the Playwright browser cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          # A lockfile bump should not cost a full download: the directory holds every
+          # browser revision side by side, so an older set still covers most of it.
+          restore-keys: playwright-${{ runner.os }}-
+
       - name: Install browsers for the smoke and layout runs
-        run: npx playwright install --with-deps chromium webkit
+        # This step downloads roughly a third of a gigabyte. On 2026-10-08 it stalled for
+        # the job's entire 30-minute budget, which cancelled the seventeen acceptance
+        # steps behind it and reported nothing about the cause. It now has the same
+        # retry shape as the Compose startup above, a per-attempt ceiling so a stalled
+        # transfer is retried instead of hanging, and a cache so the usual run downloads
+        # nothing at all.
+        timeout-minutes: 18
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for attempt in {1..3}; do
+            printf 'Playwright browser install attempt %s/3\n' "$attempt" >&2
+            if timeout 300 npx playwright install --with-deps chromium webkit; then
+              exit 0
+            fi
+            if (( attempt < 3 )); then
+              sleep 10
+            fi
+          done
+          exit 1
 
       - name: Prepare human acceptance account boundary
         run: docker compose exec -T web python manage.py prepare_human_acceptance_e2e --fresh-bootstrap

@@ -149,6 +149,31 @@ def integration_issues(workflow_path: Path, workflow: Mapping[str, Any]) -> list
         issues.append(
             f"{workflow_path.name}: Compose startup must retry transient registry failures"
         )
+    # The browser download is the largest single transfer in the job and the only step
+    # that has stalled long enough to consume the whole budget: on 2026-10-08 it hung for
+    # 29 minutes, the job hit its 30-minute timeout, and the seventeen acceptance steps
+    # behind it were cancelled without a word about the cause. A retry that is not bounded
+    # cannot help — the shell never gets control back — so the ceiling and the retry are
+    # one contract, and the cache is what keeps the usual run out of the window entirely.
+    browser_install_steps = [
+        step
+        for step in compose_steps
+        if step.get("name") == "Install browsers for the smoke and layout runs"
+    ]
+    browser_install_commands = "\n".join(str(step.get("run", "")) for step in browser_install_steps)
+    browser_install_contract_met = (
+        len(browser_install_steps) == 1
+        and "for attempt in" in browser_install_commands
+        and "timeout 300" in browser_install_commands
+        and browser_install_steps[0].get("timeout-minutes") is not None
+    )
+    if not browser_install_contract_met:
+        issues.append(
+            f"{workflow_path.name}: the Playwright browser install must retry a bounded "
+            "attempt and carry a step timeout"
+        )
+    if not any(uses_action(step, "actions/cache") for step in compose_steps):
+        issues.append(f"{workflow_path.name}: the Playwright browser install must restore a cache")
     if (
         "docker compose ps --status running" not in compose_commands
         or "State.Health.Status" not in compose_commands
