@@ -162,12 +162,14 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 - 上传最大值按用途在 `files/services.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB）。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
 - 生产 Caddy manifest 固定 `request_body max_size 120MB`；现场/event profile 才可使用更高的本地上限。应用层还会执行用途上限、文件 magic/container 校验、每报名配额、版本保留、上传限流和磁盘低水位检查。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
 - 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。
-- 内部提交文件和生成文档由 Django 受控媒体视图流式返回，当前没有独立的媒体下载 worker。
-  正式活动前必须按最大文件尺寸和并发下载量做一次负载演练；若下载占满 Gunicorn worker，
-  应把媒体交给独立的受控文件服务，并保留同等权限校验，不能直接暴露 `/media/` 目录。
-  该演练已实现为 `scripts/media_download_load_rehearsal.mjs`（配套 fixture 生命周期命令
+- 内部提交文件和生成文档由 Django 受控媒体视图流式返回，且已隔离到上文的独立 `media`
+  worker 池：慢下载占满的只会是这个池，不再拖停回答现场请求的 worker。正式活动前仍应在
+  **实际部署配置与网络条件**下重测并发下载量；该演练已实现为
+  `scripts/media_download_load_rehearsal.mjs`（配套 fixture 生命周期命令
   `prepare_media_download_rehearsal` / `cleanup_media_download_rehearsal`），结论与数据见
-  [生产准备演练](production-readiness.md) 的「媒体下载负载演练」一节。
+  [生产准备演练](production-readiness.md) 的「媒体下载负载演练」一节。对象存储与签名 URL
+  是后续演进（见上文 ADR-012 seam），不是当前生产 blocker；在那之前 `/media/` 目录不得
+  直接暴露，授权必须始终留在 Django。
 
 ## 二维码打印前提（GOAL §11.5）
 
@@ -190,7 +192,8 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 宿主机应按 [`deploy/docker-daemon.json.example`](../deploy/docker-daemon.json.example) 配置
 Docker 日志轮转（`local` driver、20 MiB、5 个文件），再按发行版规范重启 Docker；这不是
 应用容器内的配置。可以用 `scripts/monitor.sh .env.production` 接入 cron/CloudMonitor，
-它检查 db/web/proxy 健康状态、外部 HTTPS `/healthz/`、宿主机低水位和最新应用备份年龄。
+它检查 db/web/media/proxy 健康状态、外部 HTTPS `/healthz/`、宿主机低水位和最新应用备份年龄。
+`realtime` 刻意不在硬失败列表里：它本来就设计成可降级到 HTTP。
 监控脚本只读，不会停止服务、删除卷或打印凭据。
 
 ## 发布门禁
