@@ -1,8 +1,10 @@
+import json
 import tomllib
 from pathlib import Path
 
 PYPROJECT_PATH = Path(__file__).resolve().parents[2] / "pyproject.toml"
 REPOSITORY_ROOT = PYPROJECT_PATH.parent
+PYRIGHTCONFIG_PATH = REPOSITORY_ROOT / "pyrightconfig.json"
 MYPY_FILES = [
     "accounts",
     "archive",
@@ -20,6 +22,7 @@ MYPY_FILES = [
     "realtime",
     "singer_contest",
     "staff_panel",
+    "scripts",
     "tests",
     "tickets",
     "voting",
@@ -102,6 +105,10 @@ def test_quality_configuration_enforces_the_engineering_baseline():
     assert coverage["run"]["source"] == measured_directories
     assert set(measured_directories) <= set(mypy["files"])
     assert mypy["files"] == MYPY_FILES
+    # `scripts` is a directory of standalone tools rather than a package, so mypy needs
+    # this to resolve `scripts/verify_private_test_package.py` as one module instead of
+    # two and check the directory at all.
+    assert mypy["explicit_package_bases"] is True
     assert mypy["check_untyped_defs"] is True
     assert mypy["disallow_untyped_defs"] is False
     assert "ignore_errors" not in mypy
@@ -116,6 +123,36 @@ def test_quality_configuration_enforces_the_engineering_baseline():
     )
     for setting, expected_value in GRADUAL_CHECKS.items():
         assert gradual_override[setting] is expected_value
+
+
+def test_the_three_checkers_cover_the_same_tree():
+    """Three hand-written lists describe one tree, and they have to agree.
+
+    `scripts/` appeared in none of them, so `scripts/verify_workflows.py` and the
+    operational validators `deploy.sh` calls were type-checked by nothing — the same
+    silent-omission shape as the coverage `source` list. Comparing the lists to each
+    other is what keeps a fourth one from going missing.
+    """
+    tools = load_pyproject()["tool"]
+    mypy_files = set(tools["mypy"]["files"])
+    ruff_src = set(tools["ruff"]["src"])
+    pyright = json.loads(PYRIGHTCONFIG_PATH.read_text(encoding="utf-8"))
+    pyright_include = set(pyright["include"])
+
+    # ruff and mypy sweep every Python tree; pyright is the production baseline and drops
+    # `tests` on purpose — its `exclude` already drops `**/test_*.py` app-wide, so the
+    # only tree it deliberately leaves to the other two is the one that is all tests.
+    assert mypy_files == ruff_src
+    assert "scripts" in pyright_include
+    assert "tests" in pyright["exclude"]
+    assert pyright_include == (mypy_files - {"tests"}) | {
+        # File-level entries whose directories are already listed; kept because a
+        # narrowed baseline is easier to loosen than to tighten.
+        "common/authority.py",
+        "common/private_test_questionnaire.py",
+        "files/services.py",
+        "singer_contest/services.py",
+    }
 
 
 def test_toolchain_baseline_is_pinned_and_documented():

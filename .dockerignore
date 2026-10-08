@@ -15,6 +15,9 @@ db.sqlite3
 media/
 staticfiles/
 backups/
+logs/
+test-results/
+.playwright-mcp/
 docs/
 htmlcov/
 .coverage

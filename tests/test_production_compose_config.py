@@ -505,27 +505,62 @@ def test_production_env_example_documents_manifest_fixed_values():
     assert "manifest fixes" in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
 
 
+# Variables a manifest interpolates but the operator does not supply: `start-event.ps1`
+# writes them into the environment before it calls Compose, and `.env.event.example`
+# names them in a comment rather than as keys, because a value written in that file is
+# overwritten without warning.
+LAUNCHER_SUPPLIED_VARIABLES = frozenset(
+    {
+        "ARTFLOW_EVENT_ALLOWED_HOSTS",
+        "ARTFLOW_EVENT_BIND_ADDRESS",
+        "ARTFLOW_EVENT_PORT",
+    }
+)
+
+
+def undocumented_interpolations(manifest_path: Path, example_path: Path) -> set[str]:
+    manifest = manifest_path.read_text(encoding="utf-8")
+    referenced = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)(?::[-?])", manifest))
+    documented = set()
+    for line in example_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            documented.add(line.split("=", 1)[0].strip())
+    return referenced - documented - LAUNCHER_SUPPLIED_VARIABLES
+
+
 def test_production_env_example_documents_every_interpolated_variable():
-    """Every variable the manifest interpolates must also be documented.
+    """Every variable the production manifest interpolates must also be documented.
 
     A `${VAR:?}` entry aborts `docker compose config` when VAR is unset, so an
     undocumented one turns "copy the template and deploy" into a failed startup.
     Reading the names out of the manifest keeps this honest in both directions:
     adding a `${...}` reference without documenting it fails here, not on the host.
     """
-    manifest = PRODUCTION_COMPOSE_PATH.read_text(encoding="utf-8")
-    referenced = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)(?::[-?])", manifest))
-
-    documented = set()
-    for line in PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            documented.add(line.split("=", 1)[0].strip())
-
-    assert referenced <= documented, (
+    undocumented = undocumented_interpolations(PRODUCTION_COMPOSE_PATH, PRODUCTION_ENV_EXAMPLE_PATH)
+    assert not undocumented, (
         "deploy/compose.production.yml reads variables that .env.production.example "
-        f"does not document: {sorted(referenced - documented)}"
+        f"does not document: {sorted(undocumented)}"
     )
+
+
+def test_the_local_and_event_environment_templates_document_their_manifests():
+    """The same check for the other two profiles, which had both drifted.
+
+    `docker-compose.yml` interpolated `ARTFLOW_RELEASE_SHA` and the event manifest
+    interpolated `ARTFLOW_CADDY_IMAGE`; neither template mentioned them, so an operator
+    could copy the template, set everything it names, and still be running a default
+    they had no way to discover.
+    """
+    for manifest_path, example_path in (
+        (LOCAL_COMPOSE_PATH, PROJECT_ROOT / ".env.example"),
+        (EVENT_COMPOSE_PATH, EVENT_ENV_EXAMPLE_PATH),
+    ):
+        undocumented = undocumented_interpolations(manifest_path, example_path)
+        assert not undocumented, (
+            f"{manifest_path.name} reads variables that {example_path.name} does not "
+            f"document: {sorted(undocumented)}"
+        )
 
 
 def test_production_manifest_forwards_every_documented_settings_knob():
