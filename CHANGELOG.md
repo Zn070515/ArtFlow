@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-10-08 (later)
+
+### Peripheral authority closure — the staff path, the archive sheet, the rehearsal QR
+
+Four places where the main authority was already correct and something further out
+described it differently.
+
+- **The archive refused nothing when a singer contest had no frozen ruleset.** The previous
+  batch made archiving require a closeable result line, and exempted activities whose
+  closure reported `no_current_frozen_ruleset` — which exempts a singer contest that never
+  froze one. A singer contest's formal outcome *is* a confirmed stage result, so having no
+  frozen ruleset is a reason to refuse, not a reason to skip. The exemption is now decided
+  by `activity_type`: a farewell show or a general activity has no ruleset-driven result
+  line and is unaffected; a singer contest always has one. Locked rounds and complete
+  scores alone used to be enough to reach `ARCHIVED` with a package calling itself the
+  authoritative record.
+- **`stage_results.xlsx` scanned the activity's whole `StageResult` history.** When a
+  ruleset drops a checkpoint — a `semifinal` in v2 — the old confirmed row for it survives
+  in the database, and the sheet printed it beside the stage keys that are current. The
+  rows now come from `build_result_closure`, which already answers "which stage keys does
+  the current ruleset declare, and which result version is current for each", instead of
+  that question being re-derived by hand in a second place.
+- **The staff cover-image upload bypassed the public-media safety chain.** `PublicPostForm`
+  is a plain `forms.Form` with no cover field, and `post_create`/`post_edit` assigned
+  `request.FILES["cover_image"]` straight onto the model. So the daily staff path skipped
+  `forms.ImageField` — which is what rejects a file that is not really an image — and
+  skipped `sanitize_upload`, which bakes EXIF orientation into the pixels and writes no
+  metadata back. Phone photos carried GPS, device and timestamp metadata onto the public
+  page through the ordinary path while the admin path stripped them. The field is declared
+  on the form, both views pass `request.FILES`, and both read the sanitized value.
+- **The execution package embedded rehearsal QR codes with no warning.** The QR centre
+  warns on screen when the code was built from a non-production host (GOAL §11.5), but this
+  ZIP carries four ready-to-print PNGs and said nothing — the warning covered the screen
+  the operator looked at, not the file that leaves the building. A LAN rehearsal is a
+  legitimate use, so the codes are still produced; the package now includes
+  `QR-NOT-FOR-PRINT.txt` naming the host it was built from. The host rule itself moved to
+  `public_portal.services.qr_print_host_warning` so the two callers cannot drift.
+
 ## 2026-10-08
 
 ### Archive authority closure — the record has to describe what the system confirmed
