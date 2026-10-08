@@ -81,6 +81,14 @@ class SubmissionFile(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        # `common.views.controlled_media` resolves every `/media/...` request by looking the
+        # stored path up exactly (`Q(file=path) | Q(derivative=path)`), and both columns are
+        # plain FileFields: without these the one query every media byte goes through was a
+        # full scan of the submissions table.
+        indexes = [
+            models.Index(fields=["file"], name="submissionfile_file_idx"),
+            models.Index(fields=["derivative"], name="submissionfile_derivative_idx"),
+        ]
         constraints = [
             # Two slots, not one: a legacy upload is unique per purpose, a questionnaire
             # upload is unique per question. Keeping them separate is what stops a second

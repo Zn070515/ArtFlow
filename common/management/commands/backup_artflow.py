@@ -56,8 +56,28 @@ FILE_MODELS: list[tuple[type[Any], str]] = [
 ]
 
 
+def count_models() -> dict[str, Any]:
+    """Every concrete model in the project, keyed by label.
+
+    The manifest used to count seventeen hand-picked models, so the other ~40 tables were
+    covered only by ``pg_restore --exit-on-error`` — which proves the dump restored, not
+    that its rows are all there. The seventeen keep their human labels (older manifests
+    are compared by label) and everything else is added under ``app.model``, so a new model
+    is counted the day it exists rather than the day someone remembers the list.
+    """
+    from django.apps import apps
+
+    models_by_label: dict[str, Any] = dict(COUNT_MODELS)
+    for model in apps.get_models():
+        if model._meta.proxy or model._meta.auto_created:
+            continue
+        label = f"{model._meta.app_label}.{model._meta.model_name}"
+        models_by_label.setdefault(label, model)
+    return models_by_label
+
+
 def collect_counts() -> dict[str, int]:
-    return {label: model.objects.count() for label, model in COUNT_MODELS.items()}
+    return {label: model.objects.count() for label, model in count_models().items()}
 
 
 def apply_migration_heads() -> tuple[str, str, int]:

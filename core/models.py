@@ -1,5 +1,5 @@
 import secrets
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from common.authority import (
     ACTIVITY_STATE,
@@ -23,6 +23,41 @@ _PUBLIC_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 def generate_activity_public_code() -> str:
     """Return a short, human-scannable identifier for a formal activity URL."""
     return "".join(secrets.choice(_PUBLIC_CODE_ALPHABET) for _ in range(8))
+
+
+def backfill_missing_activity_public_codes(activity_model: Any, *, using: str | None = None) -> int:
+    """Give every activity without a usable public code one, and report how many.
+
+    A public code is not decoration: every public entry URL (`/e/<code>/...`), the ticket
+    QR and the judge entry are built from it, so a NULL or empty one is a broken activity
+    rather than a missing nicety. 0006 added the field nullable and backfilled it, 0008
+    tightened it to NOT NULL, and 0011 was then edited to carry a backfill of its own —
+    after some databases had already recorded 0011 as applied. Django applies a migration by
+    name, so those databases never ran the added step; this function is the one place the
+    backfill is stated, and 0012 runs it on its own name so every database converges.
+    """
+    # Through the base manager: a public code is `immutable_fields` for the application,
+    # which is exactly the rule a backfill exists to repair, and migrations run historical
+    # models for the same reason. Nothing outside this function un-sets a code.
+    manager = activity_model._base_manager
+    used = set(
+        manager.using(using)
+        .exclude(public_code__isnull=True)
+        .exclude(public_code="")
+        .values_list("public_code", flat=True)
+    )
+    missing = manager.using(using).filter(
+        models.Q(public_code__isnull=True) | models.Q(public_code="")
+    )
+    filled = 0
+    for activity in missing.iterator():
+        code = generate_activity_public_code()
+        while code in used:
+            code = generate_activity_public_code()
+        used.add(code)
+        manager.using(using).filter(pk=activity.pk).update(public_code=code)
+        filled += 1
+    return filled
 
 
 class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):

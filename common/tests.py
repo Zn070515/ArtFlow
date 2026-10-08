@@ -1752,6 +1752,26 @@ class AppBackupVerificationTests(TestCase):
         self.assertGreaterEqual(counts["activities"], 1)
         self.assertEqual(counts["registrations"], 1)
 
+    def test_the_manifest_counts_every_table(self):
+        """A hand-written list is a promise nobody can keep.
+
+        Seventeen of the ~57 tables were counted item by item, so a new model's rows were
+        covered only by `pg_restore --exit-on-error` — which proves the dump restored, not
+        that its rows are all there. The manifest now enumerates the model registry, and
+        this is the contract that keeps it that way.
+        """
+        from django.apps import apps
+
+        from common.management.commands.backup_artflow import count_models
+
+        expected = {
+            f"{model._meta.app_label}.{model._meta.model_name}"
+            for model in apps.get_models()
+            if not model._meta.proxy and not model._meta.auto_created
+        }
+
+        self.assertEqual(expected - set(count_models()), set())
+
     def test_media_content_digest_is_stable_and_sensitive_to_content(self):
         root = Path(self._media.name)
         (root / "a.txt").write_text("hello", encoding="utf-8")
@@ -1814,8 +1834,10 @@ class AppBackupVerificationTests(TestCase):
         manifest_path = next(output_root.glob("backup-*/manifest.json"))
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["git_sha"], release_sha)
-        self.assertEqual(
-            set(manifest["counts"]),
+        # The human labels the older manifests used are kept (a manifest is compared by
+        # label), and `test_the_manifest_counts_every_table` is what asserts the rest of the
+        # registry is covered too.
+        self.assertTrue(
             {
                 "activities",
                 "registrations",
@@ -1834,7 +1856,8 @@ class AppBackupVerificationTests(TestCase):
                 "tickets",
                 "ticket_access_sessions",
                 "audit_logs",
-            },
+            }
+            <= set(manifest["counts"])
         )
 
     def test_backup_artflow_holds_and_releases_the_global_write_barrier(self):
@@ -2203,6 +2226,37 @@ class PruneRetainedStateCommandTests(TestCase):
             AccessGrant.objects.filter(pk=issued.grant.pk).delete()
         with authority_write(RETENTION_CLEANUP):
             AccessGrant.objects.filter(pk=issued.grant.pk).delete()
+
+
+class MediaGatewayIndexContractTests(TestCase):
+    def test_every_path_the_gateway_looks_up_is_indexed(self):
+        """`controlled_media` resolves each `/media/...` request by exact stored path.
+
+        Those columns are plain FileFields, so without an index the one query every media
+        byte goes through scanned the whole table.
+        """
+        from archive.models import ArchivePackage
+        from exports.models import ExportTask, GeneratedDocument
+        from files.models import SubmissionFile
+        from public_portal.models import PublicMedia, PublicPost
+
+        for model, field in (
+            (SubmissionFile, "file"),
+            (SubmissionFile, "derivative"),
+            (PublicPost, "cover_image"),
+            (PublicMedia, "image"),
+            (GeneratedDocument, "file"),
+            (ExportTask, "file"),
+            (ArchivePackage, "file"),
+        ):
+            with self.subTest(model=model.__name__, field=field):
+                indexed = model._meta.get_field(field).db_index or any(
+                    field in list(index.fields) for index in model._meta.indexes
+                )
+                self.assertTrue(
+                    indexed,
+                    f"{model.__name__}.{field} is looked up by exact path but not indexed",
+                )
 
 
 class ClientIpTests(TestCase):
