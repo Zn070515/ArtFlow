@@ -60,6 +60,7 @@ from files.models import MaterialCheck, MaterialRequirement, StaffNote, Submissi
 from files.services import reconcile_singer_material_checks, store_submission_file
 from incidents.models import IncidentRecord
 from openpyxl import load_workbook
+from PIL import Image
 from public_portal.models import PublicPost, ResultRelease
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, HISTORICAL_SCHIDUI_NAME
@@ -101,6 +102,17 @@ from voting.testing import create_legacy_vote_record
 
 from staff_panel.forms import CREATE_PHASE_CHOICES, ActivityForm
 from staff_panel.views import _round_grid_payload, post_edit
+
+
+def _jpeg_carrying_exif() -> SimpleUploadedFile:
+    """A phone-style upload: real pixels plus metadata that must not reach the public page."""
+    image = Image.new("RGB", (24, 16), (10, 120, 200))
+    exif = Image.Exif()
+    exif[0x010E] = "GPS 39.9,116.3"
+    exif[0x0112] = 6  # Orientation: rotate 90° clockwise on display
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    return SimpleUploadedFile("poster.jpg", buffer.getvalue(), content_type="image/jpeg")
 
 
 def login_admin(client, user):
@@ -2283,7 +2295,65 @@ class StaffPanelSmokeTests(TestCase):
                 b"storage document",
             )
 
-    def _make_finalized_round_activity(self, *, include_scores=True):
+    def _bind_result_line(
+        self,
+        activity,
+        contest_round,
+        *,
+        status=StageResult.Status.READY_TO_CONFIRM,
+        confirmed_by=None,
+    ):
+        """Give ``contest_round`` a frozen ruleset whose single checkpoint is resolved.
+
+        The binding maps the definition's ASSESS node onto the round, so
+        `build_result_closure` resolves the stage instead of reporting a binding error —
+        the same shape `singer_contest.tests.ResultClosureServiceTests` uses. Both this
+        class's "finalized" fixture and the "bound result" one build their result line
+        here, so the two cannot describe the same activity differently.
+        """
+        ruleset = ContestRuleset.objects.create(
+            activity=activity, name="Bound Ruleset", stage_key="final"
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=json.dumps(
+                    {
+                        "schema_version": 1,
+                        "nodes": [
+                            {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"}
+                        ],
+                    }
+                ),
+                version=1,
+                binding={"stage_key": "final", "round_keys": {"r1": contest_round.pk}},
+                authority_hash="bound-authority",
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            result = StageResult.objects.create(
+                activity=activity,
+                ruleset_version=version,
+                created_by=self.admin,
+                stage_key="final",
+                status=status,
+                reasons=["tie_requires_review"] if status == StageResult.Status.REVIEW else [],
+                ruleset_hash=version.authority_hash,
+                input_fingerprint=_current_input_fingerprint(version, activity, "final"),
+                result_version=1,
+                is_test_data=False,
+            )
+        if confirmed_by is not None:
+            with authority_write(STAGE_RESULT_CONFIRM):
+                result.status = StageResult.Status.CONFIRMED
+                result.confirmed_by = confirmed_by
+                result.confirmed_at = timezone.now()
+                result.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+            result.refresh_from_db()
+        return result
+
+    def _make_finalized_round_activity(self, *, include_scores=True, confirm_result=True):
         activity = _create_activity(
             title="Archive Ready Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
@@ -2317,6 +2387,11 @@ class StaffPanelSmokeTests(TestCase):
         locked_round.status = ContestRound.Status.LOCKED
         locked_round.is_locked = True
         _save_round_state(locked_round, ["status", "is_locked"])
+        # Archiving requires a closed result line, so a fixture named "archive ready" has
+        # to actually carry one: locked rounds and complete scores were all it took before
+        # the archive started asking the same question the public release path asks.
+        if confirm_result:
+            self._bind_result_line(activity, locked_round, confirmed_by=self.admin)
         return activity
 
     def test_execution_package_omits_archive_only_sheets(self):
@@ -2377,6 +2452,52 @@ class StaffPanelSmokeTests(TestCase):
             "public_content_index.xlsx",
         ]:
             self.assertNotIn(omitted, names)
+
+    def test_execution_package_marks_qr_codes_built_outside_production(self):
+        """GOAL §11.5 has to reach the artefact a printer receives.
+
+        The QR centre warns on screen, but this ZIP embeds four ready-to-print PNGs built
+        from whatever host served the request. A LAN rehearsal produced a package whose
+        codes resolve to `192.168.x.x` with nothing inside saying so — the warning covered
+        the screen the operator looked at, not the file that leaves the building.
+        """
+        activity = _create_activity(
+            title="Rehearsal Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=False,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:execution_package", args=[activity.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            names = set(archive.namelist())
+            notice = archive.read("QR-NOT-FOR-PRINT.txt").decode("utf-8")
+        self.assertIn("QR-NOT-FOR-PRINT.txt", names)
+        self.assertIn("testserver", notice)
+        self.assertIn("正式 HTTPS", notice)
+
+    @override_settings(APP_ENV="production")
+    def test_execution_package_omits_the_notice_on_the_production_https_host(self):
+        activity = _create_activity(
+            title="Production Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.REHEARSAL,
+            is_test_mode=False,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.get(
+            reverse("staff:execution_package", args=[activity.pk]), secure=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            names = set(archive.namelist())
+        self.assertNotIn("QR-NOT-FOR-PRINT.txt", names)
+        self.assertIn("activity_qr.png", names)
 
     def test_archive_activity_rejects_test_activity(self):
         activity = _create_activity(
@@ -2446,19 +2567,14 @@ class StaffPanelSmokeTests(TestCase):
             archive_activity(activity, self.admin)
 
     def _make_bound_result_activity(self, *, status=StageResult.Status.READY_TO_CONFIRM):
-        """A formal contest whose frozen ruleset resolved one stage line.
-
-        The binding maps the definition's ASSESS node onto one locked round, so
-        `build_result_closure` resolves the stage instead of reporting a binding error —
-        the same shape `singer_contest.tests.ResultClosureServiceTests` uses.
-        """
+        """A formal contest whose frozen ruleset resolved one stage line."""
         activity = _create_activity(
             title="Bound Archive Contest",
             activity_type=Activity.Type.SINGER_CONTEST,
             phase=Activity.Phase.RESULTS_PENDING,
             is_test_mode=False,
         )
-        SingerRegistration.objects.create(
+        singer = SingerRegistration.objects.create(
             activity=activity,
             user=self.participant,
             name="Bound Singer",
@@ -2478,51 +2594,20 @@ class StaffPanelSmokeTests(TestCase):
             status=ContestRound.Status.LOCKED,
             is_locked=True,
         )
-        ruleset = ContestRuleset.objects.create(
-            activity=activity, name="Bound Ruleset", stage_key="final"
-        )
-        with authority_write(RULESET_FREEZE):
-            version = RulesetVersion.objects.create(
-                ruleset=ruleset,
-                definition=json.dumps(
-                    {
-                        "schema_version": 1,
-                        "nodes": [
-                            {"key": "assess", "type": "ASSESS", "source": "entry", "round": "r1"}
-                        ],
-                    }
-                ),
-                version=1,
-                binding={"stage_key": "final", "round_keys": {"r1": contest_round.pk}},
-                authority_hash="bound-authority",
-                status=RulesetVersion.Status.FROZEN,
-                is_current=True,
-            )
+        result = self._bind_result_line(activity, contest_round, status=status)
         with authority_write(STAGE_RESULT_RESOLVE):
-            result = StageResult.objects.create(
-                activity=activity,
-                ruleset_version=version,
-                created_by=self.admin,
-                stage_key="final",
-                status=status,
-                reasons=["tie_requires_review"] if status == StageResult.Status.REVIEW else [],
-                ruleset_hash=version.authority_hash,
-                input_fingerprint=_current_input_fingerprint(version, activity, "final"),
-                result_version=1,
-                is_test_data=False,
-            )
             # A decision, so the archive's stage_results sheet has an outcome to name
             # rather than only a header row. Decisions of a confirmed result are
             # immutable, so this has to happen before the confirmation.
             StageDecision.objects.create(
                 stage_result=result,
-                singer=SingerRegistration.objects.get(activity=activity),
+                singer=singer,
                 outcome_code="advanced",
                 rank=1,
                 score=Decimal("95.000000"),
                 is_test_data=False,
             )
-        return activity, version, result
+        return activity, result.ruleset_version, result
 
     def test_archive_rejects_a_result_line_that_was_never_confirmed(self):
         """GOAL §8.4: the authoritative record cannot be frozen on a candidate.
@@ -2652,6 +2737,77 @@ class StaffPanelSmokeTests(TestCase):
         self.assertIn("现场设备故障", archive_row)
         self.assertIn("改用纸面评分", archive_row)
         self.assertIn("是", archive_row)
+
+    def test_archive_rejects_a_singer_contest_with_no_frozen_ruleset(self):
+        """The exemption is by activity type, not by blocker.
+
+        Exempting everything that reports `no_current_frozen_ruleset` also exempted a
+        singer contest that never froze one — and a singer contest's formal outcome *is*
+        a confirmed stage result, so a contest with no frozen ruleset has no formal
+        result to archive. Locked rounds and complete scores were enough to reach
+        `ARCHIVED` with a package that calls itself the authoritative record.
+        """
+        activity = self._make_finalized_round_activity(confirm_result=False)
+
+        with self.assertRaises(PermissionDenied) as caught:
+            archive_activity(activity, self.admin)
+
+        self.assertIn("no_current_frozen_ruleset", str(caught.exception))
+        activity.refresh_from_db()
+        self.assertNotEqual(activity.phase, Activity.Phase.ARCHIVED)
+        self.assertFalse(ArchivePackage.objects.filter(activity=activity).exists())
+
+    def test_archive_accepts_a_farewell_show_with_no_ruleset(self):
+        """The other half of the same rule: no result line means no closure to close."""
+        activity = _create_activity(
+            title="Farewell Show",
+            activity_type=Activity.Type.FAREWELL_SHOW,
+            phase=Activity.Phase.RESULTS_PUBLISHED,
+            is_test_mode=False,
+        )
+
+        archive_activity(activity, self.admin)
+
+        activity.refresh_from_db()
+        self.assertEqual(activity.phase, Activity.Phase.ARCHIVED)
+        self.assertTrue(ArchivePackage.objects.filter(activity=activity, is_current=True).exists())
+
+    def test_archived_stage_results_omit_a_stage_the_current_ruleset_dropped(self):
+        """A superseded checkpoint must not ride along in the authoritative record.
+
+        Scanning the activity's whole `StageResult` history picks up the confirmed row of
+        a stage that the current frozen ruleset no longer declares — a `semifinal` removed
+        in v2 — and prints it beside the stage keys that are current. The closure already
+        knows which keys the current ruleset declares, so the sheet asks it.
+        """
+        activity = self._make_finalized_round_activity()
+        current_version = RulesetVersion.objects.get(ruleset__activity=activity, is_current=True)
+        # Both scopes are required: creating a row is the resolver's job, and opening it
+        # in CONFIRMED is the confirmation job's.
+        with authority_write(STAGE_RESULT_RESOLVE), authority_write(STAGE_RESULT_CONFIRM):
+            StageResult.objects.create(
+                activity=activity,
+                ruleset_version=current_version,
+                created_by=self.admin,
+                stage_key="removed-stage",
+                status=StageResult.Status.CONFIRMED,
+                confirmed_by=self.admin,
+                confirmed_at=timezone.now(),
+                ruleset_hash=current_version.authority_hash,
+                input_fingerprint="f" * 64,
+                result_version=1,
+                is_test_data=False,
+            )
+
+        artifact = next(
+            item for item in build_archive_package(activity) if item.name == "stage_results.xlsx"
+        )
+        sheet = load_workbook(BytesIO(artifact.content)).active
+        assert sheet is not None
+        stage_keys = {row[0] for row in sheet.iter_rows(min_row=2, values_only=True)}
+
+        self.assertIn("final", stage_keys)
+        self.assertNotIn("removed-stage", stage_keys)
 
     def test_archive_activity_rejects_unlocked_vote(self):
         activity = _create_activity(
@@ -5260,6 +5416,50 @@ class PublicPostOptimisticConcurrencyTests(TestCase):
         if base_version is not None:
             payload["base_version"] = str(base_version)
         return payload
+
+    def test_a_cover_upload_is_sanitized_on_the_staff_path(self):
+        """GOAL §19.3 on the path staff actually use, not just the admin form.
+
+        `PublicPostForm` had no cover field at all and the view assigned
+        `request.FILES["cover_image"]` straight onto the model, so this path skipped
+        `forms.ImageField` (which rejects a file that is not really an image) and skipped
+        `sanitize_upload` (which bakes EXIF orientation into the pixels and writes no
+        metadata back). Phone photos carried their GPS coordinates, device and timestamp
+        onto the public page while the admin path stripped them.
+        """
+        self.client.force_login(self.staff)
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(
+                reverse("staff:post_create"),
+                self._payload(title="With cover") | {"cover_image": _jpeg_carrying_exif()},
+            )
+
+            self.assertEqual(response.status_code, 302)
+            created = PublicPost.objects.get(title="With cover")
+            with created.cover_image.open("rb") as stored:
+                raw = stored.read()
+
+        with Image.open(BytesIO(raw)) as derived:
+            self.assertEqual(len(derived.getexif()), 0)
+            # Orientation 6 was baked into the pixels rather than dropped: 24x16 in, 16x24 out.
+            self.assertEqual(derived.size, (16, 24))
+
+    def test_a_cover_that_is_not_decodable_is_rejected_before_anything_is_written(self):
+        """`forms.ImageField`, not just the metadata strip: a fake image is not an upload."""
+        self.client.force_login(self.staff)
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            response = self.client.post(
+                reverse("staff:post_create"),
+                self._payload(title="Not an image")
+                | {
+                    "cover_image": SimpleUploadedFile(
+                        "evil.jpg", b"definitely not an image", content_type="image/jpeg"
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PublicPost.objects.filter(title="Not an image").exists())
 
     def test_edit_with_current_version_bumps_and_saves(self):
         self.client.force_login(self.staff)

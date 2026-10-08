@@ -3,8 +3,10 @@ from typing import cast
 
 from core.models import Activity
 from django import forms
+from django.core.files.uploadedfile import UploadedFile
 from django.http import QueryDict
 from farewell_show.models import Program
+from files.imaging import sanitize_upload
 from incidents.models import IncidentRecord
 from public_portal.models import PublicPost
 from ruleset.schema import parse_definition
@@ -545,6 +547,16 @@ class PublicPostForm(forms.Form):
     is_pinned = forms.BooleanField(required=False)
     sort_order = forms.IntegerField(required=False, initial=0)
     related_activity_id = forms.IntegerField(required=False)
+    # GOAL §19.3: what reaches the public site is a metadata-free derivative. This form is
+    # the daily staff path to a public post, and it used to have no cover field at all —
+    # the view assigned `request.FILES["cover_image"]` straight onto the model, so the
+    # upload skipped `forms.ImageField` (which is what rejects a file that is not really an
+    # image) and skipped `sanitize_upload` (which is what bakes EXIF orientation in and
+    # drops GPS, device and timestamp metadata). Phone photos carried their GPS coordinates
+    # onto the public page through the ordinary staff path while the admin path stripped
+    # them. Declaring the field is what puts both back in the way.
+    cover_image = forms.ImageField(required=False)
+
     # Client snapshot version for stale-edit detection. Absent/None means the
     # form came from a legacy client (or a create) and is passed through; a
     # non-matching value rejects the save as outdated.
@@ -552,6 +564,12 @@ class PublicPostForm(forms.Form):
 
     def clean_sort_order(self):
         return self.cleaned_data.get("sort_order") or 0
+
+    def clean_cover_image(self):
+        cover_image = self.cleaned_data.get("cover_image")
+        if not isinstance(cover_image, UploadedFile):
+            return cover_image
+        return sanitize_upload(cover_image)
 
 
 class ResultReleaseForm(forms.Form):
