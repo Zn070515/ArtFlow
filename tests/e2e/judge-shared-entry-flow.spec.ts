@@ -52,8 +52,11 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
       );
     }
     await sixthPage.goto(entryPath);
+    // GOAL §12.3: the sixth device is refused *and* told to contact staff. Every refusal used
+    // to arrive as the generic "scan the QR again" line, which sent someone hunting for a code
+    // that would not have helped.
     await expect(sixthPage.locator("[data-status]")).toHaveText(
-      "评委会话无效或已过期，请重新扫描现场二维码。",
+      "评委席已满，请联系现场工作人员处理。",
     );
 
     const seatLabels = await Promise.all(

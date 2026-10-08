@@ -434,11 +434,16 @@
             this.reasonCode = reasonCode;
         }
     }
+    // A code we do not know — an entry this activity has not opened, an expired terminal, a
+    // request that never reached the server — is still answered with the one instruction that
+    // is always right: scan the QR again. Naming a specific reason is only an improvement when
+    // the reason is actually known.
+    const DEFAULT_CLAIM_FAILURE = "评委会话无效或已过期，请重新扫描现场二维码。";
     function claimFailureMessage(error) {
         if (error instanceof ClaimRejected) {
-            return (CLAIM_FAILURE_MESSAGES[error.reasonCode] ?? "未能加入评委组，请联系现场工作人员。");
+            return CLAIM_FAILURE_MESSAGES[error.reasonCode] ?? DEFAULT_CLAIM_FAILURE;
         }
-        return "评委会话无效或已过期，请重新扫描现场二维码。";
+        return DEFAULT_CLAIM_FAILURE;
     }
     async function claim() {
         const response = await fetch(claimUrl, {
