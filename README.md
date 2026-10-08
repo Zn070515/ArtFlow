@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/assets/brand/artflow-logo.png" alt="ArtFlow 标志 · ArtFlow logo" width="128">
-
 <h1>ArtFlow</h1>
 
 <p><strong>学院文艺活动全生命周期运行平台</strong> · <strong>Activity operations platform for university arts departments</strong></p>
@@ -18,6 +16,12 @@
   <img src="https://img.shields.io/badge/uv-0.11.29-DE5FE9?logo=astral&logoColor=white" alt="uv 0.11.29">
   <img src="https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-336791?logo=postgresql&logoColor=white" alt="SQLite or PostgreSQL">
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose">
+</p>
+
+<p>
+  <img src="docs/assets/brand/artflow-logo.png" alt="ArtFlow 标志 · ArtFlow logo" width="128">
+  &nbsp;
+  <img src="docs/assets/brand/xinxu-studio-logo.png" alt="昕序软件科技 标志 · studio logo" width="96">
 </p>
 
 <p>
@@ -221,8 +225,6 @@ scripts/             引导、校验、备份恢复与启动脚本。
 ## 开发与维护 · Built by
 
 <div align="center">
-
-<img src="docs/assets/brand/xinxu-studio-logo.png" alt="昕序软件科技 标志 · studio logo" width="72">
 
 <p>由 <strong>昕序软件科技</strong> 设计与开发。</p>
 
