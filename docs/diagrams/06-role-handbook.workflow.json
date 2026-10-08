@@ -1,0 +1,482 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ArtFlow 角色使用手册",
+    "subtitle": "Participant、Staff、Admin、Judge、Audience 的现场操作路径；Public 仅作为结果输出端",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "bad157e4aa688513a58cb41b78b22ddc3baa68e6"
+    },
+    "output": "06-role-handbook.html"
+  },
+  "lanes": [
+    {
+      "id": "participant",
+      "label": "Participant 参与者"
+    },
+    {
+      "id": "staff_admin",
+      "label": "Staff / Admin"
+    },
+    {
+      "id": "judge",
+      "label": "Judge 评委"
+    },
+    {
+      "id": "audience",
+      "label": "Audience 观众"
+    }
+  ],
+  "phases": [
+    {
+      "id": "before",
+      "label": "活动前",
+      "fromCol": 0,
+      "toCol": 1,
+      "variant": "emphasis"
+    },
+    {
+      "id": "registration",
+      "label": "报名",
+      "fromCol": 2,
+      "toCol": 3
+    },
+    {
+      "id": "live",
+      "label": "彩排与现场",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "results",
+      "label": "结果",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "admin_boundary",
+      "label": "Admin 才能冻结 / 确认",
+      "lane": "staff_admin",
+      "fromCol": 0,
+      "toCol": 5,
+      "variant": "security"
+    },
+    {
+      "id": "audience_journey",
+      "label": "Audience 现场观赛路径",
+      "lane": "audience",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "emphasis"
+    },
+    {
+      "id": "public_output",
+      "label": "Public：只读输出，不是操作角色",
+      "lane": "staff_admin",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "admin_create",
+    "admin_freeze",
+    "staff_prepare",
+    "participant_account",
+    "participant_submit",
+    "staff_review",
+    "participant_checkin",
+    "staff_operate",
+    "admin_confirm"
+  ],
+  "nodes": [
+    {
+      "id": "admin_create",
+      "lane": "staff_admin",
+      "col": 0,
+      "type": "security",
+      "label": "创建活动",
+      "sublabel": "角色 + 规则",
+      "width": 108,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 627,
+          "end_line": 671,
+          "label": "activity_create"
+        }
+      ]
+    },
+    {
+      "id": "admin_freeze",
+      "lane": "staff_admin",
+      "col": 1,
+      "type": "security",
+      "label": "Admin 冻结规则",
+      "sublabel": "问卷 / 赛段 / 投票快照",
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 816,
+          "end_line": 853,
+          "label": "freeze_ruleset_version"
+        }
+      ]
+    },
+    {
+      "id": "staff_prepare",
+      "lane": "staff_admin",
+      "col": 2,
+      "type": "backend",
+      "label": "准备赛段",
+      "sublabel": "名单、轮次、凭证",
+      "width": 112,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 414,
+          "end_line": 520,
+          "label": "prepare_judge_panel"
+        }
+      ]
+    },
+    {
+      "id": "participant_account",
+      "lane": "participant",
+      "col": 2,
+      "type": "frontend",
+      "label": "参与者报名",
+      "sublabel": "按冻结问卷填写",
+      "width": 112,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 428,
+          "end_line": 449,
+          "label": "草稿保存"
+        }
+      ]
+    },
+    {
+      "id": "participant_submit",
+      "lane": "participant",
+      "col": 3,
+      "type": "external",
+      "label": "参与者提交",
+      "sublabel": "材料提交 / 补交",
+      "width": 112,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 466,
+          "end_line": 556,
+          "label": "报名提交"
+        }
+      ]
+    },
+    {
+      "id": "staff_review",
+      "lane": "staff_admin",
+      "col": 3,
+      "type": "database",
+      "label": "审核排程",
+      "sublabel": "名单与轮次",
+      "width": 112,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 532,
+          "end_line": 556,
+          "label": "提交可见性"
+        }
+      ]
+    },
+    {
+      "id": "participant_checkin",
+      "lane": "participant",
+      "col": 4,
+      "type": "frontend",
+      "label": "现场候场",
+      "sublabel": "按轮次上台",
+      "width": 112,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 738,
+          "end_line": 796,
+          "label": "advance_performance"
+        }
+      ]
+    },
+    {
+      "id": "judge_claim",
+      "lane": "judge",
+      "col": 4,
+      "type": "security",
+      "label": "认领评委席",
+      "sublabel": "绑定本轮席位",
+      "width": 112,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 234,
+          "end_line": 259,
+          "label": "评委会话"
+        }
+      ]
+    },
+    {
+      "id": "judge_score",
+      "lane": "judge",
+      "col": 5,
+      "type": "database",
+      "label": "Judge 提交评分",
+      "sublabel": "HOLD 时等待或转 DR",
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 1292,
+          "end_line": 1399,
+          "label": "直接评分"
+        }
+      ]
+    },
+    {
+      "id": "audience_ticket",
+      "lane": "audience",
+      "col": 3,
+      "type": "external",
+      "label": "观众入场",
+      "sublabel": "出示 QR / 凭证",
+      "width": 112,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 290,
+          "end_line": 336,
+          "label": "票据核验"
+        }
+      ]
+    },
+    {
+      "id": "audience_redeem",
+      "lane": "audience",
+      "col": 4,
+      "type": "security",
+      "label": "兑换会话",
+      "sublabel": "进入投票会话",
+      "width": 112,
+      "sources": [
+        {
+          "path": "tickets/services.py",
+          "line": 414,
+          "end_line": 452,
+          "label": "redeem_ticket"
+        }
+      ]
+    },
+    {
+      "id": "audience_vote",
+      "lane": "audience",
+      "col": 5,
+      "type": "frontend",
+      "label": "Audience 投票",
+      "sublabel": "开放窗口投票",
+      "width": 112,
+      "sources": [
+        {
+          "path": "voting/services.py",
+          "line": 75,
+          "end_line": 167,
+          "label": "submit_ballot"
+        }
+      ]
+    },
+    {
+      "id": "staff_operate",
+      "lane": "staff_admin",
+      "col": 5,
+      "type": "cloud",
+      "label": "推进 / HOLD",
+      "sublabel": "需要时走 DR",
+      "width": 112,
+      "yOffset": -70,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 544,
+          "end_line": 640,
+          "label": "暂停与恢复"
+        }
+      ]
+    },
+    {
+      "id": "admin_confirm",
+      "lane": "staff_admin",
+      "col": 5,
+      "type": "security",
+      "label": "Admin 确认结果",
+      "sublabel": "CONFIRMED 后才正式发布",
+      "yOffset": 70,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 2959,
+          "end_line": 3060,
+          "label": "confirm_stage_result"
+        }
+      ]
+    },
+    {
+      "id": "public_view",
+      "lane": "staff_admin",
+      "col": 5,
+      "type": "frontend",
+      "label": "公共结果 / 直播",
+      "sublabel": "只读输出",
+      "width": 120,
+      "yOffset": 0,
+      "sources": [
+        {
+          "path": "public_portal/services.py",
+          "line": 156,
+          "end_line": 223,
+          "label": "公共门户服务"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "admin_create",
+      "to": "admin_freeze",
+      "variant": "security",
+      "role": "main"
+    },
+    {
+      "from": "admin_freeze",
+      "to": "staff_prepare",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "staff_prepare",
+      "to": "participant_account",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "participant_account",
+      "to": "participant_submit",
+      "role": "main"
+    },
+    {
+      "from": "participant_submit",
+      "to": "staff_review",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "staff_review",
+      "to": "participant_checkin",
+      "role": "main"
+    },
+    {
+      "from": "participant_checkin",
+      "to": "staff_operate",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "judge_claim",
+      "to": "judge_score",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "staff_prepare",
+      "to": "audience_ticket",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "audience_ticket",
+      "to": "audience_redeem",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "audience_redeem",
+      "to": "audience_vote",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "staff_prepare",
+      "to": "judge_claim",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "staff_operate",
+      "to": "admin_confirm",
+      "variant": "security",
+      "role": "main"
+    },
+    {
+      "from": "admin_confirm",
+      "to": "public_view",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Participant",
+      "items": [
+        "按当前冻结问卷填写并自动保存",
+        "最终提交前校验材料",
+        "需要修改时走补交，不绕过审核"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Staff",
+      "items": [
+        "负责准备、审核、排程、签到和现场推进",
+        "异常时先 HOLD，再选择 proxy / paper DR",
+        "不能替代 Admin 确认正式结果"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Admin / Judge / Audience",
+      "items": [
+        "Admin 冻结规则并确认结果",
+        "Judge 只提交自己的评分事实",
+        "Audience 持票入场、兑换会话、在开放窗口投票"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "角色边界",
+      "items": [
+        "Public 不是本手册的操作角色",
+        "Public 只读取直播 / 结果输出",
+        "所有关键写入仍由 ArtFlow 服务与审计记录约束"
+      ]
+    }
+  ]
+}

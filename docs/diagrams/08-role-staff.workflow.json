@@ -1,0 +1,389 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "工作人员使用手册 · Staff handbook",
+    "subtitle": "六步值班：登录、审核、轮次、录分、现场推进、结果与收尾；每一步都由服务守卫把关",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a093d581dcd579ecb42c413c0936766a2c1553da"
+    },
+    "output": "08-role-staff.html"
+  },
+  "lanes": [
+    {
+      "id": "staff",
+      "label": "工作人员：操作"
+    },
+    {
+      "id": "platform",
+      "label": "ArtFlow：服务与守卫"
+    }
+  ],
+  "phases": [
+    {
+      "id": "before",
+      "label": "赛前",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "onsite",
+      "label": "现场执行",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "close",
+      "label": "结果与收尾",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "no_bypass",
+      "label": "每一步都先取活动行锁，再服从锁定状态",
+      "lane": "platform",
+      "fromCol": 0,
+      "toCol": 5,
+      "variant": "security"
+    },
+    {
+      "id": "audit_trail",
+      "label": "审核、导出、代录全部留痕",
+      "lane": "platform",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "mainPath": [
+    "s_login",
+    "s_review",
+    "s_round",
+    "s_score",
+    "s_live",
+    "s_close"
+  ],
+  "nodes": [
+    {
+      "id": "s_login",
+      "lane": "staff",
+      "col": 0,
+      "type": "security",
+      "label": "工作人员登录",
+      "sublabel": "账号 + 工作人员密钥",
+      "width": 124,
+      "sources": [
+        {
+          "path": "accounts/views.py",
+          "line": 244,
+          "end_line": 256,
+          "label": "staff_login_view"
+        }
+      ]
+    },
+    {
+      "id": "s_review",
+      "lane": "staff",
+      "col": 1,
+      "type": "frontend",
+      "label": "报名与材料审核",
+      "sublabel": "逐项通过 / 退回补交",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 1354,
+          "end_line": 1380,
+          "label": "material_check_review"
+        }
+      ]
+    },
+    {
+      "id": "s_round",
+      "lane": "staff",
+      "col": 2,
+      "type": "backend",
+      "label": "轮次与名单",
+      "sublabel": "准备轮次、分组、顺序",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 1932,
+          "end_line": 2040,
+          "label": "round_prepare"
+        }
+      ]
+    },
+    {
+      "id": "s_score",
+      "lane": "staff",
+      "col": 3,
+      "type": "frontend",
+      "label": "录入评分",
+      "sublabel": "现场快速录入",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 2053,
+          "end_line": 2160,
+          "label": "round_score_entry"
+        }
+      ]
+    },
+    {
+      "id": "s_live",
+      "lane": "staff",
+      "col": 4,
+      "type": "cloud",
+      "label": "现场推进与暂停",
+      "sublabel": "切换选手、HOLD / 恢复",
+      "width": 124,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 738,
+          "end_line": 796,
+          "label": "advance_performance"
+        }
+      ]
+    },
+    {
+      "id": "s_close",
+      "lane": "staff",
+      "col": 5,
+      "type": "frontend",
+      "label": "结果板与收尾",
+      "sublabel": "核对、导出、归档、异常",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 2550,
+          "end_line": 2589,
+          "label": "activity_result_board"
+        }
+      ]
+    },
+    {
+      "id": "p_key",
+      "lane": "platform",
+      "col": 0,
+      "type": "security",
+      "label": "权限与密钥校验",
+      "sublabel": "每步都重读当前权限",
+      "width": 124,
+      "sources": [
+        {
+          "path": "accounts/decorators.py",
+          "line": 9,
+          "end_line": 19,
+          "label": "staff_required"
+        }
+      ]
+    },
+    {
+      "id": "p_material",
+      "lane": "platform",
+      "col": 1,
+      "type": "backend",
+      "label": "材料审核状态",
+      "sublabel": "审核即重置该项结论",
+      "width": 124,
+      "sources": [
+        {
+          "path": "files/services.py",
+          "line": 914,
+          "end_line": 960,
+          "label": "review_material_check"
+        }
+      ]
+    },
+    {
+      "id": "p_prep",
+      "lane": "platform",
+      "col": 2,
+      "type": "backend",
+      "label": "轮次快照与服务",
+      "sublabel": "名单、评分矩阵、快照",
+      "width": 124,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 468,
+          "end_line": 520,
+          "label": "prepare_round"
+        }
+      ]
+    },
+    {
+      "id": "p_score",
+      "lane": "platform",
+      "col": 3,
+      "type": "database",
+      "label": "评分事实与回执",
+      "sublabel": "旧版本拒绝，不静默覆盖",
+      "width": 124,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 1307,
+          "end_line": 1420,
+          "label": "apply_scores_if_version"
+        }
+      ]
+    },
+    {
+      "id": "p_panel",
+      "lane": "platform",
+      "col": 4,
+      "type": "security",
+      "label": "评委组与席位",
+      "sublabel": "准备、暂停、释放席位",
+      "width": 124,
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 414,
+          "end_line": 520,
+          "label": "prepare_judge_panel"
+        }
+      ]
+    },
+    {
+      "id": "p_export",
+      "lane": "platform",
+      "col": 5,
+      "type": "backend",
+      "label": "导出与审计",
+      "sublabel": "每次导出都记账",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 3598,
+          "end_line": 3700,
+          "label": "export_center"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "s_login",
+      "to": "s_review",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "s_review",
+      "to": "s_round",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "s_round",
+      "to": "s_score",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "s_score",
+      "to": "s_live",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "s_live",
+      "to": "s_close",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "s_login",
+      "to": "p_key",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "s_review",
+      "to": "p_material",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "s_round",
+      "to": "p_prep",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "s_score",
+      "to": "p_score",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "s_live",
+      "to": "p_panel",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "s_close",
+      "to": "p_export",
+      "variant": "security",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "值班六步",
+      "items": [
+        "登录 → 审核报名与材料 → 准备轮次 → 录分 → 现场推进 → 结果与收尾",
+        "每一步都在服务器侧再判一次权限与锁定状态；模板隐藏不构成保护"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "异常先 HOLD",
+      "items": [
+        "暂停评委组 / 表演，不要在评分进行中改上下文",
+        "评分终端不可用时走代录或纸面评分，来源与原因必填",
+        "重复提交是安全的：同一命令只产生一条评分事实"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "现场设备与票券",
+      "items": [
+        "检票用工作人员手机摄像头，另有拍照与手工输入回退",
+        "检票三态：检票成功 / 此前已检票 / 无效",
+        "票据可重打；怀疑泄漏就重置凭证，旧会话一并失效"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "工作人员不能做的事",
+      "items": [
+        "不能核定正式结果、不能解锁活动 / 轮次 / 结果",
+        "不能修改已核定赛段的评分事实",
+        "不能替评委决定给谁打分：评分对象由服务器决定"
+      ]
+    }
+  ]
+}

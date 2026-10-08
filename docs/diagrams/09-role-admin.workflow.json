@@ -1,0 +1,388 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "管理员使用手册 · Admin handbook",
+    "subtitle": "管理员是唯一能冻结规则、核定结果、解锁与推进阶段的角色；六步建立并守住权威",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "a093d581dcd579ecb42c413c0936766a2c1553da"
+    },
+    "output": "09-role-admin.html"
+  },
+  "lanes": [
+    {
+      "id": "admin",
+      "label": "管理员：动作"
+    },
+    {
+      "id": "platform",
+      "label": "ArtFlow：权威与守卫"
+    }
+  ],
+  "phases": [
+    {
+      "id": "setup",
+      "label": "建立权威",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "rehearse",
+      "label": "彩排与转正",
+      "fromCol": 3,
+      "toCol": 3,
+      "variant": "dashed"
+    },
+    {
+      "id": "finalize",
+      "label": "核定与治理",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "groups": [
+    {
+      "id": "admin_only",
+      "label": "只有管理员能做：阶段推进、冻结、核定、解锁、权限",
+      "lane": "admin",
+      "fromCol": 0,
+      "toCol": 5,
+      "variant": "security"
+    },
+    {
+      "id": "no_silent",
+      "label": "解锁不改写历史：重算产生新版本",
+      "lane": "platform",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "a_login",
+    "a_activity",
+    "a_freeze",
+    "a_rehearse",
+    "a_confirm",
+    "a_archive"
+  ],
+  "nodes": [
+    {
+      "id": "a_login",
+      "lane": "admin",
+      "col": 0,
+      "type": "security",
+      "label": "管理员登录",
+      "sublabel": "账号 + 二次密钥",
+      "width": 124,
+      "sources": [
+        {
+          "path": "accounts/views.py",
+          "line": 257,
+          "end_line": 300,
+          "label": "admin_login_view"
+        }
+      ]
+    },
+    {
+      "id": "a_activity",
+      "lane": "admin",
+      "col": 1,
+      "type": "security",
+      "label": "活动与阶段",
+      "sublabel": "创建 / 克隆 / 推进阶段",
+      "width": 124,
+      "sources": [
+        {
+          "path": "core/services.py",
+          "line": 66,
+          "end_line": 110,
+          "label": "transition_activity_phase"
+        }
+      ]
+    },
+    {
+      "id": "a_freeze",
+      "lane": "admin",
+      "col": 2,
+      "type": "security",
+      "label": "冻结赛制版本",
+      "sublabel": "绑定真实事实才通过",
+      "width": 124,
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 816,
+          "end_line": 900,
+          "label": "freeze_ruleset_version"
+        }
+      ]
+    },
+    {
+      "id": "a_rehearse",
+      "lane": "admin",
+      "col": 3,
+      "type": "backend",
+      "label": "彩排与清残留",
+      "sublabel": "清空运行事实后转正式",
+      "width": 124,
+      "sources": [
+        {
+          "path": "common/test_data.py",
+          "line": 191,
+          "end_line": 300,
+          "label": "clear_activity_test_data"
+        }
+      ]
+    },
+    {
+      "id": "a_confirm",
+      "lane": "admin",
+      "col": 4,
+      "type": "security",
+      "label": "核定赛段结果",
+      "sublabel": "CONFIRMED 后才可抄手卡",
+      "width": 124,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 2959,
+          "end_line": 3060,
+          "label": "confirm_stage_result"
+        }
+      ]
+    },
+    {
+      "id": "a_archive",
+      "lane": "admin",
+      "col": 5,
+      "type": "backend",
+      "label": "归档与权限",
+      "sublabel": "打包归档、角色与审计",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 3763,
+          "end_line": 3784,
+          "label": "activity_archive"
+        }
+      ]
+    },
+    {
+      "id": "p_key",
+      "lane": "platform",
+      "col": 0,
+      "type": "security",
+      "label": "二次密钥窗口",
+      "sublabel": "验证有 TTL，过期重输",
+      "width": 124,
+      "sources": [
+        {
+          "path": "accounts/services.py",
+          "line": 56,
+          "end_line": 70,
+          "label": "admin_verification_is_valid"
+        }
+      ]
+    },
+    {
+      "id": "p_lock",
+      "lane": "platform",
+      "col": 1,
+      "type": "backend",
+      "label": "活动行锁",
+      "sublabel": "先取锁，再判锁定",
+      "width": 124,
+      "sources": [
+        {
+          "path": "core/services.py",
+          "line": 48,
+          "end_line": 65,
+          "label": "lock_activity_for_action"
+        }
+      ]
+    },
+    {
+      "id": "p_bound",
+      "lane": "platform",
+      "col": 2,
+      "type": "backend",
+      "label": "绑定与权威哈希",
+      "sublabel": "冻结版本自包含可复现",
+      "width": 124,
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 501,
+          "end_line": 560,
+          "label": "build_bound_context"
+        }
+      ]
+    },
+    {
+      "id": "p_residue",
+      "lane": "platform",
+      "col": 3,
+      "type": "database",
+      "label": "残留计数与隔离",
+      "sublabel": "有残留不许转正式",
+      "width": 124,
+      "sources": [
+        {
+          "path": "common/test_data.py",
+          "line": 32,
+          "end_line": 110,
+          "label": "get_test_data_counts"
+        }
+      ]
+    },
+    {
+      "id": "p_finality",
+      "lane": "platform",
+      "col": 4,
+      "type": "database",
+      "label": "最终性与不可变",
+      "sublabel": "解锁是唯一例外，且留痕",
+      "width": 124,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 3129,
+          "end_line": 3200,
+          "label": "unlock_stage_result"
+        }
+      ]
+    },
+    {
+      "id": "p_audit",
+      "lane": "platform",
+      "col": 5,
+      "type": "security",
+      "label": "审计日志",
+      "sublabel": "谁在何时改了什么",
+      "width": 124,
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 4117,
+          "end_line": 4133,
+          "label": "audit_log_list"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "a_login",
+      "to": "a_activity",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_activity",
+      "to": "a_freeze",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_freeze",
+      "to": "a_rehearse",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_rehearse",
+      "to": "a_confirm",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_confirm",
+      "to": "a_archive",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "a_login",
+      "to": "p_key",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_activity",
+      "to": "p_lock",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_freeze",
+      "to": "p_bound",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_rehearse",
+      "to": "p_residue",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_confirm",
+      "to": "p_finality",
+      "variant": "security",
+      "role": "branch"
+    },
+    {
+      "from": "a_archive",
+      "to": "p_audit",
+      "variant": "security",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "只有管理员能做",
+      "items": [
+        "阶段推进、冻结赛制、核定结果、解锁、用户与角色",
+        "敏感动作要过二次密钥，且验证窗口有时限",
+        "解锁必须填原因；解锁后重新计算并重新核定"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "建立权威的顺序",
+      "items": [
+        "活动 → 赛制（绑定并冻结）→ 彩排 → 清残留 → 转正式",
+        "冻结用真实事实编译，缺绑定就冻结失败：这是刻意的",
+        "赛制改版走后继版本，不就地改写已冻结的版本"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "彩排与正式不能混",
+      "items": [
+        "测试活动不对公众可见；离开测试模式前必须先清空运行时残留",
+        "配置（问卷、赛制、材料槽）保留；运行事实（分数、票、结果）清零"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "发布边界与外部证据",
+      "items": [
+        "结果必须 CONFIRMED 才能发布公示；撤销公示会留痕并取代旧发布",
+        "备案、真实 DNS / TLS、WAF / DDoS、学校 SSO 未齐前，公网发布保持 HOLD"
+      ]
+    }
+  ]
+}

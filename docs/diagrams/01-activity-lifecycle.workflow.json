@@ -1,0 +1,420 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ArtFlow 活动生命周期",
+    "subtitle": "从测试活动到结果公示：阶段推进由服务端状态机与冻结规则共同约束",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "animation": "trace",
+    "viewBox": [
+      1023,
+      660
+    ],
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "bad157e4aa688513a58cb41b78b22ddc3baa68e6"
+    },
+    "output": "01-activity-lifecycle.html"
+  },
+  "lanes": [
+    {
+      "id": "admin",
+      "label": "Admin 管理员"
+    },
+    {
+      "id": "staff",
+      "label": "Staff 工作人员"
+    },
+    {
+      "id": "system",
+      "label": "ArtFlow 服务"
+    },
+    {
+      "id": "exceptions",
+      "label": "阻断 / HOLD",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "design",
+      "label": "设计与规则",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "intake",
+      "label": "报名与审核",
+      "fromCol": 3,
+      "toCol": 3
+    },
+    {
+      "id": "event",
+      "label": "彩排与现场",
+      "fromCol": 4,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "results",
+      "label": "结果与公示",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "configuration",
+      "label": "活动配置边界",
+      "lane": "admin",
+      "fromCol": 0,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "result_gate",
+      "label": "结果确认闸门",
+      "lane": "exceptions",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "create_activity",
+    "clone_template",
+    "configure_ruleset",
+    "freeze_ruleset",
+    "registration_open",
+    "registration_closed",
+    "reviewing",
+    "rehearsal",
+    "live",
+    "results_pending",
+    "results_published"
+  ],
+  "nodes": [
+    {
+      "id": "create_activity",
+      "lane": "admin",
+      "col": 0,
+      "type": "backend",
+      "label": "创建活动",
+      "sublabel": "建立稳定 public_code",
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 627,
+          "end_line": 671,
+          "label": "activity_create"
+        }
+      ]
+    },
+    {
+      "id": "clone_template",
+      "lane": "admin",
+      "col": 1,
+      "type": "backend",
+      "label": "克隆模板",
+      "sublabel": "复制规则与问卷骨架",
+      "sources": [
+        {
+          "path": "staff_panel/views.py",
+          "line": 4011,
+          "end_line": 4040,
+          "label": "activity_clone"
+        }
+      ]
+    },
+    {
+      "id": "configure_ruleset",
+      "lane": "admin",
+      "col": 2,
+      "type": "security",
+      "label": "配置规则集",
+      "sublabel": "绑定问卷、赛段、投票",
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 680,
+          "end_line": 741,
+          "label": "规则集与问卷计划"
+        }
+      ]
+    },
+    {
+      "id": "freeze_ruleset",
+      "lane": "system",
+      "col": 2,
+      "type": "security",
+      "label": "冻结 RulesetVersion",
+      "sublabel": "形成运行时快照",
+      "width": 135,
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 816,
+          "end_line": 853,
+          "label": "冻结规则版本"
+        }
+      ]
+    },
+    {
+      "id": "registration_open",
+      "lane": "staff",
+      "col": 3,
+      "type": "external",
+      "label": "打开报名",
+      "sublabel": "REGISTRATION_OPEN",
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 114,
+          "end_line": 148,
+          "label": "writable_question_keys"
+        }
+      ]
+    },
+    {
+      "id": "registration_closed",
+      "lane": "system",
+      "col": 3,
+      "type": "backend",
+      "label": "关闭报名",
+      "sublabel": "REGISTRATION_CLOSED",
+      "sources": [
+        {
+          "path": "core/services.py",
+          "line": 66,
+          "end_line": 110,
+          "label": "阶段转换"
+        }
+      ]
+    },
+    {
+      "id": "reviewing",
+      "lane": "system",
+      "col": 4,
+      "type": "database",
+      "label": "审核中",
+      "sublabel": "REVIEWING · 形成可用名单",
+      "width": 120,
+      "sources": [
+        {
+          "path": "files/services.py",
+          "line": 914,
+          "end_line": 960,
+          "label": "review_material_check"
+        }
+      ]
+    },
+    {
+      "id": "rehearsal",
+      "lane": "staff",
+      "col": 4,
+      "type": "cloud",
+      "label": "彩排",
+      "sublabel": "REHEARSAL · 演练现场链路",
+      "width": 120,
+      "sources": [
+        {
+          "path": "core/services.py",
+          "line": 66,
+          "end_line": 110,
+          "label": "阶段转换"
+        }
+      ]
+    },
+    {
+      "id": "live",
+      "lane": "staff",
+      "col": 5,
+      "type": "cloud",
+      "label": "现场进行",
+      "sublabel": "评分与表演",
+      "sources": [
+        {
+          "path": "singer_contest/judge_authority.py",
+          "line": 1292,
+          "end_line": 1369,
+          "label": "评委评分入口"
+        }
+      ]
+    },
+    {
+      "id": "results_pending",
+      "lane": "system",
+      "col": 5,
+      "type": "database",
+      "label": "结果整理",
+      "sublabel": "RESULTS_PENDING · resolve",
+      "width": 120,
+      "sources": [
+        {
+          "path": "singer_contest/services.py",
+          "line": 3706,
+          "end_line": 3800,
+          "label": "recompute_activity_result"
+        }
+      ]
+    },
+    {
+      "id": "results_published",
+      "lane": "admin",
+      "col": 5,
+      "type": "frontend",
+      "label": "结果公示",
+      "sublabel": "结果已公示",
+      "width": 120,
+      "sources": [
+        {
+          "path": "public_portal/services.py",
+          "line": 157,
+          "end_line": 223,
+          "label": "release_result_post"
+        }
+      ]
+    },
+    {
+      "id": "freeze_blocked",
+      "lane": "exceptions",
+      "col": 3,
+      "type": "security",
+      "label": "冻结被阻断",
+      "sublabel": "依赖未满足或已有确认结果",
+      "width": 120,
+      "tag": "修复后重试",
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 839,
+          "end_line": 853,
+          "label": "确认结果后的冻结保护"
+        }
+      ]
+    },
+    {
+      "id": "result_hold",
+      "lane": "exceptions",
+      "col": 5,
+      "type": "security",
+      "label": "结果 HOLD",
+      "sublabel": "输入不完整或候选过期",
+      "sources": [
+        {
+          "path": "docs/production-rehearsal-runbook.md",
+          "line": 128,
+          "end_line": 130,
+          "label": "核定与 stale 候选"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "create_activity",
+      "to": "clone_template",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "clone_template",
+      "to": "configure_ruleset",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "configure_ruleset",
+      "to": "freeze_ruleset",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "freeze_ruleset",
+      "to": "registration_open",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "registration_open",
+      "to": "registration_closed",
+      "role": "main"
+    },
+    {
+      "from": "registration_closed",
+      "to": "reviewing",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "reviewing",
+      "to": "rehearsal",
+      "role": "main"
+    },
+    {
+      "from": "rehearsal",
+      "to": "live",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "live",
+      "to": "results_pending",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "results_pending",
+      "to": "results_published",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "configure_ruleset",
+      "to": "freeze_blocked",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "from": "results_pending",
+      "to": "result_hold",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "阶段是单向闸门",
+      "items": [
+        "测试活动与正式活动共用同一阶段链路",
+        "服务端拒绝跳过或逆向阶段",
+        "归档从 RESULTS_PUBLISHED 继续，不回到 LIVE"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "规则先冻结，再运行",
+      "items": [
+        "问卷、赛段、投票配置先编译成版本快照",
+        "现场只消费冻结版本",
+        "已有确认结果的版本不能被静默重冻"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "HOLD 优先于公示",
+      "items": [
+        "解析异常、输入不完整或候选过期都会停在结果闸门",
+        "只有 Admin 确认后的候选才能进入公示",
+        "阻断处理必须留下审计线索"
+      ]
+    }
+  ]
+}

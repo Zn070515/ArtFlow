@@ -1,0 +1,346 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "ArtFlow 规则集—问卷—报名",
+    "subtitle": "规则集编译出问卷计划；参与者增量填写，提交后进入审核与补交窗口",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "visual_preset": "classic",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/Zn070515/ArtFlow",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "bad157e4aa688513a58cb41b78b22ddc3baa68e6"
+    },
+    "output": "02-ruleset-questionnaire-registration.html"
+  },
+  "lanes": [
+    {
+      "id": "admin",
+      "label": "Admin / Staff 配置与审核"
+    },
+    {
+      "id": "participant",
+      "label": "Participant 参与者"
+    },
+    {
+      "id": "system",
+      "label": "编译器与持久化"
+    },
+    {
+      "id": "exceptions",
+      "label": "补交 / 拒绝",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "rules",
+      "label": "规则快照",
+      "fromCol": 0,
+      "toCol": 1,
+      "variant": "emphasis"
+    },
+    {
+      "id": "fill",
+      "label": "填写与上传",
+      "fromCol": 2,
+      "toCol": 3
+    },
+    {
+      "id": "review",
+      "label": "提交与审核",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "emphasis"
+    }
+  ],
+  "groups": [
+    {
+      "id": "drafting",
+      "label": "增量草稿，不等于提交",
+      "lane": "participant",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "dashed"
+    },
+    {
+      "id": "submission_gate",
+      "label": "原子提交闸门",
+      "lane": "system",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "frozen_ruleset",
+    "compile_plan",
+    "open_registration",
+    "save_draft",
+    "upload_files",
+    "submit_response",
+    "ready_for_event"
+  ],
+  "nodes": [
+    {
+      "id": "frozen_ruleset",
+      "lane": "admin",
+      "col": 0,
+      "type": "security",
+      "label": "当前冻结版本",
+      "sublabel": "RulesetVersion + schema_hash",
+      "width": 130,
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 680,
+          "end_line": 741,
+          "label": "问卷计划输入"
+        }
+      ]
+    },
+    {
+      "id": "compile_plan",
+      "lane": "system",
+      "col": 1,
+      "type": "backend",
+      "label": "编译 QuestionnairePlan",
+      "sublabel": "字段、约束、上传策略",
+      "width": 150,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 48,
+          "end_line": 56,
+          "label": "问卷计划编译"
+        }
+      ]
+    },
+    {
+      "id": "open_registration",
+      "lane": "admin",
+      "col": 2,
+      "type": "external",
+      "label": "打开报名窗口",
+      "sublabel": "REGISTRATION_OPEN",
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 114,
+          "end_line": 148,
+          "label": "writable_question_keys"
+        }
+      ]
+    },
+    {
+      "id": "save_draft",
+      "lane": "participant",
+      "col": 2,
+      "type": "frontend",
+      "label": "填写并自动保存",
+      "sublabel": "草稿可反复修改",
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 428,
+          "end_line": 449,
+          "label": "save_draft"
+        }
+      ]
+    },
+    {
+      "id": "upload_files",
+      "lane": "participant",
+      "col": 3,
+      "type": "cloud",
+      "label": "上传证明材料",
+      "sublabel": "按计划校验文件",
+      "sources": [
+        {
+          "path": "files/services.py",
+          "line": 416,
+          "end_line": 466,
+          "label": "store_questionnaire_file"
+        }
+      ]
+    },
+    {
+      "id": "submit_response",
+      "lane": "system",
+      "col": 4,
+      "type": "security",
+      "label": "原子提交",
+      "sublabel": "submitted_at + 审计记录",
+      "tag": "全量校验",
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 466,
+          "end_line": 556,
+          "label": "submit_registration"
+        }
+      ]
+    },
+    {
+      "id": "review_roster",
+      "lane": "admin",
+      "col": 4,
+      "type": "database",
+      "label": "审核报名名单",
+      "sublabel": "发现缺项或需要补充",
+      "sources": [
+        {
+          "path": "files/services.py",
+          "line": 914,
+          "end_line": 960,
+          "label": "review_material_check"
+        }
+      ]
+    },
+    {
+      "id": "ready_for_event",
+      "lane": "system",
+      "col": 5,
+      "type": "backend",
+      "label": "形成可用名单",
+      "sublabel": "进入彩排 / 现场消费",
+      "sources": [
+        {
+          "path": "ruleset/services.py",
+          "line": 451,
+          "end_line": 455,
+          "label": "运行期阶段限制"
+        }
+      ]
+    },
+    {
+      "id": "supplement",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "external",
+      "label": "补交 / 修复",
+      "sublabel": "关闭报名后按需补充",
+      "width": 130,
+      "tag": "不回滚原提交",
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 612,
+          "end_line": 706,
+          "label": "补交流程"
+        }
+      ]
+    },
+    {
+      "id": "group_response",
+      "lane": "participant",
+      "col": 3,
+      "type": "frontend",
+      "label": "团体 / 组合问卷",
+      "sublabel": "与个人报名分流",
+      "width": 120,
+      "yOffset": 70,
+      "sources": [
+        {
+          "path": "questionnaire/registration.py",
+          "line": 649,
+          "end_line": 711,
+          "label": "group response"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "frozen_ruleset",
+      "to": "compile_plan",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "compile_plan",
+      "to": "open_registration",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "open_registration",
+      "to": "save_draft",
+      "role": "main"
+    },
+    {
+      "from": "save_draft",
+      "to": "upload_files",
+      "role": "main"
+    },
+    {
+      "from": "upload_files",
+      "to": "submit_response",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "submit_response",
+      "to": "ready_for_event",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "review_roster",
+      "to": "ready_for_event",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "from": "submit_response",
+      "to": "supplement",
+      "variant": "dashed",
+      "role": "branch",
+      "route": "drop"
+    },
+    {
+      "from": "save_draft",
+      "to": "group_response",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "from": "group_response",
+      "to": "submit_response",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "规则集是问卷的唯一输入",
+      "items": [
+        "页面不自行发明字段或约束",
+        "编译后的计划携带 schema_hash",
+        "冻结版本被绑定到报名与运行阶段"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "草稿与提交分离",
+      "items": [
+        "自动保存是增量写入",
+        "最终提交是原子校验",
+        "提交失败时保留原草稿，便于修复后重试"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "补交不等于重新报名",
+      "items": [
+        "关闭报名后仍可在允许阶段补充",
+        "补交沿用当前规则计划",
+        "Staff 审核后才进入可用名单"
+      ]
+    }
+  ]
+}
