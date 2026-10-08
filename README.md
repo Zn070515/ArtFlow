@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/brand/artflow-logo.png" alt="ArtFlow 标志 · ArtFlow logo" width="128">
+
 <h1>ArtFlow</h1>
 
 <p><strong>学院文艺活动全生命周期运行平台</strong> · <strong>Activity operations platform for university arts departments</strong></p>
@@ -215,3 +217,16 @@ scripts/             引导、校验、备份恢复与启动脚本。
 ## 开发与合并流程
 
 在干净且最新的 `main` 上创建短期分支，完成验证后在分支提交；由负责合并的人以非快进方式合入 `main` 并推送。提交前至少运行 Django 检查、迁移检查、测试和文档检查。完整的数据库、Docker、CI、故障排查和安全说明见 [开发基线](docs/development-baseline.md)。
+
+## 开发与维护 · Built by
+
+<div align="center">
+
+<img src="docs/assets/brand/xinxu-studio-logo.png" alt="昕序软件科技 标志 · studio logo" width="72">
+
+<p>由 <strong>昕序软件科技</strong> 设计与开发。</p>
+
+<p><sub>Designed and developed by <strong>昕序软件科技</strong>.</sub></p>
+
+</div>
+
