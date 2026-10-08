@@ -64,6 +64,7 @@ src = [
     "ruleset",
     "singer_contest",
     "staff_panel",
+    "scripts",
     "tickets",
     "voting",
     "tests",
@@ -157,10 +158,15 @@ files = [
     "realtime",
     "singer_contest",
     "staff_panel",
+    "scripts",
     "tests",
     "tickets",
     "voting",
 ]
+# `scripts` is a directory of standalone tools, not a package: without this, mypy sees
+# `scripts/verify_private_test_package.py` both as the top-level module the tests import
+# and as `scripts.verify_private_test_package`, and refuses to check the directory at all.
+explicit_package_bases = true
 check_untyped_defs = true
 disallow_untyped_defs = false
 disallow_untyped_calls = false
