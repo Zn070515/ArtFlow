@@ -13,6 +13,10 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $eventEnvironmentPath = Join-Path $repositoryRoot '.env.event'
 $composePath = Join-Path $repositoryRoot 'deploy/compose.event.yml'
 $composeArguments = @('--env-file', $eventEnvironmentPath, '-f', $composePath)
+# The services the event stack cannot run without. `realtime` is deliberately absent: the
+# WebSocket layer is an enhancement that degrades to HTTP polling, so its health is not a
+# startup failure. This is the same split scripts/monitor.sh enforces at runtime.
+$mandatoryServices = @('db', 'web', 'media', 'proxy')
 $launcherEnvironmentNames = @(
     'ARTFLOW_EVENT_BIND_ADDRESS',
     'ARTFLOW_EVENT_PORT',
@@ -101,6 +105,43 @@ function Invoke-ComposeStep {
     return $output
 }
 
+function Wait-ForMandatoryServices {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Services,
+        # Generous on purpose: the first start of a fresh volume runs migrations and
+        # collectstatic inside the web entrypoint, and a false timeout on the show
+        # machine is worse than waiting.
+        [int]$TimeoutSeconds = 300
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $unhealthy = @()
+    while ((Get-Date) -lt $deadline) {
+        $unhealthy = @()
+        foreach ($service in $Services) {
+            $containerLines = @(Invoke-ComposeStep -Arguments ($composeArguments + @('ps', '-q', $service)))
+            $containerId = if ($containerLines.Count -gt 0) { ([string]$containerLines[0]).Trim() } else { '' }
+            if (-not $containerId) {
+                $unhealthy += "$service (no container)"
+                continue
+            }
+            $healthCommand = '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}'
+            $status = & docker inspect --format $healthCommand $containerId 2>&1 | Select-Object -First 1
+            $status = ([string]$status).Trim()
+            if ($status -ne 'healthy') {
+                $unhealthy += "$service ($status)"
+            }
+        }
+        if ($unhealthy.Count -eq 0) {
+            return
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    throw "Event runtime services did not become healthy within ${TimeoutSeconds}s: $($unhealthy -join ', ')"
+}
+
 function Assert-CommandSucceeded {
     param(
         [Parameter(Mandatory = $true)]
@@ -153,7 +194,13 @@ try {
     $env:ARTFLOW_EVENT_PORT = [string]$Port
     $env:ARTFLOW_EVENT_ALLOWED_HOSTS = $allowedHosts
 
-    $null = Invoke-ComposeStep -Arguments ($composeArguments + @('up', '--build', '--wait'))
+    # Not `--wait`: it fails the whole command when *any* container carrying a healthcheck
+    # is unhealthy, including ones the stack is designed to run without. An unhealthy Redis
+    # therefore aborted the launcher even though the HTTP origin was already serving, which
+    # is the opposite of the documented degradation. Start detached and wait on the
+    # mandatory set by name instead.
+    $null = Invoke-ComposeStep -Arguments ($composeArguments + @('up', '--build', '--detach'))
+    Wait-ForMandatoryServices -Services $mandatoryServices
     $doctorOutput = Invoke-ComposeStep -Arguments (
         $composeArguments + @('exec', '-T', 'web', 'python', 'manage.py', 'doctor', '--require-access-keys')
     )

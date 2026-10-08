@@ -158,6 +158,25 @@ def test_event_compose_defaults_to_loopback_and_keeps_database_private():
         assert path in (EVENT_COMPOSE_PATH.parent / "Caddyfile.event").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("compose_path", (PRODUCTION_COMPOSE_PATH, EVENT_COMPOSE_PATH))
+def test_an_unhealthy_redis_never_takes_the_http_site_down(compose_path: Path):
+    """Redis is an enhancement dependency in both manifests, not a startup gate.
+
+    Gating `realtime` on `redis: service_healthy` means that under a Redis outage the
+    container is never created at all, so `proxy`'s own `realtime: service_started`
+    wait can never be satisfied and the entire stack fails to come up — `/healthz/`,
+    scoring, voting and check-in included, none of which read Redis. The production
+    manifest was fixed for this; the event manifest is what actually runs on the show
+    machine, so it has to degrade the same way. The database keeps its health gate:
+    it is authoritative, not an enhancement.
+    """
+    services = load_compose(compose_path)["services"]
+
+    assert services["realtime"]["depends_on"]["redis"]["condition"] == "service_started"
+    assert services["realtime"]["depends_on"]["db"]["condition"] == "service_healthy"
+    assert services["proxy"]["depends_on"]["realtime"]["condition"] == "service_started"
+
+
 def test_compose_manifests_forward_optional_branding_to_web():
     for compose_path in (PRODUCTION_COMPOSE_PATH, EVENT_COMPOSE_PATH):
         compose = load_compose(compose_path)

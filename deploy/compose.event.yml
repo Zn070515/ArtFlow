@@ -96,8 +96,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # `service_started`, not `service_healthy`, exactly as in the production manifest:
+      # Redis is an enhancement dependency, and gating on its health means the container
+      # is never created at all. `proxy` below only waits for `realtime` to exist, so an
+      # unhealthy Redis would leave that wait permanently unsatisfied and take the whole
+      # event stack — including `/healthz/` and every scoring and voting mutation — down
+      # on the machine that has no other fallback. `restart: unless-stopped` retries the
+      # process until Redis accepts connections.
       redis:
-        condition: service_healthy
+        condition: service_started
     environment:
       APP_ENV: development
       DEBUG: "False"
