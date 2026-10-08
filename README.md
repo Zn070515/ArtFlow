@@ -19,9 +19,9 @@
 </p>
 
 <p>
-  <img src="docs/assets/brand/artflow-logo.png" alt="ArtFlow 标志 · ArtFlow logo" width="128">
-  &nbsp;
-  <img src="docs/assets/brand/xinxu-studio-logo.png" alt="昕序软件科技 标志 · studio logo" width="96">
+  <img src="docs/assets/brand/artflow-logo.png" alt="ArtFlow 标志 · ArtFlow logo" height="108" width="122">
+  &nbsp;&nbsp;
+  <img src="docs/assets/brand/xinxu-studio-logo.png" alt="昕序软件科技标志 · XINXU SOFTWARE logo" height="108" width="131">
 </p>
 
 <p>
