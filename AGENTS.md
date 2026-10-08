@@ -136,4 +136,10 @@ service and explicit unlock flow. `StageAwardDecision` is a computed candidate o
 `Award` rows sourced from a stage may be materialized only when that stage is confirmed.
 Ruleset templates must expose `builtin_key` and capability status; only `Production`
 templates may be cloned into a production workflow. Vote sessions must declare their
-purpose, and a ruleset vote source must match that purpose at bound freeze time.
+purpose, and a ruleset vote source must match that purpose at bound freeze time. An
+activity may be archived only while its result line is closed: the archive package is the
+permanent record, so it is built on `build_result_closure(...).closeable`, never on the
+phase or on the existence of any confirmed row. Exports, retention and the archive report
+the same populations the resolver computes (`voting.services.valid_vote_count`, never a
+raw record count), and the permanent archive carries only what GOAL §19.1 keeps durable —
+a temporary staff note stays in the pre-event execution package.

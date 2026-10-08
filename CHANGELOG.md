@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-10-08
+
+### Archive authority closure — the record has to describe what the system confirmed
+
+The live contest chain had already converged on "a candidate is not a result". Archive,
+export and retention still described the system as it was a few revisions earlier, which
+is a different kind of failure: the contest computes correctly, and the record that
+outlives it does not.
+
+- `exports.services.archive_activity` refuses to archive while the result line is not
+  closed, and it asks the question the public release path already asks
+  (`build_result_closure(...).closeable`) rather than a local "is there a CONFIRMED row"
+  test — which would miss a stale candidate, an old ruleset version, a missing checkpoint,
+  an unconfirmed upstream and a fingerprint mismatch. Activities with no current frozen
+  ruleset (a farewell show) are unaffected, and the exception is stated in the code rather
+  than left implicit.
+- `voting.services.valid_vote_count` is now the single `Count` annotation for the §9.3
+  valid-ballot population, used by the staff vote detail, the staff vote export and the
+  archive's `vote_results.xlsx`. The two exports had annotated a raw `Count("records")`,
+  so a ticket revoked after it voted reappeared in the spreadsheet and in the archive
+  while the result itself correctly excluded it. Taking the relation name rather than the
+  filter prefix keeps the two paths from being written twice.
+- The permanent archive no longer carries `staff_notes.xlsx`. GOAL §19.2 forbids keeping a
+  临时 Staff note because of archiving, and `prune_retained_state` deletes the rows on the
+  retention schedule — so the database copy was pruned on time and the copy inside the ZIP
+  was not, which is a retention shadow copy rather than retention. The pre-event execution
+  package still carries them; that is where a temporary operational note belongs.
+- The archive's incident sheet and the staff incident export share one row builder and one
+  column set. The archive had kept the thinner older one, losing exactly the §16 evidence
+  a review wants: the round, the authority state at the time, the problem, the action
+  taken, and whether a post-event review was needed.
+- `purge_retained_pii` measures the retention window from `locked_at` — the archive
+  instant — instead of `updated_at`. `archive_activity` saves with an explicit field list
+  that does not include `updated_at`, so an activity dormant for a year and archived this
+  morning looked a year old the moment it was archived and the first sweep anonymised it.
+  An archived row with no timestamp is reported rather than swept on a guess.
+- `backup_artflow.file_fields()` discovers every `FileField`/`ImageField` from the model
+  registry instead of listing three. Cover images, media derivatives and export files that
+  the database references but the disk lost produced a *passing* restore verification: the
+  media digest proves the tree matches itself, not that it ever held what the rows name.
+- The archive gains `stage_results.xlsx`, naming the confirmed result version, who
+  confirmed it and what it decided. `score_results.xlsx` is a per-round average, which was
+  the whole picture only while a `ScoreSummary` *was* the result.
+
 ## 2026-10-05
 
 ### Mobile layout — a scroll-free phone contract
