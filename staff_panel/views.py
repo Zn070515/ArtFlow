@@ -57,12 +57,14 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from exports.models import ArticleTemplate
 from exports.pdf import render_stage_result_pdf
 from exports.services import (
+    INCIDENT_LIST_HEADERS,
     archive_activity,
     build_archive_package,
     build_execution_package,
     build_package_zip,
     build_score_template_workbook,
     generate_persistent_document,
+    incident_list_rows,
     render_document_bytes,
 )
 from farewell_show.models import Program
@@ -189,7 +191,7 @@ from voting.services import (
     open_vote_session,
     unlock_vote_session,
     valid_record_queryset,
-    valid_ticket_condition,
+    valid_vote_count,
     vote_session_configuration_facts,
 )
 
@@ -3367,9 +3369,7 @@ def vote_session_detail(request, pk):
     # §9.1 / §9.3: the screen has to reconcile against the *valid* ballots the conversion
     # will publish, so a revoked or voided ticket's ballot is not counted here either.
     options = list(
-        vote_session.options.select_related("singer").annotate(
-            vote_count=Count("records", filter=valid_ticket_condition("records__"))
-        )
+        vote_session.options.select_related("singer").annotate(vote_count=valid_vote_count())
     )
     _with_generic_song_labels(option.singer for option in options)
     total_votes = valid_record_queryset(
@@ -3473,10 +3473,10 @@ def vote_session_export(request, pk):
     ws = _active_worksheet(wb)
     ws.title = "投票结果"
     ws.append(["选手", "票数"])
-    from django.db.models import Count
-
+    # §9.3: the exported number has to be the number the result is computed from, or the
+    # file a staff member hands to the judges disagrees with the result on screen.
     option_list = list(
-        vote_session.options.select_related("singer").annotate(vote_count=Count("records"))
+        vote_session.options.select_related("singer").annotate(vote_count=valid_vote_count())
     )
     for opt in option_list:
         ws.append([opt.singer.name, getattr(opt, "vote_count", 0)])
@@ -3497,7 +3497,7 @@ def _popularity_top_tie(vote_session):
     """
     leaderboard = list(
         vote_session.options.select_related("singer")
-        .annotate(vote_count=Count("records", filter=valid_ticket_condition("records__")))
+        .annotate(vote_count=valid_vote_count())
         .filter(vote_count__gt=0)
         .order_by("-vote_count", "sort_order", "pk")
     )
@@ -3893,50 +3893,20 @@ def incident_export(request):
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "异常记录"
-    ws.append(
-        [
-            "活动",
-            "时间",
-            "类型",
-            "轮次",
-            "选手",
-            "authority 状态",
-            "处理人",
-            "问题",
-            "采取动作",
-            "处理结果",
-            "备注",
-            "需要赛后复盘",
-        ]
-    )
+    # Same builder as the permanent archive sheet, so the evidence a staff member sees
+    # now and the evidence that survives the event cannot describe different columns.
+    ws.append(list(INCIDENT_LIST_HEADERS))
+    related = ("activity", "round", "singer", "program", "handled_by")
     if activity is not None:
-        incidents = IncidentRecord.objects.select_related(
-            "activity", "singer", "handled_by", "round"
-        ).filter(activity=activity, is_test=runtime_is_test(activity))
-    else:
-        incidents = IncidentRecord.objects.select_related(
-            "activity", "singer", "handled_by", "round"
-        ).filter(is_test=False)
-    row_count = 0
-    for inc in incidents:
-        ws.append(
-            [
-                inc.activity.title,
-                inc.occurred_at.strftime("%Y-%m-%d %H:%M"),
-                inc.get_event_type_display(),
-                inc.round.name if inc.round else "",
-                inc.singer.name if inc.singer else "",
-                inc.get_authority_state_display(),
-                inc.handled_by.username if inc.handled_by else "",
-                inc.problem,
-                inc.action_taken,
-                inc.resolution,
-                inc.remark,
-                "是" if inc.needs_review else "否",
-            ]
+        incidents = IncidentRecord.objects.select_related(*related).filter(
+            activity=activity, is_test=runtime_is_test(activity)
         )
-        row_count += 1
-    audit_export(request, activity, "incident_list", row_count=row_count)
+    else:
+        incidents = IncidentRecord.objects.select_related(*related).filter(is_test=False)
+    rows = incident_list_rows(incidents)
+    for row in rows:
+        ws.append(list(row))
+    audit_export(request, activity, "incident_list", row_count=len(rows))
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )

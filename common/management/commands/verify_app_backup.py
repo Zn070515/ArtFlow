@@ -7,7 +7,7 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from .backup_artflow import FILE_MODELS, collect_counts, media_content_digest
+from .backup_artflow import EXCLUDED_FILE_FIELDS, collect_counts, file_fields, media_content_digest
 
 
 def validate_counts(manifest: dict[str, Any], counts: dict[str, int]) -> list[str]:
@@ -21,9 +21,20 @@ def validate_counts(manifest: dict[str, Any], counts: dict[str, int]) -> list[st
 
 
 def verify_media_files() -> tuple[list[str], dict[str, str]]:
+    """Check that every file the restored database references exists and is readable.
+
+    The media tree's own digest proves the tree matches the backup; it says nothing about
+    whether the backup ever contained what the rows name. A row pointing at a file that
+    was already missing on the source host digests identically on both sides, so the
+    per-field walk is what turns "the archive is self-consistent" into "the archive is
+    complete".
+    """
     problems: list[str] = []
     verified: dict[str, str] = {}
-    for model, field_name in FILE_MODELS:
+    excluded = set(EXCLUDED_FILE_FIELDS)
+    for model, field_name in file_fields():
+        if (model, field_name) in excluded:
+            continue
         for obj in model.objects.exclude(**{field_name: ""}).iterator():
             file = getattr(obj, field_name)
             if not file:

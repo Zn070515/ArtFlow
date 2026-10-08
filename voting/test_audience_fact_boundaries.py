@@ -214,6 +214,51 @@ class AudienceFactBoundaryTests(TestCase):
         self.assertTrue(VoteBallot.objects.filter(pk=ballot.pk).exists())
         self.assertTrue(VoteRecord.objects.filter(ballot=ballot, vote_option=self.option).exists())
 
+    def test_every_vote_export_reports_the_same_valid_population_as_the_result(self):
+        """A revoked ticket's ballot must not come back to life inside a spreadsheet.
+
+        §9.3 makes the *valid* ballot set the population the result is computed from. The
+        staff vote detail already reconciled against it, but the standalone vote export
+        and the permanent archive's ``vote_results.xlsx`` annotated a raw
+        ``Count("records")`` — so the file a staff member hands out, and the file the
+        archive keeps as the authoritative record, both reported a number the resolver
+        would never produce.
+        """
+        from io import BytesIO
+
+        from django.test import Client
+        from exports.services import build_archive_package
+        from openpyxl import load_workbook
+
+        first = self._ticket_session()
+        second = self._ticket_session()
+        self._cast(first, browser="audience-browser-valid", ip="10.0.0.21")
+        self._cast(second, browser="audience-browser-revoked", ip="10.0.0.22")
+        revoke_ticket(second.session.ticket, actor=self.admin, note="duplicate print")
+
+        client = Client()
+        client.force_login(self.staff)
+        response = client.get(reverse("staff:vote_session_export", args=[self.vote_session.pk]))
+        self.assertEqual(response.status_code, 200)
+        sheet = load_workbook(BytesIO(response.content)).active
+        assert sheet is not None
+        exported = {row[0]: row[1] for row in sheet.iter_rows(min_row=2, values_only=True)}
+        self.assertEqual(exported[self.singer.name], 1)
+
+        archive_artifact = next(
+            artifact
+            for artifact in build_archive_package(self.activity)
+            if artifact.name == "vote_results.xlsx"
+        )
+        archive_sheet = load_workbook(BytesIO(archive_artifact.content)).active
+        assert archive_sheet is not None
+        archived = {row[1]: row[3] for row in archive_sheet.iter_rows(min_row=2, values_only=True)}
+        self.assertEqual(archived[self.singer.name], 1)
+
+        # The same number the resolver divides by, so all three surfaces agree.
+        facts = vote_session_configuration_facts(self.vote_session, test_flag=True)
+        self.assertEqual(facts["candidate_votes"][self.singer.pk], 1)
+
     def test_revoking_a_ticket_records_which_ballots_it_invalidated(self):
         """The ballot rows stay (§19.1), so the audit entry has to name the change."""
         redeemed = self._ticket_session()

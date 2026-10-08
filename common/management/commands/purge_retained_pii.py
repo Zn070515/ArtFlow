@@ -45,11 +45,33 @@ class Command(BaseCommand):
             )
 
         cutoff = timezone.now() - timedelta(days=days)
+        # `locked_at`, not `updated_at`. The help text says "archived ... older than this
+        # many days", and `updated_at` is an ordinary auto_now: `archive_activity` saves
+        # with an explicit field list that does not include it, so an activity last edited
+        # long before it was archived would already look older than the retention window
+        # on the day it was archived and be anonymised immediately.
+        #
+        # For an ARCHIVED activity, `locked_at` is the archive instant: the archive flow
+        # is the only writer of that phase and it stamps the field, while `unarchive`
+        # clears it. A null value is therefore not "long ago" — it is a row this command
+        # cannot date, so it is left alone rather than anonymised on a guess.
         activities = Activity.objects.filter(
             phase=Activity.Phase.ARCHIVED,
             data_lifecycle=Activity.DataLifecycle.FORMAL,
-            updated_at__lt=cutoff,
+            locked_at__isnull=False,
+            locked_at__lt=cutoff,
         ).order_by("pk")
+        # An ARCHIVED row with no lock timestamp is not "old": it is undatable, so it is
+        # reported rather than quietly dropped from the sweep.
+        undated = Activity.objects.filter(
+            phase=Activity.Phase.ARCHIVED,
+            data_lifecycle=Activity.DataLifecycle.FORMAL,
+            locked_at__isnull=True,
+        ).count()
+        if undated:
+            self.stdout.write(
+                f"Skipped {undated} archived formal activities with no archive timestamp."
+            )
         totals = {"activities": 0, "singers": 0, "programs": 0}
 
         with transaction.atomic():
