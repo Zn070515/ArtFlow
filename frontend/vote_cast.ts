@@ -18,11 +18,13 @@
 
   options.forEach((option) => {
     option.addEventListener("change", () => {
-      if (options.filter((item) => item.checked).length > maxSelections) {
-        option.checked = false;
-        counter.textContent = `最多选择 ${maxSelections} 位选手`;
-      }
+      const over = options.filter((item) => item.checked).length > maxSelections;
+      if (over) option.checked = false;
       update();
+      // After `update()`, not before: the counter wrote over the warning on the next line,
+      // so a voter who ticked one box too many only ever saw the running count and had to
+      // work out why the box un-ticked itself.
+      if (over) counter.textContent = `最多选择 ${maxSelections} 位选手`;
     });
   });
 

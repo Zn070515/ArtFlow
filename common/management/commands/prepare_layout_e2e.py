@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -22,9 +23,17 @@ from django.contrib.auth import BACKEND_SESSION_KEY, HASH_SESSION_KEY, SESSION_K
 from django.contrib.sessions.backends.db import SessionStore
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 from singer_contest.models import ContestRound, SingerRegistration
+from voting.models import VoteOption, VoteSession
 
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, CONTEST_ROUND_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    VOTE_SESSION_STATE,
+    authority_write,
+)
 
 
 class Command(BaseCommand):
@@ -51,6 +60,7 @@ class Command(BaseCommand):
             activity = self._create_activity()
             contest_round = self._create_round(activity)
             singers = [self._create_singer(activity, index) for index in range(3)]
+            vote_session = self._create_vote_session(activity, singers)
             session_key = self._session_key(staff)
 
         output_path.write_text(
@@ -60,6 +70,7 @@ class Command(BaseCommand):
                     "activity_id": activity.pk,
                     "round_id": contest_round.pk,
                     "singer_id": singers[0].pk,
+                    "vote_session_id": vote_session.pk,
                     "session_key": session_key,
                     "staff_username": staff.username,
                     "staff_password": password,
@@ -119,6 +130,27 @@ class Command(BaseCommand):
                 minimum_judge_count=1,
                 is_locked=False,
             )
+
+    @staticmethod
+    def _create_vote_session(
+        activity: Activity, singers: list[SingerRegistration]
+    ) -> VoteSession:
+        """A session with options, so the detail page renders its switches and its table."""
+        with authority_write(VOTE_SESSION_STATE):
+            session = VoteSession.objects.create(
+                activity=activity,
+                name="Layout fixture vote with a deliberately long session name",
+                passcode="4321",
+                start_time=timezone.now() - timedelta(minutes=30),
+                end_time=timezone.now() + timedelta(hours=2),
+            )
+        VoteOption.objects.bulk_create(
+            [
+                VoteOption(vote_session=session, singer=singer, sort_order=index)
+                for index, singer in enumerate(singers)
+            ]
+        )
+        return session
 
     @staticmethod
     def _create_singer(activity: Activity, index: int) -> SingerRegistration:

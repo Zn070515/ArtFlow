@@ -11,6 +11,7 @@ export type Fixture = {
   activity_id: number;
   round_id: number;
   singer_id: number;
+  vote_session_id: number;
   session_key: string;
 };
 
@@ -41,7 +42,9 @@ export const FIXTURE_TARGETS: Target[] = [
   { name: "staff-ticket-manage", path: "/staff/tickets/manage/", staff: true },
   { name: "staff-ticket-check-in", path: "/staff/tickets/check-in-page/", staff: true },
   { name: "staff-vote-sessions", path: "/staff/vote-sessions/", staff: true },
+  { name: "staff-vote-session-detail", path: "/staff/vote-sessions/{vote}/", staff: true },
   { name: "staff-judges", path: "/staff/judges/", staff: true },
+  { name: "staff-judge-control", path: "/staff/judges/round/{round}/control/", staff: true },
   { name: "staff-awards", path: "/staff/awards/", staff: true },
   { name: "staff-incidents", path: "/staff/incidents/", staff: true },
   { name: "staff-audit-logs", path: "/staff/audit-logs/", staff: true },
@@ -77,5 +80,6 @@ export function makeResolver(fixture: Fixture | null) {
       .replace("{code}", fixture?.public_code ?? "")
       .replace("{activity}", String(fixture?.activity_id ?? ""))
       .replace("{round}", String(fixture?.round_id ?? ""))
+      .replace("{vote}", String(fixture?.vote_session_id ?? ""))
       .replace("{singer}", String(fixture?.singer_id ?? ""));
 }

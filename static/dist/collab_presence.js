@@ -24,9 +24,26 @@
         .filter(Boolean);
     const refreshBanner = root.querySelector("[data-collab-refresh]");
     const refreshAction = root.querySelector("[data-collab-refresh-action]");
+    // `crypto.randomUUID` only exists in a secure context, and the no-ICP LAN fallback
+    // (`http://192.168.x.x:8000`) is exactly where the presence panel has to keep working —
+    // there the bare call threw a TypeError before the first heartbeat and the panel never
+    // appeared. `getRandomValues` has no such restriction; the last resort is not a security
+    // boundary (this id only tells two staff editors apart).
+    function randomClientId() {
+        const bytes = new Uint8Array(16);
+        if (typeof globalThis.crypto?.getRandomValues === "function") {
+            globalThis.crypto.getRandomValues(bytes);
+        }
+        else {
+            for (let index = 0; index < bytes.length; index += 1) {
+                bytes[index] = Math.floor(Math.random() * 256);
+            }
+        }
+        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
     const clientStorageKey = "artflow:collab:client-id";
     const existingClientId = window.sessionStorage.getItem(clientStorageKey);
-    const clientId = existingClientId || crypto.randomUUID().replace(/-/g, "");
+    const clientId = existingClientId || randomClientId();
     if (!existingClientId)
         window.sessionStorage.setItem(clientStorageKey, clientId);
     const HEARTBEAT_MS = 15000;

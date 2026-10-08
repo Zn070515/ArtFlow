@@ -2259,6 +2259,33 @@ class MediaGatewayIndexContractTests(TestCase):
                 )
 
 
+class LayoutFixtureCommandTests(TestCase):
+    """The mobile layout gate can only walk pages the fixture can address.
+
+    `tests/e2e/layout-targets.ts` resolves `/staff/vote-sessions/{vote}/` and
+    `/staff/judges/round/{round}/control/` from this payload; a key it does not carry makes
+    both specs visit an empty path and silently measure the home page instead.
+    """
+
+    def test_the_fixture_carries_every_placeholder_the_gate_resolves(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layout.json"
+            call_command("prepare_layout_e2e", "--output-file", str(path))
+            fixture = json.loads(path.read_text(encoding="utf-8"))
+
+        for key in (
+            "public_code",
+            "activity_id",
+            "round_id",
+            "singer_id",
+            "vote_session_id",
+            "session_key",
+        ):
+            with self.subTest(key=key):
+                self.assertIn(key, fixture)
+                self.assertTrue(fixture[key])
+
+
 class ClientIpTests(TestCase):
     @staticmethod
     def _request(**meta):

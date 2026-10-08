@@ -37,7 +37,7 @@ class FakeSocket {
 }
 FakeSocket.OPEN = 1;
 
-function boot({ dataset = {}, withRoot = true } = {}) {
+function boot({ dataset = {}, withRoot = true, insecure = false } = {}) {
   const membersList = new FakeElement("ul");
   const status = new FakeElement("p");
   const refreshBanner = new FakeElement("div");
@@ -78,6 +78,8 @@ function boot({ dataset = {}, withRoot = true } = {}) {
     URL,
     WebSocket: FakeSocket,
   };
+
+  if (insecure) delete context.crypto;
 
   vm.runInNewContext(source, context);
   return { membersList, status, refreshBanner, refreshAction, reloads, root };
@@ -142,4 +144,14 @@ test("a page without the collaboration root is untouched", () => {
 
   assert.equal(runtime.membersList.children.length, 0);
   assert.equal(FakeSocket.instances.length, 0);
+});
+
+test("an insecure context boots without crypto.randomUUID", () => {
+  // `randomUUID` exists only in a secure context, and the no-ICP LAN fallback
+  // (`http://192.168.x.x:8000`) is exactly where the presence panel has to work. The bare
+  // call threw a TypeError before the first heartbeat and the panel never appeared.
+  const runtime = boot({ insecure: true });
+
+  assert.equal(runtime.membersList.children.length, 1);
+  assert.match(FakeSocket.instances[0].url, /^ws:\/\/localhost\/ws\/group\/3\/materials\/\?client_id=/);
 });

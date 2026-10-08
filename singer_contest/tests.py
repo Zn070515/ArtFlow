@@ -6669,3 +6669,65 @@ class ShadowRehearsalTests(TestCase):
             .values_list("singer_id", flat=True)
         )
         self.assertEqual(list(handcard), [s.pk for s in self.singers[:3]])
+
+
+class ParticipantSubmissionHistoryTests(TestCase):
+    """GOAL §7.1: a main view shows the latest version, not every version side by side.
+
+    The participant's own submission page listed all of them with a "（当前）" badge, which
+    left them comparing their old uploads against the current one and guessing which the
+    staff would read. §7.3 puts history on its own route.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="history-singer", password="pass")
+        self.activity = Activity.objects.create(
+            title="History",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=True,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="History singer",
+            student_id="20261234",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        self.client.force_login(self.user)
+
+    def test_only_the_current_file_version_is_listed(self):
+        from files.models import SubmissionFile
+
+        stale = SubmissionFile.objects.create(
+            singer_registration=self.registration,
+            file="submissions/2026/10/stale.mp3",
+            original_name="旧版本.mp3",
+            file_size=10,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            version=1,
+            is_current=False,
+            is_test_data=True,
+        )
+        current = SubmissionFile.objects.create(
+            singer_registration=self.registration,
+            file="submissions/2026/10/current.mp3",
+            original_name="当前版本.mp3",
+            file_size=10,
+            file_purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            version=2,
+            is_current=True,
+            is_test_data=True,
+        )
+
+        response = self.client.get(
+            reverse("singer_contest:my_registration_detail", args=[self.registration.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, current.original_name)
+        self.assertNotContains(response, stale.original_name)

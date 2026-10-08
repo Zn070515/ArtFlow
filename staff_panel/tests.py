@@ -985,6 +985,36 @@ class StaffPanelSmokeTests(TestCase):
         self.assertEqual(qr_image.status_code, 200)
         self.assertEqual(qr_image["Content-Type"], "image/png")
 
+    def test_qr_pages_warn_when_the_code_is_not_built_for_the_real_host(self):
+        """GOAL §11.5: printing needs the production HTTPS host.
+
+        Outside production the code is built from whatever host served the page, so a poster
+        printed from here resolves to nothing for the audience — and nothing on the page said
+        so.
+        """
+        self.client.force_login(self.staff)
+
+        development = self.client.get(reverse("staff:qr_generate", args=[self.singer_activity.pk]))
+        self.assertContains(development, "打印前必须在正式域名下重新生成")
+
+        with override_settings(APP_ENV="production"):
+            production = self.client.get(
+                reverse("staff:qr_generate", args=[self.singer_activity.pk]), secure=True
+            )
+        self.assertNotContains(production, "打印前必须在正式域名下重新生成")
+
+        # A production deployment reached over plain HTTP is still not printable.
+        with override_settings(APP_ENV="production"):
+            insecure = self.client.get(reverse("staff:qr_generate", args=[self.singer_activity.pk]))
+        self.assertContains(insecure, "打印前必须在正式域名下重新生成")
+
+    def test_qr_center_carries_the_same_warning(self):
+        self.client.force_login(self.staff)
+
+        response = self.client.get(reverse("staff:qr_center"))
+
+        self.assertContains(response, "打印前必须在正式域名下重新生成")
+
     def test_round_score_entry_requires_prepared_round(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,

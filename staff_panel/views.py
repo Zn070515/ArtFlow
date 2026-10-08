@@ -3513,9 +3513,30 @@ def _popularity_top_tie(vote_session):
 
 
 @staff_required
+def qr_print_host_warning(request) -> str:
+    """GOAL §11.5: a QR is only printable from the real HTTPS host.
+
+    Outside production the code is built from whatever host served the page — 127.0.0.1 or a
+    LAN address — so a poster printed from here resolves to nothing for the audience, and
+    nothing on any of these pages said so. The warning is returned (not raised) because the
+    page itself is legitimate for checking the code at a rehearsal.
+    """
+    if settings.APP_ENV == "production" and request.is_secure():
+        return ""
+    return (
+        f"当前二维码由 {request.get_host()} 生成，不是正式 HTTPS 域名。"
+        "打印前必须在正式域名下重新生成（GOAL §11.5）。"
+    )
+
+
+@staff_required
 def qr_center(request):
     activities = Activity.objects.filter(activity_type=Activity.Type.SINGER_CONTEST)
-    return render(request, "staff_panel/qr_center.html", {"activities": activities})
+    return render(
+        request,
+        "staff_panel/qr_center.html",
+        {"activities": activities, "qr_host_warning": qr_print_host_warning(request)},
+    )
 
 
 @staff_required
@@ -3525,7 +3546,11 @@ def qr_generate(request, pk):
         pk=pk,
         activity_type=Activity.Type.SINGER_CONTEST,
     )
-    return render(request, "staff_panel/qr_detail.html", {"activity": activity})
+    return render(
+        request,
+        "staff_panel/qr_detail.html",
+        {"activity": activity, "qr_host_warning": qr_print_host_warning(request)},
+    )
 
 
 @staff_required

@@ -9,6 +9,9 @@
         <a href="{% url 'staff:dashboard' %}" class="hover:underline">后台</a> /
         <a href="{% url 'staff:qr_center' %}" class="hover:underline">二维码中心</a> / {{ activity.title }}
     </p>
+    {% if qr_host_warning %}
+    <div class="mb-6 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{{ qr_host_warning }}</div>
+    {% endif %}
 
     <div class="grid sm:grid-cols-2 gap-6">
         <div class="border border-gray-200 bg-white rounded-lg p-6 text-center">
