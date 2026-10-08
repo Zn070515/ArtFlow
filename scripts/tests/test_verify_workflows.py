@@ -12,6 +12,8 @@ CHECKOUT_SHA = "11bd71901bbe5b1630ceea73d27597364c9af683"
 CODEQL_SHA = "bb16b9baa2ec4010b29f5c606d57d01190139edd"
 GITLEAKS_SHA = "ff98106e4c7b2bc287b24eaf42907196329070c7"
 SETUP_UV_SHA = "c771a70e6277c0a99b617c7a806ffedaca235ff9"
+CACHE_SHA = "0057852bfaa89a56745cba8c7296529d2fc39830"
+BROWSER_INSTALL_NAME = "Install browsers for the smoke and layout runs"
 
 
 def valid_workflow() -> str:
@@ -92,6 +94,26 @@ def valid_workflow() -> str:
                       exit 0
                     fi
                     sleep 1
+                  done
+                  exit 1
+              - name: Restore the Playwright browser cache
+                uses: actions/cache@{CACHE_SHA} # v4.3.0
+                with:
+                  path: ~/.cache/ms-playwright
+                  key: playwright-${{{{ runner.os }}}}-${{{{ hashFiles('package-lock.json') }}}}
+              - name: {BROWSER_INSTALL_NAME}
+                timeout-minutes: 18
+                shell: bash
+                run: |
+                  set -Eeuo pipefail
+                  for attempt in {{1..3}}; do
+                    printf 'Playwright browser install attempt %s/3\\n' "$attempt" >&2
+                    if timeout 300 npx playwright install --with-deps chromium webkit; then
+                      exit 0
+                    fi
+                    if (( attempt < 3 )); then
+                      sleep 10
+                    fi
                   done
                   exit 1
               - name: Seed demo data twice in web
@@ -251,6 +273,33 @@ def test_verifier_requires_retry_for_compose_registry_startup():
 
     assert result.returncode == 1
     assert "Compose startup must retry transient registry failures" in result.stderr
+
+
+def test_verifier_requires_a_bounded_retry_for_the_browser_install():
+    """A retry that cannot be reached is not a retry.
+
+    The browser download stalled for the job's whole budget once; the shell never
+    regained control, so an unbounded retry loop would have changed nothing.
+    """
+    workflow = valid_workflow().replace("timeout 300 npx playwright install", "npx playwright")
+    workflow = workflow.replace("                timeout-minutes: 18\n", "")
+
+    result = run_verifier(workflow)
+
+    assert result.returncode == 1
+    assert "must retry a bounded attempt and carry a step timeout" in result.stderr
+
+
+def test_verifier_requires_the_browser_download_cache():
+    workflow = valid_workflow().replace(
+        f"        uses: actions/cache@{CACHE_SHA} # v4.3.0",
+        "        # cache removed",
+    )
+
+    result = run_verifier(workflow)
+
+    assert result.returncode == 1
+    assert "must restore a cache" in result.stderr
 
 
 def test_verifier_requires_compose_release_provenance():
