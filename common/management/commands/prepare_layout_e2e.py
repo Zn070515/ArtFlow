@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -132,9 +132,7 @@ class Command(BaseCommand):
             )
 
     @staticmethod
-    def _create_vote_session(
-        activity: Activity, singers: list[SingerRegistration]
-    ) -> VoteSession:
+    def _create_vote_session(activity: Activity, singers: list[SingerRegistration]) -> VoteSession:
         """A session with options, so the detail page renders its switches and its table."""
         with authority_write(VOTE_SESSION_STATE):
             session = VoteSession.objects.create(
