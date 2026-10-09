@@ -9,10 +9,12 @@
     {% if activity.subtitle %}<p class="mt-2 text-gray-600">{{ activity.subtitle }}</p>{% endif %}
     {% if activity.description %}<p class="mt-6 whitespace-pre-line text-gray-700">{{ activity.description }}</p>{% endif %}
 
-    <div class="mt-8 grid gap-3 sm:grid-cols-3">
+    <div class="mt-8 grid gap-3 sm:grid-cols-2">
         <a class="rounded bg-brand px-4 py-3 text-center text-sm font-medium text-white" href="{% url 'public_portal:activity_apply' activity.public_code %}">报名入口</a>
         <a class="rounded border border-gray-300 px-4 py-3 text-center text-sm font-medium text-gray-700" href="{% url 'public_portal:activity_live' activity.public_code %}">现场观众入口</a>
-        <a class="rounded border border-gray-300 px-4 py-3 text-center text-sm font-medium text-gray-700" href="{% url 'public_portal:activity_judge' activity.public_code %}">评委入口</a>
+        {# No judge entry here. The shared judge QR carries a capability in its fragment, so #}
+        {# a link from a public page would be a link to a door with no key — and while the #}
+        {# entry had no credential at all, this one line was how anyone found the door. #}
     </div>
 
     {% if result_post %}

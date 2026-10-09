@@ -129,6 +129,7 @@ from singer_contest.judge_authority import (
     submit_paper_score,
     submit_staff_proxy_score,
 )
+from singer_contest.judge_entry import judge_entry_credential
 from singer_contest.models import (
     AudienceScore,
     ContestRound,
@@ -609,11 +610,21 @@ def group_stage_correct(request, pk):
 @staff_required
 @require_POST
 def activity_judge_entry_toggle(request, pk):
+    """Open or close the judge entry for the night.
+
+    GOAL §12.3's stable shared QR removed the per-seat grant, which left the judge entry
+    with no credential at all: `/e/<code>/judge/` is public and the public activity page
+    linked to it, so anyone reading the code could take a real seat and submit a real
+    score. The capability in the QR is the fix; this switch is the second layer, and it
+    covers the live night as well as a rehearsal — the door is shut until staff open it,
+    and shutting it again after the panel is seated means a photographed QR claims
+    nothing. Sessions already claimed are untouched.
+    """
     activity = get_object_or_404(Activity, pk=pk)
     if activity.activity_type != Activity.Type.SINGER_CONTEST:
-        raise PermissionDenied("只有歌手比赛支持评委彩排入口。")
-    if not activity.is_test_mode or activity.phase == Activity.Phase.ARCHIVED or activity.is_locked:
-        raise PermissionDenied("只有未锁定的 TEST 活动可以开放评委彩排入口。")
+        raise PermissionDenied("只有歌手比赛支持评委入口。")
+    if activity.phase == Activity.Phase.ARCHIVED or activity.is_locked:
+        raise PermissionDenied("已归档或已锁定的活动不能改变评委入口。")
     activity.judge_entry_open = not activity.judge_entry_open
     with authority_write(ACTIVITY_STATE):
         activity.save(update_fields=["judge_entry_open"])
@@ -625,8 +636,36 @@ def activity_judge_entry_toggle(request, pk):
     )
     messages.success(
         request,
-        "评委彩排入口已开放。" if activity.judge_entry_open else "评委彩排入口已关闭。",
+        "评委入口已开放。" if activity.judge_entry_open else "评委入口已关闭。",
     )
+    return redirect("staff:activity_workspace", pk=activity.pk)
+
+
+@staff_required
+@require_POST
+def activity_judge_entry_rotate(request, pk):
+    """Reissue the judge QR: the printed one stops working, the entry stays open.
+
+    Closing the entry is the wrong tool for a leaked code — it also turns away the teacher
+    who is walking up right now. Bumping the version invalidates every capability signed
+    for the old one, and the new QR is printed from the QR centre as usual. Existing
+    sessions keep scoring: they are seats, not codes.
+    """
+    activity = get_object_or_404(Activity, pk=pk)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛有评委入口二维码。")
+    if activity.phase == Activity.Phase.ARCHIVED or activity.is_locked:
+        raise PermissionDenied("已归档或已锁定的活动不能重发评委二维码。")
+    activity.judge_entry_version += 1
+    with authority_write(ACTIVITY_STATE):
+        activity.save(update_fields=["judge_entry_version"])
+    log_action(
+        request,
+        AuditLog.ActionType.OTHER,
+        f"Activity:{activity.pk}",
+        new_value=f"judge_entry_version={activity.judge_entry_version}",
+    )
+    messages.success(request, "评委二维码已重发；此前发出的那张立即失效。")
     return redirect("staff:activity_workspace", pk=activity.pk)
 
 
@@ -3561,6 +3600,11 @@ def qr_image(request, pk, kind):
         path = reverse(route_name, kwargs={"public_code": activity.public_code})
     else:
         return HttpResponse("Unknown QR code kind", status=404)
+    if kind == "judge":
+        # The judge QR is the only one that carries a capability: the shared entry is the
+        # one place where the URL *is* the credential. It goes in the fragment, which the
+        # browser never sends, so the secret stays out of access logs and out of `Referer`.
+        path = f"{path}#{judge_entry_credential(activity)}"
 
     import qrcode
 

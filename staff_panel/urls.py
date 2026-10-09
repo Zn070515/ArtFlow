@@ -71,6 +71,11 @@ urlpatterns = [
         views.activity_judge_entry_toggle,
         name="activity_judge_entry_toggle",
     ),
+    path(
+        "activities/<int:pk>/judge-entry/rotate/",
+        views.activity_judge_entry_rotate,
+        name="activity_judge_entry_rotate",
+    ),
     path("posts/", views.post_list, name="post_list"),
     path("posts/new/", views.post_create, name="post_create"),
     path("posts/<int:pk>/preview/", views.post_preview, name="post_preview"),

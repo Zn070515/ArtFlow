@@ -69,6 +69,7 @@ class ActivityQuerySet(AuthorityQuerySetMixin, models.QuerySet):
         "locked_by",
         "locked_by_id",
         "judge_entry_open",
+        "judge_entry_version",
     }
     immutable_fields = {"activity_type", "public_code"}
 
@@ -163,7 +164,14 @@ class Activity(models.Model):
     judge_entry_open = models.BooleanField(
         default=False,
         db_default=False,
-        help_text="TEST 活动的评委彩排入口是否暂时开放。",
+        help_text="评委入口是否暂时开放；关闭后已入席的评委不受影响，新扫描被拒。",
+    )
+    judge_entry_version = models.PositiveIntegerField(
+        default=1,
+        help_text=(
+            "评委共享二维码的凭证版本。递增即让已发出的那张码立即失效——"
+            "二维码泄漏时用它重发，而不必关闭整个入口。"
+        ),
     )
     data_lifecycle = models.CharField(
         max_length=12,
@@ -277,6 +285,7 @@ class Activity(models.Model):
                         "locked_at",
                         "locked_by_id",
                         "judge_entry_open",
+                        "judge_entry_version",
                     )
                     .first()
                 )
@@ -303,6 +312,7 @@ class Activity(models.Model):
                         or persisted_state["locked_at"] != self.locked_at
                         or persisted_state["locked_by_id"] != self.locked_by_id
                         or persisted_state["judge_entry_open"] != self.judge_entry_open
+                        or persisted_state["judge_entry_version"] != self.judge_entry_version
                     )
                 ):
                     raise ValidationError(

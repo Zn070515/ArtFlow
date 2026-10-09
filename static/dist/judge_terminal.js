@@ -427,7 +427,14 @@
         JUDGE_TERMINALS_FULL: "评委席已满，请联系现场工作人员处理。",
         PANEL_NOT_READY: "评委组尚未准备，请等待现场工作人员。",
         ROUND_ON_HOLD: "现场评分已暂停，请等待工作人员恢复。",
+        // A capability that resolved but is not open right now: the teacher is early, not
+        // wrong, so the line says to wait rather than to hunt for another code.
+        JUDGE_ENTRY_CLOSED: "评委入口当前未开放，请等待现场工作人员开放后重新扫码。",
     };
+    // The shared judge QR carries an entry capability in its fragment: it is what proves the
+    // holder scanned the real QR rather than reading the public activity code off a poster.
+    // Prefix-matched so the per-seat grant fragments this terminal also accepts keep working.
+    const JUDGE_ENTRY_PREFIX = "AF1.J.";
     class ClaimRejected extends Error {
         constructor(reasonCode) {
             super(reasonCode);
@@ -445,10 +452,16 @@
         }
         return DEFAULT_CLAIM_FAILURE;
     }
-    async function claim() {
+    async function claim(entryToken = null) {
         const response = await fetch(claimUrl, {
             method: "POST",
             credentials: "same-origin",
+            ...(entryToken === null
+                ? {}
+                : {
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ judge_entry_token: entryToken }),
+                }),
         });
         if (response.ok)
             return true;
@@ -709,16 +722,31 @@
         }
     }
     async function boot() {
-        const fragment = window.location.hash.slice(1);
+        const rawFragment = window.location.hash.slice(1);
         try {
-            if (fragment) {
+            if (rawFragment) {
+                // Cleared before the request goes out: the capability must not survive in the
+                // address bar, in a shared screenshot, or in the history entry of the next tab.
+                const fragment = decodeURIComponent(rawFragment);
                 window.history.replaceState(null, "", window.location.pathname);
-                sessionToken = await redeem(decodeURIComponent(fragment));
-                if (!sessionToken)
-                    throw new Error("invalid grant");
-                cookieSession = false;
+                if (fragment.startsWith(JUDGE_ENTRY_PREFIX)) {
+                    // The shared QR's capability: claim a seat with it, and keep using the session
+                    // cookie from here on.
+                    await claim(fragment);
+                    sessionToken = "cookie";
+                    cookieSession = true;
+                }
+                else {
+                    sessionToken = await redeem(fragment);
+                    if (!sessionToken)
+                        throw new Error("invalid grant");
+                    cookieSession = false;
+                }
             }
             else {
+                // No fragment at all: a refresh of an already-claimed terminal, which the server
+                // answers by reusing the cookie's session. A first-time visitor who got here
+                // without scanning the QR is refused with no seat created.
                 // `claim()` throws ClaimRejected with the server's reason code, so the catch below
                 // can tell a full panel from a paused one.
                 await claim();

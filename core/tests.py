@@ -714,9 +714,14 @@ class ActivityPublicCodeBackfillTests(TestCase):
     def _historical_activity(self):
         from django.db.migrations.executor import MigrationExecutor
 
-        state = MigrationExecutor(connection).loader.project_state(
-            [("core", "0012_backfill_public_codes_again")]
-        )
+        # The *leaf* of the app, not a named migration. A historical model writes into the
+        # real table, so a pin behind the latest migration omits whatever columns were
+        # added since and trips their NOT NULL constraints — which is a fixture break, not
+        # a finding about the backfill, and it happened the first time a field was added
+        # here. Historical models carry fields but no custom `save`, so the immutability
+        # guard this test exists to sidestep is absent at any state.
+        leaf = MigrationExecutor(connection).loader.graph.leaf_nodes("core")[0]
+        state = MigrationExecutor(connection).loader.project_state([leaf])
         return state.apps.get_model("core", "Activity")
 
     def test_an_empty_public_code_is_replaced_and_a_used_one_is_left_alone(self):
