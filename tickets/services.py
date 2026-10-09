@@ -117,6 +117,27 @@ def _ticket_for_credential(raw_credential: Any) -> Ticket | None:
     )
 
 
+def _credential_authorizes_ticket(raw_credential: Any, locked_ticket: Ticket) -> bool:
+    """Whether ``raw_credential`` still authorises *this* ticket, judged after the lock.
+
+    A credential has to be resolved before the row lock can be taken, and a rotation
+    commits in the gap between the two: it bumps ``credential_version``, which is what
+    makes the printed code dead. Checking only the locked row's ``state`` afterwards left
+    that promise almost true — a check-in or a redemption that had already resolved the
+    old code would still go through, and a redemption would even mint a fresh
+    ``TicketAccessSession`` immediately after the rotation had revoked the old ones. The
+    operator would see "reset, and the sessions are gone" while the database held a
+    session created by the code they had just invalidated.
+
+    Re-running the same resolution against the locked row is what makes the final
+    authorization decision depend on the version the row holds *now*. ``state`` is
+    re-checked separately by each caller, so revoke/void stay covered by their own
+    guards.
+    """
+    resolved = _ticket_for_credential(raw_credential)
+    return resolved is not None and resolved.pk == locked_ticket.pk
+
+
 def _token_digest(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("ascii")).hexdigest()
 
@@ -300,6 +321,10 @@ def check_in_ticket_outcome(
             raise ValidationError(INVALID_TICKET_MESSAGE)
         lock_activity_for_action(candidate.activity, ActivityAction.CHECK_IN)
         locked_ticket = Ticket.objects.select_for_update().get(pk=candidate.pk)
+        # Before the state, because a rotated credential is an invalid ticket even if the
+        # row it used to point at has since been checked in by someone else.
+        if not _credential_authorizes_ticket(raw_secret, locked_ticket):
+            raise ValidationError(INVALID_TICKET_MESSAGE)
         if locked_ticket.state == Ticket.State.CHECKED_IN:
             return CheckInOutcome(ticket=locked_ticket, already_checked_in=True)
         if locked_ticket.state != Ticket.State.ISSUED:
@@ -427,7 +452,14 @@ def redeem_ticket(
             if candidate is not None
             else None
         )
-        if ticket is None or ticket.state not in {Ticket.State.ISSUED, Ticket.State.CHECKED_IN}:
+        # The credential is re-resolved against the locked row, so a code rotated between
+        # the two reads cannot produce a session — which is exactly what the rotation's
+        # own comment promises when it revokes the sessions that code already produced.
+        if (
+            ticket is None
+            or ticket.state not in {Ticket.State.ISSUED, Ticket.State.CHECKED_IN}
+            or not _credential_authorizes_ticket(raw_secret, ticket)
+        ):
             raise ValidationError(INVALID_TICKET_MESSAGE)
         raw_token = secrets.token_urlsafe(32)
         ttl_seconds = int(getattr(settings, "TICKET_ACCESS_SESSION_TTL_SECONDS", 30 * 60))
