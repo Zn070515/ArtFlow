@@ -184,7 +184,7 @@ async function submitJudgeScore(actor, score) {
   const before = Date.now();
   await submit.click();
   await status
-    .filter({ hasText: /评分已确认|网络暂时不可用|现场暂停|不接受|失败|无效/ })
+    .filter({ hasText: /评分已确认|网络暂时不可用|现场暂停|不接受|失败|无效|已经提交过/ })
     .waitFor({ timeout: 15000 })
     .catch(() => {});
   const text = ((await status.textContent()) ?? "").trim();
@@ -247,8 +247,14 @@ async function castVote(page, label) {
 async function readerActor(browser, label, startPath) {
   const context = await browser.newContext();
   const page = await actorPage(context, label);
-  await page.goto(`${baseUrl}${startPath}`);
-  await page.locator("body").waitFor();
+  try {
+    await page.goto(`${baseUrl}${startPath}`, { timeout: 20000 });
+    await page.locator("body").waitFor({ timeout: 20000 });
+  } catch (error) {
+    // Recorded, not fatal: a page that never renders is a finding about the stack, and
+    // throwing here ended a rehearsal at the first one.
+    record({ actor: label, action: "open", failed: String(error).slice(0, 60) });
+  }
   return { label, context, page };
 }
 
@@ -303,14 +309,15 @@ async function run() {
     }
     record({ actor: "staff", action: "all_logged_in", count: cast.staff.length });
 
-    // The overflow attempt first, so it cannot take a seat a real judge needs.
-    const overflow = await judgeActor(browser, "judge:overflow");
-    await overflow.context.close();
-
     for (let index = 0; index < manifest.judge_seats.length; index += 1) {
       cast.judges.push(await judgeActor(browser, `judge:${index + 1}`, { dropFirstAck: index === 1 }));
     }
     record({ actor: "judges", action: "seated", seats: readySeats.slice().sort() });
+
+    // The sixth device only after the five are seated: it is refused *because* they are, and
+    // running it first made it take a seat a teacher needed.
+    const overflow = await judgeActor(browser, "judge:overflow");
+    await overflow.context.close();
 
     const groups = [
       ["audience", manifest.tickets.valid_checked_in],
@@ -341,12 +348,27 @@ async function run() {
 
   // P2 — steady state: judges score, the audience watches.
   if (runs("p2")) {
+    const judgeDesk = cast.staff.find((member) => member.credentials.role === "judge-desk");
+    const controlUrl = `${baseUrl}/staff/judges/round/${manifest.rounds.r1}/control/`;
     const scoring = (async () => {
       let round = 0;
       while (Date.now() - startedAt < at(305)) {
+        // One score per seat per performance is enforced, so the performers have to change
+        // between rounds — otherwise the loop measures the refusal path and calls it scoring.
+        const target = manifest.performances[round % manifest.performances.length];
+        try {
+          await judgeDesk.page.goto(controlUrl);
+          await judgeDesk.page
+            .locator(`form:has(input[name="performance_id"][value="${target.id}"]) button`)
+            .first()
+            .click({ timeout: 5000 });
+          await judgeDesk.page.waitForLoadState("domcontentloaded");
+        } catch (error) {
+          record({ actor: "staff:judge-desk", action: "advance", failed: String(error).slice(0, 60) });
+        }
         round += 1;
         for (const judge of cast.judges) await submitJudgeScore(judge, String(85 + (round % 10)));
-        await sleep(at(6));
+        await sleep(at(4));
       }
     })();
     const watching = (async () => {
@@ -403,7 +425,7 @@ async function run() {
   if (runs("p3")) {
     const judgeDesk = cast.staff.find((member) => member.credentials.role === "judge-desk");
     const checkIn = cast.staff.find((member) => member.credentials.role === "check-in");
-    const activityPath = `${baseUrl}/staff/activities/${manifest.activity.id}/`;
+    const activityPath = `${baseUrl}/staff/activities/${manifest.activity.id}/workspace/`;
     const toggle = () => judgeDesk.page.locator('form[action*="judge-entry/toggle"] button');
 
     await waitUntil(420);
@@ -436,10 +458,24 @@ async function run() {
     mark("p3", "entry rotated");
 
     await waitUntil(540);
-    const revoked = manifest.tickets.revoked[0];
-    await cast.admin.page.goto(`${baseUrl}/staff/tickets/${revoked.ticket_id}/`);
-    await cast.admin.page.getByRole("button", { name: "撤销" }).click();
-    mark("p3", `ticket revoked: ${revoked.serial}`);
+    // A ticket that has been *used*: the point is that its ballot stays on file as evidence
+    // while it leaves the valid set. Revoking one that is already revoked has no button to
+    // press, which is what the first attempt at this step found.
+    const revoked = manifest.tickets.valid_checked_in[0];
+    try {
+      await cast.admin.page.goto(`${baseUrl}/staff/tickets/${revoked.ticket_id}/detail/`);
+      await cast.admin.page.getByRole("button", { name: "撤销" }).click({ timeout: 10000 });
+      mark("p3", `ticket revoked: ${revoked.serial}`);
+    } catch (error) {
+      record({ actor: "admin", action: "revoke_ticket", failed: String(error).slice(0, 60) });
+    }
+    const revokedActor = cast.audience.find((member) => member.ticket.ticket_id === revoked.ticket_id);
+    if (revokedActor) {
+      // The same browser that voted a moment ago: its session is now void and a second ballot
+      // must not appear, even though the first one stays on file.
+      const again = await castVote(revokedActor.page, `${revokedActor.label}:after-revoke`);
+      record({ actor: revokedActor.label, action: "vote_after_revoke", accepted: again });
+    }
 
     await waitUntil(560);
     docker("stop", realtimeContainer);
@@ -466,10 +502,14 @@ async function run() {
       .locator("[data-ticket-check-in-form] input[name=secret]")
       .fill(manifest.tickets.valid_not_checked[0].credential);
     await checkIn.page.getByRole("button", { name: "确认检票" }).click();
+    const checkInStatus = checkIn.page
+      .locator("[data-ticket-check-in-status]")
+      .filter({ hasText: /检票成功|已检票|无效|失败/ });
+    await checkInStatus.waitFor({ timeout: 10000 }).catch(() => {});
     record({
       actor: "staff:check-in",
       action: "check_in",
-      status: ((await checkIn.page.locator("[data-ticket-check-in-status]").textContent()) ?? "").slice(0, 30),
+      status: ((await checkInStatus.textContent().catch(() => "")) ?? "").slice(0, 30),
     });
     mark("p3", "check-in exercised");
   }
@@ -477,7 +517,7 @@ async function run() {
   // P3b — the toggle observation: two staff pages rendered before either clicks.
   if (runs("p3b")) {
     await waitUntil(680);
-    const workspacePath = `/staff/activities/${manifest.activity.id}/`;
+    const workspacePath = `/staff/activities/${manifest.activity.id}/workspace/`;
     for (let round = 0; round < 5; round += 1) {
       const first = await browser.newContext();
       const second = await browser.newContext();
