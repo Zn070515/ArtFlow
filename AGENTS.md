@@ -153,3 +153,17 @@ the public site passes `forms.ImageField` (which rejects a payload that is not d
 and `files.imaging.sanitize_upload` (which bakes EXIF orientation into the pixels and
 writes no metadata back). A view that assigns `request.FILES[...]` to a public image field
 is a bypass, however legitimate the page is.
+
+A credential that has to be resolved before a row lock is taken must be re-checked against
+the locked row before it authorises anything: `rotate_ticket_credential` promises that the
+old code dies the moment it commits, and a request that resolved it a millisecond earlier
+would otherwise still check in, or mint a session right after the rotation revoked the ones
+that code produced. `state` is re-checked by each caller's own guard; the credential's
+version is not, so it needs its own recheck. The same shape — a pre-lock read becoming the
+final authorization — is what to look for in any new entry path.
+
+Bytes written to storage are not rolled back with the transaction that references them:
+`files.services._store_file` compensates by deleting what it just wrote when the remainder
+of the write fails, while superseded files keep using `transaction.on_commit` (they are only
+garbage once their replacement has really committed). The two directions are deliberately
+opposite.

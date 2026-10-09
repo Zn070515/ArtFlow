@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-10-09
+
+### A rotated ticket credential is now dead the moment the rotation commits
+
+`rotate_ticket_credential` bumps `credential_version` and revokes the browser sessions the
+printed code already produced, so that a leaked code can be killed on the spot. That held
+against every request that *started* after the rotation, and not against one that had
+already resolved the code: the resolution happens before the row lock can be taken, and the
+code after the lock re-read the row and checked only its `state`. A check-in would therefore
+succeed with a code the operator had just invalidated, and — worse — a redemption would mint
+a fresh `TicketAccessSession` immediately after the rotation revoked the old ones, so
+resetting a leaked code could visibly create a working session from it.
+
+Both `check_in_ticket_outcome` and `redeem_ticket` now re-resolve the credential against the
+locked row (`tickets.services._credential_authorizes_ticket`), so the final authorization
+decision depends on the version the row holds now. `state` was already re-checked by each
+caller's own guard, which is why revoke and void never had this problem.
+
+Two `TransactionTestCase` race tests pin the interleaving deterministically by holding the
+resolution step open while the rotation commits on another connection — both fail against
+the previous code and pass against this one. They are `postgresql`-marked, because SQLite
+cannot express the race.
+
+### A failed upload no longer leaves its bytes behind
+
+`files.services._store_file` writes to storage before the row that references it can commit,
+and a rollback does not take the bytes back. Anything that failed between the write and the
+commit — including a failure raised by the caller's own transaction — left a file no row
+points at: invisible to the application, still occupying the media volume, and still counted
+by the low-water check that refuses uploads when free space runs out. The write now
+compensates by deleting what it just wrote, while superseded files keep using
+`transaction.on_commit`, which is the opposite direction on purpose. The
+`ARTFLOW_UPLOAD_MAX_VERSIONS` validity check also moved to the precondition block, where it
+belongs — it used to run *after* the write, so a deployment with an invalid value orphaned
+one file per attempt.
+
 ## 2026-10-08 (later)
 
 ### Peripheral authority closure — the staff path, the archive sheet, the rehearsal QR

@@ -372,6 +372,93 @@ def _jpeg_with_metadata() -> bytes:
     return buffer.getvalue()
 
 
+class UploadRollbackCompensationTests(TestCase):
+    """The bytes land before the transaction commits, so a rollback has to take them back.
+
+    Superseded files are deleted through `transaction.on_commit`, which is the right
+    direction for *them*: the replacement may only be deleted once it really committed.
+    The write needs the opposite half. Without it, any failure between the storage write
+    and the commit leaves a file no row points at — invisible to the application, still
+    occupying the media volume, and still counted by the low-water check that refuses
+    uploads when free space runs out.
+    """
+
+    def setUp(self):
+        _clear_upload_rate_limit()
+        self.media_root = tempfile.mkdtemp()
+        self.override = override_settings(MEDIA_ROOT=self.media_root)
+        self.override.enable()
+        self.user = User.objects.create_user(username="orphan-participant", password="pass")
+        self.activity = _create_activity(
+            title="Orphan Contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+        )
+        self.registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=self.user,
+            name="Orphan Singer",
+            student_id="20260099",
+            college="College",
+            class_name="Class",
+            phone="13800000000",
+            song_name="Song",
+        )
+
+    def tearDown(self):
+        self.override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+
+    def _stored_files(self) -> list[Path]:
+        return [path for path in Path(self.media_root).rglob("*") if path.is_file()]
+
+    def test_a_failure_after_the_write_leaves_no_file_behind(self):
+        with patch("files.services._reset_matching_check", side_effect=RuntimeError("boom")):
+            with self.assertRaisesMessage(RuntimeError, "boom"):
+                store_submission_file(
+                    owner=self.registration,
+                    uploaded_file=SimpleUploadedFile(
+                        "orphan.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+                    ),
+                    purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                    uploaded_by=self.user,
+                )
+
+        self.assertFalse(SubmissionFile.objects.filter(singer_registration=self.registration))
+        self.assertEqual(self._stored_files(), [])
+
+    def test_a_failure_after_the_derivative_write_removes_both_objects(self):
+        """§19.3 stores two objects, so the compensation has to remove two."""
+        with patch("files.services._reset_matching_check", side_effect=RuntimeError("boom")):
+            with self.assertRaisesMessage(RuntimeError, "boom"):
+                store_submission_file(
+                    owner=self.registration,
+                    uploaded_file=SimpleUploadedFile(
+                        "orphan-cover.jpg",
+                        _jpeg_with_metadata(),
+                        content_type="image/jpeg",
+                    ),
+                    purpose=SubmissionFile.Purpose.PROGRAM_IMAGE,
+                    uploaded_by=self.user,
+                )
+
+        self.assertFalse(SubmissionFile.objects.filter(singer_registration=self.registration))
+        self.assertEqual(self._stored_files(), [])
+
+    def test_the_successful_upload_keeps_its_object(self):
+        """The compensation must not fire on the ordinary path."""
+        submission = store_submission_file(
+            owner=self.registration,
+            uploaded_file=SimpleUploadedFile(
+                "kept.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+            ),
+            purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+            uploaded_by=self.user,
+        )
+
+        self.assertTrue(submission.file.storage.exists(submission.file.name))
+        self.assertEqual(len(self._stored_files()), 1)
+
+
 class PublicDerivativeDeliveryTests(TestCase):
     """GOAL §19.3: a public viewer is served the metadata-free derivative."""
 
