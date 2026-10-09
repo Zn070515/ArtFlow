@@ -137,6 +137,17 @@ class Command(BaseCommand):
             vote_session, closed_session = self._prepare_votes(activity, registrations, operator)
             tickets = self._issue_tickets(activity, operator, admin)
 
+            # A second activity that stays in registration. An upload only exists while the
+            # registration window is open — the show activity is in LIVE, where the form is
+            # legitimately closed — so the questionnaire and file path needs an activity of its
+            # own or it is never exercised at all.
+            registration_activity = self._create_activity(
+                title="Load simulation registration", phase=Activity.Phase.REGISTRATION_OPEN
+            )
+            registration, _ = self._create_performers(registration_activity, participants=1)
+            registration_rounds = self._create_rounds(registration_activity, registration, operator)
+            self._freeze_questionnaire_ruleset(registration_activity, registration_rounds, admin)
+
         manifest = {
             "product_revision": options["product_revision"],
             "activity": {
@@ -179,6 +190,10 @@ class Command(BaseCommand):
             "participant": {
                 "username": participant.username,
                 "password": participant_password,
+            },
+            "registration_activity": {
+                "id": registration_activity.pk,
+                "public_code": registration_activity.public_code,
             },
             "vote_sessions": [
                 {
@@ -225,18 +240,20 @@ class Command(BaseCommand):
     # --- contest ----------------------------------------------------------------------
 
     @staticmethod
-    def _create_activity() -> Activity:
+    def _create_activity(
+        title: str = "Load simulation contest", phase: str = Activity.Phase.REHEARSAL
+    ) -> Activity:
         with authority_write(ACTIVITY_STATE):
             return Activity.objects.create(
-                title="Load simulation contest",
+                title=title,
                 activity_type=Activity.Type.SINGER_CONTEST,
-                phase=Activity.Phase.REHEARSAL,
+                phase=phase,
                 is_test_mode=False,
                 judge_entry_open=True,
             )
 
     def _create_performers(
-        self, activity: Activity
+        self, activity: Activity, participants: int = PERFORMER_COUNT
     ) -> tuple[list[SingerRegistration], tuple[User, str]]:
         """One account per performer, because a registration must belong to a user.
 
@@ -245,7 +262,7 @@ class Command(BaseCommand):
         """
         registrations = []
         participant_account: tuple[User, str] | None = None
-        for index in range(PERFORMER_COUNT):
+        for index in range(participants):
             user, password = self._create_user(
                 f"load-sim-singer-{index + 1:02d}", User.Role.PARTICIPANT
             )

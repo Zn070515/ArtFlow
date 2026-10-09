@@ -73,12 +73,18 @@ const httpFailures = [];
 const measurements = [];
 const timeline = [];
 const readySeats = [];
+let stage = "p1";
+// Every response an instrumented page sees, at any status. The peak's abort line is a *rate*,
+// and a rate needs a denominator: counting only the failures left the rule dividing by the
+// number of viewers, which is not what the plan asks for.
+let responsesSeen = 0;
 
 function record(entry) {
   const line = JSON.stringify({ t: ((Date.now() - startedAt) / 1000).toFixed(1), ...entry });
   appendFileSync(actorsLogPath, `${line}\n`);
 }
 function mark(phase, note = "") {
+  stage = phase;
   timeline.push({ phase, note, t: (Date.now() - startedAt) / 1000 });
   record({ actor: "phase", action: phase, note });
 }
@@ -86,8 +92,15 @@ function actorPage(context, actor) {
   const page = context.newPage();
   return page.then((resolved) => {
     resolved.on("response", (response) => {
+      responsesSeen += 1;
       if (response.status() >= 400) {
-        httpFailures.push({ actor, status: response.status(), url: response.url() });
+        httpFailures.push({
+          actor,
+          status: response.status(),
+          url: response.url(),
+          stage,
+          t: (Date.now() - startedAt) / 1000,
+        });
       }
     });
     // The ticket revoke form and a few others confirm() before submitting, and Playwright
@@ -265,6 +278,110 @@ async function pollLive(members, intervalSeconds) {
   await sleep(at(intervalSeconds));
 }
 
+/** A staff member on the rapid-score grid: fills cells, watches the save land. */
+async function rapidScoreActor(browser, label, credentials, roundId) {
+  const context = await browser.newContext();
+  const page = await actorPage(context, label);
+  await loginStaff(page, credentials);
+  await page.goto(`${baseUrl}/staff/rounds/${roundId}/scores/`);
+  await page.locator("[data-saved-count]").waitFor({ timeout: 20000 });
+  const cells = await page.locator("input[data-singer-id][data-judge-id]").count();
+  record({ actor: label, action: "grid_ready", cells });
+  return { label, context, page, credentials, cells };
+}
+
+async function fillScoreCell(actor, singerId, judgeId, value) {
+  const cell = actor.page.locator(
+    `input[data-singer-id="${singerId}"][data-judge-id="${judgeId}"]`,
+  );
+  if ((await cell.count()) === 0) {
+    record({ actor: actor.label, action: "score_cell", missing: `${singerId}/${judgeId}` });
+    return false;
+  }
+  const before = Number((await actor.page.locator("[data-saved-count]").textContent()) ?? 0) || 0;
+  const started = Date.now();
+  await cell.fill(value);
+  await cell.blur();
+  try {
+    await actor.page.waitForFunction(
+      (expected) => Number(document.querySelector("[data-saved-count]")?.textContent ?? 0) > expected,
+      before,
+      { timeout: 10000 },
+    );
+  } catch {
+    // Timed out: fall through and let the conflict text say what happened.
+  }
+  const elapsed = Date.now() - started;
+  // The saved counter moves for a *round trip*, not for an accepted write: a write the server
+  // refused because the page was a revision behind still resolves. The conflict line is the
+  // observable that separates "accepted" from "refused and reported", so it is read every
+  // time rather than only on the timeout path.
+  const conflictText = await actor.page
+    .locator("[data-conflicts]")
+    .textContent()
+    .catch(() => "");
+  const conflicts = (conflictText ?? "").trim();
+  const accepted = conflicts.length === 0;
+  if (accepted) measurements.push({ name: "rapid_score_save", ms: elapsed });
+  record({
+    actor: actor.label,
+    action: "score_cell",
+    singer: singerId,
+    value,
+    accepted,
+    conflicts: conflicts.slice(0, 60),
+  });
+  return accepted;
+}
+
+/** A participant: sign in and upload a file answer through the real questionnaire page. */
+async function participantUpload(browser, label) {
+  const context = await browser.newContext();
+  const page = await actorPage(context, label);
+  await page.goto(`${baseUrl}/login/participant/`);
+  await page.getByLabel("用户名").fill(manifest.participant.username);
+  await page.getByLabel("密码").fill(manifest.participant.password);
+  await page.getByRole("button", { name: "登录" }).click();
+  // The registration activity, not the show activity: an upload only exists while the
+  // registration window is open, and the show one is in LIVE where the form is closed.
+  await page.goto(`${baseUrl}/questionnaire/${manifest.registration_activity.id}/`);
+  const form = page.locator("[data-questionnaire-form]");
+  await form.waitFor({ timeout: 20000 });
+  const fileInput = page.locator('input[type="file"][data-file-answer]').first();
+  if ((await fileInput.count()) === 0) {
+    record({ actor: label, action: "upload", missing: "no file question on the form" });
+    return { label, context, page, uploaded: false };
+  }
+  const key = await fileInput.getAttribute("data-file-answer");
+  const filePath = path.join(outputDir, "answer.mp3");
+  writeFileSync(filePath, Buffer.concat([
+    Buffer.from([0x49, 0x44, 0x33, 0x04, 0, 0, 0, 0, 0, 0]), // "ID3" + version
+    Buffer.alloc(2048),
+  ]));
+  const started = Date.now();
+  let uploaded = false;
+  try {
+    const beforeVersion = (await fileInput.getAttribute("data-file-version")) ?? "";
+    await fileInput.setInputFiles(filePath);
+    // The observable is the version the server assigns to the stored file: waiting for the
+    // input to *exist* already succeeded before the upload started, and measured a timeout.
+    await page.waitForFunction(
+      ([key, before]) =>
+        document
+          .querySelector(`input[data-file-answer="${key}"]`)
+          ?.getAttribute("data-file-version") !== before,
+      [key, beforeVersion],
+      { timeout: 15000 },
+    );
+    uploaded = true;
+    measurements.push({ name: "file_upload", ms: Date.now() - started });
+  } catch (error) {
+    record({ actor: label, action: "upload", failed: String(error).slice(0, 60) });
+  }
+  record({ actor: label, action: "upload", question: key, uploaded });
+  return { label, context, page, uploaded, filePath };
+}
+
 // --- injections -------------------------------------------------------------------------
 
 function docker(...arguments_) {
@@ -289,10 +406,49 @@ async function probeHealth() {
 
 // --- the run ----------------------------------------------------------------------------
 
-const browser = await chromium.launch();
+// The machine's system proxy has to be taken out of the path, and it has to be explicit.
+//
+// This host runs an enterprise proxy as the WinINET system proxy, and the browser sends even
+// loopback URLs to it: the peer for http://127.0.0.1:8000 was 127.0.0.1:12334, not Caddy. A
+// bypass list alone does not help — `--proxy-bypass-list=127.0.0.1;localhost` still went to the
+// proxy. `direct://` does. It matters because the proxy answers a share of the loopback
+// requests with its own 502 while forwarding the rest: the two earlier runs recorded 668 and 13
+// such 502s on the live page, and neither Caddy's log nor the web container's access log has a
+// single entry to match. Measuring that proxy and calling it "the stack's capacity" is the one
+// mistake this harness must not make again, so the launch is pinned here and checked below.
+const browser = await chromium.launch({ args: ["--proxy-server=direct://"] });
+
+// The check that makes the pin above load-bearing: if a future run is pointed at a proxy again,
+// it fails immediately instead of producing a plausible-looking curve.
+async function assertDirectConnection() {
+  const probe = await browser.newContext();
+  const page = await probe.newPage();
+  let peer = null;
+  page.on("response", async (response) => {
+    if (peer !== null) return;
+    const address = await response.serverAddr().catch(() => null);
+    peer = address ? `${address.ipAddress}:${address.port}` : "";
+  });
+  await page.goto(`${baseUrl}/healthz/`, { timeout: 15000 });
+  // The response listener is async (reading the peer address is a round trip to the browser),
+  // so it can land after goto resolves.
+  for (let attempt = 0; attempt < 50 && peer === null; attempt += 1) await sleep(100);
+  await probe.close();
+  const expected = `${base.hostname}:${base.port || (base.protocol === "https:" ? 443 : 80)}`;
+  if (peer !== expected) {
+    throw new Error(
+      `The browser is not talking to the stack: /healthz/ was answered by "${peer || "no peer"}", ` +
+        `not ${expected}. A proxy in the path fabricates 502s the server never sees.`,
+    );
+  }
+  record({ actor: "preflight", action: "direct_connection", peer });
+}
+
 const cast = { judges: [], audience: [], public: [], staff: [] };
 
 async function run() {
+  await assertDirectConnection();
+
   // P1 — cold start, sequentially, so a broken actor is attributable.
   if (runs("p1")) {
     const adminContext = await browser.newContext();
@@ -343,16 +499,31 @@ async function run() {
         )),
       );
     }
-    mark("p1", `cast ready: ${cast.judges.length} judges, ${cast.audience.length} audience`);
+
+    // The two roles the first run never exercised: staff entering scores on the grid, and a
+    // participant uploading through the questionnaire.
+    cast.rapid = [];
+    for (const role of ["score-entry", "backstage"]) {
+      const credentials = manifest.staff.find((member) => member.role === role);
+      cast.rapid.push(
+        await rapidScoreActor(browser, `rapid:${role}`, credentials, manifest.rounds.r1),
+      );
+    }
+    cast.upload = await participantUpload(browser, "participant:upload");
+    mark("p1", `cast ready: ${cast.judges.length} judges, ${cast.audience.length} audience, ${cast.rapid.length} on the score grid`);
   }
 
   // P2 — steady state: judges score, the audience watches.
   if (runs("p2")) {
+    // Without this the whole steady state inherits the P1 label, because `stage` only moves in
+    // mark() — and then every 4xx the voting and scoring paths answer on purpose is filed under
+    // "cold start".
+    mark("p2", "steady state started");
     const judgeDesk = cast.staff.find((member) => member.credentials.role === "judge-desk");
     const controlUrl = `${baseUrl}/staff/judges/round/${manifest.rounds.r1}/control/`;
     const scoring = (async () => {
       let round = 0;
-      while (Date.now() - startedAt < at(305)) {
+      while (Date.now() - startedAt < at(240)) {
         // One score per seat per performance is enforced, so the performers have to change
         // between rounds — otherwise the loop measures the refusal path and calls it scoring.
         const target = manifest.performances[round % manifest.performances.length];
@@ -375,12 +546,47 @@ async function run() {
       // The audience's real load is the live page polling, not repeated voting: a ticket
       // votes once, and a rehearsal that keeps re-submitting would measure the refusal path
       // instead of the site.
-      while (Date.now() - startedAt < at(305)) {
+      while (Date.now() - startedAt < at(240)) {
         await pollLive(cast.audience, 10);
       }
     })();
+    const grid = (async () => {
+      const [first, second] = cast.rapid;
+      let round = 0;
+      while (Date.now() - startedAt < at(240)) {
+        round += 1;
+        const singer = manifest.performers[round % manifest.performers.length].singer_id;
+        const cell = first.page.locator(`input[data-singer-id="${singer}"]`).first();
+        const judgeId = await cell.getAttribute("data-judge-id").catch(() => null);
+        if (judgeId === null && round === 1) {
+          record({
+            actor: first.label,
+            action: "grid_lookup_failed",
+            singer,
+            grid_cells: first.cells,
+            sample: ((await first.page.locator("[data-saved-count]").textContent()) ?? "").slice(0, 20),
+          });
+        }
+        if (judgeId) {
+          await fillScoreCell(first, singer, judgeId, String(80 + (round % 10)));
+          // `second` has not reloaded since `first` saved, so its write carries a stale grid
+          // version. The grid has to refuse it *and* say so rather than apply it quietly.
+          await fillScoreCell(second, singer, judgeId, String(90 + (round % 5)));
+        }
+        // A second upload, which is also the version-retention path.
+        if (cast.upload?.uploaded && round % 3 === 0) {
+          await cast.upload.page
+            .locator('input[type="file"][data-file-answer]')
+            .first()
+            .setInputFiles(cast.upload.filePath)
+            .catch(() => {});
+          record({ actor: "participant:upload", action: "upload_again", round });
+        }
+        await sleep(at(6));
+      }
+    })();
     const browsing = (async () => {
-      while (Date.now() - startedAt < at(305)) {
+      while (Date.now() - startedAt < at(240)) {
         for (const group of chunk(cast.public, 10)) {
           await Promise.all(
             group.map((member) =>
@@ -391,33 +597,81 @@ async function run() {
         await sleep(at(15));
       }
     })();
-    await Promise.all([scoring, watching, browsing]);
+    await Promise.all([scoring, grid, watching, browsing]);
     mark("p2", "steady state finished");
   }
 
-  // P2b — peak: double the audience with read-only viewers, sample the curve, then settle
-  // before any injection so a later failure cannot be blamed on the teardown.
+  // P2b — a staged ramp. The first attempt at this phase measured almost nothing: creating a
+  // hundred viewers took 81 s of the 110 s window, so the window was mostly context creation.
+  // The viewers are built during P2 now, and the window only varies how many of them poll.
+  const ramp = [];
   if (runs("p2b")) {
-    const burst = [];
-    for (let index = 0; index < 100; index += 1) {
-      burst.push(await readerActor(browser, `burst:${index + 1}`, `/e/${code}/live/`));
+    await waitUntil(240);
+    for (const group of chunk([...Array(200).keys()], 20)) {
+      ramp.push(
+        ...(await Promise.all(
+          group.map((index) => readerActor(browser, `ramp:${index + 1}`, `/e/${code}/live/`)),
+        )),
+      );
     }
-    mark("p2b", `burst viewers: ${burst.length}`);
-    const sampled = (async () => {
-      for (let tick = 300; tick < 410; tick += 15) {
-        await waitUntil(tick);
-        const sample = await probeHealth();
-        measurements.push({ name: "healthz_probe", ms: sample.ms, status: sample.status });
-        record({ actor: "probe", action: "healthz", ms: sample.ms, status: sample.status });
+    mark("p2b", `ramp viewers ready: ${ramp.length}`);
+    await waitUntil(300);
+
+    const stages = [50, 100, 150, 200];
+    let previous = 0;
+    for (const target of stages) {
+      mark("p2b", `stage ${target}`);
+      const active = ramp.slice(0, target);
+      const stageStarted = Date.now();
+      const stageFailuresBefore = httpFailures.length;
+      const stageResponsesBefore = responsesSeen;
+      const samples = [];
+      const loading = (async () => {
+        while (Date.now() - stageStarted < at(20)) await pollLive(active, 5);
+      })();
+      const sampling = (async () => {
+        while (Date.now() - stageStarted < at(20)) {
+          const sample = await probeHealth();
+          samples.push(sample);
+          measurements.push({ name: `probe_${target}`, ms: sample.ms, status: sample.status });
+          await sleep(at(5));
+        }
+      })();
+      await Promise.all([loading, sampling]);
+      const failed = httpFailures.slice(stageFailuresBefore).filter((f) => [502, 504, 500].includes(f.status)).length;
+      const requests = responsesSeen - stageResponsesBefore;
+      const worst = samples.reduce((max, sample) => Math.max(max, sample.ms), 0);
+      record({
+        actor: "ramp",
+        action: "stage",
+        viewers: target,
+        added: target - previous,
+        requests,
+        failures: failed,
+        probe_max_ms: worst,
+      });
+      previous = target;
+      // The plan's abort line for the peak: past this the bend has already been found, and
+      // more load only buries the evidence. The denominator is the requests the stage actually
+      // served — one viewer at 5 s per poll makes ~4 reloads, and every reload is a page *and*
+      // a state fetch, so dividing by the viewer count alone was four times stricter than the
+      // plan and ended the first real ramp at its very first stage.
+      const failureRate = requests > 0 ? failed / requests : 0;
+      if (failureRate > 0.05 || worst > 5000) {
+        record({
+          actor: "ramp",
+          action: "aborted_stage",
+          viewers: target,
+          requests,
+          failures: failed,
+          failure_rate: Number(failureRate.toFixed(4)),
+          probe_max_ms: worst,
+        });
+        break;
       }
-    })();
-    const loading = (async () => {
-      while (Date.now() - startedAt < at(410)) await pollLive(burst, 20);
-    })();
-    await Promise.all([sampled, loading]);
-    for (const member of burst) await member.context.close();
-    mark("p2b", `burst closed: ${burst.length}`);
-    await waitUntil(420);
+    }
+    for (const member of ramp) await member.context.close();
+    mark("p2b", `ramp closed: ${ramp.length}`);
     mark("p2b", "settled before injections");
   }
 
@@ -428,36 +682,36 @@ async function run() {
     const activityPath = `${baseUrl}/staff/activities/${manifest.activity.id}/workspace/`;
     const toggle = () => judgeDesk.page.locator('form[action*="judge-entry/toggle"] button');
 
-    await waitUntil(420);
+    await waitUntil(400);
     await judgeDesk.page.goto(`${baseUrl}/staff/judges/round/${manifest.rounds.r1}/control/`);
     await judgeDesk.page.getByPlaceholder("暂停评委组原因").fill("负载演练暂停");
     await judgeDesk.page.getByRole("button", { name: "暂停评委组" }).click();
     mark("p3", "hold");
 
-    await waitUntil(440);
+    await waitUntil(420);
     await submitJudgeScore(cast.judges[0], "66.00"); // must be refused while HOLD
     mark("p3", "score attempted during hold");
 
-    await waitUntil(460);
+    await waitUntil(440);
     await judgeDesk.page.getByRole("button", { name: "恢复评委组" }).click();
     mark("p3", "resume");
 
-    await waitUntil(480);
+    await waitUntil(460);
     await judgeDesk.page.goto(activityPath);
     await toggle().click();
     mark("p3", "entry closed");
 
-    await waitUntil(500);
+    await waitUntil(480);
     const blocked = await judgeActor(browser, "judge:after-close");
     record({ actor: "judge:after-close", action: "claim_blocked", status: ((await blocked.page.locator("[data-status]").textContent()) ?? "").slice(0, 40) });
     await blocked.context.close();
 
-    await waitUntil(520);
+    await waitUntil(500);
     await judgeDesk.page.goto(activityPath);
     await judgeDesk.page.locator('form[action*="judge-entry/rotate"] button').click();
     mark("p3", "entry rotated");
 
-    await waitUntil(540);
+    await waitUntil(520);
     // A ticket that has been *used*: the point is that its ballot stays on file as evidence
     // while it leaves the valid set. Revoking one that is already revoked has no button to
     // press, which is what the first attempt at this step found.
@@ -477,26 +731,49 @@ async function run() {
       record({ actor: revokedActor.label, action: "vote_after_revoke", accepted: again });
     }
 
-    await waitUntil(560);
+    await waitUntil(540);
     docker("stop", realtimeContainer);
     mark("p3", "realtime stopped");
 
-    await waitUntil(580);
+    await waitUntil(556);
+    // A judge terminal can only answer for the performance it is looking at, and by this point
+    // every seat has already scored the one on screen — the earlier run's submission here was
+    // refused with "该评委席位已经提交过此表演的评分", which proves the HTTP chain *answered* but
+    // leaves the plan's "a write lands with the socket down" unproven. The rapid-score grid takes
+    // a formal write (staff_rapid) that does not depend on the performance context, so it is the
+    // probe that can actually land: one cell, re-valued, and its receipt is the evidence.
+    const gridProbe = cast.rapid[0];
+    if (gridProbe) {
+      // Reloaded first: the page has been open since P2 and a version it dragged along would
+      // make this probe measure the stale-write guard instead of the outage.
+      await gridProbe.page.goto(`${baseUrl}/staff/rounds/${manifest.rounds.r1}/scores/`);
+      await gridProbe.page.locator("[data-saved-count]").waitFor({ timeout: 20000 });
+      const singer = manifest.performers[manifest.performers.length - 1].singer_id;
+      const cell = gridProbe.page.locator(`input[data-singer-id="${singer}"]`).first();
+      const judgeId = await cell.getAttribute("data-judge-id").catch(() => null);
+      if (judgeId) {
+        const accepted = await fillScoreCell(gridProbe, singer, judgeId, "99");
+        record({ actor: gridProbe.label, action: "write_while_realtime_down", singer, accepted });
+      } else {
+        record({ actor: gridProbe.label, action: "write_while_realtime_down", missing: "grid cell" });
+      }
+    }
+    await waitUntil(560);
     await submitJudgeScore(cast.judges[1], "77.00"); // HTTP must still work without the socket
     docker("start", realtimeContainer);
     mark("p3", "realtime started");
 
-    await waitUntil(600);
+    await waitUntil(580);
     docker("stop", redisContainer);
     docker("start", redisContainer);
     mark("p3", "redis restarted");
 
-    await waitUntil(620);
+    await waitUntil(600);
     await judgeDesk.page.goto(activityPath);
     await toggle().click();
     mark("p3", "entry reopened");
 
-    await waitUntil(640);
+    await waitUntil(620);
     await checkIn.page.goto(`${baseUrl}/staff/tickets/check-in-page/`);
     await checkIn.page
       .locator("[data-ticket-check-in-form] input[name=secret]")
@@ -594,8 +871,23 @@ const report = {
   measurements: {
     judge_score: summarize(measurements.filter((sample) => sample.name === "judge_score")),
     vote_submit: summarize(measurements.filter((sample) => sample.name === "vote_submit")),
-    healthz_probe: summarize(measurements.filter((sample) => sample.name === "healthz_probe")),
+    rapid_score_save: summarize(measurements.filter((sample) => sample.name === "rapid_score_save")),
+    file_upload: summarize(measurements.filter((sample) => sample.name === "file_upload")),
+    by_stage: Object.fromEntries(
+      [...new Set(measurements.map((sample) => sample.name))].map((name) => [
+        name,
+        summarize(measurements.filter((sample) => sample.name === name)),
+      ]),
+    ),
   },
+  // Which load level produced which failures: the whole point of ramping instead of
+  // switching the burst on in one step.
+  failures_by_stage: httpFailures.reduce((accumulator, failure) => {
+    accumulator[failure.stage] = accumulator[failure.stage] ?? {};
+    const key = String(failure.status);
+    accumulator[failure.stage][key] = (accumulator[failure.stage][key] ?? 0) + 1;
+    return accumulator;
+  }, {}),
   timeline,
 };
 
