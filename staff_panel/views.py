@@ -609,6 +609,7 @@ def group_stage_correct(request, pk):
 
 @staff_required
 @require_POST
+@transaction.atomic
 def activity_judge_entry_toggle(request, pk):
     """Open or close the judge entry for the night.
 
@@ -620,7 +621,11 @@ def activity_judge_entry_toggle(request, pk):
     and shutting it again after the panel is seated means a photographed QR claims
     nothing. Sessions already claimed are untouched.
     """
-    activity = get_object_or_404(Activity, pk=pk)
+    # The row lock is the same Activity-first discipline every other mutation uses, and it
+    # is what makes this read-modify-write safe: without it two staff clicking at the same
+    # moment both read the old value and the second write silently loses the first. The
+    # claim path takes the same lock, so a claim and a toggle can no longer interleave.
+    activity = get_object_or_404(Activity.objects.select_for_update(), pk=pk)
     if activity.activity_type != Activity.Type.SINGER_CONTEST:
         raise PermissionDenied("只有歌手比赛支持评委入口。")
     if activity.phase == Activity.Phase.ARCHIVED or activity.is_locked:
@@ -643,6 +648,7 @@ def activity_judge_entry_toggle(request, pk):
 
 @staff_required
 @require_POST
+@transaction.atomic
 def activity_judge_entry_rotate(request, pk):
     """Reissue the judge QR: the printed one stops working, the entry stays open.
 
@@ -651,7 +657,10 @@ def activity_judge_entry_rotate(request, pk):
     for the old one, and the new QR is printed from the QR centre as usual. Existing
     sessions keep scoring: they are seats, not codes.
     """
-    activity = get_object_or_404(Activity, pk=pk)
+    # Locked for the same reason the toggle is: two staff reissuing at once would both read
+    # version N and both write N+1, so the increment would be lost and a code that both of
+    # them believed they had killed would still resolve.
+    activity = get_object_or_404(Activity.objects.select_for_update(), pk=pk)
     if activity.activity_type != Activity.Type.SINGER_CONTEST:
         raise PermissionDenied("只有歌手比赛有评委入口二维码。")
     if activity.phase == Activity.Phase.ARCHIVED or activity.is_locked:

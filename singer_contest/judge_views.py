@@ -18,11 +18,10 @@ from .judge_authority import (
     JudgePanelChanged,
     JudgePerformanceNotScorable,
     JudgeRoundOnHold,
-    claim_judge_session,
+    claim_judge_session_for_entry,
     get_judge_context_readonly,
     submit_judge_score,
 )
-from .judge_entry import judge_entry_activity
 
 BODY_MAX_BYTES = 16 * 1024
 _JUDGE_CONTEXT_SESSION_LIMIT = 45
@@ -40,6 +39,8 @@ _JUDGE_CLAIM_IP_LIMIT = 120
 _KNOWN_REASON_CODES = {
     "DUPLICATE_SCORE_FACT",
     "IDEMPOTENCY_CONFLICT",
+    "INVALID_JUDGE_ENTRY",
+    "JUDGE_ENTRY_CLOSED",
     "JUDGE_TERMINALS_FULL",
     "PANEL_CHANGED_MID_ROUND",
     "PANEL_NOT_READY",
@@ -49,6 +50,12 @@ _KNOWN_REASON_CODES = {
     "RUBRIC_PAYLOAD_INVALID",
     "SCORE_WINDOW_CLOSED",
     "STALE_CONTEXT",
+}
+# A capability that does not resolve is answered as if the activity did not exist, so the
+# door never confirms which activities are running. Everything else is a real 409: the door
+# exists, the caller holds a valid code, and something about the moment is wrong.
+_REFUSAL_STATUS = {
+    "INVALID_JUDGE_ENTRY": 404,
 }
 
 
@@ -205,30 +212,23 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
                 )
                 return response
     # A first-time claim is resolved *through* the capability, never from the public code
-    # alone. `/e/<code>/judge/` is a public URL and the public activity page used to link to
-    # it, so a seat was claimable by anyone who could read the code; the session that came
-    # out of it is legitimate as far as every downstream guard can tell, which is what made
-    # it matter. A code that does not resolve is answered as if the activity did not exist,
-    # so the door does not confirm which activities are running.
+    # alone, and the whole decision — resolve, lock, revalidate, claim — is the service's.
+    # Assembling it here is how the recheck under the lock came to be missing; the view now
+    # only translates the answer.
+    #
     # A body that is not JSON is not an attack here, it is just a request with no token in
-    # it: the header is still read, and the answer is the same opaque refusal as a wrong
+    # it: the header is still read, and the answer is the same refusal as a wrong
     # capability rather than a 400 that would tell a prober they had found something.
     payload = _body_payload(request) or {}
     raw_entry = payload.get("judge_entry_token") or request.headers.get("X-Judge-Entry") or ""
-    activity = judge_entry_activity(raw_entry, public_code=public_code)
-    if activity is None:
-        return _error("INVALID_JUDGE_ENTRY", 404)
-    if not activity.judge_entry_open:
-        # Only a holder of a *valid* capability reaches this line, so naming the reason
-        # tells a teacher who is simply early to wait rather than to hunt for a new code.
-        return _error("JUDGE_ENTRY_CLOSED", 409)
     try:
-        claimed = claim_judge_session(activity)
+        claimed = claim_judge_session_for_entry(raw_entry, public_code=public_code)
     except (ValidationError, PermissionDenied) as error:
-        # Not every refusal is "the seats are taken": a paused panel (§12.6) and a round
-        # with no panel yet have their own reason codes, and the door has to tell them
-        # apart to say something actionable.
-        return _error(_reason_from_messages(error), 409)
+        # Not every refusal is "the seats are taken": a paused panel (§12.6), a round with
+        # no panel yet, a capability that no longer resolves and a closed entry all have
+        # their own codes, and the door has to tell them apart to say something actionable.
+        reason_code = _reason_from_messages(error)
+        return _error(reason_code, _REFUSAL_STATUS.get(reason_code, 409))
     response = _no_store(
         JsonResponse(
             {
