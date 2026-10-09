@@ -57,11 +57,16 @@ def test_shared_judge_browser_gate_covers_fixed_capacity_and_stable_entry():
     # before the terminal learned to name its reason.
     for marker in (
         "shared judge entry assigns five terminals, survives HOLD, and rejects the sixth",
+        # The gate has to walk the QR's real URL, capability fragment and all: the public
+        # code on its own claims no seat, so a spec that only used the path would be
+        # asserting the door works while leaving the key untested.
         "`/e/${fixture.public_code}/judge/`",
+        "`/e/${fixture.public_code}/judge/#${fixture.judge_entry_token}`",
         "评委终端已就绪。",
         "评委席已满，请联系现场工作人员处理。",
     ):
         assert marker in SHARED_JUDGE_FLOW
+    assert 'fixture["judge_entry_token"] = judge_entry_credential(activity)' in FIXTURE_COMMAND
 
 
 def test_live_ticket_browser_gate_covers_open_poll_check_in_and_ballot():

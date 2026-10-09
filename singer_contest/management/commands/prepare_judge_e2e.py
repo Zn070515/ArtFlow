@@ -17,6 +17,7 @@ from singer_contest.judge_authority import (
     issue_judge_grant,
     prepare_judge_panel,
 )
+from singer_contest.judge_entry import judge_entry_credential
 from singer_contest.models import ContestRound, SingerRegistration
 from singer_contest.services import prepare_round, set_round_groups
 
@@ -95,6 +96,11 @@ class Command(BaseCommand):
             "staff_username": operator.username,
             "staff_password": operator_password,
         }
+        if options["shared_entry"]:
+            # The shared entry's whole credential, exactly as the printed QR carries it in
+            # its fragment. The browser gate needs it for the same reason a teacher does:
+            # the public code alone claims no seat.
+            fixture["judge_entry_token"] = judge_entry_credential(activity)
         if issued is not None:
             fixture["grant_token"] = issued.token
         output_path.write_text(

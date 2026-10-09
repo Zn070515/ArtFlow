@@ -17,6 +17,7 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
 
   const fixture = JSON.parse(readFileSync(judgeFixturePath, "utf8")) as {
     public_code?: unknown;
+    judge_entry_token?: unknown;
     round_id?: unknown;
     staff_username?: unknown;
     staff_password?: unknown;
@@ -24,11 +25,13 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
   if (
     typeof fixture.public_code !== "string" ||
     fixture.public_code.length < 6 ||
+    typeof fixture.judge_entry_token !== "string" ||
+    fixture.judge_entry_token.length < 16 ||
     typeof fixture.round_id !== "number" ||
     typeof fixture.staff_username !== "string" ||
     typeof fixture.staff_password !== "string"
   ) {
-    throw new Error("Judge browser fixture does not contain a stable public code.");
+    throw new Error("Judge browser fixture does not contain a stable public code and capability.");
   }
 
   const contexts = await Promise.all(
@@ -42,7 +45,21 @@ test("shared judge entry assigns five terminals, survives HOLD, and rejects the 
     if (!firstPage || !sixthPage) {
       throw new Error("Expected six judge terminal pages.");
     }
-    const entryPath = `/e/${fixture.public_code}/judge/`;
+    // The QR's URL, capability and all: the fragment is what proves the code was scanned
+    // rather than read off a poster, and the public code alone claims nothing.
+    const entryPath = `/e/${fixture.public_code}/judge/#${fixture.judge_entry_token}`;
+
+    // A terminal opened without the capability gets no seat, so the five that follow are
+    // claiming the seats the sixth device would otherwise have taken.
+    const barePage = await browser.newContext();
+    try {
+      const bare = await barePage.newPage();
+      await bare.goto(`/e/${fixture.public_code}/judge/`);
+      await expect(bare.locator("[data-status]")).not.toHaveText("评委终端已就绪。");
+    } finally {
+      await barePage.close();
+    }
+
     await Promise.all(pages.slice(0, 5).map((page) => page.goto(entryPath)));
 
     for (const page of pages.slice(0, 5)) {

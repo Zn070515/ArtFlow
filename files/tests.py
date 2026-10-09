@@ -15,6 +15,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Count
+from django.db.models.sql.compiler import SQLInsertCompiler
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from PIL import Image
@@ -418,6 +419,38 @@ class UploadRollbackCompensationTests(TestCase):
                     owner=self.registration,
                     uploaded_file=SimpleUploadedFile(
                         "orphan.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
+                    ),
+                    purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
+                    uploaded_by=self.user,
+                )
+
+        self.assertFalse(SubmissionFile.objects.filter(singer_registration=self.registration))
+        self.assertEqual(self._stored_files(), [])
+
+    def test_a_failing_insert_removes_the_bytes_it_already_wrote(self):
+        """`FileField` commits the file *before* the INSERT runs.
+
+        The compensation used to start from the object `objects.create()` returned, so the
+        case where the row never came into existence cleaned up nothing: `create` raises
+        without returning, the file it wrote is on the volume, and no bookkeeping knows its
+        name. The insert is intercepted at the SQL compiler so the field really does commit
+        the bytes first — patching `Model.save` would skip the commit and test nothing.
+        """
+        real_as_sql = SQLInsertCompiler.as_sql
+
+        def as_sql_then_fail(compiler, *args, **kwargs):
+            # Building the INSERT is what calls `FileField.pre_save`, which is what commits
+            # the bytes. Failing here reproduces "the file exists and the row does not",
+            # which patching `Model.save` cannot: that skips the commit entirely.
+            real_as_sql(compiler, *args, **kwargs)
+            raise IntegrityError("insert refused")
+
+        with patch.object(SQLInsertCompiler, "as_sql", as_sql_then_fail):
+            with self.assertRaisesMessage(IntegrityError, "insert refused"):
+                store_submission_file(
+                    owner=self.registration,
+                    uploaded_file=SimpleUploadedFile(
+                        "refused.mp3", b"ID3\x04\x00\x00\x00\x00\x00\x00", content_type="audio/mpeg"
                     ),
                     purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                     uploaded_by=self.user,

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from ruleset.models import ContestRuleset, RulesetVersion
+from singer_contest.judge_entry import judge_entry_credential
 from singer_contest.models import StageResult
 from voting.models import VoteSession
 
@@ -230,7 +232,12 @@ class StableActivityEntryTests(TestCase):
             response,
             reverse("public_portal:activity_live", args=[self.formal.public_code]),
         )
-        self.assertContains(
+        # No judge entry, and deliberately so: the shared judge QR carries its capability in
+        # the URL fragment, so a link from a public page would be a link to a door with no
+        # key. While the entry had no credential at all, this line was how anyone found the
+        # door — the link is not hiding a working entrance, it is one fewer way to learn
+        # that a judge terminal exists.
+        self.assertNotContains(
             response,
             reverse("public_portal:activity_judge", args=[self.formal.public_code]),
         )
@@ -251,13 +258,58 @@ class StableActivityEntryTests(TestCase):
 
         self.assertEqual(self.client.get(judge_url).status_code, 200)
         claim_url = reverse("judge:claim", args=[self.testing.public_code])
-        claim = self.client.post(claim_url)
+        claim = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": judge_entry_credential(self.testing)}),
+            content_type="application/json",
+        )
         self.assertEqual(claim.status_code, 409)
 
         with authority_write(ACTIVITY_STATE):
             self.testing.judge_entry_open = False
             self.testing.save(update_fields=["judge_entry_open"])
-        self.assertEqual(self.client.post(claim_url).status_code, 404)
+        closed = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": judge_entry_credential(self.testing)}),
+            content_type="application/json",
+        )
+        # A capability that resolves while the entry is shut says so, rather than sending a
+        # teacher who is merely early off to hunt for another code.
+        self.assertEqual(closed.status_code, 409)
+        self.assertEqual(closed.json()["reason_code"], "JUDGE_ENTRY_CLOSED")
+
+    def test_the_public_code_alone_cannot_open_a_formal_judge_entry(self):
+        """The judge door needs the QR's capability, not the activity's public code.
+
+        The public code is printed on posters and linked from the public page; the entry
+        was reachable with nothing else, so any reader could take a seat and then submit a
+        score that every downstream guard would accept as a real `DIRECT_JUDGE` fact.
+        """
+        with authority_write(ACTIVITY_STATE):
+            self.formal.judge_entry_open = True
+            self.formal.save(update_fields=["judge_entry_open"])
+        claim_url = reverse("judge:claim", args=[self.formal.public_code])
+
+        bare = self.client.post(claim_url)
+        self.assertEqual(bare.status_code, 404)
+        self.assertNotIn("artflow_judge_session", bare.cookies)
+
+        guessed = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": f"AF1.J.{self.formal.public_code}.1.{'0' * 32}"}),
+            content_type="application/json",
+        )
+        self.assertEqual(guessed.status_code, 404)
+        self.assertNotIn("artflow_judge_session", guessed.cookies)
+
+        # Another activity's capability does not open this one's door.
+        foreign = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": judge_entry_credential(self.testing)}),
+            content_type="application/json",
+        )
+        self.assertEqual(foreign.status_code, 404)
+        self.assertNotIn("artflow_judge_session", foreign.cookies)
 
     def test_live_route_keeps_same_target_when_vote_sessions_change(self):
         live_url = reverse("public_portal:activity_live", args=[self.formal.public_code])

@@ -64,6 +64,7 @@ from PIL import Image
 from public_portal.models import PublicPost, ResultRelease
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, HISTORICAL_SCHIDUI_NAME
+from singer_contest.judge_entry import judge_entry_credential
 from singer_contest.models import (
     AudienceScore,
     Award,
@@ -8569,11 +8570,18 @@ class JudgeControlHTTPTests(TestCase):
         self.assertEqual(response["Content-Type"], "image/png")
 
     def test_shared_judge_entry_is_wired_to_a_real_seat_claim(self):
-        """The one staff QR targets the entry whose claim actually assigns a seat."""
+        """The one staff QR targets the entry whose claim actually assigns a seat.
+
+        And the claim needs the capability that QR carries: the public code was enough on
+        its own, so anyone who could read a poster could take a real seat and submit a real
+        score — a `DIRECT_JUDGE` fact that every downstream guard accepts, because it is
+        one.
+        """
         self._prepare_panel()
         with authority_write(ACTIVITY_STATE):
             self.activity.judge_entry_open = True
             self.activity.save(update_fields=["judge_entry_open"])
+        capability = judge_entry_credential(self.activity)
 
         self.client.logout()
         terminal = self.client.get(
@@ -8582,9 +8590,51 @@ class JudgeControlHTTPTests(TestCase):
         self.assertEqual(terminal.status_code, 200)
         self.assertContains(terminal, reverse("judge:claim", args=[self.activity.public_code]))
 
-        claim = self.client.post(reverse("judge:claim", args=[self.activity.public_code]))
+        claim_url = reverse("judge:claim", args=[self.activity.public_code])
+        without_capability = self.client.post(claim_url)
+        self.assertEqual(without_capability.status_code, 404)
+        self.assertNotIn("artflow_judge_session", without_capability.cookies)
+
+        claim = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": capability}),
+            content_type="application/json",
+        )
         self.assertEqual(claim.status_code, 201)
         self.assertIn("artflow_judge_session", claim.cookies)
+
+    def test_reissuing_the_judge_qr_invalidates_the_previous_one(self):
+        """A leaked code is reissued, not answered by closing the door on latecomers."""
+        self._prepare_panel()
+        with authority_write(ACTIVITY_STATE):
+            self.activity.judge_entry_open = True
+            self.activity.save(update_fields=["judge_entry_open"])
+        stale = judge_entry_credential(self.activity)
+
+        response = self.client.post(
+            reverse("staff:activity_judge_entry_rotate", args=[self.activity.pk])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.activity.refresh_from_db()
+        self.assertEqual(self.activity.judge_entry_version, 2)
+        self.assertTrue(self.activity.judge_entry_open)
+
+        self.client.logout()
+        claim_url = reverse("judge:claim", args=[self.activity.public_code])
+        replayed = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": stale}),
+            content_type="application/json",
+        )
+        self.assertEqual(replayed.status_code, 404)
+        self.assertNotIn("artflow_judge_session", replayed.cookies)
+
+        fresh = self.client.post(
+            claim_url,
+            data=json.dumps({"judge_entry_token": judge_entry_credential(self.activity)}),
+            content_type="application/json",
+        )
+        self.assertEqual(fresh.status_code, 201)
 
     def test_control_page_is_staff_only_and_readable(self):
         self.client.logout()

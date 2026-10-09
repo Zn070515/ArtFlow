@@ -36,6 +36,7 @@ from singer_contest.group_chorus import (
     group_material_readiness,
     group_stage_archive_blocker,
 )
+from singer_contest.judge_entry import judge_entry_credential
 from singer_contest.models import (
     ContestRound,
     GroupStage,
@@ -519,6 +520,12 @@ def build_execution_package(activity: Activity, request: Any = None) -> list[Pac
     ):
         path = reverse(route_name, kwargs={"public_code": activity.public_code})
         url = request.build_absolute_uri(path) if request is not None else path
+        if kind == "judge":
+            # The judge QR is the one that carries a capability: the URL *is* the entry
+            # credential. It rides in the fragment, which the browser never sends, so it
+            # stays out of access logs and out of `Referer`. Without it the printed sheet
+            # would advertise a door that anyone holding the sheet could open.
+            url = f"{url}#{judge_entry_credential(activity)}"
         artifacts.append(_qr_artifact(f"{kind}_qr", url))
     # GOAL §11.5. The QR centre warns on screen; this ZIP is the artefact that actually
     # reaches a printer, and it carried four ready-to-print PNGs built from whatever host

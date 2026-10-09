@@ -22,6 +22,7 @@ from .judge_authority import (
     get_judge_context_readonly,
     submit_judge_score,
 )
+from .judge_entry import judge_entry_activity
 
 BODY_MAX_BYTES = 16 * 1024
 _JUDGE_CONTEXT_SESSION_LIMIT = 45
@@ -30,6 +31,12 @@ _JUDGE_CONTEXT_IP_LIMIT = 600
 _JUDGE_SCORE_SESSION_LIMIT = 30
 _JUDGE_SCORE_ANONYMOUS_IP_LIMIT = 30
 _JUDGE_SCORE_IP_LIMIT = 120
+# Seats are finite and a wrong code is retried by a whole queue of teachers, so the door
+# gets a generous but real ceiling: enough for a panel walking up in order from one NAT
+# address, not enough for a script draining the seat list.
+_JUDGE_CLAIM_SESSION_LIMIT = 20
+_JUDGE_CLAIM_ANONYMOUS_IP_LIMIT = 20
+_JUDGE_CLAIM_IP_LIMIT = 120
 _KNOWN_REASON_CODES = {
     "DUPLICATE_SCORE_FACT",
     "IDEMPOTENCY_CONFLICT",
@@ -160,18 +167,19 @@ def judge_terminal(request: HttpRequest):
 def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
     if not _same_origin(request):
         return _error("ORIGIN_REJECTED", 403)
-    activity = Activity.objects.filter(
-        public_code=public_code,
-        activity_type=Activity.Type.SINGER_CONTEST,
-        data_lifecycle__in=[
-            Activity.DataLifecycle.FORMAL,
-            Activity.DataLifecycle.TEST,
-        ],
-    ).first()
-    if activity is None or (
-        activity.data_lifecycle == Activity.DataLifecycle.TEST and not activity.judge_entry_open
-    ):
-        return _error("INVALID_JUDGE_ENTRY", 404)
+    limited = _rate_limit(
+        request,
+        "claim",
+        session_limit=_JUDGE_CLAIM_SESSION_LIMIT,
+        anonymous_ip_limit=_JUDGE_CLAIM_ANONYMOUS_IP_LIMIT,
+        ip_limit=_JUDGE_CLAIM_IP_LIMIT,
+    )
+    if limited is not None:
+        return limited
+    # A seat already held needs no capability: the session *is* the credential by then.
+    # This has to come first, because a refresh, a locked screen or a reconnect comes back
+    # with no fragment and therefore no capability to present — and §12.3 promises those
+    # do not require re-scanning.
     existing_token = _judge_token(request)
     if existing_token:
         try:
@@ -179,7 +187,11 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
         except (ValidationError, PermissionDenied):
             pass
         else:
-            if context.activity_id == activity.pk:
+            if Activity.objects.filter(
+                pk=context.activity_id,
+                public_code=public_code,
+                activity_type=Activity.Type.SINGER_CONTEST,
+            ).exists():
                 response = _no_store(
                     JsonResponse({"seat_label": context.seat_label, "reused": True})
                 )
@@ -192,6 +204,24 @@ def judge_claim(request: HttpRequest, public_code: str) -> JsonResponse:
                     samesite="Lax",
                 )
                 return response
+    # A first-time claim is resolved *through* the capability, never from the public code
+    # alone. `/e/<code>/judge/` is a public URL and the public activity page used to link to
+    # it, so a seat was claimable by anyone who could read the code; the session that came
+    # out of it is legitimate as far as every downstream guard can tell, which is what made
+    # it matter. A code that does not resolve is answered as if the activity did not exist,
+    # so the door does not confirm which activities are running.
+    # A body that is not JSON is not an attack here, it is just a request with no token in
+    # it: the header is still read, and the answer is the same opaque refusal as a wrong
+    # capability rather than a 400 that would tell a prober they had found something.
+    payload = _body_payload(request) or {}
+    raw_entry = payload.get("judge_entry_token") or request.headers.get("X-Judge-Entry") or ""
+    activity = judge_entry_activity(raw_entry, public_code=public_code)
+    if activity is None:
+        return _error("INVALID_JUDGE_ENTRY", 404)
+    if not activity.judge_entry_open:
+        # Only a holder of a *valid* capability reaches this line, so naming the reason
+        # tells a teacher who is simply early to wait rather than to hunt for a new code.
+        return _error("JUDGE_ENTRY_CLOSED", 409)
     try:
         claimed = claim_judge_session(activity)
     except (ValidationError, PermissionDenied) as error:
