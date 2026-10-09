@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+from typing import Any
 
 from accounts.models import User
 from accounts.services import require_current_staff
@@ -42,6 +43,7 @@ from entry_access.services import (
 )
 from realtime.events import schedule_judge_context_event
 
+from .judge_entry import judge_entry_activity, judge_entry_authorizes_activity
 from .models import (
     ContestRound,
     CriterionScore,
@@ -231,6 +233,32 @@ def _current_panel_snapshot(contest_round: ContestRound) -> RoundPanelSnapshot |
 
 
 @transaction.atomic
+def claim_judge_session_for_entry(raw_credential: Any, *, public_code: str) -> ClaimedJudgeSession:
+    """The judge entry's whole authority: resolve, lock, revalidate, claim.
+
+    The capability has to be resolved before the row lock can be taken, and staff can
+    reissue or close the entry in the gap between the two — so the final decision has to be
+    made against the **locked** activity, not against the row the lookup returned. Without
+    that, a claim which had already resolved the old code still took a seat after a
+    reissue, and the "reissuing invalidates the code already handed out" promise was only
+    true for requests that started afterwards. This is the same rule the ticket credential
+    enforces; the view used to assemble the two steps itself, which is how the recheck came
+    to be missing.
+    """
+    with transaction.atomic():
+        candidate = judge_entry_activity(raw_credential, public_code=public_code)
+        if candidate is None:
+            raise ValidationError(["INVALID_JUDGE_ENTRY", "评委入口凭证无效或已失效。"])
+        locked_activity = Activity.objects.select_for_update().get(pk=candidate.pk)
+        if not judge_entry_authorizes_activity(raw_credential, locked_activity):
+            raise ValidationError(["INVALID_JUDGE_ENTRY", "评委入口凭证无效或已失效。"])
+        if not locked_activity.judge_entry_open:
+            # Only a holder of a *valid* capability reaches this line, so naming the reason
+            # tells a teacher who is simply early to wait rather than to hunt for a code.
+            raise ValidationError(["JUDGE_ENTRY_CLOSED", "评委入口当前未开放。"])
+        return claim_judge_session(locked_activity)
+
+
 def claim_judge_session(activity: Activity) -> ClaimedJudgeSession:
     """Claim the first free prepared seat for the stable public judge entry."""
     locked_activity = Activity.objects.select_for_update().get(pk=activity.pk)

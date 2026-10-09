@@ -164,12 +164,19 @@ its door is closed is told so; a code that does not resolve is refused as if the
 did not exist.
 
 A credential that has to be resolved before a row lock is taken must be re-checked against
-the locked row before it authorises anything: `rotate_ticket_credential` promises that the
-old code dies the moment it commits, and a request that resolved it a millisecond earlier
-would otherwise still check in, or mint a session right after the rotation revoked the ones
-that code produced. `state` is re-checked by each caller's own guard; the credential's
-version is not, so it needs its own recheck. The same shape — a pre-lock read becoming the
-final authorization — is what to look for in any new entry path.
+the locked row before it authorises anything. `rotate_ticket_credential` promises that the
+old code dies the moment it commits, and `Activity.judge_entry_version` promises the same
+for a reissued judge QR; a request that resolved the code a millisecond earlier would
+otherwise still check in, or take a seat right after the reissue. `state` is re-checked by
+each caller's own guard; the credential's version is not, so it needs its own recheck —
+`judge_entry_authorizes_activity` recomputes the signature from the locked row rather than
+trusting the token's claim.
+
+The door's *own* switches are part of the same decision: `judge_entry_open` is read from the
+locked row too, or "closing refuses new scans" is only true for requests that start
+afterwards. And the service owns the whole sequence — resolve, lock, revalidate, act — so a
+view cannot assemble it and quietly omit a step. Both doors are opened and closed under the
+activity row lock for the same reason every other mutation is.
 
 Bytes written to storage are not rolled back with the transaction that references them:
 `files.services` compensates by deleting what it just wrote, while superseded files keep
