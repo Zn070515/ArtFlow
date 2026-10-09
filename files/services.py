@@ -14,6 +14,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import Storage
 from django.db import transaction
+from django.db.models import FileField
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from questionnaire.schema import FILE_TYPE
@@ -299,6 +300,12 @@ def _store_file(
     media_root.mkdir(parents=True, exist_ok=True)
     if shutil.disk_usage(media_root).free < settings.ARTFLOW_UPLOAD_MIN_FREE_MB * 1024 * 1024:
         raise ValidationError("存储空间不足，暂时无法接收上传。")
+    max_versions = settings.ARTFLOW_UPLOAD_MAX_VERSIONS
+    # A settings check, so it belongs with the other preconditions: it used to run after
+    # the file had already been written, which meant a deployment with an invalid value
+    # left one orphaned file per upload attempt.
+    if max_versions < 1:
+        raise ValidationError("上传版本保留配置无效。")
     try:
         # The owner is identified by model *and* pk: a singer registration and a farewell
         # show program are separate tables whose ids both start at 1, so a pk-only key let
@@ -365,38 +372,61 @@ def _store_file(
     # original and its metadata-free derivative are produced by the one write path every
     # upload already goes through. Non-images come back unchanged.
     derivative = sanitize_upload(uploaded_file)
-    created = SubmissionFile.objects.create(
-        **owner_filter,
-        question_key=question_key,
-        file_purpose=purpose,
-        file=uploaded_file,
-        original_name=original_name,
-        file_size=uploaded_file.size,
-        source_ruleset_version=source_ruleset_version,
-        uploaded_by=uploaded_by,
-        is_test_data=activity.is_test_mode,
-        is_current=True,
-        version=latest + 1,
-    )
-    if derivative is not uploaded_file:
-        created.derivative.save(original_name, derivative, save=False)
-        created.save(update_fields=["derivative"])
-    max_versions = settings.ARTFLOW_UPLOAD_MAX_VERSIONS
-    if max_versions < 1:
-        raise ValidationError("上传版本保留配置无效。")
-    stale_files = list(
-        SubmissionFile.objects.filter(**slot).order_by("-version", "-pk")[max_versions:]
-    )
-    for stale_file in stale_files:
-        stale_storage = stale_file.file.storage
-        stale_name = stale_file.file.name
-        stale_derivative = stale_file.derivative.name if stale_file.derivative else ""
-        stale_file.delete()
-        if stale_name:
-            transaction.on_commit(partial(delete_storage_object, stale_storage, stale_name))
-        if stale_derivative:
-            transaction.on_commit(partial(delete_storage_object, stale_storage, stale_derivative))
-    _reset_matching_check(locked_owner, purpose, question_key=question_key)
+    # The bytes are on the storage backend before the transaction commits, and a rollback
+    # does not take them back with it: a failure between here and the commit — including
+    # one raised by the caller's own transaction — would leave a file that no row points
+    # at, count against the volume's free space, and never be reachable again. Superseded
+    # files use `transaction.on_commit` for the opposite reason (they may only be deleted
+    # once the replacement really committed), so the write needs the compensating half.
+    file_field = SubmissionFile._meta.get_field("file")
+    assert isinstance(file_field, FileField)
+    file_storage = file_field.storage
+    written_names: list[str] = []
+    try:
+        created = SubmissionFile.objects.create(
+            **owner_filter,
+            question_key=question_key,
+            file_purpose=purpose,
+            file=uploaded_file,
+            original_name=original_name,
+            file_size=uploaded_file.size,
+            source_ruleset_version=source_ruleset_version,
+            uploaded_by=uploaded_by,
+            is_test_data=activity.is_test_mode,
+            is_current=True,
+            version=latest + 1,
+        )
+        if created.file.name:
+            written_names.append(created.file.name)
+        if derivative is not uploaded_file:
+            created.derivative.save(original_name, derivative, save=False)
+            if created.derivative.name:
+                written_names.append(created.derivative.name)
+            created.save(update_fields=["derivative"])
+        # Everything that can still fail after the bytes exist belongs inside this block:
+        # the compensation only helps if it covers the whole remainder, not just the
+        # insert. Deleting a superseded row above registers its `on_commit` cleanup, which
+        # Django discards on rollback — the right direction, since that file is only
+        # garbage once its replacement has really committed.
+        stale_files = list(
+            SubmissionFile.objects.filter(**slot).order_by("-version", "-pk")[max_versions:]
+        )
+        for stale_file in stale_files:
+            stale_storage = stale_file.file.storage
+            stale_name = stale_file.file.name
+            stale_derivative = stale_file.derivative.name if stale_file.derivative else ""
+            stale_file.delete()
+            if stale_name:
+                transaction.on_commit(partial(delete_storage_object, stale_storage, stale_name))
+            if stale_derivative:
+                transaction.on_commit(
+                    partial(delete_storage_object, stale_storage, stale_derivative)
+                )
+        _reset_matching_check(locked_owner, purpose, question_key=question_key)
+    except Exception:
+        for written_name in written_names:
+            delete_storage_object(file_storage, written_name)
+        raise
     return created
 
 
