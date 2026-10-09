@@ -32,6 +32,15 @@ def test_runner_drives_real_pages_and_keeps_measurements_apart_from_hard_checks(
         "暂停评委组",
         "judge-entry/toggle",
         "judge-entry/rotate",
+        # The peak's abort line is a rate over the requests the stage served, not over the
+        # number of viewers: the first real ramp ended at its first stage because it divided
+        # by the viewer count.
+        "failureRate > 0.05",
+        # A proxy in the browser's path answers loopback with its own 502s that no server log
+        # has, which is not a measurement of this stack.
+        "--proxy-server=direct://",
+        "assertDirectConnection",
+        "write_while_realtime_down",
         # Measurements are numbers; a Django 500 is a defect and exits non-zero.
         "django_500_count",
         "proxy_502_504_count",
