@@ -1,5 +1,64 @@
 # Changelog
 
+## 2026-10-09 (later)
+
+### The judge entry has a credential, so a public activity code is no longer a seat
+
+`/e/<public_code>/judge/` was reachable by anyone, the public activity page linked to it,
+and `judge_claim` asked only for the activity. Opening that URL claimed a real `JudgeSeat`
+and minted a real `JudgeSession`, and the score that followed was a `DIRECT_JUDGE` fact with
+the right seat, the right panel, the right context version, the right receipt and the right
+audit entry — so no downstream guard could tell it apart from a teacher's, because it was
+not different. The authority behind the door was never the problem; the door was.
+
+The shared QR now carries a capability in its **fragment**
+(`/e/<code>/judge/#AF1.J.<code>.<version>.<signature>`), which the browser never sends: it
+stays out of access logs, out of `Referer`, and out of the HTML the terminal renders. The
+terminal reads it, clears it from the address bar, and presents it once when it claims a
+seat. The capability is an HMAC keyed on `QR_SIGNING_KEY` over
+`judge-entry:<code>:<version>`, domain-separated from the ticket credential so neither can
+be replayed as the other.
+
+- `singer_contest.judge_entry` issues and verifies it; the version is read from the row, not
+  trusted from the token, so a reissue invalidates every previously printed code at once.
+- `judge_claim` resolves the activity **through** the capability and refuses a code that does
+  not resolve exactly as it refuses a missing activity. A capability that resolves while the
+  entry is closed says so (`JUDGE_ENTRY_CLOSED`) — only a holder of a valid code reaches
+  that line, and "you are early" is a different instruction from "scan again".
+- A **held seat needs no capability**: the session is the credential by then, so a refresh, a
+  locked screen or a reconnect still works without re-scanning (§12.3's promise). The
+  reuse branch is checked *before* the capability for exactly that reason.
+- The public activity page no longer links to the judge entry. That link was how anyone
+  found the door; with the capability in place it would only be a link to a door with no key.
+- `judge_entry_open` now covers the live night, not just a rehearsal: staff open the entry,
+  the panel scans in, staff close it, and a photographed QR claims nothing afterwards.
+  Sessions already claimed are untouched. The workspace shows the current version and gains
+  **重发评委二维码**, which bumps `Activity.judge_entry_version` — the right tool for a leaked
+  code, where closing the entry would also turn away the teacher who is walking up.
+- The execution package's judge QR carries the same fragment, so the ZIP a print shop
+  receives is no longer a sheet full of keys to a door anyone can open.
+- Claim gets a rate limit of its own; it had none, so a script could have walked the seat
+  list to `JUDGE_TERMINALS_FULL` and locked the real panel out.
+
+### Upload compensation now spans the whole unit of work
+
+The previous batch compensated the storage write when the remainder of `_store_file` failed,
+which left two holes the review named:
+
+- **The row never existed.** `FileField.pre_save` commits the bytes *before* the INSERT runs,
+  and `objects.create()` raises without returning the object, so the bookkeeping never
+  learned the file's name. `_store_file` now builds the instance explicitly and asks
+  Django's own `_committed` marker — set by the commit that happens before the INSERT —
+  whether there is anything to remove.
+- **A later statement in the same transaction failed.** `store_questionnaire_file` and its
+  group counterpart write an audit row after the upload; that insert failing rolled the file
+  row back and left the bytes. The compensation is now a context manager that the callers
+  wrap their whole body in, and `_store_file` takes the list it records into, as a required
+  argument — a caller that forgot to open the block would leave orphans silently, and there
+  is no default that would do the right thing.
+
+Both holes have a regression test that fails against the previous code.
+
 ## 2026-10-09
 
 ### A rotated ticket credential is now dead the moment the rotation commits

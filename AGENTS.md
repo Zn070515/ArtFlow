@@ -154,6 +154,15 @@ and `files.imaging.sanitize_upload` (which bakes EXIF orientation into the pixel
 writes no metadata back). A view that assigns `request.FILES[...]` to a public image field
 is a bypass, however legitimate the page is.
 
+Bootstrap authority is authority. A URL that mints a session is a credential, and a public
+route that mints one is a public credential: the shared judge entry carries an HMAC
+capability in its URL fragment (`singer_contest.judge_entry`, versioned by
+`Activity.judge_entry_version`) precisely because `/e/<code>/judge/` is public and the
+public code is printed on posters. When adding an entry point, ask what the caller has to
+*have* — not only what the code checks after they hold it. A capability that resolves while
+its door is closed is told so; a code that does not resolve is refused as if the activity
+did not exist.
+
 A credential that has to be resolved before a row lock is taken must be re-checked against
 the locked row before it authorises anything: `rotate_ticket_credential` promises that the
 old code dies the moment it commits, and a request that resolved it a millisecond earlier
@@ -163,7 +172,9 @@ version is not, so it needs its own recheck. The same shape — a pre-lock read 
 final authorization — is what to look for in any new entry path.
 
 Bytes written to storage are not rolled back with the transaction that references them:
-`files.services._store_file` compensates by deleting what it just wrote when the remainder
-of the write fails, while superseded files keep using `transaction.on_commit` (they are only
-garbage once their replacement has really committed). The two directions are deliberately
-opposite.
+`files.services` compensates by deleting what it just wrote, while superseded files keep
+using `transaction.on_commit` (they are only garbage once their replacement has really
+committed). The two directions are deliberately opposite. The compensation block must span
+the caller's whole unit of work — the audit row written after an upload is inside the same
+transaction — which is why `_store_file` takes the recording list as a required argument
+rather than opening the block itself.
