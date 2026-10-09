@@ -13,6 +13,7 @@ purpose-identified singer upload changes.
 
 import json
 import tempfile
+from unittest.mock import patch
 from uuid import uuid4
 
 from common.authority import ACCOUNT_AUTHORITY, authority_write
@@ -21,6 +22,7 @@ from core.models import Activity
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError
 from django.test import override_settings
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import freeze_ruleset_version
@@ -847,3 +849,66 @@ class LegacyUploadUnchangedTests(_QuestionnaireUploadBase):
                 purpose=SubmissionFile.Purpose.ACCOMPANIMENT,
                 uploaded_by=self.operator(),
             )
+
+
+class QuestionnaireUploadCompensationTests(_QuestionnaireUploadBase):
+    """Storage is not a transaction participant, and the caller's unit of work is bigger
+    than the row.
+
+    `_store_file` writes the bytes before the row that names them can commit, and
+    `store_questionnaire_file` writes an audit row *after* the upload in the same
+    transaction. A failure in either place rolled the row back and left the bytes: the
+    application could not see them, the volume still held them, and the low-water check
+    that refuses uploads when free space runs out still counted them.
+    """
+
+    def _stored_files(self):
+        from pathlib import Path
+
+        return [path for path in Path(self.media_root).rglob("*") if path.is_file()]
+
+    def test_a_failing_insert_removes_the_bytes_it_already_wrote(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+
+        with patch.object(SubmissionFile, "save", side_effect=IntegrityError("insert refused")):
+            with self.assertRaisesMessage(IntegrityError, "insert refused"):
+                store_questionnaire_file(
+                    registration=registration,
+                    question_key="r1.accompaniment",
+                    uploaded_file=_upload(),
+                    actor=self.operator(),
+                )
+
+        self.assertFalse(SubmissionFile.objects.filter(singer_registration=registration))
+        self.assertEqual(self._stored_files(), [])
+
+    def test_a_failure_after_the_upload_removes_the_bytes_too(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+
+        with patch("common.models.AuditLog.objects.create", side_effect=RuntimeError("audit down")):
+            with self.assertRaisesMessage(RuntimeError, "audit down"):
+                store_questionnaire_file(
+                    registration=registration,
+                    question_key="r1.accompaniment",
+                    uploaded_file=_upload(),
+                    actor=self.operator(),
+                )
+
+        self.assertFalse(SubmissionFile.objects.filter(singer_registration=registration))
+        self.assertEqual(self._stored_files(), [])
+
+    def test_the_successful_upload_keeps_its_object(self):
+        version = self.frozen_version()
+        registration = self.registration(version)
+
+        stored = store_questionnaire_file(
+            registration=registration,
+            question_key="r1.accompaniment",
+            uploaded_file=_upload(),
+            actor=self.operator(),
+        )
+
+        self.assertTrue(stored.file.storage.exists(stored.file.name))
+        self.assertEqual(len(self._stored_files()), 1)

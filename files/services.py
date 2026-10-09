@@ -1,6 +1,8 @@
 import json
 import shutil
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import partial
 from pathlib import Path, PurePath
 
@@ -31,6 +33,40 @@ VIDEO_PURPOSES = (
 
 def delete_storage_object(storage: Storage, name: str) -> None:
     storage.delete(name)
+
+
+def submission_file_storage() -> Storage:
+    field = SubmissionFile._meta.get_field("file")
+    assert isinstance(field, FileField)
+    return field.storage
+
+
+@contextmanager
+def _compensate_file_writes() -> Iterator[list[str]]:
+    """Undo the storage writes made inside the block if the block does not finish.
+
+    Storage is not a transaction participant: the bytes are on the volume the moment
+    ``FileField`` commits them, and a rollback does not take them back. A failure anywhere
+    in the *same unit of work* — the audit row written after the upload, a later statement
+    in the caller's transaction — would otherwise leave a file no row points at: invisible
+    to the application, still occupying the media volume, and still counted by the
+    low-water check that refuses uploads when free space runs out.
+
+    The block has to span the whole unit of work, not just the insert, which is why the
+    callers wrap their bodies rather than ``_store_file`` wrapping its own end. The
+    opposite direction is ``transaction.on_commit``: a *superseded* file may only be
+    deleted once its replacement has really committed. Deliberately not one mechanism for
+    both — new bytes are undone when the work fails, old bytes are deleted when it
+    succeeds.
+    """
+    written: list[str] = []
+    try:
+        yield written
+    except Exception:
+        storage = submission_file_storage()
+        for name in written:
+            delete_storage_object(storage, name)
+        raise
 
 
 MAX_UPLOAD_BYTES = {
@@ -273,6 +309,7 @@ def _store_file(
     allowed_extensions=None,
     phase_action: ActivityAction | None = ActivityAction.UPLOAD_MATERIAL,
     expected_current_version: int | None = None,
+    written_files: list[str],
 ):
     """The one storage path both the legacy and the questionnaire uploads go through.
 
@@ -287,6 +324,11 @@ def _store_file(
     window is explicitly allowed to be open during ``LIVE`` — a phase whose action set
     deliberately contains no ``UPLOAD_MATERIAL``, because it was written for participants
     uploading to their own registration. The activity row is still locked either way.
+
+    ``written_files`` is the list owned by the caller's :func:`_compensate_file_writes`
+    block. It is a required argument on purpose: a caller that forgot to open the block
+    would leave orphans behind silently, and there is no default that would do the right
+    thing.
     """
     validate_upload(
         uploaded_file,
@@ -372,42 +414,30 @@ def _store_file(
     # original and its metadata-free derivative are produced by the one write path every
     # upload already goes through. Non-images come back unchanged.
     derivative = sanitize_upload(uploaded_file)
-    # The bytes are on the storage backend before the transaction commits, and a rollback
-    # does not take them back with it: a failure between here and the commit — including
-    # one raised by the caller's own transaction — would leave a file that no row points
-    # at, count against the volume's free space, and never be reachable again. Superseded
-    # files use `transaction.on_commit` for the opposite reason (they may only be deleted
-    # once the replacement really committed), so the write needs the compensating half.
-    file_field = SubmissionFile._meta.get_field("file")
-    assert isinstance(file_field, FileField)
-    file_storage = file_field.storage
-    written_names: list[str] = []
+    created = SubmissionFile(
+        **owner_filter,
+        question_key=question_key,
+        file_purpose=purpose,
+        file=uploaded_file,
+        original_name=original_name,
+        file_size=uploaded_file.size,
+        source_ruleset_version=source_ruleset_version,
+        uploaded_by=uploaded_by,
+        is_test_data=activity.is_test_mode,
+        is_current=True,
+        version=latest + 1,
+    )
     try:
-        created = SubmissionFile.objects.create(
-            **owner_filter,
-            question_key=question_key,
-            file_purpose=purpose,
-            file=uploaded_file,
-            original_name=original_name,
-            file_size=uploaded_file.size,
-            source_ruleset_version=source_ruleset_version,
-            uploaded_by=uploaded_by,
-            is_test_data=activity.is_test_mode,
-            is_current=True,
-            version=latest + 1,
-        )
-        if created.file.name:
-            written_names.append(created.file.name)
+        # An explicit instance rather than `objects.create`, because `FileField.pre_save`
+        # commits the bytes to storage *before* the INSERT runs: if the INSERT is what
+        # fails, `create` raises without ever returning the object, and the file it just
+        # wrote would be unreachable to the compensation below.
+        created.save(force_insert=True)
+        written_files.append(created.file.name)  # type: ignore[arg-type]
         if derivative is not uploaded_file:
             created.derivative.save(original_name, derivative, save=False)
-            if created.derivative.name:
-                written_names.append(created.derivative.name)
+            written_files.append(created.derivative.name)  # type: ignore[arg-type]
             created.save(update_fields=["derivative"])
-        # Everything that can still fail after the bytes exist belongs inside this block:
-        # the compensation only helps if it covers the whole remainder, not just the
-        # insert. Deleting a superseded row above registers its `on_commit` cleanup, which
-        # Django discards on rollback — the right direction, since that file is only
-        # garbage once its replacement has really committed.
         stale_files = list(
             SubmissionFile.objects.filter(**slot).order_by("-version", "-pk")[max_versions:]
         )
@@ -424,8 +454,13 @@ def _store_file(
                 )
         _reset_matching_check(locked_owner, purpose, question_key=question_key)
     except Exception:
-        for written_name in written_names:
-            delete_storage_object(file_storage, written_name)
+        # `_committed` is Django's own marker for "these bytes are in storage" — it is set
+        # by the `FileField` commit that runs before the INSERT. Asking it is what covers
+        # the case where the row never came into existence at all.
+        pending_name = created.file.name
+        if getattr(created.file, "_committed", False) and pending_name:
+            if pending_name not in written_files:
+                written_files.append(pending_name)
         raise
     return created
 
@@ -434,12 +469,14 @@ def _store_file(
 def store_submission_file(*, owner, uploaded_file, purpose, uploaded_by):
     """Store a legacy, purpose-identified upload (unchanged behaviour)."""
     _ensure_legacy_singer_materials_allowed(owner)
-    return _store_file(
-        owner=owner,
-        uploaded_file=uploaded_file,
-        purpose=purpose,
-        uploaded_by=uploaded_by,
-    )
+    with _compensate_file_writes() as written_files:
+        return _store_file(
+            owner=owner,
+            uploaded_file=uploaded_file,
+            purpose=purpose,
+            uploaded_by=uploaded_by,
+            written_files=written_files,
+        )
 
 
 @transaction.atomic
@@ -484,27 +521,31 @@ def store_questionnaire_file(
     if writable is not None and question_key not in writable:
         raise ValidationError(f"当前阶段不可上传该题目的材料：{question_key!r}。")
     config = question["file"]
-    stored = _store_file(
-        owner=registration,
-        uploaded_file=uploaded_file,
-        purpose=questionnaire_file_purpose(config, uploaded_file),
-        uploaded_by=actor,
-        question_key=question_key,
-        source_ruleset_version=version,
-        max_mb=config["max_mb"],
-        owner_total_quota=True,
-        allowed_extensions=config["extensions"],
-    )
-    from common.models import AuditLog
+    # The audit row below is part of the same unit of work, so the compensation has to
+    # span it: a failure writing the audit used to roll the row back and leave the bytes.
+    with _compensate_file_writes() as written_files:
+        stored = _store_file(
+            owner=registration,
+            uploaded_file=uploaded_file,
+            purpose=questionnaire_file_purpose(config, uploaded_file),
+            uploaded_by=actor,
+            question_key=question_key,
+            source_ruleset_version=version,
+            max_mb=config["max_mb"],
+            owner_total_quota=True,
+            allowed_extensions=config["extensions"],
+            written_files=written_files,
+        )
+        from common.models import AuditLog
 
-    AuditLog.objects.create(
-        operator=actor,
-        action_type=AuditLog.ActionType.UPLOAD_FILE,
-        target=f"SubmissionFile:{stored.pk}",
-        new_value=stored.original_name,
-        note=f"questionnaire:{question_key}",
-    )
-    return stored
+        AuditLog.objects.create(
+            operator=actor,
+            action_type=AuditLog.ActionType.UPLOAD_FILE,
+            target=f"SubmissionFile:{stored.pk}",
+            new_value=stored.original_name,
+            note=f"questionnaire:{question_key}",
+        )
+        return stored
 
 
 @transaction.atomic
@@ -542,31 +583,33 @@ def store_questionnaire_group_file(
         raise ValidationError(f"当前分组合唱材料窗口不接受该题目：{question_key!r}。")
     reconcile_group_questionnaire_material_checks(group=group, version=version, plan=plan)
     config = question["file"]
-    stored = _store_file(
-        owner=group,
-        uploaded_file=uploaded_file,
-        purpose=questionnaire_file_purpose(config, uploaded_file),
-        uploaded_by=current_actor,
-        question_key=question_key,
-        source_ruleset_version=version,
-        max_mb=config["max_mb"],
-        owner_total_quota=True,
-        allowed_extensions=config["extensions"],
-        # The stage's material window already authorized this write; the activity phase
-        # policy would reject it outright during LIVE, where group material is legitimate.
-        phase_action=None,
-        expected_current_version=expected_current_version,
-    )
-    from common.models import AuditLog
+    with _compensate_file_writes() as written_files:
+        stored = _store_file(
+            owner=group,
+            uploaded_file=uploaded_file,
+            purpose=questionnaire_file_purpose(config, uploaded_file),
+            uploaded_by=current_actor,
+            question_key=question_key,
+            source_ruleset_version=version,
+            max_mb=config["max_mb"],
+            owner_total_quota=True,
+            allowed_extensions=config["extensions"],
+            # The stage's material window already authorized this write; the activity phase
+            # policy would reject it outright during LIVE, where group material is legitimate.
+            phase_action=None,
+            expected_current_version=expected_current_version,
+            written_files=written_files,
+        )
+        from common.models import AuditLog
 
-    AuditLog.objects.create(
-        operator=current_actor,
-        action_type=AuditLog.ActionType.UPLOAD_FILE,
-        target=f"SubmissionFile:{stored.pk}",
-        new_value=stored.original_name,
-        note=f"group_questionnaire:{question_key}",
-    )
-    return stored
+        AuditLog.objects.create(
+            operator=current_actor,
+            action_type=AuditLog.ActionType.UPLOAD_FILE,
+            target=f"SubmissionFile:{stored.pk}",
+            new_value=stored.original_name,
+            note=f"group_questionnaire:{question_key}",
+        )
+        return stored
 
 
 @transaction.atomic
@@ -1158,38 +1201,40 @@ def submit_participant_material_for_check(
     # A questionnaire check carries its question, so the replacement occupies that
     # question's slot: uploading the second round's accompaniment must not demote the
     # first round's, which is exactly what a purpose-scoped write would do.
-    stored = _store_file(
-        owner=locked_owner,
-        uploaded_file=uploaded_file,
-        purpose=_purpose_for_upload(
-            locked_check.accepted_file_purposes or [locked_check.file_purpose],
-            uploaded_file,
-            where=locked_check.item_name or "该材料项",
-        ),
-        uploaded_by=current_actor,
-        question_key=locked_check.question_key,
-        source_ruleset_version=locked_check.source_ruleset_version,
-        owner_total_quota=bool(locked_check.question_key),
-        # A Group owner was already authorized by the stage's material window, which is
-        # allowed to be open in phases whose action set has no UPLOAD_MATERIAL.
-        phase_action=None if group_scope is not None else ActivityAction.UPLOAD_MATERIAL,
-        expected_current_version=expected_current_version,
-    )
-    if group_scope is not None:
-        # The owner *is* the group: a Group has no ``group_id`` — it is the row the other
-        # members' pages are watching — so testing for that attribute silently dropped every
-        # member-upload notification while staff reviews (which go through ``check.group_id``)
-        # still worked.
-        from realtime.events import schedule_group_material_event
-
-        schedule_group_material_event(
-            locked_owner.pk,
-            event="group.material_changed",
-            revision=stored.pk,
-            actor={"id": current_actor.pk, "username": current_actor.get_username()},
-            details={"file_id": stored.pk, "check_id": locked_check.pk},
+    with _compensate_file_writes() as written_files:
+        stored = _store_file(
+            owner=locked_owner,
+            uploaded_file=uploaded_file,
+            purpose=_purpose_for_upload(
+                locked_check.accepted_file_purposes or [locked_check.file_purpose],
+                uploaded_file,
+                where=locked_check.item_name or "该材料项",
+            ),
+            uploaded_by=current_actor,
+            question_key=locked_check.question_key,
+            source_ruleset_version=locked_check.source_ruleset_version,
+            owner_total_quota=bool(locked_check.question_key),
+            # A Group owner was already authorized by the stage's material window, which is
+            # allowed to be open in phases whose action set has no UPLOAD_MATERIAL.
+            phase_action=None if group_scope is not None else ActivityAction.UPLOAD_MATERIAL,
+            expected_current_version=expected_current_version,
+            written_files=written_files,
         )
-    return stored
+        if group_scope is not None:
+            # The owner *is* the group: a Group has no ``group_id`` — it is the row the other
+            # members' pages are watching — so testing for that attribute silently dropped
+            # every member-upload notification while staff reviews (which go through
+            # ``check.group_id``) still worked.
+            from realtime.events import schedule_group_material_event
+
+            schedule_group_material_event(
+                locked_owner.pk,
+                event="group.material_changed",
+                revision=stored.pk,
+                actor={"id": current_actor.pk, "username": current_actor.get_username()},
+                details={"file_id": stored.pk, "check_id": locked_check.pk},
+            )
+        return stored
 
 
 def _reconcile_owner_checks(owner, requirements):
