@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-10-09 (last)
+
+### The judge entry is judged against the locked row, not against the pre-lock read
+
+A capability has to be resolved before the activity row lock can be taken — the resolution
+is what names the row to lock. Staff can reissue the QR or close the entry in that gap, and
+the entry used to be judged entirely on the pre-lock lookup: a claim that had already
+resolved the old code took a seat *after* the reissue that was supposed to kill that code,
+and after the close that was supposed to stop new scans. Same shape as the ticket credential
+race, same place — the first authorization decision.
+
+- `claim_judge_session_for_entry` is now the entry's whole authority: resolve, lock,
+  **revalidate the capability and the open flag against the locked row**, then claim. The
+  view no longer assembles those steps itself, which is how the recheck came to be missing.
+- `judge_entry_authorizes_activity` recomputes the signature from the locked row and compares
+  the token's claimed version against it, so a reissue invalidates every printed code at the
+  instant it commits. The two parsers share one `_parse_credential` instead of each splitting
+  the string.
+- A capability that does not resolve is still answered as 404 (the door does not confirm
+  which activities are running); everything else is 409 with its own reason code, so a
+  teacher who is merely early is told to wait.
+- `activity_judge_entry_toggle` and `activity_judge_entry_rotate` are now `@transaction.atomic`
+  with `select_for_update`: two staff clicking at once used to read the same value and write
+  the same value back, so a reissue could be lost and a code both of them believed they had
+  killed would still resolve.
+
+Two `TransactionTestCase` race tests pin the interleaving deterministically — the resolution
+step is held open while the staff action commits on another connection. Against the previous
+behaviour both hand out a real seat from a dead code; with the recheck they refuse. The
+reverse direction is pinned too: a claim that wins the lock keeps its session when the entry
+then closes or the QR is reissued, because closing stops new scans rather than evicting the
+panel.
+
 ## 2026-10-09 (later)
 
 ### The judge entry has a credential, so a public activity code is no longer a seat
