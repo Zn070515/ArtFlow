@@ -393,6 +393,7 @@ def human_ruleset_summary(
         "node_titles": node_titles,
     }
 
+
 # Numeric node fields coerced to int when present (schema enforces non-negative int).
 _INT_FIELDS = frozenset({"trim_high", "trim_low", "min_judges", "count", "quota", "groups"})
 _BOOL_FIELDS = frozenset({"descending"})
