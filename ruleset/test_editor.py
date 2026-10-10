@@ -6,11 +6,68 @@ from django.test import SimpleTestCase
 from ruleset.editor import (
     available_sources,
     definition_nodes,
+    human_ruleset_summary,
     nodes_from_form,
     preview_definition,
     synthetic_resolve_input,
 )
 from ruleset.schema import ENTRY_KEY, parse_definition
+from ruleset.templates import golden_schidui
+
+
+class HumanRulesetSummaryTests(SimpleTestCase):
+    def test_summary_projects_checkpoints_into_human_stages(self):
+        summary = human_ruleset_summary(golden_schidui())
+
+        self.assertTrue(summary["supported"])
+        self.assertEqual(summary["flow_label"], "全部选手 → 10 强 → 5 强 → 3 强")
+        self.assertEqual(
+            [stage["advance_count"] for stage in summary["stages"]],
+            [10, 5, 3],
+        )
+        self.assertEqual(
+            [
+                [component["weight_label"] for component in stage["components"]]
+                for stage in summary["stages"]
+            ],
+            [["30%", "60%", "10%"], ["60%", "40%"], ["30%", "50%", "20%"]],
+        )
+        self.assertEqual(summary["stages"][1]["components"][0]["label"], "上一阶段综合成绩")
+        self.assertEqual(summary["stages"][0]["components"][2]["kind"], "audience")
+        self.assertEqual(summary["node_titles"]["stage1"], "第一阶段综合成绩")
+        self.assertEqual(summary["node_titles"]["top10"], "第一阶段晋级名单（10人）")
+
+    def test_summary_uses_bound_labels_without_changing_technical_keys(self):
+        summary = human_ruleset_summary(
+            golden_schidui(),
+            round_labels={"r1": "第一轮 · 小组合唱"},
+            vote_labels={"audience1": "第一阶段现场投票"},
+        )
+
+        components = summary["stages"][0]["components"]
+        self.assertEqual(components[0]["label"], "第一轮 · 小组合唱评委成绩")
+        self.assertEqual(components[2]["label"], "第一阶段现场投票")
+        self.assertEqual(components[0]["source_key"], "assess_r1")
+
+    def test_summary_marks_manual_decisions_for_conditional_ui(self):
+        definition = {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "group"},
+                {
+                    "key": "manual",
+                    "type": "MANUAL_SELECT",
+                    "source": "groups",
+                    "groups": 2,
+                    "quota": 1,
+                },
+            ],
+        }
+
+        summary = human_ruleset_summary(definition)
+
+        self.assertFalse(summary["supported"])
+        self.assertTrue(summary["has_manual_decision"])
 
 
 class EditorSerializeTests(SimpleTestCase):

@@ -1,16 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}预览 — 赛制 — ArtFlow{% endblock %}
+{% block title %}模拟运行 — 赛制 — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-10">
     <p class="text-sm text-gray-500 mb-2">
-        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">返回编辑</a> / 预览
+        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">返回编辑</a> / 模拟运行
     </p>
     <h1 class="text-2xl font-bold text-gray-900 mb-2">{{ version.ruleset }}</h1>
 
-    <div class="mb-4 text-sm px-3 py-2 rounded bg-emerald-50 border border-emerald-300 text-emerald-800">
-        解析状态：<span class="font-mono font-semibold">{{ status|upper }}</span>
+    <div class="mb-4 text-sm px-3 py-3 rounded bg-sky-50 border border-sky-300 text-sky-800">
+        <div class="font-semibold">模拟运行</div>
+        <p class="mt-1">这是模拟试算，不使用本场比赛真实成绩。系统使用 16 名虚拟选手和模拟分数检查赛制流程，不会修改真实数据。</p>
+        <p class="mt-2">模拟解析状态：<span class="font-mono font-semibold">{{ status|upper }}</span></p>
     </div>
 
     {% if not passes %}
@@ -19,10 +21,10 @@
 
     {% if summary %}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
-        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">候选池规模</div>
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">模拟晋级人数</div>
         <ul class="divide-y divide-gray-100">
             {% for key, size in summary.candidate_pool_sizes.items %}
-            <li class="px-4 py-2 text-sm"><span class="font-mono">{{ key }}</span>：{{ size }} 人</li>
+            <li class="px-4 py-2 text-sm"><span class="font-mono">{{ key }}</span>：{{ size|default:"待绑定" }} 人</li>
             {% endfor %}
         </ul>
     </div>
@@ -30,7 +32,7 @@
 
     {% if decisions %}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">结果预览（前 20）</div>
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">模拟结果（前 20 名虚拟选手）</div>
         <ol class="divide-y divide-gray-100">
             {% for decision in decisions %}
             <li class="px-4 py-2 text-sm flex items-center gap-3">

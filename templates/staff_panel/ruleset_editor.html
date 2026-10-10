@@ -17,19 +17,61 @@
         <a href="{% url 'staff:activity_list' %}" class="hover:underline">{{ ruleset.activity.title }}</a>
     </p>
 
-    <div class="flex items-center gap-3 mb-6">
+    <div class="flex flex-wrap items-center gap-3 mb-6">
         <form method="post" action="{% url 'staff:ruleset_validate' version.pk %}">
-            {% csrf_token %}<button class="border border-gray-300 px-3 py-1.5 rounded text-sm">校验</button>
+            {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">校验赛制</button>
         </form>
         <form method="post" action="{% url 'staff:ruleset_preview' version.pk %}">
-            {% csrf_token %}<button class="border border-gray-300 px-3 py-1.5 rounded text-sm">预览</button>
+            {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">模拟运行</button>
         </form>
         <form method="post" action="{% url 'staff:ruleset_freeze' version.pk %}"
-              onsubmit="return confirm('确认冻结该赛制？冻结后不可编辑。');">
-            {% csrf_token %}<button class="bg-brand text-white px-3 py-1.5 rounded text-sm">冻结</button>
+              onsubmit="return confirm('确认并锁定该赛制？锁定后，本版本将作为正式成绩计算依据，不能直接修改。');">
+            {% csrf_token %}<button class="touch-target bg-brand text-white rounded text-sm">确认并锁定赛制</button>
         </form>
-        <a href="{% url 'staff:manual_decision' version.pk %}" class="border border-gray-300 px-3 py-1.5 rounded text-sm">人工选择</a>
+        {% if human_summary.has_manual_decision %}
+        <a href="{% url 'staff:manual_decision' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">录入赛制要求的人工决定</a>
+        {% endif %}
     </div>
+
+    <section class="bg-white border border-brand/20 rounded-lg overflow-hidden mb-6">
+        <div class="bg-blue-50 border-b border-blue-200 px-4 py-3">
+            <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h2 class="text-base font-semibold text-brand">赛制总览</h2>
+                {% if human_summary.supported %}<span class="text-sm text-blue-800">{{ human_summary.flow_label }}</span>{% endif %}
+            </div>
+            <p class="text-xs text-gray-600 mt-1">先看阶段和成绩组成；技术节点可在下方高级规则结构中展开。</p>
+        </div>
+        {% if human_summary.supported %}
+        <div class="p-4 space-y-4">
+            {% for stage in human_summary.stages %}
+            <article class="border border-gray-200 rounded-lg overflow-hidden">
+                <div class="bg-gray-50 px-4 py-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h3 class="font-semibold text-gray-900">{{ stage.title }}</h3>
+                        <p class="text-xs text-gray-500 mt-1">{{ stage.input_label }} → {{ stage.output_label }}</p>
+                    </div>
+                    <span class="ruleset-node-badge">{{ stage.result_label }}</span>
+                </div>
+                {% if stage.components %}
+                <div class="px-4 py-3 grid sm:grid-cols-2 gap-2">
+                    {% for component in stage.components %}
+                    <div class="flex items-center justify-between gap-3 rounded border border-gray-100 px-3 py-2
+                        {% if component.kind == 'audience' %}bg-amber-50{% elif component.kind == 'inherited' %}bg-gray-50{% else %}bg-blue-50{% endif %}">
+                        <span class="text-sm text-gray-800">{{ component.label }}</span>
+                        <span class="font-semibold text-brand whitespace-nowrap">{{ component.weight_label }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="px-4 py-3 text-sm text-gray-600">本阶段按既有节点结果产生晋级名单。</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="p-4 text-sm text-gray-600">当前赛制没有可识别的阶段检查点，请展开高级规则结构查看完整定义。</div>
+        {% endif %}
+    </section>
 
     <form method="post" action="{% url 'staff:ruleset_edit' version.pk %}">
         {% csrf_token %}
@@ -37,10 +79,16 @@
         <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
         <input type="hidden" name="node_order"
                value="{% for card in cards %}node_{{ card.index }}{% if not forloop.last %},{% endif %}{% endfor %}">
+        <details class="border border-gray-200 rounded-lg mb-4">
+            <summary class="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50">编辑高级规则结构 <span class="text-xs font-normal text-gray-500">（节点、依赖和高级参数）</span></summary>
+            <div class="px-4 py-3">
         {% for card in cards %}
         <div class="bg-white border border-gray-200 rounded-lg mb-3 overflow-hidden">
             <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-                <span class="font-mono text-sm font-medium">{{ card.node.key }}</span>
+                <div>
+                    <div class="font-medium text-gray-900">{{ card.display_label|default:card.type_label }}</div>
+                    <div class="font-mono text-xs text-gray-500 mt-0.5">技术标识：{{ card.node.key }}</div>
+                </div>
                 <span class="ruleset-node-badge">{{ card.type_label }}</span>
             </div>
             <div class="px-4 py-3">
@@ -105,13 +153,15 @@
         {% empty %}
         <div class="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center text-gray-500">该赛制没有节点。</div>
         {% endfor %}
-        <button class="bg-brand text-white px-4 py-2 rounded">保存全部</button>
+            </div>
+        </details>
+        <button class="touch-target bg-brand text-white px-4 rounded">保存高级规则</button>
     </form>
 
     <form method="post" action="{% url 'staff:ruleset_bind' version.pk %}" class="mt-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
         {% csrf_token %}
         <input type="hidden" name="base_binding" value="{{ binding_signature }}">
-        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">活动绑定</div>
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">关联本场比赛的数据</div>
         <div class="px-4 py-3 grid sm:grid-cols-2 gap-3">
             <div>
                 <label for="id_stage_key" class="block text-xs text-gray-700 mb-0.5">结果赛段名称</label>
@@ -120,24 +170,24 @@
             </div>
             {% for row in binding_maps.rounds %}
             <div>
-                <label for="id_round_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">轮次「{{ row.key }}」</label>
+                <label for="id_round_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">{{ row.usage_label|default:"本场评委成绩" }}来自：</label>
                 <input type="hidden" name="round_binding_key" value="{{ row.key }}">
                 <select id="id_round_binding_{{ forloop.counter }}" name="round_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                     <option value="">暂不绑定</option>
                     {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
-                    <p class="mt-1 text-xs text-gray-500">把问卷/节点中的轮次键绑定到当前活动的实际轮次。</p>
+                    <p class="mt-1 text-xs text-gray-500">技术标识：{{ row.key }} · 选择当前活动的实际轮次。</p>
             </div>
             {% endfor %}
             {% for row in binding_maps.votes %}
             <div>
-                <label for="id_vote_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">投票「{{ row.key }}」</label>
+                <label for="id_vote_binding_{{ forloop.counter }}" class="block text-xs text-gray-700 mb-0.5">{{ row.usage_label|default:"观众投票" }}来自：</label>
                 <input type="hidden" name="vote_binding_key" value="{{ row.key }}">
                 <select id="id_vote_binding_{{ forloop.counter }}" name="vote_binding_value" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                     <option value="">暂不绑定</option>
                     {% for value, label in row.options %}<option value="{{ value }}"{% if row.value == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
                     </select>
-                    <p class="mt-1 text-xs text-gray-500">把赛制中的投票键绑定到当前活动的投票场次。</p>
+                    <p class="mt-1 text-xs text-gray-500">技术标识：{{ row.key }} · 选择当前活动的投票场次。</p>
             </div>
             {% endfor %}
             {% for row in binding_maps.scoring_rules %}
