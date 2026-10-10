@@ -133,6 +133,266 @@ _FIELD_OPTION_LABELS = {
     },
 }
 
+_ORDINALS = (
+    "零",
+    "一",
+    "二",
+    "三",
+    "四",
+    "五",
+    "六",
+    "七",
+    "八",
+    "九",
+    "十",
+)
+
+
+def _ordinal_label(value: int) -> str:
+    if 0 <= value < len(_ORDINALS):
+        return _ORDINALS[value]
+    return str(value)
+
+
+def _format_weight(weight) -> str:
+    percent = Decimal(str(weight)) * 100
+    text = format(percent, "f").rstrip("0").rstrip(".")
+    return f"{text or '0'}%"
+
+
+def _count_label(count) -> str:
+    if isinstance(count, int) and not isinstance(count, bool):
+        return f"{count} 强"
+    return "晋级名单"
+
+
+def _round_display_label(round_key: str, round_labels: dict[str, str]) -> str:
+    bound_label = (round_labels.get(round_key) or "").strip()
+    if bound_label:
+        return f"{bound_label}评委成绩"
+    if round_key.startswith("r") and round_key[1:].isdigit():
+        return f"第{_ordinal_label(int(round_key[1:]))}轮评委成绩"
+    return "评委成绩"
+
+
+def _node_display_label(
+    source_key: str,
+    nodes_by_key: dict[str, dict],
+    *,
+    round_labels: dict[str, str],
+    vote_labels: dict[str, str],
+) -> tuple[str, str]:
+    if source_key == ENTRY_KEY:
+        return "全部选手", "entry"
+    node = nodes_by_key.get(source_key) or {}
+    node_type = node.get("type")
+    if node_type == "ASSESS":
+        vote_source = node.get("vote_source")
+        if vote_source:
+            return vote_labels.get(vote_source, "观众投票成绩"), "audience"
+        round_key = node.get("round")
+        if isinstance(round_key, str) and round_key:
+            return _round_display_label(round_key, round_labels), "judge"
+        return "评委成绩", "judge"
+    if node_type == "AGGREGATE":
+        return "上一阶段综合成绩", "inherited"
+    if node_type == "RANK":
+        return "排名结果", "derived"
+    if node_type == "SELECT":
+        return _count_label(node.get("count")), "advance"
+    if node_type == "MANUAL_SELECT":
+        return "人工决定", "manual"
+    if node_type == "PARTITION":
+        return "分组结果", "derived"
+    if node_type == "MERGE":
+        return "合并后的名单", "derived"
+    return source_key, "technical"
+
+
+def _stage_input_label(source_key: str, nodes_by_key: dict[str, dict]) -> str:
+    if source_key == ENTRY_KEY:
+        return "全部选手"
+    node = nodes_by_key.get(source_key) or {}
+    node_type = node.get("type")
+    if node_type == "SELECT":
+        return _count_label(node.get("count"))
+    if node_type == "FILL_TO_QUOTA":
+        return _count_label(node.get("quota"))
+    if node_type == "MANUAL_SELECT":
+        return "人工决定名单"
+    return "上一阶段结果"
+
+
+def _stage_node_for_checkpoint(
+    checkpoint_key: str,
+    output_key: str,
+    nodes_by_key: dict[str, dict],
+) -> dict:
+    direct = nodes_by_key.get(checkpoint_key) or {}
+    if direct.get("type") == "AGGREGATE":
+        return direct
+    current = nodes_by_key.get(output_key) or {}
+    visited = set()
+    while current and current.get("key") not in visited:
+        key = current.get("key")
+        if isinstance(key, str):
+            visited.add(key)
+        if current.get("type") == "AGGREGATE":
+            return current
+        source = current.get("source")
+        if not isinstance(source, str):
+            break
+        current = nodes_by_key.get(source) or {}
+    return direct
+
+
+def _default_node_title(
+    node: dict,
+    nodes_by_key: dict[str, dict],
+    *,
+    round_labels: dict[str, str],
+    vote_labels: dict[str, str],
+) -> str:
+    node_type = node.get("type")
+    if node_type == "ASSESS":
+        return _node_display_label(
+            node["key"],
+            nodes_by_key,
+            round_labels=round_labels,
+            vote_labels=vote_labels,
+        )[0]
+    if node_type == "AGGREGATE":
+        return "综合成绩"
+    if node_type == "RANK":
+        return "排名结果"
+    if node_type == "SELECT":
+        count = node.get("count")
+        return f"晋级名单（{count}人）" if isinstance(count, int) else "晋级名单"
+    if node_type == "MANUAL_SELECT":
+        return "人工决定名单"
+    if node_type == "PARTITION":
+        return "分组结果"
+    if node_type == "MERGE":
+        return "合并后的名单"
+    if node_type == "SUBTRACT":
+        return "排除后的名单"
+    if node_type == "PAIR":
+        return "配对结果"
+    if node_type == "DUEL":
+        return "对决结果"
+    if node_type == "FILL_TO_QUOTA":
+        return "补足后的名单"
+    if node_type == "AWARD":
+        return "奖项结果"
+    return node.get("type", "规则节点")
+
+
+def human_ruleset_summary(
+    definition,
+    *,
+    round_labels: dict[str, str] | None = None,
+    vote_labels: dict[str, str] | None = None,
+) -> dict:
+    """Project a valid ruleset into operator-facing stage cards.
+
+    This is intentionally read-only presentation logic. It consumes the existing
+    ``nodes`` and ``checkpoints`` sections and never returns a definition document,
+    so it cannot become a second serializer or alter the compiler/resolver contract.
+    """
+    parsed = parse_definition(definition)
+    nodes = list(parsed["nodes"])
+    nodes_by_key = {node["key"]: node for node in nodes}
+    round_labels = round_labels or {}
+    vote_labels = vote_labels or {}
+    checkpoints = list(parsed.get("checkpoints") or ())
+    has_manual_decision = any(node.get("type") == "MANUAL_SELECT" for node in nodes)
+    node_titles = {
+        node["key"]: _default_node_title(
+            node,
+            nodes_by_key,
+            round_labels=round_labels,
+            vote_labels=vote_labels,
+        )
+        for node in nodes
+    }
+    if not checkpoints:
+        return {
+            "supported": False,
+            "flow_label": "当前赛制未声明阶段检查点",
+            "stages": [],
+            "has_manual_decision": has_manual_decision,
+            "node_titles": node_titles,
+        }
+
+    stages = []
+    for index, checkpoint in enumerate(checkpoints, start=1):
+        stage_key = checkpoint["key"]
+        output_key = checkpoint["output"]
+        stage_node = _stage_node_for_checkpoint(stage_key, output_key, nodes_by_key)
+        output_node = nodes_by_key.get(output_key) or {}
+        output_count = output_node.get("count")
+        if output_count is None:
+            output_count = output_node.get("quota")
+        output_label = _count_label(output_count)
+        input_source = stage_node.get("within") or stage_node.get("source") or ENTRY_KEY
+        components = []
+        aggregate = stage_node.get("aggregate") or {}
+        for component in aggregate.get("components") or ():
+            source_key = component.get("source", "")
+            source_node = nodes_by_key.get(source_key) or {}
+            label, kind = _node_display_label(
+                source_key,
+                nodes_by_key,
+                round_labels=round_labels,
+                vote_labels=vote_labels,
+            )
+            components.append(
+                {
+                    "source_key": source_key,
+                    "binding_key": source_node.get("round") or source_node.get("vote_source") or "",
+                    "label": label,
+                    "kind": kind,
+                    "weight": component.get("weight"),
+                    "weight_label": _format_weight(component.get("weight", 0)),
+                }
+            )
+        stage_title = f"第{_ordinal_label(index)}阶段 · 晋级{output_label}"
+        if stage_node.get("key"):
+            node_titles[stage_node["key"]] = f"第{_ordinal_label(index)}阶段综合成绩"
+        if output_key in nodes_by_key:
+            suffix = (
+                f"（{output_count}人）"
+                if isinstance(output_count, int) and not isinstance(output_count, bool)
+                else ""
+            )
+            node_titles[output_key] = f"第{_ordinal_label(index)}阶段晋级名单{suffix}"
+        stages.append(
+            {
+                "key": stage_key,
+                "output_key": output_key,
+                "title": stage_title,
+                "input_label": _stage_input_label(input_source, nodes_by_key),
+                "output_label": output_label,
+                "advance_count": output_count,
+                "components": components,
+                "result_label": (
+                    f"综合成绩前 {output_count} 名晋级"
+                    if isinstance(output_count, int) and not isinstance(output_count, bool)
+                    else "按本阶段规则产生结果"
+                ),
+            }
+        )
+
+    flow_labels = [stages[0]["input_label"]]
+    flow_labels.extend(stage["output_label"] for stage in stages)
+    return {
+        "supported": True,
+        "flow_label": " → ".join(flow_labels),
+        "stages": stages,
+        "has_manual_decision": has_manual_decision,
+        "node_titles": node_titles,
+    }
+
 # Numeric node fields coerced to int when present (schema enforces non-negative int).
 _INT_FIELDS = frozenset({"trim_high", "trim_low", "min_judges", "count", "quota", "groups"})
 _BOOL_FIELDS = frozenset({"descending"})

@@ -15,6 +15,19 @@
     <div class="mb-4 text-sm px-3 py-2 rounded bg-red-50 border border-red-300 text-red-800">存在错误，无法冻结。</div>
     {% endif %}
 
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">赛制检查</div>
+        <ul class="divide-y divide-gray-100">
+            <li class="px-4 py-2 text-sm text-gray-800">✓ 节点结构和依赖关系已检查</li>
+            <li class="px-4 py-2 text-sm text-gray-800">✓ 成绩来源、权重和阶段输出已检查</li>
+            {% if issues %}
+            <li class="px-4 py-2 text-sm text-amber-800">⚠ 发现 {{ issues|length }} 项需要关注的问题，请查看下方详情</li>
+            {% else %}
+            <li class="px-4 py-2 text-sm text-emerald-800">✓ 未发现需要处理的问题</li>
+            {% endif %}
+        </ul>
+    </div>
+
     {% if issues %}
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
         <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">校验问题（{{ issues|length }}）</div>
@@ -25,9 +38,11 @@
                     {% if issue.severity == 'error' %}bg-red-50 text-red-700{% else %}bg-amber-50 text-amber-700{% endif %}">
                     {{ issue.severity }}
                 </span>
-                <span class="font-mono text-gray-700">{{ issue.code }}</span>
-                <span class="text-gray-600">— {{ issue.message }}</span>
-                {% if issue.node_key %}<span class="text-gray-400 text-xs">（{{ issue.node_key }}）</span>{% endif %}
+                <span class="text-gray-600">{{ issue.message }}</span>
+                <details class="mt-2 text-xs text-gray-500">
+                    <summary class="cursor-pointer">技术详情</summary>
+                    <div class="mt-1 font-mono">{{ issue.code }}{% if issue.node_key %} · {{ issue.node_key }}{% endif %}</div>
+                </details>
             </li>
             {% endfor %}
         </ul>

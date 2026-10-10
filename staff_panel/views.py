@@ -4431,6 +4431,22 @@ def _display_options(options, labels=None, nodes=None):
     ]
 
 
+def _selected_binding_labels(rows):
+    """Return the operator-facing label for each currently selected binding."""
+    labels = {}
+    for row in rows:
+        value = str(row.get("value") or "")
+        if not value:
+            continue
+        label = next(
+            (label for option_value, label in row.get("options", []) if str(option_value) == value),
+            "",
+        )
+        if label:
+            labels[row["key"]] = label
+    return labels
+
+
 def _node_field_entries(node, index, nodes, *, binding_options=None):
     """Render data-driven edit fields for one node card (select/text/checkbox/json/aggregate)."""
     labels = ruleset_editor.field_labels()
@@ -4879,6 +4895,29 @@ def ruleset_edit(request, pk):
             for key in sorted(current_group_keys | set(group_stage_binding))
         ],
     }
+    try:
+        human_summary = ruleset_editor.human_ruleset_summary(
+            version.definition,
+            round_labels=_selected_binding_labels(binding_maps["rounds"]),
+            vote_labels=_selected_binding_labels(binding_maps["votes"]),
+        )
+    except (ValueError, ValidationError):
+        human_summary = None
+    if human_summary:
+        node_titles = human_summary.get("node_titles", {})
+        for card in cards:
+            card["display_label"] = node_titles.get(card["node"]["key"], card["type_label"])
+        for bucket in ("rounds", "votes"):
+            for row in binding_maps[bucket]:
+                row["usage_label"] = next(
+                    (
+                        component["label"]
+                        for stage in human_summary.get("stages", [])
+                        for component in stage.get("components", [])
+                        if component.get("binding_key") == row["key"]
+                    ),
+                    "",
+                )
     return render(
         request,
         "staff_panel/ruleset_editor.html",
@@ -4910,6 +4949,7 @@ def ruleset_edit(request, pk):
             },
             "binding_signature": _binding_signature(ruleset),
             "binding_maps": binding_maps,
+            "human_summary": human_summary,
         },
     )
 

@@ -63,7 +63,7 @@ from openpyxl import load_workbook
 from PIL import Image
 from public_portal.models import PublicPost, ResultRelease
 from ruleset.models import ContestRuleset, RulesetVersion
-from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, HISTORICAL_SCHIDUI_NAME
+from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, HISTORICAL_SCHIDUI_NAME, golden_schidui
 from singer_contest.judge_entry import judge_entry_credential
 from singer_contest.models import (
     AudienceScore,
@@ -8078,12 +8078,34 @@ class RulesetEditorTests(TestCase):
         response = self.client.post(reverse("staff:ruleset_validate", args=[self.version.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "校验通过")
+        self.assertContains(response, "赛制检查")
+        self.assertContains(response, "技术详情")
 
-    def test_editor_preview_shows_candidate_pool_sizes(self):
+    def test_editor_preview_explains_simulation_data(self):
         response = self.client.post(reverse("staff:ruleset_preview", args=[self.version.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "READY")
-        self.assertContains(response, "候选池规模")
+        self.assertContains(response, "模拟运行")
+        self.assertContains(response, "16 名虚拟选手")
+        self.assertContains(response, "模拟晋级人数")
+        self.assertContains(response, "模拟结果")
+        self.assertNotContains(response, "候选池规模")
+
+    def test_editor_prioritizes_human_summary_and_hides_unused_manual_action(self):
+        self.version.definition = golden_schidui()
+        self.version.save(update_fields=["definition"])
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "赛制总览")
+        self.assertContains(response, "全部选手 → 10 强 → 5 强 → 3 强")
+        self.assertContains(response, "第一阶段 · 晋级10 强")
+        self.assertContains(response, "编辑高级规则结构")
+        self.assertContains(response, "技术标识：stage1")
+        self.assertNotContains(
+            response,
+            reverse("staff:manual_decision", args=[self.version.pk]),
+        )
 
     def test_editor_add_node_roundtrips(self):
         before = len(self._nodes())
