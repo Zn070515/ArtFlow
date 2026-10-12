@@ -121,6 +121,10 @@
                             </select>
                             <input name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_weight" value="{{ source.weight }}" placeholder="权重" class="border border-gray-300 rounded px-2 py-1 text-sm">
                             <label class="flex items-center gap-2 text-xs text-gray-600"><input type="checkbox" name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_create_round" value="on"{% if source.create_round %} checked{% endif %}>未绑定时创建草稿轮次</label>
+                            {% if source.scoring_mode_conflict %}
+                            <label class="sm:col-span-4 flex items-center gap-2 text-xs text-amber-800"><input type="checkbox" name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_scoring_mode_conflict_ack" value="on">我已确认按规则定义同步轮次评分方式（当前轮次：{{ source.bound_round_scoring_mode_label }}）</label>
+                            <p class="sm:col-span-4 text-xs text-amber-700">轮次当前评分方式与规则定义不一致。保存将按规则定义同步草稿轮次；已准备或已锁定的轮次仍会被拒绝。</p>
+                            {% endif %}
                         </div>
                         {% endfor %}
                     </div>
@@ -253,6 +257,7 @@
                 else if (field.type === 'hidden' && field.name.endsWith('_judge_source_count')) field.value = '1';
                 else if (field.type === 'hidden' && field.name.includes('_round_name')) field.value = '';
                 else if (field.type === 'hidden' && field.name.includes('_source')) field.value = '';
+                else if (field.type === 'checkbox' && field.name.includes('_scoring_mode_conflict_ack')) field.checked = false;
                 else if (field.type === 'checkbox') field.checked = true;
                 else if (field.tagName === 'SELECT') field.selectedIndex = 0;
                 else if (field.name.endsWith('_advance_count')) field.value = '1';
