@@ -8,6 +8,7 @@
   <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/ci.yml?branch=main&label=CI" alt="CI status"></a>
   <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/integration.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/integration.yml?branch=main&label=PostgreSQL%20integration" alt="PostgreSQL integration"></a>
   <a href="https://github.com/Zn070515/ArtFlow/actions/workflows/security.yml"><img src="https://img.shields.io/github/actions/workflow/status/Zn070515/ArtFlow/security.yml?branch=main&label=Security" alt="Security"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-PolyForm%20Dual-6f42c1?style=flat" alt="PolyForm dual license"></a>
 </p>
 
 <p>
@@ -16,6 +17,7 @@
   <img src="https://img.shields.io/badge/uv-0.11.29-DE5FE9?logo=astral&logoColor=white" alt="uv 0.11.29">
   <img src="https://img.shields.io/badge/SQLite%20%7C%20PostgreSQL-336791?logo=postgresql&logoColor=white" alt="SQLite or PostgreSQL">
   <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose">
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-PolyForm%20Dual-6f42c1?style=flat" alt="PolyForm dual license"></a>
 </p>
 
 <p>
