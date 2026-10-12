@@ -58,8 +58,11 @@ def _normalize_stage(stage, index: int) -> dict:
     if not isinstance(stage, dict):
         raise ValidationError(f"第 {index} 个比赛阶段必须是对象。")
     key = _stage_key(stage, index)
+    raw_advance_count = stage.get("advance_count")
+    if raw_advance_count is None:
+        raise ValidationError(f"阶段“{key}”的晋级人数必须是正整数。")
     try:
-        advance_count = int(stage.get("advance_count"))
+        advance_count = int(str(raw_advance_count))
     except (TypeError, ValueError) as exc:
         raise ValidationError(f"阶段“{key}”的晋级人数必须是正整数。") from exc
     if advance_count <= 0:
@@ -266,9 +269,15 @@ def infer_business_stages(definition) -> dict:
         parsed = parse_definition(definition)
     except ValidationError as exc:
         return _unsupported(f"当前规则定义无法读取：{exc}")
-    nodes = list(parsed.get("nodes") or ())
-    nodes_by_key = {node.get("key"): node for node in nodes}
-    unsupported_types = [node.get("type") for node in nodes if node.get("type") not in _EDITABLE_TYPES]
+    nodes = [node for node in (parsed.get("nodes") or ()) if isinstance(node, dict)]
+    nodes_by_key: dict[str, dict] = {
+        node["key"]: node
+        for node in nodes
+        if isinstance(node.get("key"), str)
+    }
+    unsupported_types = [
+        str(node.get("type") or "") for node in nodes if node.get("type") not in _EDITABLE_TYPES
+    ]
     if unsupported_types:
         label = _COMPLEX_LABELS.get(unsupported_types[0], "复杂")
         return _unsupported(f"当前赛制包含{label}规则，业务编辑器不能无损表达。")
@@ -283,14 +292,23 @@ def infer_business_stages(definition) -> dict:
             for index, node in enumerate(outputs, start=1)
         ]
 
-    stage_context = ((parsed.get("context") or {}).get("business") or {}).get("stages") or []
-    context_by_key = {
-        item.get("key"): item for item in stage_context if isinstance(item, dict) and item.get("key")
+    raw_context = parsed.get("context")
+    context = raw_context if isinstance(raw_context, dict) else {}
+    raw_business = context.get("business")
+    business = raw_business if isinstance(raw_business, dict) else {}
+    raw_stage_context = business.get("stages")
+    stage_context = raw_stage_context if isinstance(raw_stage_context, list) else []
+    context_by_key: dict[str, dict] = {
+        item["key"]: item
+        for item in stage_context
+        if isinstance(item, dict) and isinstance(item.get("key"), str)
     }
     stages: list[dict] = []
     previous_score = ""
     for index, checkpoint in enumerate(checkpoints, start=1):
         output_key = checkpoint.get("output")
+        if not isinstance(output_key, str):
+            return _unsupported(f"阶段“{checkpoint.get('key', index)}”缺少输出节点。")
         output = nodes_by_key.get(output_key) or {}
         if output.get("type") != "SELECT" or not isinstance(output.get("count"), int):
             return _unsupported(f"阶段“{checkpoint.get('key', index)}”不是标准晋级阶段。")

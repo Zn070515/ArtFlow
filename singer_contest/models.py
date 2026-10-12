@@ -1001,6 +1001,8 @@ class ContestRound(models.Model):
 
         def get_round_type_display(self) -> str: ...
 
+        def get_status_display(self) -> str: ...
+
     class Meta:
         base_manager_name = "objects"
         constraints = [

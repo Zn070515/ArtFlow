@@ -497,7 +497,7 @@ def _check_conversion(node: dict, prov: dict, issues: list[ReportIssue]) -> None
             )
 
 
-def _canonical_scale(value: str) -> str:
+def _canonical_scale(value: object) -> str | None:
     """Bucket scale tokens so equivalent magnitude is detected across representations.
 
     A round's rubric-sum scale arrives as a numeric string (``"100"`` = 100-mark rubric),
@@ -515,7 +515,7 @@ def _canonical_scale(value: str) -> str:
         return "votes"
     n = _scale_number(value)
     if n is None:
-        return value
+        return str(value)
     if n == 100:
         return "hundred"
     return f"scale:{format(n, 'f')}"
