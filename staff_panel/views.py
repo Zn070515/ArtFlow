@@ -1694,6 +1694,8 @@ def round_list(request):
     readiness_labels = {
         RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION: "等待上游赛段核定",
         RoundSetupReadiness.MISSING_UPSTREAM: "缺少上游赛段结果",
+        RoundSetupReadiness.UNBOUND_TO_FROZEN_RULESET: "未绑定当前冻结赛制",
+        RoundSetupReadiness.MATERIALIZATION_REQUIRED: "名单尚未物化",
         RoundSetupReadiness.STALE: "晋级名单已变化，需重新配置",
     }
     for contest_round in rounds:

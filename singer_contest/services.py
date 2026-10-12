@@ -340,6 +340,8 @@ class RoundSetupReadiness(StrEnum):
     READY = "ready"
     WAITING_FOR_UPSTREAM_CONFIRMATION = "waiting_for_upstream_confirmation"
     MISSING_UPSTREAM = "missing_upstream"
+    UNBOUND_TO_FROZEN_RULESET = "unbound_to_frozen_ruleset"
+    MATERIALIZATION_REQUIRED = "materialization_required"
     STALE = "stale"
 
 
@@ -355,6 +357,9 @@ def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
         return RoundSetupReadiness.MISSING_UPSTREAM
     if stage.status != StageResult.Status.CONFIRMED:
         return RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION
+    current_version = _current_frozen_version(contest_round.activity)
+    if contest_round.pk not in _bound_round_ids_for_version(current_version):
+        return RoundSetupReadiness.UNBOUND_TO_FROZEN_RULESET
     entry_ids = set(
         RoundEntry.objects.filter(round=contest_round).values_list("singer_id", flat=True)
     )
@@ -371,7 +376,7 @@ def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
             or PerformanceGroup.objects.filter(round=contest_round).exists()
         ):
             return RoundSetupReadiness.STALE
-        return RoundSetupReadiness.READY
+        return RoundSetupReadiness.MATERIALIZATION_REQUIRED
     if entry_ids != advancing_ids:
         return RoundSetupReadiness.STALE
     return RoundSetupReadiness.READY
@@ -384,6 +389,8 @@ def _ensure_round_setup_ready(contest_round: ContestRound) -> None:
             "上游赛段尚未核定，暂不能配置本轮分组、人工顺序或准备轮次。"
         ),
         RoundSetupReadiness.MISSING_UPSTREAM: "对应赛段尚未生成可晋级选手名单。",
+        RoundSetupReadiness.UNBOUND_TO_FROZEN_RULESET: "本轮未绑定当前冻结赛制，不能准备。",
+        RoundSetupReadiness.MATERIALIZATION_REQUIRED: "当前冻结赛制的名单尚未物化，不能准备本轮。",
         RoundSetupReadiness.STALE: "上游晋级名单已变化，本轮设置已失效，请重新配置分组和出场顺序。",
     }
     if readiness != RoundSetupReadiness.READY:
@@ -1636,6 +1643,24 @@ def _version_binding(version) -> dict:
     return binding
 
 
+def _bound_round_ids_for_version(version) -> set[int]:
+    """Return the positive round primary keys captured by a frozen binding."""
+    if version is None:
+        return set()
+    round_keys = _version_binding(version).get("round_keys") or {}
+    bound_ids: set[int] = set()
+    for raw_round_id in round_keys.values():
+        if isinstance(raw_round_id, bool):
+            continue
+        try:
+            round_id = int(raw_round_id)
+        except (TypeError, ValueError):
+            continue
+        if round_id > 0:
+            bound_ids.add(round_id)
+    return bound_ids
+
+
 def bound_ruleset_version_label(contest_round: ContestRound) -> str:
     """Label the frozen ruleset version bound to a round via its binding snapshot, if any."""
     from ruleset.models import ContestRuleset, RulesetVersion
@@ -2368,11 +2393,7 @@ _ADVANCING_OUTCOME_CODES = frozenset(
 
 def _draft_stage_rounds_for_frozen_version(activity: Activity, version, stage_key: str):
     """Return only current-frozen DRAFT rounds declared in the version binding."""
-    bound_round_ids = {
-        int(round_id)
-        for round_id in (_version_binding(version).get("round_keys") or {}).values()
-        if str(round_id).isdigit() and int(round_id) > 0
-    }
+    bound_round_ids = _bound_round_ids_for_version(version)
     if not bound_round_ids:
         return ContestRound.objects.none()
     return ContestRound.objects.select_for_update().filter(
@@ -3193,6 +3214,7 @@ def unlock_stage_result(stage: StageResult, *, operator, note: str = "") -> Stag
         raise ValidationError("只能解锁该赛段当前最新结果。")
     downstream_started = ContestRound.objects.filter(
         activity=locked.activity,
+        pk__in=_bound_round_ids_for_version(version),
         roster_source=ContestRound.RosterSource.STAGE,
         roster_source_stage=locked.stage_key,
         status__in=[
