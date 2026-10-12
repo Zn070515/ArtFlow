@@ -369,7 +369,7 @@ def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
         )
     )
     if not advancing_ids:
-        return RoundSetupReadiness.READY if entry_ids else RoundSetupReadiness.MISSING_UPSTREAM
+        return RoundSetupReadiness.STALE if entry_ids else RoundSetupReadiness.MISSING_UPSTREAM
     if not entry_ids:
         if (
             Performance.objects.filter(round=contest_round).exists()
@@ -1671,8 +1671,12 @@ def bound_ruleset_version_label(contest_round: ContestRound) -> str:
             .order_by("-version")
             .first()
         )
-        binding = _version_binding(version) if version is not None else {}
-        if not binding.get("round_keys"):
+        if version is not None:
+            # A current frozen version is authoritative even when it deliberately binds no
+            # rounds. Do not let a later draft edit make an unbound round look official.
+            binding = version.binding or {}
+        else:
+            # Preserve the legacy draft label for activities that have no frozen authority.
             binding = {"round_keys": dict(ruleset.round_keys or {})}
         for round_pk in binding.get("round_keys", {}).values():
             if str(round_pk) == str(contest_round.pk):
