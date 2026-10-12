@@ -3285,7 +3285,7 @@ def _current_frozen_version(activity):
     """
     from ruleset.models import ContestRuleset, RulesetVersion
 
-    candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by("pk")
+    candidates = ContestRuleset.objects.filter(activity=activity).order_by("pk")
     if candidates.count() > 1:
         raise ValidationError("该活动存在多个自动重算赛制，请先清理重复。")
     ruleset = candidates.first()
@@ -3747,9 +3747,7 @@ def recompute_activity_result(
     lock_activity_for_action(activity)
 
     if ruleset is None:
-        candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by(
-            "pk"
-        )
+        candidates = ContestRuleset.objects.filter(activity=activity).order_by("pk")
         # §16/§32: one activity owns exactly one contest ruleset; versions hold the history.
         # A stray duplicate is a data error, so fail loudly instead of silently picking the
         # newest and revealing an ambiguous authority.
@@ -3776,6 +3774,8 @@ def recompute_activity_result(
         raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     bound = {key: rounds[rid] for key, rid in raw_keys.items()}
     stage_key = checkpoint or binding.get("stage_key") or ruleset.stage_key or ""
+    if not stage_key:
+        raise ValidationError("该冻结赛制没有可发布的结果赛段。")
     result = run_ruleset(
         version,
         activity,
