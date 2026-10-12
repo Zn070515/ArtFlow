@@ -4273,6 +4273,12 @@ class RoundEntryBridgeTests(TestCase):
             roster_source_stage="stage1",
         )
         self._seed_r1()
+        self._set_frozen_binding(
+            {
+                "stage_key": "stage1",
+                "round_keys": {"r1": self.prelim.pk, "final": self.final.pk},
+            }
+        )
 
     def _singer(self, index):
         return SingerRegistration.objects.create(
@@ -4324,6 +4330,11 @@ class RoundEntryBridgeTests(TestCase):
                     is_test_data=True,
                 )
 
+    def _set_frozen_binding(self, binding):
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(binding=binding)
+        self.version.refresh_from_db()
+
     def test_stage1_bridges_next_round_entry_to_top3(self):
         from .services import run_ruleset
 
@@ -4339,6 +4350,83 @@ class RoundEntryBridgeTests(TestCase):
         self.assertEqual(stage.stage_key, "stage1")  # type: ignore[union-attr]
         self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
 
+    def test_empty_ruleset_stage_key_still_uses_frozen_checkpoint_version(self):
+        from .services import materialize_round_entry_from_stage
+
+        self.ruleset.stage_key = ""
+        self.ruleset.save(update_fields=["stage_key"])
+        self._set_frozen_binding(
+            {
+                "stage_key": "",
+                "round_keys": {"r1": self.prelim.pk, "final": self.final.pk},
+            }
+        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.admin,
+                stage_key="stage1",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                result_version=1,
+                is_test_data=True,
+            )
+            StageDecision.objects.bulk_create(
+                [
+                    StageDecision(
+                        stage_result=stage,
+                        singer=singer,
+                        outcome_code="direct",
+                        rank=index,
+                        is_test_data=True,
+                    )
+                    for index, singer in enumerate(self.singers[:3], start=1)
+                ]
+            )
+
+        materialize_round_entry_from_stage(stage, operator=self.admin)
+
+        self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
+
+    def test_rejects_stale_stage_result_before_changing_roster(self):
+        from .services import materialize_round_entry_from_stage
+
+        self._set_frozen_binding(
+            {
+                "stage_key": "stage1",
+                "round_keys": {"r1": self.prelim.pk, "final": self.final.pk},
+            }
+        )
+
+        def stage_with_decision(result_version, singer):
+            with authority_write(STAGE_RESULT_RESOLVE):
+                stage = StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    created_by=self.admin,
+                    stage_key="stage1",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    result_version=result_version,
+                    is_test_data=True,
+                )
+                StageDecision.objects.create(
+                    stage_result=stage,
+                    singer=singer,
+                    outcome_code="direct",
+                    rank=1,
+                    is_test_data=True,
+                )
+            return stage
+
+        stale = stage_with_decision(1, self.singers[0])
+        current = stage_with_decision(2, self.singers[1])
+        materialize_round_entry_from_stage(current, operator=self.admin)
+
+        with self.assertRaisesMessage(ValidationError, "最新"):
+            materialize_round_entry_from_stage(stale, operator=self.admin)
+
+        self.assertEqual(self._entry_ids(self.final), [self.singers[1].pk])
+
     def test_one_stage_materializes_every_configured_downstream_round(self):
         from .services import materialize_round_entry_from_stage
 
@@ -4351,6 +4439,16 @@ class RoundEntryBridgeTests(TestCase):
                 roster_source=ContestRound.RosterSource.STAGE,
                 roster_source_stage="stage1",
             )
+        self._set_frozen_binding(
+            {
+                "stage_key": "stage1",
+                "round_keys": {
+                    "r1": self.prelim.pk,
+                    "final": self.final.pk,
+                    "branch": branch.pk,
+                },
+            }
+        )
         with authority_write(STAGE_RESULT_RESOLVE):
             stage = StageResult.objects.create(
                 activity=self.activity,
@@ -4380,6 +4478,105 @@ class RoundEntryBridgeTests(TestCase):
         expected = [s.pk for s in self.singers[:3]]
         self.assertEqual(self._entry_ids(self.final), expected)
         self.assertEqual(self._entry_ids(branch), expected)
+
+    def test_unbound_draft_stage_round_is_not_materialized(self):
+        from .services import materialize_round_entry_from_stage
+
+        with authority_write(CONTEST_ROUND_STATE):
+            branch = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="未绑定复赛",
+                sequence=3,
+                roster_source=ContestRound.RosterSource.STAGE,
+                roster_source_stage="stage1",
+            )
+        self._set_frozen_binding(
+            {
+                "stage_key": "stage1",
+                "round_keys": {"r1": self.prelim.pk, "final": self.final.pk},
+            }
+        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.admin,
+                stage_key="stage1",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                result_version=1,
+                is_test_data=True,
+            )
+            StageDecision.objects.bulk_create(
+                [
+                    StageDecision(
+                        stage_result=stage,
+                        singer=singer,
+                        outcome_code="direct",
+                        rank=index,
+                        is_test_data=True,
+                    )
+                    for index, singer in enumerate(self.singers[:3], start=1)
+                ]
+            )
+
+        materialize_round_entry_from_stage(stage, operator=self.admin)
+
+        expected = [s.pk for s in self.singers[:3]]
+        self.assertEqual(self._entry_ids(self.final), expected)
+        self.assertEqual(self._entry_ids(branch), [])
+
+    def test_materialization_rolls_back_all_targets_when_later_target_fails(self):
+        from .services import materialize_round_entry_from_stage
+
+        with authority_write(CONTEST_ROUND_STATE):
+            branch = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="失败复赛",
+                sequence=3,
+                order_policy=ContestRound.OrderPolicy.PREVIOUS_RANK_ASC,
+                roster_source=ContestRound.RosterSource.STAGE,
+                roster_source_stage="stage1",
+            )
+        self._set_frozen_binding(
+            {
+                "stage_key": "stage1",
+                "round_keys": {
+                    "r1": self.prelim.pk,
+                    "final": self.final.pk,
+                    "branch": branch.pk,
+                },
+            }
+        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            stage = StageResult.objects.create(
+                activity=self.activity,
+                ruleset_version=self.version,
+                created_by=self.admin,
+                stage_key="stage1",
+                status=StageResult.Status.READY_TO_CONFIRM,
+                result_version=1,
+                is_test_data=True,
+            )
+            StageDecision.objects.bulk_create(
+                [
+                    StageDecision(
+                        stage_result=stage,
+                        singer=singer,
+                        outcome_code="direct",
+                        rank=index,
+                        is_test_data=True,
+                    )
+                    for index, singer in enumerate(self.singers[:3], start=1)
+                ]
+            )
+
+        with self.assertRaisesMessage(ValidationError, "上一轮成绩"):
+            materialize_round_entry_from_stage(stage, operator=self.admin)
+
+        self.assertEqual(self._entry_ids(self.final), [])
+        self.assertEqual(self._entry_ids(branch), [])
 
     def test_stage_roster_reads_only_the_current_frozen_ruleset_version(self):
         from .services import _round_source_singers, round_setup_readiness

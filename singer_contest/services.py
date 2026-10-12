@@ -2366,6 +2366,24 @@ _ADVANCING_OUTCOME_CODES = frozenset(
 )
 
 
+def _draft_stage_rounds_for_frozen_version(activity: Activity, version, stage_key: str):
+    """Return only current-frozen DRAFT rounds declared in the version binding."""
+    bound_round_ids = {
+        int(round_id)
+        for round_id in (_version_binding(version).get("round_keys") or {}).values()
+        if str(round_id).isdigit() and int(round_id) > 0
+    }
+    if not bound_round_ids:
+        return ContestRound.objects.none()
+    return ContestRound.objects.select_for_update().filter(
+        activity=activity,
+        pk__in=bound_round_ids,
+        roster_source=ContestRound.RosterSource.STAGE,
+        roster_source_stage=stage_key,
+        status=ContestRound.Status.DRAFT,
+    )
+
+
 @transaction.atomic
 def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> ContestRound | None:
     """Auto-generate a DRAFT round's entry roster from a resolved stage.
@@ -2380,23 +2398,32 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     retains a contestant who no longer advances. Returns the first target for backwards
     compatibility, or None when no DRAFT STAGE round consumes this stage.
     """
-    if stage.status not in {
+    locked_activity = lock_activity_for_action(Activity.objects.get(pk=stage.activity_id))
+    locked_stage = StageResult.objects.select_for_update().get(pk=stage.pk)
+    current_version = _current_frozen_version(locked_activity)
+    if current_version is None:
+        return None
+    if locked_stage.ruleset_version_id != current_version.pk:
+        return None
+    if bool(locked_stage.is_test_data) != runtime_is_test(locked_activity):
+        raise ValidationError("赛段结果与活动运行模式不一致，不能物化名单。")
+    if locked_stage.status not in {
         StageResult.Status.READY_TO_CONFIRM,
         StageResult.Status.CONFIRMED,
     }:
         return None
-    current_version = _current_frozen_version(stage.activity)
-    if current_version is None or stage.ruleset_version_id != current_version.pk:
-        return None
+    latest_version = StageResult.objects.filter(
+        activity=locked_activity,
+        stage_key=locked_stage.stage_key,
+        is_test_data=runtime_is_test(locked_activity),
+    ).aggregate(m=Max("result_version"))["m"]
+    if locked_stage.result_version != latest_version:
+        raise ValidationError("该赛段存在更新的结果版本，请使用最新结果。")
+    stage = locked_stage
     targets = list(
-        ContestRound.objects.select_for_update()
-        .filter(
-            activity=stage.activity,
-            roster_source=ContestRound.RosterSource.STAGE,
-            roster_source_stage=stage.stage_key,
-            status=ContestRound.Status.DRAFT,
-        )
-        .order_by("sequence", "pk")
+        _draft_stage_rounds_for_frozen_version(
+            locked_activity, current_version, stage.stage_key
+        ).order_by("sequence", "pk")
     )
     if not targets:
         return None
@@ -3109,11 +3136,11 @@ def _invalidate_downstream_stage_rounds(stage: StageResult, *, operator) -> None
     downstream setup. Clearing the derived snapshot before raw facts are corrected also
     prevents the next resolve from reading stale groups or manual roster entries.
     """
-    downstream = ContestRound.objects.select_for_update().filter(
-        activity=stage.activity,
-        roster_source=ContestRound.RosterSource.STAGE,
-        roster_source_stage=stage.stage_key,
-        status=ContestRound.Status.DRAFT,
+    current_version = _current_frozen_version(stage.activity)
+    if current_version is None:
+        return
+    downstream = _draft_stage_rounds_for_frozen_version(
+        stage.activity, current_version, stage.stage_key
     )
     for contest_round in downstream:
         has_facts = (
@@ -3285,7 +3312,7 @@ def _current_frozen_version(activity):
     """
     from ruleset.models import ContestRuleset, RulesetVersion
 
-    candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by("pk")
+    candidates = ContestRuleset.objects.filter(activity=activity).order_by("pk")
     if candidates.count() > 1:
         raise ValidationError("该活动存在多个自动重算赛制，请先清理重复。")
     ruleset = candidates.first()
@@ -3747,9 +3774,7 @@ def recompute_activity_result(
     lock_activity_for_action(activity)
 
     if ruleset is None:
-        candidates = ContestRuleset.objects.filter(activity=activity, stage_key__gt="").order_by(
-            "pk"
-        )
+        candidates = ContestRuleset.objects.filter(activity=activity).order_by("pk")
         # §16/§32: one activity owns exactly one contest ruleset; versions hold the history.
         # A stray duplicate is a data error, so fail loudly instead of silently picking the
         # newest and revealing an ambiguous authority.
@@ -3776,6 +3801,8 @@ def recompute_activity_result(
         raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     bound = {key: rounds[rid] for key, rid in raw_keys.items()}
     stage_key = checkpoint or binding.get("stage_key") or ruleset.stage_key or ""
+    if not stage_key:
+        raise ValidationError("该冻结赛制没有可发布的结果赛段。")
     result = run_ruleset(
         version,
         activity,
