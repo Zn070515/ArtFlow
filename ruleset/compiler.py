@@ -464,6 +464,13 @@ def _check_conversion(node: dict, prov: dict, issues: list[ReportIssue]) -> None
         declared_from = _scale_number(entry.get("from"))
         declared_to = _scale_number(entry.get("to"))
         factor = _conversion_factor(node, source, actual, target)
+        if actual is None:
+            _warn_scale(
+                node,
+                "SCALE_UNDECLARED",
+                f"分量 {source} 的实际满分未知，不能仅凭 conversion.from 证明来源尺度。",
+                issues,
+            )
         if actual is not None and declared_from != actual:
             issues.append(
                 ReportIssue(

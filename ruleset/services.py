@@ -399,6 +399,7 @@ def update_ruleset_definition_sections(
         # An empty checkpoint list is not a valid general ruleset document.  The business
         # editor nevertheless needs a valid roster-only blank state, represented by an
         # omitted optional field.
+        root.pop("checkpoints", None)
         sections_to_apply.pop("checkpoints")
     root.update(sections_to_apply)
     parse_definition(root)
@@ -595,6 +596,24 @@ def save_business_ruleset(
         if str(existing_round_keys.get(key, "")).isdigit() and int(existing_round_keys[key]) > 0
     }
     relevant_ids = referenced_existing_ids | requested_ids
+    current_frozen = (
+        RulesetVersion._base_manager.filter(
+            ruleset_id=locked.ruleset_id,
+            status=RulesetVersion.Status.FROZEN,
+            is_current=True,
+        )
+        .exclude(pk=locked.pk)
+        .values_list("binding", flat=True)
+        .first()
+    )
+    frozen_round_keys = (
+        current_frozen.get("round_keys", {}) if isinstance(current_frozen, dict) else {}
+    )
+    protected_round_ids = {
+        int(round_id)
+        for round_id in frozen_round_keys.values()
+        if str(round_id).isdigit() and int(round_id) > 0
+    }
     locked_rounds = {
         round_.pk: round_
         for round_ in ContestRound.objects.select_for_update().filter(
@@ -627,6 +646,7 @@ def save_business_ruleset(
         owner_by_id[mapped_id] = round_key
 
     configured_ids: set[int] = set()
+    scoring_modes_by_id: dict[int, str] = {}
     for request in round_requests:
         stage = request["stage"]
         source = request["source"]
@@ -667,7 +687,7 @@ def save_business_ruleset(
         round_ = locked_rounds[mapped_id]
         round_ids_by_key[round_key] = mapped_id
         desired = {
-            "name": source["round_name"] or stage["name"],
+            "name": source["round_name"] or round_.name or stage["name"],
             "scoring_mode": request["scoring_mode"],
             "advance_count": stage["advance_count"],
             "roster_source": (
@@ -681,10 +701,20 @@ def save_business_ruleset(
                 else normalized_stages[request["stage_index"] - 2]["key"]
             ),
         }
+        prior_mode = scoring_modes_by_id.get(mapped_id)
+        if prior_mode is not None and prior_mode != request["scoring_mode"]:
+            raise ValidationError(
+                f"轮次“{round_.name or mapped_id}”不能在不同阶段使用不同评分方式。"
+            )
+        scoring_modes_by_id[mapped_id] = request["scoring_mode"]
         # A round referenced by multiple stages has one configuration owner: the first
         # occurrence.  Later references keep the original roster/advance configuration.
         if owner_by_id.get(mapped_id) == round_key and mapped_id not in configured_ids:
             changed = any(getattr(round_, field) != value for field, value in desired.items())
+            if mapped_id in protected_round_ids and changed:
+                raise PermissionDenied(
+                    f"当前冻结赛制仍使用轮次“{round_.name or mapped_id}”，不能修改其执行配置。"
+                )
             if (round_.status != ContestRound.Status.DRAFT or round_.is_locked) and changed:
                 raise PermissionDenied(
                     f"轮次“{round_.name or round_.pk}”已准备，不能由业务编辑器修改。"

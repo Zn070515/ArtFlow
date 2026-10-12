@@ -4251,6 +4251,7 @@ def _business_stages_from_post(post):
                     "weight": (post.get(f"{source_prefix}_weight") or "0").strip(),
                     "create_round": post.get(f"{source_prefix}_create_round") == "on",
                     "source": (post.get(f"{source_prefix}_source") or "").strip(),
+                    "source_stage_index": post.get(f"{source_prefix}_source_stage_index") or "",
                 }
             )
         try:

@@ -128,15 +128,23 @@ def _normalize_stage(stage, index: int) -> dict:
             )
             if source_scoring_mode != stage_scoring_mode:
                 raise ValidationError(f"阶段“{key}”不能混用多种评分方式。")
-            judge_sources.append(
-                {
-                    "round_key": source_round,
-                    "round_name": str(source.get("round_name") or "").strip(),
-                    "weight": _decimal_text(source_weight),
-                    "scoring_mode": source_scoring_mode,
-                    "source": str(source.get("source") or "").strip(),
-                }
-            )
+            normalized_source: dict[str, str] = {
+                "round_key": source_round,
+                "round_name": str(source.get("round_name") or "").strip(),
+                "weight": _decimal_text(source_weight),
+                "scoring_mode": source_scoring_mode,
+                "source": str(source.get("source") or "").strip(),
+            }
+            raw_source_stage_index = source.get("source_stage_index")
+            if raw_source_stage_index not in (None, ""):
+                try:
+                    source_stage_index = int(raw_source_stage_index)
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError(f"阶段“{key}”的评委来源名单阶段标识无效。") from exc
+                if source_stage_index < 0 or source_stage_index >= index:
+                    raise ValidationError(f"阶段“{key}”的评委来源名单阶段标识无效。")
+                normalized_source["source_stage_index"] = str(source_stage_index)
+            judge_sources.append(normalized_source)
         source_total = sum((Decimal(source["weight"]) for source in judge_sources), Decimal("0"))
         if source_total != weights["judge_weight"]:
             raise ValidationError(f"阶段“{key}”的评委来源权重必须合计为评委权重。")
@@ -196,6 +204,8 @@ def business_definition_from_stages(
     checkpoints: list[dict] = []
     previous_output = ENTRY_KEY
     previous_score = ""
+    generated_outputs_by_stage = {0: ENTRY_KEY}
+    assess_nodes_by_signature: dict[tuple[str, str, str], str] = {}
     for index, stage in enumerate(normalized, start=1):
         score_sources: list[dict] = []
         judge_weight = Decimal(stage["judge_weight"])
@@ -204,24 +214,38 @@ def business_definition_from_stages(
 
         if judge_weight:
             for judge_source in stage["judge_sources"]:
-                assess_key = _unique_key(used, f"assess_{judge_source['round_key']}")
-                nodes.append(
-                    {
-                        "key": assess_key,
-                        "type": "ASSESS",
-                        "source": judge_source.get("source") or previous_output,
-                        "round": judge_source["round_key"],
-                        **(
-                            {
-                                "mode": "trimmed_mean",
-                                "trim_high": 1,
-                                "trim_low": 1,
-                            }
-                            if judge_source["scoring_mode"] == "drop_high_low"
-                            else {"mode": "mean"}
-                        ),
-                    }
+                source = judge_source.get("source") or previous_output
+                raw_source_stage_index = judge_source.get("source_stage_index")
+                if raw_source_stage_index is not None:
+                    source = generated_outputs_by_stage.get(int(raw_source_stage_index))
+                    if source is None:
+                        raise ValidationError(f"阶段“{stage['key']}”引用了无法重映射的上游名单。")
+                assess_signature = (
+                    judge_source["round_key"],
+                    source,
+                    judge_source["scoring_mode"],
                 )
+                assess_key = assess_nodes_by_signature.get(assess_signature)
+                if assess_key is None:
+                    assess_key = _unique_key(used, f"assess_{judge_source['round_key']}")
+                    nodes.append(
+                        {
+                            "key": assess_key,
+                            "type": "ASSESS",
+                            "source": source,
+                            "round": judge_source["round_key"],
+                            **(
+                                {
+                                    "mode": "trimmed_mean",
+                                    "trim_high": 1,
+                                    "trim_low": 1,
+                                }
+                                if judge_source["scoring_mode"] == "drop_high_low"
+                                else {"mode": "mean"}
+                            ),
+                        }
+                    )
+                    assess_nodes_by_signature[assess_signature] = assess_key
                 score_sources.append(
                     {
                         "source": assess_key,
@@ -270,6 +294,7 @@ def business_definition_from_stages(
             }
         )
         checkpoints.append({"key": stage["key"], "output": output_key})
+        generated_outputs_by_stage[index] = output_key
         previous_output = output_key
         previous_score = score_key
     return nodes, checkpoints, context
@@ -375,6 +400,7 @@ def infer_business_stages(definition) -> dict:
     previous_output = ENTRY_KEY
     previous_score = ""
     available_rosters = {ENTRY_KEY}
+    roster_stage_by_key = {ENTRY_KEY: 0}
     for index, checkpoint in enumerate(checkpoints, start=1):
         stage_key = str(checkpoint.get("key") or f"stage{index}")
         if checkpoint.get("decisions"):
@@ -515,6 +541,7 @@ def infer_business_stages(definition) -> dict:
                             "weight": _decimal_text(weight),
                             "source": str(source_origin),
                             "scoring_mode": mode,
+                            "source_stage_index": str(roster_stage_by_key[source_origin]),
                         }
                     )
                 else:
@@ -552,6 +579,7 @@ def infer_business_stages(definition) -> dict:
         previous_output = output_key
         previous_score = aggregate_key
         available_rosters.add(output_key)
+        roster_stage_by_key[output_key] = index
 
     all_keys = set(nodes_by_key)
     if all_keys - used:

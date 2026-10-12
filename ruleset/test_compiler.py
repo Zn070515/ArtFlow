@@ -480,6 +480,41 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
 
         self.assertIn("CONVERSION_FACTOR_MISMATCH", report.codes())
 
+    def test_bound_rejects_explicit_conversion_without_trusted_source_scale(self):
+        report, _ = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [{"source": "a", "weight": 1}],
+                        },
+                        "conversion": {
+                            "to": 100,
+                            "conversions": [
+                                {
+                                    "source": "a",
+                                    "from": 10,
+                                    "to": 100,
+                                    "method": "factor",
+                                    "factor": 10,
+                                }
+                            ],
+                        },
+                    },
+                ],
+                context={"entry_size": 1},
+            ),
+            bound=True,
+        )
+
+        self.assertIn("SCALE_UNDECLARED", report.codes())
+        self.assertEqual(report.by_code("SCALE_UNDECLARED")[0].severity.value, "error")
+        self.assertFalse(report.passes())
+
     def test_unsupported_conversion_method_remains_rejected(self):
         report, _ = compile_definition(
             _def(
