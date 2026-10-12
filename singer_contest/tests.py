@@ -87,6 +87,7 @@ from .services import (
     reset_round_snapshots,
     reset_round_to_draft,
     reset_test_round_snapshots,
+    snapshot_fingerprint,
     unlock_round,
     validate_score,
 )
@@ -1188,6 +1189,45 @@ class ScoringServiceTests(TestCase):
         self.assertIn("ruleset_version", meta)
         self.assertIn("snapshot_fingerprint", meta)
         self.assertTrue(meta["snapshot_fingerprint"])
+
+    def test_score_template_uses_empty_frozen_binding_for_version_metadata(self):
+        prepare_round(self.round, self.user)
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity,
+            name="Empty frozen binding",
+            round_keys={"prelim": self.round.pk},
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=_roster_bridge_definition(),
+                binding={},
+                is_current=True,
+                status=RulesetVersion.Status.FROZEN,
+            )
+
+        wb = build_score_template_workbook(self.round)
+        meta = self._meta_dict(wb)
+
+        self.assertEqual(meta["ruleset_version"], "")
+        self.assertEqual(
+            meta["snapshot_fingerprint"],
+            snapshot_fingerprint(
+                schema_version="1",
+                activity_id=self.activity.pk,
+                round_id=self.round.pk,
+                ruleset_version="",
+                entry_ids=[str(self.singer.pk)],
+                judge_ids=[str(self.judge.pk)],
+            ),
+        )
+
+        worksheet = wb.active
+        assert worksheet is not None
+        worksheet.cell(row=2, column=3).value = 88
+        scores, errors = self._parse_workbook(wb)
+        self.assertEqual(errors, [])
+        self.assertEqual(scores, {(self.singer.pk, self.judge.pk): Decimal("88")})
 
     def test_parse_score_workbook_accepts_matching_snapshot(self):
         prepare_round(self.round, self.user)
@@ -4597,6 +4637,20 @@ class RoundEntryBridgeTests(TestCase):
         self.assertEqual(self.final.status, ContestRound.Status.DRAFT)
         self.assertEqual(self._entry_ids(self.final), [self.singers[0].pk, self.singers[3].pk])
 
+    def test_prepare_rejects_stale_roster_when_confirmed_stage_has_no_advancers(self):
+        from .services import RoundSetupReadiness, round_setup_readiness
+
+        self._confirm_upstream_stage1()
+        RoundEntry.objects.create(round=self.final, singer=self.singers[0])
+
+        self.assertEqual(round_setup_readiness(self.final), RoundSetupReadiness.STALE)
+        with self.assertRaisesMessage(ValidationError, "晋级名单已变化"):
+            prepare_round(self.final, self.admin)
+
+        self.final.refresh_from_db()
+        self.assertEqual(self.final.status, ContestRound.Status.DRAFT)
+        self.assertEqual(self._entry_ids(self.final), [self.singers[0].pk])
+
     def test_materialization_rolls_back_all_targets_when_later_target_fails(self):
         from .services import materialize_round_entry_from_stage
 
@@ -4831,8 +4885,8 @@ class RoundEntryBridgeTests(TestCase):
         )
         self.assertEqual(inputs.roster, tuple(str(s.pk) for s in self.singers[:3]))
 
-    def test_stage_round_seeds_from_roster_not_is_advanced(self):
-        from .services import prepare_round
+    def test_stage_round_rejects_stale_roster_not_is_advanced(self):
+        from .services import RoundSetupReadiness, prepare_round, round_setup_readiness
 
         self._confirm_upstream_stage1()
         RoundEntry.objects.bulk_create(
@@ -4847,9 +4901,13 @@ class RoundEntryBridgeTests(TestCase):
             is_advanced=True,
             is_test_data=True,
         )
-        prepared = prepare_round(self.final, self.admin)
+        self.assertEqual(round_setup_readiness(self.final), RoundSetupReadiness.STALE)
+        with self.assertRaisesMessage(ValidationError, "晋级名单已变化"):
+            prepare_round(self.final, self.admin)
+
         self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
-        self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
+        self.final.refresh_from_db()
+        self.assertEqual(self.final.status, ContestRound.Status.DRAFT)
 
     def test_stage_round_without_roster_raises(self):
         from .services import prepare_round
