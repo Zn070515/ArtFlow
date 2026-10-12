@@ -60,6 +60,11 @@ COPY --chown=artflow:artflow tickets ./tickets
 COPY --chown=artflow:artflow voting ./voting
 COPY --chown=artflow:artflow static ./static
 COPY --chown=artflow:artflow templates ./templates
+# The production image runs Django's PostgreSQL acceptance suite without the dev
+# extra. Keep only the shared marker helper; the pytest-only repository tests stay
+# on the host/CI test image.
+COPY --chown=artflow:artflow tests/helpers.py ./tests/helpers.py
+COPY --chown=artflow:artflow tests/migration_helpers.py ./tests/migration_helpers.py
 COPY --chown=artflow:artflow \
     scripts/docker-entrypoint.sh \
     scripts/wait-for-postgres.sh \

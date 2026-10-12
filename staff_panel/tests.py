@@ -8161,6 +8161,156 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, 'name="stage_2_audience_source" value="top5"')
         self.assertContains(response, 'name="stage_2_audience_source_stage_key" value="stage2"')
 
+    def test_business_editor_keeps_ruleset_scoring_mode_and_shows_round_conflict(self):
+        self.version.definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {
+                        "key": "assess_r1",
+                        "type": "ASSESS",
+                        "source": "entry",
+                        "round": "r1",
+                        "mode": "trimmed_mean",
+                        "trim_high": 1,
+                        "trim_low": 1,
+                    },
+                    {
+                        "key": "stage1_score",
+                        "type": "AGGREGATE",
+                        "within": "entry",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [{"source": "assess_r1", "weight": 1}],
+                        },
+                    },
+                    {
+                        "key": "rank1",
+                        "type": "RANK",
+                        "source": "stage1_score",
+                        "descending": True,
+                    },
+                    {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                ],
+                "checkpoints": [{"key": "stage1", "output": "top10"}],
+            },
+            ensure_ascii=False,
+        )
+        self.version.save(update_fields=["definition"])
+        round_ = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮",
+            scoring_mode=ContestRound.ScoringMode.AVERAGE,
+        )
+        self.ruleset.round_keys = {"r1": round_.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        source = response.context["business_editor"]["stages"][0]["judge_sources"][0]
+        self.assertEqual(source["scoring_mode"], ContestRound.ScoringMode.DROP_HIGH_LOW)
+        self.assertTrue(source["scoring_mode_conflict"])
+        self.assertContains(response, "scoring_mode_conflict_ack")
+        self.assertContains(response, "轮次当前评分方式与规则定义不一致")
+
+    def test_business_editor_requires_explicit_mode_ack_before_syncing_bound_round(self):
+        from ruleset.services import _binding_signature
+
+        self.version.definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {
+                        "key": "assess_r1",
+                        "type": "ASSESS",
+                        "source": "entry",
+                        "round": "r1",
+                        "mode": "trimmed_mean",
+                        "trim_high": 1,
+                        "trim_low": 1,
+                    },
+                    {
+                        "key": "stage1_score",
+                        "type": "AGGREGATE",
+                        "within": "entry",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [{"source": "assess_r1", "weight": 1}],
+                        },
+                    },
+                    {
+                        "key": "rank1",
+                        "type": "RANK",
+                        "source": "stage1_score",
+                        "descending": True,
+                    },
+                    {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                ],
+                "checkpoints": [{"key": "stage1", "output": "top10"}],
+            },
+            ensure_ascii=False,
+        )
+        self.version.save(update_fields=["definition"])
+        round_ = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮",
+            scoring_mode=ContestRound.ScoringMode.AVERAGE,
+        )
+        self.ruleset.round_keys = {"r1": round_.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        def payload(**extra):
+            values = {
+                "action": "business_save",
+                "base_content_hash": self.version.content_hash,
+                "base_binding": _binding_signature(self.ruleset),
+                "base_round_configuration": self._business_round_configuration_signature(),
+                "stage_count": "1",
+                "stage_0_key": "stage1",
+                "stage_0_name": "初赛",
+                "stage_0_advance_count": "10",
+                "stage_0_judge_source_count": "1",
+                "stage_0_judge_0_round_key": "r1",
+                "stage_0_judge_0_round_name": "第一轮",
+                "stage_0_judge_0_round_id": str(round_.pk),
+                "stage_0_judge_0_weight": "1",
+                "stage_0_judge_0_source": "entry",
+                "stage_0_judge_0_source_stage_key": "entry",
+                "stage_0_judge_0_create_round": "off",
+                "stage_0_judge_weight": "1",
+                "stage_0_previous_weight": "0",
+                "stage_0_audience_weight": "0",
+                "stage_0_vote_source": "",
+                "stage_0_scoring_mode": ContestRound.ScoringMode.DROP_HIGH_LOW,
+            }
+            values.update(extra)
+            return values
+
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]), payload(), follow=True
+        )
+        self.assertContains(response, "请明确确认后再同步")
+        round_.refresh_from_db()
+        self.assertEqual(round_.scoring_mode, ContestRound.ScoringMode.AVERAGE)
+
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            payload(stage_0_judge_0_scoring_mode_conflict_ack="on"),
+            follow=True,
+        )
+        self.assertContains(response, "赛制已保存")
+        round_.refresh_from_db()
+        self.version.refresh_from_db()
+        self.assertEqual(round_.scoring_mode, ContestRound.ScoringMode.DROP_HIGH_LOW)
+        assess = next(
+            node
+            for node in json.loads(self.version.definition)["nodes"]
+            if node["type"] == "ASSESS"
+        )
+        self.assertEqual(assess["mode"], "trimmed_mean")
+
     def test_business_editor_exposes_existing_round_keys(self):
         self.ruleset.round_keys = {"r4": 401}
         self.ruleset.save(update_fields=["round_keys"])

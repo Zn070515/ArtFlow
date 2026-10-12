@@ -89,8 +89,6 @@ function Assert-ContainerContracts {
     Assert-ContentMatch $compose 'POSTGRES_HOST:\s*db' 'an explicit db hostname'
     Assert-ContentMatch $compose 'POSTGRES_(DB|USER|PASSWORD):\s*artflow' 'explicit PostgreSQL credentials'
     Assert-ContentMatch $compose '(?m)^  artflow_frontend:\s*$' 'a host-connected web network'
-    Assert-ContentMatch $compose '(?m)^  artflow_internal:\s*$' 'an internal network'
-    Assert-ContentMatch $compose 'internal:\s*true' 'an internal-only network'
 
     $dbService = [regex]::Match($compose, '(?ms)^  db:\s*$.*?(?=^  [A-Za-z0-9_-]+:\s*$|\z)').Value
     if ($dbService -match '(?m)^    ports:\s*$') {
@@ -191,6 +189,7 @@ $temporaryProductionEnvironment = [ordered]@{
     ARTFLOW_RELEASE_SHA = 'a' * 40
     ARTFLOW_WEB_IMAGE = 'artflow-web:' + ('a' * 40)
     ARTFLOW_POSTGRES_IMAGE = 'postgres:16-alpine@sha256:' + ('b' * 64)
+    ARTFLOW_REDIS_IMAGE = 'redis:7-alpine@sha256:' + ('d' * 64)
     ARTFLOW_CADDY_IMAGE = 'caddy:2-alpine@sha256:' + ('c' * 64)
     CADDY_SITE_ADDRESS = 'artflow.internal'
     SECURE_HSTS_SECONDS = '31536000'

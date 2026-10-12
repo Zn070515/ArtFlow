@@ -105,6 +105,7 @@ class OperatorEndToEndTests(TestCase):
                 "round_type": ContestRound.RoundType.PRELIMINARY,
                 "name": f"轮次{sequence}",
                 "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+                "judge_count": len(self.judges),
                 "sequence": sequence,
                 "order_policy": order_policy or ContestRound.OrderPolicy.REGISTRATION_ORDER,
                 "roster_source": roster_source,
@@ -228,7 +229,7 @@ class OperatorEndToEndTests(TestCase):
         ]
         resp = self.client.post(
             reverse("staff:audience_scores_api", args=[self.activity.pk]),
-            data=json.dumps({"cells": cells}),
+            data=json.dumps({"cells": cells, "source": "external_form", "note": "验收测试表单"}),
             content_type="application/json",
         )
         return resp

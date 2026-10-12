@@ -345,6 +345,12 @@ scripts/             引导、校验、备份恢复与启动脚本。
 
 在干净且最新的 `main` 上创建短期分支，完成验证后在分支提交；由负责合并的人以非快进方式合入 `main` 并推送。提交前至少运行 Django 检查、迁移检查、测试和文档检查。完整的数据库、Docker、CI、故障排查和安全说明见 [开发基线](docs/development-baseline.md)。
 
+## 许可与商业授权 · License
+
+ArtFlow 的项目级授权见 [LICENSE.md](LICENSE.md)，两份 PolyForm 标准正文位于
+[`licenses/`](licenses/)。商业发行、收费托管、转售或超出适用免费许可范围的商业部署，
+请先阅读 [商业授权说明](COMMERCIAL-LICENSE.md) 并取得单独的书面授权；第三方依赖仍受其自身许可证约束。
+
 ## 开发与维护 · Built by
 
 <div align="center">

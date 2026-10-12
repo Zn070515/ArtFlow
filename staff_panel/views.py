@@ -4256,6 +4256,10 @@ def _business_stages_from_post(post):
                         post.get(f"{source_prefix}_source_stage_key") or ""
                     ).strip(),
                     "source_stage_index": post.get(f"{source_prefix}_source_stage_index") or "",
+                    "scoring_mode_conflict_ack": post.get(
+                        f"{source_prefix}_scoring_mode_conflict_ack"
+                    )
+                    == "on",
                 }
             )
         try:
@@ -4288,6 +4292,9 @@ def _business_stages_from_post(post):
                 or "",
                 "create_round": any(source["create_round"] for source in judge_sources),
                 "scoring_mode": post.get(f"{prefix}_scoring_mode") or "average",
+                "scoring_mode_conflict_ack": any(
+                    source["scoring_mode_conflict_ack"] for source in judge_sources
+                ),
             }
         )
     return stages
@@ -5021,6 +5028,7 @@ def ruleset_edit(request, pk):
             for item in round_candidates
         ]
         vote_by_id = {item.pk: item for item in vote_candidates}
+        scoring_mode_labels = dict(ContestRound.ScoringMode.choices)
         vote_options = [
             (
                 str(key),
@@ -5043,10 +5051,16 @@ def ruleset_edit(request, pk):
                     (item for item in round_candidates if str(item.pk) == source["round_id"]),
                     None,
                 )
-                source["scoring_mode"] = (
-                    bound_round.scoring_mode
+                source["bound_round_scoring_mode"] = (
+                    bound_round.scoring_mode if bound_round is not None else ""
+                )
+                source["bound_round_scoring_mode_label"] = (
+                    scoring_mode_labels.get(bound_round.scoring_mode, bound_round.scoring_mode)
                     if bound_round is not None
-                    else ContestRound.ScoringMode.AVERAGE
+                    else ""
+                )
+                source["scoring_mode_conflict"] = bool(
+                    bound_round is not None and bound_round.scoring_mode != source["scoring_mode"]
                 )
         business_editor["round_options"] = prepared_round_options
         business_editor["vote_options"] = vote_options

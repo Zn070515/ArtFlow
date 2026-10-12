@@ -39,7 +39,7 @@ from questionnaire.schema import parse_questionnaire
 from .business_editor import business_definition_from_stages, infer_business_stages
 from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
-from .schema import content_hash, parse_definition
+from .schema import ENTRY_KEY, content_hash, parse_definition
 
 
 class RulesetInvalidError(Exception):
@@ -519,6 +519,13 @@ def _business_stage_round_requests(stages, normalized_stages: list[dict]) -> lis
                     "scoring_mode": raw_source.get(
                         "scoring_mode", raw.get("scoring_mode", "average")
                     ),
+                    "scoring_mode_conflict_ack": bool(
+                        raw_source.get(
+                            "scoring_mode_conflict_ack",
+                            raw.get("scoring_mode_conflict_ack", False),
+                        )
+                    ),
+                    "source_stage_key": source["source_stage_key"],
                 }
             )
     return requests
@@ -588,7 +595,9 @@ def save_business_ruleset(
     existing_business = existing_context.get("business") or {}
     if not isinstance(existing_business, dict):
         raise ValidationError("赛制 context.business 必须是对象。")
-    old_business = existing_business.get("stages") or old_projection.get("stages") or []
+    # The graph projection is the execution authority.  ``context.business`` keeps
+    # operator-facing labels, but may be stale after an advanced-editor change.
+    old_business = old_projection.get("stages") or []
     old_keys = [item.get("key") for item in old_business if isinstance(item, dict)]
     new_keys = [str(item.get("key") or f"stage{index}") for index, item in enumerate(stage_list, 1)]
     shared_count = min(len(old_keys), len(new_keys))
@@ -709,6 +718,7 @@ def save_business_ruleset(
 
     configured_ids: set[int] = set()
     scoring_modes_by_id: dict[int, str] = {}
+    roster_scopes_by_id: dict[int, tuple[str, str]] = {}
     for request in round_requests:
         stage = request["stage"]
         source = request["source"]
@@ -719,6 +729,14 @@ def save_business_ruleset(
             or _business_round_id(existing_round_keys.get(round_key), label=round_key)
             or round_ids_by_key.get(round_key)
         )
+        created_round = False
+        source_stage_key = request["source_stage_key"]
+        roster_source = (
+            ContestRound.RosterSource.APPROVED
+            if source_stage_key == ENTRY_KEY
+            else ContestRound.RosterSource.STAGE
+        )
+        roster_source_stage = "" if source_stage_key == ENTRY_KEY else source_stage_key
         if mapped_id is None:
             if not request["create_round"]:
                 raise ValidationError(f"轮次“{round_key}”尚未绑定，请明确选择创建草稿轮次。")
@@ -734,34 +752,30 @@ def save_business_ruleset(
                     scoring_mode=request["scoring_mode"],
                     name=source["round_name"] or stage["name"],
                     advance_count=stage["advance_count"],
-                    roster_source=(
-                        ContestRound.RosterSource.APPROVED
-                        if request["stage_index"] == 1
-                        else ContestRound.RosterSource.STAGE
-                    ),
-                    roster_source_stage=""
-                    if request["stage_index"] == 1
-                    else normalized_stages[request["stage_index"] - 2]["key"],
+                    roster_source=roster_source,
+                    roster_source_stage=roster_source_stage,
                 )
             mapped_id = created.pk
+            created_round = True
             locked_rounds[mapped_id] = created
             owner_by_id[mapped_id] = round_key
         round_ = locked_rounds[mapped_id]
         round_ids_by_key[round_key] = mapped_id
+        if (
+            not created_round
+            and round_.scoring_mode != request["scoring_mode"]
+            and not request["scoring_mode_conflict_ack"]
+        ):
+            raise ValidationError(
+                f"轮次“{round_.name or round_.pk}”当前评分方式与规则定义不一致，"
+                "请明确确认后再同步。"
+            )
         desired = {
             "name": source["round_name"] or round_.name or stage["name"],
             "scoring_mode": request["scoring_mode"],
             "advance_count": stage["advance_count"],
-            "roster_source": (
-                ContestRound.RosterSource.APPROVED
-                if request["stage_index"] == 1
-                else ContestRound.RosterSource.STAGE
-            ),
-            "roster_source_stage": (
-                ""
-                if request["stage_index"] == 1
-                else normalized_stages[request["stage_index"] - 2]["key"]
-            ),
+            "roster_source": roster_source,
+            "roster_source_stage": roster_source_stage,
         }
         prior_mode = scoring_modes_by_id.get(mapped_id)
         if prior_mode is not None and prior_mode != request["scoring_mode"]:
@@ -769,6 +783,31 @@ def save_business_ruleset(
                 f"轮次“{round_.name or mapped_id}”不能在不同阶段使用不同评分方式。"
             )
         scoring_modes_by_id[mapped_id] = request["scoring_mode"]
+        prior_roster_scope = roster_scopes_by_id.get(mapped_id)
+        if prior_roster_scope is not None and prior_roster_scope != (
+            desired["roster_source"],
+            desired["roster_source_stage"],
+        ):
+            prior_source, prior_stage = prior_roster_scope
+            requested_source, requested_stage = (
+                desired["roster_source"],
+                desired["roster_source_stage"],
+            )
+            # An approved roster is a superset of any stage roster, so a later
+            # subset reference is safe while the reverse direction is not.
+            compatible_subset = (
+                prior_source == ContestRound.RosterSource.APPROVED
+                and requested_source == ContestRound.RosterSource.STAGE
+            )
+            if not compatible_subset:
+                raise ValidationError(
+                    f"轮次“{round_.name or round_.pk}”被不同阶段引用了不兼容的参赛名单范围 "
+                    f"（{prior_source}/{prior_stage} 与 {requested_source}/{requested_stage}）。"
+                )
+        roster_scopes_by_id.setdefault(
+            mapped_id,
+            (desired["roster_source"], desired["roster_source_stage"]),
+        )
         # A round referenced by multiple stages has one configuration owner: the first
         # occurrence.  Later references keep the original roster/advance configuration.
         if owner_by_id.get(mapped_id) == round_key and mapped_id not in configured_ids:
