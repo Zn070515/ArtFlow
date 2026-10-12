@@ -8188,7 +8188,9 @@ class RulesetEditorTests(TestCase):
         self.assertEqual([item["key"] for item in definition["checkpoints"]], ["stage1", "stage2"])
         self.assertEqual(self.ruleset.round_keys.keys(), {"r1", "r2"})
         self.assertEqual(
-            next(node for node in definition["nodes"] if node["key"] == "stage2")["aggregate"]["components"][0]["weight"],
+            next(node for node in definition["nodes"] if node["key"] == "stage2")["aggregate"][
+                "components"
+            ][0]["weight"],
             0.6,
         )
 

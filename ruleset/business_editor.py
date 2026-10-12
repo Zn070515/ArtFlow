@@ -14,7 +14,6 @@ from django.core.exceptions import ValidationError
 
 from .schema import ENTRY_KEY, parse_definition
 
-
 _EDITABLE_TYPES = frozenset({"ROSTER", "ASSESS", "AGGREGATE", "RANK", "SELECT"})
 _COMPLEX_LABELS = {
     "PARTITION": "分组",
@@ -108,9 +107,7 @@ def _normalize_stage(stage, index: int) -> dict:
             source_round = str(source.get("round_key") or "").strip()
             if not source_round:
                 raise ValidationError(f"阶段“{key}”的评委来源必须绑定轮次标识。")
-            source_weight = _decimal(
-                source.get("weight", "0"), field=f"阶段“{key}”评委来源权重"
-            )
+            source_weight = _decimal(source.get("weight", "0"), field=f"阶段“{key}”评委来源权重")
             if not source_weight:
                 raise ValidationError(f"阶段“{key}”的评委来源权重必须大于 0。")
             judge_sources.append(
@@ -120,9 +117,7 @@ def _normalize_stage(stage, index: int) -> dict:
                     "weight": _decimal_text(source_weight),
                 }
             )
-        source_total = sum(
-            (Decimal(source["weight"]) for source in judge_sources), Decimal("0")
-        )
+        source_total = sum((Decimal(source["weight"]) for source in judge_sources), Decimal("0"))
         if source_total != weights["judge_weight"]:
             raise ValidationError(f"阶段“{key}”的评委来源权重必须合计为评委权重。")
     round_key = judge_sources[0]["round_key"] if judge_sources else ""
@@ -181,7 +176,6 @@ def business_definition_from_stages(
     previous_output = ENTRY_KEY
     previous_score = ""
     for index, stage in enumerate(normalized, start=1):
-        round_key = stage["round_key"]
         score_sources: list[dict] = []
         judge_weight = Decimal(stage["judge_weight"])
         previous_weight = Decimal(stage["previous_weight"])
@@ -222,9 +216,7 @@ def business_definition_from_stages(
                     "vote_purpose": "SCORE_COMPONENT",
                 }
             )
-            score_sources.append(
-                {"source": audience_key, "weight": _json_number(audience_weight)}
-            )
+            score_sources.append({"source": audience_key, "weight": _json_number(audience_weight)})
 
         score_key = _unique_key(used, stage["key"])
         nodes.append(
@@ -236,9 +228,7 @@ def business_definition_from_stages(
             }
         )
         rank_key = _unique_key(used, f"rank{index}")
-        nodes.append(
-            {"key": rank_key, "type": "RANK", "source": score_key, "descending": True}
-        )
+        nodes.append({"key": rank_key, "type": "RANK", "source": score_key, "descending": True})
         output_base = f"top{stage['advance_count']}"
         output_key = _unique_key(used, output_base)
         nodes.append(
@@ -271,9 +261,7 @@ def infer_business_stages(definition) -> dict:
         return _unsupported(f"当前规则定义无法读取：{exc}")
     nodes = [node for node in (parsed.get("nodes") or ()) if isinstance(node, dict)]
     nodes_by_key: dict[str, dict] = {
-        node["key"]: node
-        for node in nodes
-        if isinstance(node.get("key"), str)
+        node["key"]: node for node in nodes if isinstance(node.get("key"), str)
     }
     unsupported_types = [
         str(node.get("type") or "") for node in nodes if node.get("type") not in _EDITABLE_TYPES
@@ -312,7 +300,7 @@ def infer_business_stages(definition) -> dict:
         output = nodes_by_key.get(output_key) or {}
         if output.get("type") != "SELECT" or not isinstance(output.get("count"), int):
             return _unsupported(f"阶段“{checkpoint.get('key', index)}”不是标准晋级阶段。")
-        current = output
+        current: dict | None = output
         visited = set()
         aggregate = None
         while current and current.get("key") not in visited:
