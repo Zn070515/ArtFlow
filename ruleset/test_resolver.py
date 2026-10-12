@@ -71,6 +71,96 @@ def _full_flow_def():
     )
 
 
+class ResolverConversionTests(SimpleTestCase):
+    def _definition(self, aggregate_type="weighted_sum", *, conversions=True):
+        conversion = None
+        if conversions:
+            conversion = {
+                "to": 100,
+                "conversions": [
+                    {
+                        "source": "ten_score",
+                        "from": 10,
+                        "to": 100,
+                        "method": "factor",
+                        "factor": 10,
+                    }
+                ],
+            }
+        aggregate = {
+            "type": aggregate_type,
+            "components": [
+                {"source": "ten_score", "weight": 0.5},
+                {"source": "hundred_score", "weight": 0.5},
+            ],
+        }
+        node = {
+            "key": "composite",
+            "type": "AGGREGATE",
+            "aggregate": aggregate,
+        }
+        if conversion is not None:
+            node["conversion"] = conversion
+        return _def(
+            [
+                {
+                    "key": "ten_score",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "round": "ten",
+                    "scale": "ten",
+                },
+                {
+                    "key": "hundred_score",
+                    "type": "ASSESS",
+                    "source": ENTRY_KEY,
+                    "round": "hundred",
+                    "scale": "hundred",
+                },
+                node,
+            ]
+        )
+
+    def _inputs(self):
+        return ResolveInput(
+            roster=("c1",),
+            round_scores={
+                "ten": {"c1": (Decimal("9"),)},
+                "hundred": {"c1": (Decimal("86"),)},
+            },
+        )
+
+    def test_factor_conversion_runs_before_weighted_sum(self):
+        first = resolve(self._definition(), self._inputs())
+        second = resolve(self._definition(), self._inputs())
+        self.assertEqual(first.status, ResolverState.READY)
+        self.assertEqual(first.composites[0].value, Decimal("88"))
+        self.assertEqual(first.composites[0].components[0][2], Decimal("90"))
+        self.assertEqual(first.composites[0].components[0][3], Decimal("45.0"))
+        self.assertEqual(first.node_values, second.node_values)
+        self.assertEqual(first.input_fingerprint, second.input_fingerprint)
+
+    def test_average_uses_converted_values(self):
+        result = resolve(self._definition("average"), self._inputs())
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.composites[0].value, Decimal("88"))
+
+    def test_missing_component_conversion_holds_instead_of_summing_raw_values(self):
+        definition = self._definition()
+        definition["nodes"][-1]["conversion"]["conversions"] = [
+            {
+                "source": "hundred_score",
+                "from": 100,
+                "to": 100,
+                "method": "factor",
+                "factor": 1,
+            }
+        ]
+        result = resolve(definition, self._inputs())
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertTrue(any("分数换算" in reason for reason in result.reasons))
+
+
 class ResolverWithinScopeTests(SimpleTestCase):
     """AGGREGATE may scope its computed pool to a roster via 'within'."""
 
