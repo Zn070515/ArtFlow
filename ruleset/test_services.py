@@ -22,7 +22,11 @@ from voting.models import VoteSession
 from ruleset.business_editor import infer_business_stages
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.resolver import ResolveInput, resolve, resolve_to_checkpoint
-from ruleset.services import save_business_ruleset, validate_definition_completeness
+from ruleset.services import (
+    business_round_configuration_signature,
+    save_business_ruleset,
+    validate_definition_completeness,
+)
 from ruleset.templates import golden_schidui
 
 
@@ -98,6 +102,7 @@ class BusinessRulesetSaveTests(TestCase):
         )
 
     def test_save_creates_and_binds_an_explicit_draft_round(self):
+        old_definition = self.version.definition
         saved = save_business_ruleset(
             self.version,
             stages=[_business_stage()],
@@ -116,6 +121,12 @@ class BusinessRulesetSaveTests(TestCase):
         )
         self.assertTrue(
             AuditLog.objects.filter(target=f"RulesetVersion:{self.version.pk}").exists()
+        )
+        audit = AuditLog.objects.get(target=f"RulesetVersion:{self.version.pk}")
+        self.assertEqual(json.loads(audit.old_value)["definition"], old_definition)
+        self.assertEqual(
+            json.loads(audit.new_value)["definition"],
+            saved.definition,
         )
 
     def test_save_updates_an_existing_draft_round_configuration(self):
@@ -446,6 +457,34 @@ class BusinessRulesetSaveTests(TestCase):
             base_binding=self._binding_signature(),
         )
 
+    def test_business_save_rejects_stale_round_configuration_snapshot(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            round_ = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="并发轮次",
+                advance_count=10,
+            )
+        self.ruleset.round_keys = {"r1": round_.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        base_round_configuration = business_round_configuration_signature(
+            ContestRound.objects.filter(activity=self.activity)
+        )
+
+        with authority_write(CONTEST_ROUND_STATE):
+            round_.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
+            round_.save(update_fields=["scoring_mode"])
+
+        with self.assertRaises(ValidationError):
+            save_business_ruleset(
+                self.version,
+                stages=[_business_stage(create_round=False)],
+                operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
+                base_round_configuration=base_round_configuration,
+            )
+
     def test_unrelated_prepared_round_does_not_block_a_new_business_round(self):
         with authority_write(CONTEST_ROUND_STATE):
             unrelated = ContestRound.objects.create(
@@ -551,7 +590,10 @@ class BusinessRulesetSaveTests(TestCase):
 
     def test_business_save_preserves_unowned_context_and_questionnaire(self):
         root = json.loads(self.version.definition)
-        root["context"] = {"audience_rule": "keep", "other": {"x": 1}}
+        root["context"] = {
+            "business": {"legacy_flag": "keep", "other": {"x": 1}},
+            "audience_rule": "keep",
+        }
         root["questionnaire"] = {
             "schema_version": 1,
             "key": "q",
@@ -583,7 +625,8 @@ class BusinessRulesetSaveTests(TestCase):
         self.version.refresh_from_db()
         stored = json.loads(self.version.definition)
         self.assertEqual(stored["context"]["audience_rule"], "keep")
-        self.assertEqual(stored["context"]["other"], {"x": 1})
+        self.assertEqual(stored["context"]["business"]["legacy_flag"], "keep")
+        self.assertEqual(stored["context"]["business"]["other"], {"x": 1})
         self.assertEqual(stored["questionnaire"], root["questionnaire"])
 
     def test_golden_business_round_trip_preserves_results_bindings_rosters_and_checkpoints(self):

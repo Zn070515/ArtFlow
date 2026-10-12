@@ -82,6 +82,7 @@
         <input type="hidden" name="action" value="business_save">
         <input type="hidden" name="base_content_hash" value="{{ version.content_hash }}">
         <input type="hidden" name="base_binding" value="{{ business_editor.binding_signature }}">
+        <input type="hidden" name="base_round_configuration" value="{{ business_editor.round_configuration_signature }}">
         <input type="hidden" name="stage_count" id="business-stage-count" value="{{ business_editor.stages|length }}">
         <div class="bg-blue-50 border-b border-blue-200 px-4 py-3">
             <h2 class="text-base font-semibold text-brand">业务编辑</h2>
@@ -136,6 +137,8 @@
                     </div>
                     <div>
                         <label class="block text-xs text-gray-700 mb-0.5">观众来源</label>
+                        <input type="hidden" name="stage_{{ forloop.counter0 }}_audience_source" value="{{ stage.audience_source }}">
+                        <input type="hidden" name="stage_{{ forloop.counter0 }}_audience_source_stage_index" value="{{ stage.audience_source_stage_index }}">
                         <select name="stage_{{ forloop.counter0 }}_vote_source" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                             <option value="">暂不绑定</option>
                             {% for value, label in stage.vote_options %}<option value="{{ value }}"{% if stage.vote_source == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -197,6 +200,8 @@
                     </div>
                     <div>
                         <label class="block text-xs text-gray-700 mb-0.5">观众来源</label>
+                        <input type="hidden" name="stage___INDEX___audience_source" value="">
+                        <input type="hidden" name="stage___INDEX___audience_source_stage_index" value="">
                         <select name="stage___INDEX___vote_source" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
                             <option value="">暂不绑定</option>
                             {% for value, label in business_editor.vote_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}

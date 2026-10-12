@@ -100,6 +100,7 @@ from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definiti
 from ruleset.services import (
     RulesetInvalidError,
     _binding_signature,
+    business_round_configuration_signature,
     create_ruleset_version,
     freeze_ruleset_version,
     save_business_ruleset,
@@ -4276,6 +4277,9 @@ def _business_stages_from_post(post):
                 "previous_weight": (post.get(f"{prefix}_previous_weight") or "0").strip(),
                 "audience_weight": (post.get(f"{prefix}_audience_weight") or "0").strip(),
                 "vote_source": (post.get(f"{prefix}_vote_source") or "").strip(),
+                "audience_source": (post.get(f"{prefix}_audience_source") or "").strip(),
+                "audience_source_stage_index": post.get(f"{prefix}_audience_source_stage_index")
+                or "",
                 "create_round": any(source["create_round"] for source in judge_sources),
                 "scoring_mode": post.get(f"{prefix}_scoring_mode") or "average",
             }
@@ -4839,6 +4843,7 @@ def ruleset_edit(request, pk):
                     operator=request.user,
                     base_content_hash=request.POST.get("base_content_hash") or None,
                     base_binding=request.POST.get("base_binding") or None,
+                    base_round_configuration=request.POST.get("base_round_configuration") or None,
                 )
             except PermissionDenied as exc:
                 messages.error(request, domain_error_messages(exc))
@@ -4997,6 +5002,9 @@ def ruleset_edit(request, pk):
     business_editor = infer_business_stages(version.definition)
     business_editor["content_hash"] = version.content_hash
     business_editor["binding_signature"] = _binding_signature(ruleset)
+    business_editor["round_configuration_signature"] = business_round_configuration_signature(
+        round_candidates
+    )
     if business_editor.get("editable"):
         prepared_round_options = [
             (
