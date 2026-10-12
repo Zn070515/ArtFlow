@@ -287,6 +287,26 @@ def _default_node_title(
     return node.get("type", "规则节点")
 
 
+_HUMAN_SUMMARY_NODE_TYPES = frozenset({"ROSTER", "ASSESS", "AGGREGATE", "RANK", "SELECT"})
+
+
+def _infer_linear_checkpoints(nodes: list[dict]) -> list[dict] | None:
+    """Infer preview-only stage cards for the small business-editor graph subset.
+
+    The inferred records never go back into the definition. They only keep a partially
+    authored linear graph readable until the operator explicitly confirms its checkpoints.
+    """
+    if any(node.get("type") not in _HUMAN_SUMMARY_NODE_TYPES for node in nodes):
+        return None
+    select_nodes = [node for node in nodes if node.get("type") == "SELECT"]
+    if not select_nodes:
+        return None
+    return [
+        {"key": f"inferred_stage_{index}", "output": node["key"]}
+        for index, node in enumerate(select_nodes, start=1)
+    ]
+
+
 def human_ruleset_summary(
     definition,
     *,
@@ -316,13 +336,33 @@ def human_ruleset_summary(
         for node in nodes
     }
     if not checkpoints:
-        return {
-            "supported": False,
-            "flow_label": "当前赛制未声明阶段检查点",
-            "stages": [],
-            "has_manual_decision": has_manual_decision,
-            "node_titles": node_titles,
-        }
+        if all(node.get("type") == "ROSTER" for node in nodes):
+            return {
+                "supported": True,
+                "state": "empty",
+                "notice": "尚未设置比赛环节，可以添加第一轮比赛。",
+                "flow_label": "等待设置比赛环节",
+                "stages": [],
+                "has_manual_decision": has_manual_decision,
+                "node_titles": node_titles,
+            }
+        inferred = _infer_linear_checkpoints(nodes)
+        if inferred is None:
+            return {
+                "supported": False,
+                "state": "unsupported",
+                "notice": "此处有尚不能完整解释的规则，请在高级编辑器中确认。",
+                "flow_label": "当前赛制包含待确认的规则结构",
+                "stages": [],
+                "has_manual_decision": has_manual_decision,
+                "node_titles": node_titles,
+            }
+        checkpoints = inferred
+        state = "partial"
+        notice = "当前规则尚未声明 checkpoint，请确认每个比赛阶段后再冻结。"
+    else:
+        state = "complete"
+        notice = ""
 
     stages = []
     for index, checkpoint in enumerate(checkpoints, start=1):
@@ -387,6 +427,8 @@ def human_ruleset_summary(
     flow_labels.extend(stage["output_label"] for stage in stages)
     return {
         "supported": True,
+        "state": state,
+        "notice": notice,
         "flow_label": " → ".join(flow_labels),
         "stages": stages,
         "has_manual_decision": has_manual_decision,

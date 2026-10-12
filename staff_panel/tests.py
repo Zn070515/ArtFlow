@@ -8019,6 +8019,25 @@ class RulesetEditorTests(TestCase):
         self.version.refresh_from_db()
         return json.loads(self.version.definition)["nodes"]
 
+    def test_blank_starter_definition_contains_only_the_roster(self):
+        from staff_panel.views import _starter_definition
+
+        definition = json.loads(_starter_definition())
+        self.assertEqual(definition["nodes"], [{"key": "roster", "type": "ROSTER"}])
+
+    def test_staff_can_edit_but_does_not_receive_freeze_control(self):
+        staff = _create_provisioned_user(
+            username="editor-staff",
+            password="pass",
+            role=User.Role.STAFF,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "确认并锁定赛制")
+
     def test_contest_ruleset_create_reuses_single_activity_authority(self):
         from ruleset.models import ContestRuleset
 

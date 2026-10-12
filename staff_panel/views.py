@@ -93,7 +93,7 @@ from questionnaire.projection import (
 )
 from realtime.events import schedule_activity_event
 from ruleset import editor as ruleset_editor
-from ruleset.compiler import compile_definition
+from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
 from ruleset.services import (
@@ -104,6 +104,7 @@ from ruleset.services import (
     supersede_ruleset_version,
     update_ruleset_binding,
     update_ruleset_definition_section,
+    validate_definition_completeness,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.group_chorus import (
@@ -4200,15 +4201,11 @@ def ruleset_template_detail(request, pk):
 
 
 def _starter_definition():
-    """Minimal forward-only graph a blank ruleset starts from."""
+    """A blank ruleset starts with an explicit roster and no guessed contest stage."""
     return json.dumps(
         {
             "schema_version": 1,
-            "nodes": [
-                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
-                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
-            ],
+            "nodes": [{"key": "roster", "type": "ROSTER"}],
         },
         ensure_ascii=False,
     )
@@ -4950,6 +4947,7 @@ def ruleset_edit(request, pk):
             "binding_signature": _binding_signature(ruleset),
             "binding_maps": binding_maps,
             "human_summary": human_summary,
+            "can_freeze": request.user.is_admin,
         },
     )
 
@@ -5061,6 +5059,9 @@ def manual_decision(request, pk):
 def ruleset_validate(request, pk):
     version = get_object_or_404(RulesetVersion, pk=pk)
     report, plan = compile_definition(version.definition)
+    completeness_issues = validate_definition_completeness(version.definition)
+    if completeness_issues:
+        report = ValidationReport(report.issues + completeness_issues)
     return render(
         request,
         "staff_panel/ruleset_validate.html",

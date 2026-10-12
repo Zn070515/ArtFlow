@@ -35,7 +35,7 @@ from questionnaire.cross_domain import (
 )
 from questionnaire.schema import parse_questionnaire
 
-from .compiler import ExecutionPlan, ValidationReport, compile_definition
+from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
 from .schema import content_hash, parse_definition
 
@@ -353,21 +353,20 @@ DEFINITION_SECTIONS: tuple[str, ...] = ("nodes", "checkpoints", "context", "ques
 
 
 @transaction.atomic
-def update_ruleset_definition_section(
+def update_ruleset_definition_sections(
     version: RulesetVersion,
     *,
-    section: str,
-    value,
+    sections: dict[str, object],
     operator,
     base_content_hash: str | None = None,
 ) -> RulesetVersion:
-    """Replace one top-level ``definition`` section, leaving every sibling untouched.
+    """Replace several top-level ``definition`` sections in one atomic root update.
 
     The root is a document, not a node list: ``checkpoints`` and ``context`` are already
     written beside ``nodes``, and the Ruleset-driven Questionnaire phase adds
-    ``questionnaire`` next to them. An editor that rebuilds the whole root from the one
-    section it edits deletes the others on every save — so each editor patches its own
-    section through here and every sibling is handed back byte-identical.
+    ``questionnaire`` next to them. Editors can own different sections, but a business
+    editor must be able to save its complete form as one document update so a failed
+    validation cannot leave half of the form committed.
 
     The version is re-read under the Activity-first lock, so the patch applies to the root
     as it exists at write time rather than to a document the caller loaded earlier.
@@ -376,8 +375,11 @@ def update_ruleset_definition_section(
     save, so a section patch can never persist a graph that ``parse_definition`` rejects.
     """
     require_current_staff(operator)
-    if section not in DEFINITION_SECTIONS:
-        raise ValidationError(f"未知的 definition section：{section!r}")
+    if not isinstance(sections, dict) or not sections:
+        raise ValidationError("至少需要提交一个 definition section。")
+    unknown = sorted(set(sections) - set(DEFINITION_SECTIONS))
+    if unknown:
+        raise ValidationError(f"未知的 definition section：{unknown[0]!r}")
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
@@ -389,7 +391,7 @@ def update_ruleset_definition_section(
         raise ValidationError("赛制定义不是合法 JSON，无法按 section 保存。") from exc
     if not isinstance(root, dict):
         raise ValidationError("赛制定义的根必须是对象。")
-    root[section] = value
+    root.update(sections)
     parse_definition(root)
     if "questionnaire" in root:
         # The questionnaire editor's save is a schema gate too, so a broken question is
@@ -398,6 +400,57 @@ def update_ruleset_definition_section(
     locked.definition = json.dumps(root, ensure_ascii=False)
     locked.save(update_fields=["definition"])
     return locked
+
+
+@transaction.atomic
+def update_ruleset_definition_section(
+    version: RulesetVersion,
+    *,
+    section: str,
+    value,
+    operator,
+    base_content_hash: str | None = None,
+) -> RulesetVersion:
+    """Backward-compatible single-section wrapper around the atomic multi-section service."""
+    return update_ruleset_definition_sections(
+        version,
+        sections={section: value},
+        operator=operator,
+        base_content_hash=base_content_hash,
+    )
+
+
+def validate_definition_completeness(definition) -> tuple[ReportIssue, ...]:
+    """Return hard issues for a syntactically valid definition with no contest stage.
+
+    ``ROSTER`` is an intentional blank starting point for the business editor, but it is
+    not a freezeable contest. Keeping this check separate from graph compilation lets the
+    editor explain the state without teaching the low-level schema parser UI concepts.
+    """
+    try:
+        parsed = parse_definition(definition)
+    except ValidationError:
+        return ()
+    stage_types = {
+        "ASSESS",
+        "AGGREGATE",
+        "RANK",
+        "SELECT",
+        "MANUAL_SELECT",
+        "PAIR",
+        "DUEL",
+        "FILL_TO_QUOTA",
+    }
+    if any(node.get("type") in stage_types for node in parsed.get("nodes", ())):
+        return ()
+    return (
+        ReportIssue(
+            code="RULESET_INCOMPLETE",
+            severity=Severity.ERROR,
+            path="nodes",
+            message="赛制尚未设置比赛环节，至少需要一个评分、排名或晋级节点。",
+        ),
+    )
 
 
 @transaction.atomic
@@ -864,6 +917,9 @@ def freeze_ruleset_version(
     )
     bound_context = build_bound_context(locked, normalized_binding)
     report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
+    completeness_issues = validate_definition_completeness(locked.definition)
+    if completeness_issues:
+        report = ValidationReport(report.issues + completeness_issues)
     if not report.passes():
         raise RulesetInvalidError(report, plan)
     assert plan is not None

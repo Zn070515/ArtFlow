@@ -24,10 +24,12 @@
         <form method="post" action="{% url 'staff:ruleset_preview' version.pk %}">
             {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">模拟运行</button>
         </form>
+        {% if can_freeze %}
         <form method="post" action="{% url 'staff:ruleset_freeze' version.pk %}"
               onsubmit="return confirm('确认并锁定该赛制？锁定后，本版本将作为正式成绩计算依据，不能直接修改。');">
             {% csrf_token %}<button class="touch-target bg-brand text-white rounded text-sm">确认并锁定赛制</button>
         </form>
+        {% endif %}
         {% if human_summary.has_manual_decision %}
         <a href="{% url 'staff:manual_decision' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">录入赛制要求的人工决定</a>
         {% endif %}
@@ -40,6 +42,7 @@
                 {% if human_summary.supported %}<span class="text-sm text-blue-800">{{ human_summary.flow_label }}</span>{% endif %}
             </div>
             <p class="text-xs text-gray-600 mt-1">先看阶段和成绩组成；技术节点可在下方高级规则结构中展开。</p>
+            {% if human_summary.notice %}<p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-2">{{ human_summary.notice }}</p>{% endif %}
         </div>
         {% if human_summary.supported %}
         <div class="p-4 space-y-4">
@@ -69,7 +72,7 @@
             {% endfor %}
         </div>
         {% else %}
-        <div class="p-4 text-sm text-gray-600">当前赛制没有可识别的阶段检查点，请展开高级规则结构查看完整定义。</div>
+        <div class="p-4 text-sm text-gray-600">{{ human_summary.notice }}</div>
         {% endif %}
     </section>
 

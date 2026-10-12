@@ -21,7 +21,11 @@ from django.test import TestCase
 
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.schema import content_hash
-from ruleset.services import DEFINITION_SECTIONS, update_ruleset_definition_section
+from ruleset.services import (
+    DEFINITION_SECTIONS,
+    update_ruleset_definition_section,
+    update_ruleset_definition_sections,
+)
 from ruleset.templates import golden_schidui
 
 SIBLINGS = ("checkpoints", "context", "questionnaire")
@@ -102,6 +106,11 @@ class DefinitionSectionPatchTests(TestCase):
             self.version, section=section, value=value, operator=self.operator, **kwargs
         )
 
+    def _patch_many(self, sections, **kwargs):
+        return update_ruleset_definition_sections(
+            self.version, sections=sections, operator=self.operator, **kwargs
+        )
+
     def _assert_siblings_untouched(self, stale, changed_section):
         stored = self._stored()
         self.assertEqual(
@@ -169,6 +178,42 @@ class DefinitionSectionPatchTests(TestCase):
             "questionnaire",
             _valid_questionnaire(key="q2"),
             base_content_hash="0" * 64,
+        )
+        self.assertEqual(self._stored(), stale)
+
+    def test_patching_multiple_sections_is_one_atomic_root_update(self):
+        stale = self._stored()
+        patched_nodes = [*stale["nodes"], {"key": "extra", "type": "ASSESS", "source": "entry"}]
+        patched_context = {"audience_rule": "2027", "editor": "business"}
+        self._patch_many(
+            {"nodes": patched_nodes, "context": patched_context},
+            base_content_hash=content_hash(stale),
+        )
+        stored = self._stored()
+        self.assertEqual(stored["nodes"], patched_nodes)
+        self.assertEqual(stored["context"], patched_context)
+        self.assertEqual(stored["checkpoints"], stale["checkpoints"])
+        self.assertEqual(stored["questionnaire"], stale["questionnaire"])
+
+    def test_stale_hash_rejects_a_multi_section_patch_without_partial_write(self):
+        stale = self._stored()
+        self.assertRaises(
+            ValidationError,
+            self._patch_many,
+            {"context": {"audience_rule": "never"}, "checkpoints": []},
+            base_content_hash="0" * 64,
+        )
+        self.assertEqual(self._stored(), stale)
+
+    def test_invalid_multi_section_patch_rolls_back_every_section(self):
+        stale = self._stored()
+        self.assertRaises(
+            ValidationError,
+            self._patch_many,
+            {
+                "context": {"audience_rule": "would-not-persist"},
+                "nodes": [{"key": "broken", "type": "RANK", "source": "missing"}],
+            },
         )
         self.assertEqual(self._stored(), stale)
 
