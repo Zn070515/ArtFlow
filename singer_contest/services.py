@@ -2366,6 +2366,26 @@ _ADVANCING_OUTCOME_CODES = frozenset(
 )
 
 
+def _draft_stage_rounds_for_frozen_version(
+    activity: Activity, version, stage_key: str
+):
+    """Return only current-frozen DRAFT rounds declared in the version binding."""
+    bound_round_ids = {
+        int(round_id)
+        for round_id in (_version_binding(version).get("round_keys") or {}).values()
+        if str(round_id).isdigit() and int(round_id) > 0
+    }
+    if not bound_round_ids:
+        return ContestRound.objects.none()
+    return ContestRound.objects.select_for_update().filter(
+        activity=activity,
+        pk__in=bound_round_ids,
+        roster_source=ContestRound.RosterSource.STAGE,
+        roster_source_stage=stage_key,
+        status=ContestRound.Status.DRAFT,
+    )
+
+
 @transaction.atomic
 def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> ContestRound | None:
     """Auto-generate a DRAFT round's entry roster from a resolved stage.
@@ -2403,12 +2423,8 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
         raise ValidationError("该赛段存在更新的结果版本，请使用最新结果。")
     stage = locked_stage
     targets = list(
-        ContestRound.objects.select_for_update()
-        .filter(
-            activity=stage.activity,
-            roster_source=ContestRound.RosterSource.STAGE,
-            roster_source_stage=stage.stage_key,
-            status=ContestRound.Status.DRAFT,
+        _draft_stage_rounds_for_frozen_version(
+            locked_activity, current_version, stage.stage_key
         )
         .order_by("sequence", "pk")
     )
@@ -3123,11 +3139,11 @@ def _invalidate_downstream_stage_rounds(stage: StageResult, *, operator) -> None
     downstream setup. Clearing the derived snapshot before raw facts are corrected also
     prevents the next resolve from reading stale groups or manual roster entries.
     """
-    downstream = ContestRound.objects.select_for_update().filter(
-        activity=stage.activity,
-        roster_source=ContestRound.RosterSource.STAGE,
-        roster_source_stage=stage.stage_key,
-        status=ContestRound.Status.DRAFT,
+    current_version = _current_frozen_version(stage.activity)
+    if current_version is None:
+        return
+    downstream = _draft_stage_rounds_for_frozen_version(
+        stage.activity, current_version, stage.stage_key
     )
     for contest_round in downstream:
         has_facts = (
