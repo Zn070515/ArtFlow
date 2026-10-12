@@ -1,4 +1,6 @@
 import json
+from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from accounts.models import User
@@ -7,10 +9,15 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from singer_contest.models import ContestRound
+from voting.models import VoteSession
 
+from ruleset.business_editor import infer_business_stages
 from ruleset.models import ContestRuleset, RulesetVersion
+from ruleset.resolver import ResolveInput, resolve
 from ruleset.services import save_business_ruleset, validate_definition_completeness
+from ruleset.templates import golden_schidui
 
 
 class DefinitionCompletenessTests(SimpleTestCase):
@@ -90,6 +97,7 @@ class BusinessRulesetSaveTests(TestCase):
             stages=[_business_stage()],
             operator=self.operator,
             base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
         )
 
         round_ = ContestRound.objects.get(activity=self.activity)
@@ -126,6 +134,8 @@ class BusinessRulesetSaveTests(TestCase):
                 )
             ],
             operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
         )
 
         round_.refresh_from_db()
@@ -151,6 +161,8 @@ class BusinessRulesetSaveTests(TestCase):
                 self.version,
                 stages=[_business_stage(advance_count=5, create_round=False)],
                 operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
             )
 
         self.version.refresh_from_db()
@@ -163,6 +175,7 @@ class BusinessRulesetSaveTests(TestCase):
                 stages=[_business_stage()],
                 operator=self.operator,
                 base_content_hash="0" * 64,
+                base_binding=self._binding_signature(),
             )
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
 
@@ -178,9 +191,149 @@ class BusinessRulesetSaveTests(TestCase):
                 self.version,
                 stages=[_business_stage()],
                 operator=self.operator,
+                base_content_hash=self.version.content_hash,
                 base_binding=stale_binding,
             )
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
+
+    def test_business_save_requires_both_compare_and_swap_baselines(self):
+        with self.assertRaises(ValidationError):
+            save_business_ruleset(
+                self.version,
+                stages=[_business_stage()],
+                operator=self.operator,
+            )
+
+        self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
+
+    def test_business_save_refuses_a_lossy_existing_definition(self):
+        root = json.loads(self.version.definition)
+        root["nodes"] = [
+            {
+                "key": "assess_r1",
+                "type": "ASSESS",
+                "source": "entry",
+                "round": "r1",
+                "min_judges": 3,
+            },
+            {
+                "key": "score",
+                "type": "AGGREGATE",
+                "within": "entry",
+                "aggregate": {
+                    "type": "weighted_sum",
+                    "components": [{"source": "assess_r1", "weight": 1}],
+                },
+            },
+            {"key": "rank", "type": "RANK", "source": "score", "descending": True},
+            {"key": "top1", "type": "SELECT", "source": "rank", "count": 1},
+        ]
+        root["checkpoints"] = [{"key": "stage1", "output": "top1"}]
+        self.version.definition = json.dumps(root)
+        self.version.save(update_fields=["definition"])
+
+        with self.assertRaises(ValidationError):
+            save_business_ruleset(
+                self.version,
+                stages=[_business_stage()],
+                operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
+            )
+
+        self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
+
+    def test_business_save_can_clear_all_stages_to_a_valid_blank_definition(self):
+        save_business_ruleset(
+            self.version,
+            stages=[],
+            operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
+        )
+
+        self.version.refresh_from_db()
+        root = json.loads(self.version.definition)
+        self.assertEqual(root["nodes"], [{"key": "roster", "type": "ROSTER"}])
+        self.assertNotIn("checkpoints", root)
+
+    def test_unrelated_prepared_round_does_not_block_a_new_business_round(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            unrelated = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                status=ContestRound.Status.PREPARED,
+                name="高级编辑器轮次",
+            )
+        self.ruleset.round_keys = {"advanced": unrelated.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        save_business_ruleset(
+            self.version,
+            stages=[_business_stage()],
+            operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
+        )
+
+        unrelated.refresh_from_db()
+        self.assertEqual(unrelated.status, ContestRound.Status.PREPARED)
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 2)
+
+    def test_repeated_round_reference_has_one_configuration_owner(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            round_ = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="共享轮次",
+            )
+        self.ruleset.round_keys = {"r3": round_.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        save_business_ruleset(
+            self.version,
+            stages=[
+                _business_stage(key="stage1", round_key="r3", advance_count=5, create_round=False),
+                _business_stage(key="stage2", round_key="r3", advance_count=3, create_round=False),
+            ],
+            operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
+        )
+
+        round_.refresh_from_db()
+        self.assertEqual(round_.advance_count, 5)
+        self.assertEqual(round_.roster_source, ContestRound.RosterSource.APPROVED)
+        self.assertEqual(round_.roster_source_stage, "")
+
+    def test_same_round_id_cannot_be_reused_by_different_round_keys(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            round_ = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="重复绑定",
+            )
+
+        with self.assertRaises(ValidationError):
+            save_business_ruleset(
+                self.version,
+                stages=[
+                    _business_stage(
+                        key="stage1", round_key="r1", round_id=round_.pk, create_round=False
+                    ),
+                    _business_stage(
+                        key="stage2", round_key="r2", round_id=round_.pk, create_round=False
+                    ),
+                ],
+                operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
+            )
+
+    def _binding_signature(self):
+        from ruleset.services import _binding_signature
+
+        return _binding_signature(self.ruleset)
 
     def test_definition_validation_rolls_back_created_round_and_binding(self):
         from ruleset.business_editor import business_definition_from_stages
@@ -199,6 +352,8 @@ class BusinessRulesetSaveTests(TestCase):
                     self.version,
                     stages=[_business_stage()],
                     operator=self.operator,
+                    base_content_hash=self.version.content_hash,
+                    base_binding=self._binding_signature(),
                 )
 
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
@@ -228,13 +383,134 @@ class BusinessRulesetSaveTests(TestCase):
         self.version.definition = json.dumps(root, ensure_ascii=False)
         self.version.save(update_fields=["definition"])
 
-        save_business_ruleset(self.version, stages=[_business_stage()], operator=self.operator)
+        save_business_ruleset(
+            self.version,
+            stages=[_business_stage()],
+            operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
+        )
 
         self.version.refresh_from_db()
         stored = json.loads(self.version.definition)
         self.assertEqual(stored["context"]["audience_rule"], "keep")
         self.assertEqual(stored["context"]["other"], {"x": 1})
         self.assertEqual(stored["questionnaire"], root["questionnaire"])
+
+    def test_golden_business_round_trip_preserves_results_bindings_rosters_and_checkpoints(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            rounds = {
+                key: ContestRound.objects.create(
+                    activity=self.activity,
+                    round_type=(
+                        ContestRound.RoundType.PRELIMINARY
+                        if key == "r1"
+                        else ContestRound.RoundType.SEMI_FINAL
+                    ),
+                    name=key,
+                    advance_count=count,
+                )
+                for key, count in (("r1", 10), ("r2", 10), ("r3", 5), ("r4", 3))
+            }
+        start = timezone.now()
+        votes = {
+            key: VoteSession.objects.create(
+                activity=self.activity,
+                name=key,
+                start_time=start,
+                end_time=start + timedelta(hours=1),
+                purpose=VoteSession.Purpose.SCORE_COMPONENT,
+                is_test_data=True,
+            )
+            for key in ("audience1", "audience4")
+        }
+        self.ruleset.round_keys = {key: round_.pk for key, round_ in rounds.items()}
+        self.ruleset.vote_keys = {key: vote.pk for key, vote in votes.items()}
+        self.ruleset.save(update_fields=["round_keys", "vote_keys"])
+        original_definition = golden_schidui()
+        self.version.definition = original_definition
+        self.version.save(update_fields=["definition"])
+        original_binding = self._binding_signature()
+        original_rounds = {
+            key: (round_.roster_source, round_.roster_source_stage, round_.advance_count)
+            for key, round_ in rounds.items()
+        }
+        inputs = ResolveInput(
+            roster=("a", "b", "c", "d", "e"),
+            round_scores={
+                key: {
+                    contestant: (Decimal(str(value)),)
+                    for contestant, value in zip(("a", "b", "c", "d", "e"), values)
+                }
+                for key, values in {
+                    "r1": (90, 80, 70, 60, 50),
+                    "r2": (85, 75, 65, 55, 45),
+                    "r3": (88, 78, 68, 58, 48),
+                    "r4": (87, 77, 67, 57, 47),
+                }.items()
+            },
+            vote_scores={
+                "audience1": {
+                    key: Decimal(str(value))
+                    for key, value in zip(("a", "b", "c", "d", "e"), (10, 9, 8, 7, 6))
+                },
+                "audience4": {
+                    key: Decimal(str(value))
+                    for key, value in zip(("a", "b", "c", "d", "e"), (6, 7, 8, 9, 10))
+                },
+            },
+        )
+        before = resolve(original_definition, inputs)
+        projection = infer_business_stages(original_definition)
+        saved = save_business_ruleset(
+            self.version,
+            stages=projection["stages"],
+            operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=original_binding,
+        )
+        after_definition = saved.definition
+        after = resolve(after_definition, inputs)
+
+        self.assertEqual(before.status, after.status)
+        self.assertEqual(
+            [
+                (item.contestant, item.outcome_code, item.rank, item.score)
+                for item in before.decisions
+            ],
+            [
+                (item.contestant, item.outcome_code, item.rank, item.score)
+                for item in after.decisions
+            ],
+        )
+        self.assertEqual(
+            [(item.contestant, item.value) for item in before.composites],
+            [(item.contestant, item.value) for item in after.composites],
+        )
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self._binding_signature(), original_binding)
+        self.assertEqual(
+            json.loads(after_definition)["checkpoints"],
+            json.loads(original_definition)["checkpoints"],
+        )
+        expected_rosters = {
+            "r1": (ContestRound.RosterSource.APPROVED, "", 10),
+            "r2": (ContestRound.RosterSource.APPROVED, "", 10),
+            "r3": (ContestRound.RosterSource.STAGE, "stage1", 5),
+            "r4": (ContestRound.RosterSource.STAGE, "stage2", 3),
+        }
+        self.assertEqual(
+            {
+                key: (
+                    ContestRound.objects.get(pk=round_.pk).roster_source,
+                    ContestRound.objects.get(pk=round_.pk).roster_source_stage,
+                    ContestRound.objects.get(pk=round_.pk).advance_count,
+                )
+                for key, round_ in rounds.items()
+            },
+            expected_rosters,
+        )
+        self.assertNotEqual(original_rounds, expected_rosters)
 
     def test_deleting_a_middle_stage_that_a_later_stage_keeps_is_rejected(self):
         with authority_write(CONTEST_ROUND_STATE):
@@ -280,4 +556,6 @@ class BusinessRulesetSaveTests(TestCase):
                     _business_stage(key="stage3", round_key="r3", advance_count=3),
                 ],
                 operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
             )

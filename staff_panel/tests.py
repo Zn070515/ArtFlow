@@ -8025,6 +8025,17 @@ class RulesetEditorTests(TestCase):
         definition = json.loads(_starter_definition())
         self.assertEqual(definition["nodes"], [{"key": "roster", "type": "ROSTER"}])
 
+    def test_blank_business_editor_can_add_its_first_stage(self):
+        self.version.definition = json.dumps(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+        self.version.save(update_fields=["definition"])
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertTrue(response.context["business_editor"]["editable"])
+        self.assertContains(response, 'id="business-stage-template"')
+
     def test_staff_can_edit_but_does_not_receive_freeze_control(self):
         staff = _create_provisioned_user(
             username="editor-staff",
@@ -8141,6 +8152,8 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, "<details", html=False)
 
     def test_business_editor_can_add_a_stage_and_change_weights_and_quota(self):
+        from ruleset.services import _binding_signature
+
         self.version.definition = json.dumps(
             {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
         )
@@ -8148,7 +8161,7 @@ class RulesetEditorTests(TestCase):
         payload = {
             "action": "business_save",
             "base_content_hash": self.version.content_hash,
-            "base_binding": "",
+            "base_binding": _binding_signature(self.ruleset),
             "stage_count": "2",
             "stage_0_key": "stage1",
             "stage_0_name": "初赛",
@@ -8195,6 +8208,8 @@ class RulesetEditorTests(TestCase):
         )
 
     def test_business_editor_rejects_stale_content_with_conflict_message(self):
+        from ruleset.services import _binding_signature
+
         stale_hash = self.version.content_hash
         self.version.definition = golden_schidui()
         self.version.save(update_fields=["definition"])
@@ -8203,6 +8218,7 @@ class RulesetEditorTests(TestCase):
             {
                 "action": "business_save",
                 "base_content_hash": stale_hash,
+                "base_binding": _binding_signature(self.ruleset),
                 "stage_count": "0",
             },
             follow=True,
@@ -8210,11 +8226,14 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, "其他编辑修改")
 
     def test_business_editor_reports_invalid_weight_as_form_error(self):
+        from ruleset.services import _binding_signature
+
         response = self.client.post(
             reverse("staff:ruleset_edit", args=[self.version.pk]),
             {
                 "action": "business_save",
                 "base_content_hash": self.version.content_hash,
+                "base_binding": _binding_signature(self.ruleset),
                 "stage_count": "1",
                 "stage_0_key": "stage1",
                 "stage_0_name": "初赛",

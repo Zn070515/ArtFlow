@@ -7,6 +7,7 @@ graphs remain readable through the advanced editor and are never rewritten by in
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 
@@ -15,6 +16,7 @@ from django.core.exceptions import ValidationError
 from .schema import ENTRY_KEY, parse_definition
 
 _EDITABLE_TYPES = frozenset({"ROSTER", "ASSESS", "AGGREGATE", "RANK", "SELECT"})
+_BUSINESS_SCORING_MODES = frozenset({"average", "drop_high_low"})
 _COMPLEX_LABELS = {
     "PARTITION": "分组",
     "MANUAL_SELECT": "人工选择",
@@ -44,6 +46,13 @@ def _json_number(value: Decimal) -> int | float:
     if value == value.to_integral_value():
         return int(value)
     return float(value)
+
+
+def _scoring_mode(value, *, field: str) -> str:
+    mode = str(value or "average")
+    if mode not in _BUSINESS_SCORING_MODES:
+        raise ValidationError(f"{field} 不是受支持的评分方式。")
+    return mode
 
 
 def _stage_key(stage, index: int) -> str:
@@ -81,6 +90,7 @@ def _normalize_stage(stage, index: int) -> dict:
         raise ValidationError(f"阶段“{key}”的成绩权重必须合计为 1。")
     if index == 1 and weights["previous_weight"]:
         raise ValidationError("第一阶段不能引用上一阶段成绩。")
+    stage_scoring_mode = _scoring_mode(stage.get("scoring_mode"), field=f"阶段“{key}”评分方式")
     raw_judge_sources = stage.get("judge_sources")
     if raw_judge_sources is None:
         round_key = str(stage.get("round_key") or "").strip()
@@ -92,6 +102,8 @@ def _normalize_stage(stage, index: int) -> dict:
                     "round_key": round_key,
                     "round_name": str(stage.get("round_name") or "").strip(),
                     "weight": _decimal_text(weights["judge_weight"]),
+                    "scoring_mode": stage_scoring_mode,
+                    "source": str(stage.get("source") or "").strip(),
                 }
             ]
             if weights["judge_weight"]
@@ -110,11 +122,19 @@ def _normalize_stage(stage, index: int) -> dict:
             source_weight = _decimal(source.get("weight", "0"), field=f"阶段“{key}”评委来源权重")
             if not source_weight:
                 raise ValidationError(f"阶段“{key}”的评委来源权重必须大于 0。")
+            source_scoring_mode = _scoring_mode(
+                source.get("scoring_mode", stage_scoring_mode),
+                field=f"阶段“{key}”评分方式",
+            )
+            if source_scoring_mode != stage_scoring_mode:
+                raise ValidationError(f"阶段“{key}”不能混用多种评分方式。")
             judge_sources.append(
                 {
                     "round_key": source_round,
                     "round_name": str(source.get("round_name") or "").strip(),
                     "weight": _decimal_text(source_weight),
+                    "scoring_mode": source_scoring_mode,
+                    "source": str(source.get("source") or "").strip(),
                 }
             )
         source_total = sum((Decimal(source["weight"]) for source in judge_sources), Decimal("0"))
@@ -132,6 +152,7 @@ def _normalize_stage(stage, index: int) -> dict:
         "round_key": round_key,
         "round_name": judge_sources[0]["round_name"] if judge_sources else "",
         "judge_sources": judge_sources,
+        "scoring_mode": judge_sources[0]["scoring_mode"] if judge_sources else stage_scoring_mode,
         "advance_count": advance_count,
         "judge_weight": _decimal_text(weights["judge_weight"]),
         "previous_weight": _decimal_text(weights["previous_weight"]),
@@ -188,8 +209,17 @@ def business_definition_from_stages(
                     {
                         "key": assess_key,
                         "type": "ASSESS",
-                        "source": previous_output,
+                        "source": judge_source.get("source") or previous_output,
                         "round": judge_source["round_key"],
+                        **(
+                            {
+                                "mode": "trimmed_mean",
+                                "trim_high": 1,
+                                "trim_low": 1,
+                            }
+                            if judge_source["scoring_mode"] == "drop_high_low"
+                            else {"mode": "mean"}
+                        ),
                     }
                 )
                 score_sources.append(
@@ -253,12 +283,51 @@ def _component_decimal(component: dict) -> Decimal:
     return _decimal(component.get("weight"), field="综合成绩权重")
 
 
+def _raw_definition(definition) -> dict:
+    if isinstance(definition, dict):
+        return deepcopy(definition)
+    if isinstance(definition, str):
+        loaded = json.loads(definition)
+        if isinstance(loaded, dict):
+            return loaded
+    raise ValidationError("赛制定义根必须是对象。")
+
+
+def _unexpected_fields(node: dict, allowed: set[str], *, label: str) -> str | None:
+    unexpected = sorted(set(node) - allowed)
+    if unexpected:
+        return f"{label}包含业务编辑器无法保留的字段：{unexpected[0]}。"
+    return None
+
+
+def _assess_mode(node: dict, *, label: str) -> tuple[str, str | None]:
+    if node.get("scale") is not None:
+        return "", f"{label}声明了评分尺度，业务编辑器不能无损表达换算。"
+    if node.get("min_judges") is not None:
+        return "", f"{label}声明了最少评委数，业务编辑器不能无损表达。"
+    mode = node.get("mode") or "mean"
+    if mode == "mean":
+        if node.get("trim_high") is not None or node.get("trim_low") is not None:
+            return "", f"{label}的截尾参数不能由业务编辑器无损表达。"
+        return "average", None
+    if mode == "trimmed_mean" and node.get("trim_high") == 1 and node.get("trim_low") == 1:
+        return "drop_high_low", None
+    return "", f"{label}的评分方式不能由业务编辑器无损表达。"
+
+
 def infer_business_stages(definition) -> dict:
-    """Safely project a linear graph into business stage cards."""
+    """Project only a demonstrably lossless linear graph into business stage cards.
+
+    ``parse_definition`` intentionally returns the executable sections only.  Business
+    labels and preserved source scopes live in the raw root context, so this function
+    reads both representations and rejects anything it cannot round-trip exactly.
+    """
     try:
-        parsed = parse_definition(definition)
-    except ValidationError as exc:
-        return _unsupported(f"当前规则定义无法读取：{exc}")
+        raw = _raw_definition(definition)
+        parsed = parse_definition(raw)
+    except (ValidationError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return _unsupported(f"当前规则定义无法读取，不能无损表达：{exc}")
+
     nodes = [node for node in (parsed.get("nodes") or ()) if isinstance(node, dict)]
     nodes_by_key: dict[str, dict] = {
         node["key"]: node for node in nodes if isinstance(node.get("key"), str)
@@ -270,17 +339,26 @@ def infer_business_stages(definition) -> dict:
         label = _COMPLEX_LABELS.get(unsupported_types[0], "复杂")
         return _unsupported(f"当前赛制包含{label}规则，业务编辑器不能无损表达。")
 
+    # The blank editor is a first-class state.  It is deliberately narrower than a
+    # normal stage graph so a stray node can never be silently deleted by a save.
+    if (
+        len(nodes) == 1
+        and nodes[0] == {"key": "roster", "type": "ROSTER"}
+        and not raw.get("checkpoints")
+    ):
+        return {"supported": True, "editable": True, "reason": "", "stages": []}
+
     checkpoints = list(parsed.get("checkpoints") or ())
     if not checkpoints:
         outputs = [node for node in nodes if node.get("type") == "SELECT"]
         if not outputs:
             return _unsupported("尚未识别到可编辑的晋级阶段。")
         checkpoints = [
-            {"key": f"stage{index}", "output": node["key"]}
+            {"key": f"stage{index}", "output": node["key"], "decisions": ()}
             for index, node in enumerate(outputs, start=1)
         ]
 
-    raw_context = parsed.get("context")
+    raw_context = raw.get("context")
     context = raw_context if isinstance(raw_context, dict) else {}
     raw_business = context.get("business")
     business = raw_business if isinstance(raw_business, dict) else {}
@@ -291,59 +369,170 @@ def infer_business_stages(definition) -> dict:
         for item in stage_context
         if isinstance(item, dict) and isinstance(item.get("key"), str)
     }
+
     stages: list[dict] = []
+    used: set[str] = set()
+    previous_output = ENTRY_KEY
     previous_score = ""
+    available_rosters = {ENTRY_KEY}
     for index, checkpoint in enumerate(checkpoints, start=1):
+        stage_key = str(checkpoint.get("key") or f"stage{index}")
+        if checkpoint.get("decisions"):
+            return _unsupported(f"阶段“{stage_key}”包含人工决定，业务编辑器不能无损表达。")
         output_key = checkpoint.get("output")
         if not isinstance(output_key, str):
-            return _unsupported(f"阶段“{checkpoint.get('key', index)}”缺少输出节点。")
+            return _unsupported(f"阶段“{stage_key}”缺少输出节点。")
         output = nodes_by_key.get(output_key) or {}
         if output.get("type") != "SELECT" or not isinstance(output.get("count"), int):
-            return _unsupported(f"阶段“{checkpoint.get('key', index)}”不是标准晋级阶段。")
-        current: dict | None = output
-        visited = set()
-        aggregate = None
-        while current and current.get("key") not in visited:
-            visited.add(current.get("key"))
-            if current.get("type") == "AGGREGATE":
-                aggregate = current
-                break
-            source = current.get("source")
-            current = nodes_by_key.get(source) if isinstance(source, str) else None
-        if aggregate is None:
-            return _unsupported(f"阶段“{checkpoint.get('key', index)}”缺少可编辑的综合成绩。")
+            return _unsupported(f"阶段“{stage_key}”不是标准晋级阶段。")
+        issue = _unexpected_fields(
+            output, {"key", "type", "source", "count"}, label=f"阶段“{stage_key}”的晋级节点"
+        )
+        if issue:
+            return _unsupported(issue)
+        rank_key = output.get("source")
+        rank = nodes_by_key.get(rank_key) if isinstance(rank_key, str) else None
+        if not isinstance(rank, dict) or rank.get("type") != "RANK":
+            return _unsupported(f"阶段“{stage_key}”缺少标准排名节点，不能无损表达。")
+        if not isinstance(rank_key, str):
+            return _unsupported(f"阶段“{stage_key}”缺少标准排名节点，不能无损表达。")
+        issue = _unexpected_fields(
+            rank, {"key", "type", "source", "descending"}, label=f"阶段“{stage_key}”的排名节点"
+        )
+        if issue or rank.get("descending") is not True:
+            return _unsupported(issue or f"阶段“{stage_key}”的排名规则不能由业务编辑器无损表达。")
+        aggregate_key = rank.get("source")
+        aggregate = nodes_by_key.get(aggregate_key) if isinstance(aggregate_key, str) else None
+        if not isinstance(aggregate, dict) or aggregate.get("type") != "AGGREGATE":
+            return _unsupported(f"阶段“{stage_key}”缺少标准综合成绩节点。")
+        if not isinstance(aggregate_key, str):
+            return _unsupported(f"阶段“{stage_key}”缺少标准综合成绩节点。")
+        if "conversion" in aggregate:
+            return _unsupported(f"阶段“{stage_key}”包含换算规则，业务编辑器不能无损表达。")
+        issue = _unexpected_fields(
+            aggregate,
+            {"key", "type", "within", "aggregate"},
+            label=f"阶段“{stage_key}”的综合成绩节点",
+        )
+        if issue:
+            return _unsupported(issue)
+        if aggregate.get("within") != previous_output:
+            return _unsupported(f"阶段“{stage_key}”的成绩范围不能由业务编辑器无损表达。")
+        aggregate_spec = aggregate.get("aggregate")
+        if not isinstance(aggregate_spec, dict):
+            return _unsupported(f"阶段“{stage_key}”的综合成绩配置不能由业务编辑器无损表达。")
+        if (
+            set(aggregate_spec) != {"type", "components"}
+            or aggregate_spec.get("type") != "weighted_sum"
+        ):
+            return _unsupported(f"阶段“{stage_key}”的综合算法不能由业务编辑器无损表达。")
+        components = aggregate_spec.get("components")
+        if not isinstance(components, list) or not components:
+            return _unsupported(f"阶段“{stage_key}”没有可编辑的成绩来源。")
 
+        used.update({output_key, rank_key, aggregate_key})
         judge_weight = Decimal("0")
         previous_weight = Decimal("0")
         audience_weight = Decimal("0")
-        judge_sources = []
+        judge_sources: list[dict] = []
         vote_source = ""
-        for component in (aggregate.get("aggregate") or {}).get("components") or ():
+        scoring_modes: set[str] = set()
+        component_sources: set[str] = set()
+        for component in components:
+            if not isinstance(component, dict) or set(component) != {"source", "weight"}:
+                return _unsupported(f"阶段“{stage_key}”的成绩来源不能由业务编辑器无损表达。")
             source_key = component.get("source")
+            if not isinstance(source_key, str) or source_key in component_sources:
+                return _unsupported(f"阶段“{stage_key}”的成绩来源不能由业务编辑器无损表达。")
+            component_sources.add(source_key)
+            try:
+                weight = _component_decimal(component)
+            except ValidationError as exc:
+                return _unsupported(f"阶段“{stage_key}”的成绩权重不能由业务编辑器无损表达：{exc}")
             source_node = nodes_by_key.get(source_key) or {}
-            weight = _component_decimal(component)
             source_type = source_node.get("type")
-            if source_type == "ASSESS" and source_node.get("vote_source"):
-                audience_weight += weight
-                vote_source = str(source_node.get("vote_source"))
-            elif source_type == "ASSESS" and source_node.get("round"):
-                judge_weight += weight
-                judge_sources.append(
+            if source_type == "ASSESS":
+                source_origin = source_node.get("source")
+                if source_origin not in available_rosters:
+                    return _unsupported(
+                        f"阶段“{stage_key}”的评委来源范围不能由业务编辑器无损表达。"
+                    )
+                issue = _unexpected_fields(
+                    source_node,
                     {
-                        "round_key": str(source_node.get("round")),
-                        "round_name": "",
-                        "weight": _decimal_text(weight),
-                    }
+                        "key",
+                        "type",
+                        "source",
+                        "round",
+                        "vote_source",
+                        "vote_purpose",
+                        "mode",
+                        "trim_high",
+                        "trim_low",
+                        "scale",
+                        "min_judges",
+                    },
+                    label=f"阶段“{stage_key}”的成绩评估节点",
                 )
+                if issue:
+                    return _unsupported(issue)
+                if source_node.get("vote_source"):
+                    if (
+                        source_node.get("round")
+                        or source_node.get("vote_purpose") != "SCORE_COMPONENT"
+                    ):
+                        return _unsupported(
+                            f"阶段“{stage_key}”的观众分来源不能由业务编辑器无损表达。"
+                        )
+                    if any(
+                        source_node.get(field) is not None
+                        for field in ("mode", "trim_high", "trim_low", "scale", "min_judges")
+                    ):
+                        return _unsupported(
+                            f"阶段“{stage_key}”的观众分配置不能由业务编辑器无损表达。"
+                        )
+                    current_vote_source = str(source_node["vote_source"])
+                    if vote_source and vote_source != current_vote_source:
+                        return _unsupported(f"阶段“{stage_key}”包含多个观众分来源。")
+                    vote_source = current_vote_source
+                    audience_weight += weight
+                elif source_node.get("round"):
+                    if source_node.get("vote_purpose") is not None:
+                        return _unsupported(
+                            f"阶段“{stage_key}”的评委来源不能由业务编辑器无损表达。"
+                        )
+                    mode, mode_issue = _assess_mode(
+                        source_node, label=f"阶段“{stage_key}”的评委来源"
+                    )
+                    if mode_issue:
+                        return _unsupported(mode_issue)
+                    scoring_modes.add(mode)
+                    judge_weight += weight
+                    judge_sources.append(
+                        {
+                            "round_key": str(source_node["round"]),
+                            "round_name": "",
+                            "weight": _decimal_text(weight),
+                            "source": str(source_origin),
+                            "scoring_mode": mode,
+                        }
+                    )
+                else:
+                    return _unsupported(f"阶段“{stage_key}”的评估来源不能由业务编辑器无损表达。")
+                used.add(source_key)
             elif source_key == previous_score:
                 previous_weight += weight
+                used.add(source_key)
             else:
-                return _unsupported(
-                    f"阶段“{checkpoint.get('key', index)}”包含业务编辑器无法识别的成绩来源。"
-                )
+                return _unsupported(f"阶段“{stage_key}”包含业务编辑器无法识别的成绩来源。")
+
+        total = judge_weight + previous_weight + audience_weight
+        if total != Decimal("1"):
+            return _unsupported(f"阶段“{stage_key}”的成绩权重不能由业务编辑器无损表达。")
         if not judge_sources:
-            return _unsupported(f"阶段“{checkpoint.get('key', index)}”缺少评委轮次。")
-        stage_key = str(checkpoint.get("key") or f"stage{index}")
+            return _unsupported(f"阶段“{stage_key}”缺少评委轮次。")
+        if len(scoring_modes) > 1:
+            return _unsupported(f"阶段“{stage_key}”混用了多种评分方式。")
         saved = context_by_key.get(stage_key) or {}
         stages.append(
             {
@@ -352,6 +541,7 @@ def infer_business_stages(definition) -> dict:
                 "round_key": judge_sources[0]["round_key"],
                 "round_name": str(saved.get("round_name") or ""),
                 "judge_sources": judge_sources,
+                "scoring_mode": next(iter(scoring_modes), "average"),
                 "advance_count": output["count"],
                 "judge_weight": _decimal_text(judge_weight),
                 "previous_weight": _decimal_text(previous_weight),
@@ -359,5 +549,12 @@ def infer_business_stages(definition) -> dict:
                 "vote_source": vote_source,
             }
         )
-        previous_score = aggregate.get("key") or ""
+        previous_output = output_key
+        previous_score = aggregate_key
+        available_rosters.add(output_key)
+
+    all_keys = set(nodes_by_key)
+    if all_keys - used:
+        extra = sorted(all_keys - used)[0]
+        return _unsupported(f"节点“{extra}”未连接到业务阶段，业务编辑器不能无损表达。")
     return {"supported": True, "editable": True, "reason": "", "stages": stages}

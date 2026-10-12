@@ -36,7 +36,7 @@ from questionnaire.cross_domain import (
 )
 from questionnaire.schema import parse_questionnaire
 
-from .business_editor import business_definition_from_stages
+from .business_editor import business_definition_from_stages, infer_business_stages
 from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
 from .schema import content_hash, parse_definition
@@ -361,6 +361,7 @@ def update_ruleset_definition_sections(
     sections: dict[str, object],
     operator,
     base_content_hash: str | None = None,
+    allow_empty_checkpoints: bool = False,
 ) -> RulesetVersion:
     """Replace several top-level ``definition`` sections in one atomic root update.
 
@@ -393,7 +394,13 @@ def update_ruleset_definition_sections(
         raise ValidationError("赛制定义不是合法 JSON，无法按 section 保存。") from exc
     if not isinstance(root, dict):
         raise ValidationError("赛制定义的根必须是对象。")
-    root.update(sections)
+    sections_to_apply = dict(sections)
+    if allow_empty_checkpoints and sections_to_apply.get("checkpoints") == []:
+        # An empty checkpoint list is not a valid general ruleset document.  The business
+        # editor nevertheless needs a valid roster-only blank state, represented by an
+        # omitted optional field.
+        sections_to_apply.pop("checkpoints")
+    root.update(sections_to_apply)
     parse_definition(root)
     if "questionnaire" in root:
         # The questionnaire editor's save is a schema gate too, so a broken question is
@@ -466,13 +473,14 @@ def _business_stage_round_requests(stages, normalized_stages: list[dict]) -> lis
     for index, stage in enumerate(normalized_stages, start=1):
         raw = raw_by_key.get(stage["key"], {})
         raw_sources = raw.get("judge_sources")
-        raw_source_by_key = {
-            str(item.get("round_key")): item
-            for item in raw_sources or ()
-            if isinstance(item, dict) and item.get("round_key")
-        }
-        for source in stage["judge_sources"]:
-            raw_source = raw_source_by_key.get(source["round_key"], {})
+        raw_source_list = list(raw_sources) if isinstance(raw_sources, (list, tuple)) else []
+        for source_index, source in enumerate(stage["judge_sources"]):
+            raw_source = (
+                raw_source_list[source_index]
+                if source_index < len(raw_source_list)
+                and isinstance(raw_source_list[source_index], dict)
+                else {}
+            )
             raw_round_id = raw_source.get("round_id", raw.get("round_id"))
             requests.append(
                 {
@@ -516,13 +524,18 @@ def save_business_ruleset(
     require_current_staff(operator)
     from singer_contest.models import ContestRound
 
+    if not isinstance(base_content_hash, str) or not base_content_hash:
+        raise ValidationError("业务编辑保存必须提供 definition 版本校验值。")
+    if not isinstance(base_binding, str) or not base_binding:
+        raise ValidationError("业务编辑保存必须提供绑定版本校验值。")
+
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
-    if base_content_hash is not None and locked.content_hash != base_content_hash:
+    if locked.content_hash != base_content_hash:
         raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
     locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
-    if base_binding is not None and _binding_signature(locked_ruleset) != base_binding:
+    if _binding_signature(locked_ruleset) != base_binding:
         raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
 
     stage_list = list(stages or [])
@@ -532,6 +545,9 @@ def save_business_ruleset(
         raise ValidationError("赛制定义不是合法 JSON，无法保存业务规则。") from exc
     if not isinstance(root, dict):
         raise ValidationError("赛制定义的根必须是对象。")
+    old_projection = infer_business_stages(locked.definition)
+    if not old_projection.get("editable"):
+        raise ValidationError(old_projection.get("reason") or "当前赛制不能由业务编辑器无损保存。")
     existing_context = root.get("context") or {}
     if not isinstance(existing_context, dict):
         raise ValidationError("赛制 context 必须是对象。")
@@ -567,38 +583,59 @@ def save_business_ruleset(
         )
 
     round_ids_by_key: dict[str, int] = {}
-    all_existing_ids = {
-        int(value)
-        for value in existing_round_keys.values()
-        if str(value).isdigit() and int(value) > 0
-    }
     requested_ids = {
         parsed
         for request in round_requests
         if (parsed := _business_round_id(request["round_id"], label=request["source"]["round_key"]))
     }
+    referenced_round_keys = {request["source"]["round_key"] for request in round_requests}
+    referenced_existing_ids = {
+        int(existing_round_keys[key])
+        for key in referenced_round_keys
+        if str(existing_round_keys.get(key, "")).isdigit() and int(existing_round_keys[key]) > 0
+    }
+    relevant_ids = referenced_existing_ids | requested_ids
     locked_rounds = {
         round_.pk: round_
         for round_ in ContestRound.objects.select_for_update().filter(
             activity_id=locked_ruleset.activity_id,
-            pk__in=all_existing_ids | requested_ids,
+            pk__in=relevant_ids,
         )
     }
     if requested_ids - set(locked_rounds):
         raise ValidationError("业务编辑器只能绑定属于当前活动的轮次。")
-    for round_ in locked_rounds.values():
-        if round_.status != ContestRound.Status.DRAFT or round_.is_locked:
-            raise PermissionDenied(
-                f"轮次“{round_.name or round_.pk}”已准备，不能由业务编辑器修改。"
-            )
 
+    key_to_id: dict[str, int] = {}
+    for request in round_requests:
+        round_key = request["source"]["round_key"]
+        explicit_id = _business_round_id(request["round_id"], label=round_key)
+        mapped_id = explicit_id or _business_round_id(
+            existing_round_keys.get(round_key), label=round_key
+        )
+        if mapped_id is not None:
+            prior_id = key_to_id.get(round_key)
+            if prior_id is not None and prior_id != mapped_id:
+                raise ValidationError(f"轮次“{round_key}”在同一保存中绑定了多个轮次。")
+            key_to_id[round_key] = mapped_id
+    owner_by_id: dict[int, str] = {}
+    for round_key, mapped_id in key_to_id.items():
+        prior_key = owner_by_id.get(mapped_id)
+        if prior_key is not None and prior_key != round_key:
+            raise ValidationError(
+                f"轮次 id {mapped_id} 不能同时作为“{prior_key}”和“{round_key}”的配置所有者。"
+            )
+        owner_by_id[mapped_id] = round_key
+
+    configured_ids: set[int] = set()
     for request in round_requests:
         stage = request["stage"]
         source = request["source"]
         round_key = source["round_key"]
         explicit_id = _business_round_id(request["round_id"], label=round_key)
-        mapped_id = explicit_id or _business_round_id(
-            existing_round_keys.get(round_key), label=round_key
+        mapped_id = (
+            explicit_id
+            or _business_round_id(existing_round_keys.get(round_key), label=round_key)
+            or round_ids_by_key.get(round_key)
         )
         if mapped_id is None:
             if not request["create_round"]:
@@ -626,31 +663,38 @@ def save_business_ruleset(
                 )
             mapped_id = created.pk
             locked_rounds[mapped_id] = created
+            owner_by_id[mapped_id] = round_key
         round_ = locked_rounds[mapped_id]
         round_ids_by_key[round_key] = mapped_id
-        round_.name = source["round_name"] or stage["name"]
-        round_.scoring_mode = request["scoring_mode"]
-        round_.advance_count = stage["advance_count"]
-        round_.roster_source = (
-            ContestRound.RosterSource.APPROVED
-            if request["stage_index"] == 1
-            else ContestRound.RosterSource.STAGE
-        )
-        round_.roster_source_stage = (
-            ""
-            if request["stage_index"] == 1
-            else normalized_stages[request["stage_index"] - 2]["key"]
-        )
-        with authority_write(CONTEST_ROUND_STATE):
-            round_.save(
-                update_fields=[
-                    "name",
-                    "scoring_mode",
-                    "advance_count",
-                    "roster_source",
-                    "roster_source_stage",
-                ]
-            )
+        desired = {
+            "name": source["round_name"] or stage["name"],
+            "scoring_mode": request["scoring_mode"],
+            "advance_count": stage["advance_count"],
+            "roster_source": (
+                ContestRound.RosterSource.APPROVED
+                if request["stage_index"] == 1
+                else ContestRound.RosterSource.STAGE
+            ),
+            "roster_source_stage": (
+                ""
+                if request["stage_index"] == 1
+                else normalized_stages[request["stage_index"] - 2]["key"]
+            ),
+        }
+        # A round referenced by multiple stages has one configuration owner: the first
+        # occurrence.  Later references keep the original roster/advance configuration.
+        if owner_by_id.get(mapped_id) == round_key and mapped_id not in configured_ids:
+            changed = any(getattr(round_, field) != value for field, value in desired.items())
+            if (round_.status != ContestRound.Status.DRAFT or round_.is_locked) and changed:
+                raise PermissionDenied(
+                    f"轮次“{round_.name or round_.pk}”已准备，不能由业务编辑器修改。"
+                )
+            if changed:
+                for field, value in desired.items():
+                    setattr(round_, field, value)
+                with authority_write(CONTEST_ROUND_STATE):
+                    round_.save(update_fields=list(desired))
+            configured_ids.add(mapped_id)
 
     binding = _snapshot_binding(locked_ruleset)
     binding["round_keys"] = {
@@ -675,6 +719,7 @@ def save_business_ruleset(
         sections={"nodes": nodes, "checkpoints": checkpoints, "context": business_context},
         operator=operator,
         base_content_hash=base_content_hash,
+        allow_empty_checkpoints=True,
     )
     AuditLog.objects.create(
         operator=operator,
