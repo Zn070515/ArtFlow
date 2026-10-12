@@ -4382,6 +4382,45 @@ class RoundEntryBridgeTests(TestCase):
 
         self.assertEqual(self._entry_ids(self.final), [s.pk for s in self.singers[:3]])
 
+    def test_rejects_stale_stage_result_before_changing_roster(self):
+        from .services import materialize_round_entry_from_stage
+
+        self._set_frozen_binding(
+            {
+                "stage_key": "stage1",
+                "round_keys": {"r1": self.prelim.pk, "final": self.final.pk},
+            }
+        )
+
+        def stage_with_decision(result_version, singer):
+            with authority_write(STAGE_RESULT_RESOLVE):
+                stage = StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    created_by=self.admin,
+                    stage_key="stage1",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    result_version=result_version,
+                    is_test_data=True,
+                )
+                StageDecision.objects.create(
+                    stage_result=stage,
+                    singer=singer,
+                    outcome_code="direct",
+                    rank=1,
+                    is_test_data=True,
+                )
+            return stage
+
+        stale = stage_with_decision(1, self.singers[0])
+        current = stage_with_decision(2, self.singers[1])
+        materialize_round_entry_from_stage(current, operator=self.admin)
+
+        with self.assertRaisesMessage(ValidationError, "最新"):
+            materialize_round_entry_from_stage(stale, operator=self.admin)
+
+        self.assertEqual(self._entry_ids(self.final), [self.singers[1].pk])
+
     def test_one_stage_materializes_every_configured_downstream_round(self):
         from .services import materialize_round_entry_from_stage
 

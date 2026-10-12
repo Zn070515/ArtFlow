@@ -2380,14 +2380,28 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     retains a contestant who no longer advances. Returns the first target for backwards
     compatibility, or None when no DRAFT STAGE round consumes this stage.
     """
-    if stage.status not in {
+    locked_activity = lock_activity_for_action(Activity.objects.get(pk=stage.activity_id))
+    locked_stage = StageResult.objects.select_for_update().get(pk=stage.pk)
+    current_version = _current_frozen_version(locked_activity)
+    if current_version is None:
+        return None
+    if locked_stage.ruleset_version_id != current_version.pk:
+        raise ValidationError("只能物化当前冻结赛制版本的赛段结果。")
+    if bool(locked_stage.is_test_data) != runtime_is_test(locked_activity):
+        raise ValidationError("赛段结果与活动运行模式不一致，不能物化名单。")
+    if locked_stage.status not in {
         StageResult.Status.READY_TO_CONFIRM,
         StageResult.Status.CONFIRMED,
     }:
         return None
-    current_version = _current_frozen_version(stage.activity)
-    if current_version is None or stage.ruleset_version_id != current_version.pk:
-        return None
+    latest_version = StageResult.objects.filter(
+        activity=locked_activity,
+        stage_key=locked_stage.stage_key,
+        is_test_data=runtime_is_test(locked_activity),
+    ).aggregate(m=Max("result_version"))["m"]
+    if locked_stage.result_version != latest_version:
+        raise ValidationError("该赛段存在更新的结果版本，请使用最新结果。")
+    stage = locked_stage
     targets = list(
         ContestRound.objects.select_for_update()
         .filter(
