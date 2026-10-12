@@ -36,8 +36,8 @@ from questionnaire.cross_domain import (
 )
 from questionnaire.schema import parse_questionnaire
 
-from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
 from .business_editor import business_definition_from_stages
+from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
 from .models import ContestRuleset, RulesetVersion
 from .schema import content_hash, parse_definition
 
@@ -542,7 +542,9 @@ def save_business_ruleset(
     for old_index, old_key in enumerate(old_keys):
         if old_key not in new_keys and any(key in new_keys for key in old_keys[old_index + 1 :]):
             dependent = next(key for key in old_keys[old_index + 1 :] if key in new_keys)
-            raise ValidationError(f"阶段“{dependent}”依赖已删除的阶段“{old_key}”，不能删除中间阶段。")
+            raise ValidationError(
+                f"阶段“{dependent}”依赖已删除的阶段“{old_key}”，不能删除中间阶段。"
+            )
 
     nodes, checkpoints, business_context = business_definition_from_stages(
         stage_list, existing_context=existing_context
@@ -566,7 +568,9 @@ def save_business_ruleset(
 
     round_ids_by_key: dict[str, int] = {}
     all_existing_ids = {
-        int(value) for value in existing_round_keys.values() if str(value).isdigit() and int(value) > 0
+        int(value)
+        for value in existing_round_keys.values()
+        if str(value).isdigit() and int(value) > 0
     }
     requested_ids = {
         parsed
@@ -584,14 +588,18 @@ def save_business_ruleset(
         raise ValidationError("业务编辑器只能绑定属于当前活动的轮次。")
     for round_ in locked_rounds.values():
         if round_.status != ContestRound.Status.DRAFT or round_.is_locked:
-            raise PermissionDenied(f"轮次“{round_.name or round_.pk}”已准备，不能由业务编辑器修改。")
+            raise PermissionDenied(
+                f"轮次“{round_.name or round_.pk}”已准备，不能由业务编辑器修改。"
+            )
 
     for request in round_requests:
         stage = request["stage"]
         source = request["source"]
         round_key = source["round_key"]
         explicit_id = _business_round_id(request["round_id"], label=round_key)
-        mapped_id = explicit_id or _business_round_id(existing_round_keys.get(round_key), label=round_key)
+        mapped_id = explicit_id or _business_round_id(
+            existing_round_keys.get(round_key), label=round_key
+        )
         if mapped_id is None:
             if not request["create_round"]:
                 raise ValidationError(f"轮次“{round_key}”尚未绑定，请明确选择创建草稿轮次。")
@@ -612,7 +620,9 @@ def save_business_ruleset(
                         if request["stage_index"] == 1
                         else ContestRound.RosterSource.STAGE
                     ),
-                    roster_source_stage="" if request["stage_index"] == 1 else normalized_stages[request["stage_index"] - 2]["key"],
+                    roster_source_stage=""
+                    if request["stage_index"] == 1
+                    else normalized_stages[request["stage_index"] - 2]["key"],
                 )
             mapped_id = created.pk
             locked_rounds[mapped_id] = created
@@ -627,7 +637,9 @@ def save_business_ruleset(
             else ContestRound.RosterSource.STAGE
         )
         round_.roster_source_stage = (
-            "" if request["stage_index"] == 1 else normalized_stages[request["stage_index"] - 2]["key"]
+            ""
+            if request["stage_index"] == 1
+            else normalized_stages[request["stage_index"] - 2]["key"]
         )
         with authority_write(CONTEST_ROUND_STATE):
             round_.save(

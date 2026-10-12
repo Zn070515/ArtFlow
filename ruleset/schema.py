@@ -230,9 +230,7 @@ def _validate_conversion(name: str, node: dict) -> None:
         raise ValidationError(f"Node {name}: conversion 'conversions' must be a non-empty list.")
     aggregate = node.get("aggregate") or {}
     component_sources = {
-        item.get("source")
-        for item in aggregate.get("components") or ()
-        if isinstance(item, dict)
+        item.get("source") for item in aggregate.get("components") or () if isinstance(item, dict)
     }
     seen_sources: set[str] = set()
     for i, entry in enumerate(conversions):

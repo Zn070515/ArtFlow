@@ -219,7 +219,6 @@ class SchemaAcceptanceStructureParsingTests(SimpleTestCase):
         self.assertEqual(outputs["assess_r3"], OutputType.SCOREMAP)
         self.assertEqual(outputs["final"], OutputType.SCOREMAP)
 
-
     def test_partition_subtract_repechage_merge_parses(self):
         parsed = parse_definition(partition_subtract_repechage_merge())
         outputs = parsed["outputs"]
@@ -662,9 +661,7 @@ class ConversionSchemaTests(SimpleTestCase):
                 self._definition(
                     {
                         "to": 100,
-                        "conversions": [
-                            {"from": 10, "to": 100, "method": "factor", "factor": 10}
-                        ],
+                        "conversions": [{"from": 10, "to": 100, "method": "factor", "factor": 10}],
                     }
                 )
             )

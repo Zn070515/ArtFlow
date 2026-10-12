@@ -102,11 +102,11 @@ from ruleset.services import (
     _binding_signature,
     create_ruleset_version,
     freeze_ruleset_version,
+    save_business_ruleset,
     supersede_ruleset_version,
     update_ruleset_binding,
     update_ruleset_definition_section,
     validate_definition_completeness,
-    save_business_ruleset,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.group_chorus import (
@@ -4270,8 +4270,7 @@ def _business_stages_from_post(post):
                 "round_id": judge_sources[0]["round_id"],
                 "advance_count": post.get(f"{prefix}_advance_count") or "",
                 "judge_sources": judge_sources,
-                "judge_weight": (post.get(f"{prefix}_judge_weight") or "").strip()
-                or judge_weight,
+                "judge_weight": (post.get(f"{prefix}_judge_weight") or "").strip() or judge_weight,
                 "previous_weight": (post.get(f"{prefix}_previous_weight") or "0").strip(),
                 "audience_weight": (post.get(f"{prefix}_audience_weight") or "0").strip(),
                 "vote_source": (post.get(f"{prefix}_vote_source") or "").strip(),
@@ -5028,7 +5027,9 @@ def ruleset_edit(request, pk):
                     None,
                 )
                 source["scoring_mode"] = (
-                    bound_round.scoring_mode if bound_round is not None else ContestRound.ScoringMode.AVERAGE
+                    bound_round.scoring_mode
+                    if bound_round is not None
+                    else ContestRound.ScoringMode.AVERAGE
                 )
     return render(
         request,

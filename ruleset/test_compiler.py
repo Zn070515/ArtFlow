@@ -410,6 +410,7 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             )
         )
         self.assertTrue(report.passes(), report.codes())
+        assert plan is not None
         aggregate_plan = next(node for node in plan.nodes if node["key"] == "agg")
         self.assertEqual(aggregate_plan["conversion"]["target"], "100")
         self.assertEqual(aggregate_plan["conversion"]["components"]["b"]["factor"], "10")

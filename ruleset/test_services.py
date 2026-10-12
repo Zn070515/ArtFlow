@@ -7,9 +7,9 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
-from ruleset.models import ContestRuleset, RulesetVersion
 from singer_contest.models import ContestRound
 
+from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import save_business_ruleset, validate_definition_completeness
 
 
@@ -78,7 +78,9 @@ class BusinessRulesetSaveTests(TestCase):
         )
         self.version = RulesetVersion.objects.create(
             ruleset=self.ruleset,
-            definition=json.dumps({"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}),
+            definition=json.dumps(
+                {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+            ),
             created_by=self.operator,
         )
 
@@ -95,8 +97,12 @@ class BusinessRulesetSaveTests(TestCase):
         self.assertEqual(round_.advance_count, 10)
         self.ruleset.refresh_from_db()
         self.assertEqual(self.ruleset.round_keys, {"r1": round_.pk})
-        self.assertEqual(json.loads(saved.definition)["checkpoints"], [{"key": "stage1", "output": "top10"}])
-        self.assertTrue(AuditLog.objects.filter(target=f"RulesetVersion:{self.version.pk}").exists())
+        self.assertEqual(
+            json.loads(saved.definition)["checkpoints"], [{"key": "stage1", "output": "top10"}]
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(target=f"RulesetVersion:{self.version.pk}").exists()
+        )
 
     def test_save_updates_an_existing_draft_round_configuration(self):
         with authority_write(CONTEST_ROUND_STATE):

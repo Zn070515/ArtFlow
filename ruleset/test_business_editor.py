@@ -42,7 +42,9 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
         )
         self.assertEqual(checkpoints, [{"key": "stage1", "output": "top10"}])
         self.assertEqual(nodes[0]["round"], "r1")
-        self.assertEqual(nodes[1]["aggregate"]["components"], [{"source": "assess_r1", "weight": 1}])
+        self.assertEqual(
+            nodes[1]["aggregate"]["components"], [{"source": "assess_r1", "weight": 1}]
+        )
         self.assertEqual(context["business"]["stages"][0]["key"], "stage1")
 
     def test_two_stages_can_inherit_the_previous_composite_score(self):
@@ -63,13 +65,17 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
             ]
         )
 
-        self.assertEqual(checkpoints, [{"key": "stage1", "output": "top10"}, {"key": "stage2", "output": "top3"}])
+        self.assertEqual(
+            checkpoints, [{"key": "stage1", "output": "top10"}, {"key": "stage2", "output": "top3"}]
+        )
         stage2 = next(node for node in nodes if node["key"] == "stage2")
         self.assertEqual(
             stage2["aggregate"]["components"],
             [{"source": "stage1", "weight": 0.6}, {"source": "assess_r2", "weight": 0.4}],
         )
-        self.assertEqual(next(node for node in nodes if node["key"] == "assess_r2")["source"], "top10")
+        self.assertEqual(
+            next(node for node in nodes if node["key"] == "assess_r2")["source"], "top10"
+        )
 
     def test_judge_and_audience_weights_are_explicit_and_deterministic(self):
         stages = [_stage()]
@@ -80,7 +86,9 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
         self.assertEqual(first, second)
         self.assertEqual(stages, original)
         self.assertEqual(
-            next(node for node in first[0] if node["type"] == "AGGREGATE")["aggregate"]["components"],
+            next(node for node in first[0] if node["type"] == "AGGREGATE")["aggregate"][
+                "components"
+            ],
             [
                 {"source": "assess_r1", "weight": 0.6},
                 {"source": "assess_audience1", "weight": 0.4},
@@ -99,7 +107,9 @@ class BusinessDefinitionInferenceTests(SimpleTestCase):
 
         self.assertTrue(result["supported"])
         self.assertTrue(result["editable"])
-        self.assertEqual([stage["key"] for stage in result["stages"]], ["stage1", "stage2", "stage3"])
+        self.assertEqual(
+            [stage["key"] for stage in result["stages"]], ["stage1", "stage2", "stage3"]
+        )
         self.assertEqual([stage["advance_count"] for stage in result["stages"]], [10, 5, 3])
         self.assertEqual(result["stages"][0]["judge_weight"], "0.9")
         self.assertEqual(
@@ -114,7 +124,13 @@ class BusinessDefinitionInferenceTests(SimpleTestCase):
                 "schema_version": 1,
                 "nodes": [
                     {"key": "groups", "type": "PARTITION", "source": "entry", "by": "group"},
-                    {"key": "manual", "type": "MANUAL_SELECT", "source": "groups", "groups": 2, "quota": 1},
+                    {
+                        "key": "manual",
+                        "type": "MANUAL_SELECT",
+                        "source": "groups",
+                        "groups": 2,
+                        "quota": 1,
+                    },
                 ],
             }
         )
