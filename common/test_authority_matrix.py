@@ -1583,11 +1583,23 @@ class AuthorityMutationMatrixTests(TestCase):
         self.assertTrue(locked_vote.is_locked)
         draft_version = create_ruleset_version(
             self.ruleset,
-            definition='{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}',
+            definition=(
+                '{"schema_version": 1, "nodes": ['
+                '{"key": "assess-round", "type": "ASSESS", "source": "entry", '
+                '"round": "r1"},'
+                '{"key": "rank-round", "type": "RANK", '
+                '"source": "assess-round", "descending": true},'
+                '{"key": "select-round", "type": "SELECT", '
+                '"source": "rank-round", "count": 1}]}'
+            ),
             created_by=self.admin_user,
-            binding={},
+            binding={"round_keys": {"r1": self.round.pk}},
         )
-        frozen_version = freeze_ruleset_version(draft_version, self.admin_user, binding={})
+        frozen_version = freeze_ruleset_version(
+            draft_version,
+            self.admin_user,
+            binding={"round_keys": {"r1": self.round.pk}},
+        )
         self.assertEqual(frozen_version.status, RulesetVersion.Status.FROZEN)
         with authority_write(ACTIVITY_STATE):
             Activity.objects.filter(pk=self.activity.pk).update(
@@ -1598,7 +1610,7 @@ class AuthorityMutationMatrixTests(TestCase):
             self.activity,
             stage_key="matrix-service-stage",
             computed_by=self.admin_user,
-            round_keys={},
+            round_keys={"r1": self.round.pk},
             preview=False,
         )
         self.assertIsInstance(resolved_stage, StageResult)
