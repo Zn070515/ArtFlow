@@ -157,6 +157,36 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
             [node.get("source") for node in nodes if node["type"] == "ASSESS"],
         )
 
+    def test_stage_roster_sources_follow_stable_stage_keys(self):
+        nodes, _, _ = business_definition_from_stages(
+            [
+                _stage(judge_weight="1", audience_weight="0", vote_source=""),
+                _stage(
+                    key="stage2",
+                    name="复赛",
+                    round_key="r2",
+                    judge_weight="1",
+                    audience_weight="0",
+                    vote_source="",
+                    source_stage_key="stage1",
+                ),
+                _stage(
+                    key="stage3",
+                    name="决赛",
+                    round_key="r3",
+                    judge_weight="1",
+                    audience_weight="0",
+                    vote_source="",
+                    source_stage_key="stage1",
+                ),
+            ]
+        )
+
+        self.assertEqual(
+            next(node for node in nodes if node.get("round") == "r3")["source"],
+            "top10",
+        )
+
     def test_audience_source_pool_round_trips_and_remaps(self):
         definition = {
             "schema_version": 1,
@@ -214,7 +244,7 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
 
         projection = infer_business_stages(definition)
         self.assertEqual(projection["stages"][1]["audience_source"], "entry")
-        self.assertEqual(projection["stages"][1]["audience_source_stage_index"], "0")
+        self.assertEqual(projection["stages"][1]["audience_source_stage_key"], "entry")
 
         stages = deepcopy(projection["stages"])
         stages[0]["advance_count"] = 8

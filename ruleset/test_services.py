@@ -103,7 +103,7 @@ class BusinessRulesetSaveTests(TestCase):
 
     def test_save_creates_and_binds_an_explicit_draft_round(self):
         old_definition = self.version.definition
-        saved = save_business_ruleset(
+        saved = self._save(
             self.version,
             stages=[_business_stage()],
             operator=self.operator,
@@ -140,7 +140,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.ruleset.round_keys = {"r1": round_.pk}
         self.ruleset.save(update_fields=["round_keys"])
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[
                 _business_stage(
@@ -160,6 +160,16 @@ class BusinessRulesetSaveTests(TestCase):
         self.assertEqual(round_.advance_count, 5)
         self.assertEqual(round_.scoring_mode, ContestRound.ScoringMode.DROP_HIGH_LOW)
 
+        audit = AuditLog.objects.get(target=f"RulesetVersion:{self.version.pk}")
+        old_value = json.loads(audit.old_value)
+        new_value = json.loads(audit.new_value)
+        self.assertIn(str(round_.pk), new_value["round_configuration"])
+        self.assertEqual(old_value["round_configuration"][str(round_.pk)]["name"], "旧名称")
+        self.assertEqual(
+            new_value["round_configuration"][str(round_.pk)]["scoring_mode"],
+            ContestRound.ScoringMode.DROP_HIGH_LOW,
+        )
+
     def test_save_refuses_prepared_round_without_mutating_definition(self):
         with authority_write(CONTEST_ROUND_STATE):
             round_ = ContestRound.objects.create(
@@ -174,7 +184,7 @@ class BusinessRulesetSaveTests(TestCase):
         before = self.version.definition
 
         with self.assertRaises(PermissionDenied):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[_business_stage(advance_count=5, create_round=False)],
                 operator=self.operator,
@@ -187,7 +197,7 @@ class BusinessRulesetSaveTests(TestCase):
 
     def test_stale_hashes_reject_the_whole_business_save(self):
         with self.assertRaises(ValidationError):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[_business_stage()],
                 operator=self.operator,
@@ -204,7 +214,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.ruleset.save(update_fields=["stage_key"])
 
         with self.assertRaises(ValidationError):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[_business_stage()],
                 operator=self.operator,
@@ -213,12 +223,14 @@ class BusinessRulesetSaveTests(TestCase):
             )
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
 
-    def test_business_save_requires_both_compare_and_swap_baselines(self):
+    def test_business_save_requires_all_compare_and_swap_baselines(self):
         with self.assertRaises(ValidationError):
             save_business_ruleset(
                 self.version,
                 stages=[_business_stage()],
                 operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
             )
 
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
@@ -250,7 +262,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.version.save(update_fields=["definition"])
 
         with self.assertRaises(ValidationError):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[_business_stage()],
                 operator=self.operator,
@@ -261,7 +273,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.assertFalse(ContestRound.objects.filter(activity=self.activity).exists())
 
     def test_business_save_can_clear_all_stages_to_a_valid_blank_definition(self):
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[_business_stage()],
             operator=self.operator,
@@ -271,7 +283,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.version.refresh_from_db()
         self.ruleset.refresh_from_db()
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[],
             operator=self.operator,
@@ -343,7 +355,7 @@ class BusinessRulesetSaveTests(TestCase):
         projection = infer_business_stages(self.version.definition)
         projection["stages"][0]["advance_count"] = 8
 
-        saved = save_business_ruleset(
+        saved = self._save(
             self.version,
             stages=projection["stages"],
             operator=self.operator,
@@ -370,7 +382,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.ruleset.round_keys = {"r1": round_.pk}
         self.ruleset.save(update_fields=["round_keys"])
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[_business_stage(round_name="", create_round=False)],
             operator=self.operator,
@@ -392,7 +404,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.ruleset.save(update_fields=["round_keys"])
 
         with self.assertRaises(ValidationError):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[
                     _business_stage(round_name="", create_round=False),
@@ -436,7 +448,7 @@ class BusinessRulesetSaveTests(TestCase):
 
         before_definition = self.version.definition
         with self.assertRaises(PermissionDenied):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[_business_stage(round_name="", advance_count=5, create_round=False)],
                 operator=self.operator,
@@ -449,7 +461,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.assertEqual(self.version.definition, before_definition)
         self.assertEqual(round_.advance_count, 10)
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[_business_stage(round_name="", advance_count=10, create_round=False)],
             operator=self.operator,
@@ -496,7 +508,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.ruleset.round_keys = {"advanced": unrelated.pk}
         self.ruleset.save(update_fields=["round_keys"])
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[_business_stage()],
             operator=self.operator,
@@ -508,6 +520,107 @@ class BusinessRulesetSaveTests(TestCase):
         self.assertEqual(unrelated.status, ContestRound.Status.PREPARED)
         self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 2)
 
+    def test_unrelated_draft_round_configuration_change_does_not_block_business_save(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            unrelated = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="高级编辑器草稿轮次",
+                advance_count=20,
+            )
+        self.ruleset.round_keys = {"advanced": unrelated.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        base_round_configuration = business_round_configuration_signature(
+            ContestRound.objects.filter(activity=self.activity)
+        )
+
+        with authority_write(CONTEST_ROUND_STATE):
+            unrelated.advance_count = 18
+            unrelated.save(update_fields=["advance_count"])
+
+        self._save(
+            self.version,
+            stages=[_business_stage()],
+            operator=self.operator,
+            base_content_hash=self.version.content_hash,
+            base_binding=self._binding_signature(),
+            base_round_configuration=base_round_configuration,
+        )
+
+    def test_create_round_rejects_an_existing_round_key(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            existing = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="已有轮次",
+            )
+        self.ruleset.round_keys = {"r1": existing.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        before_definition = self.version.definition
+        with self.assertRaises(ValidationError):
+            self._save(
+                self.version,
+                stages=[_business_stage(create_round=True)],
+                operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
+                base_round_configuration=business_round_configuration_signature(
+                    ContestRound.objects.filter(activity=self.activity)
+                ),
+            )
+
+        self.version.refresh_from_db()
+        self.assertEqual(self.version.definition, before_definition)
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 1)
+
+    def test_business_save_rejects_middle_stage_structure_change(self):
+        from ruleset.business_editor import business_definition_from_stages
+
+        initial_stages = [
+            _business_stage(),
+            _business_stage(key="stage2", round_key="r2", round_name="第二轮"),
+        ]
+        nodes, checkpoints, _context = business_definition_from_stages(initial_stages)
+        self.version.definition = json.dumps(
+            {
+                "schema_version": 1,
+                "nodes": nodes,
+                "checkpoints": checkpoints,
+            },
+            ensure_ascii=False,
+        )
+        self.version.save(update_fields=["definition"])
+        with authority_write(CONTEST_ROUND_STATE):
+            first = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第一轮",
+            )
+            second = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="第二轮",
+            )
+        self.ruleset.round_keys = {"r1": first.pk, "r2": second.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        inserted = _business_stage(
+            key="inserted",
+            round_key="r-new",
+            round_name="插入轮次",
+        )
+
+        with self.assertRaises(ValidationError):
+            self._save(
+                self.version,
+                stages=[initial_stages[0], inserted, initial_stages[1]],
+                operator=self.operator,
+                base_content_hash=self.version.content_hash,
+                base_binding=self._binding_signature(),
+                base_round_configuration=business_round_configuration_signature(
+                    ContestRound.objects.filter(activity=self.activity)
+                ),
+            )
+
     def test_repeated_round_reference_has_one_configuration_owner(self):
         with authority_write(CONTEST_ROUND_STATE):
             round_ = ContestRound.objects.create(
@@ -518,7 +631,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.ruleset.round_keys = {"r3": round_.pk}
         self.ruleset.save(update_fields=["round_keys"])
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[
                 _business_stage(key="stage1", round_key="r3", advance_count=5, create_round=False),
@@ -543,7 +656,7 @@ class BusinessRulesetSaveTests(TestCase):
             )
 
         with self.assertRaises(ValidationError):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[
                     _business_stage(
@@ -563,6 +676,15 @@ class BusinessRulesetSaveTests(TestCase):
 
         return _binding_signature(self.ruleset)
 
+    def _save(self, *args, **kwargs):
+        kwargs.setdefault(
+            "base_round_configuration",
+            business_round_configuration_signature(
+                ContestRound.objects.filter(activity=self.activity)
+            ),
+        )
+        return save_business_ruleset(*args, **kwargs)
+
     def test_definition_validation_rolls_back_created_round_and_binding(self):
         from ruleset.business_editor import business_definition_from_stages
 
@@ -576,7 +698,7 @@ class BusinessRulesetSaveTests(TestCase):
             ),
         ):
             with self.assertRaises(ValidationError):
-                save_business_ruleset(
+                self._save(
                     self.version,
                     stages=[_business_stage()],
                     operator=self.operator,
@@ -614,7 +736,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.version.definition = json.dumps(root, ensure_ascii=False)
         self.version.save(update_fields=["definition"])
 
-        save_business_ruleset(
+        self._save(
             self.version,
             stages=[_business_stage()],
             operator=self.operator,
@@ -709,7 +831,7 @@ class BusinessRulesetSaveTests(TestCase):
             for key in ("stage1", "stage2", "stage3")
         }
         projection = infer_business_stages(original_definition)
-        saved = save_business_ruleset(
+        saved = self._save(
             self.version,
             stages=projection["stages"],
             operator=self.operator,
@@ -810,7 +932,7 @@ class BusinessRulesetSaveTests(TestCase):
         self.version.save(update_fields=["definition"])
 
         with self.assertRaisesRegex(ValidationError, "stage2"):
-            save_business_ruleset(
+            self._save(
                 self.version,
                 stages=[
                     _business_stage(key="stage1", round_key="r1"),
