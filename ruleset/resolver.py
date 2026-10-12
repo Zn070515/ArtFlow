@@ -644,7 +644,12 @@ def _runtime_scale_number(value) -> Decimal | None:
 
 
 def _converted_component_value(
-    node: dict, component: dict, value, st: _Stage, by_key: dict[str, dict]
+    node: dict,
+    component: dict,
+    value,
+    st: _Stage,
+    by_key: dict[str, dict],
+    plan_node: dict | None = None,
 ) -> Decimal | None:
     """Apply a declared fixed-factor conversion before aggregate weighting.
 
@@ -657,6 +662,31 @@ def _converted_component_value(
     if not conversion:
         return converted
     source = component["source"]
+    if plan_node is not None and "conversion" in plan_node:
+        planned = plan_node["conversion"]
+        entry = (planned.get("components") or {}).get(source)
+        if entry is not None:
+            try:
+                factor = _as_dec(entry["factor"])
+            except (KeyError, ValueError, ArithmeticError):
+                st.hold.append(f"AGGREGATE {node['key']} 的编译换算系数无效。")
+                return None
+            if factor <= 0:
+                st.hold.append(f"AGGREGATE {node['key']} 的编译换算系数必须为正数。")
+                return None
+            return converted * factor
+        planned_component = next(
+            (item for item in plan_node.get("components") or () if item.get("source") == source),
+            None,
+        )
+        source_scale = _runtime_scale_number(
+            planned_component.get("scale") if planned_component else None
+        )
+        target_scale = _runtime_scale_number(planned.get("target"))
+        if source_scale is not None and source_scale == target_scale:
+            return converted
+        st.hold.append(f"AGGREGATE {node['key']} 缺少分量 {source} 的编译换算。")
+        return None
     entry = next(
         (
             item
@@ -690,7 +720,11 @@ def _converted_component_value(
 
 
 def _aggregate(
-    node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, dict]
+    node: dict,
+    st: _Stage,
+    inputs: ResolveInput,
+    by_key: dict[str, dict],
+    plan_node: dict | None = None,
 ) -> tuple[dict, tuple]:
     comps = node["aggregate"]["components"]
     agg_type = node["aggregate"]["type"]
@@ -712,7 +746,7 @@ def _aggregate(
                 st.hold.append(f"AGGREGATE {node['key']} 缺失分量 {comp['source']} 对 {c} 的分数。")
                 broken = True
                 break
-            v = _converted_component_value(node, comp, raw_value, st, by_key)
+            v = _converted_component_value(node, comp, raw_value, st, by_key, plan_node)
             if v is None:
                 broken = True
                 break
@@ -1089,7 +1123,13 @@ def _final_status(st: _Stage) -> ResolverState:
     return ResolverState.READY
 
 
-def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, dict]) -> None:
+def _run_node(
+    node: dict,
+    st: _Stage,
+    inputs: ResolveInput,
+    by_key: dict[str, dict],
+    plan_nodes: dict[str, dict] | None = None,
+) -> None:
     """Execute one node in place. The forward-only graph guarantees its refs are staged."""
     ntype = node["type"]
     if ntype == "ROSTER":
@@ -1103,7 +1143,7 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
     elif ntype == "ASSESS":
         st.values[node["key"]] = _assess(node, st, inputs)
     elif ntype == "AGGREGATE":
-        val, comps = _aggregate(node, st, inputs, by_key)
+        val, comps = _aggregate(node, st, inputs, by_key, (plan_nodes or {}).get(node["key"]))
         st.values[node["key"]] = val
         st.composites.extend(comps)
     elif ntype == "RANK":
@@ -1245,6 +1285,17 @@ def _assemble_result(
     )
 
 
+def _execution_plan_nodes(plan, definition: dict) -> dict[str, dict]:
+    """Return plan nodes only when the plan belongs to this exact definition."""
+    if plan is None or getattr(plan, "content_hash", None) != content_hash(definition):
+        return {}
+    return {
+        node["key"]: node
+        for node in getattr(plan, "nodes", ())
+        if isinstance(node, dict) and isinstance(node.get("key"), str)
+    }
+
+
 def resolve(definition, inputs: ResolveInput, plan=None) -> ResolveResult:
     """Deterministically replay ``definition`` over ``inputs``.
 
@@ -1256,9 +1307,10 @@ def resolve(definition, inputs: ResolveInput, plan=None) -> ResolveResult:
     by_key = {n["key"]: n for n in nodes}
     obj = definition if isinstance(definition, dict) else json.loads(definition)
     st = _Stage(inputs.roster)
+    plan_nodes = _execution_plan_nodes(plan, obj)
 
     for node in nodes:
-        _run_node(node, st, inputs, by_key)
+        _run_node(node, st, inputs, by_key, plan_nodes)
 
     return _assemble_result(st, obj, parsed, plan, inputs_fingerprint(inputs))
 
@@ -1281,6 +1333,7 @@ def resolve_to_checkpoint(
     checkpoints = parsed.get("checkpoints") or ()
     by_key = {n["key"]: n for n in nodes}
     obj = definition if isinstance(definition, dict) else json.loads(definition)
+    plan_nodes = _execution_plan_nodes(plan, obj)
 
     cp = next((c for c in checkpoints if c["key"] == checkpoint), None)
     if cp is None:
@@ -1290,7 +1343,7 @@ def resolve_to_checkpoint(
     st = _Stage(inputs.roster)
     for node in nodes:
         if node["key"] in closure:
-            _run_node(node, st, inputs, by_key)
+            _run_node(node, st, inputs, by_key, plan_nodes)
 
     round_keys, vote_keys, group_keys, manual_keys = _consumed_scopes(nodes, closure)
     duel_keys = _consumed_duel_keys(nodes, closure)

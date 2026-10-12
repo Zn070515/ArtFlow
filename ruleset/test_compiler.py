@@ -449,6 +449,37 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
         )
         self.assertIn("CONVERSION_FACTOR_MISMATCH", report.codes())
 
+    def test_same_scale_explicit_conversion_must_be_identity(self):
+        report, _ = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [{"source": "a", "weight": 1}],
+                        },
+                        "conversion": {
+                            "to": 100,
+                            "conversions": [
+                                {
+                                    "source": "a",
+                                    "from": 100,
+                                    "to": 100,
+                                    "method": "factor",
+                                    "factor": 10,
+                                }
+                            ],
+                        },
+                    },
+                ]
+            )
+        )
+
+        self.assertIn("CONVERSION_FACTOR_MISMATCH", report.codes())
+
     def test_unsupported_conversion_method_remains_rejected(self):
         report, _ = compile_definition(
             _def(
