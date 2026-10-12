@@ -4250,6 +4250,7 @@ def _business_stages_from_post(post):
                     "round_id": post.get(f"{source_prefix}_round_id") or "",
                     "weight": (post.get(f"{source_prefix}_weight") or "0").strip(),
                     "create_round": post.get(f"{source_prefix}_create_round") == "on",
+                    "source": (post.get(f"{source_prefix}_source") or "").strip(),
                 }
             )
         try:
@@ -5031,6 +5032,9 @@ def ruleset_edit(request, pk):
                     if bound_round is not None
                     else ContestRound.ScoringMode.AVERAGE
                 )
+        business_editor["round_options"] = prepared_round_options
+        business_editor["vote_options"] = vote_options
+        business_editor["scoring_modes"] = list(ContestRound.ScoringMode.choices)
     return render(
         request,
         "staff_panel/ruleset_editor.html",

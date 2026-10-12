@@ -1,9 +1,12 @@
+import json
 from copy import deepcopy
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase
 
 from ruleset.business_editor import business_definition_from_stages, infer_business_stages
+from ruleset.resolver import ResolveInput, resolve
 from ruleset.templates import golden_schidui
 
 
@@ -99,8 +102,139 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
         with self.assertRaises(ValidationError):
             business_definition_from_stages([_stage(judge_weight="0.7")])
 
+    def test_drop_high_low_generates_trimmed_mean_assess_nodes(self):
+        nodes, _, _ = business_definition_from_stages(
+            [
+                _stage(
+                    judge_weight="1",
+                    audience_weight="0",
+                    vote_source="",
+                    scoring_mode="drop_high_low",
+                )
+            ]
+        )
+
+        assess = next(node for node in nodes if node["type"] == "ASSESS")
+        self.assertEqual(assess["mode"], "trimmed_mean")
+        self.assertEqual(assess["trim_high"], 1)
+        self.assertEqual(assess["trim_low"], 1)
+
+    def test_drop_high_low_generated_definition_executes_trimmed_mean(self):
+        nodes, checkpoints, _ = business_definition_from_stages(
+            [
+                _stage(
+                    judge_weight="1",
+                    audience_weight="0",
+                    vote_source="",
+                    scoring_mode="drop_high_low",
+                )
+            ]
+        )
+
+        result = resolve(
+            {"schema_version": 1, "nodes": nodes, "checkpoints": checkpoints},
+            ResolveInput(
+                roster=("c1",),
+                round_scores={
+                    "r1": {"c1": (Decimal("10"), Decimal("8"), Decimal("9"), Decimal("7"))}
+                },
+            ),
+        )
+
+        self.assertEqual(result.composites[0].value, Decimal("8.5"))
+
 
 class BusinessDefinitionInferenceTests(SimpleTestCase):
+    def test_roster_only_definition_is_an_editable_blank(self):
+        result = infer_business_stages(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+
+        self.assertTrue(result["supported"])
+        self.assertTrue(result["editable"])
+        self.assertEqual(result["stages"], [])
+
+    def test_business_context_metadata_is_projected_from_the_raw_definition(self):
+        definition = json.loads(golden_schidui())
+        definition["context"] = {
+            "business": {
+                "stages": [
+                    {"key": "stage1", "name": "保留的初赛名称"},
+                    {"key": "stage2", "name": "保留的复赛名称"},
+                    {"key": "stage3", "name": "保留的决赛名称"},
+                ]
+            }
+        }
+
+        result = infer_business_stages(json.dumps(definition, ensure_ascii=False))
+
+        self.assertEqual(
+            [stage["name"] for stage in result["stages"]],
+            ["保留的初赛名称", "保留的复赛名称", "保留的决赛名称"],
+        )
+
+    def test_inference_rejects_semantics_the_business_form_cannot_preserve(self):
+        for field, value in (("min_judges", 3), ("scale", "hundred")):
+            with self.subTest(field=field):
+                definition = {
+                    "schema_version": 1,
+                    "nodes": [
+                        {
+                            "key": "assess_r1",
+                            "type": "ASSESS",
+                            "source": "entry",
+                            "round": "r1",
+                            field: value,
+                        },
+                        {
+                            "key": "score",
+                            "type": "AGGREGATE",
+                            "within": "entry",
+                            "aggregate": {
+                                "type": "weighted_sum",
+                                "components": [{"source": "assess_r1", "weight": 1}],
+                            },
+                        },
+                        {"key": "rank", "type": "RANK", "source": "score", "descending": True},
+                        {"key": "top1", "type": "SELECT", "source": "rank", "count": 1},
+                    ],
+                    "checkpoints": [{"key": "stage1", "output": "top1"}],
+                }
+
+                result = infer_business_stages(definition)
+
+                self.assertFalse(result["editable"])
+                self.assertIn("无损", result["reason"])
+
+    def test_inference_rejects_explicit_aggregate_conversion(self):
+        definition = json.loads(golden_schidui())
+        stage1 = next(node for node in definition["nodes"] if node["key"] == "stage1")
+        stage1["conversion"] = {
+            "to": 100,
+            "conversions": [
+                {"source": "assess_r1", "from": 100, "to": 100, "method": "factor", "factor": 1}
+            ],
+        }
+
+        result = infer_business_stages(definition)
+
+        self.assertFalse(result["editable"])
+        self.assertIn("换算", result["reason"])
+
+    def test_inference_rejects_tie_policy_and_disconnected_nodes(self):
+        definition = json.loads(golden_schidui())
+        next(node for node in definition["nodes"] if node["key"] == "rank1")["tie_policy"] = (
+            "review"
+        )
+        definition["nodes"].append(
+            {"key": "orphan", "type": "ASSESS", "source": "entry", "round": "unused"}
+        )
+
+        result = infer_business_stages(definition)
+
+        self.assertFalse(result["editable"])
+        self.assertIn("无损", result["reason"])
+
     def test_golden_linear_definition_is_editable_without_mutating_it(self):
         definition = golden_schidui()
         result = infer_business_stages(definition)

@@ -428,17 +428,17 @@ def _check_conversion(node: dict, prov: dict, issues: list[ReportIssue]) -> None
         source = component["source"]
         actual = _scale_number(prov[source].get("scale"))
         entry = _conversion_for_component(node, source)
-        if actual is None:
-            _warn_scale(
-                node,
-                "SCALE_UNDECLARED",
-                f"分量 {source} 未声明或无法确认实际满分。",
-                issues,
-            )
-            continue
-        if actual == target:
-            continue
         if entry is None:
+            if actual is None:
+                _warn_scale(
+                    node,
+                    "SCALE_UNDECLARED",
+                    f"分量 {source} 未声明或无法确认实际满分。",
+                    issues,
+                )
+                continue
+            if actual == target:
+                continue
             issues.append(
                 ReportIssue(
                     "CONVERSION_SOURCE_MISSING",
@@ -464,7 +464,7 @@ def _check_conversion(node: dict, prov: dict, issues: list[ReportIssue]) -> None
         declared_from = _scale_number(entry.get("from"))
         declared_to = _scale_number(entry.get("to"))
         factor = _conversion_factor(node, source, actual, target)
-        if declared_from != actual:
+        if actual is not None and declared_from != actual:
             issues.append(
                 ReportIssue(
                     "CONVERSION_SOURCE_SCALE_MISMATCH",

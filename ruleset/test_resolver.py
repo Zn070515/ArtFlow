@@ -12,6 +12,7 @@ from typing import cast
 
 from django.test import SimpleTestCase
 
+from ruleset.compiler import compile_definition
 from ruleset.resolver import (
     OutcomeCode,
     ResolveInput,
@@ -441,6 +442,62 @@ class ResolverHoldTests(SimpleTestCase):
         result = resolve(definition, inputs)
         self.assertEqual(result.status, ResolverState.HOLD)
         self.assertIn("c3", " ".join(result.reasons))
+
+    def test_bound_execution_plan_supplies_scale_for_unannotated_source(self):
+        definition = _def(
+            [
+                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
+                {"key": "b", "type": "ASSESS", "source": ENTRY_KEY, "round": "r2"},
+                {
+                    "key": "agg",
+                    "type": "AGGREGATE",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "a", "weight": 0.5},
+                            {"source": "b", "weight": 0.5},
+                        ],
+                    },
+                    "conversion": {
+                        "to": 100,
+                        "conversions": [
+                            {
+                                "source": "b",
+                                "from": 10,
+                                "to": 100,
+                                "method": "factor",
+                                "factor": 10,
+                            }
+                        ],
+                    },
+                },
+            ]
+        )
+        report, plan = compile_definition(
+            definition,
+            context={
+                "entry_size": 1,
+                "rounds": {
+                    "r1": {"judge_count": 1, "scale": 100},
+                    "r2": {"judge_count": 1, "scale": 10},
+                },
+            },
+            bound=False,
+        )
+        self.assertTrue(report.passes(), report.codes())
+        assert plan is not None
+
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("c1",),
+                round_scores=_rs({"r1": {"c1": [90]}, "r2": {"c1": [5]}}),
+            ),
+            plan=plan,
+        )
+
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.composites[0].value, Decimal("70"))
 
     def test_aggregate_missing_component_hold(self):
         definition = _def(
