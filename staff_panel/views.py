@@ -93,7 +93,8 @@ from questionnaire.projection import (
 )
 from realtime.events import schedule_activity_event
 from ruleset import editor as ruleset_editor
-from ruleset.compiler import compile_definition
+from ruleset.business_editor import infer_business_stages
+from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
 from ruleset.services import (
@@ -104,6 +105,8 @@ from ruleset.services import (
     supersede_ruleset_version,
     update_ruleset_binding,
     update_ruleset_definition_section,
+    validate_definition_completeness,
+    save_business_ruleset,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.group_chorus import (
@@ -4200,15 +4203,11 @@ def ruleset_template_detail(request, pk):
 
 
 def _starter_definition():
-    """Minimal forward-only graph a blank ruleset starts from."""
+    """A blank ruleset starts with an explicit roster and no guessed contest stage."""
     return json.dumps(
         {
             "schema_version": 1,
-            "nodes": [
-                {"key": "assess_r1", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"},
-                {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
-                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
-            ],
+            "nodes": [{"key": "roster", "type": "ROSTER"}],
         },
         ensure_ascii=False,
     )
@@ -4222,6 +4221,65 @@ def _unique_key(nodes, base):
         candidate = f"{base}_{counter}"
         counter += 1
     return candidate
+
+
+def _business_stages_from_post(post):
+    """Parse the repeatable business-stage form into the service payload."""
+    try:
+        stage_count = int(post.get("stage_count", "0"))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("比赛阶段数量无效。") from exc
+    if stage_count < 0 or stage_count > 50:
+        raise ValidationError("比赛阶段数量必须在 0 到 50 之间。")
+    stages = []
+    for index in range(stage_count):
+        prefix = f"stage_{index}"
+        try:
+            source_count = int(post.get(f"{prefix}_judge_source_count", "1"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"第 {index + 1} 个阶段的评委来源数量无效。") from exc
+        if source_count <= 0 or source_count > 20:
+            raise ValidationError(f"第 {index + 1} 个阶段的评委来源数量无效。")
+        judge_sources = []
+        for source_index in range(source_count):
+            source_prefix = f"{prefix}_judge_{source_index}"
+            judge_sources.append(
+                {
+                    "round_key": (post.get(f"{source_prefix}_round_key") or "").strip(),
+                    "round_name": (post.get(f"{source_prefix}_round_name") or "").strip(),
+                    "round_id": post.get(f"{source_prefix}_round_id") or "",
+                    "weight": (post.get(f"{source_prefix}_weight") or "0").strip(),
+                    "create_round": post.get(f"{source_prefix}_create_round") == "on",
+                }
+            )
+        try:
+            judge_weight = str(
+                sum(
+                    (Decimal(source["weight"] or "0") for source in judge_sources),
+                    Decimal("0"),
+                )
+            )
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValidationError(f"第 {index + 1} 个阶段的评委权重无效。") from exc
+        stages.append(
+            {
+                "key": (post.get(f"{prefix}_key") or f"stage{index + 1}").strip(),
+                "name": (post.get(f"{prefix}_name") or "").strip(),
+                "round_key": judge_sources[0]["round_key"],
+                "round_name": judge_sources[0]["round_name"],
+                "round_id": judge_sources[0]["round_id"],
+                "advance_count": post.get(f"{prefix}_advance_count") or "",
+                "judge_sources": judge_sources,
+                "judge_weight": (post.get(f"{prefix}_judge_weight") or "").strip()
+                or judge_weight,
+                "previous_weight": (post.get(f"{prefix}_previous_weight") or "0").strip(),
+                "audience_weight": (post.get(f"{prefix}_audience_weight") or "0").strip(),
+                "vote_source": (post.get(f"{prefix}_vote_source") or "").strip(),
+                "create_round": any(source["create_round"] for source in judge_sources),
+                "scoring_mode": post.get(f"{prefix}_scoring_mode") or "average",
+            }
+        )
+    return stages
 
 
 def _last_node_of(output_types, nodes):
@@ -4771,6 +4829,23 @@ def ruleset_edit(request, pk):
     if version.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
     if request.method == "POST":
+        if request.POST.get("action") == "business_save":
+            try:
+                business_stages = _business_stages_from_post(request.POST)
+                save_business_ruleset(
+                    version,
+                    stages=business_stages,
+                    operator=request.user,
+                    base_content_hash=request.POST.get("base_content_hash") or None,
+                    base_binding=request.POST.get("base_binding") or None,
+                )
+            except PermissionDenied as exc:
+                messages.error(request, domain_error_messages(exc))
+            except ValidationError as exc:
+                messages.error(request, domain_error_messages(exc))
+            else:
+                messages.success(request, "赛制已保存。")
+            return redirect("staff:ruleset_edit", pk=pk)
         try:
             current = ruleset_editor.definition_nodes(version.definition)
             nodes = _edit_nodes(request.POST, current)
@@ -4918,6 +4993,43 @@ def ruleset_edit(request, pk):
                     ),
                     "",
                 )
+    business_editor = infer_business_stages(version.definition)
+    business_editor["content_hash"] = version.content_hash
+    business_editor["binding_signature"] = _binding_signature(ruleset)
+    if business_editor.get("editable"):
+        prepared_round_options = [
+            (
+                str(item.pk),
+                f"{item.name or item.get_round_type_display()}（{item.get_status_display()}）",
+            )
+            for item in round_candidates
+        ]
+        vote_by_id = {item.pk: item for item in vote_candidates}
+        vote_options = [
+            (
+                str(key),
+                f"{vote_by_id[int(value)].name}（{vote_by_id[int(value)].get_purpose_display()}）"
+                if str(value).isdigit() and int(value) in vote_by_id
+                else f"{key}（暂不绑定）",
+            )
+            for key, value in (ruleset.vote_keys or {}).items()
+        ]
+        for stage in business_editor.get("stages", []):
+            stage["previous_weight"] = stage.get("previous_weight", "0")
+            stage["audience_weight"] = stage.get("audience_weight", "0")
+            stage["vote_options"] = vote_options
+            stage["scoring_modes"] = list(ContestRound.ScoringMode.choices)
+            for source in stage.get("judge_sources", []):
+                source["round_id"] = str(ruleset.round_keys.get(source["round_key"], ""))
+                source["round_options"] = prepared_round_options
+                source["create_round"] = not source["round_id"]
+                bound_round = next(
+                    (item for item in round_candidates if str(item.pk) == source["round_id"]),
+                    None,
+                )
+                source["scoring_mode"] = (
+                    bound_round.scoring_mode if bound_round is not None else ContestRound.ScoringMode.AVERAGE
+                )
     return render(
         request,
         "staff_panel/ruleset_editor.html",
@@ -4950,6 +5062,8 @@ def ruleset_edit(request, pk):
             "binding_signature": _binding_signature(ruleset),
             "binding_maps": binding_maps,
             "human_summary": human_summary,
+            "can_freeze": request.user.is_admin,
+            "business_editor": business_editor,
         },
     )
 
@@ -5061,6 +5175,9 @@ def manual_decision(request, pk):
 def ruleset_validate(request, pk):
     version = get_object_or_404(RulesetVersion, pk=pk)
     report, plan = compile_definition(version.definition)
+    completeness_issues = validate_definition_completeness(version.definition)
+    if completeness_issues:
+        report = ValidationReport(report.issues + completeness_issues)
     return render(
         request,
         "staff_panel/ruleset_validate.html",

@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 
 from accounts.services import require_current_admin, require_current_staff
-from common.authority import RULESET_FREEZE, authority_write
+from common.authority import CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from core.services import lock_activity_for_action
@@ -35,7 +36,8 @@ from questionnaire.cross_domain import (
 )
 from questionnaire.schema import parse_questionnaire
 
-from .compiler import ExecutionPlan, ValidationReport, compile_definition
+from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
+from .business_editor import business_definition_from_stages
 from .models import ContestRuleset, RulesetVersion
 from .schema import content_hash, parse_definition
 
@@ -353,21 +355,20 @@ DEFINITION_SECTIONS: tuple[str, ...] = ("nodes", "checkpoints", "context", "ques
 
 
 @transaction.atomic
-def update_ruleset_definition_section(
+def update_ruleset_definition_sections(
     version: RulesetVersion,
     *,
-    section: str,
-    value,
+    sections: dict[str, object],
     operator,
     base_content_hash: str | None = None,
 ) -> RulesetVersion:
-    """Replace one top-level ``definition`` section, leaving every sibling untouched.
+    """Replace several top-level ``definition`` sections in one atomic root update.
 
     The root is a document, not a node list: ``checkpoints`` and ``context`` are already
     written beside ``nodes``, and the Ruleset-driven Questionnaire phase adds
-    ``questionnaire`` next to them. An editor that rebuilds the whole root from the one
-    section it edits deletes the others on every save — so each editor patches its own
-    section through here and every sibling is handed back byte-identical.
+    ``questionnaire`` next to them. Editors can own different sections, but a business
+    editor must be able to save its complete form as one document update so a failed
+    validation cannot leave half of the form committed.
 
     The version is re-read under the Activity-first lock, so the patch applies to the root
     as it exists at write time rather than to a document the caller loaded earlier.
@@ -376,8 +377,11 @@ def update_ruleset_definition_section(
     save, so a section patch can never persist a graph that ``parse_definition`` rejects.
     """
     require_current_staff(operator)
-    if section not in DEFINITION_SECTIONS:
-        raise ValidationError(f"未知的 definition section：{section!r}")
+    if not isinstance(sections, dict) or not sections:
+        raise ValidationError("至少需要提交一个 definition section。")
+    unknown = sorted(set(sections) - set(DEFINITION_SECTIONS))
+    if unknown:
+        raise ValidationError(f"未知的 definition section：{unknown[0]!r}")
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
@@ -389,7 +393,7 @@ def update_ruleset_definition_section(
         raise ValidationError("赛制定义不是合法 JSON，无法按 section 保存。") from exc
     if not isinstance(root, dict):
         raise ValidationError("赛制定义的根必须是对象。")
-    root[section] = value
+    root.update(sections)
     parse_definition(root)
     if "questionnaire" in root:
         # The questionnaire editor's save is a schema gate too, so a broken question is
@@ -398,6 +402,281 @@ def update_ruleset_definition_section(
     locked.definition = json.dumps(root, ensure_ascii=False)
     locked.save(update_fields=["definition"])
     return locked
+
+
+@transaction.atomic
+def update_ruleset_definition_section(
+    version: RulesetVersion,
+    *,
+    section: str,
+    value,
+    operator,
+    base_content_hash: str | None = None,
+) -> RulesetVersion:
+    """Backward-compatible single-section wrapper around the atomic multi-section service."""
+    return update_ruleset_definition_sections(
+        version,
+        sections={section: value},
+        operator=operator,
+        base_content_hash=base_content_hash,
+    )
+
+
+def validate_definition_completeness(definition) -> tuple[ReportIssue, ...]:
+    """Return hard issues for a syntactically valid definition with no contest stage.
+
+    ``ROSTER`` is an intentional blank starting point for the business editor, but it is
+    not a freezeable contest. Keeping this check separate from graph compilation lets the
+    editor explain the state without teaching the low-level schema parser UI concepts.
+    """
+    try:
+        parsed = parse_definition(definition)
+    except ValidationError:
+        return ()
+    stage_types = {
+        "ASSESS",
+        "AGGREGATE",
+        "RANK",
+        "SELECT",
+        "MANUAL_SELECT",
+        "PAIR",
+        "DUEL",
+        "FILL_TO_QUOTA",
+    }
+    if any(node.get("type") in stage_types for node in parsed.get("nodes", ())):
+        return ()
+    return (
+        ReportIssue(
+            code="RULESET_INCOMPLETE",
+            severity=Severity.ERROR,
+            path="nodes",
+            message="赛制尚未设置比赛环节，至少需要一个评分、排名或晋级节点。",
+        ),
+    )
+
+
+def _business_stage_round_requests(stages, normalized_stages: list[dict]) -> list[dict]:
+    """Expand the stage payload into the round configuration requests it authorizes."""
+    raw_by_key = {
+        str(stage.get("key") or f"stage{index}"): stage
+        for index, stage in enumerate(stages, start=1)
+        if isinstance(stage, dict)
+    }
+    requests = []
+    for index, stage in enumerate(normalized_stages, start=1):
+        raw = raw_by_key.get(stage["key"], {})
+        raw_sources = raw.get("judge_sources")
+        raw_source_by_key = {
+            str(item.get("round_key")): item
+            for item in raw_sources or ()
+            if isinstance(item, dict) and item.get("round_key")
+        }
+        for source in stage["judge_sources"]:
+            raw_source = raw_source_by_key.get(source["round_key"], {})
+            raw_round_id = raw_source.get("round_id", raw.get("round_id"))
+            requests.append(
+                {
+                    "stage": stage,
+                    "stage_index": index,
+                    "source": source,
+                    "round_id": raw_round_id,
+                    "create_round": bool(
+                        raw_source.get("create_round", raw.get("create_round", False))
+                    ),
+                    "scoring_mode": raw_source.get(
+                        "scoring_mode", raw.get("scoring_mode", "average")
+                    ),
+                }
+            )
+    return requests
+
+
+def _business_round_id(value, *, label: str) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"轮次“{label}”的绑定 id 无效。") from exc
+    if result <= 0:
+        raise ValidationError(f"轮次“{label}”的绑定 id 无效。")
+    return result
+
+
+@transaction.atomic
+def save_business_ruleset(
+    version: RulesetVersion,
+    *,
+    stages,
+    operator,
+    base_content_hash: str | None = None,
+    base_binding: str | None = None,
+) -> RulesetVersion:
+    """Atomically save the linear business editor and its activity-owned draft rounds."""
+    require_current_staff(operator)
+    from singer_contest.models import ContestRound
+
+    locked = _lock_version_for_write(version)
+    if locked.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    if base_content_hash is not None and locked.content_hash != base_content_hash:
+        raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
+    if base_binding is not None and _binding_signature(locked_ruleset) != base_binding:
+        raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
+
+    stage_list = list(stages or [])
+    try:
+        root = json.loads(locked.definition)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制定义不是合法 JSON，无法保存业务规则。") from exc
+    if not isinstance(root, dict):
+        raise ValidationError("赛制定义的根必须是对象。")
+    existing_context = root.get("context") or {}
+    if not isinstance(existing_context, dict):
+        raise ValidationError("赛制 context 必须是对象。")
+
+    old_business = (existing_context.get("business") or {}).get("stages") or []
+    old_keys = [item.get("key") for item in old_business if isinstance(item, dict)]
+    new_keys = [str(item.get("key") or f"stage{index}") for index, item in enumerate(stage_list, 1)]
+    for old_index, old_key in enumerate(old_keys):
+        if old_key not in new_keys and any(key in new_keys for key in old_keys[old_index + 1 :]):
+            dependent = next(key for key in old_keys[old_index + 1 :] if key in new_keys)
+            raise ValidationError(f"阶段“{dependent}”依赖已删除的阶段“{old_key}”，不能删除中间阶段。")
+
+    nodes, checkpoints, business_context = business_definition_from_stages(
+        stage_list, existing_context=existing_context
+    )
+    normalized_stages = business_context["business"]["stages"]
+    round_requests = _business_stage_round_requests(stage_list, normalized_stages)
+    existing_round_keys = dict(locked_ruleset.round_keys or {})
+    old_business_round_keys = {
+        str(item.get("round_key"))
+        for item in old_business
+        if isinstance(item, dict) and item.get("round_key")
+    }
+    for item in old_business:
+        if not isinstance(item, dict):
+            continue
+        old_business_round_keys.update(
+            str(source.get("round_key"))
+            for source in item.get("judge_sources") or ()
+            if isinstance(source, dict) and source.get("round_key")
+        )
+
+    round_ids_by_key: dict[str, int] = {}
+    all_existing_ids = {
+        int(value) for value in existing_round_keys.values() if str(value).isdigit() and int(value) > 0
+    }
+    requested_ids = {
+        parsed
+        for request in round_requests
+        if (parsed := _business_round_id(request["round_id"], label=request["source"]["round_key"]))
+    }
+    locked_rounds = {
+        round_.pk: round_
+        for round_ in ContestRound.objects.select_for_update().filter(
+            activity_id=locked_ruleset.activity_id,
+            pk__in=all_existing_ids | requested_ids,
+        )
+    }
+    if requested_ids - set(locked_rounds):
+        raise ValidationError("业务编辑器只能绑定属于当前活动的轮次。")
+    for round_ in locked_rounds.values():
+        if round_.status != ContestRound.Status.DRAFT or round_.is_locked:
+            raise PermissionDenied(f"轮次“{round_.name or round_.pk}”已准备，不能由业务编辑器修改。")
+
+    for request in round_requests:
+        stage = request["stage"]
+        source = request["source"]
+        round_key = source["round_key"]
+        explicit_id = _business_round_id(request["round_id"], label=round_key)
+        mapped_id = explicit_id or _business_round_id(existing_round_keys.get(round_key), label=round_key)
+        if mapped_id is None:
+            if not request["create_round"]:
+                raise ValidationError(f"轮次“{round_key}”尚未绑定，请明确选择创建草稿轮次。")
+            round_type = (
+                ContestRound.RoundType.PRELIMINARY
+                if request["stage_index"] == 1
+                else ContestRound.RoundType.SEMI_FINAL
+            )
+            with authority_write(CONTEST_ROUND_STATE):
+                created = ContestRound.objects.create(
+                    activity_id=locked_ruleset.activity_id,
+                    round_type=round_type,
+                    scoring_mode=request["scoring_mode"],
+                    name=source["round_name"] or stage["name"],
+                    advance_count=stage["advance_count"],
+                    roster_source=(
+                        ContestRound.RosterSource.APPROVED
+                        if request["stage_index"] == 1
+                        else ContestRound.RosterSource.STAGE
+                    ),
+                    roster_source_stage="" if request["stage_index"] == 1 else normalized_stages[request["stage_index"] - 2]["key"],
+                )
+            mapped_id = created.pk
+            locked_rounds[mapped_id] = created
+        round_ = locked_rounds[mapped_id]
+        round_ids_by_key[round_key] = mapped_id
+        round_.name = source["round_name"] or stage["name"]
+        round_.scoring_mode = request["scoring_mode"]
+        round_.advance_count = stage["advance_count"]
+        round_.roster_source = (
+            ContestRound.RosterSource.APPROVED
+            if request["stage_index"] == 1
+            else ContestRound.RosterSource.STAGE
+        )
+        round_.roster_source_stage = (
+            "" if request["stage_index"] == 1 else normalized_stages[request["stage_index"] - 2]["key"]
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            round_.save(
+                update_fields=[
+                    "name",
+                    "scoring_mode",
+                    "advance_count",
+                    "roster_source",
+                    "roster_source_stage",
+                ]
+            )
+
+    binding = _snapshot_binding(locked_ruleset)
+    binding["round_keys"] = {
+        key: value
+        for key, value in existing_round_keys.items()
+        if key not in old_business_round_keys or key in round_ids_by_key
+    }
+    binding["round_keys"].update(round_ids_by_key)
+    for stage in normalized_stages:
+        if Decimal(stage["audience_weight"]) and stage["vote_source"] not in (
+            locked_ruleset.vote_keys or {}
+        ):
+            raise ValidationError(f"投票来源“{stage['vote_source']}”尚未绑定到当前活动。")
+    update_ruleset_binding(
+        locked_ruleset,
+        binding=binding,
+        operator=operator,
+        base_binding=base_binding,
+    )
+    saved = update_ruleset_definition_sections(
+        locked,
+        sections={"nodes": nodes, "checkpoints": checkpoints, "context": business_context},
+        operator=operator,
+        base_content_hash=base_content_hash,
+    )
+    AuditLog.objects.create(
+        operator=operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"RulesetVersion:{saved.pk}",
+        old_value=json.dumps(
+            {"definition": locked.definition, "binding": _snapshot_binding(locked_ruleset)},
+            ensure_ascii=False,
+        ),
+        new_value=json.dumps(
+            {"definition": saved.definition, "binding": binding}, ensure_ascii=False
+        ),
+    )
+    return saved
 
 
 @transaction.atomic
@@ -864,6 +1143,9 @@ def freeze_ruleset_version(
     )
     bound_context = build_bound_context(locked, normalized_binding)
     report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
+    completeness_issues = validate_definition_completeness(locked.definition)
+    if completeness_issues:
+        report = ValidationReport(report.issues + completeness_issues)
     if not report.passes():
         raise RulesetInvalidError(report, plan)
     assert plan is not None

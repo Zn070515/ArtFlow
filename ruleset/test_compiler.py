@@ -377,11 +377,8 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
             "SCALE_MIXED",
         )
 
-    def test_conversion_declared_is_forbidden(self):
-        # §29-30: conversion is schema-approved but unimplemented by the resolver
-        # (which does w*v), so a declared conversion must be a hard ERROR, not silently
-        # skipped as it was before.
-        self._assert_invalid(
+    def test_factor_conversion_is_supported(self):
+        report, plan = compile_definition(
             _def(
                 [
                     {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
@@ -397,14 +394,116 @@ class CompilerInvalidCorpusTests(SimpleTestCase):
                             ],
                         },
                         "conversion": {
-                            "to": "hundred",
-                            "conversions": [{"from": "ten", "method": "factor", "factor": 10}],
+                            "to": 100,
+                            "conversions": [
+                                {
+                                    "source": "b",
+                                    "from": 10,
+                                    "to": 100,
+                                    "method": "factor",
+                                    "factor": 10,
+                                }
+                            ],
+                        },
+                    },
+                ]
+            )
+        )
+        self.assertTrue(report.passes(), report.codes())
+        aggregate_plan = next(node for node in plan.nodes if node["key"] == "agg")
+        self.assertEqual(aggregate_plan["conversion"]["target"], "100")
+        self.assertEqual(aggregate_plan["conversion"]["components"]["b"]["factor"], "10")
+
+    def test_conversion_factor_mismatch_is_rejected(self):
+        report, _ = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
+                    {"key": "b", "type": "ASSESS", "source": ENTRY_KEY, "scale": "ten"},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "a", "weight": 0.5},
+                                {"source": "b", "weight": 0.5},
+                            ],
+                        },
+                        "conversion": {
+                            "to": 100,
+                            "conversions": [
+                                {
+                                    "source": "b",
+                                    "from": 10,
+                                    "to": 100,
+                                    "method": "factor",
+                                    "factor": 9,
+                                }
+                            ],
+                        },
+                    },
+                ]
+            )
+        )
+        self.assertIn("CONVERSION_FACTOR_MISMATCH", report.codes())
+
+    def test_unsupported_conversion_method_remains_rejected(self):
+        report, _ = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
+                    {"key": "b", "type": "ASSESS", "source": ENTRY_KEY, "scale": "ten"},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "a", "weight": 0.5},
+                                {"source": "b", "weight": 0.5},
+                            ],
+                        },
+                        "conversion": {
+                            "to": 100,
+                            "conversions": [
+                                {
+                                    "source": "b",
+                                    "from": 10,
+                                    "to": 100,
+                                    "method": "minmax",
+                                }
+                            ],
+                        },
+                    },
+                ]
+            )
+        )
+        self.assertIn("CONVERSION_UNSUPPORTED", report.codes())
+
+    def test_known_and_unknown_scales_do_not_early_return(self):
+        report, _ = compile_definition(
+            _def(
+                [
+                    {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
+                    {"key": "b", "type": "ASSESS", "source": ENTRY_KEY},
+                    {
+                        "key": "agg",
+                        "type": "AGGREGATE",
+                        "aggregate": {
+                            "type": "weighted_sum",
+                            "components": [
+                                {"source": "a", "weight": 0.5},
+                                {"source": "b", "weight": 0.5},
+                            ],
                         },
                     },
                 ]
             ),
-            "CONVERSION_UNSUPPORTED",
+            bound=True,
         )
+        self.assertIn("SCALE_UNDECLARED", report.codes())
+        self.assertFalse(report.passes())
 
     def test_scale_undeclared_is_warn_not_error(self):
         report, _ = compile_definition(

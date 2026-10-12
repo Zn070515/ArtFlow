@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Mapping
 
@@ -628,7 +628,70 @@ def _union_pool(maps, idx) -> tuple:
     return tuple(sorted(seen, key=lambda c: (seen[c], c)))
 
 
-def _aggregate(node: dict, st: _Stage, inputs: ResolveInput) -> tuple[dict, tuple]:
+_SCALE_ALIASES = {"ten": Decimal("10"), "hundred": Decimal("100")}
+
+
+def _runtime_scale_number(value) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = _SCALE_ALIASES.get(value, value)
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return number if number.is_finite() and number > 0 else None
+
+
+def _converted_component_value(
+    node: dict, component: dict, value, st: _Stage, by_key: dict[str, dict]
+) -> Decimal | None:
+    """Apply a declared fixed-factor conversion before aggregate weighting.
+
+    The compiler is the authoritative gate for formal execution. The resolver still fails
+    closed when it is called directly with a malformed conversion so a preview/replay can
+    never silently turn a missing conversion into a raw-score sum.
+    """
+    conversion = node.get("conversion")
+    converted = _as_dec(value)
+    if not conversion:
+        return converted
+    source = component["source"]
+    entry = next(
+        (
+            item
+            for item in conversion.get("conversions") or ()
+            if isinstance(item, dict) and item.get("source") == source
+        ),
+        None,
+    )
+    if entry is None:
+        source_node = by_key.get(source) or {}
+        source_scale = _runtime_scale_number(source_node.get("scale"))
+        target_scale = _runtime_scale_number(conversion.get("to"))
+        if source_scale is not None and source_scale == target_scale:
+            return converted
+        st.hold.append(f"AGGREGATE {node['key']} 缺少分量 {source} 的分数换算。")
+        return None
+    if entry.get("method") != "factor":
+        st.hold.append(
+            f"AGGREGATE {node['key']} 使用了尚未实现的换算方法 {entry.get('method')!r}。"
+        )
+        return None
+    try:
+        factor = _as_dec(entry["factor"])
+    except (KeyError, ValueError, ArithmeticError):
+        st.hold.append(f"AGGREGATE {node['key']} 的分数换算系数无效。")
+        return None
+    if factor <= 0:
+        st.hold.append(f"AGGREGATE {node['key']} 的分数换算系数必须为正数。")
+        return None
+    return converted * factor
+
+
+def _aggregate(
+    node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, dict]
+) -> tuple[dict, tuple]:
     comps = node["aggregate"]["components"]
     agg_type = node["aggregate"]["type"]
     maps = [st.values[c["source"]] for c in comps]
@@ -644,9 +707,13 @@ def _aggregate(node: dict, st: _Stage, inputs: ResolveInput) -> tuple[dict, tupl
         broken = False
         for comp in comps:
             m = st.values[comp["source"]]
-            v = m.get(c)
-            if v is None:
+            raw_value = m.get(c)
+            if raw_value is None:
                 st.hold.append(f"AGGREGATE {node['key']} 缺失分量 {comp['source']} 对 {c} 的分数。")
+                broken = True
+                break
+            v = _converted_component_value(node, comp, raw_value, st, by_key)
+            if v is None:
                 broken = True
                 break
             w = _as_dec(comp["weight"])
@@ -1036,7 +1103,7 @@ def _run_node(node: dict, st: _Stage, inputs: ResolveInput, by_key: dict[str, di
     elif ntype == "ASSESS":
         st.values[node["key"]] = _assess(node, st, inputs)
     elif ntype == "AGGREGATE":
-        val, comps = _aggregate(node, st, inputs)
+        val, comps = _aggregate(node, st, inputs, by_key)
         st.values[node["key"]] = val
         st.composites.extend(comps)
     elif ntype == "RANK":

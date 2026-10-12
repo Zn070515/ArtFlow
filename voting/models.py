@@ -463,6 +463,8 @@ class VoteSession(models.Model):
         options: models.Manager["VoteOption"]
         activity_id: int
 
+        def get_purpose_display(self) -> str: ...
+
     class Meta:
         base_manager_name = "objects"
         ordering = ["-created_at"]

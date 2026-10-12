@@ -16,6 +16,52 @@ from ruleset.templates import golden_schidui
 
 
 class HumanRulesetSummaryTests(SimpleTestCase):
+    def test_summary_identifies_a_blank_roster_only_definition(self):
+        summary = human_ruleset_summary(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+
+        self.assertEqual(summary["state"], "empty")
+        self.assertIn("尚未设置比赛环节", summary["notice"])
+        self.assertEqual(summary["stages"], [])
+
+    def test_summary_identifies_a_partial_linear_graph_without_checkpoints(self):
+        summary = human_ruleset_summary(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                    {"key": "rank1", "type": "RANK", "source": "assess_r1", "descending": True},
+                    {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                ],
+            }
+        )
+
+        self.assertEqual(summary["state"], "partial")
+        self.assertTrue(summary["supported"])
+        self.assertEqual([stage["advance_count"] for stage in summary["stages"]], [10])
+        self.assertIn("checkpoint", summary["notice"].lower())
+
+    def test_summary_explains_unsupported_graph_without_guessing(self):
+        summary = human_ruleset_summary(
+            {
+                "schema_version": 1,
+                "nodes": [
+                    {"key": "groups", "type": "PARTITION", "source": ENTRY_KEY, "by": "group"},
+                    {
+                        "key": "manual",
+                        "type": "MANUAL_SELECT",
+                        "source": "groups",
+                        "groups": 2,
+                        "quota": 1,
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(summary["state"], "unsupported")
+        self.assertIn("尚不能完整解释", summary["notice"])
+
     def test_summary_projects_checkpoints_into_human_stages(self):
         summary = human_ruleset_summary(golden_schidui())
 
