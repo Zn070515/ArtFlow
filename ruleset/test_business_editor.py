@@ -143,6 +143,20 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
 
         self.assertEqual(result.composites[0].value, Decimal("8.5"))
 
+    def test_changed_stage_quota_remaps_historical_roster_sources(self):
+        projection = infer_business_stages(golden_schidui())
+        stages = deepcopy(projection["stages"])
+        stages[0]["advance_count"] = 8
+
+        nodes, _, _ = business_definition_from_stages(stages)
+
+        r3 = next(node for node in nodes if node.get("round") == "r3")
+        self.assertEqual(r3["source"], "top8")
+        self.assertNotIn(
+            "top10",
+            [node.get("source") for node in nodes if node["type"] == "ASSESS"],
+        )
+
 
 class BusinessDefinitionInferenceTests(SimpleTestCase):
     def test_roster_only_definition_is_an_editable_blank(self):

@@ -112,6 +112,7 @@
                             <input type="hidden" name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_round_key" value="{{ source.round_key }}">
                             <input type="hidden" name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_round_name" value="{{ source.round_name }}">
                             <input type="hidden" name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_source" value="{{ source.source }}">
+                            <input type="hidden" name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_source_stage_index" value="{{ source.source_stage_index }}">
                             <select name="stage_{{ forloop.parentloop.counter0 }}_judge_{{ forloop.counter0 }}_round_id" class="border border-gray-300 rounded px-2 py-1 text-sm">
                                 <option value="">待绑定 / 新建草稿</option>
                                 {% for value, label in source.round_options %}<option value="{{ value }}"{% if source.round_id == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -173,6 +174,7 @@
                             <input type="hidden" name="stage___INDEX___judge_0_round_key" value="r1">
                             <input type="hidden" name="stage___INDEX___judge_0_round_name" value="">
                             <input type="hidden" name="stage___INDEX___judge_0_source" value="">
+                            <input type="hidden" name="stage___INDEX___judge_0_source_stage_index" value="">
                             <select name="stage___INDEX___judge_0_round_id" class="border border-gray-300 rounded px-2 py-1 text-sm">
                                 <option value="">待绑定 / 新建草稿</option>
                                 {% for value, label in business_editor.round_options %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
