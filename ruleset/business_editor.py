@@ -91,6 +91,16 @@ def _normalize_stage(stage, index: int) -> dict:
     if index == 1 and weights["previous_weight"]:
         raise ValidationError("第一阶段不能引用上一阶段成绩。")
     stage_scoring_mode = _scoring_mode(stage.get("scoring_mode"), field=f"阶段“{key}”评分方式")
+    audience_source = str(stage.get("audience_source") or "").strip()
+    raw_audience_source_stage_index = stage.get("audience_source_stage_index")
+    audience_source_stage_index = None
+    if raw_audience_source_stage_index not in (None, ""):
+        try:
+            audience_source_stage_index = int(raw_audience_source_stage_index)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"阶段“{key}”的观众来源名单阶段标识无效。") from exc
+        if audience_source_stage_index < 0 or audience_source_stage_index >= index:
+            raise ValidationError(f"阶段“{key}”的观众来源名单阶段标识无效。")
     raw_judge_sources = stage.get("judge_sources")
     if raw_judge_sources is None:
         round_key = str(stage.get("round_key") or "").strip()
@@ -166,6 +176,10 @@ def _normalize_stage(stage, index: int) -> dict:
         "previous_weight": _decimal_text(weights["previous_weight"]),
         "audience_weight": _decimal_text(weights["audience_weight"]),
         "vote_source": vote_source,
+        "audience_source": audience_source,
+        "audience_source_stage_index": (
+            str(audience_source_stage_index) if audience_source_stage_index is not None else ""
+        ),
     }
 
 
@@ -197,7 +211,15 @@ def business_definition_from_stages(
     context = deepcopy(existing_context or {})
     if not isinstance(context, dict):
         raise ValidationError("赛制 context 必须是对象。")
-    context["business"] = {"stages": deepcopy(normalized)}
+    existing_business = context.get("business")
+    if existing_business is None:
+        business_context = {}
+    elif isinstance(existing_business, dict):
+        business_context = deepcopy(existing_business)
+    else:
+        raise ValidationError("赛制 context.business 必须是对象。")
+    business_context["stages"] = deepcopy(normalized)
+    context["business"] = business_context
 
     nodes: list[dict] = [] if normalized else [{"key": "roster", "type": "ROSTER"}]
     used = set() if normalized else {"roster"}
@@ -260,12 +282,22 @@ def business_definition_from_stages(
                 {"source": previous_score, "weight": _json_number(previous_weight)},
             )
         if audience_weight:
+            audience_source = stage.get("audience_source") or previous_output
+            raw_audience_source_stage_index = stage.get("audience_source_stage_index")
+            if raw_audience_source_stage_index not in (None, ""):
+                audience_source = generated_outputs_by_stage.get(
+                    int(raw_audience_source_stage_index), ""
+                )
+                if not audience_source:
+                    raise ValidationError(f"阶段“{stage['key']}”引用了无法重映射的观众名单。")
+            if audience_source not in generated_outputs_by_stage.values():
+                raise ValidationError(f"阶段“{stage['key']}”引用了无法识别的观众名单。")
             audience_key = _unique_key(used, f"assess_{stage['vote_source']}")
             nodes.append(
                 {
                     "key": audience_key,
                     "type": "ASSESS",
-                    "source": previous_output,
+                    "source": audience_source,
                     "vote_source": stage["vote_source"],
                     "vote_purpose": "SCORE_COMPONENT",
                 }
@@ -462,6 +494,8 @@ def infer_business_stages(definition) -> dict:
         audience_weight = Decimal("0")
         judge_sources: list[dict] = []
         vote_source = ""
+        audience_source = ""
+        audience_source_stage_index = ""
         scoring_modes: set[str] = set()
         component_sources: set[str] = set()
         for component in components:
@@ -521,6 +555,8 @@ def infer_business_stages(definition) -> dict:
                     if vote_source and vote_source != current_vote_source:
                         return _unsupported(f"阶段“{stage_key}”包含多个观众分来源。")
                     vote_source = current_vote_source
+                    audience_source = str(source_origin)
+                    audience_source_stage_index = str(roster_stage_by_key[source_origin])
                     audience_weight += weight
                 elif source_node.get("round"):
                     if source_node.get("vote_purpose") is not None:
@@ -574,6 +610,8 @@ def infer_business_stages(definition) -> dict:
                 "previous_weight": _decimal_text(previous_weight),
                 "audience_weight": _decimal_text(audience_weight),
                 "vote_source": vote_source,
+                "audience_source": audience_source,
+                "audience_source_stage_index": audience_source_stage_index,
             }
         )
         previous_output = output_key

@@ -132,6 +132,26 @@ def _binding_signature(ruleset: ContestRuleset) -> str:
     )
 
 
+_BUSINESS_ROUND_CONFIGURATION_FIELDS = (
+    "name",
+    "scoring_mode",
+    "advance_count",
+    "roster_source",
+    "roster_source_stage",
+)
+
+
+def business_round_configuration_signature(rounds) -> str:
+    """Return the business editor's snapshot of activity round configuration."""
+    snapshot = {
+        str(round_.pk): {
+            field: getattr(round_, field) for field in _BUSINESS_ROUND_CONFIGURATION_FIELDS
+        }
+        for round_ in rounds
+    }
+    return json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 def _authority_hash(version: RulesetVersion) -> str:
     """Digest of the full authoritative surface (definition + frozen binding + plan).
 
@@ -520,6 +540,7 @@ def save_business_ruleset(
     operator,
     base_content_hash: str | None = None,
     base_binding: str | None = None,
+    base_round_configuration: str | None = None,
 ) -> RulesetVersion:
     """Atomically save the linear business editor and its activity-owned draft rounds."""
     require_current_staff(operator)
@@ -538,6 +559,18 @@ def save_business_ruleset(
     locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
     if _binding_signature(locked_ruleset) != base_binding:
         raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
+    locked_round_configuration = list(
+        ContestRound.objects.select_for_update().filter(activity_id=locked_ruleset.activity_id)
+    )
+    if (
+        base_round_configuration is not None
+        and business_round_configuration_signature(locked_round_configuration)
+        != base_round_configuration
+    ):
+        raise ValidationError("比赛轮次配置已被其他编辑修改，请刷新后重试。")
+
+    old_definition = locked.definition
+    old_binding = _snapshot_binding(locked_ruleset)
 
     stage_list = list(stages or [])
     try:
@@ -744,6 +777,8 @@ def save_business_ruleset(
         operator=operator,
         base_binding=base_binding,
     )
+    locked_ruleset.refresh_from_db()
+    new_binding = _snapshot_binding(locked_ruleset)
     saved = update_ruleset_definition_sections(
         locked,
         sections={"nodes": nodes, "checkpoints": checkpoints, "context": business_context},
@@ -756,11 +791,11 @@ def save_business_ruleset(
         action_type=AuditLog.ActionType.OTHER,
         target=f"RulesetVersion:{saved.pk}",
         old_value=json.dumps(
-            {"definition": locked.definition, "binding": _snapshot_binding(locked_ruleset)},
+            {"definition": old_definition, "binding": old_binding},
             ensure_ascii=False,
         ),
         new_value=json.dumps(
-            {"definition": saved.definition, "binding": binding}, ensure_ascii=False
+            {"definition": saved.definition, "binding": new_binding}, ensure_ascii=False
         ),
     )
     return saved

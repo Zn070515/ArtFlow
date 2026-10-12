@@ -8150,6 +8150,9 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, "保存比赛阶段")
         self.assertContains(response, "编辑高级规则结构")
         self.assertContains(response, "<details", html=False)
+        self.assertContains(response, 'name="base_round_configuration"')
+        self.assertContains(response, 'name="stage_2_audience_source" value="top5"')
+        self.assertContains(response, 'name="stage_2_audience_source_stage_index" value="2"')
 
     def test_business_editor_can_add_a_stage_and_change_weights_and_quota(self):
         from ruleset.services import _binding_signature

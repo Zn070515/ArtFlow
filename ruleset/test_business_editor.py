@@ -148,7 +148,7 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
         stages = deepcopy(projection["stages"])
         stages[0]["advance_count"] = 8
 
-        nodes, _, _ = business_definition_from_stages(stages)
+        nodes, checkpoints, _context = business_definition_from_stages(stages)
 
         r3 = next(node for node in nodes if node.get("round") == "r3")
         self.assertEqual(r3["source"], "top8")
@@ -156,6 +156,86 @@ class BusinessDefinitionGenerationTests(SimpleTestCase):
             "top10",
             [node.get("source") for node in nodes if node["type"] == "ASSESS"],
         )
+
+    def test_audience_source_pool_round_trips_and_remaps(self):
+        definition = {
+            "schema_version": 1,
+            "nodes": [
+                {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
+                {
+                    "key": "assess_a1",
+                    "type": "ASSESS",
+                    "source": "entry",
+                    "vote_source": "audience1",
+                    "vote_purpose": "SCORE_COMPONENT",
+                },
+                {
+                    "key": "stage1",
+                    "type": "AGGREGATE",
+                    "within": "entry",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r1", "weight": 0.6},
+                            {"source": "assess_a1", "weight": 0.4},
+                        ],
+                    },
+                },
+                {"key": "rank1", "type": "RANK", "source": "stage1", "descending": True},
+                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                {"key": "assess_r2", "type": "ASSESS", "source": "top10", "round": "r2"},
+                {
+                    "key": "assess_a2",
+                    "type": "ASSESS",
+                    "source": "entry",
+                    "vote_source": "audience2",
+                    "vote_purpose": "SCORE_COMPONENT",
+                },
+                {
+                    "key": "stage2",
+                    "type": "AGGREGATE",
+                    "within": "top10",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "assess_r2", "weight": 0.6},
+                            {"source": "assess_a2", "weight": 0.4},
+                        ],
+                    },
+                },
+                {"key": "rank2", "type": "RANK", "source": "stage2", "descending": True},
+                {"key": "top3", "type": "SELECT", "source": "rank2", "count": 3},
+            ],
+            "checkpoints": [
+                {"key": "stage1", "output": "top10"},
+                {"key": "stage2", "output": "top3"},
+            ],
+        }
+
+        projection = infer_business_stages(definition)
+        self.assertEqual(projection["stages"][1]["audience_source"], "entry")
+        self.assertEqual(projection["stages"][1]["audience_source_stage_index"], "0")
+
+        stages = deepcopy(projection["stages"])
+        stages[0]["advance_count"] = 8
+        nodes, checkpoints, _context = business_definition_from_stages(stages)
+
+        audience = next(node for node in nodes if node.get("vote_source") == "audience2")
+        self.assertEqual(audience["source"], "entry")
+        inputs = ResolveInput(
+            roster=tuple(f"c{index}" for index in range(1, 16)),
+            round_scores={
+                "r1": {f"c{index}": (Decimal("100"),) for index in range(1, 16)},
+                "r2": {f"c{index}": (Decimal("90"),) for index in range(1, 11)},
+            },
+            vote_scores={
+                "audience1": {f"c{index}": Decimal("50") for index in range(1, 16)},
+                "audience2": {f"c{index}": Decimal("40") for index in range(1, 11)},
+            },
+        )
+        before = resolve(definition, inputs)
+        after = resolve({"schema_version": 1, "nodes": nodes, "checkpoints": checkpoints}, inputs)
+        self.assertEqual(before.status, after.status)
 
 
 class BusinessDefinitionInferenceTests(SimpleTestCase):
