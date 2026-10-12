@@ -8126,6 +8126,121 @@ class RulesetEditorTests(TestCase):
             reverse("staff:manual_decision", args=[self.version.pk]),
         )
 
+    def test_business_editor_projects_linear_stages_and_keeps_advanced_editor_collapsed(self):
+        self.version.definition = golden_schidui()
+        self.version.save(update_fields=["definition"])
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["business_editor"]["editable"])
+        self.assertEqual(len(response.context["business_editor"]["stages"]), 3)
+        self.assertContains(response, "业务编辑")
+        self.assertContains(response, "保存比赛阶段")
+        self.assertContains(response, "编辑高级规则结构")
+        self.assertContains(response, "<details", html=False)
+
+    def test_business_editor_can_add_a_stage_and_change_weights_and_quota(self):
+        self.version.definition = json.dumps(
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+        )
+        self.version.save(update_fields=["definition"])
+        payload = {
+            "action": "business_save",
+            "base_content_hash": self.version.content_hash,
+            "base_binding": "",
+            "stage_count": "2",
+            "stage_0_key": "stage1",
+            "stage_0_name": "初赛",
+            "stage_0_advance_count": "10",
+            "stage_0_judge_source_count": "1",
+            "stage_0_judge_0_round_key": "r1",
+            "stage_0_judge_0_round_name": "第一轮",
+            "stage_0_judge_0_weight": "1",
+            "stage_0_judge_0_create_round": "on",
+            "stage_0_scoring_mode": "average",
+            "stage_0_previous_weight": "0",
+            "stage_0_audience_weight": "0",
+            "stage_0_vote_source": "",
+            "stage_1_key": "stage2",
+            "stage_1_name": "决赛",
+            "stage_1_advance_count": "3",
+            "stage_1_judge_source_count": "1",
+            "stage_1_judge_0_round_key": "r2",
+            "stage_1_judge_0_round_name": "第二轮",
+            "stage_1_judge_0_weight": "0.4",
+            "stage_1_judge_0_create_round": "on",
+            "stage_1_scoring_mode": "average",
+            "stage_1_previous_weight": "0.6",
+            "stage_1_audience_weight": "0",
+            "stage_1_vote_source": "",
+        }
+
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]), payload, follow=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "赛制已保存")
+        self.version.refresh_from_db()
+        self.ruleset.refresh_from_db()
+        definition = json.loads(self.version.definition)
+        self.assertEqual([item["key"] for item in definition["checkpoints"]], ["stage1", "stage2"])
+        self.assertEqual(self.ruleset.round_keys.keys(), {"r1", "r2"})
+        self.assertEqual(
+            next(node for node in definition["nodes"] if node["key"] == "stage2")["aggregate"]["components"][0]["weight"],
+            0.6,
+        )
+
+    def test_business_editor_rejects_stale_content_with_conflict_message(self):
+        stale_hash = self.version.content_hash
+        self.version.definition = golden_schidui()
+        self.version.save(update_fields=["definition"])
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {
+                "action": "business_save",
+                "base_content_hash": stale_hash,
+                "stage_count": "0",
+            },
+            follow=True,
+        )
+        self.assertContains(response, "其他编辑修改")
+
+    def test_business_editor_reports_invalid_weight_as_form_error(self):
+        response = self.client.post(
+            reverse("staff:ruleset_edit", args=[self.version.pk]),
+            {
+                "action": "business_save",
+                "base_content_hash": self.version.content_hash,
+                "stage_count": "1",
+                "stage_0_key": "stage1",
+                "stage_0_name": "初赛",
+                "stage_0_advance_count": "10",
+                "stage_0_judge_source_count": "1",
+                "stage_0_judge_0_round_key": "r1",
+                "stage_0_judge_0_round_name": "第一轮",
+                "stage_0_judge_0_weight": "not-a-number",
+                "stage_0_previous_weight": "0",
+                "stage_0_audience_weight": "0",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "评委权重无效")
+
+    def test_business_editor_is_read_only_for_complex_graphs(self):
+        from ruleset.templates import golden_xiaofeng
+
+        self.version.definition = golden_xiaofeng()
+        self.version.save(update_fields=["definition"])
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertFalse(response.context["business_editor"]["editable"])
+        self.assertContains(response, "不能无损表达")
+        self.assertNotContains(response, "保存比赛阶段")
+
     def test_editor_add_node_roundtrips(self):
         before = len(self._nodes())
         response = self.client.post(
