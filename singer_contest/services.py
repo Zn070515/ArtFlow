@@ -2366,9 +2366,7 @@ _ADVANCING_OUTCOME_CODES = frozenset(
 )
 
 
-def _draft_stage_rounds_for_frozen_version(
-    activity: Activity, version, stage_key: str
-):
+def _draft_stage_rounds_for_frozen_version(activity: Activity, version, stage_key: str):
     """Return only current-frozen DRAFT rounds declared in the version binding."""
     bound_round_ids = {
         int(round_id)
@@ -2425,8 +2423,7 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     targets = list(
         _draft_stage_rounds_for_frozen_version(
             locked_activity, current_version, stage.stage_key
-        )
-        .order_by("sequence", "pk")
+        ).order_by("sequence", "pk")
     )
     if not targets:
         return None
