@@ -2406,7 +2406,7 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     if current_version is None:
         return None
     if locked_stage.ruleset_version_id != current_version.pk:
-        raise ValidationError("只能物化当前冻结赛制版本的赛段结果。")
+        return None
     if bool(locked_stage.is_test_data) != runtime_is_test(locked_activity):
         raise ValidationError("赛段结果与活动运行模式不一致，不能物化名单。")
     if locked_stage.status not in {
