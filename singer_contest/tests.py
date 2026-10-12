@@ -4330,6 +4330,36 @@ class RoundEntryBridgeTests(TestCase):
                     is_test_data=True,
                 )
 
+    def _confirm_stage1_with_decisions(self, singers):
+        with authority_write(STAGE_RESULT_CONFIRM):
+            with authority_write(STAGE_RESULT_RESOLVE):
+                stage = StageResult.objects.create(
+                    activity=self.activity,
+                    ruleset_version=self.version,
+                    created_by=self.admin,
+                    stage_key="stage1",
+                    status=StageResult.Status.READY_TO_CONFIRM,
+                    result_version=1,
+                    is_test_data=True,
+                )
+                StageDecision.objects.bulk_create(
+                    [
+                        StageDecision(
+                            stage_result=stage,
+                            singer=singer,
+                            outcome_code="direct",
+                            rank=index,
+                            is_test_data=True,
+                        )
+                        for index, singer in enumerate(singers, start=1)
+                    ]
+                )
+                stage.status = StageResult.Status.CONFIRMED
+                stage.confirmed_at = timezone.now()
+                stage.confirmed_by = self.admin
+                stage.save(update_fields=["status", "confirmed_at", "confirmed_by"])
+        return stage
+
     def _set_frozen_binding(self, binding):
         with authority_write(RULESET_FREEZE):
             RulesetVersion._base_manager.filter(pk=self.version.pk).update(binding=binding)
@@ -4526,6 +4556,47 @@ class RoundEntryBridgeTests(TestCase):
         self.assertEqual(self._entry_ids(self.final), expected)
         self.assertEqual(self._entry_ids(branch), [])
 
+    def test_prepare_rejects_unbound_stage_round_even_when_upstream_has_advancers(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            extra = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="未绑定准备轮次",
+                sequence=3,
+                roster_source=ContestRound.RosterSource.STAGE,
+                roster_source_stage="stage1",
+            )
+        self._confirm_stage1_with_decisions(self.singers[:3])
+
+        with self.assertRaisesMessage(ValidationError, "未绑定当前冻结赛制"):
+            prepare_round(extra, self.admin)
+
+        extra.refresh_from_db()
+        self.assertEqual(extra.status, ContestRound.Status.DRAFT)
+        self.assertEqual(self._entry_ids(extra), [])
+
+    def test_prepare_rejects_bound_stage_round_without_materialized_roster(self):
+        self._confirm_stage1_with_decisions(self.singers[:3])
+
+        with self.assertRaisesMessage(ValidationError, "名单尚未物化"):
+            prepare_round(self.final, self.admin)
+
+        self.final.refresh_from_db()
+        self.assertEqual(self.final.status, ContestRound.Status.DRAFT)
+        self.assertEqual(self._entry_ids(self.final), [])
+
+    def test_prepare_rejects_bound_stage_round_with_stale_materialized_roster(self):
+        self._confirm_stage1_with_decisions(self.singers[:3])
+        RoundEntry.objects.create(round=self.final, singer=self.singers[0])
+        RoundEntry.objects.create(round=self.final, singer=self.singers[3])
+
+        with self.assertRaisesMessage(ValidationError, "晋级名单已变化"):
+            prepare_round(self.final, self.admin)
+
+        self.final.refresh_from_db()
+        self.assertEqual(self.final.status, ContestRound.Status.DRAFT)
+        self.assertEqual(self._entry_ids(self.final), [self.singers[0].pk, self.singers[3].pk])
+
     def test_materialization_rolls_back_all_targets_when_later_target_fails(self):
         from .services import materialize_round_entry_from_stage
 
@@ -4578,6 +4649,30 @@ class RoundEntryBridgeTests(TestCase):
         self.assertEqual(self._entry_ids(self.final), [])
         self.assertEqual(self._entry_ids(branch), [])
 
+    def test_unlock_ignores_unbound_started_stage_round(self):
+        from .services import unlock_stage_result
+
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        stage = self._confirm_upstream_stage1()
+        with authority_write(CONTEST_ROUND_STATE):
+            extra = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="未绑定已开始轮次",
+                sequence=3,
+                roster_source=ContestRound.RosterSource.STAGE,
+                roster_source_stage="stage1",
+                status=ContestRound.Status.PREPARED,
+            )
+
+        unlocked = unlock_stage_result(stage, operator=self.admin, note="修正未绑定轮次")
+
+        self.assertEqual(unlocked.status, StageResult.Status.READY_TO_CONFIRM)
+        extra.refresh_from_db()
+        self.assertEqual(extra.status, ContestRound.Status.PREPARED)
+
     def test_stage_roster_reads_only_the_current_frozen_ruleset_version(self):
         from .services import _round_source_singers, round_setup_readiness
 
@@ -4588,6 +4683,10 @@ class RoundEntryBridgeTests(TestCase):
             successor = RulesetVersion.objects.create(
                 ruleset=self.ruleset,
                 definition=self.version.definition,
+                binding={
+                    "stage_key": "stage1",
+                    "round_keys": {"r1": self.prelim.pk, "final": self.final.pk},
+                },
                 version=2,
                 is_current=True,
                 status=RulesetVersion.Status.FROZEN,
