@@ -141,14 +141,18 @@ _BUSINESS_ROUND_CONFIGURATION_FIELDS = (
 )
 
 
-def business_round_configuration_signature(rounds) -> str:
-    """Return the business editor's snapshot of activity round configuration."""
-    snapshot = {
+def _business_round_configuration_snapshot(rounds) -> dict[str, dict]:
+    return {
         str(round_.pk): {
             field: getattr(round_, field) for field in _BUSINESS_ROUND_CONFIGURATION_FIELDS
         }
-        for round_ in rounds
+        for round_ in sorted(rounds, key=lambda item: item.pk)
     }
+
+
+def business_round_configuration_signature(rounds) -> str:
+    """Return the business editor's snapshot of activity round configuration."""
+    snapshot = _business_round_configuration_snapshot(rounds)
     return json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -550,6 +554,8 @@ def save_business_ruleset(
         raise ValidationError("业务编辑保存必须提供 definition 版本校验值。")
     if not isinstance(base_binding, str) or not base_binding:
         raise ValidationError("业务编辑保存必须提供绑定版本校验值。")
+    if not isinstance(base_round_configuration, str) or not base_round_configuration:
+        raise ValidationError("业务编辑保存必须提供轮次配置版本校验值。")
 
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
@@ -559,18 +565,11 @@ def save_business_ruleset(
     locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
     if _binding_signature(locked_ruleset) != base_binding:
         raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
-    locked_round_configuration = list(
-        ContestRound.objects.select_for_update().filter(activity_id=locked_ruleset.activity_id)
-    )
-    if (
-        base_round_configuration is not None
-        and business_round_configuration_signature(locked_round_configuration)
-        != base_round_configuration
-    ):
-        raise ValidationError("比赛轮次配置已被其他编辑修改，请刷新后重试。")
-
     old_definition = locked.definition
     old_binding = _snapshot_binding(locked_ruleset)
+    old_round_configuration = _business_round_configuration_snapshot(
+        ContestRound.objects.filter(activity_id=locked_ruleset.activity_id)
+    )
 
     stage_list = list(stages or [])
     try:
@@ -586,15 +585,23 @@ def save_business_ruleset(
     if not isinstance(existing_context, dict):
         raise ValidationError("赛制 context 必须是对象。")
 
-    old_business = (existing_context.get("business") or {}).get("stages") or []
+    existing_business = existing_context.get("business") or {}
+    if not isinstance(existing_business, dict):
+        raise ValidationError("赛制 context.business 必须是对象。")
+    old_business = existing_business.get("stages") or old_projection.get("stages") or []
     old_keys = [item.get("key") for item in old_business if isinstance(item, dict)]
     new_keys = [str(item.get("key") or f"stage{index}") for index, item in enumerate(stage_list, 1)]
-    for old_index, old_key in enumerate(old_keys):
-        if old_key not in new_keys and any(key in new_keys for key in old_keys[old_index + 1 :]):
-            dependent = next(key for key in old_keys[old_index + 1 :] if key in new_keys)
-            raise ValidationError(
-                f"阶段“{dependent}”依赖已删除的阶段“{old_key}”，不能删除中间阶段。"
-            )
+    shared_count = min(len(old_keys), len(new_keys))
+    if new_keys[:shared_count] != old_keys[:shared_count]:
+        for old_index, old_key in enumerate(old_keys):
+            if old_key not in new_keys and any(
+                key in new_keys for key in old_keys[old_index + 1 :]
+            ):
+                dependent = next(key for key in old_keys[old_index + 1 :] if key in new_keys)
+                raise ValidationError(
+                    f"阶段“{dependent}”依赖已删除的阶段“{old_key}”，不能删除中间阶段。"
+                )
+        raise ValidationError("业务编辑器只允许在末尾追加或删除比赛阶段，不能插入、重排或改名。")
 
     nodes, checkpoints, business_context = business_definition_from_stages(
         stage_list, existing_context=existing_context
@@ -628,7 +635,30 @@ def save_business_ruleset(
         for key in referenced_round_keys
         if str(existing_round_keys.get(key, "")).isdigit() and int(existing_round_keys[key]) > 0
     }
-    relevant_ids = referenced_existing_ids | requested_ids
+    old_business_existing_ids = {
+        int(existing_round_keys[key])
+        for key in old_business_round_keys
+        if str(existing_round_keys.get(key, "")).isdigit() and int(existing_round_keys[key]) > 0
+    }
+    relevant_ids = referenced_existing_ids | requested_ids | old_business_existing_ids
+    try:
+        base_round_snapshot = json.loads(base_round_configuration)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("轮次配置版本校验值无效。") from exc
+    if not isinstance(base_round_snapshot, dict):
+        raise ValidationError("轮次配置版本校验值无效。")
+    locked_round_configuration = list(
+        ContestRound.objects.select_for_update().filter(
+            activity_id=locked_ruleset.activity_id,
+            pk__in=relevant_ids,
+        )
+    )
+    current_round_snapshot = _business_round_configuration_snapshot(locked_round_configuration)
+    if any(
+        base_round_snapshot.get(str(round_id)) != current_round_snapshot.get(str(round_id))
+        for round_id in relevant_ids
+    ):
+        raise ValidationError("比赛轮次配置已被其他编辑修改，请刷新后重试。")
     current_frozen = (
         RulesetVersion._base_manager.filter(
             ruleset_id=locked.ruleset_id,
@@ -647,15 +677,14 @@ def save_business_ruleset(
         for round_id in frozen_round_keys.values()
         if str(round_id).isdigit() and int(round_id) > 0
     }
-    locked_rounds = {
-        round_.pk: round_
-        for round_ in ContestRound.objects.select_for_update().filter(
-            activity_id=locked_ruleset.activity_id,
-            pk__in=relevant_ids,
-        )
-    }
+    locked_rounds = {round_.pk: round_ for round_ in locked_round_configuration}
     if requested_ids - set(locked_rounds):
         raise ValidationError("业务编辑器只能绑定属于当前活动的轮次。")
+
+    for request in round_requests:
+        round_key = request["source"]["round_key"]
+        if request["create_round"] and existing_round_keys.get(round_key) not in (None, ""):
+            raise ValidationError(f"轮次键“{round_key}”已经绑定已有轮次，不能按创建新轮次处理。")
 
     key_to_id: dict[str, int] = {}
     for request in round_requests:
@@ -786,16 +815,28 @@ def save_business_ruleset(
         base_content_hash=base_content_hash,
         allow_empty_checkpoints=True,
     )
+    new_round_configuration = _business_round_configuration_snapshot(
+        ContestRound.objects.filter(activity_id=locked_ruleset.activity_id)
+    )
     AuditLog.objects.create(
         operator=operator,
         action_type=AuditLog.ActionType.OTHER,
         target=f"RulesetVersion:{saved.pk}",
         old_value=json.dumps(
-            {"definition": old_definition, "binding": old_binding},
+            {
+                "definition": old_definition,
+                "binding": old_binding,
+                "round_configuration": old_round_configuration,
+            },
             ensure_ascii=False,
         ),
         new_value=json.dumps(
-            {"definition": saved.definition, "binding": new_binding}, ensure_ascii=False
+            {
+                "definition": saved.definition,
+                "binding": new_binding,
+                "round_configuration": new_round_configuration,
+            },
+            ensure_ascii=False,
         ),
     )
     return saved

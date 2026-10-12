@@ -8019,6 +8019,13 @@ class RulesetEditorTests(TestCase):
         self.version.refresh_from_db()
         return json.loads(self.version.definition)["nodes"]
 
+    def _business_round_configuration_signature(self):
+        from ruleset.services import business_round_configuration_signature
+
+        return business_round_configuration_signature(
+            ContestRound.objects.filter(activity=self.activity)
+        )
+
     def test_blank_starter_definition_contains_only_the_roster(self):
         from staff_panel.views import _starter_definition
 
@@ -8152,7 +8159,15 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, "<details", html=False)
         self.assertContains(response, 'name="base_round_configuration"')
         self.assertContains(response, 'name="stage_2_audience_source" value="top5"')
-        self.assertContains(response, 'name="stage_2_audience_source_stage_index" value="2"')
+        self.assertContains(response, 'name="stage_2_audience_source_stage_key" value="stage2"')
+
+    def test_business_editor_exposes_existing_round_keys(self):
+        self.ruleset.round_keys = {"r4": 401}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertEqual(response.context["business_editor"]["existing_round_keys"], ["r4"])
 
     def test_business_editor_can_add_a_stage_and_change_weights_and_quota(self):
         from ruleset.services import _binding_signature
@@ -8165,6 +8180,7 @@ class RulesetEditorTests(TestCase):
             "action": "business_save",
             "base_content_hash": self.version.content_hash,
             "base_binding": _binding_signature(self.ruleset),
+            "base_round_configuration": self._business_round_configuration_signature(),
             "stage_count": "2",
             "stage_0_key": "stage1",
             "stage_0_name": "初赛",
@@ -8222,6 +8238,7 @@ class RulesetEditorTests(TestCase):
                 "action": "business_save",
                 "base_content_hash": stale_hash,
                 "base_binding": _binding_signature(self.ruleset),
+                "base_round_configuration": self._business_round_configuration_signature(),
                 "stage_count": "0",
             },
             follow=True,
@@ -8237,6 +8254,7 @@ class RulesetEditorTests(TestCase):
                 "action": "business_save",
                 "base_content_hash": self.version.content_hash,
                 "base_binding": _binding_signature(self.ruleset),
+                "base_round_configuration": self._business_round_configuration_signature(),
                 "stage_count": "1",
                 "stage_0_key": "stage1",
                 "stage_0_name": "初赛",

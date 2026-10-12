@@ -4252,6 +4252,9 @@ def _business_stages_from_post(post):
                     "weight": (post.get(f"{source_prefix}_weight") or "0").strip(),
                     "create_round": post.get(f"{source_prefix}_create_round") == "on",
                     "source": (post.get(f"{source_prefix}_source") or "").strip(),
+                    "source_stage_key": (
+                        post.get(f"{source_prefix}_source_stage_key") or ""
+                    ).strip(),
                     "source_stage_index": post.get(f"{source_prefix}_source_stage_index") or "",
                 }
             )
@@ -4278,6 +4281,9 @@ def _business_stages_from_post(post):
                 "audience_weight": (post.get(f"{prefix}_audience_weight") or "0").strip(),
                 "vote_source": (post.get(f"{prefix}_vote_source") or "").strip(),
                 "audience_source": (post.get(f"{prefix}_audience_source") or "").strip(),
+                "audience_source_stage_key": (
+                    post.get(f"{prefix}_audience_source_stage_key") or ""
+                ).strip(),
                 "audience_source_stage_index": post.get(f"{prefix}_audience_source_stage_index")
                 or "",
                 "create_round": any(source["create_round"] for source in judge_sources),
@@ -5002,6 +5008,7 @@ def ruleset_edit(request, pk):
     business_editor = infer_business_stages(version.definition)
     business_editor["content_hash"] = version.content_hash
     business_editor["binding_signature"] = _binding_signature(ruleset)
+    business_editor["existing_round_keys"] = sorted(str(key) for key in (ruleset.round_keys or {}))
     business_editor["round_configuration_signature"] = business_round_configuration_signature(
         round_candidates
     )
