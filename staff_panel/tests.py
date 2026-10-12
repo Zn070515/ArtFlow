@@ -8214,6 +8214,25 @@ class RulesetEditorTests(TestCase):
         self.assertContains(response, "scoring_mode_conflict_ack")
         self.assertContains(response, "轮次当前评分方式与规则定义不一致")
 
+    def test_business_editor_exposes_ack_for_an_intentional_scoring_mode_change(self):
+        self.version.definition = golden_schidui()
+        self.version.save(update_fields=["definition"])
+        round_ = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮",
+            scoring_mode=ContestRound.ScoringMode.AVERAGE,
+        )
+        self.ruleset.round_keys = {"r1": round_.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        source = response.context["business_editor"]["stages"][0]["judge_sources"][0]
+        self.assertFalse(source["scoring_mode_conflict"])
+        self.assertContains(response, "scoring_mode_conflict_ack")
+        self.assertContains(response, "如果本次修改评分方式")
+
     def test_business_editor_requires_explicit_mode_ack_before_syncing_bound_round(self):
         from ruleset.services import _binding_signature
 

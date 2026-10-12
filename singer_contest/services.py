@@ -203,6 +203,25 @@ def authoritative_panel_judges(contest_round: ContestRound) -> QuerySet[Judge]:
     )
 
 
+def _current_stage_result_for_round(
+    contest_round: ContestRound, stage_key: str
+) -> StageResult | None:
+    """Return the current frozen version's result for a stage-backed round."""
+    version = _current_frozen_version(contest_round.activity)
+    if version is None:
+        return None
+    return (
+        StageResult.objects.filter(
+            activity=contest_round.activity,
+            ruleset_version=version,
+            stage_key=stage_key,
+            is_test_data=runtime_is_test(contest_round.activity),
+        )
+        .order_by("-result_version", "-pk")
+        .first()
+    )
+
+
 def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistration]:
     source = contest_round.effective_roster_source()
     if source == ContestRound.RosterSource.APPROVED:
@@ -233,15 +252,7 @@ def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistratio
         )
     if not contest_round.roster_source_stage:
         raise ValidationError("STAGE 来源轮次必须配置上游赛段。")
-    upstream = (
-        StageResult.objects.filter(
-            activity=contest_round.activity,
-            stage_key=contest_round.roster_source_stage,
-            is_test_data=runtime_is_test(contest_round.activity),
-        )
-        .order_by("-pk")
-        .first()
-    )
+    upstream = _current_stage_result_for_round(contest_round, contest_round.roster_source_stage)
     if upstream is None or upstream.status != StageResult.Status.CONFIRMED:
         raise ValidationError("上游赛段未核定，禁止准备该轮次。")
     materialized_entries = list(
@@ -339,11 +350,7 @@ def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
     stage_key = (contest_round.roster_source_stage or "").strip()
     if not stage_key:
         return RoundSetupReadiness.MISSING_UPSTREAM
-    stage = (
-        StageResult.objects.filter(activity=contest_round.activity, stage_key=stage_key)
-        .order_by("-result_version", "-pk")
-        .first()
-    )
+    stage = _current_stage_result_for_round(contest_round, stage_key)
     if stage is None:
         return RoundSetupReadiness.MISSING_UPSTREAM
     if stage.status != StageResult.Status.CONFIRMED:
@@ -2364,21 +2371,24 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
     """Auto-generate a DRAFT round's entry roster from a resolved stage.
 
     The StageDecision table is the advancement authority (M1-INTEGRATION-1): every
-    contestant with an advancing outcome code moves into the ``STAGE`` round bound to
+    contestant with an advancing outcome code moves into every ``STAGE`` round bound to
     this stage (``roster_source_stage == stage.stage_key``). Only resolve on a stage
     that has actually decided something (READY_TO_CONFIRM / CONFIRMED), so a HOLD or
     REVIEW result never writes a partial roster. The round entry is reconciled to the
     *current* advancing set: a re-resolved stage (new ``result_version``) prunes
     superseded advancers and adds new ones, so a round still in DRAFT never silently
-    retains a contestant who no longer advances. Returns the target round, or None
-    when no DRAFT STAGE round consumes this stage.
+    retains a contestant who no longer advances. Returns the first target for backwards
+    compatibility, or None when no DRAFT STAGE round consumes this stage.
     """
     if stage.status not in {
         StageResult.Status.READY_TO_CONFIRM,
         StageResult.Status.CONFIRMED,
     }:
         return None
-    target = (
+    current_version = _current_frozen_version(stage.activity)
+    if current_version is None or stage.ruleset_version_id != current_version.pk:
+        return None
+    targets = list(
         ContestRound.objects.select_for_update()
         .filter(
             activity=stage.activity,
@@ -2387,9 +2397,8 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
             status=ContestRound.Status.DRAFT,
         )
         .order_by("sequence", "pk")
-        .first()
     )
-    if target is None:
+    if not targets:
         return None
     advancers = list(
         stage.decisions.filter(outcome_code__in=_ADVANCING_OUTCOME_CODES)
@@ -2397,79 +2406,83 @@ def materialize_round_entry_from_stage(stage: StageResult, *, operator=None) -> 
         .order_by("rank", "pk")
     )
     target_singers = [decision.singer for decision in advancers]
-    existing_orders = dict(
-        RoundEntry.objects.filter(round=target, singer__in=target_singers).values_list(
-            "singer_id", "running_order"
+    first_target = targets[0]
+    for target in targets:
+        existing_orders = dict(
+            RoundEntry.objects.filter(round=target, singer__in=target_singers).values_list(
+                "singer_id", "running_order"
+            )
         )
-    )
-    manual_unordered = target.order_policy == ContestRound.OrderPolicy.MANUAL and not (
-        set(existing_orders) == {singer.pk for singer in target_singers}
-        and all(order is not None for order in existing_orders.values())
-    )
-    ordered_singers = (
-        _order_singers_for_round(target, target_singers, allow_unordered_manual=manual_unordered)
-        if target_singers
-        else []
-    )
-    running_order_by_singer = (
-        {}
-        if manual_unordered
-        else {singer.pk: index for index, singer in enumerate(ordered_singers, start=1)}
-    )
-    entry_qs = RoundEntry.objects.filter(round=target)
-    existing_ids = set(entry_qs.values_list("singer_id", flat=True))
-    target_ids = {decision.singer_id for decision in advancers}
-    removed = existing_ids - target_ids
-    to_create = [
-        RoundEntry(
-            round=target,
-            singer=decision.singer,
-            running_order=running_order_by_singer.get(decision.singer_id),
+        manual_unordered = target.order_policy == ContestRound.OrderPolicy.MANUAL and not (
+            set(existing_orders) == {singer.pk for singer in target_singers}
+            and all(order is not None for order in existing_orders.values())
         )
-        for decision in advancers
-        if decision.singer_id not in existing_ids
-    ]
-    if removed:
-        entry_qs.filter(singer_id__in=removed).delete()
-    if running_order_by_singer:
-        entry_qs.update(running_order=None)
-    if to_create:
-        RoundEntry.objects.bulk_create(to_create)
-    for singer_id, index in running_order_by_singer.items():
-        entry_qs.filter(singer_id=singer_id).update(running_order=index)
-    if removed or to_create:
-        Performance.objects.filter(round=target).delete()
-        PerformanceGroup.objects.filter(round=target).delete()
-        AuditLog.objects.create(
-            operator=operator,
-            action_type=AuditLog.ActionType.OTHER,
-            target=f"ContestRound:{target.pk}",
-            new_value=json.dumps(
-                {
-                    "stage_key": stage.stage_key,
-                    "removed_entries": len(removed),
-                    "added_entries": len(to_create),
-                },
-                ensure_ascii=False,
-            ),
-            note="invalidate_round_setup_facts",
+        ordered_singers = (
+            _order_singers_for_round(
+                target, target_singers, allow_unordered_manual=manual_unordered
+            )
+            if target_singers
+            else []
         )
-        AuditLog.objects.create(
-            operator=operator,
-            action_type=AuditLog.ActionType.OTHER,
-            target=f"ContestRound:{target.pk}",
-            new_value=json.dumps(
-                {
-                    "stage_key": stage.stage_key,
-                    "added_entries": len(to_create),
-                    "removed_entries": len(removed),
-                    "advancers": len(advancers),
-                },
-                ensure_ascii=False,
-            ),
-            note="materialize_round_entry_from_stage",
+        running_order_by_singer = (
+            {}
+            if manual_unordered
+            else {singer.pk: index for index, singer in enumerate(ordered_singers, start=1)}
         )
-    return target
+        entry_qs = RoundEntry.objects.filter(round=target)
+        existing_ids = set(entry_qs.values_list("singer_id", flat=True))
+        target_ids = {decision.singer_id for decision in advancers}
+        removed = existing_ids - target_ids
+        to_create = [
+            RoundEntry(
+                round=target,
+                singer=decision.singer,
+                running_order=running_order_by_singer.get(decision.singer_id),
+            )
+            for decision in advancers
+            if decision.singer_id not in existing_ids
+        ]
+        if removed:
+            entry_qs.filter(singer_id__in=removed).delete()
+        if running_order_by_singer:
+            entry_qs.update(running_order=None)
+        if to_create:
+            RoundEntry.objects.bulk_create(to_create)
+        for singer_id, index in running_order_by_singer.items():
+            entry_qs.filter(singer_id=singer_id).update(running_order=index)
+        if removed or to_create:
+            Performance.objects.filter(round=target).delete()
+            PerformanceGroup.objects.filter(round=target).delete()
+            AuditLog.objects.create(
+                operator=operator,
+                action_type=AuditLog.ActionType.OTHER,
+                target=f"ContestRound:{target.pk}",
+                new_value=json.dumps(
+                    {
+                        "stage_key": stage.stage_key,
+                        "removed_entries": len(removed),
+                        "added_entries": len(to_create),
+                    },
+                    ensure_ascii=False,
+                ),
+                note="invalidate_round_setup_facts",
+            )
+            AuditLog.objects.create(
+                operator=operator,
+                action_type=AuditLog.ActionType.OTHER,
+                target=f"ContestRound:{target.pk}",
+                new_value=json.dumps(
+                    {
+                        "stage_key": stage.stage_key,
+                        "added_entries": len(to_create),
+                        "removed_entries": len(removed),
+                        "advancers": len(advancers),
+                    },
+                    ensure_ascii=False,
+                ),
+                note="materialize_round_entry_from_stage",
+            )
+    return first_target
 
 
 def _definition_checkpoint_keys(definition) -> set[str]:
