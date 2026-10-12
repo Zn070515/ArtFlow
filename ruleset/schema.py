@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Callable
 
@@ -38,6 +39,7 @@ PAIRING_POLICIES = frozenset({"ADJACENT", "HIGH_LOW"})
 DUEL_DECISION_SOURCES = frozenset({"manual_recorded_result"})
 VOTE_PURPOSES = frozenset({"POPULARITY", "SCORE_COMPONENT", "SELECTION", "OTHER"})
 CONVERSION_METHODS = frozenset({"factor", "minmax", "rank"})
+_CONVERSION_SCALE_ALIASES = {"ten": Decimal("10"), "hundred": Decimal("100")}
 # FILL_TO_QUOTA distribution mode: "global" fills until the TOTAL across the target
 # group map reaches `quota`; "each_group" fills EVERY target group up to `quota`.
 FILL_MODES = frozenset({"global", "each_group"})
@@ -222,20 +224,63 @@ def _validate_conversion(name: str, node: dict) -> None:
         return
     if not isinstance(conversion, dict):
         raise ValidationError(f"Node {name}: 'conversion' must be an object.")
-    _require_one_of(name, {"conversion": conversion.get("to")}, "conversion", SCALES)
+    target = _conversion_decimal(name, conversion.get("to"), "conversion.to")
     conversions = conversion.get("conversions")
     if not isinstance(conversions, list) or not conversions:
         raise ValidationError(f"Node {name}: conversion 'conversions' must be a non-empty list.")
+    aggregate = node.get("aggregate") or {}
+    component_sources = {
+        item.get("source")
+        for item in aggregate.get("components") or ()
+        if isinstance(item, dict)
+    }
+    seen_sources: set[str] = set()
     for i, entry in enumerate(conversions):
         if not isinstance(entry, dict):
             raise ValidationError(f"Node {name}: conversion {i} must be an object.")
-        _require_one_of(name, {"conversion": entry.get("from")}, "conversion", SCALES)
+        extra = set(entry) - {"source", "from", "to", "method", "factor"}
+        if extra:
+            raise ValidationError(
+                f"Node {name}: conversion {i} has unexpected keys {sorted(extra)}."
+            )
+        source = entry.get("source")
+        if not isinstance(source, str) or not source:
+            raise ValidationError(f"Node {name}: conversion {i} requires a non-empty 'source'.")
+        if source not in component_sources:
+            raise ValidationError(
+                f"Node {name}: conversion {i} source {source!r} is not an aggregate component."
+            )
+        if source in seen_sources:
+            raise ValidationError(f"Node {name}: conversion duplicates source {source!r}.")
+        seen_sources.add(source)
+        _conversion_decimal(name, entry.get("from"), f"conversion {i}.from")
+        entry_target = _conversion_decimal(name, entry.get("to"), f"conversion {i}.to")
+        if entry_target != target:
+            raise ValidationError(
+                f"Node {name}: conversion {i}.to must equal conversion.to ({target})."
+            )
         method = entry.get("method")
         if method not in CONVERSION_METHODS:
             raise ValidationError(
                 f"Node {name}: conversion {i} method {method!r} unsupported; "
                 f"expected one of {sorted(CONVERSION_METHODS)}."
             )
+        if method == "factor":
+            _conversion_decimal(name, entry.get("factor"), f"conversion {i}.factor")
+
+
+def _conversion_decimal(name: str, value, field: str) -> Decimal:
+    if isinstance(value, bool) or value is None:
+        raise ValidationError(f"Node {name}: '{field}' must be a positive number.")
+    if isinstance(value, str):
+        value = _CONVERSION_SCALE_ALIASES.get(value, value)
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        raise ValidationError(f"Node {name}: '{field}' must be a positive number.")
+    if not number.is_finite() or number <= 0:
+        raise ValidationError(f"Node {name}: '{field}' must be a positive number.")
+    return number
 
 
 def _validate_vote(name: str, node: dict) -> None:

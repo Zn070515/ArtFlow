@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 
 from django.core.exceptions import ValidationError
@@ -374,20 +374,127 @@ def _check_weight(agg: dict, node_key: str, issues: list[ReportIssue]) -> None:
         )
 
 
-def _check_conversion(node: dict, issues: list[ReportIssue]) -> None:
-    # §29-30: scale conversion is declared in the schema but NOT implemented by the
-    # resolver, which silently does ``w * v``. Deciding or ignoring it yields wrong
-    # math, so forbid it outright (roadmap option B) until a real conversion exists.
-    if node.get("conversion"):
+_CONVERSION_SCALE_ALIASES = {"ten": Decimal("10"), "hundred": Decimal("100")}
+
+
+def _scale_number(value) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = _CONVERSION_SCALE_ALIASES.get(value, value)
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return number if number.is_finite() and number > 0 else None
+
+
+def _conversion_for_component(node: dict, source: str) -> dict | None:
+    conversion = node.get("conversion") or {}
+    return next(
+        (
+            item
+            for item in conversion.get("conversions") or ()
+            if isinstance(item, dict) and item.get("source") == source
+        ),
+        None,
+    )
+
+
+def _conversion_factor(node: dict, source: str, source_scale, target_scale) -> Decimal | None:
+    entry = _conversion_for_component(node, source)
+    if entry is None:
+        return None
+    return _scale_number(entry.get("factor"))
+
+
+def _check_conversion(node: dict, prov: dict, issues: list[ReportIssue]) -> None:
+    conversion = node.get("conversion")
+    if not conversion:
+        return
+    target = _scale_number(conversion.get("to"))
+    if target is None:
         issues.append(
             ReportIssue(
-                "CONVERSION_UNSUPPORTED",
+                "CONVERSION_TARGET_SCALE_INVALID",
                 Severity.ERROR,
                 node["key"],
-                "conversion",
-                "分数制换算当前未实现，禁止声明 conversion。",
+                "conversion.to",
+                "换算目标满分必须是正数。",
             )
         )
+        return
+    for component in node["aggregate"]["components"]:
+        source = component["source"]
+        actual = _scale_number(prov[source].get("scale"))
+        entry = _conversion_for_component(node, source)
+        if actual is None:
+            _warn_scale(
+                node,
+                "SCALE_UNDECLARED",
+                f"分量 {source} 未声明或无法确认实际满分。",
+                issues,
+            )
+            continue
+        if actual == target:
+            continue
+        if entry is None:
+            issues.append(
+                ReportIssue(
+                    "CONVERSION_SOURCE_MISSING",
+                    Severity.ERROR,
+                    node["key"],
+                    "conversion.conversions",
+                    f"分量 {source} 从 {actual} 分制进入 {target} 分制时缺少换算。",
+                )
+            )
+            continue
+        method = entry.get("method")
+        if method != "factor":
+            issues.append(
+                ReportIssue(
+                    "CONVERSION_UNSUPPORTED",
+                    Severity.ERROR,
+                    node["key"],
+                    "conversion",
+                    f"换算方法 {method!r} 当前未实现，只支持 factor。",
+                )
+            )
+            continue
+        declared_from = _scale_number(entry.get("from"))
+        declared_to = _scale_number(entry.get("to"))
+        factor = _conversion_factor(node, source, actual, target)
+        if declared_from != actual:
+            issues.append(
+                ReportIssue(
+                    "CONVERSION_SOURCE_SCALE_MISMATCH",
+                    Severity.ERROR,
+                    node["key"],
+                    f"conversion.{source}.from",
+                    f"分量 {source} 实际为 {actual} 分制，但换算声明来源为 {declared_from}。",
+                )
+            )
+        if declared_to != target:
+            issues.append(
+                ReportIssue(
+                    "CONVERSION_TARGET_SCALE_MISMATCH",
+                    Severity.ERROR,
+                    node["key"],
+                    f"conversion.{source}.to",
+                    f"分量 {source} 的换算目标必须为 {target}。",
+                )
+            )
+        expected = target / declared_from if declared_from else None
+        if factor is None or expected is None or factor != expected:
+            issues.append(
+                ReportIssue(
+                    "CONVERSION_FACTOR_MISMATCH",
+                    Severity.ERROR,
+                    node["key"],
+                    f"conversion.{source}.factor",
+                    f"分量 {source} 的换算系数应为 {expected}，收到 {factor}。",
+                )
+            )
 
 
 def _canonical_scale(value: str) -> str:
@@ -398,15 +505,20 @@ def _canonical_scale(value: str) -> str:
     Both are the same magnitude for a weighted composite; a genuinely different rubric
     (e.g. ``"50"``) must stay distinct so a mixed-composite is still refused.
     """
+    if value is None:
+        return value
     if value == "hundred":
         return "hundred"
+    if value == "ten":
+        return "scale:10"
     if value == "votes":
         return "votes"
-    try:
-        n = float(value)
-    except (TypeError, ValueError):
+    n = _scale_number(value)
+    if n is None:
         return value
-    return "hundred" if n == 100 else f"scale:{n}"
+    if n == 100:
+        return "hundred"
+    return f"scale:{format(n, 'f')}"
 
 
 def _check_scale(
@@ -415,22 +527,29 @@ def _check_scale(
     if node["type"] != "AGGREGATE":
         return
     comps = node["aggregate"]["components"]
-    scales = [_canonical_scale(prov[c["source"]]["scale"]) for c in comps]
+    scales = []
+    conversion = node.get("conversion") or {}
+    target = conversion.get("to")
+    for component in comps:
+        source = component["source"]
+        entry = _conversion_for_component(node, source)
+        scale = target if entry and entry.get("method") == "factor" else prov[source]["scale"]
+        scales.append(_canonical_scale(scale))
     resolved = [s for s in scales if s not in (None, "unknown")]
-    if any(s == "unknown" for s in scales) and not resolved:
+    unknown = any(s in (None, "unknown") for s in scales)
+    if unknown and not resolved:
         _warn_scale(
             node, "SCALE_UNDECLARED", "所有分量 scale 未声明，无法校验是否混用量纲。", issues
         )
         return
-    if len(set(resolved)) == 1:
-        return
-    if any(s == "unknown" for s in scales):
+    if unknown:
         _warn_scale(
             node,
             "SCALE_UNDECLARED",
             "存在未声明 scale 的分量，跨量纲组合需显式 conversion。",
             issues,
         )
+    if len(set(resolved)) <= 1:
         return
     _issue_scale(
         node, "SCALE_MIXED", "混合不同分数制：{}。".format(set(scales)), Severity.ERROR, issues
@@ -1052,6 +1171,20 @@ def _node_plan(node: dict, prov: dict, outputs: dict) -> dict:
         plan["score_weights_sum"] = str(
             sum((Decimal(str(c["weight"])) for c in node["aggregate"]["components"]), Decimal("0"))
         )
+        if node.get("conversion"):
+            conversion = node["conversion"]
+            plan["conversion"] = {
+                "target": str(_scale_number(conversion.get("to"))),
+                "components": {
+                    item["source"]: {
+                        "from": str(_scale_number(item.get("from"))),
+                        "to": str(_scale_number(item.get("to"))),
+                        "method": item.get("method"),
+                        "factor": str(_scale_number(item.get("factor"))),
+                    }
+                    for item in conversion.get("conversions") or ()
+                },
+            }
     if node.get("round"):
         plan["round"] = node["round"]
     if node.get("tie_policy"):
@@ -1164,7 +1297,7 @@ def compile_definition(
         if node["type"] == "AGGREGATE":
             _check_weight(node["aggregate"], node["key"], issues)
         _check_scale(node, prov, by_key, ctx, issues)
-        _check_conversion(node, issues)
+        _check_conversion(node, prov, issues)
         _check_judges(node, prov, ctx, issues)
         _check_quota(node, prov, by_key, ctx, issues)
         _check_pair(node, prov, ctx, issues)

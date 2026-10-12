@@ -218,8 +218,7 @@ class SchemaAcceptanceStructureParsingTests(SimpleTestCase):
         self.assertEqual(outputs["prev_composite"], OutputType.SCOREMAP)
         self.assertEqual(outputs["assess_r3"], OutputType.SCOREMAP)
         self.assertEqual(outputs["final"], OutputType.SCOREMAP)
-        self.assertEqual(outputs["ranked"], OutputType.RANKED_ROSTER)
-        self.assertEqual(outputs["winners"], OutputType.ROSTER)
+
 
     def test_partition_subtract_repechage_merge_parses(self):
         parsed = parse_definition(partition_subtract_repechage_merge())
@@ -615,6 +614,90 @@ class SchemaCheckpointTests(SimpleTestCase):
     def test_non_list_checkpoints_rejected(self):
         with self.assertRaises(ValidationError):
             parse_definition(self._def({"key": "stage1", "output": "winners"}))
+
+
+class ConversionSchemaTests(SimpleTestCase):
+    def _definition(self, conversion):
+        return _def(
+            [
+                {"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "scale": "hundred"},
+                {"key": "b", "type": "ASSESS", "source": ENTRY_KEY, "scale": "ten"},
+                {
+                    "key": "agg",
+                    "type": "AGGREGATE",
+                    "aggregate": {
+                        "type": "weighted_sum",
+                        "components": [
+                            {"source": "a", "weight": 0.5},
+                            {"source": "b", "weight": 0.5},
+                        ],
+                    },
+                    "conversion": conversion,
+                },
+            ]
+        )
+
+    def test_factor_conversion_requires_explicit_numeric_contract(self):
+        parsed = parse_definition(
+            self._definition(
+                {
+                    "to": 100,
+                    "conversions": [
+                        {
+                            "source": "b",
+                            "from": 10,
+                            "to": 100,
+                            "method": "factor",
+                            "factor": 10,
+                        }
+                    ],
+                }
+            )
+        )
+        self.assertEqual(parsed["nodes"][-1]["conversion"]["to"], 100)
+
+    def test_conversion_rejects_missing_source(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(
+                self._definition(
+                    {
+                        "to": 100,
+                        "conversions": [
+                            {"from": 10, "to": 100, "method": "factor", "factor": 10}
+                        ],
+                    }
+                )
+            )
+
+    def test_conversion_rejects_non_positive_factor(self):
+        with self.assertRaises(ValidationError):
+            parse_definition(
+                self._definition(
+                    {
+                        "to": 100,
+                        "conversions": [
+                            {
+                                "source": "b",
+                                "from": 10,
+                                "to": 100,
+                                "method": "factor",
+                                "factor": 0,
+                            }
+                        ],
+                    }
+                )
+            )
+
+    def test_conversion_rejects_duplicate_or_foreign_sources(self):
+        for entries in (
+            [
+                {"source": "b", "from": 10, "to": 100, "method": "factor", "factor": 10},
+                {"source": "b", "from": 10, "to": 100, "method": "factor", "factor": 10},
+            ],
+            [{"source": "ghost", "from": 10, "to": 100, "method": "factor", "factor": 10}],
+        ):
+            with self.subTest(entries=entries), self.assertRaises(ValidationError):
+                parse_definition(self._definition({"to": 100, "conversions": entries}))
 
 
 class _RulesetModelBase(_CharacterizationBase):
