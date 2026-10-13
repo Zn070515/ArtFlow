@@ -27,6 +27,7 @@ from django.db.models import Q
 from ruleset.resolver import OutcomeCode, ResolverState
 
 from .deletion import cascade_draft_snapshots_or_protect_prepared
+from .scoring import ScoreCompletionMode
 
 if TYPE_CHECKING:
     from files.models import MaterialCheck, StaffNote, SubmissionFile
@@ -813,6 +814,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
         "activity_id",
         "round_type",
         "scoring_mode",
+        "score_completion_mode",
         "judge_count",
         "minimum_judge_count",
         "name",
@@ -916,6 +918,10 @@ class ContestRound(models.Model):
         AVERAGE = "average", "平均分"
         DROP_HIGH_LOW = "drop_high_low", "去最高最低后平均"
 
+    class CompletionMode(models.TextChoices):
+        FULL_MATRIX = ScoreCompletionMode.FULL_MATRIX.value, "完整评分矩阵"
+        MINIMUM_VALID = ScoreCompletionMode.MINIMUM_VALID.value, "达到最低有效评委数"
+
     class OrderPolicy(models.TextChoices):
         REGISTRATION_ORDER = "registration_order", "报名顺序"
         DRAW = "draw", "抽签顺序"
@@ -942,6 +948,12 @@ class ContestRound(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rounds")
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
+    score_completion_mode = models.CharField(
+        max_length=16,
+        choices=CompletionMode,
+        default=CompletionMode.FULL_MATRIX,
+        help_text="历史轮次使用完整矩阵；现场赛制可显式使用最低有效评委数。",
+    )
     judge_count = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -1374,6 +1386,11 @@ class RoundPanelSnapshot(models.Model):
     expected_judge_count = models.PositiveIntegerField()
     minimum_judge_count = models.PositiveIntegerField()
     scoring_method = models.CharField(max_length=32)
+    completion_mode = models.CharField(
+        max_length=16,
+        choices=ContestRound.CompletionMode,
+        default=ContestRound.CompletionMode.FULL_MATRIX,
+    )
     roster_digest = models.CharField(max_length=64)
     captured_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -2227,7 +2244,7 @@ class ScoreSummary(models.Model):
     singer = models.ForeignKey(
         SingerRegistration, on_delete=models.CASCADE, related_name="summaries"
     )
-    average_score = models.DecimalField(max_digits=6, decimal_places=3, default=0)
+    average_score = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     rank = models.IntegerField(default=0)
     is_advanced = models.BooleanField(default=False)
     is_test_data = models.BooleanField(default=False)
@@ -2898,6 +2915,71 @@ class Performance(models.Model):
 
     def __str__(self):
         return f"{self.singer.name} — {self.song_title or self.round.name or self.round}"
+
+
+class PerformanceScoreState(models.Model):
+    """Per-performance scoring gate, independent from the live performance cursor."""
+
+    class State(models.TextChoices):
+        NOT_OPENED = "not_opened", "未开放"
+        OPEN = "open", "收分中"
+        LOCKED = "locked", "已锁定"
+
+    performance = models.OneToOneField(
+        Performance, on_delete=models.PROTECT, related_name="score_state"
+    )
+    state = models.CharField(max_length=16, choices=State.choices, default=State.NOT_OPENED)
+    context_version = models.PositiveIntegerField(default=0)
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="opened_performance_scores",
+    )
+    opened_at = models.DateTimeField(null=True, blank=True)
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locked_performance_scores",
+    )
+    locked_at = models.DateTimeField(null=True, blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = JudgePerformanceQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        performance_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [
+            models.Index(fields=["state", "context_version"], name="perf_score_state_idx"),
+        ]
+
+    def clean(self):
+        if self.state == self.State.NOT_OPENED:
+            if self.opened_at is not None or self.locked_at is not None:
+                raise ValidationError("未开放表演不能带有开放或锁定时间。")
+        elif self.opened_at is None:
+            raise ValidationError("已开放表演必须记录开放时间。")
+        if self.state == self.State.LOCKED and self.locked_at is None:
+            raise ValidationError("已锁定表演必须记录锁定时间。")
+        if self.state != self.State.LOCKED and self.locked_at is not None:
+            raise ValidationError("未锁定表演不能记录锁定时间。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(ROUND_PERFORMANCE_STATE):
+            raise ValidationError("逐表演评分状态只能通过现场 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(ROUND_PERFORMANCE_STATE):
+            raise ValidationError("逐表演评分状态删除需要现场 authority service。")
+        return super().delete(*args, **kwargs)
 
 
 class ScoringRubric(models.Model):

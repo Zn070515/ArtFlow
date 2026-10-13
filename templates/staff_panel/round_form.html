@@ -32,9 +32,18 @@
             {% for error in form.scoring_mode.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
+            {{ form.score_completion_mode.label_tag }}{{ form.score_completion_mode }}
+            {% for error in form.score_completion_mode.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
+            <p class="text-xs text-gray-500 mt-1">达到最低人数只表示可锁定，必须由工作人员显式结束收分。</p>
+        </div>
+        <div>
             {{ form.judge_count.label_tag }}{{ form.judge_count }}
             {% for error in form.judge_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
             <p class="text-xs text-gray-500 mt-1">现场会自动使用 J1、J2 等通道，不需要提前录入老师姓名。</p>
+        </div>
+        <div>
+            {{ form.minimum_judge_count.label_tag }}{{ form.minimum_judge_count }}
+            {% for error in form.minimum_judge_count.errors %}<p class="text-sm text-red-700 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
             {{ form.sequence.label_tag }}{{ form.sequence }}

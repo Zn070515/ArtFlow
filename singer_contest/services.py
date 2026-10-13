@@ -37,7 +37,7 @@ from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import F, Max, OuterRef, Q, QuerySet, Subquery
+from django.db.models import Count, F, Max, OuterRef, Q, QuerySet, Subquery
 from django.utils import timezone
 from realtime.events import schedule_activity_event
 from ruleset.compiler import ExecutionPlan, compile_version
@@ -89,6 +89,13 @@ from .models import (
     _award_materialization_authorized,
     _duel_write_authorized,
     _manual_write_authorized,
+)
+from .scoring import (
+    ScoreCompleteness,
+    ScoreCompletionMode,
+    ScoreCompletionState,
+    assess_score_completeness,
+    official_average,
 )
 
 
@@ -748,6 +755,7 @@ def configure_draft_round_from_planning(
             "judge_count",
             "minimum_judge_count",
             "scoring_mode",
+            "score_completion_mode",
             "advance_count",
             "roster_source",
             "roster_source_stage",
@@ -760,6 +768,7 @@ def configure_draft_round_from_planning(
         "judge_count",
         "minimum_judge_count",
         "scoring_mode",
+        "score_completion_mode",
         "advance_count",
         "roster_source",
         "roster_source_stage",
@@ -794,6 +803,11 @@ def configure_draft_round_from_planning(
         if scoring_mode not in ContestRound.ScoringMode.values:
             raise ValidationError("评分方式无效。")
         locked_round.scoring_mode = scoring_mode
+    if "score_completion_mode" in configuration:
+        completion_mode = str(configuration["score_completion_mode"] or "")
+        if completion_mode not in ContestRound.CompletionMode.values:
+            raise ValidationError("评分完成方式无效。")
+        locked_round.score_completion_mode = completion_mode
     if "advance_count" in configuration:
         try:
             advance_count = int(str(configuration["advance_count"]))
@@ -845,6 +859,7 @@ def configure_draft_round_from_planning(
                 "judge_count",
                 "minimum_judge_count",
                 "scoring_mode",
+                "score_completion_mode",
                 "advance_count",
                 "roster_source",
                 "roster_source_stage",
@@ -1134,7 +1149,7 @@ def ensure_round_final_for_advancement(contest_round: ContestRound) -> None:
         raise ValidationError("上游轮次尚未锁定，无法生成后续轮次。")
     if not expected_score_cells(contest_round):
         raise ValidationError("上游轮次没有可用的评分矩阵。")
-    if missing_score_cells(contest_round):
+    if not round_scores_complete(contest_round):
         raise ValidationError("上游轮次仍有未录完的分数。")
     entry_count = RoundEntry.objects.filter(round=contest_round).count()
     summary_count = ScoreSummary.objects.filter(round=contest_round).count()
@@ -1164,6 +1179,64 @@ def expected_score_cells(contest_round: ContestRound) -> list[tuple[int, int]]:
     singers = list(_eligible_singers(contest_round).values_list("pk", flat=True))
     judges = list(authoritative_panel_judges(contest_round).values_list("pk", flat=True))
     return [(singer_id, judge_id) for singer_id in singers for judge_id in judges]
+
+
+def score_completeness_for_round(
+    contest_round: ContestRound,
+) -> dict[int, ScoreCompleteness]:
+    """Return the authoritative completion state for every prepared contestant."""
+
+    judges = list(authoritative_panel_judges(contest_round))
+    expected_judge_count = len(judges)
+    if expected_judge_count < 1:
+        return {}
+    snapshot = (
+        RoundPanelSnapshot.objects.filter(round=contest_round)
+        .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
+        .order_by("-version")
+        .first()
+    )
+    minimum_judge_count = (
+        snapshot.minimum_judge_count
+        if snapshot is not None
+        else contest_round.minimum_judge_count or expected_judge_count
+    )
+    completion_mode = (
+        snapshot.completion_mode
+        if snapshot is not None
+        else contest_round.score_completion_mode
+    )
+    score_counts = dict(
+        ScoreRecord.objects.filter(
+            round=contest_round,
+            judge_id__in=[judge.pk for judge in judges],
+        )
+        .values("singer_id")
+        .annotate(valid_count=Count("pk"))
+        .values_list("singer_id", "valid_count")
+    )
+    opened_singer_ids = set(score_counts)
+    return {
+        singer.pk: assess_score_completeness(
+            expected_judge_count=expected_judge_count,
+            valid_score_count=int(score_counts.get(singer.pk, 0)),
+            minimum_judge_count=minimum_judge_count,
+            completion_mode=completion_mode,
+            opened=singer.pk in opened_singer_ids,
+            locked=contest_round.is_locked,
+        )
+        for singer in _eligible_singers(contest_round)
+    }
+
+
+def round_scores_complete(contest_round: ContestRound) -> bool:
+    """Whether every contestant has enough scores for this round's frozen policy."""
+
+    states = score_completeness_for_round(contest_round).values()
+    return all(
+        state.state in {ScoreCompletionState.READY_TO_LOCK, ScoreCompletionState.LOCKED}
+        for state in states
+    )
 
 
 def missing_score_cells(contest_round: ContestRound) -> list[dict[str, int | str]]:
@@ -1201,18 +1274,26 @@ def recalculate_round(contest_round: ContestRound) -> None:
 
 
 def _recalculate_round(contest_round: ContestRound) -> None:
-    missing = missing_score_cells(contest_round)
-    if missing:
-        ScoreSummary.objects.filter(round=contest_round).delete()
-        if contest_round.advancement_status != ContestRound.AdvancementStatus.AUTO:
-            contest_round.advancement_status = ContestRound.AdvancementStatus.AUTO
-            with authority_write(CONTEST_ROUND_STATE):
-                contest_round.save(update_fields=["advancement_status"])
-        return
+    completion = score_completeness_for_round(contest_round)
+    if contest_round.score_completion_mode == ScoreCompletionMode.FULL_MATRIX:
+        if missing_score_cells(contest_round):
+            ScoreSummary.objects.filter(round=contest_round).delete()
+            if contest_round.advancement_status != ContestRound.AdvancementStatus.AUTO:
+                contest_round.advancement_status = ContestRound.AdvancementStatus.AUTO
+                with authority_write(CONTEST_ROUND_STATE):
+                    contest_round.save(update_fields=["advancement_status"])
+            return
 
     singers = _eligible_singers(contest_round)
     judge_ids = authoritative_panel_judges(contest_round).values_list("pk", flat=True)
     for singer in singers:
+        singer_completion = completion.get(singer.pk)
+        if singer_completion is None or singer_completion.state not in {
+            ScoreCompletionState.READY_TO_LOCK,
+            ScoreCompletionState.LOCKED,
+        }:
+            ScoreSummary.objects.filter(round=contest_round, singer=singer).delete()
+            continue
         singer_scores = list(
             ScoreRecord.objects.filter(
                 round=contest_round, singer=singer, judge_id__in=judge_ids
@@ -1224,7 +1305,7 @@ def _recalculate_round(contest_round: ContestRound) -> None:
         ):
             singer_scores.remove(max(singer_scores))
             singer_scores.remove(min(singer_scores))
-        average = sum(singer_scores, Decimal("0")) / len(singer_scores)
+        average = official_average(singer_scores)
         ScoreSummary.objects.update_or_create(
             round=contest_round,
             singer=singer,
@@ -1583,7 +1664,7 @@ def apply_scores_if_version(
         "status": ScoreWriteReceipt.Status.SUCCEEDED,
         "reason_code": "SCORES_APPLIED",
         "version": locked_round.score_version,
-        "matrix_complete": not missing_score_cells(locked_round),
+        "matrix_complete": round_scores_complete(locked_round),
     }
     if base_values is not None:
         result["applied"] = [
@@ -1636,7 +1717,7 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
         raise PermissionDenied("该比赛轮次已锁定。")
     if not expected_score_cells(locked_round):
         raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
-    if missing_score_cells(locked_round):
+    if not round_scores_complete(locked_round):
         raise PermissionDenied("仍有未完成的评委评分，不能锁定结果。")
     if locked_round.advancement_status == ContestRound.AdvancementStatus.NEEDS_REVIEW:
         raise PermissionDenied("晋级线存在同分，请先人工核定晋级名单。")
@@ -2123,6 +2204,7 @@ def bind_resolve_input(
     """
     roster = _stage_entry_roster(version, activity, round_keys, checkpoint=checkpoint)
     round_scores = {}
+    round_score_minimums: dict[str, int] = {}
     for rkey, contest_round in round_keys.items():
         grouped: dict[str, list[Decimal]] = {}
         records = (
@@ -2133,9 +2215,27 @@ def bind_resolve_input(
         for rec in records:
             grouped.setdefault(str(rec.singer_id), []).append(rec.score)
         round_scores[rkey] = {k: tuple(v) for k, v in grouped.items()}
+        panel_count = authoritative_panel_judges(contest_round).count()
+        snapshot = (
+            RoundPanelSnapshot.objects.filter(round=contest_round)
+            .exclude(state=RoundPanelSnapshot.State.SUPERSEDED)
+            .order_by("-version")
+            .first()
+        )
+        configured_minimum = (
+            snapshot.minimum_judge_count
+            if snapshot is not None
+            else contest_round.minimum_judge_count
+        )
+        round_score_minimums[rkey] = (
+            configured_minimum or panel_count
+            if contest_round.score_completion_mode == ScoreCompletionMode.MINIMUM_VALID
+            else panel_count
+        )
     return ResolveInput(
         roster=roster,
         round_scores=round_scores,
+        round_score_minimums=round_score_minimums,
         vote_scores=vote_scores or {},
         group_of=group_of or {},
         manual=manual or {},

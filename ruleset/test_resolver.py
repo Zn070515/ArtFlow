@@ -424,6 +424,36 @@ class ResolverReadyTests(SimpleTestCase):
         self.assertEqual(result.status, ResolverState.READY)
         self.assertEqual(result.decisions[0].score, Decimal("8.5"))
 
+    def test_assess_uses_official_two_decimal_rounding_and_minimum_count(self):
+        definition = _def(
+            [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("c1",),
+                round_scores={"r1": {"c1": (Decimal("90.00"), Decimal("90.01"))}},
+                round_score_minimums={"r1": 2},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.READY)
+        self.assertEqual(result.decisions[0].score, Decimal("90.01"))
+
+    def test_assess_holds_when_frozen_minimum_valid_judges_are_missing(self):
+        definition = _def(
+            [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}]
+        )
+        result = resolve(
+            definition,
+            ResolveInput(
+                roster=("c1",),
+                round_scores={"r1": {"c1": (Decimal("90.00"),)}},
+                round_score_minimums={"r1": 2},
+            ),
+        )
+        self.assertEqual(result.status, ResolverState.HOLD)
+        self.assertEqual(result.node_values["a"], {})
+
     def test_pair_even_ok(self):
         definition = _def(
             [{"key": "p", "type": "PAIR", "source": ENTRY_KEY, "pairing_policy": "ADJACENT"}]

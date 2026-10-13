@@ -134,6 +134,7 @@ from singer_contest.judge_authority import (
     advance_performance,
     hold_judge_panel,
     hold_performance,
+    lock_performance_score,
     prepare_judge_panel,
     release_judge_seat,
     resume_judge_panel,
@@ -155,6 +156,7 @@ from singer_contest.models import (
     Performance,
     PerformanceGroup,
     PerformanceRunState,
+    PerformanceScoreState,
     RoundEntry,
     RoundPanelSnapshot,
     RubricCriterion,
@@ -1817,8 +1819,10 @@ def round_create(request):
                         "activity": locked_activity,
                         "round_type": form.cleaned_data["round_type"],
                         "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "score_completion_mode": form.cleaned_data["score_completion_mode"],
                         "judge_count": form.cleaned_data["judge_count"],
-                        "minimum_judge_count": form.cleaned_data["judge_count"],
+                        "minimum_judge_count": form.cleaned_data["minimum_judge_count"]
+                        or form.cleaned_data["judge_count"],
                         "name": form.cleaned_data["name"],
                         "advance_count": form.cleaned_data["advance_count"],
                         "order_policy": form.cleaned_data["order_policy"],
@@ -1907,7 +1911,9 @@ def round_edit(request, pk):
         "name": contest_round.name,
         "round_type": contest_round.round_type,
         "scoring_mode": contest_round.scoring_mode,
+        "score_completion_mode": contest_round.score_completion_mode,
         "judge_count": contest_round.judge_count,
+        "minimum_judge_count": contest_round.minimum_judge_count,
         "advance_count": contest_round.advance_count,
         "sequence": contest_round.sequence,
         "order_policy": contest_round.order_policy,
@@ -1946,6 +1952,7 @@ def round_edit(request, pk):
                         "name",
                         "round_type",
                         "scoring_mode",
+                        "score_completion_mode",
                         "advance_count",
                         "sequence",
                         "order_policy",
@@ -1956,12 +1963,15 @@ def round_edit(request, pk):
                     ):
                         setattr(locked_round, field, form.cleaned_data[field])
                     locked_round.judge_count = form.cleaned_data["judge_count"]
-                    locked_round.minimum_judge_count = form.cleaned_data["judge_count"]
+                    locked_round.minimum_judge_count = (
+                        form.cleaned_data["minimum_judge_count"] or form.cleaned_data["judge_count"]
+                    )
                     locked_round.save(
                         update_fields=[
                             "name",
                             "round_type",
                             "scoring_mode",
+                            "score_completion_mode",
                             "judge_count",
                             "minimum_judge_count",
                             "advance_count",
@@ -2918,6 +2928,16 @@ def _judge_control_context(
         .select_related("singer")
         .order_by("sequence", "pk")
     )
+    performance_score_states = {
+        state.performance_id: state
+        for state in PerformanceScoreState._base_manager.filter(
+            performance_id__in=[performance.pk for performance in performances]
+        )
+    }
+    performance_rows = [
+        {"performance": performance, "score_state": performance_score_states.get(performance.pk)}
+        for performance in performances
+    ]
     expected_judge_count = (
         contest_round.judge_count if contest_round.judge_count is not None else len(round_judges)
     )
@@ -2963,6 +2983,7 @@ def _judge_control_context(
         "seat_rows": seat_rows,
         "run_state": run_state,
         "performances": performances,
+        "performance_rows": performance_rows,
         "expected_judge_count": expected_judge_count,
         "actual_judge_count": actual_judge_count,
         "minimum_judge_count": minimum_judge_count,
@@ -3144,6 +3165,28 @@ def judge_performance_advance(request, pk):
             messages.success(request, "当前表演已切换，旧评分上下文自动失效。")
     else:
         messages.error(request, f"推进表演失败：{_form_error(form)}")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_performance_score_lock(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    form = JudgePerformanceActionForm(request.POST)
+    if form.is_valid() and form.cleaned_data["context_version"] is not None:
+        try:
+            lock_performance_score(
+                contest_round.pk,
+                form.cleaned_data["performance_id"],
+                operator=request.user,
+                expected_context_version=form.cleaned_data["context_version"],
+            )
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, f"锁定表演评分失败：{domain_error_messages(error)}")
+        else:
+            messages.success(request, "该表演评分已锁定，之后的评分将被拒绝。")
+    else:
+        messages.error(request, "锁定表演评分失败：现场版本已失效，请刷新后重试。")
     return redirect("staff:judge_control", pk=pk)
 
 
@@ -4119,6 +4162,7 @@ def activity_clone(request, pk):
             activity=new_activity,
             round_type=contest_round.round_type,
             scoring_mode=contest_round.scoring_mode,
+            score_completion_mode=contest_round.score_completion_mode,
             minimum_judge_count=contest_round.minimum_judge_count,
             judge_count=contest_round.judge_count,
             name=contest_round.name,

@@ -110,20 +110,36 @@
             {% endif %}
         </div>
         <div class="mt-4 space-y-2">
-            {% for performance in performances %}
+            {% for row in performance_rows %}
+            {% with performance=row.performance score_state=row.score_state %}
             <div class="flex flex-col gap-2 rounded border border-gray-200 p-3 md:flex-row md:items-center md:justify-between">
-                <div class="text-sm"><span class="font-medium">{{ performance.sequence }}. {{ performance.singer.name }}</span>{% if performance.song_title %} · {{ performance.song_title }}{% endif %}</div>
-                {% if policy_state == 'ACTIVE' and run_state.state != 'hold' %}
+                <div class="text-sm"><span class="font-medium">{{ performance.sequence }}. {{ performance.singer.name }}</span>{% if performance.song_title %} · {{ performance.song_title }}{% endif %}
+                    {% if score_state.state == 'open' %}<span class="ml-2 text-amber-700">收分中</span>{% elif score_state.state == 'locked' %}<span class="ml-2 text-green-700">评分已锁定</span>{% else %}<span class="ml-2 text-gray-500">尚未开放</span>{% endif %}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                {% if policy_state == 'ACTIVE' and run_state.state != 'hold' and score_state.state != 'locked' %}
                 <form method="post" action="{% url 'staff:judge_performance_advance' round.pk %}" class="flex gap-2">
                     {% csrf_token %}
                     <input type="hidden" name="performance_id" value="{{ performance.pk }}">
+                    <input type="hidden" name="context_version" value="{{ score_state.context_version|default:0 }}">
                     <input type="hidden" name="reason" value="现场切换表演">
                     <button class="rounded bg-brand px-3 py-1.5 text-xs text-white" type="submit">切换到此表演</button>
                 </form>
                 {% else %}
                 <button class="rounded bg-gray-200 px-3 py-1.5 text-xs text-gray-500" type="button" disabled>HOLD 中不可切换</button>
                 {% endif %}
+                {% if score_state.state == 'open' %}
+                <form method="post" action="{% url 'staff:judge_performance_score_lock' round.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="performance_id" value="{{ performance.pk }}">
+                    <input type="hidden" name="context_version" value="{{ score_state.context_version }}">
+                    <input type="hidden" name="reason" value="工作人员结束收分">
+                    <button class="rounded bg-green-600 px-3 py-1.5 text-xs text-white" type="submit">结束收分并锁定</button>
+                </form>
+                {% endif %}
+                </div>
             </div>
+            {% endwith %}
             {% empty %}
             <p class="text-sm text-gray-500">暂无表演上下文。</p>
             {% endfor %}

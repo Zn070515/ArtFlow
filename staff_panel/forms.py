@@ -97,11 +97,24 @@ class ContestRoundForm(forms.Form):
         required=False,
         initial=ContestRound.ScoringMode.AVERAGE,
     )
+    score_completion_mode = forms.ChoiceField(
+        label="成绩完成方式",
+        choices=ContestRound.CompletionMode.choices,
+        required=False,
+        initial=ContestRound.CompletionMode.FULL_MATRIX,
+        help_text="历史轮次用完整矩阵；现场赛制可改为达到最低有效评委数后人工锁定。",
+    )
     judge_count = forms.IntegerField(
         label="评委通道数（匿名现场）",
         min_value=1,
         required=True,
         help_text="赛前可在草稿轮次中调整；现场会自动生成 J1、J2… 评分通道。",
+    )
+    minimum_judge_count = forms.IntegerField(
+        label="最低有效评委数",
+        min_value=1,
+        required=False,
+        help_text="留空时沿用评委通道总数。",
     )
     advance_count = forms.IntegerField(
         label="晋级人数（0 表示不限制）", min_value=0, required=False, initial=0
@@ -150,6 +163,12 @@ class ContestRoundForm(forms.Form):
     def clean_scoring_mode(self):
         return self.cleaned_data.get("scoring_mode") or ContestRound.ScoringMode.AVERAGE
 
+    def clean_score_completion_mode(self):
+        return (
+            self.cleaned_data.get("score_completion_mode")
+            or ContestRound.CompletionMode.FULL_MATRIX
+        )
+
     def clean_sequence(self):
         return self.cleaned_data.get("sequence")
 
@@ -190,6 +209,7 @@ class JudgePanelAttendanceForm(forms.Form):
 
 class JudgePerformanceActionForm(forms.Form):
     performance_id = forms.IntegerField(min_value=1)
+    context_version = forms.IntegerField(min_value=0, required=False)
     reason = forms.CharField(max_length=240)
 
 

@@ -47,6 +47,7 @@ class AuditLog(models.Model):
         JUDGE_SESSION_ISSUE = "judge_session_issue", "签发评委会话"
         JUDGE_SESSION_REVOKE = "judge_session_revoke", "撤销评委会话"
         JUDGE_PERF_ADVANCE = "judge_perf_advance", "推进评委表演"
+        JUDGE_PERF_SCORE_LOCK = "judge_perf_score_lock", "锁定单个表演评分"
         JUDGE_PERF_HOLD = "judge_perf_hold", "暂停评委表演"
         JUDGE_SCORE_SUBMIT = "judge_score_submit", "提交评委评分"
         JUDGE_SCORE_PROXY = "judge_score_proxy", "代录评委评分"

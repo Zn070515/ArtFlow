@@ -13,6 +13,31 @@
     function optionalText(value) {
         return value === null ? null : typeof value === "string" ? value : null;
     }
+    function parsePendingPerformances(value) {
+        if (value === undefined)
+            return [];
+        if (!Array.isArray(value))
+            return null;
+        const pending = value.flatMap((item) => {
+            if (!isRecord(item) ||
+                !positiveInteger(item.performance_id) ||
+                !nonNegativeInteger(item.context_version) ||
+                typeof item.performance_label !== "string" ||
+                typeof item.singer_name !== "string" ||
+                typeof item.song_title !== "string" ||
+                typeof item.state !== "string")
+                return [];
+            return [{
+                    performance_id: item.performance_id,
+                    context_version: item.context_version,
+                    performance_label: item.performance_label,
+                    singer_name: item.singer_name,
+                    song_title: item.song_title,
+                    state: item.state,
+                }];
+        });
+        return pending.length === value.length ? pending : null;
+    }
     function parseContext(value) {
         if (!isRecord(value) || !isRecord(value.context))
             return null;
@@ -31,6 +56,9 @@
             !isRecord(candidate.rubric_payload))
             return null;
         const rawCriteria = candidate.rubric_payload.criteria;
+        const pendingPerformances = parsePendingPerformances(candidate.pending_performances);
+        if (!pendingPerformances)
+            return null;
         const criteria = Array.isArray(rawCriteria) ? rawCriteria.flatMap((item) => {
             if (!isRecord(item) ||
                 !positiveInteger(item.criterion_id) ||
@@ -69,6 +97,7 @@
                     : undefined,
                 criteria,
             },
+            pending_performances: pendingPerformances,
         };
     }
     function parseSession(value) {
@@ -151,6 +180,7 @@
     const stateField = root.querySelector("[data-performance-state]");
     const criteriaContainer = root.querySelector("[data-criteria]");
     const totalField = root.querySelector("[data-total]");
+    const pendingContainer = root.querySelector("[data-pending]");
     const redeemUrl = root.dataset.redeemUrl || "/entry-access/grants/redeem/";
     const claimUrl = root.dataset.claimUrl || "/judge/claim/";
     const contextUrl = root.dataset.contextUrl || "/judge/context/";
@@ -174,10 +204,28 @@
     let realtimeHeartbeatTimer = null;
     let realtimeReconnectDelay = 1000;
     let realtimeConnected = false;
+    let selectedTarget = null;
     const criterionInputs = new Map();
-    function contextFingerprint(value) {
+    function contextFingerprint(value, target = selectedTarget) {
         return [value.activity_id, value.round_id, value.seat_id, value.panel_snapshot_id,
-            value.panel_version, value.context_version, value.performance_id ?? "none"].join(":");
+            value.panel_version, target?.context_version ?? value.context_version,
+            target?.performance_id ?? value.performance_id ?? "none"].join(":");
+    }
+    function activeTarget() {
+        if (!context)
+            return null;
+        if (selectedTarget)
+            return selectedTarget;
+        if (!context.performance_id)
+            return null;
+        return {
+            performance_id: context.performance_id,
+            context_version: context.context_version,
+            performance_label: context.performance_label || "当前节目",
+            singer_name: context.singer_name || "",
+            song_title: context.song_title || "",
+            state: context.performance_state,
+        };
     }
     function storageKey(fingerprint) {
         return `${storageKeyPrefix}${fingerprint}`;
@@ -335,7 +383,36 @@
         }
         updateTotal();
     }
+    function renderPendingPerformances(value) {
+        if (!pendingContainer)
+            return;
+        pendingContainer.replaceChildren();
+        if (value.pending_performances.length === 0) {
+            pendingContainer.textContent = "暂无已开放的待补评分节目。";
+            return;
+        }
+        for (const pending of value.pending_performances) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "block w-full rounded border px-3 py-2 text-left";
+            button.textContent = `${pending.performance_label}｜${pending.singer_name}｜${pending.song_title}`;
+            button.dataset.selected = String(selectedTarget?.performance_id === pending.performance_id);
+            button.addEventListener("click", () => {
+                if (!context || selectedTarget?.performance_id === pending.performance_id)
+                    return;
+                persistCurrentDraft();
+                selectedTarget = pending;
+                renderContext(context);
+                draft = readDraft(contextFingerprint(context));
+                applyDraft(draft);
+                updateControls();
+                statusText(terminalRoot, `已切换到${pending.performance_label}，请补交评分。`);
+            });
+            pendingContainer.appendChild(button);
+        }
+    }
     function renderContext(value) {
+        const target = activeTarget();
         if (activityField)
             activityField.textContent = value.activity_name;
         if (roundField)
@@ -343,13 +420,13 @@
         if (seatField)
             seatField.textContent = value.seat_label;
         if (performanceField)
-            performanceField.textContent = value.performance_label || "暂无";
+            performanceField.textContent = target?.performance_label || "暂无";
         if (singerField)
-            singerField.textContent = value.singer_name || "暂无";
+            singerField.textContent = target?.singer_name || "暂无";
         if (songField)
-            songField.textContent = value.song_title || "暂无";
+            songField.textContent = target?.song_title || "暂无";
         if (stateField) {
-            stateField.textContent = {
+            stateField.textContent = selectedTarget ? "待补交评分" : {
                 performing: "评分中",
                 accepting_score: "等待收分",
                 hold: "现场暂停",
@@ -386,23 +463,29 @@
         scoreField.disabled = value.rubric_payload.criteria.length > 0;
         if (totalField)
             totalField.textContent = "—";
+        renderPendingPerformances(value);
     }
     function updateControls() {
-        const scoreable = context !== null && context.performance_id !== null &&
-            ["performing", "accepting_score"].includes(context.performance_state);
+        const target = activeTarget();
+        const scoreable = context !== null && target !== null &&
+            (selectedTarget ? target.state === "open" : ["performing", "accepting_score"].includes(target.state));
         submitControl.disabled = !scoreable;
         if (context && context.rubric_payload.criteria.length > 0)
             scoreField.disabled = true;
     }
     function setContext(value, initial = false) {
+        const nextSelectedTarget = selectedTarget
+            ? value.pending_performances.find((item) => item.performance_id === selectedTarget?.performance_id) || null
+            : null;
         const oldFingerprint = context ? contextFingerprint(context) : null;
-        const newFingerprint = contextFingerprint(value);
+        const newFingerprint = contextFingerprint(value, nextSelectedTarget);
         const changed = oldFingerprint !== null && oldFingerprint !== newFingerprint;
         if (changed && draftTimer !== null) {
             clearTimeout(draftTimer);
             draftTimer = null;
             persistCurrentDraft();
         }
+        selectedTarget = nextSelectedTarget;
         context = value;
         renderContext(value);
         draft = changed ? null : readDraft(newFingerprint);
@@ -656,7 +739,9 @@
             statusText(terminalRoot, "评委会话无效或已过期，请重新扫描现场二维码。");
             return;
         }
-        if (!context.performance_id || !["performing", "accepting_score"].includes(context.performance_state)) {
+        const target = activeTarget();
+        if (!target || (selectedTarget ? target.state !== "open" :
+            !["performing", "accepting_score"].includes(target.state))) {
             statusText(terminalRoot, "当前没有可评分的表演。");
             return;
         }
@@ -688,8 +773,8 @@
                 },
                 body: JSON.stringify({
                     command_id: current.command_id,
-                    expected_context_version: context.context_version,
-                    expected_performance_id: context.performance_id,
+                    expected_context_version: target.context_version,
+                    expected_performance_id: target.performance_id,
                     score_payload: scorePayload,
                 }),
             });
@@ -698,7 +783,7 @@
                 clearDraft(current);
                 if (draft?.command_id === current.command_id)
                     draft = null;
-                statusText(terminalRoot, `评分已确认：${context.singer_name || "当前选手"}，等待现场切换下一位选手。`, "success");
+                statusText(terminalRoot, `评分已确认：${target.singer_name || "当前选手"}，等待现场切换下一位选手。`, "success");
             }
             else if (isRecord(data) && data.reason_code === "STALE_CONTEXT") {
                 statusText(terminalRoot, "现场上下文已变化，当前草稿未提交。");
