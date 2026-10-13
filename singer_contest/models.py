@@ -11,6 +11,7 @@ from common.authority import (
     ROUND_PERFORMANCE_STATE,
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
+    SINGER_CONTESTANT_NUMBER,
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
@@ -413,6 +414,11 @@ class SingerRegistration(models.Model):
     )
 
     name = models.CharField(max_length=100)
+    official_number = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="活动内对外使用的官方选手编号；必须通过编号服务设置。",
+    )
     student_id = models.CharField(max_length=20)
     college = models.CharField(max_length=100)
     class_name = models.CharField(max_length=100)
@@ -462,6 +468,11 @@ class SingerRegistration(models.Model):
                 condition=~Q(student_id=""),
                 name="singer_one_registration_per_student_per_activity",
             ),
+            models.UniqueConstraint(
+                fields=["activity", "official_number"],
+                condition=Q(official_number__isnull=False),
+                name="singer_unique_official_number_per_activity",
+            ),
         ]
 
     def __str__(self):
@@ -469,6 +480,17 @@ class SingerRegistration(models.Model):
 
     def save(self, *args, **kwargs):
         _ensure_identity_ownership_unchanged(self, frozenset({"activity_id", "user_id"}))
+        if self._state.adding:
+            if self.official_number is not None and not authority_authorized(
+                SINGER_CONTESTANT_NUMBER
+            ):
+                raise ValidationError("官方选手编号必须通过编号服务设置。")
+        elif not authority_authorized(SINGER_CONTESTANT_NUMBER):
+            stored_number = type(self)._base_manager.filter(pk=self.pk).values_list(
+                "official_number", flat=True
+            ).first()
+            if stored_number != self.official_number:
+                raise ValidationError("官方选手编号必须通过编号服务设置。")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -928,6 +950,7 @@ class ContestRound(models.Model):
         MANUAL = "manual", "人工顺序"
         PREVIOUS_RANK_ASC = "previous_rank_asc", "上一轮排名升序"
         PREVIOUS_RANK_DESC = "previous_rank_desc", "上一轮排名降序"
+        OFFICIAL_NUMBER = "official_number", "官方选手编号"
 
     class TieOrderPolicy(models.TextChoices):
         REVIEW = "review", "同分待人工决定"

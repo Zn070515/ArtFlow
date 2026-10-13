@@ -49,6 +49,7 @@ class AuditLog(models.Model):
         JUDGE_PERF_ADVANCE = "judge_perf_advance", "推进评委表演"
         JUDGE_PERF_SCORE_LOCK = "judge_perf_score_lock", "锁定单个表演评分"
         JUDGE_PERF_HOLD = "judge_perf_hold", "暂停评委表演"
+        SET_CONTESTANT_NUMBER = "set_contestant_number", "设置官方选手编号"
         JUDGE_SCORE_SUBMIT = "judge_score_submit", "提交评委评分"
         JUDGE_SCORE_PROXY = "judge_score_proxy", "代录评委评分"
         JUDGE_SCORE_PAPER = "judge_score_paper", "录入纸面评分"

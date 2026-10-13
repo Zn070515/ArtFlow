@@ -63,8 +63,9 @@ from .models import (
     ScoreRecord,
     ScoreSource,
     ScoringRubric,
+    SingerRegistration,
 )
-from .services import apply_scores
+from .services import apply_scores, set_official_contestant_number
 
 
 class JudgeAuthorityVocabularyTests(TestCase):
@@ -339,6 +340,49 @@ class JudgePanelServiceTests(TestCase):
             self.round.rubric = rubric
             self.round.save(update_fields=["rubric"])
         return rubric, criteria
+
+    def test_official_contestant_number_uses_a_unique_audited_authority_service(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            other_user = User.objects.create_user(
+                username="official-number-singer",
+                password="pass",
+                role=User.Role.PARTICIPANT,
+            )
+        registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=other_user,
+            name="Numbered singer",
+            student_id="number-001",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000001",
+            song_name="Numbered song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+        updated = set_official_contestant_number(
+            registration.pk,
+            17,
+            operator=self.operator,
+        )
+
+        self.assertEqual(updated.official_number, 17)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.SET_CONTESTANT_NUMBER,
+                target=f"SingerRegistration:{registration.pk}",
+            ).exists()
+        )
+        registration.official_number = 18
+        with self.assertRaises(ValidationError):
+            registration.save(update_fields=["official_number"])
+        with self.assertRaises(ValidationError):
+            set_official_contestant_number(
+                self.singer.pk,
+                17,
+                operator=self.operator,
+            )
 
     def test_prepare_panel_creates_immutable_snapshot_seat_and_live_context(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)

@@ -19,6 +19,7 @@ from common.authority import (
     ROUND_PERFORMANCE_STATE,
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
+    SINGER_CONTESTANT_NUMBER,
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
@@ -424,6 +425,76 @@ def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration
     return _round_source_singers(contest_round)
 
 
+@transaction.atomic
+def set_official_contestant_number(
+    registration_id: int,
+    official_number: int,
+    *,
+    operator,
+) -> SingerRegistration:
+    """Set one activity-scoped public number through an audited authority boundary."""
+
+    current_operator = require_current_staff(operator)
+    if isinstance(official_number, bool) or not isinstance(official_number, int):
+        raise ValidationError("官方选手编号必须是正整数。")
+    if official_number < 1:
+        raise ValidationError("官方选手编号必须是正整数。")
+    registration = (
+        SingerRegistration.objects.select_for_update()
+        .select_related("activity")
+        .filter(pk=registration_id)
+        .first()
+    )
+    if registration is None:
+        raise ValidationError("报名记录不存在。")
+    locked_activity = lock_activity_for_action(registration.activity, ActivityAction.SCORE)
+    if registration.activity_id != locked_activity.pk:
+        raise PermissionDenied("选手不属于当前活动。")
+    if registration.official_number == official_number:
+        return registration
+    if SingerRegistration.objects.filter(
+        activity=registration.activity,
+        official_number=official_number,
+    ).exclude(pk=registration.pk).exists():
+        raise ValidationError("同一活动内官方选手编号不能重复。")
+
+    affected_rounds = list(
+        ContestRound.objects.filter(
+            Q(entries__singer=registration) | Q(performances__singer=registration)
+        )
+        .distinct()
+        .order_by("sequence", "pk")
+    )
+    if affected_rounds and not current_operator.is_admin:
+        raise PermissionDenied("已有轮次使用该选手，官方编号修正需要管理员。")
+    if any(round_item.status == ContestRound.Status.LOCKED for round_item in affected_rounds):
+        raise PermissionDenied("已锁定结果中的选手不能修正官方编号。")
+
+    old_number = registration.official_number
+    with authority_write(SINGER_CONTESTANT_NUMBER):
+        registration.official_number = official_number
+        registration.save(update_fields=["official_number", "updated_at"])
+    if affected_rounds:
+        with authority_write(CONTEST_ROUND_STATE):
+            for round_item in affected_rounds:
+                if round_item.advancement_status != ContestRound.AdvancementStatus.NEEDS_REVIEW:
+                    round_item.advancement_status = ContestRound.AdvancementStatus.NEEDS_REVIEW
+                    round_item.save(update_fields=["advancement_status"])
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.SET_CONTESTANT_NUMBER,
+        target=f"SingerRegistration:{registration.pk}",
+        old_value="" if old_number is None else str(old_number),
+        new_value=str(official_number),
+        note=json.dumps(
+            {"affected_round_ids": [round_item.pk for round_item in affected_rounds]},
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+    )
+    return registration
+
+
 def _order_singers_for_round(
     contest_round: ContestRound,
     singers: list[SingerRegistration],
@@ -432,6 +503,10 @@ def _order_singers_for_round(
 ):
     """Apply the declared order policy before the entry snapshot is frozen."""
     policy = contest_round.order_policy
+    if policy == ContestRound.OrderPolicy.OFFICIAL_NUMBER:
+        if any(singer.official_number is None for singer in singers):
+            raise ValidationError("官方编号顺序要求本轮所有选手先完成官方编号。")
+        return sorted(singers, key=lambda singer: (singer.official_number, singer.pk))
     if policy == ContestRound.OrderPolicy.REGISTRATION_ORDER:
         return sorted(singers, key=lambda singer: singer.pk)
     if policy in (ContestRound.OrderPolicy.DRAW, ContestRound.OrderPolicy.MANUAL):

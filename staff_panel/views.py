@@ -196,6 +196,7 @@ from singer_contest.services import (
     round_roster_stage_choices,
     round_setup_readiness,
     set_manual_decision,
+    set_official_contestant_number,
     set_round_groups,
     set_round_running_order,
     stage_decisions_by_blocks,
@@ -227,6 +228,7 @@ from staff_panel.forms import (
     JudgePanelAttendanceForm,
     JudgePerformanceActionForm,
     ManualDecisionForm,
+    OfficialContestantNumberForm,
     ProgramReviewForm,
     PublicPostForm,
     RapidScoreCommandForm,
@@ -1243,62 +1245,81 @@ def singer_registration_detail(request, pk):
     reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
     errors = []
     if request.method == "POST":
+        if "set_official_number" in request.POST:
+            number_form = OfficialContestantNumberForm(request.POST)
+            if number_form.is_valid():
+                try:
+                    set_official_contestant_number(
+                        reg.pk,
+                        number_form.cleaned_data["official_number"],
+                        operator=request.user,
+                    )
+                except (PermissionDenied, ValidationError, IntegrityError) as error:
+                    errors = [domain_error_messages(error)]
+                else:
+                    messages.success(request, "官方选手编号已保存。")
+                    return redirect("staff:singer_registration_detail", pk=reg.pk)
+            else:
+                errors = [_form_error(number_form)]
         is_upload = "upload_file" in request.POST
         action = ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
-        ensure_activity_action_allowed(reg.activity, action)
-        with transaction.atomic():
-            activity = lock_activity_for_action(reg.activity, action)
-            locked_reg = (
-                SingerRegistration.objects.select_for_update()
-                .select_related("activity", "user")
-                .get(pk=reg.pk)
-            )
-            if locked_reg.activity_id != activity.pk:
-                raise PermissionDenied("报名信息不属于当前活动。")
-            if is_upload:
-                f = request.FILES.get("file")
-                if f:
-                    try:
-                        submission_file = store_submission_file(
-                            owner=locked_reg,
-                            uploaded_file=f,
-                            purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                            uploaded_by=request.user,
-                        )
-                    except ValidationError as error:
-                        errors.extend(error.messages)
+        if "set_official_number" not in request.POST and not errors:
+            ensure_activity_action_allowed(reg.activity, action)
+            with transaction.atomic():
+                activity = lock_activity_for_action(reg.activity, action)
+                locked_reg = (
+                    SingerRegistration.objects.select_for_update()
+                    .select_related("activity", "user")
+                    .get(pk=reg.pk)
+                )
+                if locked_reg.activity_id != activity.pk:
+                    raise PermissionDenied("报名信息不属于当前活动。")
+                if is_upload:
+                    f = request.FILES.get("file")
+                    if f:
+                        try:
+                            submission_file = store_submission_file(
+                                owner=locked_reg,
+                                uploaded_file=f,
+                                purpose=request.POST.get(
+                                    "file_purpose", SubmissionFile.Purpose.OTHER
+                                ),
+                                uploaded_by=request.user,
+                            )
+                        except ValidationError as error:
+                            errors.extend(error.messages)
+                        else:
+                            reconcile_singer_material_checks(locked_reg)
+                            log_action(
+                                request,
+                                AuditLog.ActionType.UPLOAD_FILE,
+                                f"SubmissionFile:{submission_file.pk}",
+                                new_value=submission_file.original_name,
+                            )
+                else:
+                    form = SingerReviewForm(request.POST)
+                    if not form.is_valid():
+                        errors = [_form_error(form)]
                     else:
-                        reconcile_singer_material_checks(locked_reg)
+                        old_value = f"pre={locked_reg.pre_status}; live={locked_reg.live_status}"
+                        locked_reg.pre_status = form.cleaned_data["pre_status"]
+                        locked_reg.live_status = form.cleaned_data["live_status"]
+                        note = form.cleaned_data.get("staff_note", "").strip()
+                        if note:
+                            StaffNote.objects.create(
+                                singer_registration=locked_reg,
+                                content=note,
+                                created_by=request.user,
+                            )
+                        locked_reg.save()
                         log_action(
                             request,
-                            AuditLog.ActionType.UPLOAD_FILE,
-                            f"SubmissionFile:{submission_file.pk}",
-                            new_value=submission_file.original_name,
+                            AuditLog.ActionType.UPDATE_STATUS,
+                            f"SingerRegistration:{locked_reg.pk}",
+                            old_value=old_value,
+                            new_value=f"pre={locked_reg.pre_status}; live={locked_reg.live_status}",
                         )
-            else:
-                form = SingerReviewForm(request.POST)
-                if not form.is_valid():
-                    errors = [_form_error(form)]
-                else:
-                    old_value = f"pre={locked_reg.pre_status}; live={locked_reg.live_status}"
-                    locked_reg.pre_status = form.cleaned_data["pre_status"]
-                    locked_reg.live_status = form.cleaned_data["live_status"]
-                    note = form.cleaned_data.get("staff_note", "").strip()
-                    if note:
-                        StaffNote.objects.create(
-                            singer_registration=locked_reg,
-                            content=note,
-                            created_by=request.user,
-                        )
-                    locked_reg.save()
-                    log_action(
-                        request,
-                        AuditLog.ActionType.UPDATE_STATUS,
-                        f"SingerRegistration:{locked_reg.pk}",
-                        old_value=old_value,
-                        new_value=f"pre={locked_reg.pre_status}; live={locked_reg.live_status}",
-                    )
-                    return redirect("staff:singer_registration_detail", pk=reg.pk)
+                        return redirect("staff:singer_registration_detail", pk=reg.pk)
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
     checks = reg.material_checks.all()
@@ -1319,6 +1340,9 @@ def singer_registration_detail(request, pk):
                 reg.activity
             ),
             "errors": errors,
+            "official_number_form": OfficialContestantNumberForm(
+                initial={"official_number": reg.official_number}
+            ),
         },
     )
 
@@ -1580,6 +1604,7 @@ def export_registrations(request):
     ws.title = "报名名单"
     ws.append(
         [
+            "官方编号",
             "姓名",
             "学号",
             "学院",
@@ -1608,6 +1633,7 @@ def export_registrations(request):
     for r in rows:
         ws.append(
             [
+                r.official_number,
                 r.name,
                 r.student_id,
                 r.college,

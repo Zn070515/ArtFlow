@@ -549,6 +549,10 @@ class SingerReviewForm(forms.Form):
     staff_note = forms.CharField(max_length=1000, required=False)
 
 
+class OfficialContestantNumberForm(forms.Form):
+    official_number = forms.IntegerField(min_value=1, label="官方选手编号")
+
+
 class ProgramReviewForm(forms.Form):
     status = forms.ChoiceField(choices=Program.Status.choices)
     sort_order = forms.IntegerField(required=False, initial=0)
