@@ -745,10 +745,13 @@ class PlanningCompileTests(SimpleTestCase):
         )
 
         self.assertTrue(result.can_apply)
-        self.assertEqual(result.round_configurations[0]["business_ids"], [
-            "stage-1-round",
-            "stage-2-round",
-        ])
+        self.assertEqual(
+            result.round_configurations[0]["business_ids"],
+            [
+                "stage-1-round",
+                "stage-2-round",
+            ],
+        )
 
     def test_two_rounds_contribute_to_one_stage_result(self):
         result = prepare_planning_compile(
@@ -1164,9 +1167,7 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
         source = payload["stages"][0]["judge_sources"][0]
         source["judge_count"] = planning_field(6, "confirmed", "评委名单", "judge")
         source["minimum_judge_count"] = planning_field(5, "confirmed", "比赛方案", "judge")
-        source["rubric"]["name"] = planning_field(
-            "新评分", "confirmed", "评分表", "text"
-        )
+        source["rubric"]["name"] = planning_field("新评分", "confirmed", "评分表", "text")
         payload["execution_refs"] = {
             "rounds": {
                 "round-1": {

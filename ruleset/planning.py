@@ -974,14 +974,10 @@ def prepare_planning_compile(
                         configuration[field] = deepcopy(source[field])
                 round_configurations_by_key[round_key] = configuration
             else:
-                source_roster_stage = str(
-                    source.get("source_stage_key") or stage["key"]
-                )
+                source_roster_stage = str(source.get("source_stage_key") or stage["key"])
                 source_execution_facts = {
                     **source,
-                    "roster_source": (
-                        "approved" if source_roster_stage == "entry" else "stage"
-                    ),
+                    "roster_source": ("approved" if source_roster_stage == "entry" else "stage"),
                     "roster_source_stage": (
                         "" if source_roster_stage == "entry" else source_roster_stage
                     ),

@@ -626,16 +626,17 @@ def prepare_planning_preflight(
                     )
                     binding_ready = False
                 if contest_round.pk in frozen_round_ids:
-                    for field in _planning_round_configuration_diff_fields(
+                    differences = _planning_round_configuration_diff_fields(
                         configuration, contest_round
-                    ):
+                    )
+                    for field in differences:
                         issues.append(
                             _planning_preflight_issue(
                                 "FROZEN_ROUND_CONFIGURATION",
                                 f"当前冻结赛制仍使用轮次“{round_key}”，不能修改其{field}配置。",
                             )
                         )
-                    if _planning_round_configuration_diff_fields(configuration, contest_round):
+                    if differences:
                         binding_ready = False
                 candidate_round_keys[round_key] = contest_round.pk
         rubric_id = raw_ref.get("rubric_id") if isinstance(raw_ref, dict) else None
@@ -814,9 +815,7 @@ def _planning_round_configuration_diff_fields(
     if "rubric" in configuration:
         raw_rubric = configuration["rubric"]
         actual_rubric = getattr(contest_round, "rubric", None)
-        rubric_matches = (
-            raw_rubric is None and actual_rubric is None
-        ) or (
+        rubric_matches = (raw_rubric is None and actual_rubric is None) or (
             isinstance(raw_rubric, dict)
             and actual_rubric is not None
             and _planning_rubric_matches(actual_rubric, raw_rubric)
@@ -1482,24 +1481,23 @@ def save_business_ruleset(
             "roster_source_stage": roster_source_stage,
         }
         if "judge_count" in request:
-            desired["judge_count"] = _business_round_count(
-                request["judge_count"], label=round_key
-            )
+            desired["judge_count"] = _business_round_count(request["judge_count"], label=round_key)
         if "minimum_judge_count" in request:
             desired["minimum_judge_count"] = _business_round_count(
                 request["minimum_judge_count"], label=round_key
             )
         if "rubric_id" in request:
             rubric_id = _business_round_id(request["rubric_id"], label=round_key)
-            if rubric_id is not None and not ScoringRubric.objects.filter(
-                pk=rubric_id, activity_id=locked_ruleset.activity_id
-            ).exists():
+            if (
+                rubric_id is not None
+                and not ScoringRubric.objects.filter(
+                    pk=rubric_id, activity_id=locked_ruleset.activity_id
+                ).exists()
+            ):
                 raise ValidationError(f"轮次“{round_key}”的评分标准不属于当前活动。")
             desired["rubric_id"] = rubric_id
         next_judge_count = desired.get("judge_count", round_.judge_count)
-        next_minimum_judge_count = desired.get(
-            "minimum_judge_count", round_.minimum_judge_count
-        )
+        next_minimum_judge_count = desired.get("minimum_judge_count", round_.minimum_judge_count)
         if (
             next_judge_count is not None
             and next_minimum_judge_count is not None

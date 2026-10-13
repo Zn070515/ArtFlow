@@ -161,13 +161,13 @@ git commit -m "fix: preserve configured minimum judge count"
 - Verify: all modified files and configuration sweep targets from `AGENTS.md`.
 - Update: `docs/superpowers/plans/2026-10-13-planning-freeze-round-safety.md` checkboxes as work completes.
 
-- [ ] **Step 1: Run the complete focused regression set.**
+- [x] **Step 1: Run the complete focused regression set.**
 
 ```powershell
 $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q ruleset/test_planning.py ruleset/test_services.py singer_contest/tests.py
 ```
 
-- [ ] **Step 2: Run the project quality gates.**
+- [x] **Step 2: Run the project quality gates.**
 
 ```powershell
 $env:APP_ENV='development'; $env:DEBUG='False'; uv run python manage.py check
@@ -181,14 +181,14 @@ npm run check:e2e
 pwsh -NoProfile -File scripts/check_docs.ps1
 ```
 
-- [ ] **Step 3: Run the CI-equivalent parallel suite and PostgreSQL acceptance gate.**
+- [x] **Step 3: Run the CI-equivalent parallel suite and PostgreSQL acceptance gate.**
 
 ```powershell
 $env:APP_ENV='development'; $env:DEBUG='False'; $env:DATABASE_ENGINE='sqlite'; uv run pytest -q -n auto --maxprocesses=4 --dist=loadscope --durations=30
 pwsh -NoProfile -File scripts/verify_postgres_acceptance.ps1 -StartCompose -VerifyResetSafety
 ```
 
-- [ ] **Step 4: Review the final diff and configuration sweep.**
+- [x] **Step 4: Review the final diff and configuration sweep.**
 
 Check `pyrightconfig.json`, `pyproject.toml`, `tailwind.config.js`, `tsconfig*.json`, environment examples, ignore files, and Dependabot entries against the current tree. Run `git diff --check` and confirm no generated media, database, coverage, or staticfiles artifacts are tracked.
 
