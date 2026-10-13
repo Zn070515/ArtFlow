@@ -468,7 +468,8 @@
     function updateControls() {
         const target = activeTarget();
         const scoreable = context !== null && target !== null &&
-            (selectedTarget ? target.state === "open" : ["performing", "accepting_score"].includes(target.state));
+            ["performing", "accepting_score"].includes(context.performance_state) &&
+            (selectedTarget ? target.state === "open" : target.state === context.performance_state);
         submitControl.disabled = !scoreable;
         if (context && context.rubric_payload.criteria.length > 0)
             scoreField.disabled = true;
@@ -740,8 +741,8 @@
             return;
         }
         const target = activeTarget();
-        if (!target || (selectedTarget ? target.state !== "open" :
-            !["performing", "accepting_score"].includes(target.state))) {
+        if (!target || !["performing", "accepting_score"].includes(context.performance_state) ||
+            (selectedTarget ? target.state !== "open" : target.state !== context.performance_state)) {
             statusText(terminalRoot, "当前没有可评分的表演。");
             return;
         }
