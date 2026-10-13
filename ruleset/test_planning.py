@@ -2,10 +2,16 @@ import json
 from decimal import Decimal
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    authority_write,
+)
 from common.models import AuditLog
 from core.models import Activity
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
 
 from singer_contest.models import ContestRound
@@ -16,11 +22,19 @@ from ruleset.planning import (
     PlanningResolution,
     PlanningSeverity,
     parse_percentage,
+    prepare_planning_compile,
     planning_field,
     validate_planning_draft,
 )
-from ruleset.services import load_planning_draft, planning_projection_from_definition, save_planning_draft
+from ruleset.services import (
+    apply_planning_to_ruleset,
+    load_planning_draft,
+    planning_projection_from_definition,
+    prepare_planning_compile_for_version,
+    save_planning_draft,
+)
 from ruleset.templates import golden_schidui
+from singer_contest.services import configure_draft_round_from_planning
 
 
 class PercentageParsingTests(SimpleTestCase):
@@ -271,4 +285,278 @@ class PlanningProjectionTests(SimpleTestCase):
         self.assertFalse(projection.editable)
         self.assertTrue(projection.read_only)
         self.assertIn("人工", projection.notice)
+
+
+def _planning_stage(**overrides):
+    stage: dict[str, object] = {
+        "business_id": "stage-1",
+        "name": planning_field(
+            "初赛", PlanningResolution.CONFIRMED, "比赛方案", "text"
+        ),
+        "participants": {
+            "source": "all_finalists",
+            "count": planning_field(
+                15, PlanningResolution.CONFIRMED, "报名汇总表", "person"
+            ),
+        },
+        "advance_count": planning_field(
+            10, PlanningResolution.CONFIRMED, "比赛方案", "person"
+        ),
+        "judge_sources": [
+            {
+                "business_id": "round-1",
+                "format": "solo",
+                "weight": planning_field(
+                    "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                ),
+            }
+        ],
+        "audience_source": planning_field(
+            "", PlanningResolution.CONFIRMED, "无观众计分", "vote"
+        ),
+        "audience_weight": planning_field(
+            "0", PlanningResolution.CONFIRMED, "无观众计分", "percent"
+        ),
+        "result_method": planning_field(
+            "top_n", PlanningResolution.CONFIRMED, "比赛方案", "text"
+        ),
+    }
+    stage.update(overrides)
+    return stage
+
+
+def _planning_payload(stage: dict[str, object] | None = None) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "stages": [stage or _planning_stage()],
+        "execution_refs": {},
+    }
+
+
+def _golden_planning_payload(
+    weights: tuple[str, str] = ("30", "60"), audience_weight: str = "10"
+) -> dict[str, object]:
+    stage = _planning_stage(
+        judge_sources=[
+            {
+                "business_id": "round-1",
+                "format": "solo",
+                "weight": planning_field(
+                    weights[0], PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                ),
+            },
+            {
+                "business_id": "round-2",
+                "format": "solo",
+                "weight": planning_field(
+                    weights[1], PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                ),
+            },
+        ],
+        audience_source=planning_field(
+            "audience1", PlanningResolution.CONFIRMED, "投票方案", "vote"
+        ),
+        audience_weight=planning_field(
+            audience_weight, PlanningResolution.CONFIRMED, "比赛方案", "percent"
+        ),
+    )
+    return _planning_payload(stage)
+
+
+class PlanningCompileTests(SimpleTestCase):
+    def test_two_rounds_contribute_to_one_stage_result(self):
+        result = prepare_planning_compile(
+            _golden_planning_payload(),
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertTrue(result.can_apply)
+        self.assertEqual(
+            [source["weight"] for source in result.business_stages[0]["judge_sources"]],
+            ["0.3", "0.6"],
+        )
+        self.assertEqual(result.business_stages[0]["audience_weight"], "0.1")
+
+    def test_missing_weight_or_conversion_blocks_candidate_but_does_not_raise(self):
+        incomplete = _planning_payload(
+            _planning_stage(
+                judge_sources=[
+                    {
+                        "business_id": "round-1",
+                        "format": "solo",
+                        "weight": planning_field(
+                            None,
+                            PlanningResolution.PENDING,
+                            "待确认",
+                            "percent",
+                        ),
+                    }
+                ]
+            )
+        )
+
+        result = prepare_planning_compile(
+            incomplete,
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        self.assertIn("WEIGHTS_INCOMPLETE", {issue.code for issue in result.issues})
+
+    def test_collaboration_groups_do_not_create_group_selection(self):
+        collaboration = _planning_payload(
+            _planning_stage(
+                collaboration_group=planning_field(
+                    "同组演唱、每人单独评分",
+                    PlanningResolution.CONFIRMED,
+                    "比赛方案",
+                    "group",
+                ),
+                judge_sources=[
+                    {
+                        "business_id": "round-1",
+                        "format": "collaboration",
+                        "weight": planning_field(
+                            "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                        ),
+                    }
+                ],
+            )
+        )
+
+        result = prepare_planning_compile(
+            collaboration,
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertTrue(result.can_apply)
+        self.assertNotIn(
+            "PARTITION",
+            {node["type"] for node in result.candidate_definition["nodes"]},
+        )
+
+    def test_non_linear_result_method_is_blocked_without_professional_graph(self):
+        manual = _planning_payload(
+            _planning_stage(
+                result_method=planning_field(
+                    "manual",
+                    PlanningResolution.CONFIRMED,
+                    "负责人决定",
+                    "text",
+                )
+            )
+        )
+
+        result = prepare_planning_compile(
+            manual,
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        self.assertIn("UNSUPPORTED_RESULT_METHOD", {issue.code for issue in result.issues})
+
+
+class PlanningRoundConfigurationTests(PlanningDraftAuthorityTests):
+    def test_planning_can_configure_only_an_unlocked_draft_round(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                status=ContestRound.Status.DRAFT,
+                is_locked=False,
+            )
+
+        configured = configure_draft_round_from_planning(
+            contest_round,
+            operator=self.operator,
+            configuration={
+                "name": "第一轮小组演唱",
+                "judge_count": 5,
+                "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+                "advance_count": 10,
+                "roster_source": ContestRound.RosterSource.APPROVED,
+                "roster_source_stage": "",
+                "rubric": None,
+            },
+        )
+
+        self.assertEqual(configured.judge_count, 5)
+
+    def test_planning_rejects_a_prepared_round(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                status=ContestRound.Status.PREPARED,
+                is_locked=False,
+            )
+
+        with self.assertRaises(PermissionDenied):
+            configure_draft_round_from_planning(
+                contest_round,
+                operator=self.operator,
+                configuration={"name": "修改"},
+            )
+
+
+class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
+    def _complete_payload(self):
+        return _planning_payload(
+            _planning_stage(
+                judge_sources=[
+                    {
+                        "business_id": "round-1",
+                        "format": "solo",
+                        "weight": planning_field(
+                            "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                        ),
+                    }
+                ],
+                audience_source=planning_field(
+                    "", PlanningResolution.CONFIRMED, "无观众计分", "vote"
+                ),
+                audience_weight=planning_field(
+                    "0", PlanningResolution.CONFIRMED, "无观众计分", "percent"
+                ),
+            )
+        )
+
+    def test_prepare_for_version_reads_the_current_draft_without_mutation(self):
+        payload = self._complete_payload()
+        save_planning_draft(
+            self.version,
+            payload=payload,
+            operator=self.operator,
+            expected_revision=0,
+        )
+        before_definition = self.version.definition
+
+        result = prepare_planning_compile_for_version(self.version)
+
+        self.assertTrue(result.can_apply)
+        self.version.refresh_from_db()
+        self.assertEqual(self.version.definition, before_definition)
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 0)
+
+    def test_apply_planning_materializes_only_a_draft_round_and_definition(self):
+        payload = self._complete_payload()
+        draft = save_planning_draft(
+            self.version,
+            payload=payload,
+            operator=self.operator,
+            expected_revision=0,
+        )
+
+        saved = apply_planning_to_ruleset(
+            self.version,
+            operator=self.operator,
+            expected_revision=draft.revision,
+        )
+
+        self.assertEqual(saved.status, RulesetVersion.Status.DRAFT)
+        self.assertEqual(
+            ContestRound.objects.filter(activity=self.activity, status=ContestRound.Status.DRAFT).count(),
+            1,
+        )
+        self.assertIn("checkpoints", json.loads(saved.definition))
 

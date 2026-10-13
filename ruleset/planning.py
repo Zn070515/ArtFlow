@@ -69,6 +69,21 @@ class PlanningProjection:
     summary: dict[str, object] | None = None
 
 
+@dataclass(frozen=True)
+class PlanningCompileResult:
+    issues: tuple[PlanningIssue, ...]
+    candidate_definition: dict[str, object] | None
+    business_stages: tuple[dict[str, object], ...]
+    round_configurations: tuple[dict[str, object], ...]
+    change_summary: tuple[str, ...]
+
+    @property
+    def can_apply(self) -> bool:
+        return self.candidate_definition is not None and not any(
+            issue.blocks_apply for issue in self.issues
+        )
+
+
 PLANNING_UNITS = frozenset(
     {"text", "person", "group", "judge", "minute", "score", "percent", "vote"}
 )
@@ -249,6 +264,255 @@ def validate_planning_draft(payload: object) -> tuple[PlanningIssue, ...]:
                 )
             )
     return tuple(issues)
+
+
+def _planning_value(value: object, *, label: str) -> object:
+    if isinstance(value, Mapping) and "value" in value:
+        resolution = value.get("resolution")
+        if resolution != PlanningResolution.CONFIRMED.value:
+            raise ValidationError(f"{label} 尚待确定或存在冲突。")
+        value = value.get("value")
+    if value is None or value == "":
+        raise ValidationError(f"{label} 尚待确定。")
+    return value
+
+
+def _decimal_text(value: Decimal) -> str:
+    text = format(value, "f").rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _percentage_coefficient(value: object, *, label: str) -> Decimal:
+    parsed = parse_percentage(_planning_value(value, label=label))
+    if parsed.requires_confirmation:
+        raise ValidationError(f"{label} 的小数含义需要确认。")
+    return parsed.coefficient
+
+
+def _stage_text(value: object, *, label: str, default: str = "") -> str:
+    if value is None or value == "":
+        return default
+    return str(_planning_value(value, label=label)).strip()
+
+
+def _stage_count(value: object, *, label: str) -> int:
+    raw = _planning_value(value, label=label)
+    try:
+        count = int(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{label} 必须是正整数。") from exc
+    if count <= 0:
+        raise ValidationError(f"{label} 必须是正整数。")
+    return count
+
+
+def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[dict[str, object]]:
+    """Convert a complete planning payload into the existing linear editor shape."""
+    issues = validate_planning_draft(payload)
+    if any(issue.blocks_apply for issue in issues):
+        raise ValidationError("规划草稿仍有待确认事项。")
+    raw_stages = payload.get("stages")
+    if not isinstance(raw_stages, list) or not raw_stages:
+        raise ValidationError("至少需要一个比赛阶段。")
+
+    stages: list[dict[str, object]] = []
+    previous_stage_key = "entry"
+    for stage_index, raw_stage in enumerate(raw_stages, start=1):
+        if not isinstance(raw_stage, Mapping):
+            raise ValidationError("比赛阶段必须是对象。")
+        stage_key = f"stage{stage_index}"
+        stage_name = _stage_text(
+            raw_stage.get("name"), label=f"第 {stage_index} 阶段名称", default=f"第{stage_index}阶段"
+        )
+        advance_count = _stage_count(
+            raw_stage.get("advance_count"), label=f"阶段“{stage_name}”的晋级人数"
+        )
+        result_method = _stage_text(
+            raw_stage.get("result_method"), label=f"阶段“{stage_name}”的结果方式"
+        )
+        if result_method != "top_n":
+            raise ValidationError(f"阶段“{stage_name}”的结果方式不能由普通工作台应用。")
+
+        raw_sources = raw_stage.get("judge_sources")
+        if not isinstance(raw_sources, list) or not raw_sources:
+            raise ValidationError(f"阶段“{stage_name}”缺少评委成绩来源。")
+        judge_sources: list[dict[str, object]] = []
+        for round_index, raw_source in enumerate(raw_sources, start=1):
+            if not isinstance(raw_source, Mapping):
+                raise ValidationError(f"阶段“{stage_name}”的评委成绩来源必须是对象。")
+            round_id = _stage_text(
+                raw_source.get("business_id"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个演唱轮次",
+                default=f"round-{stage_index}-{round_index}",
+            )
+            weight = _percentage_coefficient(
+                raw_source.get("weight"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个成绩比例",
+            )
+            judge_sources.append(
+                {
+                    "round_key": f"r{len(judge_sources) + 1}",
+                    "round_name": _stage_text(
+                        raw_source.get("name"), label="演唱轮次名称", default=f"第{round_index}轮"
+                    ),
+                    "weight": _decimal_text(weight),
+                    "scoring_mode": "average",
+                    "source": previous_stage_key,
+                    "source_stage_key": previous_stage_key,
+                    "business_id": round_id,
+                    "create_round": True,
+                }
+            )
+
+        judge_weight = sum(
+            (Decimal(str(source["weight"])) for source in judge_sources), Decimal("0")
+        )
+        audience_weight = _percentage_coefficient(
+            raw_stage.get("audience_weight", "0"),
+            label=f"阶段“{stage_name}”的观众成绩比例",
+        )
+        raw_audience_source = raw_stage.get("audience_source")
+        if isinstance(raw_audience_source, Mapping) and raw_audience_source.get("value") in (
+            None,
+            "",
+        ):
+            audience_source = ""
+        else:
+            audience_source = _stage_text(
+                raw_audience_source,
+                label="观众成绩来源",
+                default="",
+            )
+        if audience_weight and not audience_source:
+            raise ValidationError(f"阶段“{stage_name}”使用观众成绩时必须有来源。")
+        if judge_weight + audience_weight != Decimal("1"):
+            raise ValidationError(f"阶段“{stage_name}”的成绩比例必须合计为 100%。")
+        stages.append(
+            {
+                "key": stage_key,
+                "name": stage_name,
+                "round_key": str(judge_sources[0]["round_key"]),
+                "round_name": str(judge_sources[0]["round_name"]),
+                "judge_sources": judge_sources,
+                "scoring_mode": "average",
+                "advance_count": advance_count,
+                "judge_weight": _decimal_text(judge_weight),
+                "previous_weight": "0",
+                "audience_weight": _decimal_text(audience_weight),
+                "vote_source": audience_source,
+                "audience_source": previous_stage_key if audience_weight else "",
+                "audience_source_stage_key": previous_stage_key if audience_weight else "",
+            }
+        )
+        previous_stage_key = stage_key
+    return stages
+
+
+def _planning_issue_for_conversion(error: ValidationError) -> PlanningIssue:
+    message = str(error)
+    if "结果方式" in message:
+        code = "UNSUPPORTED_RESULT_METHOD"
+        severity = PlanningSeverity.EXECUTION_RISK
+    else:
+        code = "WEIGHTS_INCOMPLETE"
+        severity = PlanningSeverity.MISSING_INFORMATION
+    return PlanningIssue(
+        code=code,
+        severity=severity,
+        message=message,
+        blocks_apply=True,
+    )
+
+
+def prepare_planning_compile(
+    payload: Mapping[str, object], current_definition: object
+) -> PlanningCompileResult:
+    """Validate and prepare a candidate without writing executable state."""
+    from ruleset.business_editor import business_definition_from_stages, infer_business_stages
+    from ruleset.schema import parse_definition
+
+    issues = list(validate_planning_draft(payload))
+    try:
+        business_stages = planning_payload_to_business_stages(payload)
+    except ValidationError as exc:
+        issues.append(_planning_issue_for_conversion(exc))
+        return PlanningCompileResult(
+            issues=tuple(issues),
+            candidate_definition=None,
+            business_stages=(),
+            round_configurations=(),
+            change_summary=(),
+        )
+
+    current_projection = infer_business_stages(current_definition)
+    if not current_projection.get("supported"):
+        issues.append(
+            PlanningIssue(
+                code="CURRENT_DEFINITION_COMPLEX",
+                severity=PlanningSeverity.EXECUTION_RISK,
+                message="当前正式规则包含复杂结构，需要专业工具修改。",
+                blocks_apply=True,
+            )
+        )
+        return PlanningCompileResult(
+            issues=tuple(issues),
+            candidate_definition=None,
+            business_stages=tuple(business_stages),
+            round_configurations=(),
+            change_summary=(),
+        )
+    if isinstance(current_definition, str):
+        current_root = json.loads(current_definition)
+    elif isinstance(current_definition, dict):
+        current_root = deepcopy(current_definition)
+    else:
+        raise ValidationError("赛制定义必须是 JSON 对象或 JSON 文字。")
+    parsed_root = parse_definition(current_root)
+    existing_context = parsed_root.get("context")
+    if not isinstance(existing_context, dict):
+        existing_context = {}
+    nodes, checkpoints, context = business_definition_from_stages(
+        business_stages,
+        existing_context=existing_context,
+    )
+    candidate_definition: dict[str, object] = {
+        "schema_version": parsed_root.get("schema_version", 1),
+        "nodes": nodes,
+        "checkpoints": checkpoints,
+        "context": context,
+    }
+    round_configurations_list: list[dict[str, object]] = []
+    for stage_index, stage in enumerate(business_stages, start=1):
+        raw_sources = stage.get("judge_sources")
+        if not isinstance(raw_sources, list):
+            continue
+        for source in raw_sources:
+            if not isinstance(source, Mapping):
+                continue
+            round_configurations_list.append(
+                {
+                    "business_id": str(source["business_id"]),
+                    "round_key": str(source["round_key"]),
+                    "name": str(source["round_name"]),
+                    "scoring_mode": str(source["scoring_mode"]),
+                    "advance_count": int(str(stage["advance_count"])),
+                    "roster_source": "approved" if stage_index == 1 else "stage",
+                    "roster_source_stage": "" if stage_index == 1 else str(stage["key"]),
+                    "stage_index": stage_index,
+                }
+            )
+    round_configurations = tuple(round_configurations_list)
+    change_summary = tuple(
+        f"{stage['name']}按 {stage['judge_weight']} / {stage['audience_weight']} 合成，晋级 {stage['advance_count']} 人"
+        for stage in business_stages
+    )
+    return PlanningCompileResult(
+        issues=tuple(issues),
+        candidate_definition=candidate_definition,
+        business_stages=tuple(business_stages),
+        round_configurations=round_configurations,
+        change_summary=change_summary,
+    )
 
 
 def _historical_stage_payload(
