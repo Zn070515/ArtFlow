@@ -15,7 +15,7 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
-from singer_contest.models import ContestRound, ScoringRubric
+from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric
 from singer_contest.services import configure_draft_round_from_planning
 
 from ruleset.models import ContestRuleset, RulesetPlanningDraft, RulesetVersion
@@ -642,6 +642,117 @@ def _semantic_graph(definition):
 
 
 class PlanningCompileTests(SimpleTestCase):
+    def test_shared_round_rejects_conflicting_execution_facts(self):
+        first = _planning_stage(
+            judge_sources=[
+                {
+                    "business_id": "stage-1-round",
+                    "round_key": "shared-r3",
+                    "format": "solo",
+                    "source_stage_key": "entry",
+                    "scoring_mode": planning_field(
+                        "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": _planning_rubric("共享评分 A"),
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ]
+        )
+        second = _planning_stage(
+            business_id="stage-2",
+            name=planning_field("复赛", PlanningResolution.CONFIRMED, "比赛方案", "text"),
+            judge_sources=[
+                {
+                    "business_id": "stage-2-round",
+                    "round_key": "shared-r3",
+                    "format": "solo",
+                    "source_stage_key": "entry",
+                    "scoring_mode": planning_field(
+                        "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        6, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": _planning_rubric("共享评分 B"),
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ],
+        )
+
+        result = prepare_planning_compile(
+            {"schema_version": 1, "stages": [first, second], "execution_refs": {}},
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        conflict = [
+            issue
+            for issue in result.issues
+            if issue.code == "INCONSISTENT_SHARED_ROUND_CONFIGURATION"
+        ]
+        self.assertTrue(conflict)
+        self.assertEqual(conflict[0].round_id, "shared-r3")
+        self.assertIn("judge_count", conflict[0].field_path)
+
+    def test_shared_round_allows_reference_only_stage_differences(self):
+        first = _planning_stage(
+            judge_sources=[
+                {
+                    "business_id": "stage-1-round",
+                    "round_key": "shared-r3",
+                    "format": "solo",
+                    "source_stage_key": "entry",
+                    "scoring_mode": planning_field(
+                        "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": _planning_rubric("共享评分"),
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ]
+        )
+        second = deepcopy(first)
+        second["business_id"] = "stage-2"
+        second["name"] = planning_field("复赛", PlanningResolution.CONFIRMED, "比赛方案", "text")
+        second["judge_sources"][0]["business_id"] = "stage-2-round"
+        second["judge_sources"][0]["weight"] = planning_field(
+            "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+        )
+
+        result = prepare_planning_compile(
+            {"schema_version": 1, "stages": [first, second], "execution_refs": {}},
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertTrue(result.can_apply)
+        self.assertEqual(
+            result.round_configurations[0]["business_ids"],
+            [
+                "stage-1-round",
+                "stage-2-round",
+            ],
+        )
+
     def test_two_rounds_contribute_to_one_stage_result(self):
         result = prepare_planning_compile(
             _golden_planning_payload(),
@@ -878,6 +989,31 @@ class PlanningRoundConfigurationTests(PlanningDraftAuthorityTests):
                 configuration={"name": "修改"},
             )
 
+    def test_planning_rejects_changes_to_a_round_used_by_current_frozen_ruleset(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第一轮",
+            )
+        self.ruleset.round_keys = {"r1": contest_round.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        with authority_write(RULESET_FREEZE):
+            self.version.status = RulesetVersion.Status.FROZEN
+            self.version.is_current = True
+            self.version.binding = {"round_keys": {"r1": contest_round.pk}}
+            self.version.save(update_fields=["status", "is_current", "binding"])
+
+        with self.assertRaises(PermissionDenied):
+            configure_draft_round_from_planning(
+                contest_round,
+                operator=self.operator,
+                configuration={"name": "冻结后修改"},
+            )
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.name, "第一轮")
+
 
 class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
     def _complete_payload(self):
@@ -995,6 +1131,78 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
             )
 
         self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 0)
+
+    def test_apply_rejects_changes_to_a_round_used_by_current_frozen_ruleset(self):
+        rubric = ScoringRubric.objects.create(
+            activity=self.activity,
+            name="旧评分",
+        )
+        RubricCriterion.objects.create(rubric=rubric, name="演唱", max_score=100)
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第1轮",
+                judge_count=5,
+                minimum_judge_count=4,
+                rubric=rubric,
+                advance_count=10,
+                roster_source=ContestRound.RosterSource.APPROVED,
+            )
+        self.ruleset.round_keys = {"round-1": contest_round.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        with authority_write(RULESET_FREEZE):
+            self.version.status = RulesetVersion.Status.FROZEN
+            self.version.is_current = True
+            self.version.binding = {"round_keys": {"round-1": contest_round.pk}}
+            self.version.save(update_fields=["status", "is_current", "binding"])
+        successor = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            version=2,
+            definition=self.version.definition,
+            created_by=self.operator,
+        )
+
+        payload = self._complete_payload()
+        source = payload["stages"][0]["judge_sources"][0]
+        source["judge_count"] = planning_field(6, "confirmed", "评委名单", "judge")
+        source["minimum_judge_count"] = planning_field(5, "confirmed", "比赛方案", "judge")
+        source["rubric"]["name"] = planning_field("新评分", "confirmed", "评分表", "text")
+        payload["execution_refs"] = {
+            "rounds": {
+                "round-1": {
+                    "round_key": "round-1",
+                    "round_id": contest_round.pk,
+                }
+            }
+        }
+
+        preflight = prepare_planning_preflight(successor, payload)
+        self.assertFalse(preflight.safe_to_apply)
+        self.assertIn("FROZEN_ROUND_CONFIGURATION", {issue.code for issue in preflight.issues})
+        draft = save_planning_draft(
+            successor,
+            payload=payload,
+            operator=self.operator,
+            expected_revision=0,
+        )
+        before_definition = successor.definition
+
+        with self.assertRaises(ValidationError):
+            apply_planning_to_ruleset(
+                successor,
+                operator=self.operator,
+                expected_revision=draft.revision,
+            )
+
+        contest_round.refresh_from_db()
+        successor.refresh_from_db()
+        self.assertEqual(contest_round.judge_count, 5)
+        self.assertEqual(contest_round.minimum_judge_count, 4)
+        self.assertEqual(contest_round.rubric_id, rubric.pk)
+        self.assertEqual(ScoringRubric.objects.filter(activity=self.activity).count(), 1)
+        self.assertEqual(successor.definition, before_definition)
+        self.assertEqual(self.version.binding, {"round_keys": {"round-1": contest_round.pk}})
 
     def test_apply_planning_materializes_only_a_draft_round_and_definition(self):
         payload = self._complete_payload()

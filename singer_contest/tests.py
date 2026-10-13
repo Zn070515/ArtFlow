@@ -822,6 +822,35 @@ class ScoringServiceTests(TestCase):
             ["J1", "J2", "J3"],
         )
 
+    def test_prepare_round_preserves_explicit_minimum_judge_count(self):
+        self.round.judge_count = 5
+        self.round.minimum_judge_count = 4
+        self.round.save(update_fields=["judge_count", "minimum_judge_count"])
+
+        prepared = prepare_round(self.round, self.user)
+
+        self.assertEqual(prepared.minimum_judge_count, 4)
+
+    def test_prepare_round_defaults_missing_minimum_judge_count_to_panel_size(self):
+        self.round.judge_count = 5
+        self.round.minimum_judge_count = None
+        self.round.save(update_fields=["judge_count", "minimum_judge_count"])
+
+        prepared = prepare_round(self.round, self.user)
+
+        self.assertEqual(prepared.minimum_judge_count, 5)
+
+    def test_prepare_round_rejects_minimum_judge_count_above_panel_size(self):
+        self.round.judge_count = 5
+        self.round.minimum_judge_count = 6
+        self.round.save(update_fields=["judge_count", "minimum_judge_count"])
+
+        with self.assertRaisesMessage(ValidationError, "最低有效评委数不能超过评委数量"):
+            prepare_round(self.round, self.user)
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+
     def test_configured_judge_count_is_also_the_minimum_panel_size(self):
         self.judge.is_active = False
         self.judge.save(update_fields=["is_active"])
