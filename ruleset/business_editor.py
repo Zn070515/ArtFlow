@@ -92,6 +92,7 @@ def _normalize_stage(stage, index: int) -> dict:
         raise ValidationError("第一阶段不能引用上一阶段成绩。")
     stage_scoring_mode = _scoring_mode(stage.get("scoring_mode"), field=f"阶段“{key}”评分方式")
     audience_source = str(stage.get("audience_source") or "").strip()
+    audience_conversion = str(stage.get("audience_conversion") or "").strip()
     audience_source_stage_key = str(stage.get("audience_source_stage_key") or "").strip()
     raw_audience_source_stage_index = stage.get("audience_source_stage_index")
     audience_source_stage_index = None
@@ -141,13 +142,16 @@ def _normalize_stage(stage, index: int) -> dict:
             )
             if source_scoring_mode != stage_scoring_mode:
                 raise ValidationError(f"阶段“{key}”不能混用多种评分方式。")
-            normalized_source: dict[str, str] = {
+            normalized_source: dict[str, object] = {
                 "round_key": source_round,
                 "round_name": str(source.get("round_name") or "").strip(),
                 "weight": _decimal_text(source_weight),
                 "scoring_mode": source_scoring_mode,
                 "source": str(source.get("source") or "").strip(),
             }
+            for field in ("format", "judge_count", "minimum_judge_count", "rubric"):
+                if field in source:
+                    normalized_source[field] = deepcopy(source[field])
             source_stage_key = str(source.get("source_stage_key") or "").strip()
             if source_stage_key:
                 normalized_source["source_stage_key"] = source_stage_key
@@ -170,7 +174,7 @@ def _normalize_stage(stage, index: int) -> dict:
         raise ValidationError(f"阶段“{key}”使用观众权重时必须绑定投票来源。")
     if not weights["audience_weight"]:
         vote_source = ""
-    return {
+    normalized_result: dict[str, object] = {
         "key": key,
         "name": str(stage.get("name") or f"第{index}阶段").strip(),
         "round_key": round_key,
@@ -182,12 +186,17 @@ def _normalize_stage(stage, index: int) -> dict:
         "previous_weight": _decimal_text(weights["previous_weight"]),
         "audience_weight": _decimal_text(weights["audience_weight"]),
         "vote_source": vote_source,
+        "audience_conversion": audience_conversion,
         "audience_source": audience_source,
         "audience_source_stage_key": audience_source_stage_key,
         "audience_source_stage_index": (
             str(audience_source_stage_index) if audience_source_stage_index is not None else ""
         ),
     }
+    for field in ("participants", "collaboration_group"):
+        if field in stage:
+            normalized_result[field] = deepcopy(stage[field])
+    return normalized_result
 
 
 def _normalized_stages(stages) -> list[dict]:
@@ -532,6 +541,7 @@ def infer_business_stages(definition) -> dict:
         vote_source = ""
         audience_source = ""
         audience_source_stage_key = ""
+        audience_conversion = ""
         scoring_modes: set[str] = set()
         component_sources: set[str] = set()
         for component in components:
@@ -633,23 +643,40 @@ def infer_business_stages(definition) -> dict:
         if len(scoring_modes) > 1:
             return _unsupported(f"阶段“{stage_key}”混用了多种评分方式。")
         saved = context_by_key.get(stage_key) or {}
-        stages.append(
-            {
-                "key": stage_key,
-                "name": str(saved.get("name") or f"第{index}阶段"),
-                "round_key": judge_sources[0]["round_key"],
-                "round_name": str(saved.get("round_name") or ""),
-                "judge_sources": judge_sources,
-                "scoring_mode": next(iter(scoring_modes), "average"),
-                "advance_count": output["count"],
-                "judge_weight": _decimal_text(judge_weight),
-                "previous_weight": _decimal_text(previous_weight),
-                "audience_weight": _decimal_text(audience_weight),
-                "vote_source": vote_source,
-                "audience_source": audience_source,
-                "audience_source_stage_key": audience_source_stage_key,
-            }
-        )
+        if saved.get("audience_conversion"):
+            audience_conversion = str(saved["audience_conversion"])
+        saved_sources = {
+            str(source.get("round_key")): source
+            for source in saved.get("judge_sources") or ()
+            if isinstance(source, dict) and source.get("round_key")
+        }
+        for source in judge_sources:
+            saved_source = saved_sources.get(str(source["round_key"]))
+            if not isinstance(saved_source, dict):
+                continue
+            for field in ("format", "judge_count", "minimum_judge_count", "rubric"):
+                if field in saved_source:
+                    source[field] = deepcopy(saved_source[field])
+        stage_result: dict[str, object] = {
+            "key": stage_key,
+            "name": str(saved.get("name") or f"第{index}阶段"),
+            "round_key": judge_sources[0]["round_key"],
+            "round_name": str(saved.get("round_name") or ""),
+            "judge_sources": judge_sources,
+            "scoring_mode": next(iter(scoring_modes), "average"),
+            "advance_count": output["count"],
+            "judge_weight": _decimal_text(judge_weight),
+            "previous_weight": _decimal_text(previous_weight),
+            "audience_weight": _decimal_text(audience_weight),
+            "vote_source": vote_source,
+            "audience_conversion": audience_conversion,
+            "audience_source": audience_source,
+            "audience_source_stage_key": audience_source_stage_key,
+        }
+        for field in ("participants", "collaboration_group"):
+            if field in saved:
+                stage_result[field] = deepcopy(saved[field])
+        stages.append(stage_result)
         previous_output = output_key
         previous_score = aggregate_key
         available_rosters.add(output_key)

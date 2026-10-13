@@ -1,6 +1,7 @@
 import json
 
 from accounts.models import User
+from common.authority import RULESET_FREEZE, authority_write
 from core.models import Activity
 from django.test import TestCase
 from django.urls import reverse
@@ -15,6 +16,19 @@ from staff_panel.tests import (
     _create_provisioned_user,
 )
 from staff_panel.views import safe_domain_error_messages
+
+
+def _planning_rubric(name):
+    return {
+        "name": planning_field(name, "confirmed", "评分表", "text"),
+        "description": planning_field("每人分别评分", "confirmed", "评分表", "text"),
+        "criteria": [
+            {
+                "name": planning_field("演唱表现", "confirmed", "评分表", "text"),
+                "max_score": planning_field(100, "confirmed", "评分表", "score"),
+            }
+        ],
+    }
 
 
 class RulesetPlanningViewTests(TestCase):
@@ -72,6 +86,17 @@ class RulesetPlanningViewTests(TestCase):
         self.assertNotContains(response, "content_hash")
         self.assertNotContains(response, "binding_signature")
 
+    def test_frozen_planning_page_is_read_only_instead_of_calling_draft_editor(self):
+        version = self._version()
+        version.status = RulesetVersion.Status.FROZEN
+        with authority_write(RULESET_FREEZE):
+            version.save(update_fields=["status"])
+
+        response = self.client.get(reverse("staff:ruleset_planning", args=[version.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "只读")
+
     def test_invalid_planning_save_returns_raw_input_and_business_error(self):
         version = self._version()
         payload = {
@@ -115,18 +140,33 @@ class RulesetPlanningWorkflowTests(RulesetPlanningViewTests):
                     "name": planning_field("初赛", "confirmed", "比赛方案", "text"),
                     "advance_count": planning_field(10, "confirmed", "比赛方案", "person"),
                     "result_method": planning_field("top_n", "confirmed", "比赛方案", "text"),
+                    "previous_weight": planning_field(
+                        "0", "confirmed", "无上一阶段成绩", "percent"
+                    ),
                     "judge_sources": [
                         {
                             "business_id": "round-1",
                             "round_key": "planning-r1",
                             "name": planning_field("第一轮", "confirmed", "比赛方案", "text"),
+                            "format": "solo",
                             "weight": weight,
+                            "scoring_mode": planning_field(
+                                "average", "confirmed", "取评委平均分", "text"
+                            ),
+                            "judge_count": planning_field(5, "confirmed", "评委名单", "judge"),
+                            "rubric": _planning_rubric("第一轮评分"),
                         },
                         {
                             "business_id": "round-2",
                             "round_key": "planning-r2",
                             "name": planning_field("第二轮", "confirmed", "比赛方案", "text"),
+                            "format": "solo",
                             "weight": planning_field("60", "confirmed", "比赛方案", "percent"),
+                            "scoring_mode": planning_field(
+                                "average", "confirmed", "取评委平均分", "text"
+                            ),
+                            "judge_count": planning_field(5, "confirmed", "评委名单", "judge"),
+                            "rubric": _planning_rubric("第二轮评分"),
                         },
                     ],
                     "audience_weight": planning_field("0", "confirmed", "无观众计分", "percent"),

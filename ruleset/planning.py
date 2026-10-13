@@ -76,12 +76,28 @@ class PlanningCompileResult:
     business_stages: tuple[dict[str, object], ...]
     round_configurations: tuple[dict[str, object], ...]
     change_summary: tuple[str, ...]
+    binding_ready: bool = True
+    freeze_ready: bool | None = None
+
+    @property
+    def business_complete(self) -> bool:
+        return self.candidate_definition is not None and not any(
+            issue.blocks_apply and issue.severity is not PlanningSeverity.EXECUTION_RISK
+            for issue in self.issues
+        )
 
     @property
     def can_apply(self) -> bool:
-        return self.candidate_definition is not None and not any(
-            issue.blocks_apply for issue in self.issues
-        )
+        """Whether the pure business candidate is complete.
+
+        Database-aware callers should use :attr:`safe_to_apply`, which also includes
+        the activity binding preflight.
+        """
+        return self.business_complete
+
+    @property
+    def safe_to_apply(self) -> bool:
+        return self.business_complete and self.binding_ready
 
 
 PLANNING_UNITS = frozenset(
@@ -229,6 +245,147 @@ def _validate_field_object(
     return tuple(issues)
 
 
+def _validate_nested_field_objects(
+    value: object,
+    *,
+    stage_id: str,
+    field_path: str,
+) -> tuple[PlanningIssue, ...]:
+    if isinstance(value, Mapping):
+        if "resolution" in value or "unit" in value:
+            return _validate_field_object(
+                value,
+                stage_id=stage_id,
+                field_path=field_path,
+            )
+        issues: list[PlanningIssue] = []
+        for key, child in value.items():
+            issues.extend(
+                _validate_nested_field_objects(
+                    child,
+                    stage_id=stage_id,
+                    field_path=f"{field_path}.{key}",
+                )
+            )
+        return tuple(issues)
+    if isinstance(value, list):
+        issues = []
+        for index, child in enumerate(value):
+            issues.extend(
+                _validate_nested_field_objects(
+                    child,
+                    stage_id=stage_id,
+                    field_path=f"{field_path}[{index}]",
+                )
+            )
+        return tuple(issues)
+    return ()
+
+
+def _confirmed_field_value(value: object) -> tuple[bool, object]:
+    if isinstance(value, Mapping) and "resolution" in value:
+        return (
+            value.get("resolution") == PlanningResolution.CONFIRMED.value
+            and value.get("value") not in (None, ""),
+            value.get("value"),
+        )
+    return value not in (None, ""), value
+
+
+def _required_field_issue(
+    *,
+    value: object,
+    stage_id: str,
+    field_path: str,
+    code: str,
+    message: str,
+) -> PlanningIssue | None:
+    confirmed, _raw_value = _confirmed_field_value(value)
+    if confirmed:
+        return None
+    return PlanningIssue(
+        code=code,
+        severity=PlanningSeverity.MISSING_INFORMATION,
+        stage_id=stage_id,
+        field_path=field_path,
+        message=message,
+        blocks_apply=True,
+    )
+
+
+def _rubric_missing_issue(value: object, *, stage_id: str, field_path: str) -> PlanningIssue | None:
+    if not isinstance(value, Mapping):
+        return PlanningIssue(
+            code="MISSING_RUBRIC",
+            severity=PlanningSeverity.MISSING_INFORMATION,
+            stage_id=stage_id,
+            field_path=field_path,
+            message="这个轮次的评分维度和每项满分尚待确定。",
+            blocks_apply=True,
+        )
+    if (
+        _required_field_issue(
+            value=value.get("name"),
+            stage_id=stage_id,
+            field_path=f"{field_path}.name",
+            code="MISSING_RUBRIC",
+            message="这个轮次的评分表名称尚待确定。",
+        )
+        is not None
+    ):
+        return PlanningIssue(
+            code="MISSING_RUBRIC",
+            severity=PlanningSeverity.MISSING_INFORMATION,
+            stage_id=stage_id,
+            field_path=field_path,
+            message="这个轮次的评分维度和每项满分尚待确定。",
+            blocks_apply=True,
+        )
+    criteria = value.get("criteria")
+    if not isinstance(criteria, list) or not criteria:
+        return PlanningIssue(
+            code="MISSING_RUBRIC",
+            severity=PlanningSeverity.MISSING_INFORMATION,
+            stage_id=stage_id,
+            field_path=f"{field_path}.criteria",
+            message="这个轮次至少需要一项评分维度和对应满分。",
+            blocks_apply=True,
+        )
+    for index, criterion in enumerate(criteria):
+        if not isinstance(criterion, Mapping):
+            return PlanningIssue(
+                code="MISSING_RUBRIC",
+                severity=PlanningSeverity.MISSING_INFORMATION,
+                stage_id=stage_id,
+                field_path=f"{field_path}.criteria[{index}]",
+                message="这个轮次的评分维度和每项满分尚待确定。",
+                blocks_apply=True,
+            )
+        for field_name, message in (
+            ("name", "评分维度名称"),
+            ("max_score", "评分维度满分"),
+        ):
+            if (
+                _required_field_issue(
+                    value=criterion.get(field_name),
+                    stage_id=stage_id,
+                    field_path=f"{field_path}.criteria[{index}].{field_name}",
+                    code="MISSING_RUBRIC",
+                    message=f"这个轮次的{message}尚待确定。",
+                )
+                is not None
+            ):
+                return PlanningIssue(
+                    code="MISSING_RUBRIC",
+                    severity=PlanningSeverity.MISSING_INFORMATION,
+                    stage_id=stage_id,
+                    field_path=f"{field_path}.criteria[{index}]",
+                    message="这个轮次的评分维度和每项满分尚待确定。",
+                    blocks_apply=True,
+                )
+    return None
+
+
 def validate_planning_draft(payload: object) -> tuple[PlanningIssue, ...]:
     """Validate business planning JSON while preserving incomplete-but-saveable input."""
     root = _as_mapping(payload, message="规划草稿必须是 JSON 对象。")
@@ -243,23 +400,166 @@ def validate_planning_draft(payload: object) -> tuple[PlanningIssue, ...]:
         stage_id = stage.get("business_id")
         if not isinstance(stage_id, str) or not stage_id.strip():
             raise ValidationError(f"第 {index + 1} 个比赛阶段缺少业务标识。")
+        required_issues: list[PlanningIssue] = []
         participants = stage.get("participants")
-        if isinstance(participants, Mapping) and participants.get("count") is None:
-            issues.append(
-                PlanningIssue(
-                    code="MISSING_PARTICIPANT_COUNT",
-                    severity=PlanningSeverity.MISSING_INFORMATION,
+        if (
+            isinstance(participants, Mapping)
+            and (
+                issue := _required_field_issue(
+                    value=participants.get("count"),
                     stage_id=stage_id,
                     field_path=f"stages[{index}].participants.count",
+                    code="MISSING_PARTICIPANT_COUNT",
                     message="这个阶段的参赛人数尚待确定。",
-                    blocks_apply=True,
                 )
             )
+            is not None
+        ):
+            required_issues.append(issue)
+        raw_sources_for_shape = stage.get("judge_sources")
+        collaboration_round = isinstance(raw_sources_for_shape, list) and any(
+            isinstance(source, Mapping)
+            and (
+                source.get("format", {}).get("value")
+                if isinstance(source.get("format"), Mapping)
+                else source.get("format")
+            )
+            == "collaboration"
+            for source in raw_sources_for_shape
+        )
+        if collaboration_round:
+            participant_mapping = participants if isinstance(participants, Mapping) else {}
+            if (
+                issue := _required_field_issue(
+                    value=participant_mapping.get("count"),
+                    stage_id=stage_id,
+                    field_path=f"stages[{index}].participants.count",
+                    code="MISSING_PARTICIPANT_COUNT",
+                    message="这个阶段的参赛人数尚待确定。",
+                )
+            ) is not None:
+                required_issues.append(issue)
+            for field_name, code, message in (
+                ("group_count", "MISSING_GROUP_COUNT", "这个阶段的演唱组数尚待确定。"),
+                ("group_size", "MISSING_GROUP_SIZE", "每个演唱组的人数尚待确定。"),
+            ):
+                if (
+                    issue := _required_field_issue(
+                        value=participant_mapping.get(field_name),
+                        stage_id=stage_id,
+                        field_path=f"stages[{index}].participants.{field_name}",
+                        code=code,
+                        message=message,
+                    )
+                ) is not None:
+                    required_issues.append(issue)
+        raw_audience_weight_for_requirements = stage.get("audience_weight")
+        if isinstance(raw_audience_weight_for_requirements, Mapping):
+            raw_audience_weight_for_requirements = raw_audience_weight_for_requirements.get("value")
+        audience_weight_is_nonzero = False
+        if raw_audience_weight_for_requirements not in (None, ""):
+            try:
+                audience_weight_is_nonzero = (
+                    parse_percentage(raw_audience_weight_for_requirements).percent > 0
+                )
+            except ValidationError:
+                pass
+        if audience_weight_is_nonzero:
+            if (
+                issue := _required_field_issue(
+                    value=stage.get("audience_source"),
+                    stage_id=stage_id,
+                    field_path=f"stages[{index}].audience_source",
+                    code="MISSING_AUDIENCE_SOURCE",
+                    message="观众成绩来源尚待确定。",
+                )
+            ) is not None:
+                required_issues.append(issue)
+            if (
+                issue := _required_field_issue(
+                    value=stage.get("audience_conversion"),
+                    stage_id=stage_id,
+                    field_path=f"stages[{index}].audience_conversion",
+                    code="MISSING_AUDIENCE_CONVERSION",
+                    message="观众投票到成绩的换算方式尚待确定。",
+                )
+            ) is not None:
+                required_issues.append(issue)
+            else:
+                raw_conversion = stage.get("audience_conversion")
+                if isinstance(raw_conversion, Mapping):
+                    raw_conversion = raw_conversion.get("value")
+                if raw_conversion not in {"ballot_share_percent", "audience_score_hundred"}:
+                    required_issues.append(
+                        PlanningIssue(
+                            code="INVALID_AUDIENCE_CONVERSION",
+                            severity=PlanningSeverity.EXECUTION_RISK,
+                            stage_id=stage_id,
+                            field_path=f"stages[{index}].audience_conversion",
+                            message="观众成绩换算方式不受支持，请选择投票支持率或百分制观众分。",
+                            blocks_apply=True,
+                        )
+                    )
+        for field_name, code, message in (
+            ("result_method", "MISSING_RESULT_METHOD", "这个阶段的晋级方式尚待确定。"),
+            ("previous_weight", "MISSING_PREVIOUS_WEIGHT", "这个阶段的上一阶段成绩比例尚待确定。"),
+            ("audience_weight", "MISSING_AUDIENCE_WEIGHT", "这个阶段是否计入观众成绩尚待确定。"),
+        ):
+            if (
+                issue := _required_field_issue(
+                    value=stage.get(field_name),
+                    stage_id=stage_id,
+                    field_path=f"stages[{index}].{field_name}",
+                    code=code,
+                    message=message,
+                )
+            ) is not None:
+                required_issues.append(issue)
         raw_sources = stage.get("judge_sources")
         if isinstance(raw_sources, list):
             for source_index, raw_source in enumerate(raw_sources):
                 if not isinstance(raw_source, Mapping):
                     continue
+                raw_format = raw_source.get("format")
+                if isinstance(raw_format, Mapping):
+                    raw_format = raw_format.get("value")
+                if (
+                    issue := _required_field_issue(
+                        value=raw_format,
+                        stage_id=stage_id,
+                        field_path=f"stages[{index}].judge_sources[{source_index}].format",
+                        code="MISSING_ROUND_FORMAT",
+                        message="这个轮次的演唱形式尚待确定。",
+                    )
+                ) is not None:
+                    required_issues.append(issue)
+                if (
+                    issue := _required_field_issue(
+                        value=raw_source.get("scoring_mode"),
+                        stage_id=stage_id,
+                        field_path=f"stages[{index}].judge_sources[{source_index}].scoring_mode",
+                        code="MISSING_SCORING_MODE",
+                        message="这个轮次的评分方式尚待确定。",
+                    )
+                ) is not None:
+                    required_issues.append(issue)
+                if (
+                    issue := _required_field_issue(
+                        value=raw_source.get("judge_count"),
+                        stage_id=stage_id,
+                        field_path=f"stages[{index}].judge_sources[{source_index}].judge_count",
+                        code="MISSING_JUDGE_COUNT",
+                        message="这个轮次的评委数量尚待确定。",
+                    )
+                ) is not None:
+                    required_issues.append(issue)
+                rubric_issue = _rubric_missing_issue(
+                    raw_source.get("rubric"),
+                    stage_id=stage_id,
+                    field_path=f"stages[{index}].judge_sources[{source_index}].rubric",
+                )
+                if rubric_issue is not None:
+                    required_issues.append(rubric_issue)
                 raw_weight = raw_source.get("weight")
                 if isinstance(raw_weight, Mapping):
                     raw_weight = raw_weight.get("value")
@@ -280,12 +580,13 @@ def validate_planning_draft(payload: object) -> tuple[PlanningIssue, ...]:
                 raise ValidationError(f"第 {index + 1} 个阶段观众成绩比例：{exc}") from exc
         for field_name, field_value in stage.items():
             issues.extend(
-                _validate_field_object(
+                _validate_nested_field_objects(
                     field_value,
                     stage_id=stage_id,
                     field_path=f"stages[{index}].{field_name}",
                 )
             )
+        issues.extend(required_issues)
     return tuple(issues)
 
 
@@ -329,6 +630,57 @@ def _stage_count(value: object, *, label: str) -> int:
     return count
 
 
+def _optional_stage_count(value: object, *, label: str) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, Mapping) and value.get("value") in (None, ""):
+        return None
+    return _stage_count(value, label=label)
+
+
+def _rubric_definition(value: object, *, label: str) -> dict[str, object] | None:
+    if value is None:
+        return None
+    raw = _as_mapping(value, message=f"{label}必须是对象。")
+    name = _stage_text(raw.get("name"), label=f"{label}名称")
+    description = ""
+    if raw.get("description") is not None:
+        description = _stage_text(raw.get("description"), label=f"{label}说明")
+    raw_criteria = raw.get("criteria")
+    if not isinstance(raw_criteria, list) or not raw_criteria:
+        raise ValidationError(f"{label}至少需要一个评分项。")
+    criteria: list[dict[str, object]] = []
+    total = Decimal("0")
+    for index, raw_criterion in enumerate(raw_criteria, start=1):
+        criterion = _as_mapping(raw_criterion, message=f"{label}第 {index} 个评分项必须是对象。")
+        criterion_name = _stage_text(criterion.get("name"), label=f"{label}第 {index} 个评分项名称")
+        raw_max_score = _planning_value(
+            criterion.get("max_score"), label=f"{label}第 {index} 个评分项满分"
+        )
+        try:
+            max_score = Decimal(str(raw_max_score))
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValidationError(f"{label}第 {index} 个评分项满分无效。") from exc
+        if not max_score.is_finite() or max_score <= 0:
+            raise ValidationError(f"{label}第 {index} 个评分项满分必须大于 0。")
+        criterion_description = ""
+        if criterion.get("description") is not None:
+            criterion_description = _stage_text(
+                criterion.get("description"), label=f"{label}第 {index} 个评分项说明"
+            )
+        criteria.append(
+            {
+                "name": criterion_name,
+                "max_score": format(max_score.normalize(), "f"),
+                "description": criterion_description,
+            }
+        )
+        total += max_score
+    if total != Decimal("100"):
+        raise ValidationError(f"{label}评分项满分合计必须为 100 分，当前为 {total:g} 分。")
+    return {"name": name, "description": description, "criteria": criteria}
+
+
 def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[dict[str, object]]:
     """Convert a complete planning payload into the existing linear editor shape."""
     issues = validate_planning_draft(payload)
@@ -370,6 +722,12 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
                 label=f"阶段“{stage_name}”的第 {round_index} 个演唱轮次",
                 default=f"round-{stage_index}-{round_index}",
             )
+            round_format = _stage_text(
+                raw_source.get("format"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个演唱形式",
+            )
+            if round_format not in {"solo", "collaboration"}:
+                raise ValidationError(f"阶段“{stage_name}”的演唱形式无效。")
             round_key = _stage_text(
                 raw_source.get("round_key"),
                 label=f"阶段“{stage_name}”的第 {round_index} 个轮次标识",
@@ -379,40 +737,79 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
                 raw_source.get("weight"),
                 label=f"阶段“{stage_name}”的第 {round_index} 个成绩比例",
             )
-            judge_sources.append(
-                {
-                    "round_key": round_key,
-                    "round_name": _stage_text(
-                        raw_source.get("name"), label="演唱轮次名称", default=f"第{round_index}轮"
-                    ),
-                    "weight": _decimal_text(weight),
-                    "scoring_mode": str(raw_source.get("scoring_mode") or "average"),
-                    "source": _stage_text(
-                        raw_source.get("source"),
-                        label=f"阶段“{stage_name}”的第 {round_index} 个成绩来源",
-                        default=previous_stage_key,
-                    ),
-                    "source_stage_key": _stage_text(
-                        raw_source.get("source_stage_key"),
-                        label=f"阶段“{stage_name}”的第 {round_index} 个名单来源",
-                        default=previous_stage_key,
-                    ),
-                    "business_id": round_id,
-                    "create_round": True,
-                }
+            scoring_mode = _stage_text(
+                raw_source.get("scoring_mode"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个评分方式",
             )
+            if scoring_mode not in {"average", "drop_high_low"}:
+                raise ValidationError(f"阶段“{stage_name}”的评分方式无效。")
+            judge_count = _optional_stage_count(
+                raw_source.get("judge_count"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个评委数量",
+            )
+            minimum_judge_count = _optional_stage_count(
+                raw_source.get("minimum_judge_count"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个最低有效评委数",
+            )
+            if (
+                judge_count is not None
+                and minimum_judge_count is not None
+                and minimum_judge_count > judge_count
+            ):
+                raise ValidationError(f"阶段“{stage_name}”的最低有效评委数不能超过评委数量。")
+            rubric = _rubric_definition(
+                raw_source.get("rubric"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个评分标准",
+            )
+            source_configuration: dict[str, object] = {
+                "round_key": round_key,
+                "round_name": _stage_text(
+                    raw_source.get("name"), label="演唱轮次名称", default=f"第{round_index}轮"
+                ),
+                "weight": _decimal_text(weight),
+                "scoring_mode": scoring_mode,
+                "judge_count": judge_count,
+                "minimum_judge_count": minimum_judge_count,
+                "rubric": rubric,
+                "format": round_format,
+                "source": _stage_text(
+                    raw_source.get("source"),
+                    label=f"阶段“{stage_name}”的第 {round_index} 个成绩来源",
+                    default=previous_stage_key,
+                ),
+                "source_stage_key": _stage_text(
+                    raw_source.get("source_stage_key"),
+                    label=f"阶段“{stage_name}”的第 {round_index} 个名单来源",
+                    default=previous_stage_key,
+                ),
+                "business_id": round_id,
+                "create_round": True,
+            }
+            for optional_field in ("judge_count", "minimum_judge_count", "rubric"):
+                if optional_field not in raw_source:
+                    source_configuration.pop(optional_field, None)
+            judge_sources.append(source_configuration)
 
         judge_weight = sum(
             (Decimal(str(source["weight"])) for source in judge_sources), Decimal("0")
         )
         previous_weight = _percentage_coefficient(
-            raw_stage.get("previous_weight", "0"),
+            raw_stage.get("previous_weight"),
             label=f"阶段“{stage_name}”的上一阶段成绩比例",
         )
         audience_weight = _percentage_coefficient(
-            raw_stage.get("audience_weight", "0"),
+            raw_stage.get("audience_weight"),
             label=f"阶段“{stage_name}”的观众成绩比例",
         )
+        raw_audience_conversion = raw_stage.get("audience_conversion")
+        audience_conversion = ""
+        if audience_weight:
+            audience_conversion = _stage_text(
+                raw_audience_conversion,
+                label=f"阶段“{stage_name}”的观众成绩换算方式",
+            )
+            if audience_conversion not in {"ballot_share_percent", "audience_score_hundred"}:
+                raise ValidationError(f"阶段“{stage_name}”的观众成绩换算方式无效。")
         raw_audience_source = raw_stage.get("audience_source")
         if isinstance(raw_audience_source, Mapping) and raw_audience_source.get("value") in (
             None,
@@ -436,16 +833,35 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
                 "round_key": str(judge_sources[0]["round_key"]),
                 "round_name": str(judge_sources[0]["round_name"]),
                 "judge_sources": judge_sources,
-                "scoring_mode": "average",
+                "scoring_mode": str(judge_sources[0]["scoring_mode"]),
                 "advance_count": advance_count,
                 "judge_weight": _decimal_text(judge_weight),
                 "previous_weight": _decimal_text(previous_weight),
                 "audience_weight": _decimal_text(audience_weight),
                 "vote_source": audience_source,
+                "audience_conversion": audience_conversion,
                 "audience_source": previous_stage_key if audience_weight else "",
                 "audience_source_stage_key": previous_stage_key if audience_weight else "",
             }
         )
+        raw_participants = raw_stage.get("participants")
+        if isinstance(raw_participants, Mapping) and "count" in raw_participants:
+            participants = {
+                "source": str(raw_participants.get("source") or ""),
+                "count": _stage_count(
+                    raw_participants.get("count"), label=f"阶段“{stage_name}”的参赛人数"
+                ),
+            }
+            for field_name, label in (("group_count", "演唱组数"), ("group_size", "每组人数")):
+                if field_name in raw_participants:
+                    participants[field_name] = _stage_count(
+                        raw_participants.get(field_name), label=f"阶段“{stage_name}”的{label}"
+                    )
+            stages[-1]["participants"] = participants
+        if raw_stage.get("collaboration_group") is not None:
+            stages[-1]["collaboration_group"] = _stage_text(
+                raw_stage.get("collaboration_group"), label=f"阶段“{stage_name}”的分组演唱说明"
+            )
         previous_stage_key = stage_key
     return stages
 
@@ -454,6 +870,9 @@ def _planning_issue_for_conversion(error: ValidationError) -> PlanningIssue:
     message = str(error)
     if "结果方式" in message:
         code = "UNSUPPORTED_RESULT_METHOD"
+        severity = PlanningSeverity.EXECUTION_RISK
+    elif "观众成绩换算方式" in message:
+        code = "INVALID_AUDIENCE_CONVERSION"
         severity = PlanningSeverity.EXECUTION_RISK
     else:
         code = "WEIGHTS_INCOMPLETE"
@@ -540,6 +959,7 @@ def prepare_planning_compile(
                     "round_key": round_key,
                     "name": str(source["round_name"]),
                     "scoring_mode": str(source["scoring_mode"]),
+                    "format": str(source.get("format") or "solo"),
                     "advance_count": int(str(stage["advance_count"])),
                     "roster_source": "approved"
                     if str(source.get("source_stage_key")) == "entry"
@@ -549,6 +969,9 @@ def prepare_planning_compile(
                     else str(source.get("source_stage_key") or stage["key"]),
                     "stage_index": stage_index,
                 }
+                for field in ("judge_count", "minimum_judge_count", "rubric"):
+                    if field in source:
+                        configuration[field] = deepcopy(source[field])
                 round_configurations_by_key[round_key] = configuration
             business_ids = configuration["business_ids"]
             assert isinstance(business_ids, list)
@@ -580,7 +1003,50 @@ def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[s
         except (InvalidOperation, ValueError):
             return ""
 
-    return {
+    def round_payload(round_index: int, round_source: Mapping[str, object]) -> dict[str, object]:
+        result: dict[str, object] = {
+            "business_id": str(
+                round_source.get("round_key")
+                or round_source.get("business_id")
+                or f"{business_id}-round-{round_index}"
+            ),
+            "round_key": str(
+                round_source.get("round_key")
+                or round_source.get("business_id")
+                or f"{business_id}-round-{round_index}"
+            ),
+            "name": planning_field(
+                str(
+                    round_source.get("round_name")
+                    or round_source.get("round_key")
+                    or f"第 {round_index} 轮"
+                ),
+                PlanningResolution.CONFIRMED,
+                "历史规则定义",
+                "text",
+            ),
+            "format": str(round_source.get("format") or "solo"),
+            "scoring_mode": planning_field(
+                str(round_source.get("scoring_mode") or "average"),
+                PlanningResolution.CONFIRMED,
+                "历史规则定义",
+                "text",
+            ),
+            "source": str(round_source.get("source") or "entry"),
+            "source_stage_key": str(round_source.get("source_stage_key") or "entry"),
+            "weight": planning_field(
+                percentage_value(round_source.get("weight", "")),
+                PlanningResolution.CONFIRMED,
+                "历史规则定义",
+                "percent",
+            ),
+        }
+        for field in ("judge_count", "minimum_judge_count", "rubric"):
+            if field in round_source:
+                result[field] = deepcopy(round_source[field])
+        return result
+
+    payload: dict[str, object] = {
         "business_id": business_id,
         "name": planning_field(
             str(stage.get("name") or f"第 {index} 阶段"),
@@ -598,40 +1064,7 @@ def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[s
             "top_n", PlanningResolution.CONFIRMED, "历史规则定义", "text"
         ),
         "judge_sources": [
-            {
-                "business_id": str(
-                    round_source.get("round_key")
-                    or round_source.get("business_id")
-                    or f"{business_id}-round-{round_index}"
-                ),
-                "round_key": str(
-                    round_source.get("round_key")
-                    or round_source.get("business_id")
-                    or f"{business_id}-round-{round_index}"
-                ),
-                "name": planning_field(
-                    str(
-                        round_source.get("round_name")
-                        or round_source.get("round_key")
-                        or f"第 {round_index} 轮"
-                    ),
-                    PlanningResolution.CONFIRMED,
-                    "历史规则定义",
-                    "text",
-                ),
-                "format": str(round_source.get("format") or "solo"),
-                "scoring_mode": str(round_source.get("scoring_mode") or "average"),
-                "source": str(round_source.get("source") or "entry"),
-                "source_stage_key": str(round_source.get("source_stage_key") or "entry"),
-                "source": str(round_source.get("source") or "entry"),
-                "source_stage_key": str(round_source.get("source_stage_key") or "entry"),
-                "weight": planning_field(
-                    percentage_value(round_source.get("weight", "")),
-                    PlanningResolution.CONFIRMED,
-                    "历史规则定义",
-                    "percent",
-                ),
-            }
+            round_payload(round_index, round_source)
             for round_index, round_source in enumerate(round_sources, start=1)
         ],
         "judge_weight": planning_field(
@@ -679,6 +1112,23 @@ def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[s
             for round_index, round_source in enumerate(round_sources, start=1)
         ],
     }
+    try:
+        audience_weight = Decimal(str(stage.get("audience_weight") or "0"))
+    except (InvalidOperation, ValueError):
+        audience_weight = Decimal("0")
+    if audience_weight:
+        payload["audience_conversion"] = planning_field(
+            str(stage.get("audience_conversion") or ""),
+            PlanningResolution.CONFIRMED
+            if stage.get("audience_conversion")
+            else PlanningResolution.PENDING,
+            "历史规则定义" if stage.get("audience_conversion") else "需要确认投票换算规则",
+            "text",
+        )
+    for field in ("participants", "collaboration_group"):
+        if field in stage:
+            payload[field] = deepcopy(stage[field])
+    return payload
 
 
 def planning_projection_from_definition(definition: object) -> PlanningProjection:

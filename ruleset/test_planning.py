@@ -1,5 +1,7 @@
 import json
+from copy import deepcopy
 from decimal import Decimal
+from typing import Any
 
 from accounts.models import User
 from common.authority import (
@@ -13,7 +15,7 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
-from singer_contest.models import ContestRound
+from singer_contest.models import ContestRound, ScoringRubric
 from singer_contest.services import configure_draft_round_from_planning
 
 from ruleset.models import ContestRuleset, RulesetPlanningDraft, RulesetVersion
@@ -31,6 +33,7 @@ from ruleset.services import (
     load_planning_draft,
     planning_projection_from_definition,
     prepare_planning_compile_for_version,
+    prepare_planning_preflight,
     save_planning_draft,
 )
 from ruleset.templates import golden_schidui
@@ -87,6 +90,129 @@ class PlanningValidationTests(SimpleTestCase):
         self.assertEqual(issue.severity, PlanningSeverity.MISSING_INFORMATION)
         self.assertTrue(issue.blocks_apply)
         self.assertEqual(issue.stage_id, "stage-1")
+
+    def test_nested_pending_participant_count_blocks_apply(self):
+        payload = {
+            "schema_version": 1,
+            "stages": [
+                {
+                    "business_id": "stage-1",
+                    "participants": {
+                        "source": "all_finalists",
+                        "count": planning_field(
+                            None, PlanningResolution.PENDING, "待确认", "person"
+                        ),
+                    },
+                }
+            ],
+        }
+
+        issues = validate_planning_draft(payload)
+
+        self.assertTrue(any(issue.code == "MISSING_PARTICIPANT_COUNT" for issue in issues))
+
+    def test_missing_audience_weight_is_not_interpreted_as_zero(self):
+        stage = _planning_stage()
+        stage.pop("audience_weight")
+
+        result = prepare_planning_compile(
+            _planning_payload(stage),
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        self.assertIn("MISSING_AUDIENCE_WEIGHT", {issue.code for issue in result.issues})
+
+    def test_audience_vote_conversion_is_not_invented(self):
+        stage = _planning_stage(
+            audience_source=planning_field(
+                "audience1", PlanningResolution.CONFIRMED, "投票方案", "vote"
+            ),
+            audience_weight=planning_field(
+                "10", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+            ),
+        )
+
+        result = prepare_planning_compile(
+            _planning_payload(stage),
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        self.assertIn("MISSING_AUDIENCE_CONVERSION", {issue.code for issue in result.issues})
+
+    def test_audience_source_is_required_when_audience_weight_is_nonzero(self):
+        stage = _planning_stage(
+            audience_source=planning_field("", PlanningResolution.CONFIRMED, "待补充", "vote"),
+            audience_weight=planning_field(
+                "10", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+            ),
+            audience_conversion=planning_field(
+                "ballot_share_percent",
+                PlanningResolution.CONFIRMED,
+                "投票换算规则",
+                "text",
+            ),
+        )
+
+        issues = validate_planning_draft(_planning_payload(stage))
+
+        self.assertIn("MISSING_AUDIENCE_SOURCE", {issue.code for issue in issues})
+
+    def test_round_format_is_not_defaulted_to_solo(self):
+        stage = _planning_stage()
+        stage["judge_sources"][0]["format"] = ""
+
+        issues = validate_planning_draft(_planning_payload(stage))
+
+        self.assertIn("MISSING_ROUND_FORMAT", {issue.code for issue in issues})
+
+    def test_optional_empty_facts_do_not_block_a_complete_stage(self):
+        stage = _planning_stage()
+        stage["judge_sources"][0]["minimum_judge_count"] = planning_field(
+            "", PlanningResolution.CONFIRMED, "按准备名单人数", "judge"
+        )
+        stage["audience_conversion"] = planning_field(
+            "", PlanningResolution.CONFIRMED, "无观众计分", "text"
+        )
+
+        result = prepare_planning_compile(
+            _planning_payload(stage),
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertTrue(result.can_apply)
+
+    def test_missing_previous_weight_is_not_interpreted_as_zero(self):
+        first = _planning_stage()
+        second = _planning_stage(
+            business_id="stage-2",
+            name=planning_field("复赛", PlanningResolution.CONFIRMED, "比赛方案", "text"),
+        )
+        second.pop("previous_weight", None)
+
+        result = prepare_planning_compile(
+            {"schema_version": 1, "stages": [first, second], "execution_refs": {}},
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        self.assertIn("MISSING_PREVIOUS_WEIGHT", {issue.code for issue in result.issues})
+
+    def test_missing_judge_count_and_rubric_are_not_interpreted_as_runtime_defaults(self):
+        stage = _planning_stage()
+        stage["judge_sources"][0].pop("judge_count")
+        stage["judge_sources"][0].pop("rubric")
+
+        result = prepare_planning_compile(
+            _planning_payload(stage),
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        codes = {issue.code for issue in result.issues}
+        self.assertFalse(result.can_apply)
+        self.assertIn("MISSING_JUDGE_COUNT", codes)
+        self.assertIn("MISSING_RUBRIC", codes)
 
     def test_confirmed_false_is_not_missing(self):
         value = planning_field(
@@ -294,8 +420,9 @@ class PlanningProjectionTests(SimpleTestCase):
 
     def test_golden_compile_deduplicates_shared_round_configuration(self):
         projection = planning_projection_from_definition(golden_schidui())
+        payload = _add_golden_execution_facts(projection.payload)
 
-        result = prepare_planning_compile(projection.payload, golden_schidui())
+        result = prepare_planning_compile(payload, golden_schidui())
 
         self.assertTrue(result.can_apply)
         self.assertEqual(
@@ -304,11 +431,17 @@ class PlanningProjectionTests(SimpleTestCase):
         )
         shared = result.round_configurations[2]
         self.assertEqual(shared["business_ids"], ["r3", "r3"])
+        assert result.candidate_definition is not None
+        self.assertEqual(
+            _semantic_graph(result.candidate_definition),
+            _semantic_graph(golden_schidui()),
+        )
 
     def test_historical_projection_can_prepare_without_losing_previous_score_weight(self):
         projection = planning_projection_from_definition(golden_schidui())
+        payload = _add_golden_execution_facts(projection.payload)
 
-        result = prepare_planning_compile(projection.payload, golden_schidui())
+        result = prepare_planning_compile(payload, golden_schidui())
 
         self.assertTrue(result.can_apply)
         self.assertEqual(result.business_stages[1]["previous_weight"], "0.6")
@@ -342,6 +475,21 @@ class PlanningProjectionTests(SimpleTestCase):
         self.assertIn("人工", projection.notice)
 
 
+def _planning_rubric(name="演唱评分"):
+    return {
+        "name": planning_field(name, PlanningResolution.CONFIRMED, "评分表", "text"),
+        "description": planning_field(
+            "每人分别评分", PlanningResolution.CONFIRMED, "评分表", "text"
+        ),
+        "criteria": [
+            {
+                "name": planning_field("演唱表现", PlanningResolution.CONFIRMED, "评分表", "text"),
+                "max_score": planning_field(100, PlanningResolution.CONFIRMED, "评分表", "score"),
+            }
+        ],
+    }
+
+
 def _planning_stage(**overrides):
     stage: dict[str, object] = {
         "business_id": "stage-1",
@@ -351,10 +499,18 @@ def _planning_stage(**overrides):
             "count": planning_field(15, PlanningResolution.CONFIRMED, "报名汇总表", "person"),
         },
         "advance_count": planning_field(10, PlanningResolution.CONFIRMED, "比赛方案", "person"),
+        "previous_weight": planning_field(
+            "0", PlanningResolution.CONFIRMED, "第一阶段无上一阶段成绩", "percent"
+        ),
         "judge_sources": [
             {
                 "business_id": "round-1",
                 "format": "solo",
+                "scoring_mode": planning_field(
+                    "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                ),
+                "judge_count": planning_field(5, PlanningResolution.CONFIRMED, "评委名单", "judge"),
+                "rubric": _planning_rubric(),
                 "weight": planning_field(
                     "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
                 ),
@@ -386,6 +542,11 @@ def _golden_planning_payload(
             {
                 "business_id": "round-1",
                 "format": "solo",
+                "scoring_mode": planning_field(
+                    "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                ),
+                "judge_count": planning_field(5, PlanningResolution.CONFIRMED, "评委名单", "judge"),
+                "rubric": _planning_rubric("第一轮评分"),
                 "weight": planning_field(
                     weights[0], PlanningResolution.CONFIRMED, "比赛方案", "percent"
                 ),
@@ -393,6 +554,11 @@ def _golden_planning_payload(
             {
                 "business_id": "round-2",
                 "format": "solo",
+                "scoring_mode": planning_field(
+                    "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                ),
+                "judge_count": planning_field(5, PlanningResolution.CONFIRMED, "评委名单", "judge"),
+                "rubric": _planning_rubric("第二轮评分"),
                 "weight": planning_field(
                     weights[1], PlanningResolution.CONFIRMED, "比赛方案", "percent"
                 ),
@@ -404,8 +570,75 @@ def _golden_planning_payload(
         audience_weight=planning_field(
             audience_weight, PlanningResolution.CONFIRMED, "比赛方案", "percent"
         ),
+        audience_conversion=planning_field(
+            "ballot_share_percent", PlanningResolution.CONFIRMED, "投票换算规则", "text"
+        ),
     )
     return _planning_payload(stage)
+
+
+def _add_golden_execution_facts(payload):
+    payload = deepcopy(payload)
+    for stage in payload["stages"]:
+        if stage.get("audience_weight", {}).get("value") not in (None, "0", 0):
+            stage["audience_conversion"] = planning_field(
+                "ballot_share_percent", PlanningResolution.CONFIRMED, "投票换算规则", "text"
+            )
+        for source in stage["judge_sources"]:
+            source["judge_count"] = planning_field(
+                5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+            )
+            source["rubric"] = _planning_rubric(f"{source['round_key']}评分")
+    return payload
+
+
+def _semantic_graph(definition):
+    root = json.loads(definition) if isinstance(definition, str) else definition
+    nodes = {node["key"]: node for node in root["nodes"]}
+    cache: dict[str, Any] = {}
+
+    def canonical(key: str) -> Any:
+        if key == "entry":
+            return ("ENTRY",)
+        if key in cache:
+            return cache[key]
+        node = nodes[key]
+        node_type = node["type"]
+        value: Any
+        if node_type == "ASSESS":
+            value = (
+                "ASSESS",
+                canonical(node["source"]),
+                str(node.get("round") or ""),
+                str(node.get("vote_source") or ""),
+                str(node.get("vote_purpose") or ""),
+                str(node.get("mode") or "mean"),
+                int(node.get("trim_high") or 0),
+                int(node.get("trim_low") or 0),
+            )
+        elif node_type == "AGGREGATE":
+            aggregate = node["aggregate"]
+            value = (
+                "AGGREGATE",
+                canonical(node.get("within") or "entry"),
+                aggregate["type"],
+                tuple(
+                    (canonical(component["source"]), str(Decimal(str(component["weight"]))))
+                    for component in aggregate["components"]
+                ),
+            )
+        elif node_type == "RANK":
+            value = ("RANK", canonical(node["source"]), bool(node.get("descending")))
+        elif node_type == "SELECT":
+            value = ("SELECT", canonical(node["source"]), int(node["count"]))
+        else:
+            raise AssertionError(f"unexpected golden node type: {node_type}")
+        cache[key] = value
+        return value
+
+    return tuple(
+        (checkpoint["key"], canonical(checkpoint["output"])) for checkpoint in root["checkpoints"]
+    )
 
 
 class PlanningCompileTests(SimpleTestCase):
@@ -426,6 +659,70 @@ class PlanningCompileTests(SimpleTestCase):
         )
         self.assertEqual(result.business_stages[0]["audience_weight"], "0.1")
 
+    def test_round_configuration_preserves_explicit_execution_facts(self):
+        stage = _planning_stage(
+            participants={
+                "source": "all_finalists",
+                "count": planning_field(15, PlanningResolution.CONFIRMED, "报名汇总表", "person"),
+                "group_count": planning_field(5, PlanningResolution.CONFIRMED, "分组方案", "group"),
+                "group_size": planning_field(3, PlanningResolution.CONFIRMED, "分组方案", "person"),
+            },
+            judge_sources=[
+                {
+                    "business_id": "round-1",
+                    "format": "collaboration",
+                    "scoring_mode": planning_field(
+                        "drop_high_low", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": {
+                        "name": planning_field(
+                            "演唱评分", PlanningResolution.CONFIRMED, "评分表", "text"
+                        ),
+                        "description": planning_field(
+                            "每人单独评分", PlanningResolution.CONFIRMED, "评分表", "text"
+                        ),
+                        "criteria": [
+                            {
+                                "name": planning_field(
+                                    "演唱", PlanningResolution.CONFIRMED, "评分表", "text"
+                                ),
+                                "max_score": planning_field(
+                                    "100", PlanningResolution.CONFIRMED, "评分表", "score"
+                                ),
+                            }
+                        ],
+                    },
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ],
+            audience_weight=planning_field(
+                "0", PlanningResolution.CONFIRMED, "无观众计分", "percent"
+            ),
+            audience_source=planning_field("", PlanningResolution.CONFIRMED, "无观众计分", "vote"),
+        )
+
+        result = prepare_planning_compile(
+            _planning_payload(stage),
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertTrue(result.can_apply)
+        configuration = result.round_configurations[0]
+        self.assertEqual(configuration["scoring_mode"], "drop_high_low")
+        self.assertEqual(configuration["judge_count"], 5)
+        self.assertEqual(configuration["minimum_judge_count"], 4)
+        rubric = configuration["rubric"]
+        assert isinstance(rubric, dict)
+        self.assertEqual(rubric["name"], "演唱评分")
+
     def test_missing_weight_or_conversion_blocks_candidate_but_does_not_raise(self):
         incomplete = _planning_payload(
             _planning_stage(
@@ -433,6 +730,13 @@ class PlanningCompileTests(SimpleTestCase):
                     {
                         "business_id": "round-1",
                         "format": "solo",
+                        "scoring_mode": planning_field(
+                            "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                        ),
+                        "judge_count": planning_field(
+                            5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                        ),
+                        "rubric": _planning_rubric(),
                         "weight": planning_field(
                             None,
                             PlanningResolution.PENDING,
@@ -461,10 +765,27 @@ class PlanningCompileTests(SimpleTestCase):
                     "比赛方案",
                     "group",
                 ),
+                participants={
+                    "source": "报名汇总",
+                    "count": planning_field(15, PlanningResolution.CONFIRMED, "报名汇总", "person"),
+                    "group_count": planning_field(
+                        5, PlanningResolution.CONFIRMED, "比赛方案", "group"
+                    ),
+                    "group_size": planning_field(
+                        3, PlanningResolution.CONFIRMED, "比赛方案", "person"
+                    ),
+                },
                 judge_sources=[
                     {
                         "business_id": "round-1",
                         "format": "collaboration",
+                        "scoring_mode": planning_field(
+                            "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                        ),
+                        "judge_count": planning_field(
+                            5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                        ),
+                        "rubric": _planning_rubric(),
                         "weight": planning_field(
                             "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
                         ),
@@ -479,6 +800,10 @@ class PlanningCompileTests(SimpleTestCase):
         )
 
         self.assertTrue(result.can_apply)
+        participants = result.business_stages[0]["participants"]
+        assert isinstance(participants, dict)
+        self.assertEqual(participants["group_count"], 5)
+        self.assertEqual(participants["group_size"], 3)
         candidate_definition = result.candidate_definition
         assert candidate_definition is not None
         raw_nodes = candidate_definition["nodes"]
@@ -562,6 +887,13 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
                     {
                         "business_id": "round-1",
                         "format": "solo",
+                        "scoring_mode": planning_field(
+                            "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                        ),
+                        "judge_count": planning_field(
+                            5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                        ),
+                        "rubric": _planning_rubric(),
                         "weight": planning_field(
                             "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
                         ),
@@ -592,6 +924,39 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
         self.version.refresh_from_db()
         self.assertEqual(self.version.definition, before_definition)
         self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 0)
+
+    def test_preflight_distinguishes_business_binding_and_freeze_states(self):
+        payload = self._complete_payload()
+
+        result = prepare_planning_preflight(self.version, payload)
+
+        self.assertTrue(result.business_complete)
+        self.assertTrue(result.binding_ready)
+        self.assertTrue(result.freeze_ready)
+        self.assertTrue(result.safe_to_apply)
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 0)
+
+    def test_preflight_blocks_apply_when_audience_source_is_not_bound(self):
+        payload = self._complete_payload()
+        source = payload["stages"][0]["judge_sources"][0]
+        source["weight"] = planning_field(90, "confirmed", "比赛方案", "percent")
+        payload["stages"][0]["audience_source"] = planning_field(
+            "audience1", "confirmed", "投票方案", "vote"
+        )
+        payload["stages"][0]["audience_weight"] = planning_field(
+            10, "confirmed", "比赛方案", "percent"
+        )
+        payload["stages"][0]["audience_conversion"] = planning_field(
+            "ballot_share_percent", "confirmed", "投票换算规则", "text"
+        )
+
+        result = prepare_planning_preflight(self.version, payload)
+
+        self.assertTrue(result.business_complete)
+        self.assertFalse(result.binding_ready)
+        self.assertFalse(result.safe_to_apply)
+        self.assertFalse(result.freeze_ready)
+        self.assertIn("MISSING_VOTE_BINDING", {issue.code for issue in result.issues})
 
     def test_apply_rejects_execution_ref_owned_by_another_activity_before_creating_round(self):
         with authority_write(ACTIVITY_STATE):
@@ -655,3 +1020,52 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
             1,
         )
         self.assertIn("checkpoints", json.loads(saved.definition))
+
+    def test_apply_materializes_explicit_judge_and_rubric_configuration(self):
+        payload = self._complete_payload()
+        source = payload["stages"][0]["judge_sources"][0]
+        source["judge_count"] = planning_field(5, "confirmed", "评委名单", "judge")
+        source["minimum_judge_count"] = planning_field(4, "confirmed", "比赛方案", "judge")
+        source["rubric"] = {
+            "name": planning_field("演唱评分", "confirmed", "评分表", "text"),
+            "description": planning_field("每人单独评分", "confirmed", "评分表", "text"),
+            "criteria": [
+                {
+                    "name": planning_field("演唱", "confirmed", "评分表", "text"),
+                    "max_score": planning_field("100", "confirmed", "评分表", "score"),
+                }
+            ],
+        }
+        draft = save_planning_draft(
+            self.version,
+            payload=payload,
+            operator=self.operator,
+            expected_revision=0,
+        )
+
+        apply_planning_to_ruleset(
+            self.version,
+            operator=self.operator,
+            expected_revision=draft.revision,
+        )
+
+        contest_round = ContestRound.objects.get(activity=self.activity)
+        self.assertEqual(contest_round.judge_count, 5)
+        self.assertEqual(contest_round.minimum_judge_count, 4)
+        self.assertIsNotNone(contest_round.rubric_id)
+        rubric = contest_round.rubric
+        assert rubric is not None
+        self.assertEqual(rubric.name, "演唱评分")
+        self.assertEqual(rubric.criteria.get().max_score, 100)
+
+        draft.refresh_from_db()
+        apply_planning_to_ruleset(
+            self.version,
+            operator=self.operator,
+            expected_revision=draft.revision,
+        )
+
+        self.assertEqual(
+            ScoringRubric.objects.filter(activity=self.activity).count(),
+            1,
+        )
