@@ -192,7 +192,7 @@ pwsh -NoProfile -File scripts/verify_postgres_acceptance.ps1 -StartCompose -Veri
 
 Check `pyrightconfig.json`, `pyproject.toml`, `tailwind.config.js`, `tsconfig*.json`, environment examples, ignore files, and Dependabot entries against the current tree. Run `git diff --check` and confirm no generated media, database, coverage, or staticfiles artifacts are tracked.
 
-- [ ] **Step 5: Commit, merge, push, and monitor CI.**
+- [x] **Step 5: Commit, merge, push, and monitor CI.**
 
 ```powershell
 git status --short
