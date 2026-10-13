@@ -96,6 +96,11 @@ from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+from ruleset.planning import (
+    PlanningCompileResult,
+    planning_projection_from_definition,
+    prepare_planning_compile,
+)
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
 from ruleset.services import (
     RulesetInvalidError,
@@ -103,7 +108,11 @@ from ruleset.services import (
     business_round_configuration_signature,
     create_ruleset_version,
     freeze_ruleset_version,
+    apply_planning_to_ruleset,
+    load_planning_draft,
+    prepare_planning_compile_for_version,
     save_business_ruleset,
+    save_planning_draft,
     supersede_ruleset_version,
     update_ruleset_binding,
     update_ruleset_definition_section,
@@ -4735,6 +4744,139 @@ def _node_type_options(nodes):
     return options
 
 
+def _planning_result_json(result: PlanningCompileResult) -> dict[str, object]:
+    return {
+        "can_apply": result.can_apply,
+        "issues": [issue.to_dict() for issue in result.issues],
+        "business_stages": list(result.business_stages),
+        "change_summary": list(result.change_summary),
+    }
+
+
+def _planning_request_payload(request):
+    try:
+        body = json.loads(request.body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValidationError("规划数据不是合法 JSON。") from exc
+    if not isinstance(body, dict):
+        raise ValidationError("规划数据必须是 JSON 对象。")
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        raise ValidationError("规划草稿缺少有效内容。")
+    raw_revision = body.get("revision")
+    if isinstance(raw_revision, bool) or not isinstance(raw_revision, (int, str)):
+        raise ValidationError("规划草稿版本号无效。")
+    try:
+        revision = int(raw_revision)
+    except ValueError as exc:
+        raise ValidationError("规划草稿版本号无效。") from exc
+    if revision < 0:
+        raise ValidationError("规划草稿版本号无效。")
+    return payload, revision
+
+
+def _planning_error_response(error, *, payload=None):
+    return JsonResponse(
+        {
+            "ok": False,
+            "error": domain_error_messages(error),
+            "payload": payload,
+        },
+        status=400,
+        json_dumps_params={"ensure_ascii": False},
+    )
+
+
+@staff_required
+@require_http_methods(["GET", "POST"])
+def ruleset_planning(request, pk):
+    version = get_object_or_404(
+        RulesetVersion.objects.select_related("ruleset__activity"), pk=pk
+    )
+    if request.method == "POST":
+        raw_payload = None
+        try:
+            raw_payload, revision = _planning_request_payload(request)
+            draft = save_planning_draft(
+                version,
+                payload=raw_payload,
+                operator=request.user,
+                expected_revision=revision,
+            )
+        except (PermissionDenied, ValidationError) as exc:
+            response = _planning_error_response(exc, payload=raw_payload)
+            if isinstance(exc, PermissionDenied):
+                response.status_code = 403
+            return response
+        return JsonResponse(
+            {"ok": True, "revision": draft.revision, "payload": draft.payload}
+        )
+
+    draft = load_planning_draft(version)
+    projection = planning_projection_from_definition(version.definition)
+    display_payload = draft.payload
+    if not display_payload.get("stages") and projection.editable:
+        display_payload = projection.payload
+    compile_result = None
+    if display_payload.get("stages"):
+        compile_result = prepare_planning_compile(display_payload, version.definition)
+    return render(
+        request,
+        "staff_panel/ruleset_planning.html",
+        {
+            "activity": version.ruleset.activity,
+            "ruleset": version.ruleset,
+            "version": version,
+            "planning_payload": display_payload,
+            "planning_revision": draft.revision,
+            "planning_projection": projection,
+            "planning_result": compile_result,
+            "planning_result_json": _planning_result_json(compile_result)
+            if compile_result is not None
+            else {"can_apply": False, "issues": [], "change_summary": []},
+            "planning_read_only": projection.read_only
+            or version.status != RulesetVersion.Status.DRAFT,
+        },
+    )
+
+
+@staff_required
+@require_http_methods(["GET", "POST"])
+def ruleset_planning_preview(request, pk):
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    try:
+        if request.method == "POST":
+            payload, _revision = _planning_request_payload(request)
+            result = prepare_planning_compile(payload, version.definition)
+        else:
+            result = prepare_planning_compile_for_version(version)
+    except (PermissionDenied, ValidationError) as exc:
+        response = _planning_error_response(exc)
+        if isinstance(exc, PermissionDenied):
+            response.status_code = 403
+        return response
+    return JsonResponse({"ok": True, "result": _planning_result_json(result)})
+
+
+@staff_required
+@require_POST
+def ruleset_planning_apply(request, pk):
+    version = get_object_or_404(RulesetVersion, pk=pk)
+    try:
+        _payload, revision = _planning_request_payload(request)
+        saved = apply_planning_to_ruleset(
+            version,
+            operator=request.user,
+            expected_revision=revision,
+        )
+    except (PermissionDenied, ValidationError) as exc:
+        response = _planning_error_response(exc)
+        if isinstance(exc, PermissionDenied):
+            response.status_code = 403
+        return response
+    return JsonResponse({"ok": True, "redirect": reverse("staff:ruleset_edit", args=[saved.pk])})
+
+
 @staff_required
 @transaction.atomic
 def contest_ruleset_create(request):
@@ -4780,7 +4922,7 @@ def contest_ruleset_create(request):
                 version = create_ruleset_version(
                     existing, definition=template.definition, created_by=request.user
                 )
-                messages.success(request, f"已将「{template.name}」克隆到该活动，进入编辑。")
+                messages.success(request, f"已将「{template.name}」克隆到该活动，进入准备。")
             else:
                 # Reuse the single authority: edit the latest DRAFT, or supersede a frozen
                 # current into a fresh editing DRAFT — never redirect into a frozen version.
@@ -4807,7 +4949,7 @@ def contest_ruleset_create(request):
                 else:
                     version = draft
                 messages.info(request, "该活动已有赛制，进入现有赛制编辑。")
-            return redirect("staff:ruleset_edit", pk=version.pk)
+            return redirect("staff:ruleset_planning", pk=version.pk)
         definition = template.definition if template else _starter_definition()
         ruleset = ContestRuleset.objects.create(
             activity=activity,
@@ -4817,8 +4959,8 @@ def contest_ruleset_create(request):
             created_by=request.user,
         )
         version = create_ruleset_version(ruleset, definition=definition, created_by=request.user)
-        messages.success(request, "赛制已创建，进入编辑。")
-        return redirect("staff:ruleset_edit", pk=version.pk)
+        messages.success(request, "赛制已创建，进入准备。")
+        return redirect("staff:ruleset_planning", pk=version.pk)
     templates = RulesetTemplate.objects.filter(
         capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION
     ).order_by("name")
@@ -5298,8 +5440,8 @@ def ruleset_clone_from_template(request, template_pk):
     version = create_ruleset_version(
         ruleset, definition=template.definition, created_by=request.user
     )
-    messages.success(request, f"已从「{template.name}」克隆到活动，进入编辑。")
-    return redirect("staff:ruleset_edit", pk=version.pk)
+    messages.success(request, f"已从「{template.name}」克隆到活动，进入准备。")
+    return redirect("staff:ruleset_planning", pk=version.pk)
 
 
 @staff_required

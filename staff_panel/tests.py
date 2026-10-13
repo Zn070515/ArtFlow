@@ -7450,7 +7450,7 @@ class RulesetTemplateLibraryTests(TestCase):
         version = RulesetVersion.objects.get(ruleset=ruleset)
         self.assertEqual(version.status, "draft")
         self.assertEqual(version.definition, template.definition)
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+        self.assertRedirects(response, reverse("staff:ruleset_planning", args=[version.pk]))
 
     def test_clone_entry_point_rejects_a_non_production_template(self):
         """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
@@ -7540,7 +7540,7 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(ruleset.name, "院十佳2027复制")
         self.assertEqual(ruleset.source_template, template)
         version = RulesetVersion.objects.get(ruleset=ruleset)
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+        self.assertRedirects(response, reverse("staff:ruleset_planning", args=[version.pk]))
 
     def test_clone_twice_into_same_activity_avoids_one_current_collision(self):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -7565,7 +7565,7 @@ class RulesetTemplateLibraryTests(TestCase):
         latest = versions[-1]
         latest.refresh_from_db()
         self.assertFalse(latest.is_current)
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[latest.pk]))
+        self.assertRedirects(response, reverse("staff:ruleset_planning", args=[latest.pk]))
 
     def test_clone_last_year_picks_the_template_by_builtin_key(self):
         # §11.2: the display name is UI, the builtin key is identity — even after the row
@@ -7584,7 +7584,7 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(ruleset.source_template_id, template.pk)
         self.assertEqual(ruleset.source_template.definition, template.definition)  # type: ignore[union-attr]
         version = RulesetVersion.objects.get(ruleset=ruleset)
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+        self.assertRedirects(response, reverse("staff:ruleset_planning", args=[version.pk]))
 
     def test_clone_requires_staff_and_post(self):
         activity = self._clone_activity()
@@ -8066,7 +8066,7 @@ class RulesetEditorTests(TestCase):
             reverse("staff:contest_ruleset_create"),
             {"activity": self.activity.pk, "name": "新赛制2026"},
         )
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.assertRedirects(response, reverse("staff:ruleset_planning", args=[self.version.pk]))
         self.assertEqual(ContestRuleset.objects.filter(activity=self.activity).count(), 1)
         self.assertTrue(ContestRuleset.objects.filter(name="院十佳2026规则").exists())
         self.assertFalse(ContestRuleset.objects.filter(name="新赛制2026").exists())

@@ -276,6 +276,21 @@ urlpatterns = [
         name="ruleset_clone_last_year",
     ),
     path("rulesets/create/", views.contest_ruleset_create, name="contest_ruleset_create"),
+    path(
+        "rulesets/<int:pk>/planning/",
+        views.ruleset_planning,
+        name="ruleset_planning",
+    ),
+    path(
+        "rulesets/<int:pk>/planning/preview/",
+        views.ruleset_planning_preview,
+        name="ruleset_planning_preview",
+    ),
+    path(
+        "rulesets/<int:pk>/planning/apply/",
+        views.ruleset_planning_apply,
+        name="ruleset_planning_apply",
+    ),
     path("rulesets/<int:pk>/edit/", views.ruleset_edit, name="ruleset_edit"),
     path(
         "rulesets/<int:pk>/questionnaire/",

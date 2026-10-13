@@ -258,6 +258,22 @@ class PlanningProjectionTests(SimpleTestCase):
         )
         self.assertEqual(projection.source, "historical_projection")
 
+    def test_historical_projection_contains_a_complete_editable_stage_shape(self):
+        projection = planning_projection_from_definition(golden_schidui())
+
+        stage = projection.payload["stages"][0]
+        self.assertEqual(stage["result_method"]["value"], "top_n")
+        self.assertEqual(stage["judge_sources"][0]["weight"]["value"], "30")
+        self.assertEqual(stage["audience_weight"]["value"], "10")
+
+    def test_historical_projection_can_prepare_without_losing_previous_score_weight(self):
+        projection = planning_projection_from_definition(golden_schidui())
+
+        result = prepare_planning_compile(projection.payload, golden_schidui())
+
+        self.assertTrue(result.can_apply)
+        self.assertEqual(result.business_stages[1]["previous_weight"], "0.6")
+
     def test_complex_definition_is_read_only_and_keeps_manual_node_information(self):
         definition = {
             "schema_version": 1,

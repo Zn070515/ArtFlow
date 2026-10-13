@@ -255,6 +255,29 @@ def validate_planning_draft(payload: object) -> tuple[PlanningIssue, ...]:
                     blocks_apply=True,
                 )
             )
+        raw_sources = stage.get("judge_sources")
+        if isinstance(raw_sources, list):
+            for source_index, raw_source in enumerate(raw_sources):
+                if not isinstance(raw_source, Mapping):
+                    continue
+                raw_weight = raw_source.get("weight")
+                if isinstance(raw_weight, Mapping):
+                    raw_weight = raw_weight.get("value")
+                if raw_weight not in (None, ""):
+                    try:
+                        parse_percentage(raw_weight)
+                    except ValidationError as exc:
+                        raise ValidationError(
+                            f"第 {index + 1} 个阶段第 {source_index + 1} 个成绩比例：{exc}"
+                        ) from exc
+        raw_audience_weight = stage.get("audience_weight")
+        if isinstance(raw_audience_weight, Mapping):
+            raw_audience_weight = raw_audience_weight.get("value")
+        if raw_audience_weight not in (None, ""):
+            try:
+                parse_percentage(raw_audience_weight)
+            except ValidationError as exc:
+                raise ValidationError(f"第 {index + 1} 个阶段观众成绩比例：{exc}") from exc
         for field_name, field_value in stage.items():
             issues.extend(
                 _validate_field_object(
@@ -345,13 +368,18 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
                 label=f"阶段“{stage_name}”的第 {round_index} 个演唱轮次",
                 default=f"round-{stage_index}-{round_index}",
             )
+            round_key = _stage_text(
+                raw_source.get("round_key"),
+                label=f"阶段“{stage_name}”的第 {round_index} 个轮次标识",
+                default=round_id,
+            )
             weight = _percentage_coefficient(
                 raw_source.get("weight"),
                 label=f"阶段“{stage_name}”的第 {round_index} 个成绩比例",
             )
             judge_sources.append(
                 {
-                    "round_key": f"r{len(judge_sources) + 1}",
+                    "round_key": round_key,
                     "round_name": _stage_text(
                         raw_source.get("name"), label="演唱轮次名称", default=f"第{round_index}轮"
                     ),
@@ -366,6 +394,10 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
 
         judge_weight = sum(
             (Decimal(str(source["weight"])) for source in judge_sources), Decimal("0")
+        )
+        previous_weight = _percentage_coefficient(
+            raw_stage.get("previous_weight", "0"),
+            label=f"阶段“{stage_name}”的上一阶段成绩比例",
         )
         audience_weight = _percentage_coefficient(
             raw_stage.get("audience_weight", "0"),
@@ -385,7 +417,7 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
             )
         if audience_weight and not audience_source:
             raise ValidationError(f"阶段“{stage_name}”使用观众成绩时必须有来源。")
-        if judge_weight + audience_weight != Decimal("1"):
+        if judge_weight + previous_weight + audience_weight != Decimal("1"):
             raise ValidationError(f"阶段“{stage_name}”的成绩比例必须合计为 100%。")
         stages.append(
             {
@@ -397,7 +429,7 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
                 "scoring_mode": "average",
                 "advance_count": advance_count,
                 "judge_weight": _decimal_text(judge_weight),
-                "previous_weight": "0",
+                "previous_weight": _decimal_text(previous_weight),
                 "audience_weight": _decimal_text(audience_weight),
                 "vote_source": audience_source,
                 "audience_source": previous_stage_key if audience_weight else "",
@@ -518,8 +550,14 @@ def prepare_planning_compile(
 def _historical_stage_payload(
     stage: Mapping[str, object], index: int
 ) -> dict[str, object]:
-    business_id = f"stage-{index}"
+    business_id = str(stage.get("key") or f"stage{index}")
     round_sources = _mapping_list(stage.get("judge_sources"))
+    def percentage_value(value: object) -> str:
+        try:
+            return _decimal_text(Decimal(str(value)) * Decimal("100"))
+        except (InvalidOperation, ValueError):
+            return ""
+
     return {
         "business_id": business_id,
         "name": planning_field(
@@ -534,23 +572,56 @@ def _historical_stage_payload(
             "历史规则定义",
             "person",
         ),
+        "result_method": planning_field(
+            "top_n", PlanningResolution.CONFIRMED, "历史规则定义", "text"
+        ),
+        "judge_sources": [
+            {
+                "business_id": f"{business_id}-{round_index}",
+                "round_key": f"{business_id}-{round_index}",
+                "name": planning_field(
+                    str(
+                        round_source.get("round_name")
+                        or round_source.get("round_key")
+                        or f"第 {round_index} 轮"
+                    ),
+                    PlanningResolution.CONFIRMED,
+                    "历史规则定义",
+                    "text",
+                ),
+                "format": "solo",
+                "weight": planning_field(
+                    percentage_value(round_source.get("weight", "")),
+                    PlanningResolution.CONFIRMED,
+                    "历史规则定义",
+                    "percent",
+                ),
+            }
+            for round_index, round_source in enumerate(round_sources, start=1)
+        ],
         "judge_weight": planning_field(
-            stage.get("judge_weight", "0"),
+            percentage_value(stage.get("judge_weight", "0")),
             PlanningResolution.CONFIRMED,
             "历史规则定义",
             "percent",
         ),
         "previous_weight": planning_field(
-            stage.get("previous_weight", "0"),
+            percentage_value(stage.get("previous_weight", "0")),
             PlanningResolution.CONFIRMED,
             "历史规则定义",
             "percent",
         ),
         "audience_weight": planning_field(
-            stage.get("audience_weight", "0"),
+            percentage_value(stage.get("audience_weight", "0")),
             PlanningResolution.CONFIRMED,
             "历史规则定义",
             "percent",
+        ),
+        "audience_source": planning_field(
+            str(stage.get("vote_source") or stage.get("audience_source") or ""),
+            PlanningResolution.CONFIRMED,
+            "历史规则定义",
+            "vote",
         ),
         "execution_rounds": [
             {
