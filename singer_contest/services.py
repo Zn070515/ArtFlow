@@ -729,9 +729,7 @@ def configure_draft_round_from_planning(
     current_operator = require_current_staff(operator)
     locked_activity = lock_activity_for_action(contest_round.activity)
     locked_round = (
-        ContestRound.objects.select_for_update()
-        .select_related("activity")
-        .get(pk=contest_round.pk)
+        ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
     )
     if locked_round.activity_id != locked_activity.pk:
         raise PermissionDenied("轮次不属于当前活动。")
@@ -804,7 +802,10 @@ def configure_draft_round_from_planning(
         locked_round.roster_source = roster_source
     if "roster_source_stage" in configuration:
         locked_round.roster_source_stage = str(configuration["roster_source_stage"] or "")
-    if locked_round.roster_source == ContestRound.RosterSource.STAGE and not locked_round.roster_source_stage:
+    if (
+        locked_round.roster_source == ContestRound.RosterSource.STAGE
+        and not locked_round.roster_source_stage
+    ):
         raise ValidationError("按赛段晋级的轮次必须说明来源赛段。")
     if "rubric" in configuration:
         rubric = configuration["rubric"]
@@ -831,10 +832,7 @@ def configure_draft_round_from_planning(
         target=f"ContestRound:{locked_round.pk}",
         old_value=json.dumps(old_value, ensure_ascii=False, default=str),
         new_value=json.dumps(
-            {
-                field: getattr(locked_round, field)
-                for field in old_value
-            },
+            {field: getattr(locked_round, field) for field in old_value},
             ensure_ascii=False,
             default=str,
         ),

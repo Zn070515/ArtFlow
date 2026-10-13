@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Mapping
 
 from django.core.exceptions import ValidationError
 
@@ -345,7 +345,9 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
             raise ValidationError("比赛阶段必须是对象。")
         stage_key = f"stage{stage_index}"
         stage_name = _stage_text(
-            raw_stage.get("name"), label=f"第 {stage_index} 阶段名称", default=f"第{stage_index}阶段"
+            raw_stage.get("name"),
+            label=f"第 {stage_index} 阶段名称",
+            default=f"第{stage_index}阶段",
         )
         advance_count = _stage_count(
             raw_stage.get("advance_count"), label=f"阶段“{stage_name}”的晋级人数"
@@ -535,7 +537,10 @@ def prepare_planning_compile(
             )
     round_configurations = tuple(round_configurations_list)
     change_summary = tuple(
-        f"{stage['name']}按 {stage['judge_weight']} / {stage['audience_weight']} 合成，晋级 {stage['advance_count']} 人"
+        (
+            f"{stage['name']}按 {stage['judge_weight']} / "
+            f"{stage['audience_weight']} 合成，晋级 {stage['advance_count']} 人"
+        )
         for stage in business_stages
     )
     return PlanningCompileResult(
@@ -547,11 +552,10 @@ def prepare_planning_compile(
     )
 
 
-def _historical_stage_payload(
-    stage: Mapping[str, object], index: int
-) -> dict[str, object]:
+def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[str, object]:
     business_id = str(stage.get("key") or f"stage{index}")
     round_sources = _mapping_list(stage.get("judge_sources"))
+
     def percentage_value(value: object) -> str:
         try:
             return _decimal_text(Decimal(str(value)) * Decimal("100"))
@@ -651,9 +655,7 @@ def planning_projection_from_definition(definition: object) -> PlanningProjectio
     try:
         inferred = infer_business_stages(definition)
         if inferred.get("supported") and inferred.get("editable"):
-            stages = tuple(
-                deepcopy(stage) for stage in _mapping_list(inferred.get("stages"))
-            )
+            stages = tuple(deepcopy(stage) for stage in _mapping_list(inferred.get("stages")))
             payload_stages = tuple(
                 _historical_stage_payload(stage, index)
                 for index, stage in enumerate(stages, start=1)
@@ -714,4 +716,3 @@ def planning_projection_from_definition(definition: object) -> PlanningProjectio
             read_only=True,
             notice=f"当前规则定义无法读取，请使用专业工具：{exc}",
         )
-

@@ -1,15 +1,19 @@
 import json
 
-from django.test import TestCase
-from django.urls import reverse
-
 from accounts.models import User
 from core.models import Activity
+from django.test import TestCase
+from django.urls import reverse
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.planning import planning_field
 from ruleset.templates import golden_xiaofeng
-from staff_panel.tests import _acceptance_definition_json, _create_activity, _create_provisioned_user
 from singer_contest.models import ContestRound
+
+from staff_panel.tests import (
+    _acceptance_definition_json,
+    _create_activity,
+    _create_provisioned_user,
+)
 
 
 class RulesetPlanningViewTests(TestCase):

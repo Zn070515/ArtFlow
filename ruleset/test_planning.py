@@ -13,17 +13,17 @@ from common.models import AuditLog
 from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
-
 from singer_contest.models import ContestRound
+from singer_contest.services import configure_draft_round_from_planning
 
 from ruleset.models import ContestRuleset, RulesetPlanningDraft, RulesetVersion
 from ruleset.planning import (
-    default_planning_payload,
     PlanningResolution,
     PlanningSeverity,
+    default_planning_payload,
     parse_percentage,
-    prepare_planning_compile,
     planning_field,
+    prepare_planning_compile,
     validate_planning_draft,
 )
 from ruleset.services import (
@@ -34,7 +34,6 @@ from ruleset.services import (
     save_planning_draft,
 )
 from ruleset.templates import golden_schidui
-from singer_contest.services import configure_draft_round_from_planning
 
 
 class PercentageParsingTests(SimpleTestCase):
@@ -306,18 +305,12 @@ class PlanningProjectionTests(SimpleTestCase):
 def _planning_stage(**overrides):
     stage: dict[str, object] = {
         "business_id": "stage-1",
-        "name": planning_field(
-            "初赛", PlanningResolution.CONFIRMED, "比赛方案", "text"
-        ),
+        "name": planning_field("初赛", PlanningResolution.CONFIRMED, "比赛方案", "text"),
         "participants": {
             "source": "all_finalists",
-            "count": planning_field(
-                15, PlanningResolution.CONFIRMED, "报名汇总表", "person"
-            ),
+            "count": planning_field(15, PlanningResolution.CONFIRMED, "报名汇总表", "person"),
         },
-        "advance_count": planning_field(
-            10, PlanningResolution.CONFIRMED, "比赛方案", "person"
-        ),
+        "advance_count": planning_field(10, PlanningResolution.CONFIRMED, "比赛方案", "person"),
         "judge_sources": [
             {
                 "business_id": "round-1",
@@ -327,15 +320,11 @@ def _planning_stage(**overrides):
                 ),
             }
         ],
-        "audience_source": planning_field(
-            "", PlanningResolution.CONFIRMED, "无观众计分", "vote"
-        ),
+        "audience_source": planning_field("", PlanningResolution.CONFIRMED, "无观众计分", "vote"),
         "audience_weight": planning_field(
             "0", PlanningResolution.CONFIRMED, "无观众计分", "percent"
         ),
-        "result_method": planning_field(
-            "top_n", PlanningResolution.CONFIRMED, "比赛方案", "text"
-        ),
+        "result_method": planning_field("top_n", PlanningResolution.CONFIRMED, "比赛方案", "text"),
     }
     stage.update(overrides)
     return stage
@@ -571,8 +560,10 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
 
         self.assertEqual(saved.status, RulesetVersion.Status.DRAFT)
         self.assertEqual(
-            ContestRound.objects.filter(activity=self.activity, status=ContestRound.Status.DRAFT).count(),
+            ContestRound.objects.filter(
+                activity=self.activity,
+                status=ContestRound.Status.DRAFT,
+            ).count(),
             1,
         )
         self.assertIn("checkpoints", json.loads(saved.definition))
-

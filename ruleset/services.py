@@ -49,8 +49,8 @@ from .planning import (
     PlanningCompileResult,
     PlanningProjection,
     default_planning_payload,
-    prepare_planning_compile,
     planning_projection_from_definition,
+    prepare_planning_compile,
     validate_planning_draft,
 )
 from .schema import ENTRY_KEY, content_hash, parse_definition
@@ -424,9 +424,7 @@ def save_planning_draft(
     draft.source = "manual"
     draft.updated_by = current_operator
     with authority_write(PLANNING_DRAFT_WRITE):
-        draft.save(
-            update_fields=["payload", "revision", "source", "updated_by", "updated_at"]
-        )
+        draft.save(update_fields=["payload", "revision", "source", "updated_by", "updated_at"])
     AuditLog.objects.create(
         operator=current_operator,
         action_type=AuditLog.ActionType.UPDATE_RULESET_PLANNING,
@@ -490,9 +488,7 @@ def apply_planning_to_ruleset(
             except (TypeError, ValueError) as exc:
                 raise ValidationError(f"轮次“{round_key}”的绑定 id 无效。") from exc
             contest_round = (
-                ContestRound.objects.select_for_update()
-                .select_related("activity")
-                .get(pk=round_id)
+                ContestRound.objects.select_for_update().select_related("activity").get(pk=round_id)
             )
             if contest_round.activity_id != locked_ruleset.activity_id:
                 raise PermissionDenied("规划候选不能绑定其他活动的比赛轮次。")

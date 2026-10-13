@@ -105,10 +105,10 @@ from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definiti
 from ruleset.services import (
     RulesetInvalidError,
     _binding_signature,
+    apply_planning_to_ruleset,
     business_round_configuration_signature,
     create_ruleset_version,
     freeze_ruleset_version,
-    apply_planning_to_ruleset,
     load_planning_draft,
     prepare_planning_compile_for_version,
     save_business_ruleset,
@@ -4790,9 +4790,7 @@ def _planning_error_response(error, *, payload=None):
 @staff_required
 @require_http_methods(["GET", "POST"])
 def ruleset_planning(request, pk):
-    version = get_object_or_404(
-        RulesetVersion.objects.select_related("ruleset__activity"), pk=pk
-    )
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
     if request.method == "POST":
         raw_payload = None
         try:
@@ -4808,9 +4806,7 @@ def ruleset_planning(request, pk):
             if isinstance(exc, PermissionDenied):
                 response.status_code = 403
             return response
-        return JsonResponse(
-            {"ok": True, "revision": draft.revision, "payload": draft.payload}
-        )
+        return JsonResponse({"ok": True, "revision": draft.revision, "payload": draft.payload})
 
     draft = load_planning_draft(version)
     projection = planning_projection_from_definition(version.definition)
