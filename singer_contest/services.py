@@ -53,7 +53,7 @@ from ruleset.resolver import (
     stage_consumed_duel_keys,
     stage_consumed_scopes,
 )
-from ruleset.services import require_runtime_readiness
+from ruleset.services import current_frozen_version, require_runtime_readiness
 from voting.models import VoteSession
 
 from .models import (
@@ -816,6 +816,21 @@ def configure_draft_round_from_planning(
         if rubric is not None and getattr(rubric, "activity_id", None) != locked_activity.pk:
             raise ValidationError("评分标准必须属于当前活动。")
         locked_round.rubric = rubric
+
+    current_frozen = current_frozen_version(locked_activity)
+    frozen_round_ids = {
+        int(round_id)
+        for round_id in (
+            current_frozen.binding.get("round_keys", {})
+            if current_frozen is not None and isinstance(current_frozen.binding, dict)
+            else {}
+        ).values()
+        if str(round_id).isdigit() and int(round_id) > 0
+    }
+    if locked_round.pk in frozen_round_ids and any(
+        old_value[field] != getattr(locked_round, field) for field in old_value
+    ):
+        raise PermissionDenied("当前冻结赛制仍使用该轮次，不能修改其执行配置。")
 
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(

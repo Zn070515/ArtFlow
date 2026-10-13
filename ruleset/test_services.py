@@ -16,7 +16,7 @@ from core.models import Activity
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
-from singer_contest.models import ContestRound
+from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric
 from voting.models import VoteSession
 
 from ruleset.business_editor import infer_business_stages
@@ -236,6 +236,69 @@ class BusinessRulesetSaveTests(TestCase):
 
         self.version.refresh_from_db()
         self.assertEqual(self.version.definition, before)
+
+    def test_business_save_refuses_changes_to_a_round_used_by_current_frozen_ruleset(self):
+        rubric = ScoringRubric.objects.create(
+            activity=self.activity,
+            name="旧评分",
+        )
+        RubricCriterion.objects.create(rubric=rubric, name="演唱", max_score=100)
+        with authority_write(CONTEST_ROUND_STATE):
+            round_ = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第一轮",
+                judge_count=5,
+                minimum_judge_count=4,
+                rubric=rubric,
+                advance_count=10,
+                roster_source=ContestRound.RosterSource.APPROVED,
+            )
+        self.ruleset.round_keys = {"r1": round_.pk}
+        self.ruleset.save(update_fields=["round_keys"])
+        with authority_write(RULESET_FREEZE):
+            self.version.status = RulesetVersion.Status.FROZEN
+            self.version.is_current = True
+            self.version.binding = {"round_keys": {"r1": round_.pk}}
+            self.version.save(update_fields=["status", "is_current", "binding"])
+        successor = RulesetVersion.objects.create(
+            ruleset=self.ruleset,
+            version=2,
+            definition=self.version.definition,
+            created_by=self.operator,
+        )
+
+        changed_source = {
+            "round_key": "r1",
+            "round_name": "第一轮",
+            "weight": "1",
+            "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+            "source": "entry",
+            "source_stage_key": "entry",
+            "format": "solo",
+            "judge_count": 6,
+            "minimum_judge_count": 5,
+            "rubric": {"name": "新评分"},
+            "round_id": round_.pk,
+            "create_round": False,
+        }
+        before_definition = successor.definition
+
+        with self.assertRaises(PermissionDenied):
+            self._save(
+                successor,
+                stages=[_business_stage(advance_count=10, judge_sources=[changed_source])],
+                operator=self.operator,
+                base_content_hash=successor.content_hash,
+                base_binding=self._binding_signature(),
+            )
+
+        round_.refresh_from_db()
+        successor.refresh_from_db()
+        self.assertEqual(round_.judge_count, 5)
+        self.assertEqual(round_.minimum_judge_count, 4)
+        self.assertEqual(round_.rubric_id, rubric.pk)
+        self.assertEqual(successor.definition, before_definition)
 
     def test_stale_hashes_reject_the_whole_business_save(self):
         with self.assertRaises(ValidationError):
