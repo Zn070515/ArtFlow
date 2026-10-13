@@ -84,13 +84,13 @@ git commit -m "fix: isolate frozen round configuration"
 - Allowed per-stage differences remain `business_ids`, score weights, stage context, and other reference-only fields.
 - A conflict is represented by a blocking `PlanningIssue` with a stable code and the conflicting round key in `round_id`/`field_path`.
 
-- [ ] **Step 1: Write the failing shared-round consistency test.**
+- [x] **Step 1: Write the failing shared-round consistency test.**
 
 Build a payload with two stages referencing the same `round_key`, then change the second source's `judge_count` and rubric while leaving its score weight/stage context different as allowed. Assert that the compile result is not applyable and contains `INCONSISTENT_SHARED_ROUND_CONFIGURATION`; assert the message names the round and the differing field.
 
 Add a second assertion or test proving that two references with identical judge count, minimum judge count, scoring mode, rubric, and roster scope remain applyable even though their business IDs and weights differ.
 
-- [ ] **Step 2: Run the focused compiler tests and verify the new conflict test fails.**
+- [x] **Step 2: Run the focused compiler tests and verify the new conflict test fails.**
 
 ```powershell
 $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q ruleset/test_planning.py::PlanningCompileTests
@@ -98,17 +98,17 @@ $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q ruleset/test_planning.
 
 Expected: the conflicting payload currently compiles by retaining the first configuration.
 
-- [ ] **Step 3: Implement explicit shared-round field comparison.**
+- [x] **Step 3: Implement explicit shared-round field comparison.**
 
 Define the execution comparison fields as `format`, `judge_count`, `minimum_judge_count`, `scoring_mode`, `rubric`, `roster_source`, and `roster_source_stage`, plus the first configuration's round name/advancement only where they are truly one-round properties. When a repeated source differs, append a blocking issue and continue collecting issues; do not overwrite the first configuration and do not silently accept the conflict.
 
-- [ ] **Step 4: Run the compiler tests and verify both conflict and compatible reuse pass.**
+- [x] **Step 4: Run the compiler tests and verify both conflict and compatible reuse pass.**
 
 ```powershell
 $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q ruleset/test_planning.py::PlanningCompileTests
 ```
 
-- [ ] **Step 5: Commit the isolated compiler fix.**
+- [x] **Step 5: Commit the isolated compiler fix.**
 
 ```powershell
 git add ruleset/planning.py ruleset/test_planning.py

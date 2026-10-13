@@ -642,6 +642,114 @@ def _semantic_graph(definition):
 
 
 class PlanningCompileTests(SimpleTestCase):
+    def test_shared_round_rejects_conflicting_execution_facts(self):
+        first = _planning_stage(
+            judge_sources=[
+                {
+                    "business_id": "stage-1-round",
+                    "round_key": "shared-r3",
+                    "format": "solo",
+                    "source_stage_key": "entry",
+                    "scoring_mode": planning_field(
+                        "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": _planning_rubric("共享评分 A"),
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ]
+        )
+        second = _planning_stage(
+            business_id="stage-2",
+            name=planning_field("复赛", PlanningResolution.CONFIRMED, "比赛方案", "text"),
+            judge_sources=[
+                {
+                    "business_id": "stage-2-round",
+                    "round_key": "shared-r3",
+                    "format": "solo",
+                    "source_stage_key": "entry",
+                    "scoring_mode": planning_field(
+                        "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        6, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": _planning_rubric("共享评分 B"),
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ],
+        )
+
+        result = prepare_planning_compile(
+            {"schema_version": 1, "stages": [first, second], "execution_refs": {}},
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertFalse(result.can_apply)
+        conflict = [
+            issue
+            for issue in result.issues
+            if issue.code == "INCONSISTENT_SHARED_ROUND_CONFIGURATION"
+        ]
+        self.assertTrue(conflict)
+        self.assertEqual(conflict[0].round_id, "shared-r3")
+        self.assertIn("judge_count", conflict[0].field_path)
+
+    def test_shared_round_allows_reference_only_stage_differences(self):
+        first = _planning_stage(
+            judge_sources=[
+                {
+                    "business_id": "stage-1-round",
+                    "round_key": "shared-r3",
+                    "format": "solo",
+                    "source_stage_key": "entry",
+                    "scoring_mode": planning_field(
+                        "average", PlanningResolution.CONFIRMED, "比赛方案", "text"
+                    ),
+                    "judge_count": planning_field(
+                        5, PlanningResolution.CONFIRMED, "评委名单", "judge"
+                    ),
+                    "minimum_judge_count": planning_field(
+                        4, PlanningResolution.CONFIRMED, "比赛方案", "judge"
+                    ),
+                    "rubric": _planning_rubric("共享评分"),
+                    "weight": planning_field(
+                        "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+                    ),
+                }
+            ]
+        )
+        second = deepcopy(first)
+        second["business_id"] = "stage-2"
+        second["name"] = planning_field("复赛", PlanningResolution.CONFIRMED, "比赛方案", "text")
+        second["judge_sources"][0]["business_id"] = "stage-2-round"
+        second["judge_sources"][0]["weight"] = planning_field(
+            "100", PlanningResolution.CONFIRMED, "比赛方案", "percent"
+        )
+
+        result = prepare_planning_compile(
+            {"schema_version": 1, "stages": [first, second], "execution_refs": {}},
+            {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+        )
+
+        self.assertTrue(result.can_apply)
+        self.assertEqual(result.round_configurations[0]["business_ids"], [
+            "stage-1-round",
+            "stage-2-round",
+        ])
+
     def test_two_rounds_contribute_to_one_stage_result(self):
         result = prepare_planning_compile(
             _golden_planning_payload(),

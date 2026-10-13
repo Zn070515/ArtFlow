@@ -82,8 +82,7 @@ class PlanningCompileResult:
     @property
     def business_complete(self) -> bool:
         return self.candidate_definition is not None and not any(
-            issue.blocks_apply and issue.severity is not PlanningSeverity.EXECUTION_RISK
-            for issue in self.issues
+            issue.blocks_apply for issue in self.issues
         )
 
     @property
@@ -973,6 +972,47 @@ def prepare_planning_compile(
                     if field in source:
                         configuration[field] = deepcopy(source[field])
                 round_configurations_by_key[round_key] = configuration
+            else:
+                source_roster_stage = str(
+                    source.get("source_stage_key") or stage["key"]
+                )
+                source_execution_facts = {
+                    **source,
+                    "roster_source": (
+                        "approved" if source_roster_stage == "entry" else "stage"
+                    ),
+                    "roster_source_stage": (
+                        "" if source_roster_stage == "entry" else source_roster_stage
+                    ),
+                }
+                for field in (
+                    "format",
+                    "judge_count",
+                    "minimum_judge_count",
+                    "scoring_mode",
+                    "rubric",
+                    "roster_source",
+                    "roster_source_stage",
+                ):
+                    expected = configuration.get(field)
+                    actual = source_execution_facts.get(field)
+                    if field == "minimum_judge_count" and expected is None and actual is None:
+                        continue
+                    if expected == actual:
+                        continue
+                    issues.append(
+                        PlanningIssue(
+                            code="INCONSISTENT_SHARED_ROUND_CONFIGURATION",
+                            severity=PlanningSeverity.EXECUTION_RISK,
+                            round_id=round_key,
+                            field_path=f"rounds.{round_key}.{field}",
+                            message=(
+                                f"共享轮次“{round_key}”在不同阶段的{field}配置不一致，"
+                                "不能静默采用首次配置。"
+                            ),
+                            blocks_apply=True,
+                        )
+                    )
             business_ids = configuration["business_ids"]
             assert isinstance(business_ids, list)
             business_ids.append(str(source["business_id"]))
