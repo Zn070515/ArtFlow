@@ -267,7 +267,7 @@ def domain_error_messages(error) -> str:
     error_messages = getattr(error, "messages", None)
     if error_messages:
         return "；".join(str(message) for message in error_messages)
-    return str(error)
+    return "请求无法完成，请检查当前状态后重试。"
 
 
 _AUTO_RESOLVE_WARNING = "该赛段无法自动核定，请人工核定。"

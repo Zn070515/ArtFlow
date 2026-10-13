@@ -260,7 +260,10 @@ class PlanningProjectionTests(SimpleTestCase):
     def test_historical_projection_contains_a_complete_editable_stage_shape(self):
         projection = planning_projection_from_definition(golden_schidui())
 
-        stage = projection.payload["stages"][0]
+        raw_stages = projection.payload["stages"]
+        assert isinstance(raw_stages, list)
+        stage = raw_stages[0]
+        assert isinstance(stage, dict)
         self.assertEqual(stage["result_method"]["value"], "top_n")
         self.assertEqual(stage["judge_sources"][0]["weight"]["value"], "30")
         self.assertEqual(stage["audience_weight"]["value"], "10")
@@ -376,8 +379,12 @@ class PlanningCompileTests(SimpleTestCase):
         )
 
         self.assertTrue(result.can_apply)
+        raw_sources = result.business_stages[0]["judge_sources"]
+        assert isinstance(raw_sources, list)
+        sources = [source for source in raw_sources if isinstance(source, dict)]
+        self.assertEqual(len(sources), len(raw_sources))
         self.assertEqual(
-            [source["weight"] for source in result.business_stages[0]["judge_sources"]],
+            [source["weight"] for source in sources],
             ["0.3", "0.6"],
         )
         self.assertEqual(result.business_stages[0]["audience_weight"], "0.1")
@@ -435,9 +442,15 @@ class PlanningCompileTests(SimpleTestCase):
         )
 
         self.assertTrue(result.can_apply)
+        candidate_definition = result.candidate_definition
+        assert candidate_definition is not None
+        raw_nodes = candidate_definition["nodes"]
+        assert isinstance(raw_nodes, list)
+        nodes = [node for node in raw_nodes if isinstance(node, dict)]
+        self.assertEqual(len(nodes), len(raw_nodes))
         self.assertNotIn(
             "PARTITION",
-            {node["type"] for node in result.candidate_definition["nodes"]},
+            {node["type"] for node in nodes},
         )
 
     def test_non_linear_result_method_is_blocked_without_professional_graph(self):

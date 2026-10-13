@@ -772,6 +772,7 @@ def configure_draft_round_from_planning(
         locked_round.judge_count = judge_count
     if "minimum_judge_count" in configuration:
         minimum = configuration["minimum_judge_count"]
+        minimum_value: int | None = None
         if minimum is not None:
             try:
                 minimum_value = int(str(minimum))
@@ -779,7 +780,7 @@ def configure_draft_round_from_planning(
                 raise ValidationError("最低有效评委数必须是正整数。") from exc
             if minimum_value <= 0:
                 raise ValidationError("最低有效评委数必须是正整数。")
-        locked_round.minimum_judge_count = minimum
+        locked_round.minimum_judge_count = minimum_value
     if "name" in configuration:
         locked_round.name = str(configuration["name"] or "").strip()
     if "scoring_mode" in configuration:
@@ -808,7 +809,10 @@ def configure_draft_round_from_planning(
     ):
         raise ValidationError("按赛段晋级的轮次必须说明来源赛段。")
     if "rubric" in configuration:
-        rubric = configuration["rubric"]
+        raw_rubric = configuration["rubric"]
+        if raw_rubric is not None and not isinstance(raw_rubric, ScoringRubric):
+            raise ValidationError("评分标准无效。")
+        rubric: ScoringRubric | None = raw_rubric
         if rubric is not None and getattr(rubric, "activity_id", None) != locked_activity.pk:
             raise ValidationError("评分标准必须属于当前活动。")
         locked_round.rubric = rubric

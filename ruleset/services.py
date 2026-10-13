@@ -535,10 +535,10 @@ def apply_planning_to_ruleset(
             if not isinstance(source, dict):
                 continue
             business_id = str(source.get("business_id") or "")
-            configured = round_by_business_id.get(business_id)
-            if configured is None:
+            configured_round = round_by_business_id.get(business_id)
+            if configured_round is None:
                 raise ValidationError("规划候选缺少可执行的比赛轮次。")
-            source["round_id"] = configured.pk
+            source["round_id"] = configured_round.pk
             source["create_round"] = False
 
     base_round_configuration = business_round_configuration_signature(
