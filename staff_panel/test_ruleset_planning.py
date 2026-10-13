@@ -14,7 +14,7 @@ from staff_panel.tests import (
     _create_activity,
     _create_provisioned_user,
 )
-from staff_panel.views import domain_error_messages
+from staff_panel.views import safe_domain_error_messages
 
 
 class RulesetPlanningViewTests(TestCase):
@@ -34,7 +34,7 @@ class RulesetPlanningViewTests(TestCase):
 
     def test_domain_error_fallback_does_not_echo_untrusted_exception_text(self):
         self.assertEqual(
-            domain_error_messages(RuntimeError("internal stack detail")),
+            safe_domain_error_messages(RuntimeError("internal stack detail")),
             "请求无法完成，请检查当前状态后重试。",
         )
 

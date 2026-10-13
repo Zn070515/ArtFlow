@@ -267,6 +267,14 @@ def domain_error_messages(error) -> str:
     error_messages = getattr(error, "messages", None)
     if error_messages:
         return "；".join(str(message) for message in error_messages)
+    return str(error)
+
+
+def safe_domain_error_messages(error) -> str:
+    """Return domain messages without exposing arbitrary exception text to JSON clients."""
+    error_messages = getattr(error, "messages", None)
+    if error_messages:
+        return "；".join(str(message) for message in error_messages)
     return "请求无法完成，请检查当前状态后重试。"
 
 
@@ -4779,7 +4787,7 @@ def _planning_error_response(error, *, payload=None):
     return JsonResponse(
         {
             "ok": False,
-            "error": domain_error_messages(error),
+            "error": safe_domain_error_messages(error),
             "payload": payload,
         },
         status=400,
