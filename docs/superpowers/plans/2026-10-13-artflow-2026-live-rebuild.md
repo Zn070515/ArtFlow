@@ -8,6 +8,8 @@
 
 **Constraints:** 保留旧轮次兼容；所有跨模块事实只有一个 authority；命令具备版本校验和幂等；确认后的原始评分、配对、席位和结果不可由直接 ORM 写入绕过；不引入隐藏并列规则。
 
+**截至 2026-10-14 的交付状态：** Task 0、Task 1、Task 2 和 Task 3 已落地并通过对应定向门禁：评分完成策略/两位小数正式值、逐表演开分与迟交、官方选手编号 authority 与工作人员入口均已接入。Task 4–8 仍按下方顺序实施，不能把尚未存在的挑战、材料投影或工作台能力当作已完成。
+
 ## Task 0 — 基线、文档和配置审计
 
 **Files:** `docs/superpowers/specs/2026-10-13-live-competition-rebuild.md`、本计划、`pyrightconfig.json`、`pyproject.toml`、`tailwind.config.js`、`tsconfig*.json`、`.env*.example`、忽略文件和 dependabot 配置。
