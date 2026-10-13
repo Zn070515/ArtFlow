@@ -268,6 +268,43 @@ class PlanningProjectionTests(SimpleTestCase):
         self.assertEqual(stage["judge_sources"][0]["weight"]["value"], "30")
         self.assertEqual(stage["audience_weight"]["value"], "10")
 
+    def test_golden_projection_preserves_shared_round_identity(self):
+        projection = planning_projection_from_definition(golden_schidui())
+
+        payload_stages = projection.payload["stages"]
+        assert isinstance(payload_stages, list)
+        stage2 = payload_stages[1]
+        stage3 = payload_stages[2]
+        assert isinstance(stage2, dict)
+        assert isinstance(stage3, dict)
+        stage2_sources = stage2["judge_sources"]
+        stage3_sources = stage3["judge_sources"]
+        assert isinstance(stage2_sources, list)
+        assert isinstance(stage3_sources, list)
+        self.assertEqual(stage2_sources[0]["round_key"], "r3")
+        self.assertEqual(stage3_sources[0]["round_key"], "r3")
+        self.assertEqual(stage2_sources[0]["business_id"], "r3")
+        self.assertEqual(stage3_sources[0]["business_id"], "r3")
+
+        execution_refs = projection.payload["execution_refs"]
+        assert isinstance(execution_refs, dict)
+        round_refs = execution_refs["rounds"]
+        assert isinstance(round_refs, dict)
+        self.assertEqual(set(round_refs), {"r1", "r2", "r3", "r4"})
+
+    def test_golden_compile_deduplicates_shared_round_configuration(self):
+        projection = planning_projection_from_definition(golden_schidui())
+
+        result = prepare_planning_compile(projection.payload, golden_schidui())
+
+        self.assertTrue(result.can_apply)
+        self.assertEqual(
+            [configuration["round_key"] for configuration in result.round_configurations],
+            ["r1", "r2", "r3", "r4"],
+        )
+        shared = result.round_configurations[2]
+        self.assertEqual(shared["business_ids"], ["r3", "r3"])
+
     def test_historical_projection_can_prepare_without_losing_previous_score_weight(self):
         projection = planning_projection_from_definition(golden_schidui())
 
@@ -554,6 +591,44 @@ class PlanningApplyServiceTests(PlanningDraftAuthorityTests):
         self.assertTrue(result.can_apply)
         self.version.refresh_from_db()
         self.assertEqual(self.version.definition, before_definition)
+        self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 0)
+
+    def test_apply_rejects_execution_ref_owned_by_another_activity_before_creating_round(self):
+        with authority_write(ACTIVITY_STATE):
+            other_activity = Activity.objects.create(
+                title="其他活动",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                is_test_mode=True,
+            )
+        with authority_write(CONTEST_ROUND_STATE):
+            other_round = ContestRound.objects.create(
+                activity=other_activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                status=ContestRound.Status.DRAFT,
+            )
+        payload = self._complete_payload()
+        payload["execution_refs"] = {
+            "rounds": {
+                "round-1": {
+                    "round_key": "round-1",
+                    "round_id": other_round.pk,
+                }
+            }
+        }
+        draft = save_planning_draft(
+            self.version,
+            payload=payload,
+            operator=self.operator,
+            expected_revision=0,
+        )
+
+        with self.assertRaises(PermissionDenied):
+            apply_planning_to_ruleset(
+                self.version,
+                operator=self.operator,
+                expected_revision=draft.revision,
+            )
+
         self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 0)
 
     def test_apply_planning_materializes_only_a_draft_round_and_definition(self):

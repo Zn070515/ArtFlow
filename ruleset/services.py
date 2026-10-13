@@ -477,11 +477,53 @@ def apply_planning_to_ruleset(
     locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
     base_binding = _binding_signature(locked_ruleset)
     existing_round_keys = dict(locked_ruleset.round_keys or {})
-    round_by_business_id: dict[str, ContestRound] = {}
-    execution_refs: dict[str, dict[str, object]] = {}
+    raw_execution_refs = draft.payload.get("execution_refs")
+    if raw_execution_refs in (None, {}):
+        raw_execution_refs = {}
+    if not isinstance(raw_execution_refs, dict):
+        raise ValidationError("规划草稿的执行引用必须是对象。")
+    raw_round_refs = raw_execution_refs.get("rounds", {})
+    if not isinstance(raw_round_refs, dict):
+        raise ValidationError("规划草稿的轮次执行引用必须是对象。")
+    validated_round_ids: dict[str, int] = {}
     for configuration in result.round_configurations:
         round_key = str(configuration["round_key"])
-        raw_round_id = existing_round_keys.get(round_key)
+        raw_ref = raw_round_refs.get(round_key)
+        if raw_ref is None:
+            continue
+        if not isinstance(raw_ref, dict):
+            raise ValidationError(f"轮次“{round_key}”的执行引用必须是对象。")
+        if raw_ref.get("round_key", round_key) != round_key:
+            raise ValidationError(f"轮次“{round_key}”的执行引用标识不一致。")
+        raw_round_id = raw_ref.get("round_id")
+        if raw_round_id in (None, ""):
+            continue
+        try:
+            round_id = int(str(raw_round_id))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"轮次“{round_key}”的执行引用 id 无效。") from exc
+        if round_id <= 0:
+            raise ValidationError(f"轮次“{round_key}”的执行引用 id 无效。")
+        contest_round = (
+            ContestRound.objects.select_for_update().select_related("activity").filter(pk=round_id).first()
+        )
+        if contest_round is None:
+            raise ValidationError(f"轮次“{round_key}”的执行引用不存在。")
+        if contest_round.activity_id != locked_ruleset.activity_id:
+            raise PermissionDenied("规划候选不能绑定其他活动的比赛轮次。")
+        mapped_id = existing_round_keys.get(round_key)
+        if mapped_id not in (None, "") and str(mapped_id) != str(round_id):
+            raise ValidationError(f"轮次“{round_key}”的执行引用已过期，请刷新后重试。")
+        validated_round_ids[round_key] = round_id
+
+    round_by_key: dict[str, ContestRound] = {}
+    execution_refs = deepcopy(raw_execution_refs)
+    execution_round_refs = execution_refs.setdefault("rounds", {})
+    if not isinstance(execution_round_refs, dict):
+        raise ValidationError("规划草稿的轮次执行引用必须是对象。")
+    for configuration in result.round_configurations:
+        round_key = str(configuration["round_key"])
+        raw_round_id = validated_round_ids.get(round_key, existing_round_keys.get(round_key))
         if raw_round_id not in (None, ""):
             try:
                 round_id = int(str(raw_round_id))
@@ -519,11 +561,11 @@ def apply_planning_to_ruleset(
                 "roster_source_stage": str(configuration["roster_source_stage"]),
             },
         )
-        business_id = str(configuration["business_id"])
-        round_by_business_id[business_id] = configured
-        execution_refs[business_id] = {
+        round_by_key[round_key] = configured
+        execution_round_refs[round_key] = {
             "round_key": round_key,
             "round_id": configured.pk,
+            "business_ids": list(configuration.get("business_ids") or []),
         }
 
     stages = deepcopy(list(result.business_stages))
@@ -534,8 +576,8 @@ def apply_planning_to_ruleset(
         for source in raw_sources:
             if not isinstance(source, dict):
                 continue
-            business_id = str(source.get("business_id") or "")
-            configured_round = round_by_business_id.get(business_id)
+            round_key = str(source.get("round_key") or "")
+            configured_round = round_by_key.get(round_key)
             if configured_round is None:
                 raise ValidationError("规划候选缺少可执行的比赛轮次。")
             source["round_id"] = configured_round.pk

@@ -386,9 +386,17 @@ def planning_payload_to_business_stages(payload: Mapping[str, object]) -> list[d
                         raw_source.get("name"), label="演唱轮次名称", default=f"第{round_index}轮"
                     ),
                     "weight": _decimal_text(weight),
-                    "scoring_mode": "average",
-                    "source": previous_stage_key,
-                    "source_stage_key": previous_stage_key,
+                    "scoring_mode": str(raw_source.get("scoring_mode") or "average"),
+                    "source": _stage_text(
+                        raw_source.get("source"),
+                        label=f"阶段“{stage_name}”的第 {round_index} 个成绩来源",
+                        default=previous_stage_key,
+                    ),
+                    "source_stage_key": _stage_text(
+                        raw_source.get("source_stage_key"),
+                        label=f"阶段“{stage_name}”的第 {round_index} 个名单来源",
+                        default=previous_stage_key,
+                    ),
                     "business_id": round_id,
                     "create_round": True,
                 }
@@ -515,7 +523,7 @@ def prepare_planning_compile(
         "checkpoints": checkpoints,
         "context": context,
     }
-    round_configurations_list: list[dict[str, object]] = []
+    round_configurations_by_key: dict[str, dict[str, object]] = {}
     for stage_index, stage in enumerate(business_stages, start=1):
         raw_sources = stage.get("judge_sources")
         if not isinstance(raw_sources, list):
@@ -523,19 +531,29 @@ def prepare_planning_compile(
         for source in raw_sources:
             if not isinstance(source, Mapping):
                 continue
-            round_configurations_list.append(
-                {
+            round_key = str(source["round_key"])
+            configuration = round_configurations_by_key.get(round_key)
+            if configuration is None:
+                configuration = {
                     "business_id": str(source["business_id"]),
-                    "round_key": str(source["round_key"]),
+                    "business_ids": [],
+                    "round_key": round_key,
                     "name": str(source["round_name"]),
                     "scoring_mode": str(source["scoring_mode"]),
                     "advance_count": int(str(stage["advance_count"])),
-                    "roster_source": "approved" if stage_index == 1 else "stage",
-                    "roster_source_stage": "" if stage_index == 1 else str(stage["key"]),
+                    "roster_source": "approved"
+                    if str(source.get("source_stage_key")) == "entry"
+                    else "stage",
+                    "roster_source_stage": ""
+                    if str(source.get("source_stage_key")) == "entry"
+                    else str(source.get("source_stage_key") or stage["key"]),
                     "stage_index": stage_index,
                 }
-            )
-    round_configurations = tuple(round_configurations_list)
+                round_configurations_by_key[round_key] = configuration
+            business_ids = configuration["business_ids"]
+            assert isinstance(business_ids, list)
+            business_ids.append(str(source["business_id"]))
+    round_configurations = tuple(round_configurations_by_key.values())
     change_summary = tuple(
         (
             f"{stage['name']}按 {stage['judge_weight']} / "
@@ -581,8 +599,16 @@ def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[s
         ),
         "judge_sources": [
             {
-                "business_id": f"{business_id}-{round_index}",
-                "round_key": f"{business_id}-{round_index}",
+                "business_id": str(
+                    round_source.get("round_key")
+                    or round_source.get("business_id")
+                    or f"{business_id}-round-{round_index}"
+                ),
+                "round_key": str(
+                    round_source.get("round_key")
+                    or round_source.get("business_id")
+                    or f"{business_id}-round-{round_index}"
+                ),
                 "name": planning_field(
                     str(
                         round_source.get("round_name")
@@ -593,7 +619,12 @@ def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[s
                     "历史规则定义",
                     "text",
                 ),
-                "format": "solo",
+                "format": str(round_source.get("format") or "solo"),
+                "scoring_mode": str(round_source.get("scoring_mode") or "average"),
+                "source": str(round_source.get("source") or "entry"),
+                "source_stage_key": str(round_source.get("source_stage_key") or "entry"),
+                "source": str(round_source.get("source") or "entry"),
+                "source_stage_key": str(round_source.get("source_stage_key") or "entry"),
                 "weight": planning_field(
                     percentage_value(round_source.get("weight", "")),
                     PlanningResolution.CONFIRMED,
@@ -629,7 +660,11 @@ def _historical_stage_payload(stage: Mapping[str, object], index: int) -> dict[s
         ),
         "execution_rounds": [
             {
-                "business_id": f"{business_id}-round-{round_index}",
+                "business_id": str(
+                    round_source.get("round_key")
+                    or round_source.get("business_id")
+                    or f"{business_id}-round-{round_index}"
+                ),
                 "name": planning_field(
                     str(
                         round_source.get("round_name")
@@ -660,15 +695,25 @@ def planning_projection_from_definition(definition: object) -> PlanningProjectio
                 _historical_stage_payload(stage, index)
                 for index, stage in enumerate(stages, start=1)
             )
-            execution_refs = {
-                str(stage["business_id"]): {
+            round_refs: dict[str, dict[str, object]] = {}
+            stage_refs: dict[str, dict[str, object]] = {}
+            for stage, source in zip(payload_stages, stages, strict=True):
+                round_keys = [
+                    str(round_source.get("round_key") or "")
+                    for round_source in _mapping_list(source.get("judge_sources"))
+                ]
+                stage_refs[str(stage["business_id"])] = {
                     "stage_key": str(source.get("key") or ""),
-                    "round_keys": [
-                        str(round_source.get("round_key") or "")
-                        for round_source in _mapping_list(source.get("judge_sources"))
-                    ],
+                    "round_keys": round_keys,
                 }
-                for stage, source in zip(payload_stages, stages, strict=True)
+                for round_key in round_keys:
+                    if round_key:
+                        round_refs[round_key] = {
+                            "round_key": round_key,
+                        }
+            execution_refs = {
+                "rounds": round_refs,
+                "stages": stage_refs,
             }
             return PlanningProjection(
                 stages=stages,
