@@ -82,7 +82,8 @@ class PlanningCompileResult:
     @property
     def business_complete(self) -> bool:
         return self.candidate_definition is not None and not any(
-            issue.blocks_apply for issue in self.issues
+            issue.blocks_apply and issue.severity is not PlanningSeverity.EXECUTION_RISK
+            for issue in self.issues
         )
 
     @property
@@ -1003,7 +1004,7 @@ def prepare_planning_compile(
                     issues.append(
                         PlanningIssue(
                             code="INCONSISTENT_SHARED_ROUND_CONFIGURATION",
-                            severity=PlanningSeverity.EXECUTION_RISK,
+                            severity=PlanningSeverity.BUSINESS_CONFLICT,
                             round_id=round_key,
                             field_path=f"rounds.{round_key}.{field}",
                             message=(
