@@ -18,6 +18,7 @@
     </p>
 
     <div class="flex flex-wrap items-center gap-3 mb-6">
+        <a href="{% url 'staff:ruleset_planning' version.pk %}" class="touch-target border border-brand text-brand rounded text-sm">业务准备工作台</a>
         <form method="post" action="{% url 'staff:ruleset_validate' version.pk %}">
             {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">校验赛制</button>
         </form>

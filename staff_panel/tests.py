@@ -8056,6 +8056,12 @@ class RulesetEditorTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "确认并锁定赛制")
 
+    def test_professional_editor_links_back_to_planning_workbench(self):
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertContains(response, "业务准备工作台")
+        self.assertContains(response, reverse("staff:ruleset_planning", args=[self.version.pk]))
+
     def test_contest_ruleset_create_reuses_single_activity_authority(self):
         from ruleset.models import ContestRuleset
 
