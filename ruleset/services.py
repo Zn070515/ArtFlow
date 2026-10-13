@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from decimal import Decimal
 
 from accounts.services import require_current_admin, require_current_staff
-from common.authority import CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    CONTEST_ROUND_STATE,
+    PLANNING_DRAFT_WRITE,
+    RULESET_FREEZE,
+    authority_write,
+)
 from common.models import AuditLog
 from core.models import Activity
 from core.services import lock_activity_for_action
@@ -38,7 +44,13 @@ from questionnaire.schema import parse_questionnaire
 
 from .business_editor import business_definition_from_stages, infer_business_stages
 from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
-from .models import ContestRuleset, RulesetVersion
+from .models import ContestRuleset, RulesetPlanningDraft, RulesetVersion
+from .planning import (
+    PlanningProjection,
+    default_planning_payload,
+    planning_projection_from_definition,
+    validate_planning_draft,
+)
 from .schema import ENTRY_KEY, content_hash, parse_definition
 
 
@@ -347,6 +359,82 @@ def _lock_version_for_write(version: RulesetVersion) -> RulesetVersion:
         .select_related("ruleset__activity")
         .get(pk=version.pk)
     )
+
+
+def _planning_payload_from_projection(
+    projection: PlanningProjection,
+) -> tuple[dict[str, object], str]:
+    if projection.editable and projection.payload.get("stages"):
+        return deepcopy(projection.payload), "historical_projection"
+    return default_planning_payload(), "manual"
+
+
+def _lock_planning_draft_version(
+    version: RulesetVersion,
+) -> tuple[RulesetVersion, RulesetPlanningDraft]:
+    locked = _lock_version_for_write(version)
+    draft = (
+        RulesetPlanningDraft.objects.select_for_update()
+        .filter(ruleset_version_id=locked.pk)
+        .first()
+    )
+    if draft is not None:
+        return locked, draft
+    payload, source = _planning_payload_from_projection(
+        planning_projection_from_definition(locked.definition)
+    )
+    with authority_write(PLANNING_DRAFT_WRITE):
+        draft = RulesetPlanningDraft.objects.create(
+            ruleset_version=locked,
+            payload=payload,
+            source=source,
+        )
+    return locked, draft
+
+
+@transaction.atomic
+def load_planning_draft(version: RulesetVersion) -> RulesetPlanningDraft:
+    """Load or initialize the business draft under the standard aggregate lock order."""
+    locked, draft = _lock_planning_draft_version(version)
+    if locked.status != RulesetVersion.Status.DRAFT:
+        raise PermissionDenied("已冻结赛制版本不可编辑规划草稿。")
+    return draft
+
+
+@transaction.atomic
+def save_planning_draft(
+    version: RulesetVersion,
+    *,
+    payload: dict[str, object],
+    operator,
+    expected_revision: int,
+) -> RulesetPlanningDraft:
+    """Persist only business preparation data with compare-and-swap protection."""
+    current_operator = require_current_staff(operator)
+    locked, draft = _lock_planning_draft_version(version)
+    if locked.status != RulesetVersion.Status.DRAFT:
+        raise PermissionDenied("已冻结赛制版本不可编辑规划草稿。")
+    if draft.revision != expected_revision:
+        raise ValidationError("规划草稿已被其他编辑修改，请刷新后重试。")
+    validate_planning_draft(payload)
+    draft.payload = deepcopy(payload)
+    draft.revision += 1
+    draft.source = "manual"
+    draft.updated_by = current_operator
+    with authority_write(PLANNING_DRAFT_WRITE):
+        draft.save(
+            update_fields=["payload", "revision", "source", "updated_by", "updated_at"]
+        )
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.UPDATE_RULESET_PLANNING,
+        target=f"RulesetPlanningDraft:{draft.pk}",
+        new_value=json.dumps(
+            {"revision": draft.revision, "payload": draft.payload},
+            ensure_ascii=False,
+        ),
+    )
+    return draft
 
 
 @transaction.atomic

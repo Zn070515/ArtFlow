@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -54,6 +56,17 @@ class PlanningIssue:
             "confirm_with": self.confirm_with,
             "blocks_apply": self.blocks_apply,
         }
+
+
+@dataclass(frozen=True)
+class PlanningProjection:
+    stages: tuple[dict[str, object], ...]
+    payload: dict[str, object]
+    source: str
+    editable: bool
+    read_only: bool
+    notice: str = ""
+    summary: dict[str, object] | None = None
 
 
 PLANNING_UNITS = frozenset(
@@ -128,6 +141,16 @@ def _as_mapping(value: object, *, message: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise ValidationError(message)
     return value
+
+
+def _mapping_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, object]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            result.append({str(key): item_value for key, item_value in item.items()})
+    return result
 
 
 def _field_issue(
@@ -226,4 +249,134 @@ def validate_planning_draft(payload: object) -> tuple[PlanningIssue, ...]:
                 )
             )
     return tuple(issues)
+
+
+def _historical_stage_payload(
+    stage: Mapping[str, object], index: int
+) -> dict[str, object]:
+    business_id = f"stage-{index}"
+    round_sources = _mapping_list(stage.get("judge_sources"))
+    return {
+        "business_id": business_id,
+        "name": planning_field(
+            str(stage.get("name") or f"第 {index} 阶段"),
+            PlanningResolution.CONFIRMED,
+            "历史规则定义",
+            "text",
+        ),
+        "advance_count": planning_field(
+            stage.get("advance_count"),
+            PlanningResolution.CONFIRMED,
+            "历史规则定义",
+            "person",
+        ),
+        "judge_weight": planning_field(
+            stage.get("judge_weight", "0"),
+            PlanningResolution.CONFIRMED,
+            "历史规则定义",
+            "percent",
+        ),
+        "previous_weight": planning_field(
+            stage.get("previous_weight", "0"),
+            PlanningResolution.CONFIRMED,
+            "历史规则定义",
+            "percent",
+        ),
+        "audience_weight": planning_field(
+            stage.get("audience_weight", "0"),
+            PlanningResolution.CONFIRMED,
+            "历史规则定义",
+            "percent",
+        ),
+        "execution_rounds": [
+            {
+                "business_id": f"{business_id}-round-{round_index}",
+                "name": planning_field(
+                    str(
+                        round_source.get("round_name")
+                        or round_source.get("round_key")
+                        or "演唱轮次"
+                    ),
+                    PlanningResolution.CONFIRMED,
+                    "历史规则定义",
+                    "text",
+                ),
+            }
+            for round_index, round_source in enumerate(round_sources, start=1)
+        ],
+    }
+
+
+def planning_projection_from_definition(definition: object) -> PlanningProjection:
+    """Create an editable projection only for the lossless linear rules subset."""
+    from ruleset.business_editor import infer_business_stages
+    from ruleset.editor import human_ruleset_summary
+    from ruleset.schema import parse_definition
+
+    try:
+        inferred = infer_business_stages(definition)
+        if inferred.get("supported") and inferred.get("editable"):
+            stages = tuple(
+                deepcopy(stage) for stage in _mapping_list(inferred.get("stages"))
+            )
+            payload_stages = tuple(
+                _historical_stage_payload(stage, index)
+                for index, stage in enumerate(stages, start=1)
+            )
+            execution_refs = {
+                str(stage["business_id"]): {
+                    "stage_key": str(source.get("key") or ""),
+                    "round_keys": [
+                        str(round_source.get("round_key") or "")
+                        for round_source in _mapping_list(source.get("judge_sources"))
+                    ],
+                }
+                for stage, source in zip(payload_stages, stages, strict=True)
+            }
+            return PlanningProjection(
+                stages=stages,
+                payload={
+                    "schema_version": 1,
+                    "stages": list(payload_stages),
+                    "execution_refs": execution_refs,
+                },
+                source="historical_projection",
+                editable=True,
+                read_only=False,
+            )
+
+        if not isinstance(definition, (dict, str)):
+            raise TypeError("规则定义必须是 JSON 对象或 JSON 文字。")
+        parsed = parse_definition(definition)
+        summary = human_ruleset_summary(definition)
+        node_types = [
+            str(node.get("type") or "")
+            for node in parsed.get("nodes", [])
+            if isinstance(node, Mapping)
+        ]
+        notice = str(summary.get("notice") or "当前规则包含复杂结构，不能在普通工作台中无损修改。")
+        if "MANUAL_SELECT" in node_types:
+            notice += " 当前规则包含人工决定，需要负责人确认。"
+        return PlanningProjection(
+            stages=tuple(deepcopy(stage) for stage in _mapping_list(summary.get("stages"))),
+            payload={"schema_version": 1, "stages": [], "execution_refs": {}},
+            source="historical_read_only",
+            editable=False,
+            read_only=True,
+            notice=notice,
+            summary={
+                "human": summary,
+                "node_types": node_types,
+                "checkpoints": parsed.get("checkpoints", []),
+            },
+        )
+    except (TypeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+        return PlanningProjection(
+            stages=(),
+            payload={"schema_version": 1, "stages": [], "execution_refs": {}},
+            source="historical_read_only",
+            editable=False,
+            read_only=True,
+            notice=f"当前规则定义无法读取，请使用专业工具：{exc}",
+        )
 

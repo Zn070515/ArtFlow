@@ -474,6 +474,10 @@ class RulesetPlanningDraft(models.Model):
 
     objects = RulesetPlanningDraftManager()
 
+    if TYPE_CHECKING:
+        ruleset_version_id: int
+        updated_by_id: int | None
+
     def clean(self):
         super().clean()
         if self.ruleset_version_id:
