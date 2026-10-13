@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, cast
 
 from common.authority import (
+    PLANNING_DRAFT_WRITE,
     RULESET_FREEZE,
     AuthorityQuerySetMixin,
     authority_authorized,
@@ -423,3 +424,70 @@ class RulesetVersion(models.Model):
 
     def __str__(self):
         return f"{self.ruleset.name} — v{self.version}"
+
+
+class RulesetPlanningDraftQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    def _ensure_authorized(self) -> None:
+        if not authority_authorized(PLANNING_DRAFT_WRITE):
+            raise ValidationError("赛制准备草稿只能通过规划服务写入。")
+
+    def update(self, **kwargs):
+        self._ensure_authorized()
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_authorized()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+    def bulk_create(self, objs, *args, **kwargs):
+        self._ensure_authorized()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def delete(self):
+        self._ensure_authorized()
+        return super().delete()
+
+
+RulesetPlanningDraftManager = models.Manager.from_queryset(RulesetPlanningDraftQuerySet)
+
+
+class RulesetPlanningDraft(models.Model):
+    """Business-facing preparation data kept separate from executable rules."""
+
+    ruleset_version = models.OneToOneField(
+        RulesetVersion,
+        on_delete=models.CASCADE,
+        related_name="planning_draft",
+    )
+    payload = models.JSONField(default=dict)
+    revision = models.PositiveIntegerField(default=0)
+    source = models.CharField(max_length=24, default="manual")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_ruleset_planning_drafts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = RulesetPlanningDraftManager()
+
+    def clean(self):
+        super().clean()
+        if self.ruleset_version_id:
+            version = self.ruleset_version
+            if version.status != RulesetVersion.Status.DRAFT:
+                raise ValidationError("赛制版本冻结后不能作为当前准备草稿。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(PLANNING_DRAFT_WRITE):
+            raise ValidationError("赛制准备草稿只能通过规划服务写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(PLANNING_DRAFT_WRITE):
+            raise ValidationError("赛制准备草稿只能通过规划服务删除。")
+        return super().delete(*args, **kwargs)
