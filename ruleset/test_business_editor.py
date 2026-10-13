@@ -283,7 +283,21 @@ class BusinessDefinitionInferenceTests(SimpleTestCase):
         definition["context"] = {
             "business": {
                 "stages": [
-                    {"key": "stage1", "name": "保留的初赛名称"},
+                    {
+                        "key": "stage1",
+                        "name": "保留的初赛名称",
+                        "participants": {"count": 15, "source": "报名汇总"},
+                        "collaboration_group": "每组 3 人合作演唱",
+                        "judge_sources": [
+                            {
+                                "round_key": "r1",
+                                "format": "collaboration",
+                                "judge_count": 5,
+                                "minimum_judge_count": 4,
+                                "rubric": {"name": "演唱评分"},
+                            },
+                        ],
+                    },
                     {"key": "stage2", "name": "保留的复赛名称"},
                     {"key": "stage3", "name": "保留的决赛名称"},
                 ]
@@ -296,6 +310,13 @@ class BusinessDefinitionInferenceTests(SimpleTestCase):
             [stage["name"] for stage in result["stages"]],
             ["保留的初赛名称", "保留的复赛名称", "保留的决赛名称"],
         )
+        first_source = result["stages"][0]["judge_sources"][0]
+        self.assertEqual(first_source["format"], "collaboration")
+        self.assertEqual(first_source["judge_count"], 5)
+        self.assertEqual(first_source["minimum_judge_count"], 4)
+        self.assertEqual(first_source["rubric"], {"name": "演唱评分"})
+        self.assertEqual(result["stages"][0]["participants"]["count"], 15)
+        self.assertEqual(result["stages"][0]["collaboration_group"], "每组 3 人合作演唱")
 
     def test_inference_rejects_semantics_the_business_form_cannot_preserve(self):
         for field, value in (("min_judges", 3), ("scale", "hundred")):

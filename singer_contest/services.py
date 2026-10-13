@@ -846,10 +846,17 @@ def configure_draft_round_from_planning(
 
 
 @transaction.atomic
-def create_scoring_rubric(activity, *, name, description, criteria, operator) -> ScoringRubric:
-    """Provision a scoring rubric and all criteria as one audited operator command."""
+def create_scoring_rubric(
+    activity, *, name, description, criteria, operator, planning: bool = False
+) -> ScoringRubric:
+    """Provision a scoring rubric and all criteria as one audited operator command.
+
+    Planning creates the configuration before scoring is allowed, so that path holds the
+    activity lock without asserting the runtime ``SCORE`` action. The ordinary rubric page
+    keeps the score-action gate by default.
+    """
     current_operator = require_current_staff(operator)
-    locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
+    locked_activity = lock_activity_for_action(activity, None if planning else ActivityAction.SCORE)
     name = str(name or "").strip()
     if not name:
         raise ValidationError("评分标准名称不能为空。")

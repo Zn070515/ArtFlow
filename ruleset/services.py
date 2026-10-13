@@ -20,7 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from decimal import Decimal
+from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import (
@@ -47,7 +48,9 @@ from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, co
 from .models import ContestRuleset, RulesetPlanningDraft, RulesetVersion
 from .planning import (
     PlanningCompileResult,
+    PlanningIssue,
     PlanningProjection,
+    PlanningSeverity,
     default_planning_payload,
     planning_projection_from_definition,
     prepare_planning_compile,
@@ -403,6 +406,21 @@ def load_planning_draft(version: RulesetVersion) -> RulesetPlanningDraft:
     return draft
 
 
+def read_planning_draft(version: RulesetVersion) -> tuple[dict[str, object], int]:
+    """Read the planning surface without taking an editor lock or writing a draft.
+
+    Frozen versions remain viewable. If no draft row exists, the lossless historical
+    projection is still a valid read-only display payload and starts at revision zero.
+    """
+    draft = RulesetPlanningDraft.objects.filter(ruleset_version_id=version.pk).first()
+    if draft is not None:
+        return deepcopy(draft.payload), draft.revision
+    payload, _source = _planning_payload_from_projection(
+        planning_projection_from_definition(version.definition)
+    )
+    return payload, 0
+
+
 @transaction.atomic
 def save_planning_draft(
     version: RulesetVersion,
@@ -439,11 +457,271 @@ def save_planning_draft(
 
 @transaction.atomic
 def prepare_planning_compile_for_version(version: RulesetVersion) -> PlanningCompileResult:
-    """Prepare a candidate from the locked current draft without formal mutation."""
+    """Prepare a database-aware candidate from the current draft without mutation."""
     locked, draft = _lock_planning_draft_version(version)
     if locked.status != RulesetVersion.Status.DRAFT:
         raise PermissionDenied("已冻结赛制版本不可生成规划候选。")
-    return prepare_planning_compile(draft.payload, locked.definition)
+    return prepare_planning_preflight(locked, draft.payload)
+
+
+def _planning_rubric_scale(configuration: dict[str, object]) -> str | None:
+    rubric = configuration.get("rubric")
+    if not isinstance(rubric, dict):
+        return None
+    criteria = rubric.get("criteria")
+    if not isinstance(criteria, list):
+        return None
+    total = Decimal("0")
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            return None
+        try:
+            total += Decimal(str(criterion.get("max_score")))
+        except (TypeError, ValueError):
+            return None
+    return format(total.normalize(), "f") if total else None
+
+
+def _planning_preflight_issue(code: str, message: str) -> PlanningIssue:
+    return PlanningIssue(
+        code=code,
+        severity=PlanningSeverity.EXECUTION_RISK,
+        message=message,
+        blocks_apply=True,
+    )
+
+
+def prepare_planning_preflight(
+    version: RulesetVersion, payload: dict[str, object]
+) -> PlanningCompileResult:
+    """Run business, binding, and bound-compiler checks without creating state.
+
+    ``prepare_planning_compile`` remains a pure business conversion. This service adds the
+    activity-owned checks that a preview and the apply command must agree on: existing round
+    references are owned, editable, and current; audience sources are bound; and the candidate
+    can be compiled with the facts already present in the database plus the explicit facts from
+    the planning form. No rounds, rubrics, bindings, or draft rows are written here.
+    """
+    result = prepare_planning_compile(payload, version.definition)
+    if not result.business_complete:
+        return replace(result, binding_ready=False, freeze_ready=False)
+
+    from singer_contest.models import ContestRound, ScoringRubric
+
+    ruleset = ContestRuleset.objects.get(pk=version.ruleset_id)
+    current_binding = _snapshot_binding(ruleset)
+    current_round_keys = dict(current_binding.get("round_keys") or {})
+    raw_execution_refs = payload.get("execution_refs") or {}
+    if not isinstance(raw_execution_refs, dict):
+        return replace(
+            result,
+            issues=tuple(result.issues)
+            + (
+                _planning_preflight_issue(
+                    "INVALID_EXECUTION_REFS", "规划草稿的执行引用必须是对象。"
+                ),
+            ),
+            binding_ready=False,
+            freeze_ready=False,
+        )
+    raw_round_refs = raw_execution_refs.get("rounds") or {}
+    if not isinstance(raw_round_refs, dict):
+        return replace(
+            result,
+            issues=tuple(result.issues)
+            + (
+                _planning_preflight_issue(
+                    "INVALID_EXECUTION_REFS", "规划草稿的轮次执行引用必须是对象。"
+                ),
+            ),
+            binding_ready=False,
+            freeze_ready=False,
+        )
+
+    issues = list(result.issues)
+    candidate_binding = deepcopy(current_binding)
+    candidate_round_keys = dict(current_round_keys)
+    binding_ready = True
+    round_facts: dict[str, dict[str, object]] = {}
+    for configuration in result.round_configurations:
+        round_key = str(configuration["round_key"])
+        raw_ref = raw_round_refs.get(round_key)
+        if raw_ref is not None and not isinstance(raw_ref, dict):
+            issues.append(
+                _planning_preflight_issue(
+                    "INVALID_EXECUTION_REFS", f"轮次“{round_key}”的执行引用必须是对象。"
+                )
+            )
+            binding_ready = False
+            continue
+        if isinstance(raw_ref, dict) and raw_ref.get("round_key", round_key) != round_key:
+            issues.append(
+                _planning_preflight_issue(
+                    "INVALID_EXECUTION_REFS", f"轮次“{round_key}”的执行引用标识不一致。"
+                )
+            )
+            binding_ready = False
+            continue
+        ref_id = raw_ref.get("round_id") if isinstance(raw_ref, dict) else None
+        mapped_id = current_round_keys.get(round_key)
+        if (
+            ref_id not in (None, "")
+            and mapped_id not in (None, "")
+            and str(ref_id) != str(mapped_id)
+        ):
+            issues.append(
+                _planning_preflight_issue(
+                    "STALE_EXECUTION_REF", f"轮次“{round_key}”的执行引用已过期，请刷新后重试。"
+                )
+            )
+            binding_ready = False
+        target_id = ref_id or mapped_id
+        if target_id not in (None, ""):
+            try:
+                target_pk = int(str(target_id))
+            except (TypeError, ValueError):
+                target_pk = 0
+            contest_round = (
+                ContestRound.objects.filter(pk=target_pk).first() if target_pk > 0 else None
+            )
+            if contest_round is not None and contest_round.activity_id != ruleset.activity_id:
+                raise PermissionDenied("规划候选不能绑定其他活动的比赛轮次。")
+            if contest_round is None:
+                issues.append(
+                    _planning_preflight_issue(
+                        "ROUND_BINDING_INVALID", f"轮次“{round_key}”未绑定当前活动的比赛轮次。"
+                    )
+                )
+                binding_ready = False
+            else:
+                if contest_round.status != ContestRound.Status.DRAFT or contest_round.is_locked:
+                    issues.append(
+                        _planning_preflight_issue(
+                            "ROUND_NOT_EDITABLE",
+                            f"轮次“{round_key}”已准备或锁定，不能由规划工作台修改。",
+                        )
+                    )
+                    binding_ready = False
+                candidate_round_keys[round_key] = contest_round.pk
+        rubric_id = raw_ref.get("rubric_id") if isinstance(raw_ref, dict) else None
+        if rubric_id not in (None, ""):
+            try:
+                rubric_pk = int(str(rubric_id))
+            except (TypeError, ValueError):
+                rubric_pk = 0
+            rubric = ScoringRubric.objects.filter(pk=rubric_pk).first() if rubric_pk > 0 else None
+            if rubric is None:
+                issues.append(
+                    _planning_preflight_issue(
+                        "RUBRIC_BINDING_INVALID", f"轮次“{round_key}”的评分标准引用不存在。"
+                    )
+                )
+                binding_ready = False
+            elif rubric.activity_id != ruleset.activity_id:
+                raise PermissionDenied("规划候选不能绑定其他活动的评分标准。")
+        configuration_facts: dict[str, object] = {}
+        if "judge_count" in configuration:
+            configuration_facts["judge_count"] = int(str(configuration["judge_count"]))
+        scale = _planning_rubric_scale(configuration)
+        if scale is not None:
+            configuration_facts["scale"] = scale
+        round_facts[round_key] = configuration_facts
+
+    candidate_binding["round_keys"] = candidate_round_keys
+    for stage in result.business_stages:
+        try:
+            audience_weight = Decimal(str(stage.get("audience_weight") or "0"))
+        except (TypeError, ValueError):
+            audience_weight = Decimal("0")
+        vote_source = str(stage.get("vote_source") or "")
+        if audience_weight and vote_source not in {
+            *dict(current_binding.get("vote_keys") or {}),
+            *dict(current_binding.get("audience_keys") or {}),
+        }:
+            issues.append(
+                _planning_preflight_issue(
+                    "MISSING_VOTE_BINDING",
+                    f"观众成绩来源“{vote_source}”尚未绑定到当前活动。",
+                )
+            )
+            binding_ready = False
+
+    context = build_bound_context(version, candidate_binding)
+    context_rounds = context.setdefault("rounds", {})
+    if isinstance(context_rounds, dict):
+        for round_key, facts in round_facts.items():
+            existing_facts = context_rounds.get(round_key)
+            merged = dict(existing_facts) if isinstance(existing_facts, dict) else {}
+            merged.update(facts)
+            context_rounds[round_key] = merged
+    context_votes = context.get("votes") or {}
+    bound_vote_keys = dict(current_binding.get("vote_keys") or {})
+    bound_audience_keys = dict(current_binding.get("audience_keys") or {})
+    for stage in result.business_stages:
+        try:
+            audience_weight = Decimal(str(stage.get("audience_weight") or "0"))
+        except (TypeError, ValueError):
+            audience_weight = Decimal("0")
+        if not audience_weight:
+            continue
+        vote_source = str(stage.get("vote_source") or "")
+        declared_conversion = str(stage.get("audience_conversion") or "")
+        if vote_source in bound_vote_keys:
+            vote_facts = context_votes.get(vote_source) if isinstance(context_votes, dict) else None
+            expected_conversion = (
+                vote_facts.get("conversion") if isinstance(vote_facts, dict) else None
+            )
+            if not expected_conversion:
+                issues.append(
+                    _planning_preflight_issue(
+                        "MISSING_VOTE_CONVERSION",
+                        f"投票来源“{vote_source}”尚未绑定成绩换算规则。",
+                    )
+                )
+                binding_ready = False
+            elif declared_conversion != expected_conversion:
+                issues.append(
+                    _planning_preflight_issue(
+                        "VOTE_CONVERSION_MISMATCH",
+                        f"投票来源“{vote_source}”的换算方式与活动绑定不一致。",
+                    )
+                )
+                binding_ready = False
+        elif vote_source in bound_audience_keys and declared_conversion != "audience_score_hundred":
+            issues.append(
+                _planning_preflight_issue(
+                    "VOTE_CONVERSION_MISMATCH",
+                    f"观众分来源“{vote_source}”必须声明百分制观众分换算。",
+                )
+            )
+            binding_ready = False
+    formal_ready = False
+    if binding_ready and result.candidate_definition is not None:
+        report, _plan = compile_definition(
+            result.candidate_definition,
+            context=context,
+            bound=True,
+        )
+        formal_ready = report.passes()
+        if not formal_ready:
+            first_error = next(
+                (issue.message for issue in report.issues if issue.severity is Severity.ERROR),
+                "正式冻结检查未通过。",
+            )
+            issues.append(
+                PlanningIssue(
+                    code="FORMAL_FREEZE_NOT_READY",
+                    severity=PlanningSeverity.EXECUTION_RISK,
+                    message=first_error,
+                    blocks_apply=False,
+                )
+            )
+    return replace(
+        result,
+        issues=tuple(issues),
+        binding_ready=binding_ready,
+        freeze_ready=formal_ready,
+    )
 
 
 def _raise_planning_compile_blocked(result: PlanningCompileResult) -> None:
@@ -451,6 +729,36 @@ def _raise_planning_compile_blocked(result: PlanningCompileResult) -> None:
     if messages:
         raise ValidationError(messages)
     raise ValidationError("规划候选无法应用。")
+
+
+def _planning_rubric_matches(rubric, raw_rubric: dict[str, object]) -> bool:
+    try:
+        raw_criteria = raw_rubric.get("criteria")
+        criteria = raw_criteria if isinstance(raw_criteria, list) else []
+        expected_criteria = [
+            {
+                "name": str(item.get("name") or "").strip(),
+                "max_score": Decimal(str(item.get("max_score"))),
+                "description": str(item.get("description") or "").strip(),
+            }
+            for item in criteria
+            if isinstance(item, dict)
+        ]
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    actual_criteria = [
+        {
+            "name": criterion.name,
+            "max_score": criterion.max_score,
+            "description": criterion.description,
+        }
+        for criterion in rubric.criteria.all().order_by("sequence", "pk")
+    ]
+    return (
+        rubric.name == str(raw_rubric.get("name") or "").strip()
+        and rubric.description == str(raw_rubric.get("description") or "").strip()
+        and actual_criteria == expected_criteria
+    )
 
 
 @transaction.atomic
@@ -467,21 +775,69 @@ def apply_planning_to_ruleset(
         raise PermissionDenied("已冻结赛制版本不可应用规划候选。")
     if draft.revision != expected_revision:
         raise ValidationError("规划草稿已被其他编辑修改，请刷新后重试。")
-    result = prepare_planning_compile(draft.payload, locked.definition)
-    if not result.can_apply:
+    result = prepare_planning_preflight(locked, draft.payload)
+    if not result.safe_to_apply:
         _raise_planning_compile_blocked(result)
 
-    from singer_contest.models import ContestRound
-    from singer_contest.services import configure_draft_round_from_planning
+    from singer_contest.models import ContestRound, ScoringRubric
+    from singer_contest.services import (
+        configure_draft_round_from_planning,
+        create_scoring_rubric,
+    )
 
     locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
     base_binding = _binding_signature(locked_ruleset)
     existing_round_keys = dict(locked_ruleset.round_keys or {})
-    round_by_business_id: dict[str, ContestRound] = {}
-    execution_refs: dict[str, dict[str, object]] = {}
+    raw_execution_refs = draft.payload.get("execution_refs")
+    if raw_execution_refs in (None, {}):
+        raw_execution_refs = {}
+    if not isinstance(raw_execution_refs, dict):
+        raise ValidationError("规划草稿的执行引用必须是对象。")
+    raw_round_refs = raw_execution_refs.get("rounds", {})
+    if not isinstance(raw_round_refs, dict):
+        raise ValidationError("规划草稿的轮次执行引用必须是对象。")
+    validated_round_ids: dict[str, int] = {}
     for configuration in result.round_configurations:
         round_key = str(configuration["round_key"])
-        raw_round_id = existing_round_keys.get(round_key)
+        raw_ref = raw_round_refs.get(round_key)
+        if raw_ref is None:
+            continue
+        if not isinstance(raw_ref, dict):
+            raise ValidationError(f"轮次“{round_key}”的执行引用必须是对象。")
+        if raw_ref.get("round_key", round_key) != round_key:
+            raise ValidationError(f"轮次“{round_key}”的执行引用标识不一致。")
+        raw_round_id = raw_ref.get("round_id")
+        if raw_round_id in (None, ""):
+            continue
+        try:
+            round_id = int(str(raw_round_id))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"轮次“{round_key}”的执行引用 id 无效。") from exc
+        if round_id <= 0:
+            raise ValidationError(f"轮次“{round_key}”的执行引用 id 无效。")
+        contest_round = (
+            ContestRound.objects.select_for_update()
+            .select_related("activity")
+            .filter(pk=round_id)
+            .first()
+        )
+        if contest_round is None:
+            raise ValidationError(f"轮次“{round_key}”的执行引用不存在。")
+        if contest_round.activity_id != locked_ruleset.activity_id:
+            raise PermissionDenied("规划候选不能绑定其他活动的比赛轮次。")
+        mapped_id = existing_round_keys.get(round_key)
+        if mapped_id not in (None, "") and str(mapped_id) != str(round_id):
+            raise ValidationError(f"轮次“{round_key}”的执行引用已过期，请刷新后重试。")
+        validated_round_ids[round_key] = round_id
+
+    round_by_key: dict[str, ContestRound] = {}
+    execution_refs = deepcopy(raw_execution_refs)
+    execution_round_refs = execution_refs.setdefault("rounds", {})
+    if not isinstance(execution_round_refs, dict):
+        raise ValidationError("规划草稿的轮次执行引用必须是对象。")
+    for configuration in result.round_configurations:
+        round_key = str(configuration["round_key"])
+        raw_round_id = validated_round_ids.get(round_key, existing_round_keys.get(round_key))
         if raw_round_id not in (None, ""):
             try:
                 round_id = int(str(raw_round_id))
@@ -508,22 +864,69 @@ def apply_planning_to_ruleset(
                     roster_source=str(configuration["roster_source"]),
                     roster_source_stage=str(configuration["roster_source_stage"]),
                 )
+        configuration_kwargs: dict[str, object] = {
+            "name": str(configuration["name"]),
+            "scoring_mode": str(configuration["scoring_mode"]),
+            "advance_count": int(str(configuration["advance_count"])),
+            "roster_source": str(configuration["roster_source"]),
+            "roster_source_stage": str(configuration["roster_source_stage"]),
+        }
+        for field in ("judge_count", "minimum_judge_count"):
+            if field in configuration:
+                configuration_kwargs[field] = configuration[field]
+        if "rubric" in configuration:
+            raw_rubric = configuration["rubric"]
+            if raw_rubric is None or not isinstance(raw_rubric, dict):
+                raise ValidationError("规划候选的评分标准无效。")
+            raw_ref = raw_round_refs.get(round_key)
+            raw_rubric_id = raw_ref.get("rubric_id") if isinstance(raw_ref, dict) else None
+            if raw_rubric_id not in (None, ""):
+                try:
+                    rubric_id = int(str(raw_rubric_id))
+                except (TypeError, ValueError) as exc:
+                    raise ValidationError(f"轮次“{round_key}”的评分标准引用无效。") from exc
+                rubric = ScoringRubric.objects.select_for_update().filter(pk=rubric_id).first()
+                if rubric is None:
+                    raise ValidationError(f"轮次“{round_key}”的评分标准引用不存在。")
+                if rubric.activity_id != locked_ruleset.activity_id:
+                    raise PermissionDenied("规划候选不能绑定其他活动的评分标准。")
+                if not _planning_rubric_matches(rubric, raw_rubric):
+                    rubric = None
+            else:
+                rubric = None
+            if rubric is None and contest_round.rubric_id:
+                existing_rubric = (
+                    ScoringRubric.objects.select_for_update()
+                    .filter(pk=contest_round.rubric_id, activity_id=locked_ruleset.activity_id)
+                    .first()
+                )
+                if existing_rubric is not None and _planning_rubric_matches(
+                    existing_rubric, raw_rubric
+                ):
+                    rubric = existing_rubric
+            if rubric is None:
+                rubric = create_scoring_rubric(
+                    locked_ruleset.activity,
+                    name=raw_rubric.get("name"),
+                    description=raw_rubric.get("description", ""),
+                    criteria=raw_rubric.get("criteria"),
+                    operator=current_operator,
+                    planning=True,
+                )
+            configuration_kwargs["rubric"] = rubric
         configured = configure_draft_round_from_planning(
             contest_round,
             operator=current_operator,
-            configuration={
-                "name": str(configuration["name"]),
-                "scoring_mode": str(configuration["scoring_mode"]),
-                "advance_count": int(str(configuration["advance_count"])),
-                "roster_source": str(configuration["roster_source"]),
-                "roster_source_stage": str(configuration["roster_source_stage"]),
-            },
+            configuration=configuration_kwargs,
         )
-        business_id = str(configuration["business_id"])
-        round_by_business_id[business_id] = configured
-        execution_refs[business_id] = {
+        round_by_key[round_key] = configured
+        raw_business_ids = configuration.get("business_ids")
+        business_ids = raw_business_ids if isinstance(raw_business_ids, list) else []
+        execution_round_refs[round_key] = {
             "round_key": round_key,
             "round_id": configured.pk,
+            "business_ids": list(business_ids),
+            "rubric_id": configured.rubric_id,
         }
 
     stages = deepcopy(list(result.business_stages))
@@ -534,8 +937,8 @@ def apply_planning_to_ruleset(
         for source in raw_sources:
             if not isinstance(source, dict):
                 continue
-            business_id = str(source.get("business_id") or "")
-            configured_round = round_by_business_id.get(business_id)
+            round_key = str(source.get("round_key") or "")
+            configured_round = round_by_key.get(round_key)
             if configured_round is None:
                 raise ValidationError("规划候选缺少可执行的比赛轮次。")
             source["round_id"] = configured_round.pk

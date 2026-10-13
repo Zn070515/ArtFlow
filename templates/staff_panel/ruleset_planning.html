@@ -6,6 +6,7 @@
 {% block content %}
 <div id="ruleset-planning-app" class="max-w-5xl mx-auto px-4 py-10"
      data-revision="{{ planning_revision }}"
+     data-read-only="{{ planning_read_only|yesno:'true,false' }}"
      data-save-url="{% url 'staff:ruleset_planning' version.pk %}"
      data-preview-url="{% url 'staff:ruleset_planning_preview' version.pk %}"
      data-apply-url="{% url 'staff:ruleset_planning_apply' version.pk %}">
@@ -21,12 +22,42 @@
 
     {% if planning_read_only %}
     <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-6 text-sm text-amber-900">
-        当前赛制包含普通工作台无法无损表达的内容，下面只展示历史摘要。需要修改时请联系管理员使用专业工具。
+        当前页面为只读状态，下面只展示历史摘要和当前规则的业务摘要。需要修改时请联系管理员使用专业工具。
     </div>
     {% elif planning_projection.notice %}
     <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-6 text-sm text-amber-900">
         {{ planning_projection.notice }}
     </div>
+    {% endif %}
+
+    {% if planning_read_only and planning_projection.summary %}
+    <section class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6" aria-labelledby="planning-history-summary-title">
+        <div class="bg-purple-50 border-b border-purple-200 px-4 py-3">
+            <h2 id="planning-history-summary-title" class="text-base font-semibold text-purple-900">当前规则摘要</h2>
+            <p class="text-xs text-purple-800 mt-1">这里展示规则实际声明的阶段、成绩来源和晋级结果，不提供修改入口。</p>
+        </div>
+        <div class="p-4 space-y-3">
+            {% if planning_projection.summary.human.flow_label %}
+            <p class="text-sm font-medium text-gray-800">流程：{{ planning_projection.summary.human.flow_label }}</p>
+            {% endif %}
+            {% for stage in planning_projection.summary.human.stages %}
+            <article class="rounded border border-gray-200 p-3">
+                <h3 class="font-medium text-gray-900">{{ stage.title }}</h3>
+                <p class="text-sm text-gray-600 mt-1">{{ stage.input_label }} → {{ stage.output_label }}</p>
+                <ul class="mt-2 space-y-1 text-sm text-gray-700">
+                    {% for component in stage.components %}
+                    <li>{{ component.label }}：{{ component.weight_label }}</li>
+                    {% empty %}
+                    <li>本阶段没有可展示的成绩来源。</li>
+                    {% endfor %}
+                </ul>
+                <p class="text-sm text-gray-600 mt-2">{{ stage.result_label }}</p>
+            </article>
+            {% empty %}
+            <p class="text-sm text-gray-600">当前规则暂无可展示的阶段摘要。</p>
+            {% endfor %}
+        </div>
+    </section>
     {% endif %}
 
     <div id="planning-feedback" class="hidden mb-5 rounded-lg border px-4 py-3 text-sm" role="status"></div>
@@ -74,6 +105,7 @@
             <p class="text-xs text-gray-600 mt-1">确认成绩来源、百分比和每阶段晋级人数后，系统才会生成可执行候选。</p>
         </div>
         <div class="p-4 space-y-3">
+            <div id="planning-live-summary" class="rounded border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900"></div>
             {% if planning_result %}
                 {% if planning_result.change_summary %}
                 <div class="rounded border border-blue-200 bg-blue-50 px-3 py-2">

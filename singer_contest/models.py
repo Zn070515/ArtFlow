@@ -2910,6 +2910,7 @@ class ScoringRubric(models.Model):
     objects = ScoringRubricManager()
 
     if TYPE_CHECKING:
+        activity_id: int
         rounds: models.Manager["ContestRound"]
         criteria: models.Manager["RubricCriterion"]
 

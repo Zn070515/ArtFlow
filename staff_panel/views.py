@@ -99,7 +99,6 @@ from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.planning import (
     PlanningCompileResult,
     planning_projection_from_definition,
-    prepare_planning_compile,
 )
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
 from ruleset.services import (
@@ -109,8 +108,9 @@ from ruleset.services import (
     business_round_configuration_signature,
     create_ruleset_version,
     freeze_ruleset_version,
-    load_planning_draft,
     prepare_planning_compile_for_version,
+    prepare_planning_preflight,
+    read_planning_draft,
     save_business_ruleset,
     save_planning_draft,
     supersede_ruleset_version,
@@ -4754,7 +4754,10 @@ def _node_type_options(nodes):
 
 def _planning_result_json(result: PlanningCompileResult) -> dict[str, object]:
     return {
-        "can_apply": result.can_apply,
+        "can_apply": result.safe_to_apply,
+        "business_complete": result.business_complete,
+        "binding_ready": result.binding_ready,
+        "freeze_ready": result.freeze_ready,
         "issues": [issue.to_dict() for issue in result.issues],
         "business_stages": list(result.business_stages),
         "change_summary": list(result.change_summary),
@@ -4816,14 +4819,13 @@ def ruleset_planning(request, pk):
             return response
         return JsonResponse({"ok": True, "revision": draft.revision, "payload": draft.payload})
 
-    draft = load_planning_draft(version)
+    display_payload, planning_revision = read_planning_draft(version)
     projection = planning_projection_from_definition(version.definition)
-    display_payload = draft.payload
     if not display_payload.get("stages") and projection.editable:
         display_payload = projection.payload
     compile_result = None
     if display_payload.get("stages"):
-        compile_result = prepare_planning_compile(display_payload, version.definition)
+        compile_result = prepare_planning_preflight(version, display_payload)
     return render(
         request,
         "staff_panel/ruleset_planning.html",
@@ -4832,12 +4834,19 @@ def ruleset_planning(request, pk):
             "ruleset": version.ruleset,
             "version": version,
             "planning_payload": display_payload,
-            "planning_revision": draft.revision,
+            "planning_revision": planning_revision,
             "planning_projection": projection,
             "planning_result": compile_result,
             "planning_result_json": _planning_result_json(compile_result)
             if compile_result is not None
-            else {"can_apply": False, "issues": [], "change_summary": []},
+            else {
+                "can_apply": False,
+                "business_complete": False,
+                "binding_ready": False,
+                "freeze_ready": False,
+                "issues": [],
+                "change_summary": [],
+            },
             "planning_read_only": projection.read_only
             or version.status != RulesetVersion.Status.DRAFT,
         },
@@ -4851,7 +4860,7 @@ def ruleset_planning_preview(request, pk):
     try:
         if request.method == "POST":
             payload, _revision = _planning_request_payload(request)
-            result = prepare_planning_compile(payload, version.definition)
+            result = prepare_planning_preflight(version, payload)
         else:
             result = prepare_planning_compile_for_version(version)
     except (PermissionDenied, ValidationError) as exc:
