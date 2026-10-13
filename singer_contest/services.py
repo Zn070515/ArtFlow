@@ -499,6 +499,11 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     singers = _round_source_singers(locked_round)
 
     if locked_round.judge_count is not None:
+        if (
+            locked_round.minimum_judge_count is not None
+            and locked_round.minimum_judge_count > locked_round.judge_count
+        ):
+            raise ValidationError("最低有效评委数不能超过评委数量。")
         judges = list(
             Judge.objects.filter(
                 round_assignments__round=locked_round,
@@ -516,8 +521,9 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
             ]
         elif len(judges) != locked_round.judge_count:
             raise ValidationError("匿名评委通道数与本轮已配置评委不一致。")
-        locked_round.minimum_judge_count = locked_round.judge_count
-        locked_round.save(update_fields=["minimum_judge_count"])
+        if locked_round.minimum_judge_count is None:
+            locked_round.minimum_judge_count = locked_round.judge_count
+            locked_round.save(update_fields=["minimum_judge_count"])
     else:
         judges = list(
             Judge.objects.filter(activity=locked_round.activity, is_active=True).order_by("pk")

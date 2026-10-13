@@ -126,11 +126,11 @@ git commit -m "fix: reject inconsistent shared round facts"
 - A round with `judge_count=N` and no explicit minimum keeps the current fail-safe behavior by setting the minimum to `N`.
 - Invalid explicit minimum values are rejected before the round is prepared.
 
-- [ ] **Step 1: Write the failing preparation regression tests.**
+- [x] **Step 1: Write the failing preparation regression tests.**
 
 Add a test with five anonymous judge channels and `minimum_judge_count=4`; after `prepare_round()` assert the persisted value is 4. Add a test with five channels and `minimum_judge_count=None`; assert the persisted value becomes 5. Add an invalid-configuration test for a minimum greater than the configured judge count and assert preparation raises `ValidationError` without moving the round out of DRAFT.
 
-- [ ] **Step 2: Run the focused tests and verify the explicit-minimum test fails.**
+- [x] **Step 2: Run the focused tests and verify the explicit-minimum test fails.**
 
 ```powershell
 $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q singer_contest/tests.py -k "minimum_judge_count or prepare_round"
@@ -138,17 +138,17 @@ $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q singer_contest/tests.p
 
 Expected: the explicit minimum currently becomes the total judge count.
 
-- [ ] **Step 3: Implement the minimal fail-safe behavior.**
+- [x] **Step 3: Implement the minimal fail-safe behavior.**
 
 In the anonymous-judge branch, validate an explicit minimum against the actual judge count, assign `judge_count` only when `minimum_judge_count is None`, and save the preserved value through the existing authority path. Keep the existing drop-high-low minimum-three-judge validation and all roster/snapshot logic unchanged.
 
-- [ ] **Step 4: Run focused singer-contest tests.**
+- [x] **Step 4: Run focused singer-contest tests.**
 
 ```powershell
 $env:APP_ENV='test'; $env:DEBUG='False'; uv run pytest -q singer_contest/tests.py -k "minimum_judge_count or prepare_round"
 ```
 
-- [ ] **Step 5: Commit the isolated preparation fix.**
+- [x] **Step 5: Commit the isolated preparation fix.**
 
 ```powershell
 git add singer_contest/services.py singer_contest/tests.py
