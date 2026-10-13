@@ -719,6 +719,131 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
 
 
 @transaction.atomic
+def configure_draft_round_from_planning(
+    contest_round: ContestRound,
+    *,
+    operator,
+    configuration: Mapping[str, object],
+) -> ContestRound:
+    """Apply business preparation fields to one unlocked DRAFT round only."""
+    current_operator = require_current_staff(operator)
+    locked_activity = lock_activity_for_action(contest_round.activity)
+    locked_round = (
+        ContestRound.objects.select_for_update()
+        .select_related("activity")
+        .get(pk=contest_round.pk)
+    )
+    if locked_round.activity_id != locked_activity.pk:
+        raise PermissionDenied("轮次不属于当前活动。")
+    if locked_round.status != ContestRound.Status.DRAFT or locked_round.is_locked:
+        raise PermissionDenied("只有未锁定的草稿轮次可以从比赛规则准备中修改。")
+    old_value = {
+        field: getattr(locked_round, field)
+        for field in (
+            "name",
+            "judge_count",
+            "minimum_judge_count",
+            "scoring_mode",
+            "advance_count",
+            "roster_source",
+            "roster_source_stage",
+            "rubric_id",
+        )
+    }
+
+    allowed_fields = {
+        "name",
+        "judge_count",
+        "minimum_judge_count",
+        "scoring_mode",
+        "advance_count",
+        "roster_source",
+        "roster_source_stage",
+        "rubric",
+    }
+    unknown_fields = set(configuration) - allowed_fields
+    if unknown_fields:
+        raise ValidationError("规划草稿包含不能应用到比赛轮次的字段。")
+    if "judge_count" in configuration and configuration["judge_count"] is not None:
+        try:
+            judge_count = int(str(configuration["judge_count"]))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("评委数量必须是正整数。") from exc
+        if judge_count <= 0:
+            raise ValidationError("评委数量必须是正整数。")
+        locked_round.judge_count = judge_count
+    if "minimum_judge_count" in configuration:
+        minimum = configuration["minimum_judge_count"]
+        if minimum is not None:
+            try:
+                minimum_value = int(str(minimum))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("最低有效评委数必须是正整数。") from exc
+            if minimum_value <= 0:
+                raise ValidationError("最低有效评委数必须是正整数。")
+        locked_round.minimum_judge_count = minimum
+    if "name" in configuration:
+        locked_round.name = str(configuration["name"] or "").strip()
+    if "scoring_mode" in configuration:
+        scoring_mode = str(configuration["scoring_mode"] or "")
+        if scoring_mode not in ContestRound.ScoringMode.values:
+            raise ValidationError("评分方式无效。")
+        locked_round.scoring_mode = scoring_mode
+    if "advance_count" in configuration:
+        try:
+            advance_count = int(str(configuration["advance_count"]))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("晋级人数必须是非负整数。") from exc
+        if advance_count < 0:
+            raise ValidationError("晋级人数必须是非负整数。")
+        locked_round.advance_count = advance_count
+    if "roster_source" in configuration:
+        roster_source = str(configuration["roster_source"] or "")
+        if roster_source not in ContestRound.RosterSource.values and roster_source != "":
+            raise ValidationError("参赛名单来源无效。")
+        locked_round.roster_source = roster_source
+    if "roster_source_stage" in configuration:
+        locked_round.roster_source_stage = str(configuration["roster_source_stage"] or "")
+    if locked_round.roster_source == ContestRound.RosterSource.STAGE and not locked_round.roster_source_stage:
+        raise ValidationError("按赛段晋级的轮次必须说明来源赛段。")
+    if "rubric" in configuration:
+        rubric = configuration["rubric"]
+        if rubric is not None and getattr(rubric, "activity_id", None) != locked_activity.pk:
+            raise ValidationError("评分标准必须属于当前活动。")
+        locked_round.rubric = rubric
+
+    with authority_write(CONTEST_ROUND_STATE):
+        locked_round.save(
+            update_fields=[
+                "name",
+                "judge_count",
+                "minimum_judge_count",
+                "scoring_mode",
+                "advance_count",
+                "roster_source",
+                "roster_source_stage",
+                "rubric",
+            ]
+        )
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ContestRound:{locked_round.pk}",
+        old_value=json.dumps(old_value, ensure_ascii=False, default=str),
+        new_value=json.dumps(
+            {
+                field: getattr(locked_round, field)
+                for field in old_value
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        note="configure_draft_round_from_planning",
+    )
+    return locked_round
+
+
+@transaction.atomic
 def create_scoring_rubric(activity, *, name, description, criteria, operator) -> ScoringRubric:
     """Provision a scoring rubric and all criteria as one audited operator command."""
     current_operator = require_current_staff(operator)

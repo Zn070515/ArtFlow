@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}赛制准备 — {{ ruleset.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div id="ruleset-planning-app" class="max-w-5xl mx-auto px-4 py-10"
+     data-revision="{{ planning_revision }}"
+     data-save-url="{% url 'staff:ruleset_planning' version.pk %}"
+     data-preview-url="{% url 'staff:ruleset_planning_preview' version.pk %}"
+     data-apply-url="{% url 'staff:ruleset_planning_apply' version.pk %}">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> / 赛制准备
+    </p>
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">{{ ruleset.name }}</h1>
+            <p class="text-sm text-gray-500 mt-1">{{ activity.title }} · 用业务语言整理比赛方案</p>
+        </div>
+    </div>
+
+    {% if planning_read_only %}
+    <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-6 text-sm text-amber-900">
+        当前赛制包含普通工作台无法无损表达的内容，下面只展示历史摘要。需要修改时请联系管理员使用专业工具。
+    </div>
+    {% elif planning_projection.notice %}
+    <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-6 text-sm text-amber-900">
+        {{ planning_projection.notice }}
+    </div>
+    {% endif %}
+
+    <div id="planning-feedback" class="hidden mb-5 rounded-lg border px-4 py-3 text-sm" role="status"></div>
+
+    <section class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-blue-50 border-b border-blue-200 px-4 py-3">
+            <h2 class="text-base font-semibold text-brand">比赛流程</h2>
+            <p class="text-xs text-gray-600 mt-1">按实际执行顺序填写阶段；不确定的内容可以先标记为尚待确定。</p>
+        </div>
+        <div class="p-4">
+            <div id="planning-stage-list" class="space-y-3">
+                {% for stage in planning_payload.stages %}
+                <article class="planning-stage border border-gray-200 rounded-lg p-4" data-business-id="{{ stage.business_id }}">
+                    <div class="flex items-center justify-between gap-3">
+                        <h3 class="font-semibold text-gray-900">{{ stage.name.value|default:stage.name }}</h3>
+                        <span class="text-xs text-gray-500">第 {{ forloop.counter }} 阶段</span>
+                    </div>
+                    <p class="text-sm text-gray-600 mt-2">晋级人数：{{ stage.advance_count.value|default:stage.advance_count|default:"尚待确定" }}</p>
+                </article>
+                {% empty %}
+                <p id="planning-empty" class="text-sm text-gray-500">还没有比赛阶段，请从第一阶段开始。</p>
+                {% endfor %}
+            </div>
+            {% if not planning_read_only %}
+            <form class="hidden">{% csrf_token %}</form>
+            <button id="planning-add-stage" type="button" class="mt-4 border border-brand text-brand rounded px-3 py-2 text-sm">添加比赛阶段</button>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-3">
+            <h2 class="text-base font-semibold text-gray-900">比赛环节</h2>
+            <p class="text-xs text-gray-600 mt-1">每个阶段可以有多个演唱轮次，轮次成绩按百分比合成。</p>
+        </div>
+        <div class="p-4 text-sm text-gray-700">
+            <p>支持独唱、合作演唱和观众成绩；合作演唱不会自动改变选手名单。</p>
+            <p class="mt-2 text-gray-500">当前阶段数：<span id="planning-stage-count">{{ planning_payload.stages|length }}</span></p>
+        </div>
+    </section>
+
+    <section class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-3">
+            <h2 class="text-base font-semibold text-gray-900">成绩与晋级</h2>
+            <p class="text-xs text-gray-600 mt-1">确认成绩来源、百分比和每阶段晋级人数后，系统才会生成可执行候选。</p>
+        </div>
+        <div class="p-4 space-y-3">
+            {% if planning_result %}
+                {% if planning_result.change_summary %}
+                <div class="rounded border border-blue-200 bg-blue-50 px-3 py-2">
+                    <p class="font-medium text-blue-900">候选变化</p>
+                    <ul class="list-disc pl-5 mt-1 space-y-1 text-blue-900">
+                    {% for change in planning_result.change_summary %}<li>{{ change }}</li>{% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                {% for issue in planning_result.issues %}
+                <div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    {{ issue.message|default:issue.code }}
+                </div>
+                {% empty %}
+                <p class="text-sm text-green-700">当前填写内容可以生成候选方案。</p>
+                {% endfor %}
+            {% else %}
+            <p class="text-sm text-gray-500">填写比赛阶段后，这里会显示成绩比例和晋级检查。</p>
+            {% endif %}
+            <button id="planning-copy-pending" type="button" class="border border-gray-300 rounded px-3 py-2 text-sm text-gray-700">复制尚待确定事项</button>
+        </div>
+    </section>
+
+    <section class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-3">
+            <h2 class="text-base font-semibold text-gray-900">尚待确定</h2>
+        </div>
+        <div id="planning-pending" class="p-4 text-sm text-gray-600">
+            {% if planning_result and planning_result.issues %}
+            <p>请逐项确认上面的提示，再生成执行候选。</p>
+            {% else %}
+            <p>暂无待确认事项。</p>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-green-50 border-b border-green-200 px-4 py-3">
+            <h2 class="text-base font-semibold text-gray-900">启用前检查</h2>
+            <p class="text-xs text-gray-600 mt-1">先保存准备草稿，再预览候选；确认无误后才会写入比赛规则和草稿轮次。</p>
+        </div>
+        <div class="p-4 flex flex-wrap gap-3">
+            {% if not planning_read_only %}
+            <button id="planning-save" type="button" class="bg-brand text-white rounded px-4 py-2 text-sm">保存准备草稿</button>
+            <button id="planning-preview" type="button" class="border border-gray-300 rounded px-4 py-2 text-sm">预览候选</button>
+            <button id="planning-apply" type="button" class="border border-green-600 text-green-700 rounded px-4 py-2 text-sm">应用到赛制</button>
+            {% endif %}
+            <a href="{% url 'staff:ruleset_edit' version.pk %}" class="border border-gray-300 rounded px-4 py-2 text-sm">打开专业工具</a>
+        </div>
+    </section>
+</div>
+
+{{ planning_payload|json_script:"ruleset-planning-payload" }}
+{{ planning_result_json|json_script:"ruleset-planning-result" }}
+<script src="{% static 'dist/ruleset_planning.js' %}" defer></script>
+{% endblock %}

@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from decimal import Decimal
 
 from accounts.services import require_current_admin, require_current_staff
-from common.authority import CONTEST_ROUND_STATE, RULESET_FREEZE, authority_write
+from common.authority import (
+    CONTEST_ROUND_STATE,
+    PLANNING_DRAFT_WRITE,
+    RULESET_FREEZE,
+    authority_write,
+)
 from common.models import AuditLog
 from core.models import Activity
 from core.services import lock_activity_for_action
@@ -38,7 +44,15 @@ from questionnaire.schema import parse_questionnaire
 
 from .business_editor import business_definition_from_stages, infer_business_stages
 from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
-from .models import ContestRuleset, RulesetVersion
+from .models import ContestRuleset, RulesetPlanningDraft, RulesetVersion
+from .planning import (
+    PlanningCompileResult,
+    PlanningProjection,
+    default_planning_payload,
+    prepare_planning_compile,
+    planning_projection_from_definition,
+    validate_planning_draft,
+)
 from .schema import ENTRY_KEY, content_hash, parse_definition
 
 
@@ -347,6 +361,217 @@ def _lock_version_for_write(version: RulesetVersion) -> RulesetVersion:
         .select_related("ruleset__activity")
         .get(pk=version.pk)
     )
+
+
+def _planning_payload_from_projection(
+    projection: PlanningProjection,
+) -> tuple[dict[str, object], str]:
+    if projection.editable and projection.payload.get("stages"):
+        return deepcopy(projection.payload), "historical_projection"
+    return default_planning_payload(), "manual"
+
+
+def _lock_planning_draft_version(
+    version: RulesetVersion,
+) -> tuple[RulesetVersion, RulesetPlanningDraft]:
+    locked = _lock_version_for_write(version)
+    draft = (
+        RulesetPlanningDraft.objects.select_for_update()
+        .filter(ruleset_version_id=locked.pk)
+        .first()
+    )
+    if draft is not None:
+        return locked, draft
+    payload, source = _planning_payload_from_projection(
+        planning_projection_from_definition(locked.definition)
+    )
+    with authority_write(PLANNING_DRAFT_WRITE):
+        draft = RulesetPlanningDraft.objects.create(
+            ruleset_version=locked,
+            payload=payload,
+            source=source,
+        )
+    return locked, draft
+
+
+@transaction.atomic
+def load_planning_draft(version: RulesetVersion) -> RulesetPlanningDraft:
+    """Load or initialize the business draft under the standard aggregate lock order."""
+    locked, draft = _lock_planning_draft_version(version)
+    if locked.status != RulesetVersion.Status.DRAFT:
+        raise PermissionDenied("已冻结赛制版本不可编辑规划草稿。")
+    return draft
+
+
+@transaction.atomic
+def save_planning_draft(
+    version: RulesetVersion,
+    *,
+    payload: dict[str, object],
+    operator,
+    expected_revision: int,
+) -> RulesetPlanningDraft:
+    """Persist only business preparation data with compare-and-swap protection."""
+    current_operator = require_current_staff(operator)
+    locked, draft = _lock_planning_draft_version(version)
+    if locked.status != RulesetVersion.Status.DRAFT:
+        raise PermissionDenied("已冻结赛制版本不可编辑规划草稿。")
+    if draft.revision != expected_revision:
+        raise ValidationError("规划草稿已被其他编辑修改，请刷新后重试。")
+    validate_planning_draft(payload)
+    draft.payload = deepcopy(payload)
+    draft.revision += 1
+    draft.source = "manual"
+    draft.updated_by = current_operator
+    with authority_write(PLANNING_DRAFT_WRITE):
+        draft.save(
+            update_fields=["payload", "revision", "source", "updated_by", "updated_at"]
+        )
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.UPDATE_RULESET_PLANNING,
+        target=f"RulesetPlanningDraft:{draft.pk}",
+        new_value=json.dumps(
+            {"revision": draft.revision, "payload": draft.payload},
+            ensure_ascii=False,
+        ),
+    )
+    return draft
+
+
+@transaction.atomic
+def prepare_planning_compile_for_version(version: RulesetVersion) -> PlanningCompileResult:
+    """Prepare a candidate from the locked current draft without formal mutation."""
+    locked, draft = _lock_planning_draft_version(version)
+    if locked.status != RulesetVersion.Status.DRAFT:
+        raise PermissionDenied("已冻结赛制版本不可生成规划候选。")
+    return prepare_planning_compile(draft.payload, locked.definition)
+
+
+def _raise_planning_compile_blocked(result: PlanningCompileResult) -> None:
+    messages = [issue.message or issue.code for issue in result.issues if issue.blocks_apply]
+    if messages:
+        raise ValidationError(messages)
+    raise ValidationError("规划候选无法应用。")
+
+
+@transaction.atomic
+def apply_planning_to_ruleset(
+    version: RulesetVersion,
+    *,
+    operator,
+    expected_revision: int,
+) -> RulesetVersion:
+    """Apply one complete planning candidate through the existing ruleset service."""
+    current_operator = require_current_staff(operator)
+    locked, draft = _lock_planning_draft_version(version)
+    if locked.status != RulesetVersion.Status.DRAFT:
+        raise PermissionDenied("已冻结赛制版本不可应用规划候选。")
+    if draft.revision != expected_revision:
+        raise ValidationError("规划草稿已被其他编辑修改，请刷新后重试。")
+    result = prepare_planning_compile(draft.payload, locked.definition)
+    if not result.can_apply:
+        _raise_planning_compile_blocked(result)
+
+    from singer_contest.models import ContestRound
+    from singer_contest.services import configure_draft_round_from_planning
+
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked.ruleset_id)
+    base_binding = _binding_signature(locked_ruleset)
+    existing_round_keys = dict(locked_ruleset.round_keys or {})
+    round_by_business_id: dict[str, ContestRound] = {}
+    execution_refs: dict[str, dict[str, object]] = {}
+    for configuration in result.round_configurations:
+        round_key = str(configuration["round_key"])
+        raw_round_id = existing_round_keys.get(round_key)
+        if raw_round_id not in (None, ""):
+            try:
+                round_id = int(str(raw_round_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(f"轮次“{round_key}”的绑定 id 无效。") from exc
+            contest_round = (
+                ContestRound.objects.select_for_update()
+                .select_related("activity")
+                .get(pk=round_id)
+            )
+            if contest_round.activity_id != locked_ruleset.activity_id:
+                raise PermissionDenied("规划候选不能绑定其他活动的比赛轮次。")
+        else:
+            round_type = (
+                ContestRound.RoundType.PRELIMINARY
+                if int(str(configuration["stage_index"])) == 1
+                else ContestRound.RoundType.SEMI_FINAL
+            )
+            with authority_write(CONTEST_ROUND_STATE):
+                contest_round = ContestRound.objects.create(
+                    activity_id=locked_ruleset.activity_id,
+                    round_type=round_type,
+                    scoring_mode=str(configuration["scoring_mode"]),
+                    name=str(configuration["name"]),
+                    advance_count=int(str(configuration["advance_count"])),
+                    roster_source=str(configuration["roster_source"]),
+                    roster_source_stage=str(configuration["roster_source_stage"]),
+                )
+        configured = configure_draft_round_from_planning(
+            contest_round,
+            operator=current_operator,
+            configuration={
+                "name": str(configuration["name"]),
+                "scoring_mode": str(configuration["scoring_mode"]),
+                "advance_count": int(str(configuration["advance_count"])),
+                "roster_source": str(configuration["roster_source"]),
+                "roster_source_stage": str(configuration["roster_source_stage"]),
+            },
+        )
+        business_id = str(configuration["business_id"])
+        round_by_business_id[business_id] = configured
+        execution_refs[business_id] = {
+            "round_key": round_key,
+            "round_id": configured.pk,
+        }
+
+    stages = deepcopy(list(result.business_stages))
+    for stage in stages:
+        raw_sources = stage.get("judge_sources")
+        if not isinstance(raw_sources, list):
+            continue
+        for source in raw_sources:
+            if not isinstance(source, dict):
+                continue
+            business_id = str(source.get("business_id") or "")
+            configured = round_by_business_id.get(business_id)
+            if configured is None:
+                raise ValidationError("规划候选缺少可执行的比赛轮次。")
+            source["round_id"] = configured.pk
+            source["create_round"] = False
+
+    base_round_configuration = business_round_configuration_signature(
+        ContestRound.objects.filter(activity_id=locked_ruleset.activity_id)
+    )
+    saved = save_business_ruleset(
+        locked,
+        stages=stages,
+        operator=current_operator,
+        base_content_hash=locked.content_hash,
+        base_binding=base_binding,
+        base_round_configuration=base_round_configuration,
+    )
+    updated_payload = deepcopy(draft.payload)
+    updated_payload["execution_refs"] = execution_refs
+    draft.payload = updated_payload
+    with authority_write(PLANNING_DRAFT_WRITE):
+        draft.save(update_fields=["payload", "updated_at"])
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.UPDATE_RULESET_PLANNING,
+        target=f"RulesetPlanningDraft:{draft.pk}",
+        new_value=json.dumps(
+            {"revision": draft.revision, "applied": True, "execution_refs": execution_refs},
+            ensure_ascii=False,
+        ),
+        note="apply_planning_to_ruleset",
+    )
+    return saved
 
 
 @transaction.atomic

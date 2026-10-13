@@ -63,6 +63,7 @@ class AuditLog(models.Model):
         CORRECT_GROUP_STAGE = "correct_group_stage", "修正分组合唱成员"
         CANCEL_GROUP_STAGE = "cancel_group_stage", "取消分组合唱赛段"
         SET_GROUP_MATERIAL_STATUS = "set_group_material_status", "设置分组合唱材料窗口"
+        UPDATE_RULESET_PLANNING = "update_ruleset_planning", "修改赛制准备草稿"
         OTHER = "other", "其他"
 
     operator = models.ForeignKey(
