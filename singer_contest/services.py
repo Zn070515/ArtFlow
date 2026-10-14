@@ -4252,7 +4252,7 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
         else:
             args = _run_ruleset_args(version, activity)
             try:
-                probe = run_ruleset(
+                run_probe = run_ruleset(
                     version,
                     activity,
                     stage_key=stage_key,
@@ -4266,6 +4266,9 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
                 # because its upstream stage is still unresolved. That is "not ready yet",
                 # not a config error — skip and let a later input batch publish it.
                 continue
+            if not isinstance(run_probe, ResolveResult):
+                raise RuntimeError("preview resolver returned a persisted StageResult")
+            probe = run_probe
             publishable = {ResolverState.READY}
         if probe.status not in publishable:
             continue
