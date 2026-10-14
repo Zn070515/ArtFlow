@@ -2243,8 +2243,8 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         raise ValidationError("2026 现场赛制第一轮晋级人数必须为 10。")
     if first_round.score_completion_mode != ContestRound.CompletionMode.MINIMUM_VALID:
         raise ValidationError("2026 现场赛制第一轮必须使用最低有效评委数评分完成模式。")
-    if first_round.judge_count != 5:
-        raise ValidationError("2026 现场赛制第一轮必须配置 5 名评委。")
+    if first_round.judge_count is None or first_round.judge_count < 1:
+        raise ValidationError("2026 现场赛制第一轮必须配置正整数评委人数。")
     minimum_judge_count = first_round.minimum_judge_count
     if (
         minimum_judge_count is None
@@ -2254,14 +2254,42 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         raise ValidationError(
             "2026 现场赛制第一轮最低有效评委数必须在 1 至评委人数之间，不能超过评委人数。"
         )
-    if minimum_judge_count != 4:
-        raise ValidationError("2026 现场赛制第一轮最低有效评委数必须为 4。")
     standard = scoring_standard_snapshot(first_round)
     if standard["scoring_mode"] != ContestRound.ScoringMode.AVERAGE:
         raise ValidationError("2026 现场赛制必须使用所有有效评委分的算术平均。")
     rubric = standard.get("rubric")
     if not isinstance(rubric, dict) or not rubric.get("criteria"):
         raise ValidationError("2026 现场赛制第一轮必须配置统一评分标准。")
+    group_stage_keys = binding.get("group_stage_keys") or {}
+    group_stage_id = group_stage_keys.get(first_round_key)
+    if group_stage_id in (None, "") and len(group_stage_keys) == 1:
+        # A single GroupStage binding may use the business ``by`` key (for example
+        # ``chorus``) instead of the physical round key.  It is still unambiguous.
+        group_stage_id = next(iter(group_stage_keys.values()))
+    if "questionnaire" in root and group_stage_id in (None, ""):
+        raise ValidationError("2026 现场赛制必须绑定第一轮冻结的分组合唱分组。")
+    if group_stage_id not in (None, ""):
+        from common.lifecycle import runtime_approved_singers
+        from singer_contest.group_chorus import validate_live_first_round_group_stage
+        from singer_contest.models import GroupStage
+
+        if first_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
+            raise ValidationError("2026 现场赛制第一轮必须使用全部审核通过的选手名单。")
+        group_stage = (
+            GroupStage.objects.filter(
+                pk=group_stage_id,
+                activity_id=first_round.activity_id,
+                status=GroupStage.Status.FROZEN,
+            )
+            .prefetch_related("groups__memberships")
+            .first()
+        )
+        if group_stage is None:
+            raise ValidationError("2026 第一轮绑定的分组合唱分组不存在、未冻结或不属于当前活动。")
+        validate_live_first_round_group_stage(
+            group_stage,
+            runtime_approved_singers(first_round.activity).values_list("pk", flat=True),
+        )
     # r2/r3 are questionnaire material namespaces. Their physical scoring rounds are
     # created by the challenge service only after the relevant roster exists.
     live_config["scoring_standard"] = standard

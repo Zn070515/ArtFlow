@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from enum import StrEnum
 from typing import Any
 
@@ -63,6 +63,40 @@ def _roster_singers(stage: GroupStage) -> dict[str, SingerRegistration]:
 def group_stage_roster_singers(stage: GroupStage) -> list[SingerRegistration]:
     """Return the one authoritative roster that staff may assign to groups."""
     return list(_roster_singers(stage).values())
+
+
+def validate_live_first_round_group_stage(
+    stage: GroupStage, expected_singer_ids: Collection[int | str]
+) -> list[tuple[str, tuple[str, ...]]]:
+    """Validate and return the frozen five-by-three first-round group snapshot.
+
+    The group stage owns the material-sharing roster.  The scoring round may materialize
+    ``PerformanceGroup`` rows from it, but it must not create a second, divergent roster.
+    """
+    if stage.status != GroupStage.Status.FROZEN:
+        raise ValidationError("2026 第一轮必须使用已冻结的分组合唱分组。")
+    groups = list(stage.groups.filter(is_active=True).order_by("group_order", "pk"))
+    if len(groups) != 5:
+        raise ValidationError("2026 第一轮分组合唱必须恰好为 5 组。")
+    expected_ids = {str(singer_id) for singer_id in expected_singer_ids}
+    snapshot: list[tuple[str, tuple[str, ...]]] = []
+    actual_ids: set[str] = set()
+    for group in groups:
+        singer_ids = tuple(
+            str(singer_id)
+            for singer_id in group.memberships.filter(is_current=True)
+            .order_by("singer_id")
+            .values_list("singer_id", flat=True)
+        )
+        if len(singer_ids) != 3:
+            raise ValidationError("2026 第一轮分组合唱必须每组 3 人。")
+        if actual_ids.intersection(singer_ids):
+            raise ValidationError("2026 第一轮分组合唱成员不能重复。")
+        actual_ids.update(singer_ids)
+        snapshot.append((group.name, singer_ids))
+    if actual_ids != expected_ids:
+        raise ValidationError("2026 第一轮分组合唱必须完整覆盖第一轮选手名单。")
+    return snapshot
 
 
 def _source_roster_fingerprint(source_round: ContestRound, *, is_test_data: bool) -> str:

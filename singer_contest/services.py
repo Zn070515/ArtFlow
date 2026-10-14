@@ -454,6 +454,68 @@ def _ensure_round_setup_ready(contest_round: ContestRound) -> None:
         raise ValidationError(messages[readiness])
 
 
+def _live_group_stage_for_round(contest_round: ContestRound, *, require_binding: bool = False):
+    """Resolve the frozen 2026 first-round GroupStage bound to this physical round."""
+    from ruleset.models import ContestRuleset
+
+    from .models import GroupStage
+
+    version = current_frozen_version(contest_round.activity)
+    if version is not None:
+        binding = version.binding or {}
+    else:
+        ruleset = ContestRuleset.objects.filter(activity_id=contest_round.activity_id).first()
+        if ruleset is None:
+            return None
+        binding = {
+            "round_keys": ruleset.round_keys or {},
+            "group_stage_keys": ruleset.group_stage_keys or {},
+            "live_challenge": ruleset.live_challenge or {},
+        }
+    live_config = binding.get("live_challenge") or {}
+    if (
+        not isinstance(live_config, dict)
+        or live_config.get("format_key") != LIVE_CHALLENGE_FORMAT_KEY
+    ):
+        return None
+    first_round_key = str(live_config.get("podium_first_round_key") or "r1").strip()
+    if str((binding.get("round_keys") or {}).get(first_round_key)) != str(contest_round.pk):
+        return None
+    group_stage_keys = binding.get("group_stage_keys") or {}
+    stage_id = group_stage_keys.get(first_round_key)
+    if stage_id in (None, "") and len(group_stage_keys) == 1:
+        stage_id = next(iter(group_stage_keys.values()))
+    if stage_id in (None, ""):
+        if require_binding:
+            raise ValidationError("2026 第一轮必须绑定冻结的分组合唱分组。")
+        return None
+    stage = (
+        GroupStage.objects.filter(
+            pk=stage_id,
+            activity_id=contest_round.activity_id,
+            status=GroupStage.Status.FROZEN,
+        )
+        .prefetch_related("groups__memberships")
+        .first()
+    )
+    if stage is None:
+        raise ValidationError("2026 第一轮绑定的分组合唱分组不存在、未冻结或不属于当前活动。")
+    return stage
+
+
+def _validate_live_round_group_setup(contest_round: ContestRound, *, require_groups: bool):
+    from .group_chorus import validate_live_first_round_group_stage
+
+    stage = _live_group_stage_for_round(contest_round, require_binding=require_groups)
+    if stage is None:
+        return None
+    expected_ids = {singer.pk for singer in _round_source_singers(contest_round)}
+    snapshot = validate_live_first_round_group_stage(stage, expected_ids)
+    if require_groups and not PerformanceGroup.objects.filter(round=contest_round).exists():
+        raise ValidationError("请先按已冻结的分组合唱分组配置第一轮评分节目。")
+    return snapshot
+
+
 def current_round_roster(contest_round: ContestRound) -> list[SingerRegistration]:
     """Return the authoritative singer roster currently usable by operator controls.
 
@@ -625,6 +687,7 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
     _ensure_round_setup_ready(locked_round)
+    _validate_live_round_group_setup(locked_round, require_groups=True)
     # P0-B runtime boundary: the frozen ruleset's deferred roster facts (SELECT quotas,
     # vote candidate rosters, group capacity, full/subset coverage) are proven here — the
     # last moment before they become load-bearing. Fail closed.
@@ -812,6 +875,20 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
     if seen != set(singer_by_id):
         missing = sorted(set(singer_by_id) - seen)
         raise ValidationError(f"分组必须覆盖全部选手，缺少：{missing}。")
+
+    live_snapshot = _validate_live_round_group_setup(locked_round, require_groups=False)
+    if live_snapshot is not None:
+        incoming = [
+            (name, {str(singer.pk) for singer in group_singers})
+            for name, group_singers in normalized
+        ]
+        expected = [(name, set(singer_ids)) for name, singer_ids in live_snapshot]
+        if incoming != expected:
+            raise ValidationError("第一轮评分分组必须与已冻结的分组合唱分组一致。")
+        normalized = [
+            (name, [singer_by_id[singer_id] for singer_id in singer_ids])
+            for name, singer_ids in live_snapshot
+        ]
 
     Performance.objects.filter(round=locked_round).delete()
     PerformanceGroup.objects.filter(round=locked_round).delete()
