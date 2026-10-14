@@ -2,6 +2,14 @@
 
 本手册面向 Staff/Admin 和发布前值班人员。正式成绩、席位、配对和最终名单只能通过 Staff 页面调用的 authority service 产生；Redis/WebSocket 只负责通知，断开时继续使用 HTTP 页面。系统不提供公开实时成绩页或主持人大屏。
 
+正式生产部署必须使用明确的 `deploy/compose.production.yml`，唯一的 canonical production deployment path 是：
+
+```bash
+bash scripts/deploy.sh .env.production
+```
+
+不要用根目录开发 Compose 文件承载生产流量，也不要绕过该入口手工拼接生产服务。
+
 ## 一、彩排前置条件
 
 1. 活动类型为“歌手比赛”，已进入允许现场执行的阶段，数据库使用 PostgreSQL。
@@ -52,6 +60,12 @@ pwsh -NoProfile -File scripts/verify_postgres_backup_restore.ps1 -ComposeProject
 ```
 
 备份恢复脚本只能创建临时目标数据库，禁止对源数据库执行 `down --volumes`、reset 或 drop。
+
+恶意彩排的完整 authority、会话、输入解析、竞态、资源消耗、学校身份接入和恢复矩阵见 [M2-C malicious rehearsal matrix](m2-c-malicious-rehearsal-matrix.md)。该矩阵只允许在授权、隔离、限时环境执行。
+
+正式链路严格为 `AWARD → StageAwardDecision → CONFIRM → Award`。`StageResult.status == CONFIRMED` 才是赛段来源 Award 的正式 authority；Staff 正式奖项列表和 `award_list` 导出只显示无赛段来源的历史 Award，或 `source_stage_result.status == CONFIRMED` 的 Award。`VoteSession 锁定本身不会创建 Award`；首次核定只物化一份来源完整的 Award，重复核定不重复；input fingerprint 或 result version 已变化的 stale 候选不能物化；解锁后旧来源赛段不再 `CONFIRMED`，所以旧 Award 不进入正式列表/导出，新候选必须重新核定。
+
+`Award.source_vote_session` 只解释可能存在的历史行，不是当前 Award authority。删除或迁移前先核查历史数据，不得用它恢复 vote-lock 自动颁奖。
 
 ## 三、工作人员彩排流程
 

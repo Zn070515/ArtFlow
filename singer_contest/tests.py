@@ -1080,9 +1080,7 @@ class ScoringServiceTests(TestCase):
             Decimal("90.00"),
         )
         self.assertEqual(lock_round(self.round, self.user).status, ContestRound.Status.LOCKED)
-        self.assertFalse(
-            ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists()
-        )
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists())
 
     def test_legacy_full_matrix_round_still_rejects_partial_lock(self):
         second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
