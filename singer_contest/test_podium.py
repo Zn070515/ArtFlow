@@ -249,4 +249,3 @@ class PodiumResultServiceTests(TestCase):
         result = build_podium_result(self.version, self.activity)
         self.assertEqual(result.status, "hold")
         self.assertIn("podium_third_round_performances_unlocked", result.reasons)
-
