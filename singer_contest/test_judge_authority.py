@@ -65,7 +65,7 @@ from .models import (
     ScoringRubric,
     SingerRegistration,
 )
-from .services import apply_scores, set_official_contestant_number
+from .services import apply_scores, lock_round, set_official_contestant_number
 
 
 class JudgeAuthorityVocabularyTests(TestCase):
@@ -424,6 +424,36 @@ class JudgePanelServiceTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, "只能有一个现场评委组"):
             prepare_judge_panel(other_round.pk, operator=self.operator)
+
+    def test_locking_round_closes_panel_for_next_round_handoff(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.operator,
+        )
+        lock_round(self.round, self.operator)
+
+        from .models import RoundEntry, RoundJudge
+
+        with authority_write(CONTEST_ROUND_STATE):
+            next_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="Next round",
+            )
+            RoundEntry.objects.create(round=next_round, singer=self.singer, running_order=1)
+            RoundJudge.objects.create(round=next_round, judge=self.judge)
+            next_round.status = ContestRound.Status.PREPARED
+            next_round.save(update_fields=["status"])
+
+        next_snapshot = prepare_judge_panel(next_round.pk, operator=self.operator)
+
+        self.assertEqual(next_snapshot.round_id, next_round.pk)
+        self.assertEqual(
+            RoundPanelSnapshot.objects.get(round=self.round).state,
+            RoundPanelSnapshot.State.SUPERSEDED,
+        )
 
     def test_prepare_panel_rejects_draft_round(self):
         from django.core.exceptions import ValidationError
@@ -1013,6 +1043,8 @@ class JudgePanelServiceTests(TestCase):
             ScoreRecord.objects.get(pk=submission.score_record_id).singer_id,
             self.singer.pk,
         )
+        refreshed_context = get_judge_context(redeemed.token)
+        self.assertEqual(refreshed_context.pending_performances, ())
         self.assertEqual(
             PerformanceScoreState.objects.get(performance=self.performance).state,
             PerformanceScoreState.State.OPEN,

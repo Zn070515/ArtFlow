@@ -4103,6 +4103,41 @@ class StageResolverBindingTests(TestCase):
         self.assertEqual(refreshed.pk, stage.pk)  # type: ignore[union-attr]
         self.assertEqual(refreshed.status, StageResult.Status.CONFIRMED)
 
+    def test_staff_can_confirm_a_ready_stage_result(self):
+        from .services import confirm_stage_result, run_ruleset
+
+        staff = _create_provisioned_user(
+            username="binder-staff-confirm", password="pass", role=User.Role.STAFF
+        )
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        _save_activity_state(self.activity, ["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        _save_round_state(self.round, ["is_locked", "status"])
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
+        _promote_version_to_current(version)
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=staff,
+            round_keys={"r1": self.round},
+            preview=False,
+        )
+
+        confirmed = confirm_stage_result(stage, confirmed_by=staff)
+
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        self.assertEqual(confirmed.confirmed_by_id, staff.pk)
+
     def test_confirm_stage_result_rejects_unresolved(self):
         """§36-37: only a READY_TO_CONFIRM result may be 核定."""
         from .services import confirm_stage_result
