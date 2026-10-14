@@ -1487,9 +1487,9 @@ def finalize_advancement(
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备并完成比赛轮次后再核定晋级名单。")
     ensure_round_unlocked(locked_round)
-    if missing_score_cells(locked_round):
-        raise ValidationError("评分尚未完成，无法核定晋级名单。")
     entrants = set(_eligible_singers(locked_round).values_list("pk", flat=True))
+    if not entrants or not round_scores_complete(locked_round):
+        raise ValidationError("评分尚未完成，无法核定晋级名单。")
     selected = {int(singer_id) for singer_id in selected_singer_ids}
     if not selected:
         raise ValidationError("请选择至少一名晋级选手。")
@@ -1552,6 +1552,15 @@ def apply_scores(
     pairs = list(score_values)
     ensure_score_records_belong_to_round(locked_round, pairs)
     normalized = {pair: validate_score(value) for pair, value in score_values.items()}
+    locked_performance_singer_ids = set(
+        PerformanceScoreState.objects.filter(
+            performance__round=locked_round,
+            state=PerformanceScoreState.State.LOCKED,
+        ).values_list("performance__singer_id", flat=True)
+    )
+    changed_singer_ids = {singer_id for singer_id, _judge_id in normalized}
+    if locked_performance_singer_ids & changed_singer_ids:
+        raise ValidationError("该表演评分已锁定，不能修改。")
     changes: list[dict[str, int | str | None]] = []
     for (singer_id, judge_id), score in normalized.items():
         record = ScoreRecord.objects.filter(
