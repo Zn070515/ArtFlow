@@ -20,7 +20,13 @@ import json
 from common.authority import authority_write
 from django.core.exceptions import ValidationError
 from questionnaire.compiler import compile_questionnaire
-from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric, SingerRegistration
+from singer_contest.models import (
+    ContestRound,
+    Judge,
+    RubricCriterion,
+    ScoringRubric,
+    SingerRegistration,
+)
 
 from ruleset.editor import preview_definition
 from ruleset.schema import ENTRY_KEY
@@ -225,6 +231,96 @@ class QuestionnaireFreezeGateTests(_QuestionnaireFreezeBase):
             self.version(ruleset, json.dumps(root, ensure_ascii=False)), self._operator()
         )
         self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+
+    def test_freeze_rejects_a_qualification_condition_on_a_logical_material_round(self):
+        ruleset = self.ruleset()
+        first_round = ContestRound.objects.get(pk=ruleset.round_keys["r1"])
+        first_round.score_completion_mode = ContestRound.CompletionMode.MINIMUM_VALID
+        first_round.judge_count = 5
+        first_round.minimum_judge_count = 4
+        first_round.advance_count = 10
+        first_round.save(
+            update_fields=[
+                "score_completion_mode",
+                "judge_count",
+                "minimum_judge_count",
+                "advance_count",
+            ]
+        )
+        ruleset.round_keys = {"r1": first_round.pk}
+        judges = [
+            Judge.objects.create(activity=ruleset.activity, name=f"现场评委 {index}")
+            for index in range(1, 6)
+        ]
+        root = json.loads(_flow_definition())
+        questions = []
+        for round_key, label in (("r2", "踢馆曲目"), ("r3", "第三轮曲目")):
+            song = {
+                "key": f"{round_key}.song",
+                "type": "text",
+                "label": label,
+                "round": round_key,
+                "required": True,
+            }
+            if round_key == "r3":
+                song["visible_if"] = {
+                    "source": "context",
+                    "key": "qualified.r3",
+                    "op": "eq",
+                    "value": True,
+                }
+            questions.extend(
+                [
+                    song,
+                    {
+                        "key": f"{round_key}.accompaniment",
+                        "type": "file",
+                        "label": f"{label}伴奏",
+                        "round": round_key,
+                        "required": True,
+                        "file": {
+                            "purpose": "accompaniment",
+                            "extensions": [".mp3"],
+                            "max_mb": 100,
+                        },
+                    },
+                ]
+            )
+        questionnaire = {
+            "schema_version": 1,
+            "key": "singer_submission",
+            "pages": [
+                {
+                    "key": "materials",
+                    "title": "现场材料",
+                    "sections": [{"key": "songs", "title": "歌曲", "questions": questions}],
+                }
+            ],
+        }
+        root["questionnaire"] = questionnaire
+        ruleset.live_challenge = {
+            "format_key": "2026_live_challenge",
+            "participant_count": 15,
+            "seat_count": 10,
+            "challenge_count": 5,
+            "first_round_weight": "40%",
+            "challenge_round_weight": "60%",
+            "podium_stage_key": "final_podium",
+            "podium_first_round_key": "r1",
+            "podium_third_round_key": "r3",
+            "podium_aggregate_node": "podium_total",
+            "podium_first_round_weight": "30%",
+            "podium_third_round_weight": "70%",
+            "challenge_judge_ids": [judge.pk for judge in judges[:4]],
+            "challenge_minimum_judge_count": 4,
+            "final_judge_ids": [judge.pk for judge in judges[1:]],
+            "final_minimum_judge_count": 4,
+        }
+        ruleset.save(update_fields=["round_keys", "live_challenge"])
+        with self.assertRaisesMessage(ValidationError, "r3"):
+            freeze_ruleset_version(
+                self.version(ruleset, json.dumps(root, ensure_ascii=False)), self._operator()
+            )
 
     def test_a_bound_round_may_carry_material_without_a_score_node(self):
         """r2 is bound but no node scores it: a round that is only materials is legal, so
