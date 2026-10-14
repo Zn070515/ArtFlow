@@ -78,8 +78,8 @@
             <div class="flex flex-wrap gap-2 mb-4">
                 {% for seat in legal_seats %}
                 <form method="post">
-                    {% csrf_token %}<input type="hidden" name="action" value="target"><input type="hidden" name="command_id" value="{{ seat.command_id }}"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="seat_position" value="{{ seat.position }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
-                    <button class="touch-target border border-brand text-brand rounded text-sm">记录 {{ seat.current_holder.name }}（第 {{ seat.position }} 席）</button>
+                    {% csrf_token %}<input type="hidden" name="action" value="target"><input type="hidden" name="command_id" value="{{ seat.command_id }}"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="seat_position" value="{{ seat.seat.position }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                    <button class="touch-target border border-brand text-brand rounded text-sm">记录 {{ seat.seat.current_holder.name }}（第 {{ seat.seat.position }} 席）</button>
                 </form>
                 {% empty %}<span class="text-sm text-amber-700">当前没有可选择的席位。</span>{% endfor %}
             </div>
@@ -124,6 +124,25 @@
             {% endif %}
         </div>
     </section>
+
+    {% if last_confirmed_match %}
+    <section class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-5" aria-live="polite">
+        <h2 class="font-semibold text-emerald-900 mb-2">上一场正式结果</h2>
+        <p class="text-lg font-semibold text-emerald-900">
+            {{ last_confirmed_match.challenger.name }}
+            {{ last_confirmed_match.challenger_combined_score }} 分
+            vs
+            {{ last_confirmed_match.defender.name }}
+            {{ last_confirmed_match.defender_combined_score }} 分
+        </p>
+        <p class="text-sm text-emerald-800 mt-1">胜者：{{ last_confirmed_match.winner.name }}</p>
+        {% if current_turn %}
+        <p class="text-sm text-emerald-800 mt-2">主持人交接：请宣布本场胜者及综合成绩，然后进入第 {{ current_turn.sequence }} 位挑战者。</p>
+        {% else %}
+        <p class="text-sm text-emerald-800 mt-2">主持人交接：请宣布本场胜者及综合成绩，再由工作人员确认最终十强。</p>
+        {% endif %}
+    </section>
+    {% endif %}
 
     <section class="bg-white border border-gray-200 rounded-lg p-4">
         <h2 class="font-semibold text-gray-900 mb-3">五次机会进度</h2>

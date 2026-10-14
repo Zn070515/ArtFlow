@@ -146,6 +146,7 @@ from singer_contest.group_chorus import (
 )
 from singer_contest.judge_authority import (
     advance_performance,
+    advance_performance_group,
     hold_judge_panel,
     hold_performance,
     lock_performance_score,
@@ -481,6 +482,7 @@ def live_challenge_console(request, pk):
     )
     current_turn = None
     current_match = None
+    last_confirmed_match = None
     legal_seats = []
     command_ids = {
         action: uuid4().hex
@@ -511,15 +513,20 @@ def live_challenge_console(request, pk):
             if current_turn is not None and hasattr(current_turn, "match")
             else None
         )
+        last_confirmed_match = (
+            live_session.matches.select_related("challenger", "defender", "winner")
+            .filter(status=ChallengeMatch.Status.CONFIRMED)
+            .order_by("-turn__sequence", "-pk")
+            .first()
+        )
         if current_turn is not None:
-            legal_seats = list(
-                live_session.seats.select_related("current_holder")
+            legal_seats = [
+                {"seat": seat, "command_id": uuid4().hex}
+                for seat in live_session.seats.select_related("current_holder")
                 .filter(is_challenged=False)
                 .exclude(current_holder_id=current_turn.challenger_id)
                 .order_by("position")
-            )
-            for seat in legal_seats:
-                seat.command_id = uuid4().hex
+            ]
     challenge_performance_controls = {}
     if current_match is not None and current_match.score_round_id:
         for role, singer_id in (
@@ -555,6 +562,7 @@ def live_challenge_console(request, pk):
             "session": live_session,
             "current_turn": current_turn,
             "current_match": current_match,
+            "last_confirmed_match": last_confirmed_match,
             "legal_seats": legal_seats,
             "source_rounds": source_rounds,
             "state_labels": dict(ChallengeSession.State.choices),
@@ -3208,6 +3216,17 @@ def _judge_control_context(
         {"performance": performance, "score_state": performance_score_states.get(performance.pk)}
         for performance in performances
     ]
+    performance_group_rows = [
+        {
+            "group": group,
+            "performances": [
+                row for row in performance_rows if row["performance"].group_id == group.pk
+            ],
+        }
+        for group in PerformanceGroup._base_manager.filter(round=contest_round).order_by(
+            "sequence", "pk"
+        )
+    ]
     expected_judge_count = (
         contest_round.judge_count if contest_round.judge_count is not None else len(round_judges)
     )
@@ -3254,6 +3273,7 @@ def _judge_control_context(
         "run_state": run_state,
         "performances": performances,
         "performance_rows": performance_rows,
+        "performance_group_rows": performance_group_rows,
         "expected_judge_count": expected_judge_count,
         "actual_judge_count": actual_judge_count,
         "minimum_judge_count": minimum_judge_count,
@@ -3435,6 +3455,28 @@ def judge_performance_advance(request, pk):
             messages.success(request, "当前表演已切换，旧评分上下文自动失效。")
     else:
         messages.error(request, f"推进表演失败：{_form_error(form)}")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_performance_group_advance(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    try:
+        group_id = int(request.POST.get("group_id", ""))
+    except ValueError:
+        messages.error(request, "开放表演组失败：表演组无效。")
+        return redirect("staff:judge_control", pk=pk)
+    try:
+        advance_performance_group(
+            group_id=group_id,
+            round_id=contest_round.pk,
+            operator=request.user,
+        )
+    except (PermissionDenied, ValidationError) as error:
+        messages.error(request, f"开放表演组失败：{domain_error_messages(error)}")
+    else:
+        messages.success(request, "本组独立评分已全部开放，评委可分别提交每位成员的分数。")
     return redirect("staff:judge_control", pk=pk)
 
 
@@ -5537,7 +5579,12 @@ def ruleset_edit(request, pk):
         business_editor["vote_options"] = vote_options
         business_editor["scoring_modes"] = list(ContestRound.ScoringMode.choices)
     live_challenge = dict(ruleset.live_challenge or {})
-    for weight_key in ("first_round_weight", "challenge_round_weight"):
+    for weight_key in (
+        "first_round_weight",
+        "challenge_round_weight",
+        "podium_first_round_weight",
+        "podium_third_round_weight",
+    ):
         if weight_key in live_challenge:
             try:
                 live_challenge[weight_key] = f"{Decimal(str(live_challenge[weight_key])) * 100:g}%"
@@ -5564,6 +5611,7 @@ def ruleset_edit(request, pk):
                 "group_keys": json.dumps(ruleset.group_keys or {}, ensure_ascii=False),
                 "group_stage_keys": json.dumps(ruleset.group_stage_keys or {}, ensure_ascii=False),
                 "audience_keys": json.dumps(ruleset.audience_keys or {}, ensure_ascii=False),
+                "live_challenge": json.dumps(ruleset.live_challenge or {}, ensure_ascii=False),
                 "announcement_blocks": json.dumps(
                     ruleset.announcement_blocks or [], ensure_ascii=False
                 ),
@@ -5617,6 +5665,61 @@ def ruleset_bind(request, pk):
         }
 
     try:
+        base_live_challenge = _parse_json("base_live_challenge", {})
+        if not isinstance(base_live_challenge, dict):
+            raise ValidationError("base_live_challenge 不是合法 JSON。")
+
+        def _live_value(post_name, key):
+            value = (request.POST.get(post_name) or "").strip()
+            return value if value else base_live_challenge.get(key, "")
+
+        def _judge_id_list(post_name, key):
+            raw = (request.POST.get(post_name) or "").strip()
+            if not raw:
+                return base_live_challenge.get(key, [])
+            return [item.strip() for item in raw.split(",") if item.strip()]
+
+        live_challenge_binding = {
+            "participant_count": request.POST.get("live_participant_count") or "",
+            "seat_count": request.POST.get("live_seat_count") or "",
+            "challenge_count": request.POST.get("live_challenge_count") or "",
+            "first_round_weight": request.POST.get("live_first_weight") or "",
+            "challenge_round_weight": request.POST.get("live_challenge_weight") or "",
+            "order_policy": "official_number",
+        }
+        advanced_live_fields = {
+            "podium_stage_key": _live_value("live_podium_stage_key", "podium_stage_key"),
+            "podium_first_round_key": _live_value(
+                "live_podium_first_round_key", "podium_first_round_key"
+            ),
+            "podium_third_round_key": _live_value(
+                "live_podium_third_round_key", "podium_third_round_key"
+            ),
+            "podium_aggregate_node": _live_value(
+                "live_podium_aggregate_node", "podium_aggregate_node"
+            ),
+            "podium_first_round_weight": _live_value(
+                "live_podium_first_weight", "podium_first_round_weight"
+            ),
+            "podium_third_round_weight": _live_value(
+                "live_podium_third_weight", "podium_third_round_weight"
+            ),
+            "challenge_judge_ids": _judge_id_list(
+                "live_challenge_judge_ids", "challenge_judge_ids"
+            ),
+            "challenge_minimum_judge_count": _live_value(
+                "live_challenge_minimum_judges", "challenge_minimum_judge_count"
+            ),
+            "final_judge_ids": _judge_id_list("live_final_judge_ids", "final_judge_ids"),
+            "final_minimum_judge_count": _live_value(
+                "live_final_minimum_judges", "final_minimum_judge_count"
+            ),
+        }
+        if any(value for value in advanced_live_fields.values()) or any(
+            key in base_live_challenge for key in advanced_live_fields
+        ):
+            live_challenge_binding.update(advanced_live_fields)
+
         update_ruleset_binding(
             version.ruleset,
             binding={
@@ -5640,14 +5743,7 @@ def ruleset_bind(request, pk):
                     {},
                 ),
                 "audience_keys": _parse_json("audience_keys", {}),
-                "live_challenge": {
-                    "participant_count": request.POST.get("live_participant_count") or "",
-                    "seat_count": request.POST.get("live_seat_count") or "",
-                    "challenge_count": request.POST.get("live_challenge_count") or "",
-                    "first_round_weight": request.POST.get("live_first_weight") or "",
-                    "challenge_round_weight": request.POST.get("live_challenge_weight") or "",
-                    "order_policy": "official_number",
-                }
+                "live_challenge": live_challenge_binding
                 if any(
                     request.POST.get(name)
                     for name in (
@@ -5656,6 +5752,16 @@ def ruleset_bind(request, pk):
                         "live_challenge_count",
                         "live_first_weight",
                         "live_challenge_weight",
+                        "live_podium_stage_key",
+                        "live_podium_first_round_key",
+                        "live_podium_third_round_key",
+                        "live_podium_aggregate_node",
+                        "live_podium_first_weight",
+                        "live_podium_third_weight",
+                        "live_challenge_judge_ids",
+                        "live_challenge_minimum_judges",
+                        "live_final_judge_ids",
+                        "live_final_minimum_judges",
                     )
                 )
                 else {},

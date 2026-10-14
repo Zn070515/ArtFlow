@@ -110,6 +110,21 @@
             {% endif %}
         </div>
         <div class="mt-4 space-y-2">
+            {% for group_row in performance_group_rows %}
+            <div class="rounded border border-blue-200 bg-blue-50 p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="text-sm font-medium text-blue-900">{{ group_row.group.sequence }}. {{ group_row.group.name }} · {{ group_row.performances|length }} 位成员</div>
+                    {% if policy_state == 'ACTIVE' and run_state.state != 'hold' %}
+                    <form method="post" action="{% url 'staff:judge_performance_group_advance' round.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="group_id" value="{{ group_row.group.pk }}">
+                        <button class="rounded bg-blue-700 px-3 py-1.5 text-xs text-white" type="submit">本组结束，开放全部独立评分</button>
+                    </form>
+                    {% endif %}
+                </div>
+                <p class="mt-1 text-xs text-blue-800">一次打开本组每位成员的独立评分窗口；每位成员仍须分别达到最低评委人数并单独锁分。</p>
+            </div>
+            {% endfor %}
             {% for row in performance_rows %}
             {% with performance=row.performance score_state=row.score_state %}
             <div class="flex flex-col gap-2 rounded border border-gray-200 p-3 md:flex-row md:items-center md:justify-between">

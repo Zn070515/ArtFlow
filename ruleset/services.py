@@ -309,6 +309,104 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
             "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
             "order_policy": "official_number",
         }
+        podium_fields = {
+            "podium_stage_key",
+            "podium_first_round_key",
+            "podium_third_round_key",
+            "podium_aggregate_node",
+            "podium_first_round_weight",
+            "podium_third_round_weight",
+        }
+        if podium_fields & set(raw_live_challenge):
+            missing_podium = sorted(podium_fields - set(raw_live_challenge))
+            if missing_podium:
+                raise ValidationError(
+                    "最终冠亚季军配置缺少字段：" + ", ".join(missing_podium)
+                )
+            podium_strings = {
+                key: str(raw_live_challenge.get(key) or "").strip()
+                for key in (
+                    "podium_stage_key",
+                    "podium_first_round_key",
+                    "podium_third_round_key",
+                    "podium_aggregate_node",
+                )
+            }
+            if any(not value for value in podium_strings.values()):
+                raise ValidationError("最终冠亚季军配置的键名不能为空。")
+            if podium_strings["podium_first_round_key"] not in normalized_round_keys:
+                raise ValidationError("最终冠亚季军的第一轮键必须绑定到 round_keys。")
+            try:
+                podium_first_raw = (
+                    str(raw_live_challenge.get("podium_first_round_weight"))
+                    .strip()
+                    .removesuffix("%")
+                    .strip()
+                )
+                podium_third_raw = (
+                    str(raw_live_challenge.get("podium_third_round_weight"))
+                    .strip()
+                    .removesuffix("%")
+                    .strip()
+                )
+                podium_first = Decimal(podium_first_raw)
+                podium_third = Decimal(podium_third_raw)
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError("最终冠亚季军成绩权重格式无效。") from None
+            if podium_first <= 0 or podium_third <= 0 or podium_first + podium_third != 100:
+                raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
+            live_challenge.update(podium_strings)
+            live_challenge.update(
+                {
+                    "podium_first_round_weight": f"{(podium_first / Decimal('100')):.4f}",
+                    "podium_third_round_weight": f"{(podium_third / Decimal('100')):.4f}",
+                }
+            )
+
+        judge_config_fields = {
+            "challenge_judge_ids",
+            "challenge_minimum_judge_count",
+            "final_judge_ids",
+            "final_minimum_judge_count",
+        }
+        if judge_config_fields & set(raw_live_challenge):
+            missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
+            if missing_judges:
+                raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
+
+            def _judge_ids(key: str) -> list[int]:
+                raw_ids = raw_live_challenge.get(key)
+                if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
+                    raise ValidationError(f"live_challenge.{key} 必须是非空评委 ID 列表。")
+                try:
+                    ids = [int(str(value)) for value in raw_ids]
+                except (TypeError, ValueError):
+                    raise ValidationError(f"live_challenge.{key} 含有无效评委 ID。") from None
+                if any(value < 1 for value in ids) or len(ids) != len(set(ids)):
+                    raise ValidationError(f"live_challenge.{key} 必须是正整数且不能重复。")
+                return ids
+
+            challenge_judge_ids = _judge_ids("challenge_judge_ids")
+            final_judge_ids = _judge_ids("final_judge_ids")
+            try:
+                challenge_minimum = int(
+                    str(raw_live_challenge.get("challenge_minimum_judge_count"))
+                )
+                final_minimum = int(str(raw_live_challenge.get("final_minimum_judge_count")))
+            except (TypeError, ValueError):
+                raise ValidationError("现场轮次最低有效评委数必须是正整数。") from None
+            if not 1 <= challenge_minimum <= len(challenge_judge_ids):
+                raise ValidationError("挑战轮最低有效评委数必须在挑战轮评委数范围内。")
+            if not 1 <= final_minimum <= len(final_judge_ids):
+                raise ValidationError("第三轮最低有效评委数必须在第三轮评委数范围内。")
+            live_challenge.update(
+                {
+                    "challenge_judge_ids": challenge_judge_ids,
+                    "challenge_minimum_judge_count": challenge_minimum,
+                    "final_judge_ids": final_judge_ids,
+                    "final_minimum_judge_count": final_minimum,
+                }
+            )
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
         raise ValidationError("announcement_blocks 必须是列表。")
@@ -321,7 +419,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         if not isinstance(cp_blocks, list):
             raise ValidationError(f"announcement_blocks_by_checkpoint['{cp_key}'] 必须是列表。")
 
-    from singer_contest.models import ContestRound, GroupStage
+    from singer_contest.models import ContestRound, GroupStage, Judge
     from voting.models import VoteSession
 
     round_ids = list(normalized_round_keys.values())
@@ -331,6 +429,26 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     missing_rounds = [rid for rid in round_ids if rid not in owned_rounds]
     if missing_rounds:
         raise ValidationError(f"赛制绑定的比赛轮次不属于该活动：{missing_rounds}")
+
+    challenge_judge_ids = live_challenge.get("challenge_judge_ids")
+    final_judge_ids = live_challenge.get("final_judge_ids")
+    judge_ids = set()
+    if isinstance(challenge_judge_ids, list):
+        judge_ids.update(challenge_judge_ids)
+    if isinstance(final_judge_ids, list):
+        judge_ids.update(final_judge_ids)
+    if judge_ids:
+        owned_judges = {
+            judge.pk
+            for judge in Judge.objects.filter(
+                pk__in=judge_ids,
+                activity=ruleset.activity_id,
+                is_active=True,
+            )
+        }
+        missing_judges = sorted(judge_ids - owned_judges)
+        if missing_judges:
+            raise ValidationError(f"现场轮次评委不存在、未启用或不属于该活动：{missing_judges}")
 
     vote_ids = list(vote_keys.values())
     owned_votes = {

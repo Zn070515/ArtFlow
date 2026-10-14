@@ -440,6 +440,19 @@
                     <label class="text-xs text-gray-700">第一轮权重<input name="live_first_weight" value="{{ live_challenge.first_round_weight|default:'' }}" placeholder="40%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                     <label class="text-xs text-gray-700">挑战轮权重<input name="live_challenge_weight" value="{{ live_challenge.challenge_round_weight|default:'' }}" placeholder="60%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                 </div>
+                <div class="grid sm:grid-cols-4 gap-3 mt-3 border-t border-blue-200 pt-3">
+                    <label class="text-xs text-gray-700">冠亚季军赛段键<input name="live_podium_stage_key" value="{{ live_challenge.podium_stage_key|default:'' }}" placeholder="final_podium" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第一轮绑定键<input name="live_podium_first_round_key" value="{{ live_challenge.podium_first_round_key|default:'' }}" placeholder="first_round" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第三轮标识键<input name="live_podium_third_round_key" value="{{ live_challenge.podium_third_round_key|default:'' }}" placeholder="third_round" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">加权节点键<input name="live_podium_aggregate_node" value="{{ live_challenge.podium_aggregate_node|default:'' }}" placeholder="podium_total" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第一轮权重<input name="live_podium_first_weight" value="{{ live_challenge.podium_first_round_weight|default:'' }}" placeholder="30%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第三轮权重<input name="live_podium_third_weight" value="{{ live_challenge.podium_third_round_weight|default:'' }}" placeholder="70%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700 sm:col-span-2">挑战轮评委 ID（逗号分隔）<input name="live_challenge_judge_ids" value="{{ live_challenge.challenge_judge_ids|join:',' }}" placeholder="1,2,3,4" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">挑战轮最低人数<input name="live_challenge_minimum_judges" value="{{ live_challenge.challenge_minimum_judge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700 sm:col-span-2">第三轮评委 ID（逗号分隔）<input name="live_final_judge_ids" value="{{ live_challenge.final_judge_ids|join:',' }}" placeholder="5,6,7,8" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第三轮最低人数<input name="live_final_minimum_judges" value="{{ live_challenge.final_minimum_judge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                </div>
+                <input type="hidden" name="base_live_challenge" value="{{ binding_json.live_challenge|escape }}">
             </details>
             <details class="sm:col-span-2 border border-gray-200 rounded p-3">
                 <summary class="cursor-pointer text-sm font-medium text-gray-700">高级观众分绑定（JSON，仅人工/外部观众分需要）</summary>

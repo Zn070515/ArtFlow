@@ -55,6 +55,7 @@ from .models import (
     JudgeSeatGrant,
     JudgeSession,
     Performance,
+    PerformanceGroup,
     PerformanceRunState,
     PerformanceScoreState,
     RoundJudge,
@@ -878,6 +879,120 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
         new_value=json.dumps(
             {
                 "performance_id": performance.pk,
+                "context_version": next_version,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        ),
+    )
+    if context_changed:
+        schedule_judge_context_event(
+            locked.contest_round.pk,
+            revision=next_version,
+            actor=_realtime_actor(locked.operator),
+        )
+    return run_state
+
+
+@transaction.atomic
+def advance_performance_group(
+    round_id: int, group_id: int, *, operator
+) -> PerformanceRunState:
+    """Open every individual score window after one group performance ends.
+
+    A group performance is a single host action, but each member keeps an independent
+    ``PerformanceScoreState`` and therefore an independent lock/score matrix. The first
+    member is exposed as the current cursor for legacy clients; the remaining members are
+    returned through the judge context's pending list with the same frozen context version.
+    """
+
+    locked = _lock_judge_round(round_id, operator)
+    if locked.contest_round.status == ContestRound.Status.LOCKED:
+        raise PermissionDenied("已锁定轮次不能推进表演组。")
+    snapshot = _active_panel_snapshot(locked.contest_round)
+    if snapshot is None or snapshot.state != RoundPanelSnapshot.State.ACTIVE:
+        raise PermissionDenied("评委组未处于可评分状态。")
+    group = (
+        PerformanceGroup._base_manager.select_for_update()
+        .filter(pk=group_id, round=locked.contest_round, activity=locked.activity)
+        .first()
+    )
+    if group is None:
+        raise ValidationError("当前表演组不属于该评委轮次。")
+    performances = list(
+        Performance._base_manager.select_for_update()
+        .filter(group=group)
+        .order_by("sequence", "pk")
+    )
+    if not performances:
+        raise ValidationError("当前表演组没有可评分的独立表演。")
+    run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
+    current_group_id = (
+        Performance._base_manager.filter(pk=run_state.current_performance_id)
+        .values_list("group_id", flat=True)
+        .first()
+        if run_state.current_performance_id
+        else None
+    )
+    context_changed = current_group_id != group.pk
+    next_version = run_state.context_version + 1 if context_changed else run_state.context_version
+    now = timezone.now()
+    score_states = []
+    for performance in performances:
+        score_state = (
+            PerformanceScoreState.objects.select_for_update()
+            .filter(performance=performance)
+            .first()
+        )
+        if score_state is not None and score_state.state == PerformanceScoreState.State.LOCKED:
+            raise PermissionDenied("该表演组已有成员评分锁定，不能重新开放整组评分。")
+        if score_state is None:
+            score_states.append(
+                PerformanceScoreState(
+                    performance=performance,
+                    state=PerformanceScoreState.State.OPEN,
+                    context_version=next_version,
+                    opened_by=locked.operator,
+                    opened_at=now,
+                    is_test_data=locked.activity.is_test_mode,
+                )
+            )
+        else:
+            score_state.state = PerformanceScoreState.State.OPEN
+            score_state.context_version = next_version
+            score_state.opened_by = locked.operator
+            score_state.opened_at = score_state.opened_at or now
+            with authority_write(ROUND_PERFORMANCE_STATE):
+                score_state.save(
+                    update_fields=["state", "context_version", "opened_by", "opened_at"]
+                )
+    if score_states:
+        with authority_write(ROUND_PERFORMANCE_STATE):
+            PerformanceScoreState.objects.bulk_create(score_states)
+    with authority_write(ROUND_PERFORMANCE_STATE):
+        run_state.current_performance = performances[0]
+        run_state.state = PerformanceRunState.State.PERFORMING
+        run_state.context_version = next_version
+        run_state.hold_reason = ""
+        run_state.changed_by = locked.operator
+        run_state.save(
+            update_fields=[
+                "current_performance",
+                "state",
+                "context_version",
+                "hold_reason",
+                "changed_by",
+                "updated_at",
+            ]
+        )
+    _audit(
+        operator=locked.operator,
+        action_type=AuditLog.ActionType.JUDGE_PERF_ADVANCE,
+        target=f"PerformanceRunState:{run_state.pk}",
+        new_value=json.dumps(
+            {
+                "group_id": group.pk,
+                "performance_ids": [performance.pk for performance in performances],
                 "context_version": next_version,
             },
             ensure_ascii=True,

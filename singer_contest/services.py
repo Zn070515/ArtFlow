@@ -3001,6 +3001,13 @@ def _stage_is_checkpoint(version, stage_key: str) -> bool:
     return stage_key in _definition_checkpoint_keys(version.definition)
 
 
+def _configured_podium_stage_key(version) -> str:
+    live_challenge = (_version_binding(version).get("live_challenge") or {})
+    if not isinstance(live_challenge, dict):
+        return ""
+    return str(live_challenge.get("podium_stage_key") or "").strip()
+
+
 def _bound_inputs(version, activity, *, checkpoint=None) -> tuple[ResolveInput, dict]:
     """Rebuild the current :class:`ResolveInput` from the frozen version's binding.
 
@@ -3036,6 +3043,10 @@ def _current_input_fingerprint(version, activity, stage_key: str) -> str:
     the whole-input fingerprint. A mismatch against a stored ``input_fingerprint`` means
     the result is stale.
     """
+    if stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_current_input_fingerprint
+
+        return podium_current_input_fingerprint(version, activity)
     checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
     inputs, _ = _bound_inputs(version, activity, checkpoint=checkpoint)
     if checkpoint:
@@ -3053,6 +3064,15 @@ def _ensure_stage_dependencies_final(version, activity, stage_key: str) -> None:
     """
     from voting.models import VoteSession
 
+    if stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_required_round_ids
+
+        round_ids = podium_required_round_ids(version, activity)
+        if ContestRound.objects.filter(
+            activity=activity, pk__in=round_ids
+        ).exclude(is_locked=True).exists():
+            raise ValidationError("最终冠亚季军依赖的轮次尚未锁定，请先锁定后再核定。")
+        return
     binding = _version_binding(version)
     checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
     round_keys, vote_keys, group_keys, _ = stage_consumed_scopes(version.definition, checkpoint)
@@ -3101,6 +3121,17 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
     onto physical pks via the frozen version's binding.
     """
     version = stage.ruleset_version
+    if stage.stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_required_round_ids
+
+        return {
+            "rounds": set(podium_required_round_ids(version, stage.activity)),
+            "group_stages": set(),
+            "votes": set(),
+            "audience": set(),
+            "manual": set(),
+            "duels": set(),
+        }
     binding = _version_binding(version)
     checkpoint = stage.stage_key if _stage_is_checkpoint(version, stage.stage_key) else None
     round_keys, vote_keys, group_keys, manual_keys = stage_consumed_scopes(
@@ -3490,6 +3521,10 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     require the consumed raw facts to be at rest (rounds/votes locked). Idempotent: a
     re-confirm of an already-locked row returns it as-is.
     """
+    if _configured_podium_stage_key(stage.ruleset_version) == stage.stage_key:
+        from .podium_services import confirm_podium_result
+
+        return confirm_podium_result(stage, confirmed_by=confirmed_by)
     current_actor = require_current_staff(confirmed_by)
     locked_activity = lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
@@ -4064,6 +4099,9 @@ def build_result_closure(activity, *, stage_key: str | None = None) -> ResultClo
         if not stage_keys:
             stage_keys = ((_version_binding(version).get("stage_key") or "").strip(),)
         stage_keys = tuple(key for key in stage_keys if key)
+        podium_key = _configured_podium_stage_key(version)
+        if podium_key and podium_key not in stage_keys:
+            stage_keys = (*stage_keys, podium_key)
         if not stage_keys:
             return ResultClosure(
                 activity_id=activity.pk,

@@ -26,6 +26,7 @@ from .models import (
     ChallengeSession,
     ChallengeTurn,
     ContestRound,
+    Judge,
     Performance,
     PerformanceRunState,
     PerformanceScoreState,
@@ -210,6 +211,35 @@ def _challenge_match_performance(session: ChallengeSession, role: str):
     return match, score_round, performance
 
 
+def _configured_live_judges(
+    session: ChallengeSession, *, ids_key: str, minimum_key: str, label: str
+) -> tuple[list[Judge], int]:
+    config = (session.ruleset_version.binding or {}).get("live_challenge")
+    if not isinstance(config, dict):
+        raise ValidationError("冻结赛制尚未配置现场轮次评委名单。")
+    raw_ids = config.get(ids_key)
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise ValidationError(f"冻结赛制尚未配置{label}评委名单。")
+    try:
+        judge_ids = [int(value) for value in raw_ids]
+        minimum = int(config[minimum_key])
+    except (KeyError, TypeError, ValueError):
+        raise ValidationError(f"冻结赛制的{label}评委配置无效。") from None
+    if any(judge_id < 1 for judge_id in judge_ids) or len(judge_ids) != len(set(judge_ids)):
+        raise ValidationError(f"冻结赛制的{label}评委配置无效。")
+    if not 1 <= minimum <= len(judge_ids):
+        raise ValidationError(f"冻结赛制的{label}最低有效评委数无效。")
+    judges_by_id = {
+        judge.pk: judge
+        for judge in Judge.objects.filter(
+            activity_id=session.activity_id, pk__in=judge_ids, is_active=True
+        )
+    }
+    if set(judges_by_id) != set(judge_ids):
+        raise ValidationError(f"冻结赛制的{label}评委名单包含不存在或未启用的评委。")
+    return [judges_by_id[judge_id] for judge_id in judge_ids], minimum
+
+
 @transaction.atomic
 def advance_challenge_performance(
     session_id: int,
@@ -248,7 +278,10 @@ def advance_challenge_performance(
             performance__round=score_round,
             performance__singer_id=match.challenger_id,
         ).first()
-        if challenger_state is None or challenger_state.state == PerformanceScoreState.State.NOT_OPENED:
+        if (
+            challenger_state is None
+            or challenger_state.state == PerformanceScoreState.State.NOT_OPENED
+        ):
             raise ValidationError("请先开放挑战者评分，再开放守擂者评分。")
     from .judge_authority import advance_performance
 
@@ -309,7 +342,10 @@ def lock_challenge_performance(
             performance__round=score_round,
             performance__singer_id=match.challenger_id,
         ).first()
-        if challenger_state is None or challenger_state.state == PerformanceScoreState.State.NOT_OPENED:
+        if (
+            challenger_state is None
+            or challenger_state.state == PerformanceScoreState.State.NOT_OPENED
+        ):
             raise ValidationError("请先开放挑战者评分，再锁定守擂者评分。")
     from .judge_authority import lock_performance_score
 
@@ -823,12 +859,17 @@ def waive_challenge_turn(
 ) -> ChallengeTurn:
     current_operator, session = _session_for_update(session_id, operator)
     normalized_command = _command_id(command_id)
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise ValidationError("放弃挑战必须填写原因。")
+    if len(normalized_reason) > 240:
+        raise ValidationError("放弃挑战原因不能超过 240 个字符。")
     payload_hash = _hash_payload(
         {
             "operation": "challenge.turn.waive",
             "session_id": session.pk,
             "expected_revision": expected_revision,
-            "reason": reason,
+            "reason": normalized_reason,
         }
     )
     replay = _replay_command(
@@ -844,11 +885,6 @@ def waive_challenge_turn(
     _ensure_session_dependencies_current(session)
     if session.state != ChallengeSession.State.ACTIVE:
         raise PermissionDenied("当前踢馆会话不可放弃挑战。")
-    normalized_reason = str(reason or "").strip()
-    if not normalized_reason:
-        raise ValidationError("放弃挑战必须填写原因。")
-    if len(normalized_reason) > 240:
-        raise ValidationError("放弃挑战原因不能超过 240 个字符。")
     turn = ChallengeTurn.objects.select_for_update().get(
         session=session, sequence=session.current_turn_number
     )
@@ -945,26 +981,26 @@ def prepare_challenge_match(
     if match.status != ChallengeMatch.Status.READY_FOR_SCORING:
         raise ValidationError("当前比赛不在待准备评分阶段。")
     source_round = session.source_round
-    source_judges = list(
-        RoundJudge.objects.filter(round=source_round).select_related("judge").order_by("pk")
+    challenge_judges, minimum_judges = _configured_live_judges(
+        session,
+        ids_key="challenge_judge_ids",
+        minimum_key="challenge_minimum_judge_count",
+        label="挑战轮",
     )
-    if not source_judges:
-        raise ValidationError("踢馆评分必须先配置评委名单。")
     next_sequence = (
         ContestRound.objects.filter(activity=session.activity).aggregate(
             max_sequence=Max("sequence")
         )["max_sequence"]
         or 0
     ) + 1
-    minimum_judges = source_round.minimum_judge_count or len(source_judges)
     with authority_write(CONTEST_ROUND_STATE):
         score_round = ContestRound.objects.create(
             activity=session.activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
             scoring_mode=source_round.scoring_mode,
             score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
-            judge_count=len(source_judges),
-            minimum_judge_count=min(minimum_judges, len(source_judges)),
+            judge_count=len(challenge_judges),
+            minimum_judge_count=minimum_judges,
             name=f"踢馆第 {match.turn.sequence} 场评分",
             sequence=next_sequence,
             order_policy=ContestRound.OrderPolicy.MANUAL,
@@ -979,7 +1015,7 @@ def prepare_challenge_match(
             ]
         )
         RoundJudge.objects.bulk_create(
-            [RoundJudge(round=score_round, judge=row.judge) for row in source_judges]
+            [RoundJudge(round=score_round, judge=judge) for judge in challenge_judges]
         )
         Performance.objects.bulk_create(
             [
@@ -1379,6 +1415,12 @@ def create_final_round_from_challenge(
         raise ValidationError("第三轮名单已经生成，请从轮次页面继续准备。")
     roster = challenge_final_roster(session.pk, activity_id=session.activity_id)
     source_round = ContestRound.objects.select_for_update().get(pk=session.source_round_id)
+    final_judges, minimum_judges = _configured_live_judges(
+        session,
+        ids_key="final_judge_ids",
+        minimum_key="final_minimum_judge_count",
+        label="第三轮",
+    )
     sequence = (
         ContestRound.objects.filter(activity=session.activity).aggregate(
             max_sequence=Max("sequence")
@@ -1391,8 +1433,8 @@ def create_final_round_from_challenge(
             round_type=ContestRound.RoundType.SEMI_FINAL,
             scoring_mode=source_round.scoring_mode,
             score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
-            judge_count=source_round.judge_count,
-            minimum_judge_count=source_round.minimum_judge_count,
+            judge_count=len(final_judges),
+            minimum_judge_count=minimum_judges,
             name="第三轮冠军赛",
             sequence=sequence,
             # The challenge session's third_round_position is the frozen seat order.
@@ -1408,6 +1450,22 @@ def create_final_round_from_challenge(
         RoundEntry.objects.bulk_create(
             [
                 RoundEntry(round=final_round, singer=singer, running_order=index)
+                for index, singer in enumerate(roster, start=1)
+            ]
+        )
+        RoundJudge.objects.bulk_create(
+            [RoundJudge(round=final_round, judge=judge) for judge in final_judges]
+        )
+        Performance.objects.bulk_create(
+            [
+                Performance(
+                    activity=session.activity,
+                    round=final_round,
+                    singer=singer,
+                    sequence=index,
+                    song_title="",
+                    is_test_data=session.is_test_data,
+                )
                 for index, singer in enumerate(roster, start=1)
             ]
         )
