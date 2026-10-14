@@ -137,6 +137,11 @@
         if (result)
             void checkIn(result.getText());
     }).catch(() => {
+        // A manual credential can be submitted while the camera promise is still
+        // settling. Once checkIn() has seen a credential, a late camera failure
+        // must not overwrite the server result with a fallback error message.
+        if (busy || lastCredential)
+            return;
         offerPhotoFallback("无法打开摄像头，请拍照识别或手工输入。", "error");
     });
 })();
