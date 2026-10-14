@@ -486,9 +486,12 @@ class SingerRegistration(models.Model):
             ):
                 raise ValidationError("官方选手编号必须通过编号服务设置。")
         elif not authority_authorized(SINGER_CONTESTANT_NUMBER):
-            stored_number = type(self)._base_manager.filter(pk=self.pk).values_list(
-                "official_number", flat=True
-            ).first()
+            stored_number = (
+                type(self)
+                ._base_manager.filter(pk=self.pk)
+                .values_list("official_number", flat=True)
+                .first()
+            )
             if stored_number != self.official_number:
                 raise ValidationError("官方选手编号必须通过编号服务设置。")
         return super().save(*args, **kwargs)
@@ -849,6 +852,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
         "advance_count",
         "roster_source",
         "roster_source_stage",
+        "roster_source_challenge_session_id",
     }
 )
 
@@ -934,6 +938,7 @@ class ContestRound(models.Model):
     class RosterSource(models.TextChoices):
         APPROVED = "approved", "批准名单"
         STAGE = "stage", "赛段晋级"
+        CHALLENGE_SESSION = "challenge_session", "踢馆核定十强"
         LEGACY = "legacy", "上一轮晋级"
 
     class ScoringMode(models.TextChoices):
@@ -1016,13 +1021,21 @@ class ContestRound(models.Model):
         max_length=16, choices=AdvancementStatus, default=AdvancementStatus.AUTO
     )
     roster_source = models.CharField(
-        max_length=16,
+        max_length=24,
         choices=RosterSource,
         default="",
         blank=True,
         help_text="晋级名单来源；置空时按轮次类型自动判定。",
     )
     roster_source_stage = models.CharField(max_length=100, blank=True, default="")
+    roster_source_challenge_session = models.ForeignKey(
+        "singer_contest.ChallengeSession",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="final_rounds",
+        help_text="第三轮只能读取已核定踢馆会话的十个席位持有人。",
+    )
 
     objects = ContestRoundManager()
 
@@ -1030,6 +1043,7 @@ class ContestRound(models.Model):
         performances: models.Manager["Performance"]
         activity_id: int
         rubric_id: int | None
+        roster_source_challenge_session_id: int | None
         entries: models.Manager["RoundEntry"]
         groups: models.Manager["Group"]
         round_judges: models.Manager["RoundJudge"]
@@ -1143,7 +1157,28 @@ class ContestRound(models.Model):
         if self.roster_source:
             if self.roster_source == self.RosterSource.STAGE and not self.roster_source_stage:
                 raise ValidationError("赛段晋级轮次必须声明 source_stage。")
+            if (
+                self.roster_source == self.RosterSource.CHALLENGE_SESSION
+                and not self.roster_source_challenge_session_id
+            ):
+                raise ValidationError("第三轮必须声明已核定的踢馆会话。")
+            if (
+                self.roster_source == self.RosterSource.CHALLENGE_SESSION
+                and self.roster_source_challenge_session.activity_id != self.activity_id
+            ):
+                raise ValidationError("第三轮踢馆会话必须属于当前活动。")
+            if (
+                self.roster_source != self.RosterSource.CHALLENGE_SESSION
+                and self.roster_source_challenge_session_id
+            ):
+                raise ValidationError("只有踢馆核定十强来源可以填写踢馆会话。")
+            if self.roster_source != self.RosterSource.STAGE and self.roster_source_stage:
+                raise ValidationError("只有赛段晋级来源可以填写上游赛段。")
             return self.roster_source
+        if self.roster_source_challenge_session_id:
+            raise ValidationError("未选择踢馆名单来源，不能填写踢馆会话。")
+        if self.roster_source_stage:
+            raise ValidationError("未选择赛段晋级来源，不能填写上游赛段。")
         if self.round_type == self.RoundType.SEMI_FINAL:
             return self.RosterSource.LEGACY
         return self.RosterSource.APPROVED
@@ -2273,6 +2308,10 @@ class ScoreSummary(models.Model):
     is_test_data = models.BooleanField(default=False)
 
     objects = ScoreSummaryManager()
+
+    if TYPE_CHECKING:
+        round_id: int
+        singer_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -3973,3 +4012,15 @@ class DuelDecision(models.Model):
 
     def __str__(self):
         return f"{self.duel_key} — {self.pair_key}: {self.winner}"
+
+
+# Kept in a focused module so the live-event state machine does not further enlarge this
+# already compatibility-heavy model module.  Importing at the end avoids a circular import:
+# challenge_models reuses the ContestRound and SingerRegistration classes above.
+from .challenge_models import (  # noqa: E402, F401
+    ChallengeCommand,
+    ChallengeMatch,
+    ChallengeSeat,
+    ChallengeSession,
+    ChallengeTurn,
+)

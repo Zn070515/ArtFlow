@@ -234,6 +234,15 @@ def _round_source_singers(contest_round: ContestRound) -> list[SingerRegistratio
     source = contest_round.effective_roster_source()
     if source == ContestRound.RosterSource.APPROVED:
         return list(runtime_approved_singers(contest_round.activity).order_by("pk"))
+    if source == ContestRound.RosterSource.CHALLENGE_SESSION:
+        if contest_round.roster_source_challenge_session_id is None:
+            raise ValidationError("第三轮尚未绑定已核定的踢馆会话。")
+        from .challenge_services import challenge_final_roster
+
+        return challenge_final_roster(
+            contest_round.roster_source_challenge_session_id,
+            activity_id=contest_round.activity_id,
+        )
     if source == ContestRound.RosterSource.LEGACY:
         previous_round = (
             ContestRound.objects.filter(activity=contest_round.activity)
@@ -355,6 +364,41 @@ class RoundSetupReadiness(StrEnum):
 
 def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
     """Return the single readiness state shared by round setup reads and writes."""
+    if contest_round.roster_source == ContestRound.RosterSource.CHALLENGE_SESSION:
+        session_id = contest_round.roster_source_challenge_session_id
+        if not session_id:
+            return RoundSetupReadiness.MISSING_UPSTREAM
+        from .models import ChallengeSession
+
+        session = (
+            ChallengeSession._base_manager.filter(
+                pk=session_id,
+                activity_id=contest_round.activity_id,
+            )
+            .select_related("ruleset_version")
+            .first()
+        )
+        if session is None:
+            return RoundSetupReadiness.MISSING_UPSTREAM
+        if session.state != ChallengeSession.State.CONFIRMED:
+            return RoundSetupReadiness.WAITING_FOR_UPSTREAM_CONFIRMATION
+        current_version = _current_frozen_version(contest_round.activity)
+        if current_version is None or session.ruleset_version_id != current_version.pk:
+            return RoundSetupReadiness.UNBOUND_TO_FROZEN_RULESET
+        try:
+            from .challenge_services import challenge_final_roster
+
+            expected_ids = {singer.pk for singer in challenge_final_roster(session.pk)}
+        except ValidationError:
+            return RoundSetupReadiness.STALE
+        entry_ids = set(
+            RoundEntry.objects.filter(round=contest_round).values_list("singer_id", flat=True)
+        )
+        if not entry_ids:
+            if Performance.objects.filter(round=contest_round).exists():
+                return RoundSetupReadiness.STALE
+            return RoundSetupReadiness.MATERIALIZATION_REQUIRED
+        return RoundSetupReadiness.READY if entry_ids == expected_ids else RoundSetupReadiness.STALE
     if contest_round.roster_source != ContestRound.RosterSource.STAGE:
         return RoundSetupReadiness.READY
     stage_key = (contest_round.roster_source_stage or "").strip()
@@ -452,10 +496,14 @@ def set_official_contestant_number(
         raise PermissionDenied("选手不属于当前活动。")
     if registration.official_number == official_number:
         return registration
-    if SingerRegistration.objects.filter(
-        activity=registration.activity,
-        official_number=official_number,
-    ).exclude(pk=registration.pk).exists():
+    if (
+        SingerRegistration.objects.filter(
+            activity=registration.activity,
+            official_number=official_number,
+        )
+        .exclude(pk=registration.pk)
+        .exists()
+    ):
         raise ValidationError("同一活动内官方选手编号不能重复。")
 
     affected_rounds = list(
@@ -1277,9 +1325,7 @@ def score_completeness_for_round(
         else contest_round.minimum_judge_count or expected_judge_count
     )
     completion_mode = (
-        snapshot.completion_mode
-        if snapshot is not None
-        else contest_round.score_completion_mode
+        snapshot.completion_mode if snapshot is not None else contest_round.score_completion_mode
     )
     score_counts = dict(
         ScoreRecord.objects.filter(

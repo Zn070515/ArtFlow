@@ -237,6 +237,7 @@ class MaterialCheck(models.Model):
 
     if TYPE_CHECKING:
         group_id: int | None
+        singer_registration_id: int | None
     program = models.ForeignKey(
         "farewell_show.Program",
         on_delete=models.CASCADE,

@@ -45,6 +45,8 @@ from realtime.events import schedule_judge_context_event
 
 from .judge_entry import judge_entry_activity, judge_entry_authorizes_activity
 from .models import (
+    ChallengeMatch,
+    ChallengeSession,
     ContestRound,
     CriterionScore,
     Judge,
@@ -826,9 +828,7 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
     if context_changed:
         next_version += 1
     score_state = (
-        PerformanceScoreState.objects.select_for_update()
-        .filter(performance=performance)
-        .first()
+        PerformanceScoreState.objects.select_for_update().filter(performance=performance).first()
     )
     if score_state is not None and score_state.state == PerformanceScoreState.State.LOCKED:
         raise PermissionDenied("该表演评分已锁定，不能重新开放。")
@@ -893,15 +893,11 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
     return run_state
 
 
-def _performance_score_completeness(
-    contest_round: ContestRound, performance: Performance
-):
+def _performance_score_completeness(contest_round: ContestRound, performance: Performance):
     snapshot = _current_panel_snapshot(contest_round)
     if snapshot is None:
         raise PermissionDenied("评委组尚未准备，不能锁定表演评分。")
-    judge_ids = list(
-        snapshot.members.filter(is_active=True).values_list("judge_id", flat=True)
-    )
+    judge_ids = list(snapshot.members.filter(is_active=True).values_list("judge_id", flat=True))
     valid_score_count = ScoreRecord._base_manager.filter(
         round=contest_round,
         singer_id=performance.singer_id,
@@ -952,9 +948,7 @@ def lock_performance_score(
     if performance is None:
         raise ValidationError("PERFORMANCE_NOT_SCORABLE")
     score_state = (
-        PerformanceScoreState.objects.select_for_update()
-        .filter(performance=performance)
-        .first()
+        PerformanceScoreState.objects.select_for_update().filter(performance=performance).first()
     )
     if score_state is None or score_state.state == PerformanceScoreState.State.NOT_OPENED:
         raise ValidationError("表演评分尚未开放。")
@@ -1494,6 +1488,123 @@ def _validate_expected_context(value: object, *, field: str) -> int:
     return value
 
 
+def _challenge_judge_binding(
+    raw_ephemeral_token: str,
+    *,
+    locked: LockedJudgeTransport,
+    target_round: ContestRound,
+):
+    """Reuse the original judge seat for a dynamic challenge scoring round.
+
+    The QR session remains bound to the first-round entry point.  The target round gets a
+    fresh panel snapshot, and the judge identity is matched to that snapshot under the
+    activity lock; no new scan or browser credential is created for each match.
+    """
+    transport = authenticate_ephemeral_session(
+        raw_ephemeral_token,
+        expected_kind=EntryPoint.Kind.JUDGE,
+        activity=locked.activity,
+        round=locked.contest_round,
+    )
+    source_session = (
+        JudgeSession._base_manager.select_for_update()
+        .select_related("seat__panel_member", "panel_snapshot")
+        .filter(ephemeral_session_id=transport.pk)
+        .first()
+    )
+    if source_session is None or source_session.state != JudgeSession.State.ACTIVE:
+        raise ValidationError("评委访问会话无效。")
+    if source_session.expires_at <= timezone.now():
+        raise ValidationError("评委访问会话无效。")
+    source_seat = JudgeSeat._base_manager.select_for_update().get(pk=source_session.seat_id)
+    if source_seat.state != JudgeSeat.State.ASSIGNED:
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
+    snapshot = (
+        RoundPanelSnapshot._base_manager.select_for_update()
+        .filter(round=target_round, state=RoundPanelSnapshot.State.ACTIVE)
+        .order_by("-version")
+        .first()
+    )
+    if snapshot is None:
+        raise ValidationError("评委组尚未准备，不能提交踢馆评分。")
+    member = (
+        RoundPanelSnapshotMember._base_manager.select_for_update()
+        .filter(
+            panel_snapshot=snapshot,
+            judge_id=source_seat.panel_member.judge_id,
+            is_active=True,
+        )
+        .first()
+    )
+    if member is None:
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
+    target_seat = (
+        JudgeSeat._base_manager.select_for_update()
+        .filter(panel_member=member, state=JudgeSeat.State.ASSIGNED)
+        .first()
+    )
+    if target_seat is None:
+        raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
+    with authority_write(JUDGE_SESSION_STATE):
+        source_session.last_seen_at = timezone.now()
+        source_session.save(update_fields=["last_seen_at"])
+    return source_session, snapshot, target_seat
+
+
+def _current_challenge_target(session: JudgeSession):
+    """Resolve the current dynamic challenge round for an already scanned judge."""
+    challenge = (
+        ChallengeSession._base_manager.filter(
+            activity_id=session.panel_snapshot.activity_id,
+            source_round_id=session.panel_snapshot.round_id,
+            state=ChallengeSession.State.ACTIVE,
+        )
+        .order_by("-pk")
+        .first()
+    )
+    if challenge is None:
+        return None
+    turn = (
+        challenge.turns.select_related("match")
+        .filter(sequence=challenge.current_turn_number)
+        .first()
+    )
+    if turn is None or not hasattr(turn, "match") or not turn.match.score_round_id:
+        return None
+    match = turn.match
+    target_round = ContestRound._base_manager.filter(
+        pk=match.score_round_id,
+        activity_id=session.panel_snapshot.activity_id,
+    ).first()
+    if target_round is None or target_round.status == ContestRound.Status.LOCKED:
+        return None
+    return target_round
+
+
+def _challenge_context_binding_readonly(session: JudgeSession):
+    target_round = _current_challenge_target(session)
+    if target_round is None:
+        return None
+    snapshot = (
+        RoundPanelSnapshot._base_manager.filter(
+            round=target_round,
+            state=RoundPanelSnapshot.State.ACTIVE,
+        )
+        .order_by("-version")
+        .first()
+    )
+    if snapshot is None:
+        return None
+    judge_id = session.seat.panel_member.judge_id
+    member = snapshot.members.filter(judge_id=judge_id, is_active=True).first()
+    if member is None:
+        return None
+    seat = member.seats.filter(state=JudgeSeat.State.ASSIGNED).first()
+    if seat is None:
+        return None
+    return target_round, snapshot, seat
+
+
 @transaction.atomic
 def submit_judge_score(
     raw_ephemeral_token: str,
@@ -1511,18 +1622,55 @@ def submit_judge_score(
         expected_performance_id, field="expected_performance_id"
     )
     normalized_command_id = _validate_command_id(command_id)
+    performance_hint = (
+        Performance._base_manager.select_related("round")
+        .filter(pk=performance_id, activity=locked.activity)
+        .first()
+    )
+    challenge_match = (
+        ChallengeMatch._base_manager.select_related("score_round")
+        .filter(score_round_id=getattr(performance_hint, "round_id", None))
+        .exclude(status=ChallengeMatch.Status.REVOKED)
+        .first()
+        if performance_hint is not None
+        else None
+    )
+    challenge_session = None
+    challenge_binding = None
+    if challenge_match is not None and challenge_match.score_round_id:
+        challenge_session = (
+            ChallengeSession._base_manager.select_related("source_round")
+            .filter(pk=challenge_match.session_id)
+            .first()
+        )
+        if challenge_session is None or challenge_session.activity_id != locked.activity.pk:
+            raise ValidationError("评委访问会话无效。")
+        assert performance_hint is not None
+        source_transport = locked
+        locked = LockedJudgeTransport(
+            activity=locked.activity,
+            contest_round=performance_hint.round,
+        )
+        challenge_binding = _challenge_judge_binding(
+            raw_ephemeral_token,
+            locked=source_transport,
+            target_round=locked.contest_round,
+        )
     normalized_payload = _normalize_judge_score_payload(
         score_payload, contest_round=locked.contest_round
     )
 
     run_state = PerformanceRunState.objects.select_for_update().get(round=locked.contest_round)
-    session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
-    snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=session.panel_snapshot_id)
-    seat = (
-        JudgeSeat.objects.select_for_update()
-        .select_related("panel_member__panel_snapshot")
-        .get(pk=session.seat_id)
-    )
+    if challenge_binding is not None:
+        session, snapshot, seat = challenge_binding
+    else:
+        session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
+        snapshot = RoundPanelSnapshot.objects.select_for_update().get(pk=session.panel_snapshot_id)
+        seat = (
+            JudgeSeat.objects.select_for_update()
+            .select_related("panel_member__panel_snapshot")
+            .get(pk=session.seat_id)
+        )
     if seat.state != JudgeSeat.State.ASSIGNED:
         raise JudgePanelChanged("PANEL_CHANGED_MID_ROUND")
     performance = (
@@ -1581,9 +1729,7 @@ def submit_judge_score(
     }:
         raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
     score_state = (
-        PerformanceScoreState.objects.select_for_update()
-        .filter(performance=performance)
-        .first()
+        PerformanceScoreState.objects.select_for_update().filter(performance=performance).first()
     )
     if score_state is None or score_state.state == PerformanceScoreState.State.NOT_OPENED:
         raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
@@ -1763,9 +1909,7 @@ def _submit_staff_bound_score(
     }:
         raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
     score_state = (
-        PerformanceScoreState.objects.select_for_update()
-        .filter(performance=performance)
-        .first()
+        PerformanceScoreState.objects.select_for_update().filter(performance=performance).first()
     )
     if score_state is None or score_state.state == PerformanceScoreState.State.NOT_OPENED:
         raise JudgePerformanceNotScorable("PERFORMANCE_NOT_SCORABLE")
@@ -1894,7 +2038,34 @@ def submit_paper_score(
 @transaction.atomic
 def get_judge_context(raw_ephemeral_token: str) -> JudgeContext:
     locked = _locked_judge_transport(raw_ephemeral_token)
-    session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
+    try:
+        session = _authenticate_judge_session_locked(raw_ephemeral_token, locked)
+    except ValidationError:
+        source_session = (
+            JudgeSession._base_manager.select_related("seat__panel_member", "panel_snapshot")
+            .filter(ephemeral_session__token_digest=_ephemeral_token_digest(raw_ephemeral_token))
+            .first()
+        )
+        target_round = _current_challenge_target(source_session) if source_session else None
+        if source_session is None or target_round is None:
+            raise
+        session, snapshot, seat = _challenge_judge_binding(
+            raw_ephemeral_token,
+            locked=locked,
+            target_round=target_round,
+        )
+        run_state = (
+            PerformanceRunState.objects.select_for_update().filter(round_id=target_round.pk).first()
+        )
+        if run_state is None:
+            raise ValidationError("评委现场上下文尚未建立。")
+        return _build_judge_context(
+            session,
+            run_state,
+            contest_round=target_round,
+            snapshot=snapshot,
+            seat=seat,
+        )
     run_state = (
         PerformanceRunState.objects.select_for_update()
         .filter(round_id=session.panel_snapshot.round_id)
@@ -1916,7 +2087,28 @@ def get_judge_context_readonly(raw_ephemeral_token: str) -> JudgeContext:
     takes its full lock protocol.
     """
     transport = _judge_context_transport_readonly(raw_ephemeral_token)
-    session = _authenticate_judge_session_readonly(transport)
+    try:
+        session = _authenticate_judge_session_readonly(transport)
+    except ValidationError:
+        session = (
+            JudgeSession._base_manager.select_related("seat__panel_member", "panel_snapshot")
+            .filter(ephemeral_session_id=transport.ephemeral_session.pk)
+            .first()
+        )
+        binding = _challenge_context_binding_readonly(session) if session else None
+        if session is None or binding is None:
+            raise
+        target_round, snapshot, seat = binding
+        run_state = PerformanceRunState.objects.filter(round_id=target_round.pk).first()
+        if run_state is None:
+            raise ValidationError("评委现场上下文尚未建立。")
+        return _build_judge_context(
+            session,
+            run_state,
+            contest_round=target_round,
+            snapshot=snapshot,
+            seat=seat,
+        )
     if session is None:
         return get_judge_context(raw_ephemeral_token)
     run_state = PerformanceRunState.objects.filter(round_id=session.panel_snapshot.round_id).first()
@@ -1925,8 +2117,17 @@ def get_judge_context_readonly(raw_ephemeral_token: str) -> JudgeContext:
     return _build_judge_context(session, run_state)
 
 
-def _build_judge_context(session: JudgeSession, run_state: PerformanceRunState) -> JudgeContext:
-    contest_round = session.panel_snapshot.round
+def _build_judge_context(
+    session: JudgeSession,
+    run_state: PerformanceRunState,
+    *,
+    contest_round: ContestRound | None = None,
+    snapshot: RoundPanelSnapshot | None = None,
+    seat: JudgeSeat | None = None,
+) -> JudgeContext:
+    contest_round = contest_round or session.panel_snapshot.round
+    snapshot = snapshot or session.panel_snapshot
+    seat = seat or session.seat
     performance = None
     score_state = None
     if run_state.current_performance_id is not None:
@@ -1934,8 +2135,8 @@ def _build_judge_context(session: JudgeSession, run_state: PerformanceRunState) 
             Performance._base_manager.select_related("singer")
             .filter(
                 pk=run_state.current_performance_id,
-                round_id=session.panel_snapshot.round_id,
-                activity_id=session.panel_snapshot.activity_id,
+                round_id=contest_round.pk,
+                activity_id=contest_round.activity_id,
             )
             .first()
         )
@@ -1962,13 +2163,11 @@ def _build_judge_context(session: JudgeSession, run_state: PerformanceRunState) 
     pending_query = PerformanceScoreState._base_manager.select_related(
         "performance__singer"
     ).filter(
-        performance__round_id=session.panel_snapshot.round_id,
+        performance__round_id=contest_round.pk,
         state=PerformanceScoreState.State.OPEN,
     )
     if run_state.current_performance_id is not None:
-        pending_query = pending_query.exclude(
-            performance_id=run_state.current_performance_id
-        )
+        pending_query = pending_query.exclude(performance_id=run_state.current_performance_id)
     pending_performances = tuple(
         PendingPerformance(
             performance_id=score_state.performance_id,
@@ -1981,21 +2180,16 @@ def _build_judge_context(session: JudgeSession, run_state: PerformanceRunState) 
         for score_state in pending_query.order_by("performance__sequence", "performance_id")
     )
     return JudgeContext(
-        activity_id=session.panel_snapshot.activity_id,
+        activity_id=contest_round.activity_id,
         activity_name=session.panel_snapshot.activity.title,
         round_id=session.panel_snapshot.round_id,
         round_name=contest_round.name or contest_round.get_round_type_display(),
-        seat_id=session.seat_id,
-        seat_label=(
-            session.seat.display_label.strip()
-            or session.seat.panel_member.seat_key.replace("seat-", "J")
-        ),
-        panel_snapshot_id=session.panel_snapshot_id,
-        panel_version=session.panel_snapshot.version,
+        seat_id=seat.pk,
+        seat_label=(seat.display_label.strip() or seat.panel_member.seat_key.replace("seat-", "J")),
+        panel_snapshot_id=snapshot.pk,
+        panel_version=snapshot.version,
         context_version=(
-            score_state.context_version
-            if score_state is not None
-            else run_state.context_version
+            score_state.context_version if score_state is not None else run_state.context_version
         ),
         performance_id=run_state.current_performance_id,
         performance_label=(f"第 {performance.sequence} 个节目" if performance else None),
