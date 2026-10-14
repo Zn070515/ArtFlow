@@ -3220,7 +3220,12 @@ def _judge_control_context(
         {
             "group": group,
             "performances": [
-                row for row in performance_rows if row["performance"].group_id == group.pk
+                {
+                    "performance": performance,
+                    "score_state": performance_score_states.get(performance.pk),
+                }
+                for performance in performances
+                if performance.group_id == group.pk
             ],
         }
         for group in PerformanceGroup._base_manager.filter(round=contest_round).order_by(

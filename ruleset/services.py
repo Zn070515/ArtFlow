@@ -22,6 +22,7 @@ import json
 from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation
+from typing import cast
 
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import (
@@ -428,9 +429,9 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     if missing_rounds:
         raise ValidationError(f"赛制绑定的比赛轮次不属于该活动：{missing_rounds}")
 
-    challenge_judge_ids = live_challenge.get("challenge_judge_ids")
-    final_judge_ids = live_challenge.get("final_judge_ids")
-    judge_ids = set()
+    challenge_judge_ids = cast(list[int], live_challenge.get("challenge_judge_ids", []))
+    final_judge_ids = cast(list[int], live_challenge.get("final_judge_ids", []))
+    judge_ids: set[int] = set()
     if isinstance(challenge_judge_ids, list):
         judge_ids.update(challenge_judge_ids)
     if isinstance(final_judge_ids, list):
@@ -444,9 +445,11 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
                 is_active=True,
             )
         }
-        missing_judges = sorted(judge_ids - owned_judges)
-        if missing_judges:
-            raise ValidationError(f"现场轮次评委不存在、未启用或不属于该活动：{missing_judges}")
+        missing_bound_judges = sorted(judge_ids - owned_judges)
+        if missing_bound_judges:
+            raise ValidationError(
+                f"现场轮次评委不存在、未启用或不属于该活动：{missing_bound_judges}"
+            )
 
     vote_ids = list(vote_keys.values())
     owned_votes = {

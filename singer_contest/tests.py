@@ -4130,6 +4130,7 @@ class StageResolverBindingTests(TestCase):
             round_keys={"r1": self.round},
             preview=False,
         )
+        assert isinstance(stage, StageResult)
 
         confirmed = confirm_stage_result(stage, confirmed_by=staff)
 
