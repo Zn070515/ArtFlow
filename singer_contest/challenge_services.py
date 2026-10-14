@@ -594,10 +594,11 @@ def confirm_challenge_pairing(
     _ensure_session_dependencies_current(session)
     if session.state != ChallengeSession.State.ACTIVE:
         raise PermissionDenied("当前踢馆会话不可确认配对。")
-    turn = (
-        ChallengeTurn.objects.select_for_update()
-        .select_related("target_seat")
-        .get(session=session, sequence=session.current_turn_number)
+    # PostgreSQL rejects FOR UPDATE on the nullable side of the outer join that
+    # select_related() would generate for target_seat. The target is locked below
+    # after the turn lock, so there is no need to join it into this query.
+    turn = ChallengeTurn.objects.select_for_update().get(
+        session=session, sequence=session.current_turn_number
     )
     if turn.state != ChallengeTurn.State.TARGET_SELECTED or turn.target_seat is None:
         raise ValidationError("请先记录挑战对象。")
@@ -888,7 +889,6 @@ def lock_challenge_match_scores(
     _ensure_session_dependencies_current(session)
     match = (
         ChallengeMatch.objects.select_for_update()
-        .select_related("score_round", "turn")
         .filter(session=session, turn__sequence=session.current_turn_number)
         .first()
     )
@@ -969,7 +969,6 @@ def confirm_challenge_match_result(
     _ensure_session_dependencies_current(session)
     match = (
         ChallengeMatch.objects.select_for_update()
-        .select_related("score_round", "turn", "seat", "challenger", "defender")
         .filter(session=session, turn__sequence=session.current_turn_number)
         .first()
     )
