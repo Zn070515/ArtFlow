@@ -5594,6 +5594,9 @@ def ruleset_edit(request, pk):
                 live_challenge[weight_key] = f"{Decimal(str(live_challenge[weight_key])) * 100:g}%"
             except (InvalidOperation, ValueError):
                 pass
+    live_judges = list(
+        Judge.objects.filter(activity=ruleset.activity, is_active=True).order_by("name", "pk")
+    )
     return render(
         request,
         "staff_panel/ruleset_editor.html",
@@ -5625,6 +5628,7 @@ def ruleset_edit(request, pk):
                 ),
             },
             "live_challenge": live_challenge,
+            "live_judges": live_judges,
             "binding_signature": _binding_signature(ruleset),
             "binding_maps": binding_maps,
             "human_summary": human_summary,
@@ -5673,76 +5677,60 @@ def ruleset_bind(request, pk):
         if not isinstance(base_live_challenge, dict):
             raise ValidationError("base_live_challenge 不是合法 JSON。")
 
+        live_enabled = request.POST.get("live_format_key") == "2026_live_challenge"
+
         def _live_value(post_name, key):
             value = (request.POST.get(post_name) or "").strip()
             return value if value else base_live_challenge.get(key, "")
 
         def _judge_id_list(post_name, key):
-            raw = (request.POST.get(post_name) or "").strip()
-            if not raw:
-                return base_live_challenge.get(key, [])
-            return [item.strip() for item in raw.split(",") if item.strip()]
+            values = request.POST.getlist(post_name)
+            if live_enabled:
+                return [
+                    item.strip() for value in values for item in value.split(",") if item.strip()
+                ]
+            if values:
+                return [
+                    item.strip() for value in values for item in value.split(",") if item.strip()
+                ]
+            if request.POST.get(post_name) is not None:
+                return []
+            return base_live_challenge.get(key, [])
 
-        live_field_names = (
-            "live_format_key",
-            "live_participant_count",
-            "live_seat_count",
-            "live_challenge_count",
-            "live_first_weight",
-            "live_challenge_weight",
-            "live_podium_stage_key",
-            "live_podium_first_round_key",
-            "live_podium_third_round_key",
-            "live_podium_aggregate_node",
-            "live_podium_first_weight",
-            "live_podium_third_weight",
-            "live_challenge_judge_ids",
-            "live_challenge_minimum_judges",
-            "live_final_judge_ids",
-            "live_final_minimum_judges",
-        )
-        has_live_config = any(request.POST.get(name) for name in live_field_names)
-        live_challenge_binding = {
-            "format_key": _live_value("live_format_key", "format_key") or "2026_live_challenge",
-            "participant_count": request.POST.get("live_participant_count") or "",
-            "seat_count": request.POST.get("live_seat_count") or "",
-            "challenge_count": request.POST.get("live_challenge_count") or "",
-            "first_round_weight": request.POST.get("live_first_weight") or "",
-            "challenge_round_weight": request.POST.get("live_challenge_weight") or "",
-            "order_policy": "official_number",
-        }
-        advanced_live_fields = {
-            "podium_stage_key": _live_value("live_podium_stage_key", "podium_stage_key"),
-            "podium_first_round_key": _live_value(
-                "live_podium_first_round_key", "podium_first_round_key"
-            ),
-            "podium_third_round_key": _live_value(
-                "live_podium_third_round_key", "podium_third_round_key"
-            ),
-            "podium_aggregate_node": _live_value(
-                "live_podium_aggregate_node", "podium_aggregate_node"
-            ),
-            "podium_first_round_weight": _live_value(
-                "live_podium_first_weight", "podium_first_round_weight"
-            ),
-            "podium_third_round_weight": _live_value(
-                "live_podium_third_weight", "podium_third_round_weight"
-            ),
-            "challenge_judge_ids": _judge_id_list(
-                "live_challenge_judge_ids", "challenge_judge_ids"
-            ),
-            "challenge_minimum_judge_count": _live_value(
-                "live_challenge_minimum_judges", "challenge_minimum_judge_count"
-            ),
-            "final_judge_ids": _judge_id_list("live_final_judge_ids", "final_judge_ids"),
-            "final_minimum_judge_count": _live_value(
-                "live_final_minimum_judges", "final_minimum_judge_count"
-            ),
-        }
-        if any(value for value in advanced_live_fields.values()) or any(
-            key in base_live_challenge for key in advanced_live_fields
-        ):
-            live_challenge_binding.update(advanced_live_fields)
+        live_challenge_binding = {}
+        if live_enabled:
+            live_challenge_binding = {
+                "format_key": "2026_live_challenge",
+                "participant_count": _live_value("live_participant_count", "participant_count"),
+                "seat_count": _live_value("live_seat_count", "seat_count"),
+                "challenge_count": _live_value("live_challenge_count", "challenge_count"),
+                "first_round_weight": _live_value("live_first_weight", "first_round_weight"),
+                "challenge_round_weight": _live_value(
+                    "live_challenge_weight", "challenge_round_weight"
+                ),
+                "order_policy": "official_number",
+                # These are product invariants, not operator-configurable DSL keys.
+                "podium_stage_key": "final_podium",
+                "podium_first_round_key": "r1",
+                "podium_third_round_key": "r3",
+                "podium_aggregate_node": "podium_total",
+                "podium_first_round_weight": _live_value(
+                    "live_podium_first_weight", "podium_first_round_weight"
+                ),
+                "podium_third_round_weight": _live_value(
+                    "live_podium_third_weight", "podium_third_round_weight"
+                ),
+                "challenge_judge_ids": _judge_id_list(
+                    "live_challenge_judge_ids", "challenge_judge_ids"
+                ),
+                "challenge_minimum_judge_count": _live_value(
+                    "live_challenge_minimum_judges", "challenge_minimum_judge_count"
+                ),
+                "final_judge_ids": _judge_id_list("live_final_judge_ids", "final_judge_ids"),
+                "final_minimum_judge_count": _live_value(
+                    "live_final_minimum_judges", "final_minimum_judge_count"
+                ),
+            }
 
         update_ruleset_binding(
             version.ruleset,
@@ -5767,7 +5755,7 @@ def ruleset_bind(request, pk):
                     {},
                 ),
                 "audience_keys": _parse_json("audience_keys", {}),
-                "live_challenge": live_challenge_binding if has_live_config else {},
+                "live_challenge": live_challenge_binding,
                 "announcement_blocks": _parse_json("announcement_blocks", []),
                 "announcement_blocks_by_checkpoint": _parse_json(
                     "announcement_blocks_by_checkpoint", {}

@@ -432,7 +432,7 @@
             {% endfor %}
             <details class="sm:col-span-2 border border-brand/30 bg-blue-50 rounded p-3" open>
                 <summary class="cursor-pointer text-sm font-semibold text-brand">2026 现场挑战配置</summary>
-                <p class="text-xs text-gray-600 mt-2">选择 2026 现场赛制后，冻结会强制校验选手问卷、R2/R3 歌曲与伴奏、统一评分标准和无观众分依赖。</p>
+                <p class="text-xs text-gray-600 mt-2">选择 2026 现场赛制后，冻结会强制校验选手问卷、第二轮与第三轮歌曲/伴奏、统一算术平均评分和无观众分依赖。第二轮、第三轮材料会在现场流程需要时生成对应评分轮。</p>
                 <label class="block text-xs text-gray-700 mt-3">现场赛制类型
                     <select name="live_format_key" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
                         <option value=""{% if not live_challenge %} selected{% endif %}>不启用现场挑战</option>
@@ -446,17 +446,29 @@
                     <label class="text-xs text-gray-700">第一轮权重<input name="live_first_weight" value="{{ live_challenge.first_round_weight|default:'' }}" placeholder="40%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                     <label class="text-xs text-gray-700">挑战轮权重<input name="live_challenge_weight" value="{{ live_challenge.challenge_round_weight|default:'' }}" placeholder="60%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                 </div>
-                <div class="grid sm:grid-cols-4 gap-3 mt-3 border-t border-blue-200 pt-3">
-                    <label class="text-xs text-gray-700">冠亚季军赛段键<input name="live_podium_stage_key" value="{{ live_challenge.podium_stage_key|default:'' }}" placeholder="final_podium" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">第一轮绑定键<input name="live_podium_first_round_key" value="{{ live_challenge.podium_first_round_key|default:'' }}" placeholder="first_round" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">第三轮标识键<input name="live_podium_third_round_key" value="{{ live_challenge.podium_third_round_key|default:'' }}" placeholder="third_round" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">加权节点键<input name="live_podium_aggregate_node" value="{{ live_challenge.podium_aggregate_node|default:'' }}" placeholder="podium_total" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">第一轮权重<input name="live_podium_first_weight" value="{{ live_challenge.podium_first_round_weight|default:'' }}" placeholder="30%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">第三轮权重<input name="live_podium_third_weight" value="{{ live_challenge.podium_third_round_weight|default:'' }}" placeholder="70%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700 sm:col-span-2">挑战轮评委 ID（逗号分隔）<input name="live_challenge_judge_ids" value="{{ live_challenge.challenge_judge_ids|join:',' }}" placeholder="1,2,3,4" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">挑战轮最低人数<input name="live_challenge_minimum_judges" value="{{ live_challenge.challenge_minimum_judge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700 sm:col-span-2">第三轮评委 ID（逗号分隔）<input name="live_final_judge_ids" value="{{ live_challenge.final_judge_ids|join:',' }}" placeholder="5,6,7,8" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">第三轮最低人数<input name="live_final_minimum_judges" value="{{ live_challenge.final_minimum_judge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                <div class="grid sm:grid-cols-3 gap-3 mt-3 border-t border-blue-200 pt-3">
+                    <div class="sm:col-span-3 text-xs text-gray-600">冠亚季军正式成绩 = 第一轮成绩 × 第一轮权重 + 第三轮成绩 × 第三轮权重；权重在创建赛制时确定，冻结后不可改变。</div>
+                    <label class="text-xs text-gray-700">冠亚季军第一轮权重<input name="live_podium_first_weight" value="{{ live_challenge.podium_first_round_weight|default:'' }}" placeholder="30%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">冠亚季军第三轮权重<input name="live_podium_third_weight" value="{{ live_challenge.podium_third_round_weight|default:'' }}" placeholder="70%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <div class="text-xs text-gray-500 self-end">系统固定使用第一轮、第三轮和冠亚季军加权结果。</div>
+                    <fieldset class="sm:col-span-3">
+                        <legend class="text-xs font-semibold text-gray-700">挑战轮评委</legend>
+                        <div class="grid sm:grid-cols-4 gap-2 mt-1">
+                            {% for judge in live_judges %}
+                            <label class="inline-flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" name="live_challenge_judge_ids" value="{{ judge.pk }}"{% if judge.pk in live_challenge.challenge_judge_ids %} checked{% endif %}>{{ judge.name }}</label>
+                            {% empty %}<span class="text-xs text-gray-500">当前活动还没有启用的评委。</span>{% endfor %}
+                        </div>
+                    </fieldset>
+                    <label class="text-xs text-gray-700">挑战轮最低有效评委数<input name="live_challenge_minimum_judges" value="{{ live_challenge.challenge_minimum_judge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <fieldset class="sm:col-span-2">
+                        <legend class="text-xs font-semibold text-gray-700">第三轮评委</legend>
+                        <div class="grid sm:grid-cols-3 gap-2 mt-1">
+                            {% for judge in live_judges %}
+                            <label class="inline-flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" name="live_final_judge_ids" value="{{ judge.pk }}"{% if judge.pk in live_challenge.final_judge_ids %} checked{% endif %}>{{ judge.name }}</label>
+                            {% empty %}<span class="text-xs text-gray-500">当前活动还没有启用的评委。</span>{% endfor %}
+                        </div>
+                    </fieldset>
+                    <label class="text-xs text-gray-700">第三轮最低有效评委数<input name="live_final_minimum_judges" value="{{ live_challenge.final_minimum_judge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                 </div>
                 <input type="hidden" name="base_live_challenge" value="{{ binding_json.live_challenge|escape }}">
             </details>

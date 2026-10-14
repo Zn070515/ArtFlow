@@ -8574,6 +8574,47 @@ class RulesetEditorTests(TestCase):
         self.assertNotContains(response, ">hundred<")
         self.assertNotContains(response, ">mean<")
 
+    def test_live_editor_uses_judge_names_and_hides_technical_keys(self):
+        from singer_contest.models import Judge
+
+        Judge.objects.create(activity=self.activity, name="王评委", is_active=True)
+        Judge.objects.create(activity=self.activity, name="李评委", is_active=True)
+        response = self.client.get(reverse("staff:ruleset_edit", args=[self.version.pk]))
+
+        self.assertContains(response, "王评委")
+        self.assertContains(response, "李评委")
+        self.assertNotContains(response, "挑战轮评委 ID（逗号分隔）")
+        self.assertNotContains(response, 'name="live_podium_stage_key"')
+        self.assertNotContains(response, 'name="live_podium_aggregate_node"')
+
+    def test_disabling_live_editor_clears_stale_configuration(self):
+        self.ruleset.live_challenge = {
+            "format_key": "2026_live_challenge",
+            "participant_count": 15,
+            "seat_count": 10,
+            "challenge_count": 5,
+            "first_round_weight": "0.4000",
+            "challenge_round_weight": "0.6000",
+        }
+        self.ruleset.save(update_fields=["live_challenge"])
+
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {
+                "live_format_key": "",
+                "live_participant_count": "15",
+                "live_seat_count": "10",
+                "live_challenge_count": "5",
+                "live_first_weight": "40%",
+                "live_challenge_weight": "60%",
+                "base_live_challenge": json.dumps(self.ruleset.live_challenge),
+            },
+        )
+
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[self.version.pk]))
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.live_challenge, {})
+
     def test_editor_delete_node_removes(self):
         before = len(self._nodes())
         response = self.client.post(

@@ -43,6 +43,7 @@ from questionnaire.cross_domain import (
     validate_questionnaire_rounds,
 )
 from questionnaire.schema import parse_questionnaire
+from singer_contest.scoring import scoring_standard_snapshot
 
 from .business_editor import business_definition_from_stages, infer_business_stages
 from .compiler import ExecutionPlan, ReportIssue, Severity, ValidationReport, compile_definition
@@ -2208,27 +2209,6 @@ def _has_live_audience_dependency(value) -> bool:
     return False
 
 
-def _round_scoring_signature(contest_round) -> tuple:
-    rubric = contest_round.rubric
-    if rubric is None:
-        return (contest_round.scoring_mode, None)
-    criteria = tuple(
-        (
-            criterion.sequence,
-            criterion.name,
-            str(criterion.max_score),
-            criterion.description,
-        )
-        for criterion in rubric.criteria.all().order_by("sequence", "pk")
-    )
-    return (
-        contest_round.scoring_mode,
-        rubric.name,
-        rubric.description,
-        criteria,
-    )
-
-
 def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     """Validate the cross-domain invariants unique to the 2026 live format."""
     live_config = binding.get("live_challenge") or {}
@@ -2250,25 +2230,24 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     from singer_contest.models import ContestRound
 
     round_keys = binding.get("round_keys") or {}
-    missing_keys = [key for key in ("r1", "r2", "r3") if key not in round_keys]
-    if missing_keys:
-        raise ValidationError("2026 现场赛制必须绑定 r1、r2、r3 三个评分轮次。")
-    rounds = list(
-        ContestRound.objects.filter(
-            pk__in=[round_keys[key] for key in ("r1", "r2", "r3")],
-        ).prefetch_related("rubric__criteria")
+    first_round_key = str(live_config.get("podium_first_round_key") or "r1").strip()
+    first_round_id = round_keys.get(first_round_key)
+    if first_round_id in (None, ""):
+        raise ValidationError("2026 现场赛制必须绑定第一轮物理评分轮。")
+    first_round = (
+        ContestRound.objects.filter(pk=first_round_id).prefetch_related("rubric__criteria").first()
     )
-    by_id = {round_.pk: round_ for round_ in rounds}
-    if any(round_keys[key] not in by_id for key in ("r1", "r2", "r3")):
-        raise ValidationError("2026 现场赛制绑定的 r1、r2、r3 轮次必须属于当前活动。")
-    signatures = {
-        key: _round_scoring_signature(by_id[round_keys[key]]) for key in ("r1", "r2", "r3")
-    }
-    if (
-        any(signature[1] is None for signature in signatures.values())
-        or len(set(signatures.values())) != 1
-    ):
-        raise ValidationError("2026 现场赛制的 r1、r2、r3 必须使用统一评分标准。")
+    if first_round is None:
+        raise ValidationError("2026 现场赛制绑定的第一轮物理评分轮不存在。")
+    standard = scoring_standard_snapshot(first_round)
+    if standard["scoring_mode"] != ContestRound.ScoringMode.AVERAGE:
+        raise ValidationError("2026 现场赛制必须使用所有有效评委分的算术平均。")
+    rubric = standard.get("rubric")
+    if not isinstance(rubric, dict) or not rubric.get("criteria"):
+        raise ValidationError("2026 现场赛制第一轮必须配置统一评分标准。")
+    # r2/r3 are questionnaire material namespaces. Their physical scoring rounds are
+    # created by the challenge service only after the relevant roster exists.
+    live_config["scoring_standard"] = standard
 
 
 def _validate_frozen_questionnaire(definition, binding: dict) -> None:
@@ -2297,8 +2276,13 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
         return
     plan = compile_questionnaire(raw)
     bound_round_keys = binding.get("round_keys") or {}
-    validate_questionnaire_rounds(plan, bound_round_keys)
-    validate_questionnaire_context_keys(plan, bound_round_keys)
+    logical_material_rounds = {"r2", "r3"} if is_live_2026 else set()
+    validate_questionnaire_rounds(
+        plan, bound_round_keys, logical_round_keys=logical_material_rounds
+    )
+    validate_questionnaire_context_keys(
+        plan, bound_round_keys, logical_round_keys=logical_material_rounds
+    )
     if is_live_2026:
         from singer_contest.materials import validate_live_material_plan
 

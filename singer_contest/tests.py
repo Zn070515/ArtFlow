@@ -662,6 +662,33 @@ class ScoringServiceTests(TestCase):
             ).exists()
         )
 
+    def _enable_2026_live_ruleset(self):
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="2026 现场赛制", is_test_data=self.activity.is_test_mode
+        )
+        with authority_write(RULESET_FREEZE):
+            return RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                authority_hash="c" * 64,
+                binding={
+                    "round_keys": {"r1": self.round.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
+    def test_2026_finalize_advancement_rejects_manual_boundary_tie_selection(self):
+        singer, extra0, _extra1, _extra2 = self._prepare_boundary_tie_round()
+        self._enable_2026_live_ruleset()
+
+        with self.assertRaisesMessage(ValidationError, "同分"):
+            finalize_advancement(self.round, [singer.pk, extra0.pk], self.user)
+
     def test_finalize_advancement_rejects_singer_outside_round(self):
         self._prepare_boundary_tie_round()
         outsider = self.make_singer(student_id="outsider")

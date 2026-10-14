@@ -85,6 +85,47 @@ def official_weighted_score(components: Iterable[tuple[object, object]]) -> Deci
     )
 
 
+def scoring_standard_snapshot(contest_round) -> dict[str, object]:
+    """Return the immutable, business-relevant scoring contract for a round.
+
+    A live challenge round is created later than the ruleset freeze, so its database
+    primary key cannot be the authority for the rubric.  The frozen ruleset stores this
+    value and the dynamic-round service compares the current first-round source to it
+    before copying the rubric.  IDs are deliberately excluded: the rubric's meaning,
+    not its mutable database identity, is what the freeze authorizes.
+    """
+
+    rubric = getattr(contest_round, "rubric", None)
+    if rubric is None:
+        return {"scoring_mode": str(contest_round.scoring_mode), "rubric": None}
+    criteria = [
+        {
+            "sequence": criterion.sequence,
+            "name": criterion.name,
+            "max_score": str(criterion.max_score),
+            "description": criterion.description or "",
+        }
+        for criterion in rubric.criteria.all().order_by("sequence", "pk")
+    ]
+    return {
+        "scoring_mode": str(contest_round.scoring_mode),
+        "rubric": {
+            "name": rubric.name,
+            "description": rubric.description or "",
+            "criteria": criteria,
+        },
+    }
+
+
+def scoring_standard_matches(contest_round, frozen_standard: object) -> bool:
+    """Compare a live source round with its frozen scoring-standard snapshot."""
+
+    return (
+        isinstance(frozen_standard, dict)
+        and scoring_standard_snapshot(contest_round) == frozen_standard
+    )
+
+
 def assess_score_completeness(
     *,
     expected_judge_count: int,
