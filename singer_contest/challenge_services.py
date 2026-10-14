@@ -398,7 +398,7 @@ def _finish_turn(session: ChallengeSession, turn: ChallengeTurn) -> None:
 def _ensure_session_dependencies_current(
     session: ChallengeSession, *, lock_dependencies: bool = True
 ) -> None:
-    source_rounds = ContestRound.objects
+    source_rounds = ContestRound.objects.all()
     versions = RulesetVersion.objects.select_related("ruleset")
     if lock_dependencies:
         source_rounds = source_rounds.select_for_update()
