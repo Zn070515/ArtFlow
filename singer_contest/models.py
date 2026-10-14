@@ -2069,10 +2069,18 @@ class JudgeScoreReceipt(models.Model):
                 raise ValidationError("评分回执席位与快照不一致。")
         if self.session_id:
             session = self.session
+            same_target_seat = (
+                session is not None
+                and session.seat.panel_member.judge_id == self.seat.panel_member.judge_id
+                and session.panel_snapshot.activity_id == self.panel_snapshot.activity_id
+            )
             if (
                 session is None
-                or session.seat_id != self.seat_id
-                or session.panel_snapshot_id != self.panel_snapshot_id
+                or not (
+                    session.seat_id == self.seat_id
+                    and session.panel_snapshot_id == self.panel_snapshot_id
+                )
+                and not same_target_seat
             ):
                 raise ValidationError("评分回执会话与席位快照不一致。")
         if self.score_record_id:

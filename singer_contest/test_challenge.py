@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 
 from accounts.models import User
@@ -14,6 +15,8 @@ from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from entry_access.services import redeem_access_grant
+from questionnaire.services import get_or_create_response, mark_submitted, save_draft_answers
 from ruleset.models import ContestRuleset, RulesetVersion
 
 from .challenge_services import (
@@ -35,8 +38,10 @@ from .judge_authority import (
     advance_performance,
     claim_judge_session,
     get_judge_context,
+    issue_judge_grant,
     lock_performance_score,
     prepare_judge_panel,
+    submit_judge_score,
 )
 from .models import (
     ChallengeMatch,
@@ -139,9 +144,12 @@ class LiveChallengeAuthorityTests(TestCase):
                 version=1,
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
-                definition={"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
                 authority_hash="a" * 64,
                 binding={
+                    "round_keys": {"r1": self.round.pk},
                     "live_challenge": {
                         "participant_count": 15,
                         "seat_count": 10,
@@ -153,9 +161,28 @@ class LiveChallengeAuthorityTests(TestCase):
                         "challenge_minimum_judge_count": 4,
                         "final_judge_ids": [judge.pk for judge in judges[1:]],
                         "final_minimum_judge_count": 4,
-                    }
+                        "podium_third_round_key": "third_round",
+                    },
                 },
             )
+
+    def _seed_distinct_questionnaire_songs(self):
+        for singer in self.singers:
+            response = get_or_create_response(
+                registration=singer,
+                ruleset_version=self.version,
+                questionnaire_key="singer_submission",
+                is_test_data=True,
+            )
+            response = save_draft_answers(
+                response,
+                answers={
+                    "r1.song": f"第一轮曲目 {singer.official_number}",
+                    "r2.song": f"踢馆曲目 {singer.official_number}",
+                    "r3.song": f"决赛曲目 {singer.official_number}",
+                },
+            )
+            mark_submitted(response)
 
     def test_first_round_confirmation_freezes_queue_and_ten_seats(self):
         session = create_challenge_session(
@@ -278,6 +305,25 @@ class LiveChallengeAuthorityTests(TestCase):
             match.challenger_id,
         )
 
+    def test_challenge_match_uses_the_r2_questionnaire_song(self):
+        self._seed_distinct_questionnaire_songs()
+        session, match = self._paired_session(prefix="r2-song")
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="r2-song-prepare",
+            expected_revision=match.session.revision,
+        )
+
+        self.assertEqual(
+            list(
+                Performance.objects.filter(round=match.score_round)
+                .order_by("sequence")
+                .values_list("song_title", flat=True)
+            ),
+            ["踢馆曲目 15", "踢馆曲目 1"],
+        )
+
     def test_judge_claimed_on_challenge_round_resolves_the_live_match(self):
         """A judge scanned before the dynamic round still follows its active match."""
         session, match = self._paired_session(prefix="dynamic-judge")
@@ -366,6 +412,131 @@ class LiveChallengeAuthorityTests(TestCase):
 
         assert match.score_round_id is not None
         self.assertEqual(context.round_id, match.score_round_id)
+
+    def test_two_challenge_matches_accept_real_judge_submissions_before_final_roster(self):
+        """The public judge submission path must survive a dynamic-round handoff."""
+        session, match = self._paired_session(prefix="direct-two-match")
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="direct-two-match-prepare-one",
+            expected_revision=match.session.revision,
+        )
+        assert match.score_round is not None
+        snapshot = RoundPanelSnapshot.objects.get(
+            round=match.score_round, state=RoundPanelSnapshot.State.ACTIVE
+        )
+        tokens = []
+        for member in snapshot.members.order_by("pk"):
+            seat = member.seats.get()
+            issued = issue_judge_grant(seat.pk, operator=self.staff, ttl_seconds=600)
+            redeemed = redeem_access_grant(issued.token)
+            get_judge_context(redeemed.token)
+            tokens.append(redeemed.token)
+
+        def score_current_match(current_match, prefix, values):
+            score_round = current_match.score_round
+            assert score_round is not None
+            performances = list(score_round.performances.order_by("sequence"))
+            for performance, score in zip(performances, values, strict=True):
+                advance_performance(score_round.pk, performance.pk, operator=self.staff)
+                for index, token in enumerate(tokens, start=1):
+                    context = get_judge_context(token)
+                    submit_judge_score(
+                        token,
+                        command_id=f"{prefix}-judge-{index}-{performance.sequence}",
+                        expected_context_version=context.context_version,
+                        expected_performance_id=performance.pk,
+                        score_payload={"score": str(score), "notes": ""},
+                    )
+                run_state = PerformanceRunState.objects.get(round=score_round.pk)
+                lock_performance_score(
+                    score_round.pk,
+                    performance.pk,
+                    operator=self.staff,
+                    expected_context_version=run_state.context_version,
+                )
+            locked = lock_challenge_match_scores(
+                session.pk,
+                operator=self.staff,
+                command_id=f"{prefix}-lock",
+                expected_revision=current_match.session.revision,
+            )
+            return confirm_challenge_match_result(
+                session.pk,
+                operator=self.staff,
+                command_id=f"{prefix}-confirm",
+                expected_revision=locked.session.revision,
+            )
+
+        first = score_current_match(match, "direct-two-match-one", (100, 80))
+        self.assertEqual(first.status, ChallengeMatch.Status.CONFIRMED)
+        session.refresh_from_db()
+
+        turn = start_challenge_turn(
+            session.pk,
+            operator=self.staff,
+            command_id="direct-two-match-start-two",
+            expected_revision=session.revision,
+        )
+        target = record_challenge_target(
+            session.pk,
+            seat_position=2,
+            operator=self.staff,
+            command_id="direct-two-match-target-two",
+            expected_revision=turn.session.revision,
+        )
+        second = confirm_challenge_pairing(
+            session.pk,
+            operator=self.staff,
+            command_id="direct-two-match-pair-two",
+            expected_revision=target.session.revision,
+        )
+        second = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="direct-two-match-prepare-two",
+            expected_revision=second.session.revision,
+        )
+        second = score_current_match(second, "direct-two-match-two", (95, 75))
+        self.assertEqual(second.status, ChallengeMatch.Status.CONFIRMED)
+
+        session.refresh_from_db()
+        for sequence in range(3, 6):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"direct-two-match-start-{sequence}",
+                expected_revision=session.revision,
+            )
+            waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"direct-two-match-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="现场顺延",
+            )
+            session.refresh_from_db()
+
+        self.assertEqual(
+            ChallengeMatch.objects.filter(
+                session=session, status=ChallengeMatch.Status.CONFIRMED
+            ).count(),
+            2,
+        )
+        session = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="direct-two-match-confirm-session",
+            expected_revision=session.revision,
+        )
+        final_round = create_final_round_from_challenge(
+            session.pk,
+            operator=self.staff,
+            command_id="direct-two-match-final-round",
+            expected_revision=session.revision,
+        )
+        self.assertEqual(final_round.entries.count(), 10)
 
     def test_challenge_console_service_requires_challenger_before_defender(self):
         session, match = self._paired_session(prefix="open-order")
@@ -512,6 +683,49 @@ class LiveChallengeAuthorityTests(TestCase):
                 final_round.performances.order_by("sequence").values_list("song_title", flat=True)
             ),
             [f"歌曲 {number}" for number in range(1, 11)],
+        )
+
+    def test_final_round_uses_the_r3_questionnaire_song(self):
+        self._seed_distinct_questionnaire_songs()
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="r3-song-create",
+        )
+        for sequence in range(1, 6):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"r3-song-start-{sequence}",
+                expected_revision=session.revision,
+            )
+            waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"r3-song-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="现场顺延",
+            )
+            session.refresh_from_db()
+        session = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="r3-song-confirm",
+            expected_revision=session.revision,
+        )
+        final_round = create_final_round_from_challenge(
+            session.pk,
+            operator=self.staff,
+            command_id="r3-song-final-round",
+            expected_revision=session.revision,
+        )
+
+        self.assertEqual(
+            list(
+                final_round.performances.order_by("sequence").values_list("song_title", flat=True)
+            ),
+            [f"决赛曲目 {number}" for number in range(1, 11)],
         )
 
     def test_prepared_final_round_preserves_challenge_seat_order(self):

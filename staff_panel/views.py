@@ -5683,7 +5683,27 @@ def ruleset_bind(request, pk):
                 return base_live_challenge.get(key, [])
             return [item.strip() for item in raw.split(",") if item.strip()]
 
+        live_field_names = (
+            "live_format_key",
+            "live_participant_count",
+            "live_seat_count",
+            "live_challenge_count",
+            "live_first_weight",
+            "live_challenge_weight",
+            "live_podium_stage_key",
+            "live_podium_first_round_key",
+            "live_podium_third_round_key",
+            "live_podium_aggregate_node",
+            "live_podium_first_weight",
+            "live_podium_third_weight",
+            "live_challenge_judge_ids",
+            "live_challenge_minimum_judges",
+            "live_final_judge_ids",
+            "live_final_minimum_judges",
+        )
+        has_live_config = any(request.POST.get(name) for name in live_field_names)
         live_challenge_binding = {
+            "format_key": _live_value("live_format_key", "format_key") or "2026_live_challenge",
             "participant_count": request.POST.get("live_participant_count") or "",
             "seat_count": request.POST.get("live_seat_count") or "",
             "challenge_count": request.POST.get("live_challenge_count") or "",
@@ -5747,28 +5767,7 @@ def ruleset_bind(request, pk):
                     {},
                 ),
                 "audience_keys": _parse_json("audience_keys", {}),
-                "live_challenge": live_challenge_binding
-                if any(
-                    request.POST.get(name)
-                    for name in (
-                        "live_participant_count",
-                        "live_seat_count",
-                        "live_challenge_count",
-                        "live_first_weight",
-                        "live_challenge_weight",
-                        "live_podium_stage_key",
-                        "live_podium_first_round_key",
-                        "live_podium_third_round_key",
-                        "live_podium_aggregate_node",
-                        "live_podium_first_weight",
-                        "live_podium_third_weight",
-                        "live_challenge_judge_ids",
-                        "live_challenge_minimum_judges",
-                        "live_final_judge_ids",
-                        "live_final_minimum_judges",
-                    )
-                )
-                else {},
+                "live_challenge": live_challenge_binding if has_live_config else {},
                 "announcement_blocks": _parse_json("announcement_blocks", []),
                 "announcement_blocks_by_checkpoint": _parse_json(
                     "announcement_blocks_by_checkpoint", {}

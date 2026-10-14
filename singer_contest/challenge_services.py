@@ -17,9 +17,10 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
-from questionnaire.projection import questionnaire_song_for_key, questionnaire_song_for_round
+from questionnaire.projection import questionnaire_song_for_key
 from ruleset.models import RulesetVersion
 
+from .materials import LIVE_PERSONAL_ROUNDS
 from .models import (
     ChallengeCommand,
     ChallengeMatch,
@@ -1025,8 +1026,8 @@ def prepare_challenge_match(
                     round=score_round,
                     singer=match.challenger,
                     sequence=1,
-                    song_title=questionnaire_song_for_round(
-                        match.challenger, source_round, default=""
+                    song_title=questionnaire_song_for_key(
+                        match.challenger, LIVE_PERSONAL_ROUNDS[0], default=""
                     ),
                     is_test_data=session.is_test_data,
                 ),
@@ -1035,8 +1036,8 @@ def prepare_challenge_match(
                     round=score_round,
                     singer=match.defender,
                     sequence=2,
-                    song_title=questionnaire_song_for_round(
-                        match.defender, source_round, default=""
+                    song_title=questionnaire_song_for_key(
+                        match.defender, LIVE_PERSONAL_ROUNDS[0], default=""
                     ),
                     is_test_data=session.is_test_data,
                 ),
@@ -1131,8 +1132,13 @@ def lock_challenge_match_scores(
     if any(state != PerformanceScoreState.State.LOCKED for _, state in states):
         raise ValidationError("双方评分都必须先由工作人员分别锁定。")
     if score_round.status != ContestRound.Status.LOCKED:
-        from .services import lock_round
+        from .services import lock_round, recalculate_round
 
+        # Direct judge submissions materialize ScoreRecord facts one judge at a time;
+        # unlike the staff rapid-entry path they do not recalculate after each write.
+        # Rebuild the official summaries before lock_round closes the dynamic round, so
+        # confirm_challenge_match_result sees the same authority regardless of input path.
+        recalculate_round(score_round)
         lock_round(score_round, current_operator)
     match.status = ChallengeMatch.Status.AWAITING_RESULT
     match.revision += 1
@@ -1438,12 +1444,6 @@ def create_final_round_from_challenge(
         )["max_sequence"]
         or 0
     ) + 1
-    live_config = session.ruleset_version.binding.get("live_challenge") or {}
-    third_round_key = (
-        str(live_config.get("podium_third_round_key") or "")
-        if isinstance(live_config, dict)
-        else ""
-    )
     with authority_write(CONTEST_ROUND_STATE):
         final_round = ContestRound.objects.create(
             activity=session.activity,
@@ -1480,7 +1480,9 @@ def create_final_round_from_challenge(
                     round=final_round,
                     singer=singer,
                     sequence=index,
-                    song_title=questionnaire_song_for_key(singer, third_round_key, default=""),
+                    song_title=questionnaire_song_for_key(
+                        singer, LIVE_PERSONAL_ROUNDS[1], default=""
+                    ),
                     is_test_data=session.is_test_data,
                 )
                 for index, singer in enumerate(roster, start=1)

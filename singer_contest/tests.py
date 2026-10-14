@@ -707,6 +707,24 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(finalized.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
         self.assertFalse(ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists())
 
+    def test_finalize_advancement_accepts_an_ordinary_staff_operator(self):
+        staff = _create_provisioned_user(
+            username="advancement-staff", password="pass", role=User.Role.STAFF
+        )
+        self.round.advance_count = 1
+        self.round.score_completion_mode = ContestRound.CompletionMode.MINIMUM_VALID
+        self.round.minimum_judge_count = 1
+        _save_round_state(
+            self.round,
+            ["advance_count", "score_completion_mode", "minimum_judge_count"],
+        )
+        prepare_round(self.round, staff)
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): 95}, staff)
+
+        finalized = finalize_advancement(self.round, [self.singer.pk], staff)
+
+        self.assertEqual(finalized.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
+
     def test_advancement_without_boundary_tie_stays_auto(self):
         self._lock_scored_round(self.round, singer_count=4, advance_count=2)
         self.round.refresh_from_db()
