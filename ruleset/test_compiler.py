@@ -1791,6 +1791,22 @@ class BindingValidationTests(_RulesetModelBase):
             advance_count=10,
         )
 
+    def _configure_live_first_round(self, round_, **overrides):
+        from singer_contest.models import ContestRound
+
+        configuration = {
+            "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+            "score_completion_mode": ContestRound.CompletionMode.MINIMUM_VALID,
+            "judge_count": 5,
+            "minimum_judge_count": 4,
+            "advance_count": 10,
+        }
+        configuration.update(overrides)
+        for field, value in configuration.items():
+            setattr(round_, field, value)
+        round_.save(update_fields=list(configuration))
+        return round_
+
     def _vote_session(self, ruleset, *, is_test_data=False):
         from django.utils import timezone
         from voting.models import VoteSession
@@ -1905,6 +1921,7 @@ class BindingValidationTests(_RulesetModelBase):
         )
         round_.rubric = rubric
         round_.save(update_fields=["rubric"])
+        self._configure_live_first_round(round_)
         binding = {
             "round_keys": {"r1": round_.pk},
             "live_challenge": {"format_key": "2026_live_challenge"},
@@ -1919,11 +1936,75 @@ class BindingValidationTests(_RulesetModelBase):
         self.assertNotIn("r2", binding["round_keys"])
         self.assertNotIn("r3", binding["round_keys"])
 
+    def test_2026_live_contract_requires_ten_first_round_advancers(self):
+        ruleset = self.make_ruleset()
+        round_ = self._singer_round(ruleset)
+        self._configure_live_first_round(round_, advance_count=9)
+        with self.assertRaisesMessage(ValidationError, "晋级人数必须为 10"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "round_keys": {"r1": round_.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
+    def test_2026_live_contract_requires_minimum_valid_completion_mode(self):
+        ruleset = self.make_ruleset()
+        from singer_contest.models import ContestRound
+
+        round_ = self._singer_round(ruleset)
+        self._configure_live_first_round(
+            round_, score_completion_mode=ContestRound.CompletionMode.FULL_MATRIX
+        )
+        with self.assertRaisesMessage(ValidationError, "最低有效评委数"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "round_keys": {"r1": round_.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
+    def test_2026_live_contract_requires_five_judges_and_four_valid_scores(self):
+        ruleset = self.make_ruleset()
+        round_ = self._singer_round(ruleset)
+        self._configure_live_first_round(round_, judge_count=4)
+        with self.assertRaisesMessage(ValidationError, "5 名评委"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "round_keys": {"r1": round_.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
+        self._configure_live_first_round(round_, judge_count=5, minimum_judge_count=3)
+        with self.assertRaisesMessage(ValidationError, "最低有效评委数必须为 4"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "round_keys": {"r1": round_.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
+        self._configure_live_first_round(round_, judge_count=5, minimum_judge_count=6)
+        with self.assertRaisesMessage(ValidationError, "不能超过评委人数"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "round_keys": {"r1": round_.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
     def test_2026_live_contract_rejects_drop_high_low(self):
         ruleset = self.make_ruleset()
         from singer_contest.models import ContestRound
 
         round_ = self._singer_round(ruleset)
+        self._configure_live_first_round(round_)
         round_.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
         round_.save(update_fields=["scoring_mode"])
         with self.assertRaisesMessage(ValidationError, "算术平均"):
@@ -1969,9 +2050,43 @@ class BindingValidationTests(_RulesetModelBase):
             }
         )
         validate_questionnaire_rounds(questionnaire, {"r1": 1}, logical_round_keys={"r2", "r3"})
-        validate_questionnaire_context_keys(
-            questionnaire, {"r1": 1}, logical_round_keys={"r2", "r3"}
+
+    def test_2026_questionnaire_rejects_logical_material_round_as_qualification_source(self):
+        questionnaire = compile_questionnaire(
+            {
+                "schema_version": 1,
+                "key": "live.materials",
+                "pages": [
+                    {
+                        "key": "materials",
+                        "title": "现场材料",
+                        "sections": [
+                            {
+                                "key": "songs",
+                                "title": "歌曲",
+                                "questions": [
+                                    {
+                                        "key": "r3.song",
+                                        "type": "text",
+                                        "label": "第三轮曲目",
+                                        "round": "r3",
+                                        "visible_if": {
+                                            "source": "context",
+                                            "key": "qualified.r3",
+                                            "op": "eq",
+                                            "value": True,
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
         )
+        validate_questionnaire_rounds(questionnaire, {"r1": 1}, logical_round_keys={"r2", "r3"})
+        with self.assertRaisesMessage(ValidationError, "r3"):
+            validate_questionnaire_context_keys(questionnaire, {"r1": 1})
 
     def test_2026_live_freeze_requires_a_questionnaire(self):
         with self.assertRaisesMessage(ValidationError, "必须使用选手问卷"):
@@ -1993,6 +2108,7 @@ class BindingValidationTests(_RulesetModelBase):
     def test_2026_live_freeze_requires_one_shared_scoring_standard(self):
         ruleset = self.make_ruleset()
         rounds = {key: self._singer_round(ruleset) for key in ("r1", "r2", "r3")}
+        self._configure_live_first_round(rounds["r1"])
         with self.assertRaisesMessage(ValidationError, "统一评分标准"):
             _validate_2026_live_contract(
                 {"nodes": []},

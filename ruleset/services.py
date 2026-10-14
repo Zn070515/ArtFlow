@@ -2239,6 +2239,23 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     )
     if first_round is None:
         raise ValidationError("2026 现场赛制绑定的第一轮物理评分轮不存在。")
+    if first_round.advance_count != 10:
+        raise ValidationError("2026 现场赛制第一轮晋级人数必须为 10。")
+    if first_round.score_completion_mode != ContestRound.CompletionMode.MINIMUM_VALID:
+        raise ValidationError("2026 现场赛制第一轮必须使用最低有效评委数评分完成模式。")
+    if first_round.judge_count != 5:
+        raise ValidationError("2026 现场赛制第一轮必须配置 5 名评委。")
+    minimum_judge_count = first_round.minimum_judge_count
+    if (
+        minimum_judge_count is None
+        or minimum_judge_count < 1
+        or minimum_judge_count > first_round.judge_count
+    ):
+        raise ValidationError(
+            "2026 现场赛制第一轮最低有效评委数必须在 1 至评委人数之间，不能超过评委人数。"
+        )
+    if minimum_judge_count != 4:
+        raise ValidationError("2026 现场赛制第一轮最低有效评委数必须为 4。")
     standard = scoring_standard_snapshot(first_round)
     if standard["scoring_mode"] != ContestRound.ScoringMode.AVERAGE:
         raise ValidationError("2026 现场赛制必须使用所有有效评委分的算术平均。")
@@ -2280,9 +2297,7 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
     validate_questionnaire_rounds(
         plan, bound_round_keys, logical_round_keys=logical_material_rounds
     )
-    validate_questionnaire_context_keys(
-        plan, bound_round_keys, logical_round_keys=logical_material_rounds
-    )
+    validate_questionnaire_context_keys(plan, bound_round_keys)
     if is_live_2026:
         from singer_contest.materials import validate_live_material_plan
 

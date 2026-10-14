@@ -477,6 +477,14 @@ class SubmissionContextTests(_RegistrationBase):
         context = build_submission_context(version=version, registration=registration)
         self.assertEqual(context["activity.phase"], activity.phase)
         self.assertFalse(context["qualified.r1"])
+        physical_only_version = SimpleNamespace(
+            ruleset=version.ruleset,
+            binding={"round_keys": {"r1": version.binding["round_keys"]["r1"]}},
+        )
+        physical_only_context = build_submission_context(
+            version=physical_only_version, registration=registration
+        )
+        self.assertNotIn("qualified.r3", physical_only_context)
 
 
 class SubmitTests(_RegistrationBase):

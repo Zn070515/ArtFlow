@@ -1,10 +1,12 @@
 """Cross-domain validation between the questionnaire and the frozen ruleset (§P2).
 
 Neither compiler can see the other's world, so the facts that live *between* them are
-checked here, at freeze time, where both halves are in hand. There is exactly one:
+checked here, at freeze time, where both halves are in hand. There are two related but
+distinct checks:
 
-    a question may only bind a round the ruleset actually binds to a ContestRound
-    of the activity.
+    * a question may bind a physical round or an explicitly declared logical material
+      namespace;
+    * a ``qualified.<round>`` condition may only name a runtime qualification source.
 
 Deliberately **not** checked: that the round has an ``ASSESS`` node. A round that only
 collects material — a guest singer's name, a lyric sheet, a stage plot — is a legal round
@@ -70,16 +72,18 @@ def validate_questionnaire_context_keys(
     plan: QuestionnairePlan,
     bound_round_keys: Mapping | Set,
     *,
-    logical_round_keys: Set[str] | None = None,
+    runtime_round_keys: Set[str] | None = None,
 ) -> None:
     """Refuse a ``qualified.<round>`` condition the frozen binding cannot answer.
 
     The static vocabulary (`conditions.is_known_context_key`) stops a typo of the *shape*
     — ``qualifed.r3`` — but ``qualified.r9`` is well-shaped and still answers nothing, so
     the question it guards is hidden for the whole contest with no error anywhere. Only the
-    binding knows which rounds exist.
+    physical binding and explicit runtime sources know which rounds exist. Logical material
+    namespaces are deliberately not accepted here: collecting ``r3`` material does not
+    create a runtime qualification fact for ``r3``.
     """
-    allowed = set(bound_round_keys) | set(logical_round_keys or ())
+    allowed = set(bound_round_keys) | set(runtime_round_keys or ())
     missing = sorted(referenced_qualification_round_keys(plan) - allowed)
     if missing:
         raise ValidationError(f"问卷条件引用了赛制未绑定的晋级轮次：{missing}。")

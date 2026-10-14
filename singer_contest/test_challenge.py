@@ -14,10 +14,12 @@ from common.authority import (
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
+from django.urls import reverse
 from entry_access.services import redeem_access_grant
 from questionnaire.services import get_or_create_response, mark_submitted, save_draft_answers
 from ruleset.models import ContestRuleset, RulesetVersion
+from tests.helpers import postgresql_only
 
 from .challenge_services import (
     advance_challenge_performance,
@@ -1090,3 +1092,52 @@ class LiveChallengeAuthorityTests(TestCase):
                 command_id="tie-confirm",
                 expected_revision=match.session.revision,
             )
+
+
+@postgresql_only
+class RoundListPostgreSQLTransactionTests(TransactionTestCase):
+    def test_staff_round_list_reads_a_generated_third_round_in_autocommit(self):
+        # Reuse the complete live challenge fixture, but deliberately run under
+        # TransactionTestCase so the real GET is not wrapped in Django's TestCase
+        # transaction. This is the production boundary where select_for_update()
+        # must not leak into a read-only readiness check.
+        LiveChallengeAuthorityTests.setUp(self)
+
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="round-list-autocommit-create",
+        )
+        for sequence in range(1, 6):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"round-list-autocommit-start-{sequence}",
+                expected_revision=session.revision,
+            )
+            session = waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"round-list-autocommit-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="测试回归：现场顺延",
+            ).session
+        session = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="round-list-autocommit-confirm",
+            expected_revision=session.revision,
+        )
+        final_round = create_final_round_from_challenge(
+            session.pk,
+            operator=self.staff,
+            command_id="round-list-autocommit-final-round",
+            expected_revision=session.revision,
+        )
+
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("staff:round_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, final_round.name)
