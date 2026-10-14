@@ -19,6 +19,7 @@ from django.db.models import Max
 from django.utils import timezone
 from questionnaire.projection import questionnaire_song_for_key
 from ruleset.models import RulesetVersion
+from ruleset.services import LIVE_CHALLENGE_FORMAT_KEY
 
 from .materials import LIVE_PERSONAL_ROUNDS
 from .models import (
@@ -37,7 +38,11 @@ from .models import (
     ScoreSummary,
     SingerRegistration,
 )
-from .scoring import official_weighted_score, quantize_official_score
+from .scoring import (
+    official_weighted_score,
+    quantize_official_score,
+    scoring_standard_matches,
+)
 
 
 class ChallengeIdempotencyConflict(ValidationError):
@@ -71,17 +76,18 @@ def _configured_weights(
     first_round_weight: object | None,
     challenge_round_weight: object | None,
 ) -> tuple[Decimal, Decimal]:
-    if first_round_weight is None or challenge_round_weight is None:
-        config = (version.binding or {}).get("live_challenge")
-        if not isinstance(config, dict):
-            raise ValidationError("冻结赛制尚未配置踢馆成绩权重。")
-        first_round_weight = config.get("first_round_weight")
-        challenge_round_weight = config.get("challenge_round_weight")
-    first_weight = _weight(first_round_weight, field="first_round_weight")
-    challenge_weight = _weight(challenge_round_weight, field="challenge_round_weight")
-    if first_weight + challenge_weight != Decimal("1.0000"):
-        raise ValidationError("第一轮与踢馆成绩权重必须合计 100%。")
-    return first_weight, challenge_weight
+    config = (version.binding or {}).get("live_challenge")
+    if not isinstance(config, dict):
+        raise ValidationError("冻结赛制尚未配置踢馆成绩权重。")
+    configured_first = _weight(config.get("first_round_weight"), field="first_round_weight")
+    configured_challenge = _weight(
+        config.get("challenge_round_weight"), field="challenge_round_weight"
+    )
+    if configured_first + configured_challenge != Decimal("1.0000"):
+        raise ValidationError("冻结赛制的第一轮与踢馆成绩权重必须合计 100%。")
+    if first_round_weight is not None or challenge_round_weight is not None:
+        raise ValidationError("踢馆成绩权重只能从冻结赛制读取，不能在运行时覆盖。")
+    return configured_first, configured_challenge
 
 
 def _hash_payload(payload: dict[str, Any]) -> str:
@@ -451,6 +457,21 @@ def _validate_source_round(
         raise ValidationError("第一轮晋级名单尚未核定。")
     if ruleset_version.status != RulesetVersion.Status.FROZEN:
         raise ValidationError("踢馆会话必须绑定冻结赛制版本。")
+    binding = ruleset_version.binding or {}
+    live_config = binding.get("live_challenge") or {}
+    if isinstance(live_config, dict) and live_config.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY:
+        if round_.scoring_mode != ContestRound.ScoringMode.AVERAGE:
+            raise ValidationError("2026 现场赛制必须使用所有有效评委分的算术平均。")
+        first_key = str(live_config.get("podium_first_round_key") or "r1").strip()
+        round_keys = binding.get("round_keys") or {}
+        if not isinstance(round_keys, dict):
+            raise ValidationError("冻结赛制的第一轮绑定无效。")
+        bound_round_id = round_keys.get(first_key)
+        if str(bound_round_id) != str(round_.pk):
+            raise ValidationError("挑战会话只能从冻结赛制绑定的第一轮建立。")
+        frozen_standard = live_config.get("scoring_standard")
+        if not scoring_standard_matches(round_, frozen_standard):
+            raise ValidationError("第一轮当前评分标准与冻结赛制不一致。")
     summaries = list(
         ScoreSummary.objects.select_related("singer")
         .filter(round=round_, singer__pre_status=SingerRegistration.PreStatus.APPROVED)
@@ -983,6 +1004,10 @@ def prepare_challenge_match(
     if match.status != ChallengeMatch.Status.READY_FOR_SCORING:
         raise ValidationError("当前比赛不在待准备评分阶段。")
     source_round = session.source_round
+    live_config = (session.ruleset_version.binding or {}).get("live_challenge") or {}
+    is_live_2026 = (
+        isinstance(live_config, dict) and live_config.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
+    )
     challenge_judges, minimum_judges = _configured_live_judges(
         session,
         ids_key="challenge_judge_ids",
@@ -999,7 +1024,9 @@ def prepare_challenge_match(
         score_round = ContestRound.objects.create(
             activity=session.activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
-            scoring_mode=source_round.scoring_mode,
+            scoring_mode=(
+                ContestRound.ScoringMode.AVERAGE if is_live_2026 else source_round.scoring_mode
+            ),
             score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
             judge_count=len(challenge_judges),
             minimum_judge_count=minimum_judges,
@@ -1432,6 +1459,10 @@ def create_final_round_from_challenge(
         raise ValidationError("第三轮名单已经生成，请从轮次页面继续准备。")
     roster = challenge_final_roster(session.pk, activity_id=session.activity_id)
     source_round = ContestRound.objects.select_for_update().get(pk=session.source_round_id)
+    live_config = (session.ruleset_version.binding or {}).get("live_challenge") or {}
+    is_live_2026 = (
+        isinstance(live_config, dict) and live_config.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
+    )
     final_judges, minimum_judges = _configured_live_judges(
         session,
         ids_key="final_judge_ids",
@@ -1448,7 +1479,9 @@ def create_final_round_from_challenge(
         final_round = ContestRound.objects.create(
             activity=session.activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
-            scoring_mode=source_round.scoring_mode,
+            scoring_mode=(
+                ContestRound.ScoringMode.AVERAGE if is_live_2026 else source_round.scoring_mode
+            ),
             score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
             judge_count=len(final_judges),
             minimum_judge_count=minimum_judges,
@@ -1488,6 +1521,10 @@ def create_final_round_from_challenge(
                 for index, singer in enumerate(roster, start=1)
             ]
         )
+        # All snapshots are now materialized atomically.  Promote the round only after
+        # the draft-only snapshot guards have accepted the complete roster/panel.
+        final_round.status = ContestRound.Status.PREPARED
+        final_round.save(update_fields=["status"])
         _bump(session)
         with authority_write(LIVE_CHALLENGE_STATE):
             session.save(update_fields=["revision", "updated_at"])

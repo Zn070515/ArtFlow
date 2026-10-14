@@ -32,9 +32,15 @@ def referenced_round_keys(plan: QuestionnairePlan) -> frozenset[str]:
     return frozenset(keys)
 
 
-def validate_questionnaire_rounds(plan: QuestionnairePlan, bound_round_keys: Mapping | Set) -> None:
-    """Refuse a questionnaire that names a round the ruleset does not bind."""
-    missing = sorted(referenced_round_keys(plan) - set(bound_round_keys))
+def validate_questionnaire_rounds(
+    plan: QuestionnairePlan,
+    bound_round_keys: Mapping | Set,
+    *,
+    logical_round_keys: Set[str] | None = None,
+) -> None:
+    """Refuse a questionnaire that names neither a bound nor a logical material round."""
+    allowed = set(bound_round_keys) | set(logical_round_keys or ())
+    missing = sorted(referenced_round_keys(plan) - allowed)
     if missing:
         raise ValidationError(f"问卷引用了赛制未绑定的轮次：{missing}。")
 
@@ -61,7 +67,10 @@ def referenced_qualification_round_keys(plan: QuestionnairePlan) -> frozenset[st
 
 
 def validate_questionnaire_context_keys(
-    plan: QuestionnairePlan, bound_round_keys: Mapping | Set
+    plan: QuestionnairePlan,
+    bound_round_keys: Mapping | Set,
+    *,
+    logical_round_keys: Set[str] | None = None,
 ) -> None:
     """Refuse a ``qualified.<round>`` condition the frozen binding cannot answer.
 
@@ -70,6 +79,7 @@ def validate_questionnaire_context_keys(
     the question it guards is hidden for the whole contest with no error anywhere. Only the
     binding knows which rounds exist.
     """
-    missing = sorted(referenced_qualification_round_keys(plan) - set(bound_round_keys))
+    allowed = set(bound_round_keys) | set(logical_round_keys or ())
+    missing = sorted(referenced_qualification_round_keys(plan) - allowed)
     if missing:
         raise ValidationError(f"问卷条件引用了赛制未绑定的晋级轮次：{missing}。")

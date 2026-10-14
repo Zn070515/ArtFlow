@@ -54,7 +54,11 @@ from ruleset.resolver import (
     stage_consumed_duel_keys,
     stage_consumed_scopes,
 )
-from ruleset.services import current_frozen_version, require_runtime_readiness
+from ruleset.services import (
+    LIVE_CHALLENGE_FORMAT_KEY,
+    current_frozen_version,
+    require_runtime_readiness,
+)
 from voting.models import VoteSession
 
 from .models import (
@@ -1499,6 +1503,25 @@ def finalize_advancement(
     if advance_count and len(selected) != advance_count:
         raise ValidationError(f"晋级核定人数必须等于该轮晋级名额（{advance_count} 人）。")
 
+    is_2026_first_round = _is_2026_live_first_round(locked_round)
+    if is_2026_first_round:
+        summaries = list(
+            ScoreSummary.objects.filter(round=locked_round).values_list(
+                "singer_id", "average_score"
+            )
+        )
+        scores = [score for _singer_id, score in summaries]
+        if len(scores) != len(set(scores)):
+            raise ValidationError("2026 现场赛制存在正式成绩同分，不能自动确认前十。")
+        expected = {
+            singer_id
+            for singer_id, _score in sorted(summaries, key=lambda row: row[1], reverse=True)[
+                :advance_count
+            ]
+        }
+        if selected != expected:
+            raise ValidationError("晋级名单必须与官方正式成绩排名前十完全一致。")
+
     old_advanced = set(
         ScoreSummary.objects.filter(round=locked_round, is_advanced=True).values_list(
             "singer_id", flat=True
@@ -1527,6 +1550,26 @@ def finalize_advancement(
         note=note,
     )
     return locked_round
+
+
+def _is_2026_live_first_round(contest_round: ContestRound) -> bool:
+    """Whether this physical round is the frozen 2026 live format's R1."""
+
+    version = current_frozen_version(contest_round.activity)
+    if version is None:
+        return False
+    binding = version.binding or {}
+    live_config = binding.get("live_challenge")
+    if (
+        not isinstance(live_config, dict)
+        or live_config.get("format_key") != LIVE_CHALLENGE_FORMAT_KEY
+    ):
+        return False
+    round_keys = binding.get("round_keys")
+    if not isinstance(round_keys, dict):
+        return False
+    first_round_key = str(live_config.get("podium_first_round_key") or "r1").strip()
+    return bool(str(round_keys.get(first_round_key)) == str(contest_round.pk))
 
 
 @transaction.atomic
@@ -1855,8 +1898,17 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
         raise PermissionDenied("晋级线存在同分，请先人工核定晋级名单。")
     locked_round.is_locked = True
     locked_round.status = ContestRound.Status.LOCKED
+    # The 2026 flow has no manual tie-break path.  Once a unique formal top ten has
+    # reached the lock boundary, the lock itself is the confirmation consumed by the
+    # challenge session.  Legacy rounds retain their historical AUTO status.
+    if (
+        _is_2026_live_first_round(locked_round)
+        and locked_round.advance_count
+        and locked_round.advancement_status == ContestRound.AdvancementStatus.AUTO
+    ):
+        locked_round.advancement_status = ContestRound.AdvancementStatus.FINALIZED
     with authority_write(CONTEST_ROUND_STATE):
-        locked_round.save(update_fields=["is_locked", "status"])
+        locked_round.save(update_fields=["is_locked", "status", "advancement_status"])
     panel_snapshots = list(
         RoundPanelSnapshot.objects.select_for_update().filter(
             activity=locked_round.activity,

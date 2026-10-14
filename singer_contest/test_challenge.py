@@ -212,6 +212,39 @@ class LiveChallengeAuthorityTests(TestCase):
         self.assertEqual(session.source_score_version, 7)
         self.assertEqual(ChallengeSeat.objects.filter(session=session).count(), 10)
 
+    def test_ruleset_weights_cannot_be_overridden_when_creating_challenge_session(self):
+        with self.assertRaisesMessage(ValidationError, "只能从冻结赛制"):
+            create_challenge_session(
+                self.round,
+                ruleset_version=self.version,
+                operator=self.staff,
+                command_id="override-ruleset-weight",
+                first_round_weight="0.3000",
+                challenge_round_weight="0.7000",
+            )
+
+    def test_2026_challenge_rejects_drop_high_low_source_round(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
+            self.round.save(update_fields=["scoring_mode"])
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(
+                binding={
+                    **self.version.binding,
+                    "live_challenge": {
+                        **self.version.binding["live_challenge"],
+                        "format_key": "2026_live_challenge",
+                    },
+                }
+            )
+        with self.assertRaisesMessage(ValidationError, "算术平均"):
+            create_challenge_session(
+                self.round,
+                ruleset_version=self.version,
+                operator=self.staff,
+                command_id="reject-drop-high-low",
+            )
+
     def _paired_session(self, prefix="score"):
         session = create_challenge_session(
             self.round,

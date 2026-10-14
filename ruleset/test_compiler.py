@@ -25,6 +25,11 @@ from common.models import AuditLog
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import RequestFactory, SimpleTestCase
+from questionnaire.compiler import compile_questionnaire
+from questionnaire.cross_domain import (
+    validate_questionnaire_context_keys,
+    validate_questionnaire_rounds,
+)
 
 from ruleset.compiler import (
     ExecutionPlan,
@@ -1886,6 +1891,87 @@ class BindingValidationTests(_RulesetModelBase):
         )
 
         self.assertEqual(normalized["live_challenge"]["format_key"], "2026_live_challenge")
+
+    def test_2026_live_contract_uses_one_physical_first_round_and_logical_material_rounds(self):
+        ruleset = self.make_ruleset()
+        from singer_contest.models import RubricCriterion, ScoringRubric
+
+        round_ = self._singer_round(ruleset)
+        rubric = ScoringRubric.objects.create(
+            activity=ruleset.activity, name="统一现场评分", is_test_data=True
+        )
+        RubricCriterion.objects.create(
+            rubric=rubric, name="演唱表现", max_score=100, is_test_data=True
+        )
+        round_.rubric = rubric
+        round_.save(update_fields=["rubric"])
+        binding = {
+            "round_keys": {"r1": round_.pk},
+            "live_challenge": {"format_key": "2026_live_challenge"},
+        }
+
+        _validate_2026_live_contract({"nodes": []}, binding)
+
+        self.assertEqual(
+            binding["live_challenge"]["scoring_standard"]["scoring_mode"],
+            "average",
+        )
+        self.assertNotIn("r2", binding["round_keys"])
+        self.assertNotIn("r3", binding["round_keys"])
+
+    def test_2026_live_contract_rejects_drop_high_low(self):
+        ruleset = self.make_ruleset()
+        from singer_contest.models import ContestRound
+
+        round_ = self._singer_round(ruleset)
+        round_.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
+        round_.save(update_fields=["scoring_mode"])
+        with self.assertRaisesMessage(ValidationError, "算术平均"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "round_keys": {"r1": round_.pk},
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                },
+            )
+
+    def test_2026_questionnaire_allows_logical_material_rounds_without_physical_bindings(self):
+        questionnaire = compile_questionnaire(
+            {
+                "schema_version": 1,
+                "key": "live.materials",
+                "pages": [
+                    {
+                        "key": "materials",
+                        "title": "现场材料",
+                        "sections": [
+                            {
+                                "key": "songs",
+                                "title": "歌曲",
+                                "questions": [
+                                    {
+                                        "key": "r2.song",
+                                        "type": "text",
+                                        "label": "踢馆曲目",
+                                        "round": "r2",
+                                    },
+                                    {
+                                        "key": "r3.song",
+                                        "type": "text",
+                                        "label": "第三轮曲目",
+                                        "round": "r3",
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        validate_questionnaire_rounds(questionnaire, {"r1": 1}, logical_round_keys={"r2", "r3"})
+        validate_questionnaire_context_keys(
+            questionnaire, {"r1": 1}, logical_round_keys={"r2", "r3"}
+        )
 
     def test_2026_live_freeze_requires_a_questionnaire(self):
         with self.assertRaisesMessage(ValidationError, "必须使用选手问卷"):
