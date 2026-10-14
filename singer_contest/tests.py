@@ -71,6 +71,13 @@ from .models import (
     StageDecision,
     StageResult,
 )
+from .scoring import (
+    ScoreCompletionMode,
+    ScoreCompletionState,
+    assess_score_completeness,
+    official_average,
+    quantize_official_score,
+)
 from .services import (
     IdempotencyConflictError,
     apply_scores,
@@ -862,12 +869,49 @@ class ScoringServiceTests(TestCase):
         attending_judge_id = list(
             self.round.round_judges.order_by("pk").values_list("judge_id", flat=True)
         )[0]
-        with self.assertRaisesMessage(ValidationError, "INSUFFICIENT_JUDGES"):
-            prepare_judge_panel(
-                self.round.pk,
-                operator=self.user,
-                attending_judge_ids=[attending_judge_id],
-            )
+        snapshot = prepare_judge_panel(
+            self.round.pk,
+            operator=self.user,
+            attending_judge_ids=[attending_judge_id],
+        )
+        self.assertEqual(snapshot.expected_judge_count, 3)
+        self.assertEqual(snapshot.minimum_judge_count, 1)
+
+    def test_official_scores_use_half_up_at_two_decimal_places(self):
+        self.assertEqual(quantize_official_score(Decimal("90.005")), Decimal("90.01"))
+        self.assertEqual(
+            official_average((Decimal("90.00"), Decimal("90.01"))),
+            Decimal("90.01"),
+        )
+
+    def test_score_completeness_distinguishes_minimum_ready_from_locked(self):
+        waiting = assess_score_completeness(
+            expected_judge_count=5,
+            valid_score_count=3,
+            minimum_judge_count=4,
+            completion_mode=ScoreCompletionMode.MINIMUM_VALID,
+            opened=True,
+            locked=False,
+        )
+        ready = assess_score_completeness(
+            expected_judge_count=5,
+            valid_score_count=4,
+            minimum_judge_count=4,
+            completion_mode=ScoreCompletionMode.MINIMUM_VALID,
+            opened=True,
+            locked=False,
+        )
+        locked = assess_score_completeness(
+            expected_judge_count=5,
+            valid_score_count=4,
+            minimum_judge_count=4,
+            completion_mode=ScoreCompletionMode.MINIMUM_VALID,
+            opened=True,
+            locked=True,
+        )
+        self.assertEqual(waiting.state, ScoreCompletionState.BELOW_MINIMUM)
+        self.assertEqual(ready.state, ScoreCompletionState.READY_TO_LOCK)
+        self.assertEqual(locked.state, ScoreCompletionState.LOCKED)
 
     def test_prepare_round_rejects_drop_high_low_with_fewer_than_three_judges(self):
         self.round.scoring_mode = ContestRound.ScoringMode.DROP_HIGH_LOW
@@ -998,6 +1042,63 @@ class ScoringServiceTests(TestCase):
         self.assertEqual(
             ScoreSummary.objects.get(round=self.round, singer=self.singer).average_score,
             Decimal("90"),
+        )
+
+    def test_recalculate_round_quantizes_the_official_average(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        prepare_round(self.round, self.user)
+
+        apply_scores(
+            self.round,
+            {
+                (self.singer.pk, self.judge.pk): "90.00",
+                (self.singer.pk, second_judge.pk): "90.01",
+            },
+            self.user,
+        )
+
+        self.assertEqual(
+            ScoreSummary.objects.get(round=self.round, singer=self.singer).average_score,
+            Decimal("90.01"),
+        )
+
+    def test_minimum_valid_round_can_be_manually_locked_with_partial_matrix(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        self.round.score_completion_mode = ContestRound.CompletionMode.MINIMUM_VALID
+        self.round.minimum_judge_count = 1
+        self.round.save(update_fields=["score_completion_mode", "minimum_judge_count"])
+        prepare_round(self.round, self.user)
+
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "90.00"},
+            self.user,
+        )
+
+        self.assertEqual(
+            ScoreSummary.objects.get(round=self.round, singer=self.singer).average_score,
+            Decimal("90.00"),
+        )
+        self.assertEqual(lock_round(self.round, self.user).status, ContestRound.Status.LOCKED)
+        self.assertFalse(
+            ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists()
+        )
+
+    def test_legacy_full_matrix_round_still_rejects_partial_lock(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        prepare_round(self.round, self.user)
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "90.00"},
+            self.user,
+        )
+
+        with self.assertRaisesMessage(PermissionDenied, "仍有未完成的评委评分"):
+            lock_round(self.round, self.user)
+
+        self.assertEqual(
+            ScoreRecord.objects.filter(round=self.round, judge=second_judge).count(),
+            0,
         )
 
     def test_apply_scores_rejects_draft_round(self):

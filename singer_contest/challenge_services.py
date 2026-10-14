@@ -1,0 +1,1261 @@
+"""Audited services for the chronological live challenge stage."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable
+from decimal import Decimal
+from typing import Any
+
+from accounts.services import require_current_staff
+from common.authority import CONTEST_ROUND_STATE, LIVE_CHALLENGE_STATE, authority_write
+from common.models import AuditLog
+from core.policies import ActivityAction
+from core.services import lock_activity_for_action
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
+from django.db.models import Max
+from django.utils import timezone
+from ruleset.models import RulesetVersion
+
+from .models import (
+    ChallengeCommand,
+    ChallengeMatch,
+    ChallengeSeat,
+    ChallengeSession,
+    ChallengeTurn,
+    ContestRound,
+    Performance,
+    PerformanceScoreState,
+    RoundEntry,
+    RoundJudge,
+    ScoreSummary,
+    SingerRegistration,
+)
+from .scoring import official_weighted_score, quantize_official_score
+
+
+class ChallengeIdempotencyConflict(ValidationError):
+    """A command id was already used for a different live-challenge command."""
+
+
+def _command_id(value: object) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 64:
+        raise ValidationError("踢馆 command_id 无效。")
+    return value.strip()
+
+
+def _expected_revision(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValidationError("踢馆会话版本无效。")
+    return value
+
+
+def _weight(value: object, *, field: str) -> Decimal:
+    try:
+        weight = Decimal(str(value))
+    except Exception as exc:
+        raise ValidationError(f"{field} 必须是有效的小数权重。") from exc
+    if weight <= 0 or weight >= 1:
+        raise ValidationError(f"{field} 必须大于 0 且小于 1。")
+    return weight.quantize(Decimal("0.0001"))
+
+
+def _configured_weights(
+    version: RulesetVersion,
+    first_round_weight: object | None,
+    challenge_round_weight: object | None,
+) -> tuple[Decimal, Decimal]:
+    if first_round_weight is None or challenge_round_weight is None:
+        config = (version.binding or {}).get("live_challenge")
+        if not isinstance(config, dict):
+            raise ValidationError("冻结赛制尚未配置踢馆成绩权重。")
+        first_round_weight = config.get("first_round_weight")
+        challenge_round_weight = config.get("challenge_round_weight")
+    first_weight = _weight(first_round_weight, field="first_round_weight")
+    challenge_weight = _weight(challenge_round_weight, field="challenge_round_weight")
+    if first_weight + challenge_weight != Decimal("1.0000"):
+        raise ValidationError("第一轮与踢馆成绩权重必须合计 100%。")
+    return first_weight, challenge_weight
+
+
+def _hash_payload(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _source_fingerprint(round_: ContestRound, summaries: Iterable[ScoreSummary]) -> str:
+    rows = [
+        {
+            "singer_id": summary.singer_id,
+            "official_number": summary.singer.official_number,
+            "score": str(summary.average_score),
+            "rank": summary.rank,
+            "is_advanced": summary.is_advanced,
+        }
+        for summary in summaries
+    ]
+    return _hash_payload(
+        {
+            "round_id": round_.pk,
+            "score_version": round_.score_version,
+            "status": round_.status,
+            "advancement_status": round_.advancement_status,
+            "rows": rows,
+        }
+    )
+
+
+def _current_ruleset_hash(version: RulesetVersion) -> str:
+    return str(version.authority_hash or version.content_hash or "")
+
+
+def _record_audit(
+    *, operator, action_type: str, target: str, new_value: dict[str, Any], old_value=None
+):
+    return AuditLog.objects.create(
+        operator=operator,
+        action_type=action_type,
+        target=target,
+        old_value=json.dumps(old_value or {}, ensure_ascii=False, sort_keys=True),
+        new_value=json.dumps(new_value, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _write_command(
+    *,
+    session: ChallengeSession,
+    command_id: str,
+    operation: str,
+    payload_hash: str,
+    operator,
+    result_type: str,
+    result_id: int,
+    result_payload: dict[str, Any],
+) -> ChallengeCommand:
+    with authority_write(LIVE_CHALLENGE_STATE):
+        return ChallengeCommand.objects.create(
+            session=session,
+            command_id=command_id,
+            operation=operation,
+            payload_hash=payload_hash,
+            operator=operator,
+            result_type=result_type,
+            result_id=result_id,
+            result_payload=result_payload,
+        )
+
+
+def _replay_command(
+    *,
+    session: ChallengeSession,
+    command_id: str,
+    operation: str,
+    payload_hash: str,
+    result_model,
+):
+    command = ChallengeCommand.objects.select_for_update().filter(command_id=command_id).first()
+    if command is None:
+        return None
+    if (
+        command.session_id != session.pk
+        or command.operation != operation
+        or command.payload_hash != payload_hash
+    ):
+        raise ChallengeIdempotencyConflict("踢馆命令已绑定其他操作内容。")
+    return result_model._base_manager.get(pk=command.result_id)
+
+
+def _session_for_update(session_id: int, operator):
+    current_operator = require_current_staff(operator)
+    initial = ChallengeSession.objects.select_related("activity").filter(pk=session_id).first()
+    if initial is None:
+        raise ValidationError("踢馆会话不存在。")
+    locked_activity = lock_activity_for_action(initial.activity, ActivityAction.SCORE)
+    session = (
+        ChallengeSession.objects.select_for_update()
+        .select_related("activity", "source_round", "ruleset_version")
+        .get(pk=session_id)
+    )
+    if session.activity_id != locked_activity.pk:
+        raise ValidationError("踢馆会话活动上下文不一致。")
+    return current_operator, session
+
+
+def _check_revision(session: ChallengeSession, expected_revision: object) -> None:
+    if session.revision != _expected_revision(expected_revision):
+        raise ValidationError("踢馆会话已被其他工作人员更新，请刷新后重试。")
+
+
+def _bump(session: ChallengeSession) -> None:
+    session.revision += 1
+
+
+def _finish_turn(session: ChallengeSession, turn: ChallengeTurn) -> None:
+    if turn.sequence == 5:
+        session.state = ChallengeSession.State.READY_TO_CONFIRM
+    else:
+        session.current_turn_number = turn.sequence + 1
+
+
+def _ensure_session_dependencies_current(session: ChallengeSession) -> None:
+    source_round = ContestRound.objects.select_for_update().get(
+        pk=session.source_round_id, activity_id=session.activity_id
+    )
+    version = (
+        RulesetVersion.objects.select_for_update()
+        .select_related("ruleset")
+        .get(pk=session.ruleset_version_id)
+    )
+    summaries = _validate_source_round(source_round, version)
+    current_source_fp = _source_fingerprint(source_round, summaries)
+    current_ruleset_hash = _current_ruleset_hash(version)
+    if current_source_fp != session.source_roster_fingerprint:
+        raise ValidationError("第一轮正式结果已变化，当前踢馆会话不能继续沿用。")
+    if current_ruleset_hash != session.ruleset_hash:
+        raise ValidationError("冻结赛制版本已变化，当前踢馆会话不能继续沿用。")
+
+
+def challenge_final_roster(
+    session_id: int, *, activity_id: int | None = None
+) -> list[SingerRegistration]:
+    """Return the confirmed ten-seat roster in its frozen third-round positions.
+
+    This is the only read boundary a final round may use.  A caller cannot turn a
+    partially processed challenge session into a roster, and the dependency check keeps
+    a later first-round/ruleset correction from being silently consumed by the final.
+    """
+    session = ChallengeSession._base_manager.select_related("activity").get(pk=session_id)
+    if activity_id is not None and session.activity_id != activity_id:
+        raise ValidationError("踢馆会话不属于当前活动。")
+    if session.state != ChallengeSession.State.CONFIRMED:
+        raise ValidationError("踢馆会话尚未核定，不能生成最终十强名单。")
+    _ensure_session_dependencies_current(session)
+    seats = list(
+        ChallengeSeat._base_manager.filter(session=session).order_by("third_round_position", "pk")
+    )
+    holder_ids = [seat.current_holder_id for seat in seats]
+    if len(seats) != 10 or len(set(holder_ids)) != 10:
+        raise ValidationError("核定后的踢馆会话必须保有十个不同席位持有人。")
+    singers = {
+        singer.pk: singer
+        for singer in SingerRegistration._base_manager.filter(
+            activity_id=session.activity_id,
+            pk__in=holder_ids,
+        )
+    }
+    if set(singers) != set(holder_ids):
+        raise ValidationError("踢馆席位中存在不属于当前活动的选手。")
+    return [singers[singer_id] for singer_id in holder_ids]
+
+
+def _validate_source_round(
+    round_: ContestRound, ruleset_version: RulesetVersion
+) -> list[ScoreSummary]:
+    if round_.activity_id != ruleset_version.ruleset.activity_id:
+        raise ValidationError("第一轮和冻结赛制不属于同一活动。")
+    if round_.status != ContestRound.Status.LOCKED or not round_.is_locked:
+        raise ValidationError("第一轮必须先锁定后才能建立踢馆会话。")
+    if round_.advancement_status != ContestRound.AdvancementStatus.FINALIZED:
+        raise ValidationError("第一轮晋级名单尚未核定。")
+    if ruleset_version.status != RulesetVersion.Status.FROZEN:
+        raise ValidationError("踢馆会话必须绑定冻结赛制版本。")
+    summaries = list(
+        ScoreSummary.objects.select_related("singer")
+        .filter(round=round_, singer__pre_status=SingerRegistration.PreStatus.APPROVED)
+        .order_by("singer_id")
+    )
+    if len(summaries) != 15:
+        raise ValidationError("第一轮必须恰好有 15 名已核定选手。")
+    if any(summary.singer.official_number is None for summary in summaries):
+        raise ValidationError("所有第一轮选手必须先配置官方选手编号。")
+    if len({summary.singer.official_number for summary in summaries}) != 15:
+        raise ValidationError("官方选手编号必须在活动内唯一。")
+    scores = [summary.average_score for summary in summaries]
+    if len(set(scores)) != len(scores):
+        raise ValidationError("第一轮出现同分，不能自动建立踢馆顺序。")
+    ranked = sorted(summaries, key=lambda row: row.average_score, reverse=True)
+    expected_advanced = {row.singer_id for row in ranked[:10]}
+    actual_advanced = {row.singer_id for row in summaries if row.is_advanced}
+    if actual_advanced != expected_advanced:
+        raise ValidationError("第一轮晋级标记与正式成绩排名不一致。")
+    if len(actual_advanced) != 10:
+        raise ValidationError("第一轮必须核定十个初始席位。")
+    return summaries
+
+
+@transaction.atomic
+def create_challenge_session(
+    source_round: ContestRound,
+    *,
+    ruleset_version: RulesetVersion,
+    operator,
+    command_id: object,
+    first_round_weight: object | None = None,
+    challenge_round_weight: object | None = None,
+) -> ChallengeSession:
+    current_operator = require_current_staff(operator)
+    normalized_command = _command_id(command_id)
+    initial_round = ContestRound.objects.select_related("activity").get(pk=source_round.pk)
+    locked_activity = lock_activity_for_action(initial_round.activity, ActivityAction.SCORE)
+    locked_round = ContestRound.objects.select_for_update().get(pk=initial_round.pk)
+    locked_version = (
+        RulesetVersion.objects.select_for_update()
+        .select_related("ruleset")
+        .get(pk=ruleset_version.pk)
+    )
+    first_weight, challenge_weight = _configured_weights(
+        locked_version, first_round_weight, challenge_round_weight
+    )
+    summaries = _validate_source_round(locked_round, locked_version)
+    source_fp = _source_fingerprint(locked_round, summaries)
+    ruleset_hash = _current_ruleset_hash(locked_version)
+    input_fp = _hash_payload(
+        {
+            "source_fingerprint": source_fp,
+            "ruleset_hash": ruleset_hash,
+            "ruleset_version_id": locked_version.pk,
+        }
+    )
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.session.create",
+            "source_round_id": locked_round.pk,
+            "ruleset_version_id": locked_version.pk,
+            "input_fingerprint": input_fp,
+            "first_round_weight": str(first_weight),
+            "challenge_round_weight": str(challenge_weight),
+        }
+    )
+    existing_command = (
+        ChallengeCommand.objects.select_for_update().filter(command_id=normalized_command).first()
+    )
+    if existing_command is not None:
+        if (
+            existing_command.operation != "challenge.session.create"
+            or existing_command.payload_hash != payload_hash
+        ):
+            raise ChallengeIdempotencyConflict("踢馆命令已绑定其他创建内容。")
+        if existing_command.result_id is None:
+            raise ValidationError("踢馆创建命令缺少结果记录。")
+        return ChallengeSession._base_manager.get(pk=existing_command.result_id)
+    existing_session = ChallengeSession.objects.filter(input_fingerprint=input_fp).first()
+    if existing_session is not None:
+        raise ValidationError("该第一轮结果已经建立踢馆会话。")
+    ranked = sorted(summaries, key=lambda row: row.average_score, reverse=True)
+
+    def _official_number(summary: ScoreSummary) -> int:
+        if summary.singer.official_number is None:
+            raise ValidationError("所有第一轮选手必须先配置官方选手编号。")
+        return summary.singer.official_number
+
+    seats = sorted(ranked[:10], key=_official_number)
+    challengers = sorted(ranked[10:], key=lambda row: row.average_score)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session = ChallengeSession.objects.create(
+            activity=locked_activity,
+            source_round=locked_round,
+            ruleset_version=locked_version,
+            state=ChallengeSession.State.ACTIVE,
+            source_score_version=locked_round.score_version,
+            source_roster_fingerprint=source_fp,
+            ruleset_hash=ruleset_hash,
+            input_fingerprint=input_fp,
+            first_round_weight=first_weight,
+            challenge_round_weight=challenge_weight,
+            created_by=current_operator,
+            is_test_data=locked_activity.is_test_mode,
+        )
+        ChallengeSeat.objects.bulk_create(
+            [
+                ChallengeSeat(
+                    session=session,
+                    position=index,
+                    initial_holder=row.singer,
+                    current_holder=row.singer,
+                    third_round_position=index,
+                    is_test_data=session.is_test_data,
+                )
+                for index, row in enumerate(seats, start=1)
+            ]
+        )
+        ChallengeTurn.objects.bulk_create(
+            [
+                ChallengeTurn(
+                    session=session,
+                    sequence=index,
+                    challenger=row.singer,
+                    is_test_data=session.is_test_data,
+                )
+                for index, row in enumerate(challengers, start=1)
+            ]
+        )
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.session.create",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeSession",
+            result_id=session.pk,
+            result_payload={"session_id": session.pk, "input_fingerprint": input_fp},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_SESSION_CREATE,
+        target=f"ChallengeSession:{session.pk}",
+        new_value={
+            "source_round_id": locked_round.pk,
+            "ruleset_version_id": locked_version.pk,
+            "source_roster_fingerprint": source_fp,
+            "challengers": [turn.challenger_id for turn in session.turns.order_by("sequence")],
+            "seats": [seat.current_holder_id for seat in session.seats.order_by("position")],
+        },
+    )
+    return session
+
+
+@transaction.atomic
+def start_challenge_turn(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeTurn:
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.turn.start",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.turn.start",
+        payload_hash=payload_hash,
+        result_model=ChallengeTurn,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    if session.state == ChallengeSession.State.READY_TO_CONFIRM:
+        raise ValidationError("五次挑战机会已经处理完，请确认最终十强。")
+    if session.state != ChallengeSession.State.ACTIVE:
+        raise PermissionDenied("当前踢馆会话不可开始挑战选择。")
+    turn = ChallengeTurn.objects.select_for_update().get(
+        session=session, sequence=session.current_turn_number
+    )
+    if turn.state == ChallengeTurn.State.PENDING:
+        turn.state = ChallengeTurn.State.SELECTING
+        turn.revision += 1
+        turn.acted_by = current_operator
+        turn.acted_at = timezone.now()
+        with authority_write(LIVE_CHALLENGE_STATE):
+            turn.save(update_fields=["state", "revision", "acted_by", "acted_at"])
+        _bump(session)
+        with authority_write(LIVE_CHALLENGE_STATE):
+            session.save(update_fields=["revision", "updated_at"])
+    elif turn.state != ChallengeTurn.State.SELECTING:
+        raise ValidationError("当前挑战机会已经进入不可重新选择的阶段。")
+    with authority_write(LIVE_CHALLENGE_STATE):
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.turn.start",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeTurn",
+            result_id=turn.pk,
+            result_payload={"turn_id": turn.pk, "sequence": turn.sequence},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_TURN_START,
+        target=f"ChallengeTurn:{turn.pk}",
+        new_value={"sequence": turn.sequence, "session_revision": session.revision},
+    )
+    turn.session = session
+    return turn
+
+
+@transaction.atomic
+def record_challenge_target(
+    session_id: int,
+    *,
+    seat_position: object,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeTurn:
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    try:
+        position = int(str(seat_position))
+    except (TypeError, ValueError):
+        raise ValidationError("挑战目标席位无效。") from None
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.target.record",
+            "session_id": session.pk,
+            "seat_position": position,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.target.record",
+        payload_hash=payload_hash,
+        result_model=ChallengeTurn,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    if session.state != ChallengeSession.State.ACTIVE:
+        raise PermissionDenied("当前踢馆会话不在选人阶段。")
+    turn = ChallengeTurn.objects.select_for_update().get(
+        session=session, sequence=session.current_turn_number
+    )
+    if turn.state != ChallengeTurn.State.SELECTING:
+        raise ValidationError("请先开始当前挑战者的选择。")
+    seat = (
+        ChallengeSeat.objects.select_for_update().filter(session=session, position=position).first()
+    )
+    if seat is None:
+        raise ValidationError("挑战目标席位不存在。")
+    if seat.is_challenged:
+        raise ValidationError("席位已经被挑战，不能再次选择。")
+    if seat.current_holder_id == turn.challenger_id:
+        raise ValidationError("挑战者不能选择自己所在的席位。")
+    turn.target_seat = seat
+    turn.state = ChallengeTurn.State.TARGET_SELECTED
+    turn.revision += 1
+    turn.acted_by = current_operator
+    turn.acted_at = timezone.now()
+    _bump(session)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        turn.save(update_fields=["target_seat", "state", "revision", "acted_by", "acted_at"])
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.target.record",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeTurn",
+            result_id=turn.pk,
+            result_payload={"turn_id": turn.pk, "seat_position": seat.position},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_TARGET_RECORD,
+        target=f"ChallengeTurn:{turn.pk}",
+        new_value={"seat_id": seat.pk, "seat_position": seat.position},
+    )
+    turn.session = session
+    return turn
+
+
+@transaction.atomic
+def confirm_challenge_pairing(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeMatch:
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.pair.confirm",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.pair.confirm",
+        payload_hash=payload_hash,
+        result_model=ChallengeMatch,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    if session.state != ChallengeSession.State.ACTIVE:
+        raise PermissionDenied("当前踢馆会话不可确认配对。")
+    turn = (
+        ChallengeTurn.objects.select_for_update()
+        .select_related("target_seat")
+        .get(session=session, sequence=session.current_turn_number)
+    )
+    if turn.state != ChallengeTurn.State.TARGET_SELECTED or turn.target_seat is None:
+        raise ValidationError("请先记录挑战对象。")
+    target_seat_id = turn.target_seat_id
+    if target_seat_id is None:
+        raise ValidationError("请先记录挑战对象。")
+    seat = ChallengeSeat.objects.select_for_update().get(pk=target_seat_id)
+    if seat.is_challenged:
+        raise ValidationError("席位已经被挑战，不能重复确认配对。")
+    now = timezone.now()
+    with authority_write(LIVE_CHALLENGE_STATE):
+        match = ChallengeMatch.objects.create(
+            session=session,
+            turn=turn,
+            seat=seat,
+            challenger=turn.challenger,
+            defender=seat.current_holder,
+            status=ChallengeMatch.Status.READY_FOR_SCORING,
+            is_test_data=session.is_test_data,
+        )
+        seat.is_challenged = True
+        seat.challenged_at = now
+        seat.revision += 1
+        seat.save(update_fields=["is_challenged", "challenged_at", "revision"])
+        turn.state = ChallengeTurn.State.MATCHED
+        turn.revision += 1
+        turn.acted_by = current_operator
+        turn.acted_at = now
+        turn.save(update_fields=["state", "revision", "acted_by", "acted_at"])
+        _bump(session)
+        with authority_write(LIVE_CHALLENGE_STATE):
+            session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.pair.confirm",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeMatch",
+            result_id=match.pk,
+            result_payload={
+                "match_id": match.pk,
+                "challenger_id": match.challenger_id,
+                "defender_id": match.defender_id,
+                "seat_position": seat.position,
+            },
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_PAIR_CONFIRM,
+        target=f"ChallengeMatch:{match.pk}",
+        new_value={
+            "turn_id": turn.pk,
+            "seat_id": seat.pk,
+            "challenger_id": match.challenger_id,
+            "defender_id": match.defender_id,
+        },
+    )
+    match.session = session
+    return match
+
+
+@transaction.atomic
+def waive_challenge_turn(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeTurn:
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.turn.waive",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.turn.waive",
+        payload_hash=payload_hash,
+        result_model=ChallengeTurn,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    if session.state != ChallengeSession.State.ACTIVE:
+        raise PermissionDenied("当前踢馆会话不可放弃挑战。")
+    turn = ChallengeTurn.objects.select_for_update().get(
+        session=session, sequence=session.current_turn_number
+    )
+    if turn.state not in {ChallengeTurn.State.PENDING, ChallengeTurn.State.SELECTING}:
+        raise ValidationError("配对确认后不能正常放弃挑战。")
+    turn.state = ChallengeTurn.State.WAIVED
+    turn.target_seat = None
+    turn.revision += 1
+    turn.acted_by = current_operator
+    turn.acted_at = timezone.now()
+    _finish_turn(session, turn)
+    _bump(session)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        turn.save(update_fields=["state", "target_seat", "revision", "acted_by", "acted_at"])
+        session.save(update_fields=["state", "current_turn_number", "revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.turn.waive",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeTurn",
+            result_id=turn.pk,
+            result_payload={"turn_id": turn.pk, "sequence": turn.sequence},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_TURN_WAIVE,
+        target=f"ChallengeTurn:{turn.pk}",
+        new_value={"sequence": turn.sequence, "session_state": session.state},
+    )
+    turn.session = session
+    return turn
+
+
+@transaction.atomic
+def prepare_challenge_match(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeMatch:
+    """Create one two-contestant scoring round after pairing is confirmed."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.score.prepare",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.score.prepare",
+        payload_hash=payload_hash,
+        result_model=ChallengeMatch,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match = (
+        ChallengeMatch.objects.select_for_update()
+        .select_related("turn", "seat", "challenger", "defender")
+        .filter(session=session, turn__sequence=session.current_turn_number)
+        .first()
+    )
+    if match is None:
+        raise ValidationError("当前挑战机会还没有确认配对。")
+    if match.status == ChallengeMatch.Status.SCORING and match.score_round_id:
+        return match
+    if match.status != ChallengeMatch.Status.READY_FOR_SCORING:
+        raise ValidationError("当前比赛不在待准备评分阶段。")
+    source_round = session.source_round
+    source_judges = list(
+        RoundJudge.objects.filter(round=source_round).select_related("judge").order_by("pk")
+    )
+    if not source_judges:
+        raise ValidationError("踢馆评分必须先配置评委名单。")
+    next_sequence = (
+        ContestRound.objects.filter(activity=session.activity).aggregate(
+            max_sequence=Max("sequence")
+        )["max_sequence"]
+        or 0
+    ) + 1
+    minimum_judges = source_round.minimum_judge_count or len(source_judges)
+    with authority_write(CONTEST_ROUND_STATE):
+        score_round = ContestRound.objects.create(
+            activity=session.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            scoring_mode=source_round.scoring_mode,
+            score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
+            judge_count=len(source_judges),
+            minimum_judge_count=min(minimum_judges, len(source_judges)),
+            name=f"踢馆第 {match.turn.sequence} 场评分",
+            sequence=next_sequence,
+            order_policy=ContestRound.OrderPolicy.MANUAL,
+            advance_count=0,
+            rubric=source_round.rubric,
+            is_locked=False if hasattr(ContestRound, "is_locked") else False,
+        )
+        RoundEntry.objects.bulk_create(
+            [
+                RoundEntry(round=score_round, singer=match.challenger, running_order=1),
+                RoundEntry(round=score_round, singer=match.defender, running_order=2),
+            ]
+        )
+        RoundJudge.objects.bulk_create(
+            [RoundJudge(round=score_round, judge=row.judge) for row in source_judges]
+        )
+        Performance.objects.bulk_create(
+            [
+                Performance(
+                    activity=session.activity,
+                    round=score_round,
+                    singer=match.challenger,
+                    sequence=1,
+                    song_title="",
+                    is_test_data=session.is_test_data,
+                ),
+                Performance(
+                    activity=session.activity,
+                    round=score_round,
+                    singer=match.defender,
+                    sequence=2,
+                    song_title="",
+                    is_test_data=session.is_test_data,
+                ),
+            ]
+        )
+        score_round.status = ContestRound.Status.PREPARED
+        score_round.save(update_fields=["status", "is_locked"])
+    match.score_round = score_round
+    match.status = ChallengeMatch.Status.SCORING
+    match.revision += 1
+    with authority_write(LIVE_CHALLENGE_STATE):
+        match.save(update_fields=["score_round", "status", "revision"])
+        _bump(session)
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.score.prepare",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeMatch",
+            result_id=match.pk,
+            result_payload={"match_id": match.pk, "score_round_id": score_round.pk},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_SCORE_PREPARE,
+        target=f"ChallengeMatch:{match.pk}",
+        new_value={
+            "score_round_id": score_round.pk,
+            "contestants": [match.challenger_id, match.defender_id],
+        },
+    )
+    match.session = session
+    return match
+
+
+@transaction.atomic
+def lock_challenge_match_scores(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeMatch:
+    """Close both individual performances only after each reaches the panel minimum."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.score.lock",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.score.lock",
+        payload_hash=payload_hash,
+        result_model=ChallengeMatch,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match = (
+        ChallengeMatch.objects.select_for_update()
+        .select_related("score_round", "turn")
+        .filter(session=session, turn__sequence=session.current_turn_number)
+        .first()
+    )
+    if match is None or match.score_round_id is None:
+        raise ValidationError("当前比赛尚未准备评分。")
+    if match.status != ChallengeMatch.Status.SCORING:
+        raise ValidationError("当前比赛不在收分阶段。")
+    score_round = ContestRound.objects.select_for_update().get(pk=match.score_round_id)
+    performances = list(Performance.objects.filter(round=score_round).order_by("sequence", "pk"))
+    states = list(
+        PerformanceScoreState.objects.filter(performance__in=performances).values_list(
+            "performance_id", "state"
+        )
+    )
+    if len(performances) != 2 or len(states) != 2:
+        raise ValidationError("踢馆比赛必须包含挑战者和守擂者两名评分对象。")
+    if any(state != PerformanceScoreState.State.LOCKED for _, state in states):
+        raise ValidationError("双方评分都必须先由工作人员分别锁定。")
+    if score_round.status != ContestRound.Status.LOCKED:
+        from .services import lock_round
+
+        lock_round(score_round, current_operator)
+    match.status = ChallengeMatch.Status.AWAITING_RESULT
+    match.revision += 1
+    with authority_write(LIVE_CHALLENGE_STATE):
+        match.save(update_fields=["status", "revision"])
+        _bump(session)
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.score.lock",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeMatch",
+            result_id=match.pk,
+            result_payload={"match_id": match.pk, "score_round_id": score_round.pk},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_SCORE_LOCK,
+        target=f"ChallengeMatch:{match.pk}",
+        new_value={"score_round_id": score_round.pk, "status": match.status},
+    )
+    match.session = session
+    return match
+
+
+@transaction.atomic
+def confirm_challenge_match_result(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeMatch:
+    """Compute the official weighted result and atomically replace the seat holder."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.match.confirm",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.match.confirm",
+        payload_hash=payload_hash,
+        result_model=ChallengeMatch,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match = (
+        ChallengeMatch.objects.select_for_update()
+        .select_related("score_round", "turn", "seat", "challenger", "defender")
+        .filter(session=session, turn__sequence=session.current_turn_number)
+        .first()
+    )
+    if match is None or match.score_round_id is None:
+        raise ValidationError("当前挑战比赛不存在评分结果。")
+    if match.status != ChallengeMatch.Status.AWAITING_RESULT:
+        raise ValidationError("当前挑战比赛尚未达到待确认胜负状态。")
+    scores = {
+        row.singer_id: row.average_score
+        for row in ScoreSummary.objects.filter(
+            round_id=match.score_round_id,
+            singer_id__in=[match.challenger_id, match.defender_id],
+        )
+    }
+    source_scores = {
+        row.singer_id: row.average_score
+        for row in ScoreSummary.objects.filter(
+            round=session.source_round,
+            singer_id__in=[match.challenger_id, match.defender_id],
+        )
+    }
+    if set(scores) != {match.challenger_id, match.defender_id} or set(source_scores) != set(scores):
+        raise ValidationError("挑战双方必须都有第一轮和本场已核定的正式成绩。")
+    challenger_combined = official_weighted_score(
+        [
+            (source_scores[match.challenger_id], session.first_round_weight),
+            (scores[match.challenger_id], session.challenge_round_weight),
+        ]
+    )
+    defender_combined = official_weighted_score(
+        [
+            (source_scores[match.defender_id], session.first_round_weight),
+            (scores[match.defender_id], session.challenge_round_weight),
+        ]
+    )
+    if challenger_combined == defender_combined:
+        raise ValidationError("实际综合成绩相同，不能自动确认胜负，请处理数据异常。")
+    winner_id = (
+        match.challenger_id if challenger_combined > defender_combined else match.defender_id
+    )
+    result_fp = _hash_payload(
+        {
+            "match_id": match.pk,
+            "source_round_id": session.source_round_id,
+            "score_round_id": match.score_round_id,
+            "challenger_combined": str(challenger_combined),
+            "defender_combined": str(defender_combined),
+            "winner_id": winner_id,
+        }
+    )
+    turn = ChallengeTurn.objects.select_for_update().get(pk=match.turn_id)
+    seat = ChallengeSeat.objects.select_for_update().get(pk=match.seat_id)
+    now = timezone.now()
+    with authority_write(LIVE_CHALLENGE_STATE):
+        match.status = ChallengeMatch.Status.CONFIRMED
+        match.winner_id = winner_id
+        match.challenger_first_score = quantize_official_score(source_scores[match.challenger_id])
+        match.defender_first_score = quantize_official_score(source_scores[match.defender_id])
+        match.challenger_second_score = quantize_official_score(scores[match.challenger_id])
+        match.defender_second_score = quantize_official_score(scores[match.defender_id])
+        match.challenger_combined_score = challenger_combined
+        match.defender_combined_score = defender_combined
+        match.result_fingerprint = result_fp
+        match.confirmed_by = current_operator
+        match.confirmed_at = now
+        match.revision += 1
+        match.save(
+            update_fields=[
+                "status",
+                "winner",
+                "challenger_first_score",
+                "defender_first_score",
+                "challenger_second_score",
+                "defender_second_score",
+                "challenger_combined_score",
+                "defender_combined_score",
+                "result_fingerprint",
+                "confirmed_by",
+                "confirmed_at",
+                "revision",
+            ]
+        )
+        seat.current_holder_id = winner_id
+        seat.revision += 1
+        seat.save(update_fields=["current_holder", "revision"])
+        turn.state = ChallengeTurn.State.CONFIRMED
+        turn.revision += 1
+        turn.acted_by = current_operator
+        turn.acted_at = now
+        turn.save(update_fields=["state", "revision", "acted_by", "acted_at"])
+        _finish_turn(session, turn)
+        _bump(session)
+        session.save(update_fields=["state", "current_turn_number", "revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.match.confirm",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeMatch",
+            result_id=match.pk,
+            result_payload={
+                "match_id": match.pk,
+                "winner_id": winner_id,
+                "challenger_combined_score": str(challenger_combined),
+                "defender_combined_score": str(defender_combined),
+            },
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_MATCH_CONFIRM,
+        target=f"ChallengeMatch:{match.pk}",
+        new_value={
+            "winner_id": winner_id,
+            "seat_id": seat.pk,
+            "challenger_combined_score": str(challenger_combined),
+            "defender_combined_score": str(defender_combined),
+            "result_fingerprint": result_fp,
+        },
+    )
+    match.session = session
+    return match
+
+
+@transaction.atomic
+def confirm_challenge_session(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ChallengeSession:
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.session.confirm",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.session.confirm",
+        payload_hash=payload_hash,
+        result_model=ChallengeSession,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    if session.state != ChallengeSession.State.READY_TO_CONFIRM:
+        raise ValidationError("五次挑战机会尚未全部处理。")
+    turns = list(ChallengeTurn.objects.filter(session=session).order_by("sequence"))
+    if len(turns) != 5 or any(
+        turn.state not in {ChallengeTurn.State.WAIVED, ChallengeTurn.State.CONFIRMED}
+        for turn in turns
+    ):
+        raise ValidationError("五次挑战机会必须逐一处理后才能确认最终十强。")
+    seats = list(ChallengeSeat.objects.filter(session=session))
+    holders = [seat.current_holder_id for seat in seats]
+    if len(seats) != 10 or len(set(holders)) != 10:
+        raise ValidationError("最终十强必须恰好由十个不同席位持有人组成。")
+    now = timezone.now()
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session.state = ChallengeSession.State.CONFIRMED
+        session.confirmed_by = current_operator
+        session.confirmed_at = now
+        session.revision += 1
+        session.save(
+            update_fields=["state", "confirmed_by", "confirmed_at", "revision", "updated_at"]
+        )
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.session.confirm",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeSession",
+            result_id=session.pk,
+            result_payload={"session_id": session.pk, "holder_ids": holders},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_SESSION_CONFIRM,
+        target=f"ChallengeSession:{session.pk}",
+        new_value={
+            "holder_ids": holders,
+            "third_round_positions": [seat.third_round_position for seat in seats],
+        },
+    )
+    return session
+
+
+@transaction.atomic
+def create_final_round_from_challenge(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> ContestRound:
+    """Materialize the confirmed ten-seat roster as the draft third round."""
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.final_round.prepare",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.final_round.prepare",
+        payload_hash=payload_hash,
+        result_model=ContestRound,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    if session.state != ChallengeSession.State.CONFIRMED:
+        raise ValidationError("只有已确认最终十强后才能生成第三轮名单。")
+    existing = ContestRound.objects.filter(
+        roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
+        roster_source_challenge_session=session,
+    ).first()
+    if existing is not None:
+        raise ValidationError("第三轮名单已经生成，请从轮次页面继续准备。")
+    roster = challenge_final_roster(session.pk, activity_id=session.activity_id)
+    source_round = ContestRound.objects.select_for_update().get(pk=session.source_round_id)
+    sequence = (
+        ContestRound.objects.filter(activity=session.activity).aggregate(
+            max_sequence=Max("sequence")
+        )["max_sequence"]
+        or 0
+    ) + 1
+    with authority_write(CONTEST_ROUND_STATE):
+        final_round = ContestRound.objects.create(
+            activity=session.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            scoring_mode=source_round.scoring_mode,
+            score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
+            judge_count=source_round.judge_count,
+            minimum_judge_count=source_round.minimum_judge_count,
+            name="第三轮冠军赛",
+            sequence=sequence,
+            order_policy=ContestRound.OrderPolicy.OFFICIAL_NUMBER,
+            tie_order_policy=ContestRound.TieOrderPolicy.REVIEW,
+            advance_count=0,
+            roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
+            roster_source_challenge_session=session,
+            rubric=source_round.rubric,
+        )
+        RoundEntry.objects.bulk_create(
+            [
+                RoundEntry(round=final_round, singer=singer, running_order=index)
+                for index, singer in enumerate(roster, start=1)
+            ]
+        )
+        _bump(session)
+        with authority_write(LIVE_CHALLENGE_STATE):
+            session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.final_round.prepare",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ContestRound",
+            result_id=final_round.pk,
+            result_payload={
+                "round_id": final_round.pk,
+                "official_numbers": [singer.official_number for singer in roster],
+            },
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_FINAL_ROUND_PREPARE,
+        target=f"ContestRound:{final_round.pk}",
+        new_value={
+            "challenge_session_id": session.pk,
+            "official_numbers": [singer.official_number for singer in roster],
+        },
+    )
+    return final_round

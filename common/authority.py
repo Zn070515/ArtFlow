@@ -48,6 +48,8 @@ VOTE_SCORING_RULE = "vote_scoring_rule.write"
 VOTE_BALLOT_WRITE = "voteballot.write"
 GROUP_STAGE_STATE = "group_stage.state"
 PLANNING_DRAFT_WRITE = "ruleset.planning_draft.write"
+SINGER_CONTESTANT_NUMBER = "singer_contestant.number"
+LIVE_CHALLENGE_STATE = "singer_contest.live_challenge.state"
 
 
 @dataclass(frozen=True)

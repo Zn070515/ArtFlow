@@ -31,6 +31,7 @@
         <table class="w-full text-sm">
             <thead>
                 <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-left px-4 py-2 font-medium">官方编号</th>
                     <th class="text-left px-4 py-2 font-medium">姓名</th>
                     <th class="text-left px-4 py-2 font-medium">曲目</th>
                     <th class="text-left px-4 py-2 font-medium">活动</th>
@@ -43,6 +44,7 @@
             <tbody class="divide-y divide-gray-100">
                 {% for reg in registrations %}
                 <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2.5 font-medium">{% if reg.official_number %}{{ reg.official_number }}{% else %}—{% endif %}</td>
                     <td class="px-4 py-2.5">{{ reg.name }}</td>
                     <td class="px-4 py-2.5">{{ reg.song_label }}</td>
                     <td class="px-4 py-2.5 text-gray-500">{{ reg.activity.title }}</td>

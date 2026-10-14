@@ -71,6 +71,7 @@ function boot(fetchImpl) {
   const song = new FakeElement();
   const criteria = new FakeElement();
   const total = new FakeElement();
+  const pending = new FakeElement();
   root.children.set("[data-status]", status);
   root.children.set("[data-score]", score);
   root.children.set("[data-notes]", notes);
@@ -82,6 +83,7 @@ function boot(fetchImpl) {
   root.children.set("[data-song]", song);
   root.children.set("[data-criteria]", criteria);
   root.children.set("[data-total]", total);
+  root.children.set("[data-pending]", pending);
   const storage = new FakeStorage();
   const listeners = new Map();
   const timers = new Map();
@@ -131,7 +133,7 @@ function boot(fetchImpl) {
   vm.runInNewContext(source, context, { filename: "judge_terminal.js" });
   return {
     root, status, score, notes, submit, activity, round, performance, singer, song, criteria, total,
-    storage, window, listeners, advance,
+    pending, storage, window, listeners, advance,
   };
 }
 
@@ -173,6 +175,20 @@ const nextContextPayload = {
     performance_label: "第 7 个节目",
     singer_name: "下一位参赛者",
     song_title: "下一首曲目",
+  },
+};
+
+const pendingContextPayload = {
+  context: {
+    ...contextPayload.context,
+    pending_performances: [{
+      performance_id: 5,
+      context_version: 9,
+      performance_label: "第 5 个节目",
+      singer_name: "待补评委选手",
+      song_title: "待补曲目",
+      state: "open",
+    }],
   },
 };
 
@@ -285,6 +301,31 @@ test("polls context and isolates old draft when the current performance changes"
   assert.equal(runtime.performance.textContent, "第 7 个节目");
   assert.equal(runtime.score.value, "");
   assert.match(runtime.status.textContent, /草稿|上下文/);
+});
+
+test("selects an opened previous performance and submits its own version", async () => {
+  let scoreOptions;
+  const runtime = boot(async (url, options = {}) => {
+    if (url.includes("redeem")) return response(200, { kind: "judge", session_token: "session-secret" });
+    if (url.includes("context")) return response(200, pendingContextPayload);
+    scoreOptions = options;
+    return response(201, {
+      receipt: { receipt_id: 12, score_record_id: 13, reason_code: "ACCEPTED", status: "succeeded" },
+    });
+  });
+  await settle();
+
+  assert.equal(runtime.pending.childList.length, 1);
+  runtime.pending.childList[0].dispatch("click");
+  runtime.score.value = "89.50";
+  runtime.submit.dispatch("click");
+  await settle();
+
+  const submitted = JSON.parse(scoreOptions.body);
+  assert.equal(submitted.expected_performance_id, 5);
+  assert.equal(submitted.expected_context_version, 9);
+  assert.match(runtime.performance.textContent, /第 5 个节目/);
+  assert.match(runtime.status.textContent, /待补评委选手/);
 });
 
 test("submits rubric criterion values without trusting a client total", async () => {

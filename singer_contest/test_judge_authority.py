@@ -38,6 +38,7 @@ from .judge_authority import (
     hold_judge_panel,
     hold_performance,
     issue_judge_grant,
+    lock_performance_score,
     prepare_judge_panel,
     release_judge_seat,
     resume_judge_panel,
@@ -55,14 +56,16 @@ from .models import (
     JudgeSeatGrant,
     JudgeSession,
     PerformanceRunState,
+    PerformanceScoreState,
     RoundPanelSnapshot,
     RoundPanelSnapshotMember,
     RubricCriterion,
     ScoreRecord,
     ScoreSource,
     ScoringRubric,
+    SingerRegistration,
 )
-from .services import apply_scores
+from .services import apply_scores, set_official_contestant_number
 
 
 class JudgeAuthorityVocabularyTests(TestCase):
@@ -89,6 +92,7 @@ class JudgeAuthorityVocabularyTests(TestCase):
             "JUDGE_SESSION_REVOKE",
             "JUDGE_PERF_ADVANCE",
             "JUDGE_PERF_HOLD",
+            "JUDGE_PERF_SCORE_LOCK",
             "JUDGE_SCORE_SUBMIT",
             "JUDGE_SCORE_PROXY",
             "JUDGE_SCORE_PAPER",
@@ -108,6 +112,7 @@ class JudgeAuthorityVocabularyTests(TestCase):
             JudgeSeatGrant,
             JudgeSession,
             PerformanceRunState,
+            PerformanceScoreState,
         ):
             self.assertTrue(hasattr(model, "objects"))
 
@@ -123,6 +128,7 @@ class JudgeAuthorityVocabularyTests(TestCase):
             JudgeSeatGrant,
             JudgeSession,
             PerformanceRunState,
+            PerformanceScoreState,
         ):
             with self.subTest(model=model.__name__), self.assertRaises(ValidationError):
                 model().save()
@@ -334,6 +340,49 @@ class JudgePanelServiceTests(TestCase):
             self.round.rubric = rubric
             self.round.save(update_fields=["rubric"])
         return rubric, criteria
+
+    def test_official_contestant_number_uses_a_unique_audited_authority_service(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            other_user = User.objects.create_user(
+                username="official-number-singer",
+                password="pass",
+                role=User.Role.PARTICIPANT,
+            )
+        registration = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=other_user,
+            name="Numbered singer",
+            student_id="number-001",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000001",
+            song_name="Numbered song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+
+        updated = set_official_contestant_number(
+            registration.pk,
+            17,
+            operator=self.operator,
+        )
+
+        self.assertEqual(updated.official_number, 17)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                action_type=AuditLog.ActionType.SET_CONTESTANT_NUMBER,
+                target=f"SingerRegistration:{registration.pk}",
+            ).exists()
+        )
+        registration.official_number = 18
+        with self.assertRaises(ValidationError):
+            registration.save(update_fields=["official_number"])
+        with self.assertRaises(ValidationError):
+            set_official_contestant_number(
+                self.singer.pk,
+                17,
+                operator=self.operator,
+            )
 
     def test_prepare_panel_creates_immutable_snapshot_seat_and_live_context(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
@@ -904,6 +953,86 @@ class JudgePanelServiceTests(TestCase):
         resumed = resume_performance(self.round.pk, operator=self.operator)
         self.assertEqual(resumed.state, PerformanceRunState.State.PERFORMING)
         self.assertEqual(resumed.context_version, 3)
+
+    def test_an_open_previous_performance_accepts_late_score_until_staff_locks_it(self):
+        from .models import Performance, RoundEntry, SingerRegistration
+
+        second_user = User.objects.create_user(
+            username="judge-singer-second", password="pass", role=User.Role.PARTICIPANT
+        )
+        second_singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=second_user,
+            name="Second Singer",
+            student_id="judge-002",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000001",
+            song_name="Second Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+            is_test_data=True,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.save(update_fields=["status"])
+        RoundEntry.objects.create(round=self.round, singer=second_singer, running_order=2)
+        second_performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=second_singer,
+            sequence=2,
+            song_title="Second Song",
+            is_test_data=True,
+        )
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+        snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)
+        seat = snapshot.members.get(seat_key="seat-1").seats.get()
+        issued = issue_judge_grant(seat.pk, operator=self.operator, ttl_seconds=600)
+        redeemed = redeem_access_grant(issued.token)
+
+        advance_performance(self.round.pk, self.performance.pk, operator=self.operator)
+        advance_performance(self.round.pk, second_performance.pk, operator=self.operator)
+
+        context = get_judge_context(redeemed.token)
+        self.assertEqual(context.performance_id, second_performance.pk)
+        self.assertEqual(
+            [(item.performance_id, item.context_version) for item in context.pending_performances],
+            [(self.performance.pk, 1)],
+        )
+
+        submission = submit_judge_score(
+            redeemed.token,
+            command_id="judge-late-score-1",
+            expected_context_version=1,
+            expected_performance_id=self.performance.pk,
+            score_payload={"score": "91.50"},
+        )
+        self.assertEqual(
+            ScoreRecord.objects.get(pk=submission.score_record_id).singer_id,
+            self.singer.pk,
+        )
+        self.assertEqual(
+            PerformanceScoreState.objects.get(performance=self.performance).state,
+            PerformanceScoreState.State.OPEN,
+        )
+
+        locked = lock_performance_score(
+            self.round.pk,
+            self.performance.pk,
+            operator=self.operator,
+            expected_context_version=1,
+        )
+        self.assertEqual(locked.state, PerformanceScoreState.State.LOCKED)
+        with self.assertRaisesMessage(PermissionDenied, "该表演评分已锁定"):
+            submit_judge_score(
+                redeemed.token,
+                command_id="judge-late-score-after-lock",
+                expected_context_version=1,
+                expected_performance_id=self.performance.pk,
+                score_payload={"score": "92.00"},
+            )
 
     def test_judge_score_rejects_context_from_before_performance_hold_and_resume(self):
         snapshot = prepare_judge_panel(self.round.pk, operator=self.operator)

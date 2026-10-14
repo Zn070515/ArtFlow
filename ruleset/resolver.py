@@ -25,6 +25,8 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Mapping
 
+from singer_contest.scoring import official_average
+
 from .schema import ENTRY_KEY, content_hash, parse_definition
 
 RESULT_VERSION = 1
@@ -54,6 +56,7 @@ class ResolverState(StrEnum):
 class ResolveInput:
     roster: tuple[str, ...] = ()
     round_scores: Mapping[str, Mapping[str, tuple[Decimal, ...]]] = field(default_factory=dict)
+    round_score_minimums: Mapping[str, int] = field(default_factory=dict)
     vote_scores: Mapping[str, Mapping[str, Decimal]] = field(default_factory=dict)
     group_of: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     manual: Mapping[str, Mapping[str, tuple[str, ...]]] = field(default_factory=dict)
@@ -606,6 +609,12 @@ def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
                 st.hold.append(f"轮次 {src} 缺失 {c} 评分。")
                 continue
             dec = tuple(_as_dec(s) for s in scores)
+            minimum = inputs.round_score_minimums.get(src)
+            if minimum is not None and len(dec) < minimum:
+                st.hold.append(
+                    f"轮次 {src} {c} 有效评委不足 ({len(dec)} < {minimum})。"
+                )
+                continue
             if node.get("mode") == "trimmed_mean":
                 if len(dec) <= trims:
                     st.hold.append(f"轮次 {src} {c} 有效评委不足 ({len(dec)} <= {trims})。")
@@ -614,9 +623,9 @@ def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
                 body = ordered[
                     int(node.get("trim_low") or 0) : len(ordered) - int(node.get("trim_high") or 0)
                 ]
-                out[c] = sum(body, Decimal("0")) / Decimal(len(body))
+                out[c] = official_average(body)
             else:
-                out[c] = sum(dec, Decimal("0")) / Decimal(len(dec))
+                out[c] = official_average(dec)
     return out
 
 

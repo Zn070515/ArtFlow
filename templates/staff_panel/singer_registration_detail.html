@@ -16,6 +16,7 @@
         <div class="min-w-0 bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-2">
             <h3 class="font-medium text-gray-900 mb-3">基本信息</h3>
             <div class="flex justify-between"><span class="text-gray-500">活动</span><span>{{ reg.activity.title }}</span></div>
+            <div class="flex justify-between"><span class="text-gray-500">官方选手编号</span><span>{{ reg.official_number|default:"未设置" }}</span></div>
             <div class="flex justify-between"><span class="text-gray-500">学号</span><span>{{ reg.student_id }}</span></div>
             <div class="flex justify-between"><span class="text-gray-500">学院</span><span>{{ reg.college }}</span></div>
             <div class="flex justify-between"><span class="text-gray-500">班级</span><span>{{ reg.class_name }}</span></div>
@@ -26,6 +27,15 @@
         </div>
 
         <div class="min-w-0 space-y-4">
+            <form method="post" class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-3">
+                {% csrf_token %}
+                <input type="hidden" name="set_official_number" value="1">
+                <h3 class="font-medium text-gray-900">官方选手编号</h3>
+                <p class="text-xs text-gray-500">编号在活动内唯一；已有轮次事实后，修正会要求管理员并将下游轮次置为待复核。</p>
+                {{ official_number_form.official_number }}
+                {% if official_number_form.official_number.errors %}<p class="text-xs text-red-600">{{ official_number_form.official_number.errors|striptags }}</p>{% endif %}
+                <button type="submit" class="bg-brand text-white px-3 py-1.5 rounded text-xs hover:bg-brand-light transition-colors">保存官方编号</button>
+            </form>
             <form method="post" class="bg-white border border-gray-200 rounded-lg p-5 text-sm space-y-3">
                 {% csrf_token %}
                 <h3 class="font-medium text-gray-900">状态管理</h3>

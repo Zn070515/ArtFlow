@@ -119,6 +119,18 @@ from ruleset.services import (
     validate_definition_completeness,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
+from singer_contest.challenge_services import (
+    confirm_challenge_match_result,
+    confirm_challenge_pairing,
+    confirm_challenge_session,
+    create_challenge_session,
+    create_final_round_from_challenge,
+    lock_challenge_match_scores,
+    prepare_challenge_match,
+    record_challenge_target,
+    start_challenge_turn,
+    waive_challenge_turn,
+)
 from singer_contest.group_chorus import (
     cancel_group_stage,
     confirm_group_stage,
@@ -134,6 +146,7 @@ from singer_contest.judge_authority import (
     advance_performance,
     hold_judge_panel,
     hold_performance,
+    lock_performance_score,
     prepare_judge_panel,
     release_judge_seat,
     resume_judge_panel,
@@ -143,8 +156,12 @@ from singer_contest.judge_authority import (
     submit_staff_proxy_score,
 )
 from singer_contest.judge_entry import judge_entry_credential
+from singer_contest.materials import live_material_summary
 from singer_contest.models import (
     AudienceScore,
+    ChallengeMatch,
+    ChallengeSession,
+    ChallengeTurn,
     ContestRound,
     Group,
     GroupMembership,
@@ -155,6 +172,7 @@ from singer_contest.models import (
     Performance,
     PerformanceGroup,
     PerformanceRunState,
+    PerformanceScoreState,
     RoundEntry,
     RoundPanelSnapshot,
     RubricCriterion,
@@ -194,6 +212,7 @@ from singer_contest.services import (
     round_roster_stage_choices,
     round_setup_readiness,
     set_manual_decision,
+    set_official_contestant_number,
     set_round_groups,
     set_round_running_order,
     stage_decisions_by_blocks,
@@ -225,6 +244,7 @@ from staff_panel.forms import (
     JudgePanelAttendanceForm,
     JudgePerformanceActionForm,
     ManualDecisionForm,
+    OfficialContestantNumberForm,
     ProgramReviewForm,
     PublicPostForm,
     RapidScoreCommandForm,
@@ -328,6 +348,183 @@ def dashboard(request):
 def activity_list(request):
     activities = Activity.objects.all()
     return render(request, "staff_panel/activity_list.html", {"activities": activities})
+
+
+@staff_required
+def live_challenge_console(request, pk):
+    """One plain-language control surface for the chronological challenge stage."""
+    activity = get_object_or_404(Activity, pk=pk)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛活动支持现场挑战。")
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        command_id = request.POST.get("command_id") or uuid4().hex
+        try:
+            expected_revision = int(request.POST.get("expected_revision") or "0")
+            session_id = int(request.POST.get("session_id") or "0")
+            if action == "create":
+                source_round = get_object_or_404(
+                    ContestRound,
+                    pk=request.POST.get("source_round_id"),
+                    activity=activity,
+                )
+                version = _current_frozen_version(activity)
+                if version is None:
+                    raise ValidationError("当前活动还没有已确认的赛制版本。")
+                create_challenge_session(
+                    source_round,
+                    ruleset_version=version,
+                    operator=request.user,
+                    command_id=command_id,
+                )
+            elif action == "start":
+                start_challenge_turn(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "target":
+                record_challenge_target(
+                    session_id,
+                    seat_position=request.POST.get("seat_position"),
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "pair":
+                confirm_challenge_pairing(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "waive":
+                waive_challenge_turn(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "prepare":
+                prepare_challenge_match(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action in {"open_challenger", "open_defender"}:
+                session = get_object_or_404(ChallengeSession, pk=session_id, activity=activity)
+                turn = get_object_or_404(
+                    ChallengeTurn, session=session, sequence=session.current_turn_number
+                )
+                match = get_object_or_404(ChallengeMatch, turn=turn)
+                if not match.score_round_id:
+                    raise ValidationError("当前比赛还没有准备评分。")
+                singer_id = (
+                    match.challenger_id if action == "open_challenger" else match.defender_id
+                )
+                performance = get_object_or_404(
+                    Performance,
+                    round_id=match.score_round_id,
+                    singer_id=singer_id,
+                )
+                advance_performance(match.score_round_id, performance.pk, operator=request.user)
+            elif action == "lock_scores":
+                lock_challenge_match_scores(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "confirm_match":
+                confirm_challenge_match_result(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "confirm_session":
+                confirm_challenge_session(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "prepare_final_round":
+                create_final_round_from_challenge(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            else:
+                raise ValidationError("现场挑战操作无效。")
+        except (PermissionDenied, ValidationError, ValueError) as error:
+            messages.error(request, domain_error_messages(error))
+        else:
+            messages.success(request, "现场挑战已更新。")
+        return redirect("staff:live_challenge_console", pk=activity.pk)
+
+    live_session = (
+        ChallengeSession.objects.filter(activity=activity)
+        .select_related("source_round", "ruleset_version")
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    current_turn = None
+    current_match = None
+    legal_seats = []
+    if live_session is not None:
+        current_turn = (
+            live_session.turns.select_related("challenger", "target_seat")
+            .filter(sequence=live_session.current_turn_number)
+            .first()
+        )
+        current_match = (
+            current_turn.match
+            if current_turn is not None and hasattr(current_turn, "match")
+            else None
+        )
+        if current_turn is not None:
+            legal_seats = list(
+                live_session.seats.select_related("current_holder")
+                .filter(is_challenged=False)
+                .exclude(current_holder_id=current_turn.challenger_id)
+                .order_by("position")
+            )
+    source_rounds = ContestRound.objects.filter(
+        activity=activity,
+        status=ContestRound.Status.LOCKED,
+        advancement_status=ContestRound.AdvancementStatus.FINALIZED,
+    ).order_by("sequence", "pk")
+    return render(
+        request,
+        "staff_panel/live_challenge_console.html",
+        {
+            "activity": activity,
+            "session": live_session,
+            "current_turn": current_turn,
+            "current_match": current_match,
+            "legal_seats": legal_seats,
+            "source_rounds": source_rounds,
+            "state_labels": dict(ChallengeSession.State.choices),
+            "turn_state_labels": dict(ChallengeTurn.State.choices),
+            "match_state_labels": dict(ChallengeMatch.Status.choices),
+        },
+    )
+
+
+@staff_required
+def live_material_progress(request, pk):
+    activity = get_object_or_404(Activity, pk=pk)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛活动支持现场材料进度。")
+    return render(
+        request,
+        "staff_panel/live_material_progress.html",
+        {"activity": activity, "summary": live_material_summary(activity)},
+    )
 
 
 @staff_required
@@ -1241,62 +1438,81 @@ def singer_registration_detail(request, pk):
     reg = get_object_or_404(SingerRegistration.objects.select_related("activity", "user"), pk=pk)
     errors = []
     if request.method == "POST":
+        if "set_official_number" in request.POST:
+            number_form = OfficialContestantNumberForm(request.POST)
+            if number_form.is_valid():
+                try:
+                    set_official_contestant_number(
+                        reg.pk,
+                        number_form.cleaned_data["official_number"],
+                        operator=request.user,
+                    )
+                except (PermissionDenied, ValidationError, IntegrityError) as error:
+                    errors = [domain_error_messages(error)]
+                else:
+                    messages.success(request, "官方选手编号已保存。")
+                    return redirect("staff:singer_registration_detail", pk=reg.pk)
+            else:
+                errors = [_form_error(number_form)]
         is_upload = "upload_file" in request.POST
         action = ActivityAction.UPLOAD_MATERIAL if is_upload else ActivityAction.REVIEW_REGISTRATION
-        ensure_activity_action_allowed(reg.activity, action)
-        with transaction.atomic():
-            activity = lock_activity_for_action(reg.activity, action)
-            locked_reg = (
-                SingerRegistration.objects.select_for_update()
-                .select_related("activity", "user")
-                .get(pk=reg.pk)
-            )
-            if locked_reg.activity_id != activity.pk:
-                raise PermissionDenied("报名信息不属于当前活动。")
-            if is_upload:
-                f = request.FILES.get("file")
-                if f:
-                    try:
-                        submission_file = store_submission_file(
-                            owner=locked_reg,
-                            uploaded_file=f,
-                            purpose=request.POST.get("file_purpose", SubmissionFile.Purpose.OTHER),
-                            uploaded_by=request.user,
-                        )
-                    except ValidationError as error:
-                        errors.extend(error.messages)
+        if "set_official_number" not in request.POST and not errors:
+            ensure_activity_action_allowed(reg.activity, action)
+            with transaction.atomic():
+                activity = lock_activity_for_action(reg.activity, action)
+                locked_reg = (
+                    SingerRegistration.objects.select_for_update()
+                    .select_related("activity", "user")
+                    .get(pk=reg.pk)
+                )
+                if locked_reg.activity_id != activity.pk:
+                    raise PermissionDenied("报名信息不属于当前活动。")
+                if is_upload:
+                    f = request.FILES.get("file")
+                    if f:
+                        try:
+                            submission_file = store_submission_file(
+                                owner=locked_reg,
+                                uploaded_file=f,
+                                purpose=request.POST.get(
+                                    "file_purpose", SubmissionFile.Purpose.OTHER
+                                ),
+                                uploaded_by=request.user,
+                            )
+                        except ValidationError as error:
+                            errors.extend(error.messages)
+                        else:
+                            reconcile_singer_material_checks(locked_reg)
+                            log_action(
+                                request,
+                                AuditLog.ActionType.UPLOAD_FILE,
+                                f"SubmissionFile:{submission_file.pk}",
+                                new_value=submission_file.original_name,
+                            )
+                else:
+                    form = SingerReviewForm(request.POST)
+                    if not form.is_valid():
+                        errors = [_form_error(form)]
                     else:
-                        reconcile_singer_material_checks(locked_reg)
+                        old_value = f"pre={locked_reg.pre_status}; live={locked_reg.live_status}"
+                        locked_reg.pre_status = form.cleaned_data["pre_status"]
+                        locked_reg.live_status = form.cleaned_data["live_status"]
+                        note = form.cleaned_data.get("staff_note", "").strip()
+                        if note:
+                            StaffNote.objects.create(
+                                singer_registration=locked_reg,
+                                content=note,
+                                created_by=request.user,
+                            )
+                        locked_reg.save()
                         log_action(
                             request,
-                            AuditLog.ActionType.UPLOAD_FILE,
-                            f"SubmissionFile:{submission_file.pk}",
-                            new_value=submission_file.original_name,
+                            AuditLog.ActionType.UPDATE_STATUS,
+                            f"SingerRegistration:{locked_reg.pk}",
+                            old_value=old_value,
+                            new_value=f"pre={locked_reg.pre_status}; live={locked_reg.live_status}",
                         )
-            else:
-                form = SingerReviewForm(request.POST)
-                if not form.is_valid():
-                    errors = [_form_error(form)]
-                else:
-                    old_value = f"pre={locked_reg.pre_status}; live={locked_reg.live_status}"
-                    locked_reg.pre_status = form.cleaned_data["pre_status"]
-                    locked_reg.live_status = form.cleaned_data["live_status"]
-                    note = form.cleaned_data.get("staff_note", "").strip()
-                    if note:
-                        StaffNote.objects.create(
-                            singer_registration=locked_reg,
-                            content=note,
-                            created_by=request.user,
-                        )
-                    locked_reg.save()
-                    log_action(
-                        request,
-                        AuditLog.ActionType.UPDATE_STATUS,
-                        f"SingerRegistration:{locked_reg.pk}",
-                        old_value=old_value,
-                        new_value=f"pre={locked_reg.pre_status}; live={locked_reg.live_status}",
-                    )
-                    return redirect("staff:singer_registration_detail", pk=reg.pk)
+                        return redirect("staff:singer_registration_detail", pk=reg.pk)
     notes = reg.staff_notes.select_related("created_by")
     files = reg.files.all()
     checks = reg.material_checks.all()
@@ -1317,6 +1533,9 @@ def singer_registration_detail(request, pk):
                 reg.activity
             ),
             "errors": errors,
+            "official_number_form": OfficialContestantNumberForm(
+                initial={"official_number": reg.official_number}
+            ),
         },
     )
 
@@ -1578,6 +1797,7 @@ def export_registrations(request):
     ws.title = "报名名单"
     ws.append(
         [
+            "官方编号",
             "姓名",
             "学号",
             "学院",
@@ -1606,6 +1826,7 @@ def export_registrations(request):
     for r in rows:
         ws.append(
             [
+                r.official_number,
                 r.name,
                 r.student_id,
                 r.college,
@@ -1817,8 +2038,10 @@ def round_create(request):
                         "activity": locked_activity,
                         "round_type": form.cleaned_data["round_type"],
                         "scoring_mode": form.cleaned_data["scoring_mode"],
+                        "score_completion_mode": form.cleaned_data["score_completion_mode"],
                         "judge_count": form.cleaned_data["judge_count"],
-                        "minimum_judge_count": form.cleaned_data["judge_count"],
+                        "minimum_judge_count": form.cleaned_data["minimum_judge_count"]
+                        or form.cleaned_data["judge_count"],
                         "name": form.cleaned_data["name"],
                         "advance_count": form.cleaned_data["advance_count"],
                         "order_policy": form.cleaned_data["order_policy"],
@@ -1907,7 +2130,9 @@ def round_edit(request, pk):
         "name": contest_round.name,
         "round_type": contest_round.round_type,
         "scoring_mode": contest_round.scoring_mode,
+        "score_completion_mode": contest_round.score_completion_mode,
         "judge_count": contest_round.judge_count,
+        "minimum_judge_count": contest_round.minimum_judge_count,
         "advance_count": contest_round.advance_count,
         "sequence": contest_round.sequence,
         "order_policy": contest_round.order_policy,
@@ -1946,6 +2171,7 @@ def round_edit(request, pk):
                         "name",
                         "round_type",
                         "scoring_mode",
+                        "score_completion_mode",
                         "advance_count",
                         "sequence",
                         "order_policy",
@@ -1956,12 +2182,15 @@ def round_edit(request, pk):
                     ):
                         setattr(locked_round, field, form.cleaned_data[field])
                     locked_round.judge_count = form.cleaned_data["judge_count"]
-                    locked_round.minimum_judge_count = form.cleaned_data["judge_count"]
+                    locked_round.minimum_judge_count = (
+                        form.cleaned_data["minimum_judge_count"] or form.cleaned_data["judge_count"]
+                    )
                     locked_round.save(
                         update_fields=[
                             "name",
                             "round_type",
                             "scoring_mode",
+                            "score_completion_mode",
                             "judge_count",
                             "minimum_judge_count",
                             "advance_count",
@@ -2918,6 +3147,16 @@ def _judge_control_context(
         .select_related("singer")
         .order_by("sequence", "pk")
     )
+    performance_score_states = {
+        state.performance_id: state
+        for state in PerformanceScoreState._base_manager.filter(
+            performance_id__in=[performance.pk for performance in performances]
+        )
+    }
+    performance_rows = [
+        {"performance": performance, "score_state": performance_score_states.get(performance.pk)}
+        for performance in performances
+    ]
     expected_judge_count = (
         contest_round.judge_count if contest_round.judge_count is not None else len(round_judges)
     )
@@ -2963,6 +3202,7 @@ def _judge_control_context(
         "seat_rows": seat_rows,
         "run_state": run_state,
         "performances": performances,
+        "performance_rows": performance_rows,
         "expected_judge_count": expected_judge_count,
         "actual_judge_count": actual_judge_count,
         "minimum_judge_count": minimum_judge_count,
@@ -3144,6 +3384,28 @@ def judge_performance_advance(request, pk):
             messages.success(request, "当前表演已切换，旧评分上下文自动失效。")
     else:
         messages.error(request, f"推进表演失败：{_form_error(form)}")
+    return redirect("staff:judge_control", pk=pk)
+
+
+@staff_required
+@require_POST
+def judge_performance_score_lock(request, pk):
+    contest_round = get_object_or_404(ContestRound, pk=pk)
+    form = JudgePerformanceActionForm(request.POST)
+    if form.is_valid() and form.cleaned_data["context_version"] is not None:
+        try:
+            lock_performance_score(
+                contest_round.pk,
+                form.cleaned_data["performance_id"],
+                operator=request.user,
+                expected_context_version=form.cleaned_data["context_version"],
+            )
+        except (PermissionDenied, ValidationError) as error:
+            messages.error(request, f"锁定表演评分失败：{domain_error_messages(error)}")
+        else:
+            messages.success(request, "该表演评分已锁定，之后的评分将被拒绝。")
+    else:
+        messages.error(request, "锁定表演评分失败：现场版本已失效，请刷新后重试。")
     return redirect("staff:judge_control", pk=pk)
 
 
@@ -4119,6 +4381,7 @@ def activity_clone(request, pk):
             activity=new_activity,
             round_type=contest_round.round_type,
             scoring_mode=contest_round.scoring_mode,
+            score_completion_mode=contest_round.score_completion_mode,
             minimum_judge_count=contest_round.minimum_judge_count,
             judge_count=contest_round.judge_count,
             name=contest_round.name,
@@ -5222,6 +5485,13 @@ def ruleset_edit(request, pk):
         business_editor["round_options"] = prepared_round_options
         business_editor["vote_options"] = vote_options
         business_editor["scoring_modes"] = list(ContestRound.ScoringMode.choices)
+    live_challenge = dict(ruleset.live_challenge or {})
+    for weight_key in ("first_round_weight", "challenge_round_weight"):
+        if weight_key in live_challenge:
+            try:
+                live_challenge[weight_key] = f"{Decimal(str(live_challenge[weight_key])) * 100:g}%"
+            except (InvalidOperation, ValueError):
+                pass
     return render(
         request,
         "staff_panel/ruleset_editor.html",
@@ -5251,6 +5521,7 @@ def ruleset_edit(request, pk):
                     ensure_ascii=False,
                 ),
             },
+            "live_challenge": live_challenge,
             "binding_signature": _binding_signature(ruleset),
             "binding_maps": binding_maps,
             "human_summary": human_summary,
@@ -5318,6 +5589,25 @@ def ruleset_bind(request, pk):
                     {},
                 ),
                 "audience_keys": _parse_json("audience_keys", {}),
+                "live_challenge": {
+                    "participant_count": request.POST.get("live_participant_count") or "",
+                    "seat_count": request.POST.get("live_seat_count") or "",
+                    "challenge_count": request.POST.get("live_challenge_count") or "",
+                    "first_round_weight": request.POST.get("live_first_weight") or "",
+                    "challenge_round_weight": request.POST.get("live_challenge_weight") or "",
+                    "order_policy": "official_number",
+                }
+                if any(
+                    request.POST.get(name)
+                    for name in (
+                        "live_participant_count",
+                        "live_seat_count",
+                        "live_challenge_count",
+                        "live_first_weight",
+                        "live_challenge_weight",
+                    )
+                )
+                else {},
                 "announcement_blocks": _parse_json("announcement_blocks", []),
                 "announcement_blocks_by_checkpoint": _parse_json(
                     "announcement_blocks_by_checkpoint", {}

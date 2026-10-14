@@ -430,6 +430,17 @@
                 <p class="mt-1 text-xs text-gray-500">将 PARTITION 节点的分组来源绑定到已冻结的分组合唱赛段。</p>
             </div>
             {% endfor %}
+            <details class="sm:col-span-2 border border-brand/30 bg-blue-50 rounded p-3" open>
+                <summary class="cursor-pointer text-sm font-semibold text-brand">2026 现场挑战配置</summary>
+                <p class="text-xs text-gray-600 mt-2">填写后，冻结赛制会固定 15 人、10 个席位、5 次挑战，以及第一轮与挑战轮成绩的综合权重。权重必须合计 100%。</p>
+                <div class="grid sm:grid-cols-5 gap-3 mt-3">
+                    <label class="text-xs text-gray-700">参赛人数<input name="live_participant_count" value="{{ live_challenge.participant_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">席位数<input name="live_seat_count" value="{{ live_challenge.seat_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">挑战次数<input name="live_challenge_count" value="{{ live_challenge.challenge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第一轮权重<input name="live_first_weight" value="{{ live_challenge.first_round_weight|default:'' }}" placeholder="40%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">挑战轮权重<input name="live_challenge_weight" value="{{ live_challenge.challenge_round_weight|default:'' }}" placeholder="60%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                </div>
+            </details>
             <details class="sm:col-span-2 border border-gray-200 rounded p-3">
                 <summary class="cursor-pointer text-sm font-medium text-gray-700">高级观众分绑定（JSON，仅人工/外部观众分需要）</summary>
                 <label for="id_audience_keys" class="block text-xs text-gray-700 mt-3 mb-0.5">观众分映射</label>

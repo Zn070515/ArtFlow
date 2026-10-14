@@ -11,6 +11,7 @@ from common.authority import (
     ROUND_PERFORMANCE_STATE,
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
+    SINGER_CONTESTANT_NUMBER,
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
     TEST_DATA_CLEANUP,
@@ -27,6 +28,7 @@ from django.db.models import Q
 from ruleset.resolver import OutcomeCode, ResolverState
 
 from .deletion import cascade_draft_snapshots_or_protect_prepared
+from .scoring import ScoreCompletionMode
 
 if TYPE_CHECKING:
     from files.models import MaterialCheck, StaffNote, SubmissionFile
@@ -412,6 +414,11 @@ class SingerRegistration(models.Model):
     )
 
     name = models.CharField(max_length=100)
+    official_number = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="活动内对外使用的官方选手编号；必须通过编号服务设置。",
+    )
     student_id = models.CharField(max_length=20)
     college = models.CharField(max_length=100)
     class_name = models.CharField(max_length=100)
@@ -461,6 +468,11 @@ class SingerRegistration(models.Model):
                 condition=~Q(student_id=""),
                 name="singer_one_registration_per_student_per_activity",
             ),
+            models.UniqueConstraint(
+                fields=["activity", "official_number"],
+                condition=Q(official_number__isnull=False),
+                name="singer_unique_official_number_per_activity",
+            ),
         ]
 
     def __str__(self):
@@ -468,6 +480,20 @@ class SingerRegistration(models.Model):
 
     def save(self, *args, **kwargs):
         _ensure_identity_ownership_unchanged(self, frozenset({"activity_id", "user_id"}))
+        if self._state.adding:
+            if self.official_number is not None and not authority_authorized(
+                SINGER_CONTESTANT_NUMBER
+            ):
+                raise ValidationError("官方选手编号必须通过编号服务设置。")
+        elif not authority_authorized(SINGER_CONTESTANT_NUMBER):
+            stored_number = (
+                type(self)
+                ._base_manager.filter(pk=self.pk)
+                .values_list("official_number", flat=True)
+                .first()
+            )
+            if stored_number != self.official_number:
+                raise ValidationError("官方选手编号必须通过编号服务设置。")
         return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -813,6 +839,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
         "activity_id",
         "round_type",
         "scoring_mode",
+        "score_completion_mode",
         "judge_count",
         "minimum_judge_count",
         "name",
@@ -825,6 +852,7 @@ _CONTEST_ROUND_CONFIGURATION_FIELDS = frozenset(
         "advance_count",
         "roster_source",
         "roster_source_stage",
+        "roster_source_challenge_session_id",
     }
 )
 
@@ -910,11 +938,16 @@ class ContestRound(models.Model):
     class RosterSource(models.TextChoices):
         APPROVED = "approved", "批准名单"
         STAGE = "stage", "赛段晋级"
+        CHALLENGE_SESSION = "challenge_session", "踢馆核定十强"
         LEGACY = "legacy", "上一轮晋级"
 
     class ScoringMode(models.TextChoices):
         AVERAGE = "average", "平均分"
         DROP_HIGH_LOW = "drop_high_low", "去最高最低后平均"
+
+    class CompletionMode(models.TextChoices):
+        FULL_MATRIX = ScoreCompletionMode.FULL_MATRIX.value, "完整评分矩阵"
+        MINIMUM_VALID = ScoreCompletionMode.MINIMUM_VALID.value, "达到最低有效评委数"
 
     class OrderPolicy(models.TextChoices):
         REGISTRATION_ORDER = "registration_order", "报名顺序"
@@ -922,6 +955,7 @@ class ContestRound(models.Model):
         MANUAL = "manual", "人工顺序"
         PREVIOUS_RANK_ASC = "previous_rank_asc", "上一轮排名升序"
         PREVIOUS_RANK_DESC = "previous_rank_desc", "上一轮排名降序"
+        OFFICIAL_NUMBER = "official_number", "官方选手编号"
 
     class TieOrderPolicy(models.TextChoices):
         REVIEW = "review", "同分待人工决定"
@@ -942,6 +976,12 @@ class ContestRound(models.Model):
     activity = models.ForeignKey("core.Activity", on_delete=models.CASCADE, related_name="rounds")
     round_type = models.CharField(max_length=16, choices=RoundType)
     scoring_mode = models.CharField(max_length=16, choices=ScoringMode, default=ScoringMode.AVERAGE)
+    score_completion_mode = models.CharField(
+        max_length=16,
+        choices=CompletionMode,
+        default=CompletionMode.FULL_MATRIX,
+        help_text="历史轮次使用完整矩阵；现场赛制可显式使用最低有效评委数。",
+    )
     judge_count = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -981,13 +1021,21 @@ class ContestRound(models.Model):
         max_length=16, choices=AdvancementStatus, default=AdvancementStatus.AUTO
     )
     roster_source = models.CharField(
-        max_length=16,
+        max_length=24,
         choices=RosterSource,
         default="",
         blank=True,
         help_text="晋级名单来源；置空时按轮次类型自动判定。",
     )
     roster_source_stage = models.CharField(max_length=100, blank=True, default="")
+    roster_source_challenge_session = models.ForeignKey(
+        "singer_contest.ChallengeSession",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="final_rounds",
+        help_text="第三轮只能读取已核定踢馆会话的十个席位持有人。",
+    )
 
     objects = ContestRoundManager()
 
@@ -995,6 +1043,7 @@ class ContestRound(models.Model):
         performances: models.Manager["Performance"]
         activity_id: int
         rubric_id: int | None
+        roster_source_challenge_session_id: int | None
         entries: models.Manager["RoundEntry"]
         groups: models.Manager["Group"]
         round_judges: models.Manager["RoundJudge"]
@@ -1108,7 +1157,24 @@ class ContestRound(models.Model):
         if self.roster_source:
             if self.roster_source == self.RosterSource.STAGE and not self.roster_source_stage:
                 raise ValidationError("赛段晋级轮次必须声明 source_stage。")
+            if self.roster_source == self.RosterSource.CHALLENGE_SESSION:
+                challenge_session = self.roster_source_challenge_session
+                if challenge_session is None:
+                    raise ValidationError("第三轮必须声明已核定的踢馆会话。")
+                if challenge_session.activity_id != self.activity_id:
+                    raise ValidationError("第三轮踢馆会话必须属于当前活动。")
+            if (
+                self.roster_source != self.RosterSource.CHALLENGE_SESSION
+                and self.roster_source_challenge_session_id
+            ):
+                raise ValidationError("只有踢馆核定十强来源可以填写踢馆会话。")
+            if self.roster_source != self.RosterSource.STAGE and self.roster_source_stage:
+                raise ValidationError("只有赛段晋级来源可以填写上游赛段。")
             return self.roster_source
+        if self.roster_source_challenge_session_id:
+            raise ValidationError("未选择踢馆名单来源，不能填写踢馆会话。")
+        if self.roster_source_stage:
+            raise ValidationError("未选择赛段晋级来源，不能填写上游赛段。")
         if self.round_type == self.RoundType.SEMI_FINAL:
             return self.RosterSource.LEGACY
         return self.RosterSource.APPROVED
@@ -1374,6 +1440,11 @@ class RoundPanelSnapshot(models.Model):
     expected_judge_count = models.PositiveIntegerField()
     minimum_judge_count = models.PositiveIntegerField()
     scoring_method = models.CharField(max_length=32)
+    completion_mode = models.CharField(
+        max_length=16,
+        choices=ContestRound.CompletionMode,
+        default=ContestRound.CompletionMode.FULL_MATRIX,
+    )
     roster_digest = models.CharField(max_length=64)
     captured_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -2227,12 +2298,16 @@ class ScoreSummary(models.Model):
     singer = models.ForeignKey(
         SingerRegistration, on_delete=models.CASCADE, related_name="summaries"
     )
-    average_score = models.DecimalField(max_digits=6, decimal_places=3, default=0)
+    average_score = models.DecimalField(max_digits=6, decimal_places=2, default=0)
     rank = models.IntegerField(default=0)
     is_advanced = models.BooleanField(default=False)
     is_test_data = models.BooleanField(default=False)
 
     objects = ScoreSummaryManager()
+
+    if TYPE_CHECKING:
+        round_id: int
+        singer_id: int
 
     class Meta:
         base_manager_name = "objects"
@@ -2898,6 +2973,71 @@ class Performance(models.Model):
 
     def __str__(self):
         return f"{self.singer.name} — {self.song_title or self.round.name or self.round}"
+
+
+class PerformanceScoreState(models.Model):
+    """Per-performance scoring gate, independent from the live performance cursor."""
+
+    class State(models.TextChoices):
+        NOT_OPENED = "not_opened", "未开放"
+        OPEN = "open", "收分中"
+        LOCKED = "locked", "已锁定"
+
+    performance = models.OneToOneField(
+        Performance, on_delete=models.PROTECT, related_name="score_state"
+    )
+    state = models.CharField(max_length=16, choices=State.choices, default=State.NOT_OPENED)
+    context_version = models.PositiveIntegerField(default=0)
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="opened_performance_scores",
+    )
+    opened_at = models.DateTimeField(null=True, blank=True)
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locked_performance_scores",
+    )
+    locked_at = models.DateTimeField(null=True, blank=True)
+    is_test_data = models.BooleanField(default=False)
+
+    objects = JudgePerformanceQuerySet.as_manager()
+
+    if TYPE_CHECKING:
+        performance_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        indexes = [
+            models.Index(fields=["state", "context_version"], name="perf_score_state_idx"),
+        ]
+
+    def clean(self):
+        if self.state == self.State.NOT_OPENED:
+            if self.opened_at is not None or self.locked_at is not None:
+                raise ValidationError("未开放表演不能带有开放或锁定时间。")
+        elif self.opened_at is None:
+            raise ValidationError("已开放表演必须记录开放时间。")
+        if self.state == self.State.LOCKED and self.locked_at is None:
+            raise ValidationError("已锁定表演必须记录锁定时间。")
+        if self.state != self.State.LOCKED and self.locked_at is not None:
+            raise ValidationError("未锁定表演不能记录锁定时间。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(ROUND_PERFORMANCE_STATE):
+            raise ValidationError("逐表演评分状态只能通过现场 authority service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(ROUND_PERFORMANCE_STATE):
+            raise ValidationError("逐表演评分状态删除需要现场 authority service。")
+        return super().delete(*args, **kwargs)
 
 
 class ScoringRubric(models.Model):
@@ -3868,3 +4008,15 @@ class DuelDecision(models.Model):
 
     def __str__(self):
         return f"{self.duel_key} — {self.pair_key}: {self.winner}"
+
+
+# Kept in a focused module so the live-event state machine does not further enlarge this
+# already compatibility-heavy model module.  Importing at the end avoids a circular import:
+# challenge_models reuses the ContestRound and SingerRegistration classes above.
+from .challenge_models import (  # noqa: E402, F401
+    ChallengeCommand,
+    ChallengeMatch,
+    ChallengeSeat,
+    ChallengeSession,
+    ChallengeTurn,
+)
