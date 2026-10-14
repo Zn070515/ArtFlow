@@ -31,7 +31,10 @@ from .challenge_services import (
     waive_challenge_turn,
 )
 from .judge_authority import (
+    _current_challenge_target,
     advance_performance,
+    claim_judge_session,
+    get_judge_context,
     lock_performance_score,
     prepare_judge_panel,
 )
@@ -45,6 +48,7 @@ from .models import (
     Performance,
     PerformanceRunState,
     RoundJudge,
+    RoundPanelSnapshot,
     ScoreSummary,
     SingerRegistration,
 )
@@ -223,9 +227,19 @@ class LiveChallengeAuthorityTests(TestCase):
         assert match.score_round is not None
         score_round_id = match.score_round_id
         score_round = match.score_round
+        self.assertEqual(
+            RoundPanelSnapshot.objects.filter(
+                round=score_round, state=RoundPanelSnapshot.State.ACTIVE
+            ).count(),
+            1,
+        )
         prepare_judge_panel(score_round_id, operator=self.staff)
         performances = list(
             Performance.objects.filter(round=match.score_round).order_by("sequence")
+        )
+        self.assertEqual(
+            [performance.song_title for performance in performances],
+            ["歌曲 15", "歌曲 1"],
         )
         judges = list(Judge.objects.filter(activity=self.activity).order_by("pk"))
         for performance, score in zip(performances, (Decimal("100"), Decimal("80"))):
@@ -263,6 +277,95 @@ class LiveChallengeAuthorityTests(TestCase):
             ChallengeSeat.objects.get(session=session, position=1).current_holder_id,
             match.challenger_id,
         )
+
+    def test_judge_claimed_on_challenge_round_resolves_the_live_match(self):
+        """A judge scanned before the dynamic round still follows its active match."""
+        session, match = self._paired_session(prefix="dynamic-judge")
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="dynamic-judge-prepare",
+            expected_revision=match.session.revision,
+        )
+        assert match.score_round_id is not None
+
+        claimed = claim_judge_session(self.activity)
+
+        target_round = _current_challenge_target(claimed.session)
+        self.assertIsNotNone(target_round)
+        self.assertEqual(target_round.pk, match.score_round_id)
+
+    def test_same_judge_session_follows_the_next_challenge_match(self):
+        """A connected judge can continue after the challenge score round changes."""
+        session, match = self._paired_session(prefix="handoff")
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="handoff-prepare-one",
+            expected_revision=match.session.revision,
+        )
+        claimed = claim_judge_session(self.activity)
+        score_round = match.score_round
+        assert score_round is not None
+        performances = list(score_round.performances.order_by("sequence"))
+        judges = list(Judge.objects.filter(activity=self.activity).order_by("pk"))
+        for performance, score in zip(performances, (Decimal("100"), Decimal("80"))):
+            advance_performance(score_round.pk, performance.pk, operator=self.staff)
+            apply_scores(
+                score_round,
+                {(performance.singer_id, judge.pk): score for judge in judges[:4]},
+                self.staff,
+            )
+            run_state = PerformanceRunState.objects.get(round=score_round.pk)
+            lock_performance_score(
+                score_round.pk,
+                performance.pk,
+                operator=self.staff,
+                expected_context_version=run_state.context_version,
+            )
+        match = lock_challenge_match_scores(
+            session.pk,
+            operator=self.staff,
+            command_id="handoff-lock-one",
+            expected_revision=match.session.revision,
+        )
+        confirm_challenge_match_result(
+            session.pk,
+            operator=self.staff,
+            command_id="handoff-confirm-one",
+            expected_revision=match.session.revision,
+        )
+        session.refresh_from_db()
+        turn = start_challenge_turn(
+            session.pk,
+            operator=self.staff,
+            command_id="handoff-start-two",
+            expected_revision=session.revision,
+        )
+        target = record_challenge_target(
+            session.pk,
+            seat_position=2,
+            operator=self.staff,
+            command_id="handoff-target-two",
+            expected_revision=turn.session.revision,
+        )
+        match = confirm_challenge_pairing(
+            session.pk,
+            operator=self.staff,
+            command_id="handoff-pair-two",
+            expected_revision=target.session.revision,
+        )
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="handoff-prepare-two",
+            expected_revision=match.session.revision,
+        )
+
+        context = get_judge_context(claimed.token)
+
+        assert match.score_round_id is not None
+        self.assertEqual(context.round_id, match.score_round_id)
 
     def test_challenge_console_service_requires_challenger_before_defender(self):
         session, match = self._paired_session(prefix="open-order")
@@ -404,6 +507,12 @@ class LiveChallengeAuthorityTests(TestCase):
             [judge.pk for judge in self.judges[1:]],
         )
         self.assertEqual(Performance.objects.filter(round=final_round).count(), 10)
+        self.assertEqual(
+            list(
+                final_round.performances.order_by("sequence").values_list("song_title", flat=True)
+            ),
+            [f"歌曲 {number}" for number in range(1, 11)],
+        )
 
     def test_prepared_final_round_preserves_challenge_seat_order(self):
         session, match = self._paired_session(prefix="seat-order")

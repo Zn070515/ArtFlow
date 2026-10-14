@@ -244,7 +244,12 @@ def _normalize_string_map(raw, *, label):
     return out
 
 
-def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
+def validate_binding(
+    ruleset: ContestRuleset,
+    binding: dict | None,
+    *,
+    require_live_challenge_complete: bool = False,
+) -> dict:
     """Normalize and validate a binding snapshot against the ruleset's activity.
 
     Only round/vote/group keys that resolve to a ``ContestRound`` / ``VoteSession`` /
@@ -318,10 +323,11 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
             "podium_first_round_weight",
             "podium_third_round_weight",
         }
-        if podium_fields & set(raw_live_challenge):
-            missing_podium = sorted(podium_fields - set(raw_live_challenge))
-            if missing_podium:
-                raise ValidationError("最终冠亚季军配置缺少字段：" + ", ".join(missing_podium))
+        podium_present = bool(podium_fields & set(raw_live_challenge))
+        missing_podium = sorted(podium_fields - set(raw_live_challenge))
+        if require_live_challenge_complete and missing_podium:
+            raise ValidationError("最终冠亚季军配置缺少字段：" + ", ".join(missing_podium))
+        if podium_present and not missing_podium:
             podium_strings = {
                 key: str(raw_live_challenge.get(key) or "").strip()
                 for key in (
@@ -361,6 +367,12 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
                     "podium_third_round_weight": f"{(podium_third / Decimal('100')):.4f}",
                 }
             )
+        elif podium_present:
+            # The editable ruleset surface may keep an incomplete draft. Freeze uses
+            # ``require_live_challenge_complete=True`` below and rejects this shape.
+            live_challenge.update(
+                {key: raw_live_challenge[key] for key in podium_fields if key in raw_live_challenge}
+            )
 
         judge_config_fields = {
             "challenge_judge_ids",
@@ -368,10 +380,11 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
             "final_judge_ids",
             "final_minimum_judge_count",
         }
-        if judge_config_fields & set(raw_live_challenge):
-            missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
-            if missing_judges:
-                raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
+        judges_present = bool(judge_config_fields & set(raw_live_challenge))
+        missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
+        if require_live_challenge_complete and missing_judges:
+            raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
+        if judges_present and not missing_judges:
 
             def _judge_ids(key: str) -> list[int]:
                 raw_ids = raw_live_challenge.get(key)
@@ -406,6 +419,18 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
                     "final_minimum_judge_count": final_minimum,
                 }
             )
+        elif judges_present:
+            live_challenge.update(
+                {
+                    key: raw_live_challenge[key]
+                    for key in judge_config_fields
+                    if key in raw_live_challenge
+                }
+            )
+        elif require_live_challenge_complete:
+            raise ValidationError(
+                "现场轮次评委配置缺少字段：" + ", ".join(sorted(judge_config_fields))
+            )
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
         raise ValidationError("announcement_blocks 必须是列表。")
@@ -432,9 +457,15 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     challenge_judge_ids = cast(list[int], live_challenge.get("challenge_judge_ids", []))
     final_judge_ids = cast(list[int], live_challenge.get("final_judge_ids", []))
     judge_ids: set[int] = set()
-    if isinstance(challenge_judge_ids, list):
+    judge_config_is_complete = {
+        "challenge_judge_ids",
+        "challenge_minimum_judge_count",
+        "final_judge_ids",
+        "final_minimum_judge_count",
+    }.issubset(live_challenge)
+    if judge_config_is_complete and isinstance(challenge_judge_ids, list):
         judge_ids.update(challenge_judge_ids)
-    if isinstance(final_judge_ids, list):
+    if judge_config_is_complete and isinstance(final_judge_ids, list):
         judge_ids.update(final_judge_ids)
     if judge_ids:
         owned_judges = {
@@ -2241,7 +2272,11 @@ def freeze_ruleset_version(
         raise ValidationError("当前冻结赛制已核定赛段结果，不可生成后继赛制版本。")
 
     freeze_binding = _snapshot_binding(locked.ruleset) if binding is None else binding
-    normalized_binding = validate_binding(locked.ruleset, freeze_binding)
+    normalized_binding = validate_binding(
+        locked.ruleset,
+        freeze_binding,
+        require_live_challenge_complete=True,
+    )
     # §6.1: freeze the conversion authority itself (rule id + mode + output scale). The
     # editable surface only names the rule; the snapshot records what it meant, so a replay
     # reads the frozen identity instead of asking the DB which rule the session "has now".

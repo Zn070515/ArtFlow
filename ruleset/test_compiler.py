@@ -1968,6 +1968,23 @@ class BindingValidationTests(_RulesetModelBase):
                 },
             )
 
+    def test_freeze_validation_requires_the_complete_2026_live_contract(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaisesMessage(ValidationError, "最终冠亚季军配置缺少字段"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "participant_count": 15,
+                        "seat_count": 10,
+                        "challenge_count": 5,
+                        "first_round_weight": "40%",
+                        "challenge_round_weight": "60%",
+                    }
+                },
+                require_live_challenge_complete=True,
+            )
+
     def test_rejects_bad_checkpoint_blocks(self):
         ruleset = self.make_ruleset()
         with self.assertRaises(ValidationError):

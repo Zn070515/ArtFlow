@@ -30,6 +30,7 @@ from core.policies import ActivityAction, ensure_activity_action_allowed
 from core.services import lock_activity_for_action
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import DatabaseError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from entry_access.models import AccessGrant, EntryPoint, EphemeralSession
 from entry_access.services import (
@@ -1667,9 +1668,13 @@ def _current_challenge_target(session: JudgeSession):
     challenge = (
         ChallengeSession._base_manager.filter(
             activity_id=session.panel_snapshot.activity_id,
-            source_round_id=session.panel_snapshot.round_id,
             state=ChallengeSession.State.ACTIVE,
         )
+        .filter(
+            Q(source_round_id=session.panel_snapshot.round_id)
+            | Q(matches__score_round_id=session.panel_snapshot.round_id)
+        )
+        .distinct()
         .order_by("-pk")
         .first()
     )

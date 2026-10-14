@@ -1479,7 +1479,7 @@ def finalize_advancement(
     database order. Staff explicitly choose who advances; that choice is frozen
     for downstream round consumption and audited.
     """
-    current_actor = require_current_admin(actor)
+    current_actor = require_current_staff(actor)
     lock_activity_for_action(contest_round.activity, ActivityAction.SCORE)
     locked_round = (
         ContestRound.objects.select_for_update().select_related("activity").get(pk=contest_round.pk)
@@ -3915,6 +3915,14 @@ def _coerce_bound_ids(values: Iterable[object]) -> set[int]:
 
 def _closure_required_raw_facts(version, activity, stage_key: str) -> dict[str, tuple[int, ...]]:
     """Resolve the physical round/vote IDs consumed by one stage."""
+    if stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_required_round_ids
+
+        return {
+            "rounds": podium_required_round_ids(version, activity),
+            "group_stages": (),
+            "votes": (),
+        }
     checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
     round_keys, vote_keys, group_keys, _manual_keys = stage_consumed_scopes(
         version.definition, checkpoint
@@ -4192,6 +4200,9 @@ def _current_resolve_status(activity) -> str | None:
     else:
         full_stage = (_version_binding(version).get("stage_key") or "").strip()
         target_keys = [full_stage] if full_stage else []
+    podium_key = _configured_podium_stage_key(version)
+    if podium_key and podium_key not in target_keys:
+        target_keys.append(podium_key)
     target_keys = [k for k in target_keys if k]
     if not target_keys:
         return None
@@ -4228,25 +4239,35 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
     else:
         full_stage = (_version_binding(version).get("stage_key") or "").strip()
         targets = [(full_stage, None)] if full_stage else []
+    podium_key = _configured_podium_stage_key(version)
+    if podium_key and podium_key not in {key for key, _checkpoint in targets}:
+        targets.append((podium_key, None))
     resolved: list[str] = []
     for stage_key, checkpoint in targets:
-        args = _run_ruleset_args(version, activity)
-        try:
-            probe = run_ruleset(
-                version,
-                activity,
-                stage_key=stage_key,
-                computed_by=current_operator,
-                checkpoint=checkpoint,
-                preview=True,
-                **args,
-            )
-        except StageRosterNotMaterialized:
-            # The stage's consumed STAGE/LEGACY roster round has not been materialized
-            # because its upstream stage is still unresolved. That is "not ready yet",
-            # not a config error — skip and let a later input batch publish it.
-            continue
-        if probe.status != ResolverState.READY:
+        if stage_key == podium_key:
+            from .podium_services import build_podium_result
+
+            probe = build_podium_result(version, activity)
+            publishable = {ResolverState.READY, ResolverState.REVIEW}
+        else:
+            args = _run_ruleset_args(version, activity)
+            try:
+                probe = run_ruleset(
+                    version,
+                    activity,
+                    stage_key=stage_key,
+                    computed_by=current_operator,
+                    checkpoint=checkpoint,
+                    preview=True,
+                    **args,
+                )
+            except StageRosterNotMaterialized:
+                # The stage's consumed STAGE/LEGACY roster round has not been materialized
+                # because its upstream stage is still unresolved. That is "not ready yet",
+                # not a config error — skip and let a later input batch publish it.
+                continue
+            publishable = {ResolverState.READY}
+        if probe.status not in publishable:
             continue
         latest = (
             StageResult.objects.filter(activity=activity, stage_key=stage_key)
@@ -4255,7 +4276,11 @@ def maybe_resolve_checkpoints(activity, operator) -> list[str]:
         )
         if latest is not None and latest.input_fingerprint == probe.input_fingerprint:
             continue
-        recompute_activity_result(activity, current_operator, checkpoint=checkpoint)
+        recompute_activity_result(
+            activity,
+            current_operator,
+            checkpoint=stage_key if stage_key == podium_key else checkpoint,
+        )
         resolved.append(stage_key)
     return resolved
 
@@ -4318,9 +4343,14 @@ def recompute_activity_result(
     if missing:
         raise ValidationError(f"赛制绑定的比赛轮次不存在：{missing}")
     bound = {key: rounds[rid] for key, rid in raw_keys.items()}
-    stage_key = checkpoint or binding.get("stage_key") or ruleset.stage_key or ""
+    podium_key = _configured_podium_stage_key(version)
+    stage_key = checkpoint or binding.get("stage_key") or ruleset.stage_key or podium_key or ""
     if not stage_key:
         raise ValidationError("该冻结赛制没有可发布的结果赛段。")
+    if stage_key == podium_key:
+        from .podium_services import persist_podium_result
+
+        return persist_podium_result(version, activity, computed_by=computed_by)
     result = run_ruleset(
         version,
         activity,

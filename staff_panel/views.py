@@ -2987,10 +2987,9 @@ def stage_result_detail(request, pk):
             "stage": stage,
             "activity": stage.activity,
             "blocks": blocks,
-            # GOAL §8.5/§26.6: confirming a stage result is an admin authority, and
-            # `stage_result_confirm` is `@admin_required`. `is_admin` here mirrors that
-            # decorator so the page does not offer a button whose POST is refused.
-            "can_confirm_stage_result": request.user.is_admin,
+            # Staff may perform the operational confirmation; only unlocking remains
+            # an administrator authority because it reopens an already-final result.
+            "can_confirm_stage_result": request.user.is_staff_or_admin,
             "can_unlock_stage_result": request.user.is_admin,
         },
     )
@@ -3018,7 +3017,7 @@ def stage_result_pdf(request, pk):
     return response
 
 
-@admin_required
+@staff_required
 @require_POST
 def stage_result_confirm(request, pk):
     """核定并锁定 a stage result into its final handcard state (M1-H §36-37)."""
@@ -3048,7 +3047,7 @@ def stage_result_unlock(request, pk):
     return redirect("staff:stage_result_detail", pk=pk)
 
 
-@admin_required
+@staff_required
 @require_POST
 def round_finalize_advancement(request, pk):
     contest_round = get_object_or_404(ContestRound, pk=pk)

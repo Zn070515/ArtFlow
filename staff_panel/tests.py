@@ -3453,12 +3453,6 @@ class StaffPanelSmokeTests(TestCase):
             reverse("staff:round_finalize_advancement", args=[round_.pk]),
             data={"selected_singer_ids": [str(singer.pk)]},
         )
-        self.assertEqual(finalize_response.status_code, 403)
-        login_admin(self.client, self.admin)
-        finalize_response = self.client.post(
-            reverse("staff:round_finalize_advancement", args=[round_.pk]),
-            data={"selected_singer_ids": [str(singer.pk)]},
-        )
         self.assertEqual(finalize_response.status_code, 302)
         round_.refresh_from_db()
         self.assertEqual(round_.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
@@ -3470,7 +3464,7 @@ class StaffPanelSmokeTests(TestCase):
         self.assertTrue(round_.is_locked)
         self.assertTrue(
             AuditLog.objects.filter(
-                operator=self.admin,
+                operator=self.staff,
                 action_type=AuditLog.ActionType.FINALIZE_ADVANCEMENT,
                 target=f"ContestRound:{round_.pk}",
             ).exists()
@@ -7199,12 +7193,8 @@ class ResultBoardTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, reverse("staff:stage_result_unlock", args=[ready.pk]))
 
-    def test_staff_stage_detail_does_not_render_the_admin_confirm_form(self):
-        """GOAL §8.5/§26.6: confirming is admin authority, so the button must match it.
-
-        The form was rendered for every staff member while `stage_result_confirm` is
-        `@admin_required`, so the page offered a button whose POST was refused.
-        """
+    def test_staff_stage_detail_renders_the_confirm_form(self):
+        """Operational staff can confirm a ready result; unlock remains admin-only."""
         ready = self._stage(
             status=StageResult.Status.READY_TO_CONFIRM, ruleset_hash="hash-staff-confirm"
         )
@@ -7212,8 +7202,7 @@ class ResultBoardTests(TestCase):
         response = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, reverse("staff:stage_result_confirm", args=[ready.pk]))
-        self.assertContains(response, "等待管理员核定")
+        self.assertContains(response, reverse("staff:stage_result_confirm", args=[ready.pk]))
 
     def test_admin_stage_detail_renders_the_confirm_form(self):
         ready = self._stage(
@@ -7279,7 +7268,6 @@ class ResultBoardTests(TestCase):
         )
         assert isinstance(ready, StageResult)
         self.assertEqual(ready.status, StageResult.Status.READY_TO_CONFIRM)
-        login_admin(self.client, self.admin)
         detail = self.client.get(reverse("staff:stage_result_detail", args=[ready.pk]))
         self.assertContains(
             detail,
@@ -7289,7 +7277,7 @@ class ResultBoardTests(TestCase):
         self.assertRedirects(response, reverse("staff:stage_result_detail", args=[ready.pk]))  # type: ignore[union-attr]
         ready.refresh_from_db()  # type: ignore[union-attr]
         self.assertEqual(ready.status, StageResult.Status.CONFIRMED)
-        self.assertEqual(ready.confirmed_by, self.admin)  # type: ignore[union-attr]
+        self.assertEqual(ready.confirmed_by, self.staff)  # type: ignore[union-attr]
         self.assertIsNotNone(ready.confirmed_at)  # type: ignore[union-attr]
         # M1-R8 Commit 4: the CONFIRM audit is recorded once by the service (rich payload),
         # not duplicated by the view with a stale READY_TO_CONFIRM status.
@@ -8778,6 +8766,7 @@ class JudgeControlContractTests(SimpleTestCase):
             "staff:judge_panel_hold": [7],
             "staff:judge_panel_resume": [7],
             "staff:judge_performance_advance": [7],
+            "staff:judge_performance_group_advance": [7],
             "staff:judge_performance_hold": [7],
             "staff:judge_performance_resume": [7],
             "staff:judge_score_proxy": [7],

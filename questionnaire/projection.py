@@ -118,10 +118,34 @@ def questionnaire_song_for_round(registration, contest_round, *, default="") -> 
     """
     round_key = round_key_for_round(contest_round)
     if not round_key:
+        if getattr(registration, "song_name", "") and not getattr(
+            registration, "_artflow_questionnaire_active", False
+        ):
+            return registration.song_name
         return str(default or "")
     value = questionnaire_value(registration, f"{round_key}.song", default="")
     if isinstance(value, str) and value.strip():
         return value.strip()
+    if getattr(registration, "song_name", "") and not getattr(
+        registration, "_artflow_questionnaire_active", False
+    ):
+        return registration.song_name
+    return str(default or "")
+
+
+def questionnaire_song_for_key(registration, round_key: str, *, default="") -> str:
+    """Return a song answer by its frozen binding key.
+
+    Dynamic live rounds, such as challenge score rounds and the materialized third
+    round, are not always present in ``round_keys`` under their database primary key.
+    Their services still have a frozen symbolic key, so they can use this read-only
+    projection without copying questionnaire answers into mutable performance facts.
+    """
+    normalized_key = str(round_key or "").strip()
+    if normalized_key:
+        value = questionnaire_value(registration, f"{normalized_key}.song", default="")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     if getattr(registration, "song_name", "") and not getattr(
         registration, "_artflow_questionnaire_active", False
     ):

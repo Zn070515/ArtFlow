@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 
 from accounts.models import User
@@ -35,6 +36,7 @@ from .models import (
 )
 from .podium_services import build_podium_result
 from .scoring import official_weighted_score
+from .services import build_result_closure, maybe_resolve_checkpoints
 
 
 class PodiumScoringTests(SimpleTestCase):
@@ -121,7 +123,9 @@ class PodiumResultServiceTests(TestCase):
                 version=1,
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,
-                definition={"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]},
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
                 authority_hash="b" * 64,
                 binding={
                     "round_keys": {"first_round": self.first_round.pk},
@@ -247,3 +251,20 @@ class PodiumResultServiceTests(TestCase):
         result = build_podium_result(self.version, self.activity)
         self.assertEqual(result.status, "hold")
         self.assertIn("podium_third_round_performances_unlocked", result.reasons)
+
+    def test_normal_result_recompute_publishes_podium_candidate(self):
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+
+        resolved = maybe_resolve_checkpoints(self.activity, self.staff)
+
+        self.assertEqual(resolved, ["final_podium"])
+        stage = StageResult.objects.get(activity=self.activity, stage_key="final_podium")
+        self.assertEqual(stage.status, StageResult.Status.READY_TO_CONFIRM)
+        closure = build_result_closure(self.activity)
+        podium = next(stage for stage in closure.stages if stage.stage_key == "final_podium")
+        self.assertEqual(
+            podium.required_raw_facts["rounds"], (self.first_round.pk, self.final_round.pk)
+        )
+        self.assertTrue(podium.confirmable)
