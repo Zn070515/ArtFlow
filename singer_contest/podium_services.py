@@ -193,8 +193,7 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
         reasons.append("podium_first_round_not_locked")
 
     first_summaries = {
-        row.singer_id: row.average_score
-        for row in ScoreSummary.objects.filter(round=first_round)
+        row.singer_id: row.average_score for row in ScoreSummary.objects.filter(round=first_round)
     }
     third_summaries = (
         {row.singer_id: row.average_score for row in ScoreSummary.objects.filter(round=third_round)}
@@ -214,13 +213,16 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
             }
             if set(performances) != set(final_ids) or len(performances) != 10:
                 reasons.append("podium_third_round_performances_incomplete")
-            elif PerformanceScoreState.objects.filter(
-                performance__in=performances.values()
-            ).exclude(state=PerformanceScoreState.State.LOCKED).exists():
+            elif (
+                PerformanceScoreState.objects.filter(performance__in=performances.values())
+                .exclude(state=PerformanceScoreState.State.LOCKED)
+                .exists()
+            ):
                 reasons.append("podium_third_round_performances_unlocked")
-            elif PerformanceScoreState.objects.filter(
-                performance__in=performances.values()
-            ).count() != 10:
+            elif (
+                PerformanceScoreState.objects.filter(performance__in=performances.values()).count()
+                != 10
+            ):
                 reasons.append("podium_third_round_performances_unlocked")
 
     fingerprint = _hash(
@@ -318,15 +320,19 @@ def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
         )
         for entry, score in ordered
     )
-    awards = tuple(
-        AwardDecision(
-            award=name,
-            contestant=str(ordered[index][0].singer_id),
-            score=ordered[index][1],
-            source_node=config.aggregate_node,
+    awards = (
+        tuple(
+            AwardDecision(
+                award=name,
+                contestant=str(ordered[index][0].singer_id),
+                score=ordered[index][1],
+                source_node=config.aggregate_node,
+            )
+            for index, name in enumerate(("冠军", "亚军", "季军"))
         )
-        for index, name in enumerate(("冠军", "亚军", "季军"))
-    ) if status == ResolverState.READY else ()
+        if status == ResolverState.READY
+        else ()
+    )
     return ResolveResult(
         status=status,
         reasons=reasons,
@@ -334,9 +340,7 @@ def build_podium_result(version: RulesetVersion, activity) -> ResolveResult:
         composites=composites,
         awards=awards,
         node_values={
-            config.aggregate_node: {
-                str(entry.singer_id): str(score) for entry, score in ordered
-            }
+            config.aggregate_node: {str(entry.singer_id): str(score) for entry, score in ordered}
         },
         content_hash=_hash(config.__dict__),
         input_fingerprint=facts.fingerprint,

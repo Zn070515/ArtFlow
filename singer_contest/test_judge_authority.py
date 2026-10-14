@@ -452,9 +452,7 @@ class JudgePanelServiceTests(TestCase):
             self.round.save(update_fields=["status"])
 
         prepare_judge_panel(self.round.pk, operator=self.operator)
-        run_state = advance_performance_group(
-            self.round.pk, group.pk, operator=self.operator
-        )
+        run_state = advance_performance_group(self.round.pk, group.pk, operator=self.operator)
         self.assertEqual(run_state.current_performance_id, self.performance.pk)
         states = PerformanceScoreState.objects.filter(performance__group=group)
         self.assertEqual(states.count(), 3)

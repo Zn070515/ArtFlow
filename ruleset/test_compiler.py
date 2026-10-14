@@ -1912,7 +1912,7 @@ class BindingValidationTests(_RulesetModelBase):
                     "challenge_minimum_judge_count": "1",
                     "final_judge_ids": [judges[2].pk, judges[3].pk],
                     "final_minimum_judge_count": 2,
-                }
+                },
             },
         )
         live = normalized["live_challenge"]

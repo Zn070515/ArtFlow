@@ -705,9 +705,7 @@ class ScoringServiceTests(TestCase):
         finalized = finalize_advancement(self.round, [self.singer.pk], self.user)
 
         self.assertEqual(finalized.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
-        self.assertFalse(
-            ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists()
-        )
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists())
 
     def test_advancement_without_boundary_tie_stays_auto(self):
         self._lock_scored_round(self.round, singer_count=4, advance_count=2)

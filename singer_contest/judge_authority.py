@@ -895,9 +895,7 @@ def advance_performance(round_id: int, performance_id: int, *, operator) -> Perf
 
 
 @transaction.atomic
-def advance_performance_group(
-    round_id: int, group_id: int, *, operator
-) -> PerformanceRunState:
+def advance_performance_group(round_id: int, group_id: int, *, operator) -> PerformanceRunState:
     """Open every individual score window after one group performance ends.
 
     A group performance is a single host action, but each member keeps an independent
@@ -920,9 +918,7 @@ def advance_performance_group(
     if group is None:
         raise ValidationError("当前表演组不属于该评委轮次。")
     performances = list(
-        Performance._base_manager.select_for_update()
-        .filter(group=group)
-        .order_by("sequence", "pk")
+        Performance._base_manager.select_for_update().filter(group=group).order_by("sequence", "pk")
     )
     if not performances:
         raise ValidationError("当前表演组没有可评分的独立表演。")

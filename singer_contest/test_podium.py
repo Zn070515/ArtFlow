@@ -80,9 +80,7 @@ class PodiumResultServiceTests(TestCase):
         self.singers = []
         for number in range(1, 16):
             with authority_write(ACCOUNT_AUTHORITY):
-                user = User.objects.create_user(
-                    username=f"podium-singer-{number}", password="pass"
-                )
+                user = User.objects.create_user(username=f"podium-singer-{number}", password="pass")
             singer = SingerRegistration.objects.create(
                 activity=self.activity,
                 user=user,

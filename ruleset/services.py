@@ -320,9 +320,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         if podium_fields & set(raw_live_challenge):
             missing_podium = sorted(podium_fields - set(raw_live_challenge))
             if missing_podium:
-                raise ValidationError(
-                    "最终冠亚季军配置缺少字段：" + ", ".join(missing_podium)
-                )
+                raise ValidationError("最终冠亚季军配置缺少字段：" + ", ".join(missing_podium))
             podium_strings = {
                 key: str(raw_live_challenge.get(key) or "").strip()
                 for key in (

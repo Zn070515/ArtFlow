@@ -1871,9 +1871,7 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
                 snapshot.state = RoundPanelSnapshot.State.SUPERSEDED
                 snapshot.save(update_fields=["state"])
         run_state = (
-            PerformanceRunState.objects.select_for_update()
-            .filter(round=locked_round)
-            .first()
+            PerformanceRunState.objects.select_for_update().filter(round=locked_round).first()
         )
         if run_state is not None:
             with authority_write(ROUND_PERFORMANCE_STATE):
@@ -3002,7 +3000,7 @@ def _stage_is_checkpoint(version, stage_key: str) -> bool:
 
 
 def _configured_podium_stage_key(version) -> str:
-    live_challenge = (_version_binding(version).get("live_challenge") or {})
+    live_challenge = _version_binding(version).get("live_challenge") or {}
     if not isinstance(live_challenge, dict):
         return ""
     return str(live_challenge.get("podium_stage_key") or "").strip()
@@ -3068,9 +3066,11 @@ def _ensure_stage_dependencies_final(version, activity, stage_key: str) -> None:
         from .podium_services import podium_required_round_ids
 
         round_ids = podium_required_round_ids(version, activity)
-        if ContestRound.objects.filter(
-            activity=activity, pk__in=round_ids
-        ).exclude(is_locked=True).exists():
+        if (
+            ContestRound.objects.filter(activity=activity, pk__in=round_ids)
+            .exclude(is_locked=True)
+            .exists()
+        ):
             raise ValidationError("最终冠亚季军依赖的轮次尚未锁定，请先锁定后再核定。")
         return
     binding = _version_binding(version)
