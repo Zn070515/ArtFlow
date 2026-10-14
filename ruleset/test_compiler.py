@@ -1966,30 +1966,28 @@ class BindingValidationTests(_RulesetModelBase):
                 },
             )
 
-    def test_2026_live_contract_requires_five_judges_and_four_valid_scores(self):
+    def test_2026_live_contract_accepts_configured_judge_count_and_minimum(self):
         ruleset = self.make_ruleset()
+        from singer_contest.models import RubricCriterion, ScoringRubric
+
         round_ = self._singer_round(ruleset)
-        self._configure_live_first_round(round_, judge_count=4)
-        with self.assertRaisesMessage(ValidationError, "5 名评委"):
-            _validate_2026_live_contract(
-                {"nodes": []},
-                {
-                    "round_keys": {"r1": round_.pk},
-                    "live_challenge": {"format_key": "2026_live_challenge"},
-                },
-            )
+        rubric = ScoringRubric.objects.create(
+            activity=ruleset.activity, name="统一现场评分", is_test_data=True
+        )
+        RubricCriterion.objects.create(
+            rubric=rubric, name="演唱表现", max_score=100, is_test_data=True
+        )
+        round_.rubric = rubric
+        round_.save(update_fields=["rubric"])
+        self._configure_live_first_round(round_, judge_count=6, minimum_judge_count=5)
+        binding = {
+            "round_keys": {"r1": round_.pk},
+            "live_challenge": {"format_key": "2026_live_challenge"},
+        }
 
-        self._configure_live_first_round(round_, judge_count=5, minimum_judge_count=3)
-        with self.assertRaisesMessage(ValidationError, "最低有效评委数必须为 4"):
-            _validate_2026_live_contract(
-                {"nodes": []},
-                {
-                    "round_keys": {"r1": round_.pk},
-                    "live_challenge": {"format_key": "2026_live_challenge"},
-                },
-            )
+        _validate_2026_live_contract({"nodes": []}, binding)
 
-        self._configure_live_first_round(round_, judge_count=5, minimum_judge_count=6)
+        self._configure_live_first_round(round_, minimum_judge_count=7)
         with self.assertRaisesMessage(ValidationError, "不能超过评委人数"):
             _validate_2026_live_contract(
                 {"nodes": []},

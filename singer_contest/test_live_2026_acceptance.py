@@ -2,6 +2,7 @@
 
 import json
 from decimal import Decimal
+from typing import cast
 
 from accounts.models import User
 from common.authority import (
@@ -14,7 +15,9 @@ from common.authority import (
 )
 from core.models import Activity
 from core.services import transition_activity_phase
-from django.test import TestCase
+from django.core.exceptions import ValidationError
+from django.test import Client, TestCase
+from django.urls import reverse
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import freeze_ruleset_version
 
@@ -30,18 +33,34 @@ from .challenge_services import (
     start_challenge_turn,
     waive_challenge_turn,
 )
-from .judge_authority import advance_performance, lock_performance_score, prepare_judge_panel
+from .group_chorus import (
+    confirm_group_stage,
+    correct_group_stage,
+    create_group_stage,
+    freeze_group_stage,
+    record_group_stage,
+)
+from .judge_authority import (
+    advance_performance,
+    advance_performance_group,
+    lock_performance_score,
+    prepare_judge_panel,
+)
+from .judge_entry import judge_entry_credential
 from .models import (
     ContestRound,
     Judge,
+    PerformanceGroup,
     PerformanceRunState,
+    PerformanceScoreState,
     RubricCriterion,
+    ScoreRecord,
     ScoreSummary,
     ScoringRubric,
     SingerRegistration,
 )
 from .podium_services import build_podium_result
-from .services import apply_scores, lock_round, prepare_round
+from .services import apply_scores, lock_round, prepare_round, set_round_groups
 
 
 def _live_questionnaire():
@@ -104,7 +123,7 @@ class Live2026AcceptanceTests(TestCase):
         rubric = ScoringRubric.objects.create(
             activity=self.activity, name="2026 统一评分标准", is_test_data=True
         )
-        RubricCriterion.objects.create(
+        self.criterion = RubricCriterion.objects.create(
             rubric=rubric, name="综合表现", max_score=100, is_test_data=True
         )
         with authority_write(CONTEST_ROUND_STATE):
@@ -144,12 +163,30 @@ class Live2026AcceptanceTests(TestCase):
                 singer.save(update_fields=["official_number", "updated_at"])
             self.singers.append(singer)
 
+        self.group_specs = [
+            {
+                "name": f"第 {group_index} 组",
+                "singer_ids": [singer.pk for singer in self.singers[start : start + 3]],
+            }
+            for group_index, start in enumerate(range(0, 15, 3), start=1)
+        ]
+        self.group_stage = create_group_stage(
+            self.activity,
+            stage_key="r1_chorus",
+            name="第一轮分组合唱",
+            operator=self.admin,
+        )
+        record_group_stage(self.group_stage, self.group_specs, self.admin)
+        confirm_group_stage(self.group_stage, self.admin)
+        self.group_stage = freeze_group_stage(self.group_stage, self.admin)
+
         self.ruleset = ContestRuleset.objects.create(
             activity=self.activity,
             name="2026 院十佳现场赛制",
             is_test_data=True,
         )
         self.ruleset.round_keys = {"r1": self.first_round.pk}
+        self.ruleset.group_stage_keys = {"r1": self.group_stage.pk}
         self.ruleset.live_challenge = {
             "format_key": "2026_live_challenge",
             "participant_count": 15,
@@ -169,7 +206,7 @@ class Live2026AcceptanceTests(TestCase):
             "final_judge_ids": [judge.pk for judge in self.judges[1:]],
             "final_minimum_judge_count": 4,
         }
-        self.ruleset.save(update_fields=["round_keys", "live_challenge"])
+        self.ruleset.save(update_fields=["round_keys", "group_stage_keys", "live_challenge"])
         definition = {
             "schema_version": 1,
             "nodes": [
@@ -246,6 +283,7 @@ class Live2026AcceptanceTests(TestCase):
         self.assertNotIn("r3", frozen.binding["round_keys"])
         self.assertEqual(frozen.binding.get("vote_keys"), {})
 
+        set_round_groups(self.first_round, self.group_specs, self.admin)
         prepared_first = prepare_round(self.first_round, self.admin)
         first_judges = list(
             prepared_first.round_judges.select_related("judge").values_list("judge", flat=True)
@@ -376,3 +414,175 @@ class Live2026AcceptanceTests(TestCase):
         )
         self.assertEqual(singer_three_score, Decimal("97.70"))
         self.assertEqual([award.award for award in result.awards], ["冠军", "亚军", "季军"])
+
+    def test_first_round_scoring_groups_must_match_frozen_chorus_groups(self):
+        freeze_ruleset_version(self.version, self.admin)
+        mismatched: list[dict[str, object]] = [
+            {
+                "name": spec["name"],
+                "singer_ids": list(cast(list[int], spec["singer_ids"])),
+            }
+            for spec in self.group_specs
+        ]
+        first_ids = cast(list[int], mismatched[0]["singer_ids"])
+        second_ids = cast(list[int], mismatched[1]["singer_ids"])
+        mismatched = [
+            {
+                "name": mismatched[0]["name"],
+                "singer_ids": [second_ids[0], *first_ids[1:]],
+            },
+            {
+                "name": mismatched[1]["name"],
+                "singer_ids": [first_ids[0], *second_ids[1:]],
+            },
+            *mismatched[2:],
+        ]
+
+        with self.assertRaisesMessage(ValidationError, "已冻结的分组合唱分组一致"):
+            set_round_groups(self.first_round, mismatched, self.admin)
+
+    def test_live_freeze_requires_five_groups_of_three(self):
+        malformed = [
+            {
+                "name": "第 1 组",
+                "singer_ids": [singer.pk for singer in self.singers[:6]],
+            },
+            *[
+                {
+                    "name": f"第 {index} 组",
+                    "singer_ids": [singer.pk for singer in self.singers[start : start + 3]],
+                }
+                for index, start in ((2, 6), (3, 9), (4, 12))
+            ],
+        ]
+        correct_group_stage(
+            self.group_stage,
+            malformed,
+            self.admin,
+            reason="现场分组表暂存为四组，验证冻结门禁",
+        )
+
+        with self.assertRaisesMessage(ValidationError, "恰好为 5 组"):
+            freeze_ruleset_version(self.version, self.admin)
+
+    def test_first_round_http_judge_flow_supports_interleaved_groups_and_late_scores(self):
+        freeze_ruleset_version(self.version, self.admin)
+        set_round_groups(self.first_round, self.group_specs, self.admin)
+        prepared = prepare_round(self.first_round, self.admin)
+        prepare_judge_panel(prepared.pk, operator=self.admin)
+        with authority_write(ACTIVITY_STATE):
+            self.activity.judge_entry_open = True
+            self.activity.save(update_fields=["judge_entry_open"])
+        self.activity.refresh_from_db()
+
+        judge_clients = []
+        capability = judge_entry_credential(self.activity)
+        for _ in range(4):
+            client = Client()
+            response = client.post(
+                reverse("judge:claim", args=[self.activity.public_code]),
+                data=json.dumps({"judge_entry_token": capability}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 201, response.content)
+            judge_clients.append(client)
+
+        staff_client = Client()
+        staff_client.force_login(self.admin)
+        groups = list(PerformanceGroup.objects.filter(round=prepared).order_by("sequence", "pk"))
+        performances_by_group = [
+            list(group.performances.order_by("sequence", "pk")) for group in groups
+        ]
+
+        def pending_version(client, performance_id):
+            response = client.get(reverse("judge:context"))
+            context = response.json()["context"]
+            if context["performance_id"] == performance_id:
+                return context["context_version"]
+            match = next(
+                (
+                    item
+                    for item in context["pending_performances"]
+                    if item["performance_id"] == performance_id
+                ),
+                None,
+            )
+            if match is None:
+                self.fail(
+                    f"performance={performance_id}; context={context}; "
+                    f"response={response.content!r}"
+                )
+            return match["context_version"]
+
+        def submit_http(performance, client_indexes):
+            for index in client_indexes:
+                response = judge_clients[index].post(
+                    reverse("judge:score"),
+                    data=json.dumps(
+                        {
+                            "command_id": f"live-http-{performance.pk}-{index}",
+                            "expected_context_version": pending_version(
+                                judge_clients[index], performance.pk
+                            ),
+                            "expected_performance_id": performance.pk,
+                            "score_payload": {
+                                "criteria": [
+                                    {
+                                        "criterion_id": self.criterion.pk,
+                                        "value": str(90 + index),
+                                    }
+                                ],
+                                "notes": "",
+                            },
+                        }
+                    ),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 201, response.content)
+
+        def lock_http(performance):
+            state = performance.score_state
+            response = staff_client.post(
+                reverse("staff:judge_performance_score_lock", args=[prepared.pk]),
+                {
+                    "performance_id": performance.pk,
+                    "context_version": state.context_version,
+                    "reason": "第一轮结束收分",
+                },
+            )
+            self.assertEqual(response.status_code, 302, response.content)
+
+        advance_performance_group(prepared.pk, groups[0].pk, operator=self.admin)
+        submit_http(performances_by_group[0][0], [0, 1, 2])
+        submit_http(performances_by_group[0][1], [0, 1, 2, 3])
+        submit_http(performances_by_group[0][2], [0, 1, 2, 3])
+
+        # The first group is still short one score, but the next group may open.
+        advance_performance_group(prepared.pk, groups[1].pk, operator=self.admin)
+        for performance in performances_by_group[1]:
+            submit_http(performance, [0, 1, 2, 3])
+
+        submit_http(performances_by_group[0][0], [3])
+        for performance in performances_by_group[0] + performances_by_group[1]:
+            lock_http(performance)
+
+        for group, group_performances in zip(groups[2:], performances_by_group[2:], strict=True):
+            advance_performance_group(prepared.pk, group.pk, operator=self.admin)
+            for performance in group_performances:
+                submit_http(performance, [0, 1, 2, 3])
+                lock_http(performance)
+
+        lock_round(prepared, self.admin)
+        self.assertEqual(ScoreRecord.objects.filter(round=prepared).count(), 15 * 4)
+        self.assertEqual(
+            PerformanceScoreState.objects.filter(performance__round=prepared).count(), 15
+        )
+        self.assertFalse(
+            PerformanceScoreState.objects.filter(
+                performance__round=prepared,
+                state__in=[
+                    PerformanceScoreState.State.NOT_OPENED,
+                    PerformanceScoreState.State.OPEN,
+                ],
+            ).exists()
+        )
