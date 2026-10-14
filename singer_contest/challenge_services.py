@@ -889,7 +889,6 @@ def lock_challenge_match_scores(
     _ensure_session_dependencies_current(session)
     match = (
         ChallengeMatch.objects.select_for_update()
-        .select_related("score_round", "turn")
         .filter(session=session, turn__sequence=session.current_turn_number)
         .first()
     )
