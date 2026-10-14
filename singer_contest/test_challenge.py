@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from typing import cast
 
 from accounts.models import User
 from common.authority import (
@@ -1096,12 +1097,16 @@ class LiveChallengeAuthorityTests(TestCase):
 
 @postgresql_only
 class RoundListPostgreSQLTransactionTests(TransactionTestCase):
+    staff: User
+    round: ContestRound
+    version: RulesetVersion
+
     def test_staff_round_list_reads_a_generated_third_round_in_autocommit(self):
         # Reuse the complete live challenge fixture, but deliberately run under
         # TransactionTestCase so the real GET is not wrapped in Django's TestCase
         # transaction. This is the production boundary where select_for_update()
         # must not leak into a read-only readiness check.
-        LiveChallengeAuthorityTests.setUp(self)
+        LiveChallengeAuthorityTests.setUp(cast(LiveChallengeAuthorityTests, self))
 
         session = create_challenge_session(
             self.round,
