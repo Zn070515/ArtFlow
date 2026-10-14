@@ -254,6 +254,7 @@ class ChallengeTurn(models.Model):
         blank=True,
         related_name="targeted_turns",
     )
+    waive_reason = models.CharField(max_length=240, blank=True)
     revision = models.PositiveIntegerField(default=1)
     acted_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -300,6 +301,10 @@ class ChallengeTurn(models.Model):
                 raise ValidationError("挑战目标席位必须属于当前会话。")
             if self.state == self.State.WAIVED and self.target_seat_id:
                 raise ValidationError("放弃挑战不能保留目标席位。")
+            if self.state == self.State.WAIVED and not self.waive_reason.strip():
+                raise ValidationError("放弃挑战必须填写原因。")
+            if self.state != self.State.WAIVED and self.waive_reason:
+                raise ValidationError("未放弃的挑战机会不能保留放弃原因。")
             if self.is_test_data != self.session.is_test_data:
                 raise ValidationError("挑战机会测试标记必须与会话一致。")
 

@@ -120,12 +120,14 @@ from ruleset.services import (
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
 from singer_contest.challenge_services import (
+    advance_challenge_performance,
     confirm_challenge_match_result,
     confirm_challenge_pairing,
     confirm_challenge_session,
     create_challenge_session,
     create_final_round_from_challenge,
     lock_challenge_match_scores,
+    lock_challenge_performance,
     prepare_challenge_match,
     record_challenge_target,
     start_challenge_turn,
@@ -358,8 +360,10 @@ def live_challenge_console(request, pk):
         raise PermissionDenied("只有歌手比赛活动支持现场挑战。")
     if request.method == "POST":
         action = (request.POST.get("action") or "").strip()
-        command_id = request.POST.get("command_id") or uuid4().hex
         try:
+            command_id = request.POST.get("command_id")
+            if not command_id:
+                raise ValidationError("现场挑战命令标识无效，请刷新页面后重试。")
             expected_revision = int(request.POST.get("expected_revision") or "0")
             session_id = int(request.POST.get("session_id") or "0")
             if action == "create":
@@ -405,6 +409,7 @@ def live_challenge_console(request, pk):
                     operator=request.user,
                     command_id=command_id,
                     expected_revision=expected_revision,
+                    reason=request.POST.get("reason") or "",
                 )
             elif action == "prepare":
                 prepare_challenge_match(
@@ -414,22 +419,24 @@ def live_challenge_console(request, pk):
                     expected_revision=expected_revision,
                 )
             elif action in {"open_challenger", "open_defender"}:
-                session = get_object_or_404(ChallengeSession, pk=session_id, activity=activity)
-                turn = get_object_or_404(
-                    ChallengeTurn, session=session, sequence=session.current_turn_number
+                advance_challenge_performance(
+                    session_id,
+                    role=action.removeprefix("open_"),
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
                 )
-                match = get_object_or_404(ChallengeMatch, turn=turn)
-                if not match.score_round_id:
-                    raise ValidationError("当前比赛还没有准备评分。")
-                singer_id = (
-                    match.challenger_id if action == "open_challenger" else match.defender_id
+            elif action in {"lock_challenger", "lock_defender"}:
+                lock_challenge_performance(
+                    session_id,
+                    role=action.removeprefix("lock_"),
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                    expected_context_version=int(
+                        request.POST.get("expected_context_version") or "-1"
+                    ),
                 )
-                performance = get_object_or_404(
-                    Performance,
-                    round_id=match.score_round_id,
-                    singer_id=singer_id,
-                )
-                advance_performance(match.score_round_id, performance.pk, operator=request.user)
             elif action == "lock_scores":
                 lock_challenge_match_scores(
                     session_id,
@@ -475,6 +482,24 @@ def live_challenge_console(request, pk):
     current_turn = None
     current_match = None
     legal_seats = []
+    command_ids = {
+        action: uuid4().hex
+        for action in (
+            "create",
+            "start",
+            "waive",
+            "pair",
+            "prepare",
+            "open_challenger",
+            "open_defender",
+            "lock_challenger",
+            "lock_defender",
+            "lock_scores",
+            "confirm_match",
+            "confirm_session",
+            "prepare_final_round",
+        )
+    }
     if live_session is not None:
         current_turn = (
             live_session.turns.select_related("challenger", "target_seat")
@@ -493,6 +518,30 @@ def live_challenge_console(request, pk):
                 .exclude(current_holder_id=current_turn.challenger_id)
                 .order_by("position")
             )
+            for seat in legal_seats:
+                seat.command_id = uuid4().hex
+    challenge_performance_controls = {}
+    if current_match is not None and current_match.score_round_id:
+        for role, singer_id in (
+            ("challenger", current_match.challenger_id),
+            ("defender", current_match.defender_id),
+        ):
+            performance = (
+                Performance.objects.filter(
+                    round_id=current_match.score_round_id,
+                    singer_id=singer_id,
+                )
+                .select_related("score_state")
+                .first()
+            )
+            if performance is not None:
+                challenge_performance_controls[role] = {
+                    "performance": performance,
+                    "score_state": PerformanceScoreState.objects.filter(
+                        performance=performance
+                    ).first(),
+                    "lock_command_id": command_ids[f"lock_{role}"],
+                }
     source_rounds = ContestRound.objects.filter(
         activity=activity,
         status=ContestRound.Status.LOCKED,
@@ -511,6 +560,8 @@ def live_challenge_console(request, pk):
             "state_labels": dict(ChallengeSession.State.choices),
             "turn_state_labels": dict(ChallengeTurn.State.choices),
             "match_state_labels": dict(ChallengeMatch.Status.choices),
+            "command_ids": command_ids,
+            "challenge_performance_controls": challenge_performance_controls,
         },
     )
 

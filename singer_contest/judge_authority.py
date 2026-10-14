@@ -2169,6 +2169,14 @@ def _build_judge_context(
         performance__round_id=contest_round.pk,
         state=PerformanceScoreState.State.OPEN,
     )
+    submitted_singer_ids = set(
+        ScoreRecord._base_manager.filter(
+            round_id=contest_round.pk,
+            judge_id=seat.panel_member.judge_id,
+        ).values_list("singer_id", flat=True)
+    )
+    if submitted_singer_ids:
+        pending_query = pending_query.exclude(performance__singer_id__in=submitted_singer_ids)
     if run_state.current_performance_id is not None:
         pending_query = pending_query.exclude(performance_id=run_state.current_performance_id)
     pending_performances = tuple(
@@ -2185,7 +2193,7 @@ def _build_judge_context(
     return JudgeContext(
         activity_id=contest_round.activity_id,
         activity_name=session.panel_snapshot.activity.title,
-        round_id=session.panel_snapshot.round_id,
+        round_id=contest_round.pk,
         round_name=contest_round.name or contest_round.get_round_type_display(),
         seat_id=seat.pk,
         seat_label=(seat.display_label.strip() or seat.panel_member.seat_key.replace("seat-", "J")),

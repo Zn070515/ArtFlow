@@ -1857,6 +1857,38 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
     locked_round.status = ContestRound.Status.LOCKED
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["is_locked", "status"])
+    panel_snapshots = list(
+        RoundPanelSnapshot.objects.select_for_update().filter(
+            activity=locked_round.activity,
+            round=locked_round,
+            state__in=[RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD],
+        )
+    )
+    panel_states = {snapshot.pk: snapshot.state for snapshot in panel_snapshots}
+    if panel_snapshots:
+        with authority_write(JUDGE_PANEL_STATE):
+            for snapshot in panel_snapshots:
+                snapshot.state = RoundPanelSnapshot.State.SUPERSEDED
+                snapshot.save(update_fields=["state"])
+        run_state = (
+            PerformanceRunState.objects.select_for_update()
+            .filter(round=locked_round)
+            .first()
+        )
+        if run_state is not None:
+            with authority_write(ROUND_PERFORMANCE_STATE):
+                run_state.state = PerformanceRunState.State.CLOSED
+                run_state.hold_reason = "轮次已锁定，现场评分上下文已关闭。"
+                run_state.save(update_fields=["state", "hold_reason", "updated_at"])
+        for snapshot in panel_snapshots:
+            AuditLog.objects.create(
+                operator=current_operator,
+                action_type=AuditLog.ActionType.JUDGE_PANEL_CHANGE,
+                target=f"RoundPanelSnapshot:{snapshot.pk}",
+                old_value=panel_states[snapshot.pk],
+                new_value=RoundPanelSnapshot.State.SUPERSEDED,
+                note="lock_round_handoff",
+            )
     AuditLog.objects.create(
         operator=current_operator,
         action_type=AuditLog.ActionType.RELOCK_RESULT,
@@ -3458,7 +3490,7 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     require the consumed raw facts to be at rest (rounds/votes locked). Idempotent: a
     re-confirm of an already-locked row returns it as-is.
     """
-    current_actor = require_current_admin(confirmed_by)
+    current_actor = require_current_staff(confirmed_by)
     locked_activity = lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.activity_id != locked_activity.pk:

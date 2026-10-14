@@ -27,6 +27,7 @@ from .models import (
     ChallengeTurn,
     ContestRound,
     Performance,
+    PerformanceRunState,
     PerformanceScoreState,
     RoundEntry,
     RoundJudge,
@@ -182,6 +183,156 @@ def _session_for_update(session_id: int, operator):
     if session.activity_id != locked_activity.pk:
         raise ValidationError("踢馆会话活动上下文不一致。")
     return current_operator, session
+
+
+def _challenge_match_performance(session: ChallengeSession, role: str):
+    if role not in {"challenger", "defender"}:
+        raise ValidationError("挑战评分对象无效。")
+    match = (
+        ChallengeMatch.objects.select_for_update()
+        .select_related("turn", "challenger", "defender")
+        .filter(session=session, turn__sequence=session.current_turn_number)
+        .first()
+    )
+    if match is None or match.score_round_id is None:
+        raise ValidationError("当前比赛尚未准备评分。")
+    if match.status != ChallengeMatch.Status.SCORING:
+        raise ValidationError("当前比赛不在收分阶段。")
+    score_round = ContestRound.objects.select_for_update().get(pk=match.score_round_id)
+    singer_id = match.challenger_id if role == "challenger" else match.defender_id
+    performance = (
+        Performance.objects.select_for_update()
+        .filter(round=score_round, singer_id=singer_id)
+        .first()
+    )
+    if performance is None:
+        raise ValidationError("当前比赛缺少对应评分对象。")
+    return match, score_round, performance
+
+
+@transaction.atomic
+def advance_challenge_performance(
+    session_id: int,
+    *,
+    role: str,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> PerformanceRunState:
+    """Open a challenge contestant through the audited, ordered console boundary."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.performance.open",
+            "session_id": session.pk,
+            "role": role,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.performance.open",
+        payload_hash=payload_hash,
+        result_model=PerformanceRunState,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match, score_round, performance = _challenge_match_performance(session, role)
+    if role == "defender":
+        challenger_state = PerformanceScoreState.objects.filter(
+            performance__round=score_round,
+            performance__singer_id=match.challenger_id,
+        ).first()
+        if challenger_state is None or challenger_state.state == PerformanceScoreState.State.NOT_OPENED:
+            raise ValidationError("请先开放挑战者评分，再开放守擂者评分。")
+    from .judge_authority import advance_performance
+
+    run_state = advance_performance(score_round.pk, performance.pk, operator=current_operator)
+    _bump(session)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.performance.open",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="PerformanceRunState",
+            result_id=run_state.pk,
+            result_payload={"round_id": score_round.pk, "performance_id": performance.pk},
+        )
+    return run_state
+
+
+@transaction.atomic
+def lock_challenge_performance(
+    session_id: int,
+    *,
+    role: str,
+    operator,
+    command_id: object,
+    expected_revision: object,
+    expected_context_version: object,
+) -> PerformanceScoreState:
+    """Lock one challenge contestant after the panel minimum is met."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.performance.lock",
+            "session_id": session.pk,
+            "role": role,
+            "expected_revision": expected_revision,
+            "expected_context_version": expected_context_version,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.performance.lock",
+        payload_hash=payload_hash,
+        result_model=PerformanceScoreState,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match, score_round, performance = _challenge_match_performance(session, role)
+    if role == "defender":
+        challenger_state = PerformanceScoreState.objects.filter(
+            performance__round=score_round,
+            performance__singer_id=match.challenger_id,
+        ).first()
+        if challenger_state is None or challenger_state.state == PerformanceScoreState.State.NOT_OPENED:
+            raise ValidationError("请先开放挑战者评分，再锁定守擂者评分。")
+    from .judge_authority import lock_performance_score
+
+    score_state = lock_performance_score(
+        score_round.pk,
+        performance.pk,
+        operator=current_operator,
+        expected_context_version=expected_context_version,
+    )
+    _bump(session)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.performance.lock",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="PerformanceScoreState",
+            result_id=score_state.pk,
+            result_payload={"round_id": score_round.pk, "performance_id": performance.pk},
+        )
+    return score_state
 
 
 def _check_revision(session: ChallengeSession, expected_revision: object) -> None:
@@ -668,6 +819,7 @@ def waive_challenge_turn(
     operator,
     command_id: object,
     expected_revision: object,
+    reason: str,
 ) -> ChallengeTurn:
     current_operator, session = _session_for_update(session_id, operator)
     normalized_command = _command_id(command_id)
@@ -676,6 +828,7 @@ def waive_challenge_turn(
             "operation": "challenge.turn.waive",
             "session_id": session.pk,
             "expected_revision": expected_revision,
+            "reason": reason,
         }
     )
     replay = _replay_command(
@@ -691,20 +844,39 @@ def waive_challenge_turn(
     _ensure_session_dependencies_current(session)
     if session.state != ChallengeSession.State.ACTIVE:
         raise PermissionDenied("当前踢馆会话不可放弃挑战。")
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise ValidationError("放弃挑战必须填写原因。")
+    if len(normalized_reason) > 240:
+        raise ValidationError("放弃挑战原因不能超过 240 个字符。")
     turn = ChallengeTurn.objects.select_for_update().get(
         session=session, sequence=session.current_turn_number
     )
-    if turn.state not in {ChallengeTurn.State.PENDING, ChallengeTurn.State.SELECTING}:
+    if turn.state not in {
+        ChallengeTurn.State.PENDING,
+        ChallengeTurn.State.SELECTING,
+        ChallengeTurn.State.TARGET_SELECTED,
+    }:
         raise ValidationError("配对确认后不能正常放弃挑战。")
     turn.state = ChallengeTurn.State.WAIVED
     turn.target_seat = None
+    turn.waive_reason = normalized_reason
     turn.revision += 1
     turn.acted_by = current_operator
     turn.acted_at = timezone.now()
     _finish_turn(session, turn)
     _bump(session)
     with authority_write(LIVE_CHALLENGE_STATE):
-        turn.save(update_fields=["state", "target_seat", "revision", "acted_by", "acted_at"])
+        turn.save(
+            update_fields=[
+                "state",
+                "target_seat",
+                "waive_reason",
+                "revision",
+                "acted_by",
+                "acted_at",
+            ]
+        )
         session.save(update_fields=["state", "current_turn_number", "revision", "updated_at"])
         _write_command(
             session=session,
@@ -720,7 +892,11 @@ def waive_challenge_turn(
         operator=current_operator,
         action_type=AuditLog.ActionType.CHALLENGE_TURN_WAIVE,
         target=f"ChallengeTurn:{turn.pk}",
-        new_value={"sequence": turn.sequence, "session_state": session.state},
+        new_value={
+            "sequence": turn.sequence,
+            "session_state": session.state,
+            "reason": normalized_reason,
+        },
     )
     turn.session = session
     return turn
@@ -1219,7 +1395,10 @@ def create_final_round_from_challenge(
             minimum_judge_count=source_round.minimum_judge_count,
             name="第三轮冠军赛",
             sequence=sequence,
-            order_policy=ContestRound.OrderPolicy.OFFICIAL_NUMBER,
+            # The challenge session's third_round_position is the frozen seat order.
+            # Official numbers are only identity labels here; re-sorting by them would
+            # move a challenger into the defender's seat after a successful challenge.
+            order_policy=ContestRound.OrderPolicy.MANUAL,
             tie_order_policy=ContestRound.TieOrderPolicy.REVIEW,
             advance_count=0,
             roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,

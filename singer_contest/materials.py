@@ -94,13 +94,17 @@ def validate_live_material_plan(plan) -> tuple[LiveMaterialContract, ...]:
     return contracts
 
 
-def _check_payload(check: MaterialCheck | None) -> dict:
+def _check_payload(check: MaterialCheck | None, *, item_name: str) -> dict:
     if check is None:
-        return {"status": MaterialCheck.Status.MISSING, "status_label": "未提交"}
+        return {
+            "status": MaterialCheck.Status.MISSING,
+            "status_label": "未提交",
+            "item_name": item_name,
+        }
     return {
         "status": check.status,
         "status_label": check.get_status_display(),
-        "item_name": check.item_name,
+        "item_name": check.item_name or item_name,
     }
 
 
@@ -115,8 +119,11 @@ def _participant_round_progress(
     rows = []
     for registration in registrations:
         items = [
-            _check_payload(by_owner.get((registration.pk, question_key)))
-            for question_key in contract.question_keys
+            _check_payload(
+                by_owner.get((registration.pk, question_key)),
+                item_name=label,
+            )
+            for question_key, label in zip(contract.question_keys, contract.labels, strict=True)
         ]
         missing = [
             item["item_name"]
