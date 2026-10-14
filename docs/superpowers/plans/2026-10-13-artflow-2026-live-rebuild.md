@@ -8,7 +8,7 @@
 
 **Constraints:** 保留旧轮次兼容；所有跨模块事实只有一个 authority；命令具备版本校验和幂等；确认后的原始评分、配对、席位和结果不可由直接 ORM 写入绕过；不引入隐藏并列规则。
 
-**截至 2026-10-14 的交付状态：** Task 0、Task 1、Task 2 和 Task 3 已落地并通过对应定向门禁：评分完成策略/两位小数正式值、逐表演开分与迟交、官方选手编号 authority 与工作人员入口均已接入。Task 4–8 仍按下方顺序实施，不能把尚未存在的挑战、材料投影或工作台能力当作已完成。
+**截至 2026-10-14 的交付状态：** Task 0–7 已落地：评分完成策略/两位小数正式值、逐表演开分与迟交、官方选手编号 authority、Live Challenge 状态机、动态两人评分、材料投影和工作人员操作台均已接入。Task 8 的生产彩排手册已补齐，Django check、迁移检查、Ruff、Pyright 及现场赛制定向测试已通过；PostgreSQL、真实浏览器和 Compose 服务相关门禁仍需在对应环境执行后才能标记为完全验收。
 
 ## Task 0 — 基线、文档和配置审计
 
@@ -85,6 +85,8 @@
 
 ## Task 4 — Live Challenge authority state machine
 
+**状态：已完成。** 已实现独立会话、固定挑战队列、席位和配对 authority；命令幂等、revision、冻结规则/第一轮输入依赖校验、审计和 raw ORM 防护均已覆盖。
+
 **Files:** 新建 `singer_contest/challenge_models.py` 或等价模型模块、`challenge_services.py`、迁移、admin、测试。
 
 **RED first:**
@@ -106,6 +108,8 @@
 
 ## Task 5 — 动态两人评分和结果闭环
 
+**状态：已完成。** 每场挑战生成严格两人的动态评分轮次，双方独立开分、迟交、最低人数锁分，确认后原子替换席位；最终十强可以生成绑定挑战会话的第三轮名单。
+
 **Files:** `singer_contest` scoring/roster services、`ruleset` compiler/resolver、`common` closure/fingerprint、迁移与测试。
 
 **RED first:**
@@ -125,6 +129,8 @@
 
 ## Task 6 — 三轮材料和 Questionnaire 投影
 
+**状态：已完成。** 已增加冻结时的 R2/R3 个人材料契约校验，并在 Staff 页面提供 R1 分组、R2 个人、R3 个人的完成度投影；文件写入仍复用原有 ImageField、sanitize 和材料 authority。
+
 **Files:** `questionnaire/`、`files/`、`staff_panel/`、模板、测试和文档。
 
 **RED first:**
@@ -139,6 +145,8 @@
 
 ## Task 7 — 工作人员操作台
 
+**状态：已完成。** 已接入业务语言的材料进度页和现场挑战控制台；页面只调用 authority service，不直接写席位、配对或结果，也不提供公开实时成绩广播。
+
 **Files:** `staff_panel/views.py`、`urls.py`、templates、frontend client、tests。
 
 **RED first:** 以状态→主动作验收表驱动 view tests 和真实浏览器 smoke，不允许页面自行拼权限或写席位。
@@ -152,6 +160,8 @@
 **Verify:** `npm run check:client`、`npm run check:e2e`、`npm run test:e2e`、staff permission tests。
 
 ## Task 8 — 彩排与交付
+
+**状态：进行最终环境验收。** `docs/production-rehearsal-runbook.md` 已提供发布前门禁、操作流程、18 项验收清单、失败注入和证据记录口径。代码仓库门禁先行执行；PostgreSQL、真实浏览器和远端 CI 结果需在相应环境完成后记录。
 
 **Files:** `docs/production-rehearsal-runbook.md`、本规格、验收测试、CI 配置（仅必要时）。
 
