@@ -1157,16 +1157,12 @@ class ContestRound(models.Model):
         if self.roster_source:
             if self.roster_source == self.RosterSource.STAGE and not self.roster_source_stage:
                 raise ValidationError("赛段晋级轮次必须声明 source_stage。")
-            if (
-                self.roster_source == self.RosterSource.CHALLENGE_SESSION
-                and not self.roster_source_challenge_session_id
-            ):
-                raise ValidationError("第三轮必须声明已核定的踢馆会话。")
-            if (
-                self.roster_source == self.RosterSource.CHALLENGE_SESSION
-                and self.roster_source_challenge_session.activity_id != self.activity_id
-            ):
-                raise ValidationError("第三轮踢馆会话必须属于当前活动。")
+            if self.roster_source == self.RosterSource.CHALLENGE_SESSION:
+                challenge_session = self.roster_source_challenge_session
+                if challenge_session is None:
+                    raise ValidationError("第三轮必须声明已核定的踢馆会话。")
+                if challenge_session.activity_id != self.activity_id:
+                    raise ValidationError("第三轮踢馆会话必须属于当前活动。")
             if (
                 self.roster_source != self.RosterSource.CHALLENGE_SESSION
                 and self.roster_source_challenge_session_id

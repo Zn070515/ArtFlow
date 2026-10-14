@@ -338,12 +338,20 @@ def create_challenge_session(
             or existing_command.payload_hash != payload_hash
         ):
             raise ChallengeIdempotencyConflict("踢馆命令已绑定其他创建内容。")
+        if existing_command.result_id is None:
+            raise ValidationError("踢馆创建命令缺少结果记录。")
         return ChallengeSession._base_manager.get(pk=existing_command.result_id)
     existing_session = ChallengeSession.objects.filter(input_fingerprint=input_fp).first()
     if existing_session is not None:
         raise ValidationError("该第一轮结果已经建立踢馆会话。")
     ranked = sorted(summaries, key=lambda row: row.average_score, reverse=True)
-    seats = sorted(ranked[:10], key=lambda row: row.singer.official_number)
+
+    def _official_number(summary: ScoreSummary) -> int:
+        if summary.singer.official_number is None:
+            raise ValidationError("所有第一轮选手必须先配置官方选手编号。")
+        return summary.singer.official_number
+
+    seats = sorted(ranked[:10], key=_official_number)
     challengers = sorted(ranked[10:], key=lambda row: row.average_score)
     with authority_write(LIVE_CHALLENGE_STATE):
         session = ChallengeSession.objects.create(
@@ -593,7 +601,10 @@ def confirm_challenge_pairing(
     )
     if turn.state != ChallengeTurn.State.TARGET_SELECTED or turn.target_seat is None:
         raise ValidationError("请先记录挑战对象。")
-    seat = ChallengeSeat.objects.select_for_update().get(pk=turn.target_seat_id)
+    target_seat_id = turn.target_seat_id
+    if target_seat_id is None:
+        raise ValidationError("请先记录挑战对象。")
+    seat = ChallengeSeat.objects.select_for_update().get(pk=target_seat_id)
     if seat.is_challenged:
         raise ValidationError("席位已经被挑战，不能重复确认配对。")
     now = timezone.now()

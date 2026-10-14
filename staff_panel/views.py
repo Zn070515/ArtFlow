@@ -466,7 +466,7 @@ def live_challenge_console(request, pk):
             messages.success(request, "现场挑战已更新。")
         return redirect("staff:live_challenge_console", pk=activity.pk)
 
-    session = (
+    live_session = (
         ChallengeSession.objects.filter(activity=activity)
         .select_related("source_round", "ruleset_version")
         .order_by("-created_at", "-pk")
@@ -475,10 +475,10 @@ def live_challenge_console(request, pk):
     current_turn = None
     current_match = None
     legal_seats = []
-    if session is not None:
+    if live_session is not None:
         current_turn = (
-            session.turns.select_related("challenger", "target_seat")
-            .filter(sequence=session.current_turn_number)
+            live_session.turns.select_related("challenger", "target_seat")
+            .filter(sequence=live_session.current_turn_number)
             .first()
         )
         current_match = (
@@ -488,7 +488,7 @@ def live_challenge_console(request, pk):
         )
         if current_turn is not None:
             legal_seats = list(
-                session.seats.select_related("current_holder")
+                live_session.seats.select_related("current_holder")
                 .filter(is_challenged=False)
                 .exclude(current_holder_id=current_turn.challenger_id)
                 .order_by("position")
@@ -503,7 +503,7 @@ def live_challenge_console(request, pk):
         "staff_panel/live_challenge_console.html",
         {
             "activity": activity,
-            "session": session,
+            "session": live_session,
             "current_turn": current_turn,
             "current_match": current_match,
             "legal_seats": legal_seats,

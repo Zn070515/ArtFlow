@@ -1572,8 +1572,11 @@ def _current_challenge_target(session: JudgeSession):
     if turn is None or not hasattr(turn, "match") or not turn.match.score_round_id:
         return None
     match = turn.match
+    score_round_id = match.score_round_id
+    if score_round_id is None:
+        return None
     target_round = ContestRound._base_manager.filter(
-        pk=match.score_round_id,
+        pk=score_round_id,
         activity_id=session.panel_snapshot.activity_id,
     ).first()
     if target_round is None or target_round.status == ContestRound.Status.LOCKED:

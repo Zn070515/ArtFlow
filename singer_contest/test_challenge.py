@@ -208,21 +208,25 @@ class LiveChallengeAuthorityTests(TestCase):
         )
         self.assertEqual(Performance.objects.filter(round=match.score_round).count(), 2)
         self.assertEqual(ScoreSummary.objects.filter(round=match.score_round).count(), 0)
-        prepare_judge_panel(match.score_round_id, operator=self.staff)
+        assert match.score_round_id is not None
+        assert match.score_round is not None
+        score_round_id = match.score_round_id
+        score_round = match.score_round
+        prepare_judge_panel(score_round_id, operator=self.staff)
         performances = list(
             Performance.objects.filter(round=match.score_round).order_by("sequence")
         )
         judges = list(Judge.objects.filter(activity=self.activity).order_by("pk"))
         for performance, score in zip(performances, (Decimal("100"), Decimal("80"))):
-            advance_performance(match.score_round_id, performance.pk, operator=self.staff)
+            advance_performance(score_round_id, performance.pk, operator=self.staff)
             apply_scores(
-                match.score_round,
+                score_round,
                 {(performance.singer_id, judge.pk): score for judge in judges[:4]},
                 self.staff,
             )
-            run_state = PerformanceRunState.objects.get(round=match.score_round_id)
+            run_state = PerformanceRunState.objects.get(round=score_round_id)
             lock_performance_score(
-                match.score_round_id,
+                score_round_id,
                 performance.pk,
                 operator=self.staff,
                 expected_context_version=run_state.context_version,
@@ -504,21 +508,25 @@ class LiveChallengeAuthorityTests(TestCase):
             command_id="tie-prepare",
             expected_revision=match.session.revision,
         )
-        prepare_judge_panel(match.score_round_id, operator=self.staff)
+        assert match.score_round_id is not None
+        assert match.score_round is not None
+        score_round_id = match.score_round_id
+        score_round = match.score_round
+        prepare_judge_panel(score_round_id, operator=self.staff)
         performances = list(
             Performance.objects.filter(round=match.score_round_id).order_by("sequence")
         )
         judges = list(Judge.objects.filter(activity=self.activity).order_by("pk"))
         for performance, score in zip(performances, (Decimal("100"), Decimal("86"))):
-            advance_performance(match.score_round_id, performance.pk, operator=self.staff)
+            advance_performance(score_round_id, performance.pk, operator=self.staff)
             apply_scores(
-                match.score_round,
+                score_round,
                 {(performance.singer_id, judge.pk): score for judge in judges[:4]},
                 self.staff,
             )
-            run_state = PerformanceRunState.objects.get(round=match.score_round_id)
+            run_state = PerformanceRunState.objects.get(round=score_round_id)
             lock_performance_score(
-                match.score_round_id,
+                score_round_id,
                 performance.pk,
                 operator=self.staff,
                 expected_context_version=run_state.context_version,

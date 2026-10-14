@@ -293,7 +293,10 @@ class ChallengeTurn(models.Model):
         if self.session_id:
             if self.challenger.activity_id != self.session.activity_id:
                 raise ValidationError("挑战者必须属于会话活动。")
-            if self.target_seat_id and self.target_seat.session_id != self.session_id:
+            target_seat = self.target_seat
+            if self.target_seat_id and (
+                target_seat is None or target_seat.session_id != self.session_id
+            ):
                 raise ValidationError("挑战目标席位必须属于当前会话。")
             if self.state == self.State.WAIVED and self.target_seat_id:
                 raise ValidationError("放弃挑战不能保留目标席位。")
