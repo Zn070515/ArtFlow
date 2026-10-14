@@ -71,6 +71,7 @@ from .models import (
     Performance,
     PerformanceGroup,
     PerformanceRunState,
+    PerformanceScoreState,
     RoundEntry,
     RoundJudge,
     RoundPanelSnapshot,
@@ -1190,6 +1191,7 @@ def reset_round_snapshots(
         with authority_write(TEST_DATA_CLEANUP):
             AccessGrant.objects.filter(round=locked_round).delete()
         with authority_write(ROUND_PERFORMANCE_STATE):
+            PerformanceScoreState.objects.filter(performance__round=locked_round).delete()
             PerformanceRunState.objects.filter(round=locked_round).delete()
         Performance.objects.filter(round=locked_round).delete()
         PerformanceGroup.objects.filter(round=locked_round).delete()

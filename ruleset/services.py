@@ -83,7 +83,7 @@ def _demote_prior_current(version: RulesetVersion) -> None:
 
 def _snapshot_binding(ruleset: ContestRuleset) -> dict:
     """Read the binding off a ruleset at freeze time (the editable input surface)."""
-    return {
+    snapshot = {
         "stage_key": ruleset.stage_key or "",
         "round_keys": dict(ruleset.round_keys or {}),
         "vote_keys": dict(ruleset.vote_keys or {}),
@@ -91,10 +91,14 @@ def _snapshot_binding(ruleset: ContestRuleset) -> dict:
         "group_keys": dict(ruleset.group_keys or {}),
         "group_stage_keys": dict(ruleset.group_stage_keys or {}),
         "audience_keys": dict(ruleset.audience_keys or {}),
-        "live_challenge": dict(ruleset.live_challenge or {}),
         "announcement_blocks": list(ruleset.announcement_blocks or []),
         "announcement_blocks_by_checkpoint": dict(ruleset.announcement_blocks_by_checkpoint or {}),
     }
+    # Preserve the shape of legacy frozen bindings when this optional 2026 feature is not
+    # configured; configured live events still carry the complete frozen contract.
+    if ruleset.live_challenge:
+        snapshot["live_challenge"] = dict(ruleset.live_challenge)
+    return snapshot
 
 
 def vote_scoring_binding_snapshot(rule_keys) -> dict:
@@ -387,7 +391,7 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
     if overlap:
         raise ValidationError(f"观众分与投票键重复绑定：{sorted(overlap)}")
 
-    return {
+    normalized = {
         "stage_key": str(binding.get("stage_key") or "").strip(),
         "round_keys": normalized_round_keys,
         "vote_keys": vote_keys,
@@ -397,8 +401,10 @@ def validate_binding(ruleset: ContestRuleset, binding: dict | None) -> dict:
         "audience_keys": audience_keys,
         "announcement_blocks": announcement_blocks,
         "announcement_blocks_by_checkpoint": dict(blocks_by_checkpoint),
-        "live_challenge": live_challenge,
     }
+    if live_challenge:
+        normalized["live_challenge"] = live_challenge
+    return normalized
 
 
 def _lock_version_for_write(version: RulesetVersion) -> RulesetVersion:
@@ -1678,7 +1684,7 @@ def update_ruleset_binding(
     locked.group_keys = normalized["group_keys"]
     locked.group_stage_keys = normalized["group_stage_keys"]
     locked.audience_keys = normalized["audience_keys"]
-    locked.live_challenge = normalized["live_challenge"]
+    locked.live_challenge = normalized.get("live_challenge") or {}
     locked.announcement_blocks = normalized["announcement_blocks"]
     locked.announcement_blocks_by_checkpoint = normalized["announcement_blocks_by_checkpoint"]
     locked.save(
