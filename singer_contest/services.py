@@ -2304,11 +2304,45 @@ def _stage_entry_roster(version, activity, bound_rounds, *, checkpoint=None) -> 
     )
 
 
+def _normalize_bound_rounds(
+    activity,
+    round_keys: Mapping[str, ContestRound | int],
+) -> dict[str, ContestRound]:
+    """Resolve public round-key inputs to activity-owned model instances.
+
+    The service boundary accepts both ``ContestRound`` instances and primary keys.
+    Normalising once here keeps the binder safe for either documented binding shape.
+    """
+    requested: dict[str, int] = {}
+    for key, raw_round in round_keys.items():
+        if isinstance(raw_round, ContestRound):
+            round_id = raw_round.pk
+        else:
+            try:
+                round_id = int(str(raw_round))
+            except (TypeError, ValueError):
+                raise ValidationError("round_keys 必须绑定到有效的轮次。") from None
+        if round_id is None or round_id < 1:
+            raise ValidationError("round_keys 必须绑定到有效的轮次。")
+        requested[key] = round_id
+
+    rounds = {
+        contest_round.pk: contest_round
+        for contest_round in ContestRound.objects.filter(
+            activity=activity,
+            pk__in=requested.values(),
+        )
+    }
+    if len(rounds) != len(set(requested.values())):
+        raise ValidationError("round_keys 必须绑定到当前活动的有效轮次。")
+    return {key: rounds[round_id] for key, round_id in requested.items()}
+
+
 def bind_resolve_input(
     version,
     activity,
     *,
-    round_keys: Mapping[str, ContestRound],
+    round_keys: Mapping[str, ContestRound | int],
     vote_scores=None,
     group_of=None,
     manual=None,
@@ -2325,6 +2359,7 @@ def bind_resolve_input(
     caller supplies the single Decimal per contestant — the binder never re-derives a
     raw-vote score.
     """
+    round_keys = _normalize_bound_rounds(activity, round_keys)
     roster = _stage_entry_roster(version, activity, round_keys, checkpoint=checkpoint)
     round_scores = {}
     round_score_minimums: dict[str, int] = {}
