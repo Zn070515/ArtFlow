@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}现场挑战 — {{ activity.title }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:activity_workspace' activity.pk %}" class="hover:underline">{{ activity.title }}</a> / 现场挑战</p>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">现场挑战</h1>
+            <p class="text-sm text-gray-600 mt-1">工作人员只需按现场顺序推进：现在到谁、发生什么、下一步做什么。</p>
+        </div>
+        <a href="{% url 'staff:live_material_progress' activity.pk %}" class="touch-target border border-brand text-brand rounded text-sm">查看材料准备</a>
+    </div>
+
+    {% if messages %}
+    <div class="space-y-2 mb-4">
+        {% for message in messages %}<div class="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">{{ message }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not session %}
+    <section class="bg-white border border-gray-200 rounded-lg p-5">
+        <h2 class="text-lg font-semibold text-gray-900">当前还没有建立挑战流程</h2>
+        <p class="text-sm text-gray-600 mt-1 mb-4">请在第一轮结果已经锁定并核定后建立一次挑战流程。</p>
+        <form method="post" class="flex flex-wrap items-end gap-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+            <div>
+                <label class="block text-sm text-gray-700 mb-1">第一轮结果</label>
+                <select name="source_round_id" required class="border border-gray-300 rounded px-3 py-2 text-sm">
+                    <option value="">请选择已核定的第一轮</option>
+                    {% for round in source_rounds %}<option value="{{ round.pk }}">{{ round.name|default:round.get_round_type_display }}</option>{% endfor %}
+                </select>
+            </div>
+            <button class="touch-target bg-brand text-white rounded text-sm">建立挑战流程</button>
+        </form>
+    </section>
+    {% else %}
+    <section class="bg-white border border-brand/20 rounded-lg overflow-hidden mb-5">
+        <div class="bg-blue-50 border-b border-blue-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+                <h2 class="font-semibold text-gray-900">当前挑战流程</h2>
+                <p class="text-sm text-gray-600 mt-1">{{ session.get_state_display }} · 已处理到第 {{ session.current_turn_number }} 位挑战者</p>
+            </div>
+            <span class="text-sm font-medium text-brand">五个挑战机会按固定顺序处理</span>
+        </div>
+        <div class="p-4">
+            {% if session.state == "ready_to_confirm" %}
+            <p class="text-lg font-semibold text-gray-900 mb-3">五次挑战机会都已处理，可以确认最终十强。</p>
+            <form method="post">
+                {% csrf_token %}<input type="hidden" name="action" value="confirm_session"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                <button class="touch-target bg-brand text-white rounded text-sm">确认最终十强</button>
+            </form>
+            {% elif session.state == "confirmed" %}
+            <p class="text-lg font-semibold text-emerald-800 mb-3">最终十强已经确认，可以按选手编号准备第三轮。</p>
+            {% if not session.final_rounds.exists %}
+            <form method="post">
+                {% csrf_token %}<input type="hidden" name="action" value="prepare_final_round"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                <button class="touch-target bg-brand text-white rounded text-sm">生成第三轮十人名单</button>
+            </form>
+            {% else %}<p class="text-sm text-gray-600">第三轮十人名单已生成，请到轮次页面准备评分。</p>{% endif %}
+            {% elif current_turn %}
+            <div class="grid md:grid-cols-3 gap-4 mb-4">
+                <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">当前挑战者</p><p class="font-semibold text-gray-900 mt-1">{{ current_turn.challenger.name }}</p></div>
+                <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">当前进度</p><p class="font-semibold text-gray-900 mt-1">{{ current_turn.get_state_display }}</p></div>
+                <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">席位机会</p><p class="font-semibold text-gray-900 mt-1">第 {{ current_turn.sequence }} / 5 次</p></div>
+            </div>
+
+            {% if current_turn.state == "pending" %}
+            <form method="post">
+                {% csrf_token %}<input type="hidden" name="action" value="start"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                <button class="touch-target bg-brand text-white rounded text-sm">开始下一位选人</button>
+            </form>
+            {% elif current_turn.state == "selecting" %}
+            <p class="text-sm text-gray-700 mb-3">请听取挑战者的口头选择，然后记录合法席位；也可以记录本次放弃。</p>
+            <div class="flex flex-wrap gap-2 mb-4">
+                {% for seat in legal_seats %}
+                <form method="post">
+                    {% csrf_token %}<input type="hidden" name="action" value="target"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="seat_position" value="{{ seat.position }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                    <button class="touch-target border border-brand text-brand rounded text-sm">记录 {{ seat.current_holder.name }}（第 {{ seat.position }} 席）</button>
+                </form>
+                {% empty %}<span class="text-sm text-amber-700">当前没有可选择的席位。</span>{% endfor %}
+            </div>
+            <form method="post">
+                {% csrf_token %}<input type="hidden" name="action" value="waive"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                <button class="touch-target border border-gray-300 rounded text-sm">记录本次放弃</button>
+            </form>
+            {% elif current_turn.state == "target_selected" %}
+            <p class="text-sm text-gray-700 mb-3">已记录挑战对象，请确认这组正式对阵。</p>
+            <form method="post">
+                {% csrf_token %}<input type="hidden" name="action" value="pair"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                <button class="touch-target bg-brand text-white rounded text-sm">确认这组对阵</button>
+            </form>
+            {% elif current_match and current_match.status == "ready_for_scoring" %}
+            <p class="text-sm text-gray-700 mb-3">对阵已确认：{{ current_match.challenger.name }}先演唱，{{ current_match.defender.name }}后演唱。</p>
+            <form method="post">
+                {% csrf_token %}<input type="hidden" name="action" value="prepare"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                <button class="touch-target bg-brand text-white rounded text-sm">准备本场评分</button>
+            </form>
+            {% elif current_match and current_match.status == "scoring" %}
+            <p class="text-sm text-gray-700 mb-3">两位选手可以分别开放评分；先开放挑战者，再开放守擂者，前一人的未交评分仍可补交。</p>
+            <div class="flex flex-wrap gap-2 mb-3">
+                <form method="post">{% csrf_token %}<input type="hidden" name="action" value="open_challenger"><input type="hidden" name="session_id" value="{{ session.pk }}"><button class="touch-target border border-brand text-brand rounded text-sm">开放挑战者评分</button></form>
+                <form method="post">{% csrf_token %}<input type="hidden" name="action" value="open_defender"><input type="hidden" name="session_id" value="{{ session.pk }}"><button class="touch-target border border-brand text-brand rounded text-sm">开放守擂者评分</button></form>
+            </div>
+            <form method="post">{% csrf_token %}<input type="hidden" name="action" value="lock_scores"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}"><button class="touch-target bg-brand text-white rounded text-sm">结束收分并锁定成绩</button></form>
+            {% elif current_match and current_match.status == "awaiting_result" %}
+            <p class="text-sm text-gray-700 mb-3">双方成绩已锁定，请核对正式综合成绩后确认胜负。</p>
+            <form method="post">{% csrf_token %}<input type="hidden" name="action" value="confirm_match"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}"><button class="touch-target bg-brand text-white rounded text-sm">确认本场胜负</button></form>
+            {% elif current_match and current_match.status == "confirmed" %}
+            <p class="text-sm text-emerald-800">本场已核定，工作人员可以把结果告知主持人。</p>
+            {% endif %}
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="bg-white border border-gray-200 rounded-lg p-4">
+        <h2 class="font-semibold text-gray-900 mb-3">五次机会进度</h2>
+        <div class="grid sm:grid-cols-5 gap-2">
+            {% for turn in session.turns.all %}<div class="rounded border border-gray-200 p-2 text-sm"><div class="text-xs text-gray-500">第 {{ turn.sequence }} 次</div><div class="font-medium mt-1">{{ turn.challenger.name }}</div><div class="text-xs text-gray-600 mt-1">{{ turn.get_state_display }}</div></div>{% endfor %}
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

@@ -119,6 +119,18 @@ from ruleset.services import (
     validate_definition_completeness,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
+from singer_contest.challenge_services import (
+    confirm_challenge_match_result,
+    confirm_challenge_pairing,
+    confirm_challenge_session,
+    create_challenge_session,
+    create_final_round_from_challenge,
+    lock_challenge_match_scores,
+    prepare_challenge_match,
+    record_challenge_target,
+    start_challenge_turn,
+    waive_challenge_turn,
+)
 from singer_contest.group_chorus import (
     cancel_group_stage,
     confirm_group_stage,
@@ -144,8 +156,12 @@ from singer_contest.judge_authority import (
     submit_staff_proxy_score,
 )
 from singer_contest.judge_entry import judge_entry_credential
+from singer_contest.materials import live_material_summary
 from singer_contest.models import (
     AudienceScore,
+    ChallengeMatch,
+    ChallengeSession,
+    ChallengeTurn,
     ContestRound,
     Group,
     GroupMembership,
@@ -332,6 +348,183 @@ def dashboard(request):
 def activity_list(request):
     activities = Activity.objects.all()
     return render(request, "staff_panel/activity_list.html", {"activities": activities})
+
+
+@staff_required
+def live_challenge_console(request, pk):
+    """One plain-language control surface for the chronological challenge stage."""
+    activity = get_object_or_404(Activity, pk=pk)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛活动支持现场挑战。")
+    if request.method == "POST":
+        action = (request.POST.get("action") or "").strip()
+        command_id = request.POST.get("command_id") or uuid4().hex
+        try:
+            expected_revision = int(request.POST.get("expected_revision") or "0")
+            session_id = int(request.POST.get("session_id") or "0")
+            if action == "create":
+                source_round = get_object_or_404(
+                    ContestRound,
+                    pk=request.POST.get("source_round_id"),
+                    activity=activity,
+                )
+                version = _current_frozen_version(activity)
+                if version is None:
+                    raise ValidationError("当前活动还没有已确认的赛制版本。")
+                create_challenge_session(
+                    source_round,
+                    ruleset_version=version,
+                    operator=request.user,
+                    command_id=command_id,
+                )
+            elif action == "start":
+                start_challenge_turn(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "target":
+                record_challenge_target(
+                    session_id,
+                    seat_position=request.POST.get("seat_position"),
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "pair":
+                confirm_challenge_pairing(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "waive":
+                waive_challenge_turn(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "prepare":
+                prepare_challenge_match(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action in {"open_challenger", "open_defender"}:
+                session = get_object_or_404(ChallengeSession, pk=session_id, activity=activity)
+                turn = get_object_or_404(
+                    ChallengeTurn, session=session, sequence=session.current_turn_number
+                )
+                match = get_object_or_404(ChallengeMatch, turn=turn)
+                if not match.score_round_id:
+                    raise ValidationError("当前比赛还没有准备评分。")
+                singer_id = (
+                    match.challenger_id if action == "open_challenger" else match.defender_id
+                )
+                performance = get_object_or_404(
+                    Performance,
+                    round_id=match.score_round_id,
+                    singer_id=singer_id,
+                )
+                advance_performance(match.score_round_id, performance.pk, operator=request.user)
+            elif action == "lock_scores":
+                lock_challenge_match_scores(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "confirm_match":
+                confirm_challenge_match_result(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "confirm_session":
+                confirm_challenge_session(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            elif action == "prepare_final_round":
+                create_final_round_from_challenge(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                )
+            else:
+                raise ValidationError("现场挑战操作无效。")
+        except (PermissionDenied, ValidationError, ValueError) as error:
+            messages.error(request, domain_error_messages(error))
+        else:
+            messages.success(request, "现场挑战已更新。")
+        return redirect("staff:live_challenge_console", pk=activity.pk)
+
+    session = (
+        ChallengeSession.objects.filter(activity=activity)
+        .select_related("source_round", "ruleset_version")
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    current_turn = None
+    current_match = None
+    legal_seats = []
+    if session is not None:
+        current_turn = (
+            session.turns.select_related("challenger", "target_seat")
+            .filter(sequence=session.current_turn_number)
+            .first()
+        )
+        current_match = (
+            current_turn.match
+            if current_turn is not None and hasattr(current_turn, "match")
+            else None
+        )
+        if current_turn is not None:
+            legal_seats = list(
+                session.seats.select_related("current_holder")
+                .filter(is_challenged=False)
+                .exclude(current_holder_id=current_turn.challenger_id)
+                .order_by("position")
+            )
+    source_rounds = ContestRound.objects.filter(
+        activity=activity,
+        status=ContestRound.Status.LOCKED,
+        advancement_status=ContestRound.AdvancementStatus.FINALIZED,
+    ).order_by("sequence", "pk")
+    return render(
+        request,
+        "staff_panel/live_challenge_console.html",
+        {
+            "activity": activity,
+            "session": session,
+            "current_turn": current_turn,
+            "current_match": current_match,
+            "legal_seats": legal_seats,
+            "source_rounds": source_rounds,
+            "state_labels": dict(ChallengeSession.State.choices),
+            "turn_state_labels": dict(ChallengeTurn.State.choices),
+            "match_state_labels": dict(ChallengeMatch.Status.choices),
+        },
+    )
+
+
+@staff_required
+def live_material_progress(request, pk):
+    activity = get_object_or_404(Activity, pk=pk)
+    if activity.activity_type != Activity.Type.SINGER_CONTEST:
+        raise PermissionDenied("只有歌手比赛活动支持现场材料进度。")
+    return render(
+        request,
+        "staff_panel/live_material_progress.html",
+        {"activity": activity, "summary": live_material_summary(activity)},
+    )
 
 
 @staff_required
@@ -5292,6 +5485,13 @@ def ruleset_edit(request, pk):
         business_editor["round_options"] = prepared_round_options
         business_editor["vote_options"] = vote_options
         business_editor["scoring_modes"] = list(ContestRound.ScoringMode.choices)
+    live_challenge = dict(ruleset.live_challenge or {})
+    for weight_key in ("first_round_weight", "challenge_round_weight"):
+        if weight_key in live_challenge:
+            try:
+                live_challenge[weight_key] = f"{Decimal(str(live_challenge[weight_key])) * 100:g}%"
+            except (InvalidOperation, ValueError):
+                pass
     return render(
         request,
         "staff_panel/ruleset_editor.html",
@@ -5321,6 +5521,7 @@ def ruleset_edit(request, pk):
                     ensure_ascii=False,
                 ),
             },
+            "live_challenge": live_challenge,
             "binding_signature": _binding_signature(ruleset),
             "binding_maps": binding_maps,
             "human_summary": human_summary,
@@ -5388,6 +5589,25 @@ def ruleset_bind(request, pk):
                     {},
                 ),
                 "audience_keys": _parse_json("audience_keys", {}),
+                "live_challenge": {
+                    "participant_count": request.POST.get("live_participant_count") or "",
+                    "seat_count": request.POST.get("live_seat_count") or "",
+                    "challenge_count": request.POST.get("live_challenge_count") or "",
+                    "first_round_weight": request.POST.get("live_first_weight") or "",
+                    "challenge_round_weight": request.POST.get("live_challenge_weight") or "",
+                    "order_policy": "official_number",
+                }
+                if any(
+                    request.POST.get(name)
+                    for name in (
+                        "live_participant_count",
+                        "live_seat_count",
+                        "live_challenge_count",
+                        "live_first_weight",
+                        "live_challenge_weight",
+                    )
+                )
+                else {},
                 "announcement_blocks": _parse_json("announcement_blocks", []),
                 "announcement_blocks_by_checkpoint": _parse_json(
                     "announcement_blocks_by_checkpoint", {}

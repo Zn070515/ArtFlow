@@ -1841,6 +1841,48 @@ class BindingValidationTests(_RulesetModelBase):
         self.assertIsInstance(normalized["round_keys"]["r1"], int)
         self.assertIsInstance(normalized["vote_keys"]["audience1"], int)
 
+    def test_accepts_and_normalizes_live_challenge_configuration(self):
+        ruleset = self.make_ruleset()
+        normalized = validate_binding(
+            ruleset,
+            {
+                "live_challenge": {
+                    "participant_count": "15",
+                    "seat_count": "10",
+                    "challenge_count": "5",
+                    "first_round_weight": "40%",
+                    "challenge_round_weight": "60%",
+                }
+            },
+        )
+        self.assertEqual(
+            normalized["live_challenge"],
+            {
+                "participant_count": 15,
+                "seat_count": 10,
+                "challenge_count": 5,
+                "first_round_weight": "0.4000",
+                "challenge_round_weight": "0.6000",
+                "order_policy": "official_number",
+            },
+        )
+
+    def test_rejects_live_challenge_weights_that_do_not_sum_to_one(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaisesMessage(ValidationError, "踢馆成绩权重必须合计 100%"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "participant_count": 15,
+                        "seat_count": 10,
+                        "challenge_count": 5,
+                        "first_round_weight": "40%",
+                        "challenge_round_weight": "50%",
+                    }
+                },
+            )
+
     def test_rejects_bad_checkpoint_blocks(self):
         ruleset = self.make_ruleset()
         with self.assertRaises(ValidationError):

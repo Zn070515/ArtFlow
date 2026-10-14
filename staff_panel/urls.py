@@ -13,6 +13,16 @@ urlpatterns = [
         views.activity_workspace,
         name="activity_workspace",
     ),
+    path(
+        "activities/<int:pk>/live-challenge/",
+        views.live_challenge_console,
+        name="live_challenge_console",
+    ),
+    path(
+        "activities/<int:pk>/live-materials/",
+        views.live_material_progress,
+        name="live_material_progress",
+    ),
     path("activities/new/", views.activity_create, name="activity_create"),
     path(
         "activities/<int:activity_id>/group-stages/new/",

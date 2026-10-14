@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}材料准备 — {{ activity.title }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-8">
+    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:activity_workspace' activity.pk %}" class="hover:underline">{{ activity.title }}</a> / 材料准备</p>
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div><h1 class="text-2xl font-bold text-gray-900">材料准备进度</h1><p class="text-sm text-gray-600 mt-1">第一轮按小组共享，第二轮和第三轮按选手分别准备。</p></div>
+        <a href="{% url 'staff:live_challenge_console' activity.pk %}" class="touch-target border border-brand text-brand rounded text-sm">返回现场挑战</a>
+    </div>
+    <section class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">第一轮小组材料</h2>
+        <p class="text-sm text-gray-600 mt-1">已准备 {{ summary.first_round.ready_count }} / {{ summary.first_round.total_count }} 组</p>
+        <div class="mt-3 grid md:grid-cols-2 gap-2">
+            {% for row in summary.first_round.groups %}<div class="rounded border border-gray-200 px-3 py-2 flex justify-between gap-3"><span>{{ row.stage_name }} · {{ row.group_name }}</span><span class="text-sm {% if row.status == 'ready' %}text-emerald-700{% else %}text-amber-700{% endif %}">{{ row.status_label }}</span></div>{% empty %}<p class="text-sm text-gray-500">暂未建立分组合唱小组。</p>{% endfor %}
+        </div>
+    </section>
+    {% for round_key, round in summary.personal_rounds.items %}
+    <section class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">{{ round.title }}</h2>
+        <p class="text-sm text-gray-600 mt-1">已准备 {{ round.ready_count }} / {{ round.total_count }} 人</p>
+        <div class="mt-3 space-y-2">
+            {% for row in round.participants %}<div class="rounded border border-gray-200 px-3 py-2 flex flex-wrap justify-between gap-3"><span>{{ row.official_number }} · {{ row.name }}</span><span class="text-sm {% if row.ready %}text-emerald-700{% else %}text-amber-700{% endif %}">{% if row.ready %}已准备{% else %}待补：{{ row.missing|join:'、' }}{% endif %}</span></div>{% empty %}<p class="text-sm text-gray-500">当前冻结问卷还没有这轮个人材料题目。</p>{% endfor %}
+        </div>
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}

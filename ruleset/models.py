@@ -163,6 +163,11 @@ class ContestRuleset(models.Model):
             "grouping, e.g. {'aud1': 'stage1'}."
         ),
     )
+    live_challenge = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="2026 现场踢馆人数、席位、挑战次数和成绩权重配置。",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
