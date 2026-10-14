@@ -395,15 +395,16 @@ def _finish_turn(session: ChallengeSession, turn: ChallengeTurn) -> None:
         session.current_turn_number = turn.sequence + 1
 
 
-def _ensure_session_dependencies_current(session: ChallengeSession) -> None:
-    source_round = ContestRound.objects.select_for_update().get(
-        pk=session.source_round_id, activity_id=session.activity_id
-    )
-    version = (
-        RulesetVersion.objects.select_for_update()
-        .select_related("ruleset")
-        .get(pk=session.ruleset_version_id)
-    )
+def _ensure_session_dependencies_current(
+    session: ChallengeSession, *, lock_dependencies: bool = True
+) -> None:
+    source_rounds = ContestRound.objects
+    versions = RulesetVersion.objects.select_related("ruleset")
+    if lock_dependencies:
+        source_rounds = source_rounds.select_for_update()
+        versions = versions.select_for_update()
+    source_round = source_rounds.get(pk=session.source_round_id, activity_id=session.activity_id)
+    version = versions.get(pk=session.ruleset_version_id)
     summaries = _validate_source_round(source_round, version)
     current_source_fp = _source_fingerprint(source_round, summaries)
     current_ruleset_hash = _current_ruleset_hash(version)
@@ -427,7 +428,7 @@ def challenge_final_roster(
         raise ValidationError("踢馆会话不属于当前活动。")
     if session.state != ChallengeSession.State.CONFIRMED:
         raise ValidationError("踢馆会话尚未核定，不能生成最终十强名单。")
-    _ensure_session_dependencies_current(session)
+    _ensure_session_dependencies_current(session, lock_dependencies=False)
     seats = list(
         ChallengeSeat._base_manager.filter(session=session).order_by("third_round_position", "pk")
     )
