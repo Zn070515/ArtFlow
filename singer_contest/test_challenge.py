@@ -157,12 +157,17 @@ class LiveChallengeAuthorityTests(TestCase):
 
         self.assertEqual(session.state, ChallengeSession.State.ACTIVE)
         self.assertEqual(
-            list(session.turns.values_list("challenger_id", flat=True)), [15, 14, 13, 12, 11]
+            list(
+                session.turns.order_by("sequence").values_list(
+                    "challenger__official_number", flat=True
+                )
+            ),
+            [15, 14, 13, 12, 11],
         )
         self.assertEqual(
             list(
                 session.seats.order_by("third_round_position").values_list(
-                    "current_holder_id", flat=True
+                    "current_holder__official_number", flat=True
                 )
             ),
             list(range(1, 11)),

@@ -4908,10 +4908,13 @@ class ExportPrivacyTests(TestCase):
         )
 
     def _first_column_from(self, response):
+        return self._column_from(response, 1)
+
+    def _column_from(self, response, column):
         wb = load_workbook(BytesIO(response.content))
         ws = wb.active
         assert ws is not None
-        return [ws.cell(row=idx, column=1).value for idx in range(2, ws.max_row + 1)]
+        return [ws.cell(row=idx, column=column).value for idx in range(2, ws.max_row + 1)]
 
     def test_award_list_uses_official_stage_authority_queryset(self):
         singer = self._registration(self.contest, "Contest Singer", "S1")
@@ -4941,7 +4944,7 @@ class ExportPrivacyTests(TestCase):
             reverse("staff:export_registrations"), {"activity_id": self.other.pk}
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self._first_column_from(response), ["Other Singer"])
+        self.assertEqual(self._column_from(response, 2), ["Other Singer"])
         log = AuditLog.objects.filter(
             action_type=AuditLog.ActionType.EXPORT, operator=self.staff
         ).get()
@@ -4954,8 +4957,9 @@ class ExportPrivacyTests(TestCase):
         login_admin(self.client, self.admin)
         response = self.client.get(reverse("staff:export_registrations"))
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Contest Singer", self._first_column_from(response))
-        self.assertIn("Other Singer", self._first_column_from(response))
+        names = self._column_from(response, 2)
+        self.assertIn("Contest Singer", names)
+        self.assertIn("Other Singer", names)
 
     def test_staff_export_programs_scopes_to_selected_activity(self):
         self._program(self.contest, "Contest Program", "C1")
