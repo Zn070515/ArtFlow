@@ -415,4 +415,3 @@ def confirm_podium_result(stage: StageResult, *, confirmed_by):
     )
     materialize_stage_awards(locked, operator=current_actor)
     return locked
-

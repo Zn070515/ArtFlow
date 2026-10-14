@@ -135,7 +135,7 @@ class LiveMaterialProjectionTests(TestCase):
                 activity_type=Activity.Type.SINGER_CONTEST,
                 is_test_mode=True,
             )
-        singer = SingerRegistration.objects.create(
+        SingerRegistration.objects.create(
             activity=activity,
             user=user,
             name="未交材料",
