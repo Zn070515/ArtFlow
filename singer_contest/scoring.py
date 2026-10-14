@@ -107,9 +107,7 @@ def assess_score_completeness(
 
     mode = ScoreCompletionMode(completion_mode)
     required_count = (
-        expected_judge_count
-        if mode == ScoreCompletionMode.FULL_MATRIX
-        else minimum_judge_count
+        expected_judge_count if mode == ScoreCompletionMode.FULL_MATRIX else minimum_judge_count
     )
     if locked:
         state = ScoreCompletionState.LOCKED

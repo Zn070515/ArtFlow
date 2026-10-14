@@ -425,9 +425,7 @@ class ResolverReadyTests(SimpleTestCase):
         self.assertEqual(result.decisions[0].score, Decimal("8.5"))
 
     def test_assess_uses_official_two_decimal_rounding_and_minimum_count(self):
-        definition = _def(
-            [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}]
-        )
+        definition = _def([{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}])
         result = resolve(
             definition,
             ResolveInput(
@@ -440,9 +438,7 @@ class ResolverReadyTests(SimpleTestCase):
         self.assertEqual(result.decisions[0].score, Decimal("90.01"))
 
     def test_assess_holds_when_frozen_minimum_valid_judges_are_missing(self):
-        definition = _def(
-            [{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}]
-        )
+        definition = _def([{"key": "a", "type": "ASSESS", "source": ENTRY_KEY, "round": "r1"}])
         result = resolve(
             definition,
             ResolveInput(

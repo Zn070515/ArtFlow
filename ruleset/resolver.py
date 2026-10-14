@@ -611,9 +611,7 @@ def _assess(node: dict, st: _Stage, inputs: ResolveInput) -> dict:
             dec = tuple(_as_dec(s) for s in scores)
             minimum = inputs.round_score_minimums.get(src)
             if minimum is not None and len(dec) < minimum:
-                st.hold.append(
-                    f"轮次 {src} {c} 有效评委不足 ({len(dec)} < {minimum})。"
-                )
+                st.hold.append(f"轮次 {src} {c} 有效评委不足 ({len(dec)} < {minimum})。")
                 continue
             if node.get("mode") == "trimmed_mean":
                 if len(dec) <= trims:
