@@ -31,6 +31,7 @@ from .judge_authority import (
     JudgeIdempotencyConflict,
     JudgeRoundOnHold,
     advance_performance,
+    advance_performance_group,
     authenticate_judge_session,
     claim_judge_session,
     get_judge_context,
@@ -65,7 +66,7 @@ from .models import (
     ScoringRubric,
     SingerRegistration,
 )
-from .services import apply_scores, set_official_contestant_number
+from .services import apply_scores, lock_round, set_official_contestant_number
 
 
 class JudgeAuthorityVocabularyTests(TestCase):
@@ -399,6 +400,70 @@ class JudgePanelServiceTests(TestCase):
         self.assertEqual(run_state.state, PerformanceRunState.State.IDLE)
         self.assertEqual(run_state.context_version, 0)
 
+    def test_group_advance_opens_all_individual_scores_after_group_performance(self):
+        from .models import Performance, PerformanceGroup, RoundEntry
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.save(update_fields=["status"])
+        group = PerformanceGroup.objects.create(
+            activity=self.activity,
+            round=self.round,
+            name="第一组",
+            sequence=1,
+            is_test_data=True,
+        )
+        singers = [self.singer]
+        for index in range(2):
+            with authority_write(ACCOUNT_AUTHORITY):
+                user = User.objects.create_user(
+                    username=f"judge-group-singer-{index}", password="pass"
+                )
+            singer = SingerRegistration.objects.create(
+                activity=self.activity,
+                user=user,
+                name=f"Group singer {index}",
+                student_id=f"judge-group-{index}",
+                college="Arts",
+                class_name="Class 1",
+                phone=f"1380000001{index}",
+                song_name="Group song",
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=True,
+            )
+            singers.append(singer)
+        for sequence, singer in enumerate(singers, start=1):
+            if singer.pk != self.singer.pk:
+                RoundEntry.objects.create(round=self.round, singer=singer, running_order=sequence)
+            if singer.pk != self.singer.pk:
+                Performance.objects.create(
+                    activity=self.activity,
+                    round=self.round,
+                    singer=singer,
+                    group=group,
+                    sequence=sequence,
+                    song_title="Group song",
+                    is_test_data=True,
+                )
+        self.performance.group = group
+        self.performance.save(update_fields=["group"])
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.PREPARED
+            self.round.save(update_fields=["status"])
+
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        run_state = advance_performance_group(self.round.pk, group.pk, operator=self.operator)
+        self.assertEqual(run_state.current_performance_id, self.performance.pk)
+        states = PerformanceScoreState.objects.filter(performance__group=group)
+        self.assertEqual(states.count(), 3)
+        self.assertEqual(
+            set(states.values_list("state", flat=True)),
+            {PerformanceScoreState.State.OPEN},
+        )
+        self.assertEqual(
+            set(states.values_list("context_version", flat=True)), {run_state.context_version}
+        )
+
     def test_prepare_panel_is_idempotent_for_existing_active_snapshot(self):
         first = prepare_judge_panel(self.round.pk, operator=self.operator)
         second = prepare_judge_panel(self.round.pk, operator=self.operator)
@@ -424,6 +489,36 @@ class JudgePanelServiceTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, "只能有一个现场评委组"):
             prepare_judge_panel(other_round.pk, operator=self.operator)
+
+    def test_locking_round_closes_panel_for_next_round_handoff(self):
+        prepare_judge_panel(self.round.pk, operator=self.operator)
+        apply_scores(
+            self.round,
+            {(self.singer.pk, self.judge.pk): "90"},
+            self.operator,
+        )
+        lock_round(self.round, self.operator)
+
+        from .models import RoundEntry, RoundJudge
+
+        with authority_write(CONTEST_ROUND_STATE):
+            next_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="Next round",
+            )
+            RoundEntry.objects.create(round=next_round, singer=self.singer, running_order=1)
+            RoundJudge.objects.create(round=next_round, judge=self.judge)
+            next_round.status = ContestRound.Status.PREPARED
+            next_round.save(update_fields=["status"])
+
+        next_snapshot = prepare_judge_panel(next_round.pk, operator=self.operator)
+
+        self.assertEqual(next_snapshot.round_id, next_round.pk)
+        self.assertEqual(
+            RoundPanelSnapshot.objects.get(round=self.round).state,
+            RoundPanelSnapshot.State.SUPERSEDED,
+        )
 
     def test_prepare_panel_rejects_draft_round(self):
         from django.core.exceptions import ValidationError
@@ -1013,6 +1108,8 @@ class JudgePanelServiceTests(TestCase):
             ScoreRecord.objects.get(pk=submission.score_record_id).singer_id,
             self.singer.pk,
         )
+        refreshed_context = get_judge_context(redeemed.token)
+        self.assertEqual(refreshed_context.pending_performances, ())
         self.assertEqual(
             PerformanceScoreState.objects.get(performance=self.performance).state,
             PerformanceScoreState.State.OPEN,

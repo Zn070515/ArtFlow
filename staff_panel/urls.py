@@ -163,6 +163,11 @@ urlpatterns = [
         name="judge_performance_advance",
     ),
     path(
+        "judges/round/<int:pk>/performance-groups/advance/",
+        views.judge_performance_group_advance,
+        name="judge_performance_group_advance",
+    ),
+    path(
         "judges/round/<int:pk>/performances/score-lock/",
         views.judge_performance_score_lock,
         name="judge_performance_score_lock",

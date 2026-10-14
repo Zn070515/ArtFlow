@@ -125,3 +125,46 @@ class LiveMaterialProjectionTests(TestCase):
             summary["personal_rounds"]["r3"]["participants"][0]["missing"],
             ["r3.accompaniment"],
         )
+
+    def test_missing_checks_are_not_reported_ready_and_keep_contract_labels(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            user = User.objects.create_user(username="material-missing", password="pass")
+        with authority_write(ACTIVITY_STATE):
+            activity = Activity.objects.create(
+                title="Missing materials",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                is_test_mode=True,
+            )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=user,
+            name="未交材料",
+            student_id="material-missing-1",
+            college="艺术学院",
+            class_name="一班",
+            phone="13900000002",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        ruleset = ContestRuleset.objects.create(
+            activity=activity, name="Missing materials", is_test_data=True
+        )
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                definition=json.dumps(_definition()),
+                authority_hash="c" * 64,
+                binding={},
+            )
+
+        summary = live_material_summary(activity, version=version)
+        participant = summary["personal_rounds"]["r3"]["participants"][0]
+
+        self.assertFalse(participant["ready"])
+        self.assertEqual(participant["missing"], ["r3 歌曲", "r3 伴奏"])
+        self.assertEqual(
+            [item.get("item_name") for item in participant["items"]],
+            ["r3 歌曲", "r3 伴奏"],
+        )

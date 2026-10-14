@@ -12,6 +12,7 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    ROUND_PERFORMANCE_STATE,
     RULESET_FREEZE,
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
@@ -60,6 +61,8 @@ from .models import (
     DuelDecision,
     Judge,
     JudgeSeat,
+    Performance,
+    PerformanceScoreState,
     RoundEntry,
     RoundJudge,
     ScoreRecord,
@@ -687,6 +690,23 @@ class ScoringServiceTests(TestCase):
         ):
             finalize_advancement(self.round, [self.singer.pk], self.user)
 
+    def test_finalize_advancement_accepts_minimum_valid_scores(self):
+        second_judge = Judge.objects.create(activity=self.activity, name="Second Judge")
+        self.round.advance_count = 1
+        self.round.score_completion_mode = ContestRound.CompletionMode.MINIMUM_VALID
+        self.round.minimum_judge_count = 1
+        _save_round_state(
+            self.round,
+            ["advance_count", "score_completion_mode", "minimum_judge_count"],
+        )
+        prepare_round(self.round, self.user)
+        apply_scores(self.round, {(self.singer.pk, self.judge.pk): 95}, self.user)
+
+        finalized = finalize_advancement(self.round, [self.singer.pk], self.user)
+
+        self.assertEqual(finalized.advancement_status, ContestRound.AdvancementStatus.FINALIZED)
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round, judge=second_judge).exists())
+
     def test_advancement_without_boundary_tie_stays_auto(self):
         self._lock_scored_round(self.round, singer_count=4, advance_count=2)
         self.round.refresh_from_db()
@@ -1154,6 +1174,33 @@ class ScoringServiceTests(TestCase):
                 {(self.singer.pk, self.judge.pk): "90"},
                 self.user,
             )
+
+    def test_apply_scores_rejects_an_individually_locked_performance(self):
+        performance = Performance.objects.create(
+            activity=self.activity,
+            round=self.round,
+            singer=self.singer,
+            sequence=1,
+            song_title="Song",
+        )
+        prepare_round(self.round, self.user)
+        opened_at = timezone.now()
+        with authority_write(ROUND_PERFORMANCE_STATE):
+            PerformanceScoreState.objects.create(
+                performance=performance,
+                state=PerformanceScoreState.State.LOCKED,
+                context_version=1,
+                opened_by=self.user,
+                opened_at=opened_at,
+                locked_by=self.user,
+                locked_at=opened_at,
+                is_test_data=self.activity.is_test_mode,
+            )
+
+        with self.assertRaisesMessage(ValidationError, "该表演评分已锁定"):
+            apply_scores(self.round, {(self.singer.pk, self.judge.pk): "90"}, self.user)
+
+        self.assertFalse(ScoreRecord.objects.filter(round=self.round).exists())
 
     def test_validate_score_rejects_invalid_values(self):
         for value in ("", "abc", "-0.01", "100.01", "NaN", "Infinity", "1.234"):
@@ -4053,6 +4100,42 @@ class StageResolverBindingTests(TestCase):
         )
         self.assertEqual(refreshed.pk, stage.pk)  # type: ignore[union-attr]
         self.assertEqual(refreshed.status, StageResult.Status.CONFIRMED)
+
+    def test_staff_can_confirm_a_ready_stage_result(self):
+        from .services import confirm_stage_result, run_ruleset
+
+        staff = _create_provisioned_user(
+            username="binder-staff-confirm", password="pass", role=User.Role.STAFF
+        )
+        self.activity.phase = Activity.Phase.RESULTS_PENDING
+        _save_activity_state(self.activity, ["phase"])
+        self.round.is_locked = True
+        self.round.status = ContestRound.Status.LOCKED
+        _save_round_state(self.round, ["is_locked", "status"])
+        with authority_write(RULESET_FREEZE):
+            version = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                definition=self.version.definition,
+                version=2,
+                is_current=False,
+                status=RulesetVersion.Status.FROZEN,
+                binding={"stage_key": "选拔", "round_keys": {"r1": self.round.pk}},
+            )
+        _promote_version_to_current(version)
+        stage = run_ruleset(
+            version,
+            self.activity,
+            stage_key="选拔",
+            computed_by=staff,
+            round_keys={"r1": self.round},
+            preview=False,
+        )
+        assert isinstance(stage, StageResult)
+
+        confirmed = confirm_stage_result(stage, confirmed_by=staff)
+
+        self.assertEqual(confirmed.status, StageResult.Status.CONFIRMED)
+        self.assertEqual(confirmed.confirmed_by_id, staff.pk)
 
     def test_confirm_stage_result_rejects_unresolved(self):
         """§36-37: only a READY_TO_CONFIRM result may be 核定."""

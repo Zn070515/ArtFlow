@@ -26,7 +26,9 @@ from .models import (
     ChallengeSession,
     ChallengeTurn,
     ContestRound,
+    Judge,
     Performance,
+    PerformanceRunState,
     PerformanceScoreState,
     RoundEntry,
     RoundJudge,
@@ -182,6 +184,191 @@ def _session_for_update(session_id: int, operator):
     if session.activity_id != locked_activity.pk:
         raise ValidationError("踢馆会话活动上下文不一致。")
     return current_operator, session
+
+
+def _challenge_match_performance(session: ChallengeSession, role: str):
+    if role not in {"challenger", "defender"}:
+        raise ValidationError("挑战评分对象无效。")
+    match = (
+        ChallengeMatch.objects.select_for_update()
+        .select_related("turn", "challenger", "defender")
+        .filter(session=session, turn__sequence=session.current_turn_number)
+        .first()
+    )
+    if match is None or match.score_round_id is None:
+        raise ValidationError("当前比赛尚未准备评分。")
+    if match.status != ChallengeMatch.Status.SCORING:
+        raise ValidationError("当前比赛不在收分阶段。")
+    score_round = ContestRound.objects.select_for_update().get(pk=match.score_round_id)
+    singer_id = match.challenger_id if role == "challenger" else match.defender_id
+    performance = (
+        Performance.objects.select_for_update()
+        .filter(round=score_round, singer_id=singer_id)
+        .first()
+    )
+    if performance is None:
+        raise ValidationError("当前比赛缺少对应评分对象。")
+    return match, score_round, performance
+
+
+def _configured_live_judges(
+    session: ChallengeSession, *, ids_key: str, minimum_key: str, label: str
+) -> tuple[list[Judge], int]:
+    config = (session.ruleset_version.binding or {}).get("live_challenge")
+    if not isinstance(config, dict):
+        raise ValidationError("冻结赛制尚未配置现场轮次评委名单。")
+    raw_ids = config.get(ids_key)
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise ValidationError(f"冻结赛制尚未配置{label}评委名单。")
+    try:
+        judge_ids = [int(value) for value in raw_ids]
+        minimum = int(config[minimum_key])
+    except (KeyError, TypeError, ValueError):
+        raise ValidationError(f"冻结赛制的{label}评委配置无效。") from None
+    if any(judge_id < 1 for judge_id in judge_ids) or len(judge_ids) != len(set(judge_ids)):
+        raise ValidationError(f"冻结赛制的{label}评委配置无效。")
+    if not 1 <= minimum <= len(judge_ids):
+        raise ValidationError(f"冻结赛制的{label}最低有效评委数无效。")
+    judges_by_id = {
+        judge.pk: judge
+        for judge in Judge.objects.filter(
+            activity_id=session.activity_id, pk__in=judge_ids, is_active=True
+        )
+    }
+    if set(judges_by_id) != set(judge_ids):
+        raise ValidationError(f"冻结赛制的{label}评委名单包含不存在或未启用的评委。")
+    return [judges_by_id[judge_id] for judge_id in judge_ids], minimum
+
+
+@transaction.atomic
+def advance_challenge_performance(
+    session_id: int,
+    *,
+    role: str,
+    operator,
+    command_id: object,
+    expected_revision: object,
+) -> PerformanceRunState:
+    """Open a challenge contestant through the audited, ordered console boundary."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.performance.open",
+            "session_id": session.pk,
+            "role": role,
+            "expected_revision": expected_revision,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.performance.open",
+        payload_hash=payload_hash,
+        result_model=PerformanceRunState,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match, score_round, performance = _challenge_match_performance(session, role)
+    if role == "defender":
+        challenger_state = PerformanceScoreState.objects.filter(
+            performance__round=score_round,
+            performance__singer_id=match.challenger_id,
+        ).first()
+        if (
+            challenger_state is None
+            or challenger_state.state == PerformanceScoreState.State.NOT_OPENED
+        ):
+            raise ValidationError("请先开放挑战者评分，再开放守擂者评分。")
+    from .judge_authority import advance_performance
+
+    run_state = advance_performance(score_round.pk, performance.pk, operator=current_operator)
+    _bump(session)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.performance.open",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="PerformanceRunState",
+            result_id=run_state.pk,
+            result_payload={"round_id": score_round.pk, "performance_id": performance.pk},
+        )
+    return run_state
+
+
+@transaction.atomic
+def lock_challenge_performance(
+    session_id: int,
+    *,
+    role: str,
+    operator,
+    command_id: object,
+    expected_revision: object,
+    expected_context_version: object,
+) -> PerformanceScoreState:
+    """Lock one challenge contestant after the panel minimum is met."""
+
+    current_operator, session = _session_for_update(session_id, operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.performance.lock",
+            "session_id": session.pk,
+            "role": role,
+            "expected_revision": expected_revision,
+            "expected_context_version": expected_context_version,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.performance.lock",
+        payload_hash=payload_hash,
+        result_model=PerformanceScoreState,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    _ensure_session_dependencies_current(session)
+    match, score_round, performance = _challenge_match_performance(session, role)
+    if role == "defender":
+        challenger_state = PerformanceScoreState.objects.filter(
+            performance__round=score_round,
+            performance__singer_id=match.challenger_id,
+        ).first()
+        if (
+            challenger_state is None
+            or challenger_state.state == PerformanceScoreState.State.NOT_OPENED
+        ):
+            raise ValidationError("请先开放挑战者评分，再锁定守擂者评分。")
+    from .judge_authority import lock_performance_score
+
+    score_state = lock_performance_score(
+        score_round.pk,
+        performance.pk,
+        operator=current_operator,
+        expected_context_version=expected_context_version,
+    )
+    _bump(session)
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session.save(update_fields=["revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.performance.lock",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="PerformanceScoreState",
+            result_id=score_state.pk,
+            result_payload={"round_id": score_round.pk, "performance_id": performance.pk},
+        )
+    return score_state
 
 
 def _check_revision(session: ChallengeSession, expected_revision: object) -> None:
@@ -668,14 +855,21 @@ def waive_challenge_turn(
     operator,
     command_id: object,
     expected_revision: object,
+    reason: str,
 ) -> ChallengeTurn:
     current_operator, session = _session_for_update(session_id, operator)
     normalized_command = _command_id(command_id)
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise ValidationError("放弃挑战必须填写原因。")
+    if len(normalized_reason) > 240:
+        raise ValidationError("放弃挑战原因不能超过 240 个字符。")
     payload_hash = _hash_payload(
         {
             "operation": "challenge.turn.waive",
             "session_id": session.pk,
             "expected_revision": expected_revision,
+            "reason": normalized_reason,
         }
     )
     replay = _replay_command(
@@ -694,17 +888,31 @@ def waive_challenge_turn(
     turn = ChallengeTurn.objects.select_for_update().get(
         session=session, sequence=session.current_turn_number
     )
-    if turn.state not in {ChallengeTurn.State.PENDING, ChallengeTurn.State.SELECTING}:
+    if turn.state not in {
+        ChallengeTurn.State.PENDING,
+        ChallengeTurn.State.SELECTING,
+        ChallengeTurn.State.TARGET_SELECTED,
+    }:
         raise ValidationError("配对确认后不能正常放弃挑战。")
     turn.state = ChallengeTurn.State.WAIVED
     turn.target_seat = None
+    turn.waive_reason = normalized_reason
     turn.revision += 1
     turn.acted_by = current_operator
     turn.acted_at = timezone.now()
     _finish_turn(session, turn)
     _bump(session)
     with authority_write(LIVE_CHALLENGE_STATE):
-        turn.save(update_fields=["state", "target_seat", "revision", "acted_by", "acted_at"])
+        turn.save(
+            update_fields=[
+                "state",
+                "target_seat",
+                "waive_reason",
+                "revision",
+                "acted_by",
+                "acted_at",
+            ]
+        )
         session.save(update_fields=["state", "current_turn_number", "revision", "updated_at"])
         _write_command(
             session=session,
@@ -720,7 +928,11 @@ def waive_challenge_turn(
         operator=current_operator,
         action_type=AuditLog.ActionType.CHALLENGE_TURN_WAIVE,
         target=f"ChallengeTurn:{turn.pk}",
-        new_value={"sequence": turn.sequence, "session_state": session.state},
+        new_value={
+            "sequence": turn.sequence,
+            "session_state": session.state,
+            "reason": normalized_reason,
+        },
     )
     turn.session = session
     return turn
@@ -769,26 +981,26 @@ def prepare_challenge_match(
     if match.status != ChallengeMatch.Status.READY_FOR_SCORING:
         raise ValidationError("当前比赛不在待准备评分阶段。")
     source_round = session.source_round
-    source_judges = list(
-        RoundJudge.objects.filter(round=source_round).select_related("judge").order_by("pk")
+    challenge_judges, minimum_judges = _configured_live_judges(
+        session,
+        ids_key="challenge_judge_ids",
+        minimum_key="challenge_minimum_judge_count",
+        label="挑战轮",
     )
-    if not source_judges:
-        raise ValidationError("踢馆评分必须先配置评委名单。")
     next_sequence = (
         ContestRound.objects.filter(activity=session.activity).aggregate(
             max_sequence=Max("sequence")
         )["max_sequence"]
         or 0
     ) + 1
-    minimum_judges = source_round.minimum_judge_count or len(source_judges)
     with authority_write(CONTEST_ROUND_STATE):
         score_round = ContestRound.objects.create(
             activity=session.activity,
             round_type=ContestRound.RoundType.SEMI_FINAL,
             scoring_mode=source_round.scoring_mode,
             score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
-            judge_count=len(source_judges),
-            minimum_judge_count=min(minimum_judges, len(source_judges)),
+            judge_count=len(challenge_judges),
+            minimum_judge_count=minimum_judges,
             name=f"踢馆第 {match.turn.sequence} 场评分",
             sequence=next_sequence,
             order_policy=ContestRound.OrderPolicy.MANUAL,
@@ -803,7 +1015,7 @@ def prepare_challenge_match(
             ]
         )
         RoundJudge.objects.bulk_create(
-            [RoundJudge(round=score_round, judge=row.judge) for row in source_judges]
+            [RoundJudge(round=score_round, judge=judge) for judge in challenge_judges]
         )
         Performance.objects.bulk_create(
             [
@@ -1203,6 +1415,12 @@ def create_final_round_from_challenge(
         raise ValidationError("第三轮名单已经生成，请从轮次页面继续准备。")
     roster = challenge_final_roster(session.pk, activity_id=session.activity_id)
     source_round = ContestRound.objects.select_for_update().get(pk=session.source_round_id)
+    final_judges, minimum_judges = _configured_live_judges(
+        session,
+        ids_key="final_judge_ids",
+        minimum_key="final_minimum_judge_count",
+        label="第三轮",
+    )
     sequence = (
         ContestRound.objects.filter(activity=session.activity).aggregate(
             max_sequence=Max("sequence")
@@ -1215,11 +1433,14 @@ def create_final_round_from_challenge(
             round_type=ContestRound.RoundType.SEMI_FINAL,
             scoring_mode=source_round.scoring_mode,
             score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
-            judge_count=source_round.judge_count,
-            minimum_judge_count=source_round.minimum_judge_count,
+            judge_count=len(final_judges),
+            minimum_judge_count=minimum_judges,
             name="第三轮冠军赛",
             sequence=sequence,
-            order_policy=ContestRound.OrderPolicy.OFFICIAL_NUMBER,
+            # The challenge session's third_round_position is the frozen seat order.
+            # Official numbers are only identity labels here; re-sorting by them would
+            # move a challenger into the defender's seat after a successful challenge.
+            order_policy=ContestRound.OrderPolicy.MANUAL,
             tie_order_policy=ContestRound.TieOrderPolicy.REVIEW,
             advance_count=0,
             roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
@@ -1229,6 +1450,22 @@ def create_final_round_from_challenge(
         RoundEntry.objects.bulk_create(
             [
                 RoundEntry(round=final_round, singer=singer, running_order=index)
+                for index, singer in enumerate(roster, start=1)
+            ]
+        )
+        RoundJudge.objects.bulk_create(
+            [RoundJudge(round=final_round, judge=judge) for judge in final_judges]
+        )
+        Performance.objects.bulk_create(
+            [
+                Performance(
+                    activity=session.activity,
+                    round=final_round,
+                    singer=singer,
+                    sequence=index,
+                    song_title="",
+                    is_test_data=session.is_test_data,
+                )
                 for index, singer in enumerate(roster, start=1)
             ]
         )

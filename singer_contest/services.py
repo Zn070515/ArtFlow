@@ -1487,9 +1487,9 @@ def finalize_advancement(
     if locked_round.status == ContestRound.Status.DRAFT:
         raise ValidationError("请先准备并完成比赛轮次后再核定晋级名单。")
     ensure_round_unlocked(locked_round)
-    if missing_score_cells(locked_round):
-        raise ValidationError("评分尚未完成，无法核定晋级名单。")
     entrants = set(_eligible_singers(locked_round).values_list("pk", flat=True))
+    if not entrants or not round_scores_complete(locked_round):
+        raise ValidationError("评分尚未完成，无法核定晋级名单。")
     selected = {int(singer_id) for singer_id in selected_singer_ids}
     if not selected:
         raise ValidationError("请选择至少一名晋级选手。")
@@ -1552,6 +1552,15 @@ def apply_scores(
     pairs = list(score_values)
     ensure_score_records_belong_to_round(locked_round, pairs)
     normalized = {pair: validate_score(value) for pair, value in score_values.items()}
+    locked_performance_singer_ids = set(
+        PerformanceScoreState.objects.filter(
+            performance__round=locked_round,
+            state=PerformanceScoreState.State.LOCKED,
+        ).values_list("performance__singer_id", flat=True)
+    )
+    changed_singer_ids = {singer_id for singer_id, _judge_id in normalized}
+    if locked_performance_singer_ids & changed_singer_ids:
+        raise ValidationError("该表演评分已锁定，不能修改。")
     changes: list[dict[str, int | str | None]] = []
     for (singer_id, judge_id), score in normalized.items():
         record = ScoreRecord.objects.filter(
@@ -1848,6 +1857,36 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
     locked_round.status = ContestRound.Status.LOCKED
     with authority_write(CONTEST_ROUND_STATE):
         locked_round.save(update_fields=["is_locked", "status"])
+    panel_snapshots = list(
+        RoundPanelSnapshot.objects.select_for_update().filter(
+            activity=locked_round.activity,
+            round=locked_round,
+            state__in=[RoundPanelSnapshot.State.ACTIVE, RoundPanelSnapshot.State.HOLD],
+        )
+    )
+    panel_states = {snapshot.pk: snapshot.state for snapshot in panel_snapshots}
+    if panel_snapshots:
+        with authority_write(JUDGE_PANEL_STATE):
+            for snapshot in panel_snapshots:
+                snapshot.state = RoundPanelSnapshot.State.SUPERSEDED
+                snapshot.save(update_fields=["state"])
+        run_state = (
+            PerformanceRunState.objects.select_for_update().filter(round=locked_round).first()
+        )
+        if run_state is not None:
+            with authority_write(ROUND_PERFORMANCE_STATE):
+                run_state.state = PerformanceRunState.State.CLOSED
+                run_state.hold_reason = "轮次已锁定，现场评分上下文已关闭。"
+                run_state.save(update_fields=["state", "hold_reason", "updated_at"])
+        for snapshot in panel_snapshots:
+            AuditLog.objects.create(
+                operator=current_operator,
+                action_type=AuditLog.ActionType.JUDGE_PANEL_CHANGE,
+                target=f"RoundPanelSnapshot:{snapshot.pk}",
+                old_value=panel_states[snapshot.pk],
+                new_value=RoundPanelSnapshot.State.SUPERSEDED,
+                note="lock_round_handoff",
+            )
     AuditLog.objects.create(
         operator=current_operator,
         action_type=AuditLog.ActionType.RELOCK_RESULT,
@@ -2960,6 +2999,13 @@ def _stage_is_checkpoint(version, stage_key: str) -> bool:
     return stage_key in _definition_checkpoint_keys(version.definition)
 
 
+def _configured_podium_stage_key(version) -> str:
+    live_challenge = _version_binding(version).get("live_challenge") or {}
+    if not isinstance(live_challenge, dict):
+        return ""
+    return str(live_challenge.get("podium_stage_key") or "").strip()
+
+
 def _bound_inputs(version, activity, *, checkpoint=None) -> tuple[ResolveInput, dict]:
     """Rebuild the current :class:`ResolveInput` from the frozen version's binding.
 
@@ -2995,6 +3041,10 @@ def _current_input_fingerprint(version, activity, stage_key: str) -> str:
     the whole-input fingerprint. A mismatch against a stored ``input_fingerprint`` means
     the result is stale.
     """
+    if stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_current_input_fingerprint
+
+        return podium_current_input_fingerprint(version, activity)
     checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
     inputs, _ = _bound_inputs(version, activity, checkpoint=checkpoint)
     if checkpoint:
@@ -3012,6 +3062,17 @@ def _ensure_stage_dependencies_final(version, activity, stage_key: str) -> None:
     """
     from voting.models import VoteSession
 
+    if stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_required_round_ids
+
+        round_ids = podium_required_round_ids(version, activity)
+        if (
+            ContestRound.objects.filter(activity=activity, pk__in=round_ids)
+            .exclude(is_locked=True)
+            .exists()
+        ):
+            raise ValidationError("最终冠亚季军依赖的轮次尚未锁定，请先锁定后再核定。")
+        return
     binding = _version_binding(version)
     checkpoint = stage_key if _stage_is_checkpoint(version, stage_key) else None
     round_keys, vote_keys, group_keys, _ = stage_consumed_scopes(version.definition, checkpoint)
@@ -3060,6 +3121,17 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
     onto physical pks via the frozen version's binding.
     """
     version = stage.ruleset_version
+    if stage.stage_key == _configured_podium_stage_key(version):
+        from .podium_services import podium_required_round_ids
+
+        return {
+            "rounds": set(podium_required_round_ids(version, stage.activity)),
+            "group_stages": set(),
+            "votes": set(),
+            "audience": set(),
+            "manual": set(),
+            "duels": set(),
+        }
     binding = _version_binding(version)
     checkpoint = stage.stage_key if _stage_is_checkpoint(version, stage.stage_key) else None
     round_keys, vote_keys, group_keys, manual_keys = stage_consumed_scopes(
@@ -3449,7 +3521,11 @@ def confirm_stage_result(stage: StageResult, *, confirmed_by):
     require the consumed raw facts to be at rest (rounds/votes locked). Idempotent: a
     re-confirm of an already-locked row returns it as-is.
     """
-    current_actor = require_current_admin(confirmed_by)
+    if _configured_podium_stage_key(stage.ruleset_version) == stage.stage_key:
+        from .podium_services import confirm_podium_result
+
+        return confirm_podium_result(stage, confirmed_by=confirmed_by)
+    current_actor = require_current_staff(confirmed_by)
     locked_activity = lock_activity_for_action(stage.activity, ActivityAction.PUBLISH_RESULT)
     locked = StageResult.objects.select_for_update().get(pk=stage.pk)
     if locked.activity_id != locked_activity.pk:
@@ -4023,6 +4099,9 @@ def build_result_closure(activity, *, stage_key: str | None = None) -> ResultClo
         if not stage_keys:
             stage_keys = ((_version_binding(version).get("stage_key") or "").strip(),)
         stage_keys = tuple(key for key in stage_keys if key)
+        podium_key = _configured_podium_stage_key(version)
+        if podium_key and podium_key not in stage_keys:
+            stage_keys = (*stage_keys, podium_key)
         if not stage_keys:
             return ResultClosure(
                 activity_id=activity.pk,

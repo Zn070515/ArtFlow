@@ -17,6 +17,7 @@ from django.test import TestCase
 from ruleset.models import ContestRuleset, RulesetVersion
 
 from .challenge_services import (
+    advance_challenge_performance,
     challenge_final_roster,
     confirm_challenge_match_result,
     confirm_challenge_pairing,
@@ -92,6 +93,7 @@ class LiveChallengeAuthorityTests(TestCase):
                     "score_version",
                 ]
             )
+            self.judges = judges
         self.singers = []
         for number in range(1, 16):
             with authority_write(ACCOUNT_AUTHORITY):
@@ -143,6 +145,10 @@ class LiveChallengeAuthorityTests(TestCase):
                         "first_round_weight": "0.5000",
                         "challenge_round_weight": "0.5000",
                         "order_policy": "official_number",
+                        "challenge_judge_ids": [judge.pk for judge in judges[:4]],
+                        "challenge_minimum_judge_count": 4,
+                        "final_judge_ids": [judge.pk for judge in judges[1:]],
+                        "final_minimum_judge_count": 4,
                     }
                 },
             )
@@ -258,6 +264,52 @@ class LiveChallengeAuthorityTests(TestCase):
             match.challenger_id,
         )
 
+    def test_challenge_console_service_requires_challenger_before_defender(self):
+        session, match = self._paired_session(prefix="open-order")
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="open-order-prepare",
+            expected_revision=match.session.revision,
+        )
+        assert match.score_round_id is not None
+        prepare_judge_panel(match.score_round_id, operator=self.staff)
+
+        with self.assertRaisesMessage(ValidationError, "请先开放挑战者评分"):
+            advance_challenge_performance(
+                session.pk,
+                role="defender",
+                operator=self.staff,
+                command_id="open-order-defender-first",
+                expected_revision=match.session.revision,
+            )
+
+        opened = advance_challenge_performance(
+            session.pk,
+            role="challenger",
+            operator=self.staff,
+            command_id="open-order-challenger",
+            expected_revision=match.session.revision,
+        )
+        session.refresh_from_db()
+        replay = advance_challenge_performance(
+            session.pk,
+            role="challenger",
+            operator=self.staff,
+            command_id="open-order-challenger",
+            expected_revision=match.session.revision,
+        )
+        self.assertEqual(replay.pk, opened.pk)
+
+        defender_opened = advance_challenge_performance(
+            session.pk,
+            role="defender",
+            operator=self.staff,
+            command_id="open-order-defender",
+            expected_revision=session.revision,
+        )
+        self.assertIsNotNone(defender_opened.current_performance_id)
+
     def test_confirmed_challenge_session_is_the_only_final_round_roster(self):
         session = create_challenge_session(
             self.round,
@@ -277,6 +329,7 @@ class LiveChallengeAuthorityTests(TestCase):
                 operator=self.staff,
                 command_id=f"waive-roster-{sequence}",
                 expected_revision=turn.session.revision,
+                reason="现场顺延",
             )
             session.refresh_from_db()
         with self.assertRaisesMessage(ValidationError, "尚未核定"):
@@ -322,6 +375,7 @@ class LiveChallengeAuthorityTests(TestCase):
                 operator=self.staff,
                 command_id=f"waive-final-round-{sequence}",
                 expected_revision=turn.session.revision,
+                reason="现场顺延",
             )
             session.refresh_from_db()
         session = confirm_challenge_session(
@@ -345,6 +399,95 @@ class LiveChallengeAuthorityTests(TestCase):
             ),
             list(range(1, 11)),
         )
+        self.assertEqual(
+            list(final_round.round_judges.order_by("pk").values_list("judge_id", flat=True)),
+            [judge.pk for judge in self.judges[1:]],
+        )
+        self.assertEqual(Performance.objects.filter(round=final_round).count(), 10)
+
+    def test_prepared_final_round_preserves_challenge_seat_order(self):
+        session, match = self._paired_session(prefix="seat-order")
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="seat-order-prepare",
+            expected_revision=match.session.revision,
+        )
+        assert match.score_round_id is not None
+        score_round = match.score_round
+        assert score_round is not None
+        prepare_judge_panel(score_round.pk, operator=self.staff)
+        performances = list(Performance.objects.filter(round=score_round).order_by("sequence"))
+        judges = list(Judge.objects.filter(activity=self.activity).order_by("pk"))
+        for performance, score in zip(performances, (Decimal("100"), Decimal("80"))):
+            advance_performance(score_round.pk, performance.pk, operator=self.staff)
+            apply_scores(
+                score_round,
+                {(performance.singer_id, judge.pk): score for judge in judges[:4]},
+                self.staff,
+            )
+            run_state = PerformanceRunState.objects.get(round=score_round.pk)
+            lock_performance_score(
+                score_round.pk,
+                performance.pk,
+                operator=self.staff,
+                expected_context_version=run_state.context_version,
+            )
+        match = lock_challenge_match_scores(
+            session.pk,
+            operator=self.staff,
+            command_id="seat-order-lock",
+            expected_revision=match.session.revision,
+        )
+        confirm_challenge_match_result(
+            session.pk,
+            operator=self.staff,
+            command_id="seat-order-confirm",
+            expected_revision=match.session.revision,
+        )
+        session.refresh_from_db()
+        for sequence in range(2, 6):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"seat-order-start-{sequence}",
+                expected_revision=session.revision,
+            )
+            waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"seat-order-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="现场顺延",
+            )
+            session.refresh_from_db()
+        session = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="seat-order-session-confirm",
+            expected_revision=session.revision,
+        )
+        final_round = create_final_round_from_challenge(
+            session.pk,
+            operator=self.staff,
+            command_id="seat-order-final-round",
+            expected_revision=session.revision,
+        )
+
+        from .services import _order_singers_for_round
+
+        ordered = _order_singers_for_round(
+            final_round,
+            list(
+                SingerRegistration.objects.filter(
+                    pk__in=final_round.entries.values_list("singer_id", flat=True)
+                )
+            ),
+        )
+        self.assertEqual(
+            [singer.official_number for singer in ordered],
+            [15, *range(2, 11)],
+        )
 
     def test_pre_pairing_waiver_does_not_consume_a_seat(self):
         session = create_challenge_session(
@@ -364,6 +507,7 @@ class LiveChallengeAuthorityTests(TestCase):
             operator=self.staff,
             command_id="waive-2",
             expected_revision=turn.session.revision,
+            reason="挑战者主动放弃",
         )
 
         self.assertEqual(waived.state, ChallengeTurn.State.WAIVED)
@@ -375,6 +519,46 @@ class LiveChallengeAuthorityTests(TestCase):
             expected_revision=waived.session.revision,
         )
         self.assertEqual(next_turn.sequence, 2)
+
+    def test_target_selected_turn_requires_a_reason_to_waive(self):
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="create-reason",
+        )
+        turn = start_challenge_turn(
+            session.pk,
+            operator=self.staff,
+            command_id="start-reason",
+            expected_revision=session.revision,
+        )
+        target = record_challenge_target(
+            session.pk,
+            seat_position=1,
+            operator=self.staff,
+            command_id="target-reason",
+            expected_revision=turn.session.revision,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "放弃挑战必须填写原因"):
+            waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id="waive-reason-empty",
+                expected_revision=target.session.revision,
+                reason=" ",
+            )
+
+        waived = waive_challenge_turn(
+            session.pk,
+            operator=self.staff,
+            command_id="waive-reason-ok",
+            expected_revision=target.session.revision,
+            reason="挑战者确认不再继续",
+        )
+        self.assertEqual(waived.state, ChallengeTurn.State.WAIVED)
+        self.assertEqual(waived.waive_reason, "挑战者确认不再继续")
 
     def test_retried_start_command_returns_the_original_turn(self):
         session = create_challenge_session(
@@ -417,6 +601,7 @@ class LiveChallengeAuthorityTests(TestCase):
                 operator=self.staff,
                 command_id=f"waive-final-{sequence}",
                 expected_revision=turn.session.revision,
+                reason="现场顺延",
             )
             session.refresh_from_db()
         self.assertEqual(session.state, ChallengeSession.State.READY_TO_CONFIRM)
