@@ -86,10 +86,11 @@ def validate_live_material_plan(plan) -> tuple[LiveMaterialContract, ...]:
     for contract in contracts:
         if not contract.question_keys:
             raise ValidationError(f"{contract.round_key} 必须至少有一项必填个人材料。")
-        if not any(
-            question_key.endswith("accompaniment") or "伴奏" in label
-            for question_key, label in zip(contract.question_keys, contract.labels, strict=True)
-        ):
+        required_song_key = f"{contract.round_key}.song"
+        if required_song_key not in contract.question_keys:
+            raise ValidationError(f"{contract.round_key} 必须有必填歌曲材料。")
+        required_accompaniment_key = f"{contract.round_key}.accompaniment"
+        if required_accompaniment_key not in contract.question_keys:
             raise ValidationError(f"{contract.round_key} 必须有必填伴奏材料。")
     return contracts
 

@@ -34,6 +34,8 @@ from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.schema import ENTRY_KEY, content_hash
 from ruleset.services import (
     RulesetInvalidError,
+    _validate_2026_live_contract,
+    _validate_frozen_questionnaire,
     _vote_binding,
     create_ruleset_version,
     freeze_ruleset_version,
@@ -1867,6 +1869,53 @@ class BindingValidationTests(_RulesetModelBase):
             },
         )
 
+    def test_2026_live_marker_is_preserved_in_the_binding(self):
+        ruleset = self.make_ruleset()
+        normalized = validate_binding(
+            ruleset,
+            {
+                "live_challenge": {
+                    "format_key": "2026_live_challenge",
+                    "participant_count": 15,
+                    "seat_count": 10,
+                    "challenge_count": 5,
+                    "first_round_weight": "40%",
+                    "challenge_round_weight": "60%",
+                },
+            },
+        )
+
+        self.assertEqual(normalized["live_challenge"]["format_key"], "2026_live_challenge")
+
+    def test_2026_live_freeze_requires_a_questionnaire(self):
+        with self.assertRaisesMessage(ValidationError, "必须使用选手问卷"):
+            _validate_frozen_questionnaire(
+                json.dumps({"schema_version": 1, "nodes": []}),
+                {"live_challenge": {"format_key": "2026_live_challenge"}},
+            )
+
+    def test_2026_live_freeze_rejects_audience_score_dependencies(self):
+        with self.assertRaisesMessage(ValidationError, "不得依赖观众"):
+            _validate_2026_live_contract(
+                {"nodes": [{"key": "audience", "vote_source": "public_vote"}]},
+                {
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                    "vote_keys": {"public_vote": 1},
+                },
+            )
+
+    def test_2026_live_freeze_requires_one_shared_scoring_standard(self):
+        ruleset = self.make_ruleset()
+        rounds = {key: self._singer_round(ruleset) for key in ("r1", "r2", "r3")}
+        with self.assertRaisesMessage(ValidationError, "统一评分标准"):
+            _validate_2026_live_contract(
+                {"nodes": []},
+                {
+                    "live_challenge": {"format_key": "2026_live_challenge"},
+                    "round_keys": {key: round_.pk for key, round_ in rounds.items()},
+                },
+            )
+
     def test_rejects_live_challenge_weights_that_do_not_sum_to_one(self):
         ruleset = self.make_ruleset()
         with self.assertRaisesMessage(ValidationError, "踢馆成绩权重必须合计 100%"):
@@ -1874,6 +1923,7 @@ class BindingValidationTests(_RulesetModelBase):
                 ruleset,
                 {
                     "live_challenge": {
+                        "format_key": "2026_live_challenge",
                         "participant_count": 15,
                         "seat_count": 10,
                         "challenge_count": 5,
@@ -1975,6 +2025,7 @@ class BindingValidationTests(_RulesetModelBase):
                 ruleset,
                 {
                     "live_challenge": {
+                        "format_key": "2026_live_challenge",
                         "participant_count": 15,
                         "seat_count": 10,
                         "challenge_count": 5,

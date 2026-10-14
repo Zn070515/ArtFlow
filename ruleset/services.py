@@ -59,6 +59,8 @@ from .planning import (
 )
 from .schema import ENTRY_KEY, content_hash, parse_definition
 
+LIVE_CHALLENGE_FORMAT_KEY = "2026_live_challenge"
+
 
 class RulesetInvalidError(Exception):
     """The definition failed compilation; freezing must abort."""
@@ -274,6 +276,12 @@ def validate_binding(
     raw_live_challenge = binding.get("live_challenge") or {}
     if not isinstance(raw_live_challenge, dict):
         raise ValidationError("live_challenge 必须是对象。")
+    live_format_key = str(raw_live_challenge.get("format_key") or "").strip()
+    if live_format_key and live_format_key != LIVE_CHALLENGE_FORMAT_KEY:
+        raise ValidationError("live_challenge.format_key 不是受支持的现场赛制类型。")
+    strict_live_contract = (
+        require_live_challenge_complete and live_format_key == LIVE_CHALLENGE_FORMAT_KEY
+    )
     live_challenge: dict[str, object] = {}
     if raw_live_challenge:
 
@@ -315,6 +323,8 @@ def validate_binding(
             "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
             "order_policy": "official_number",
         }
+        if live_format_key:
+            live_challenge["format_key"] = live_format_key
         podium_fields = {
             "podium_stage_key",
             "podium_first_round_key",
@@ -325,7 +335,7 @@ def validate_binding(
         }
         podium_present = bool(podium_fields & set(raw_live_challenge))
         missing_podium = sorted(podium_fields - set(raw_live_challenge))
-        if require_live_challenge_complete and missing_podium:
+        if strict_live_contract and missing_podium:
             raise ValidationError("最终冠亚季军配置缺少字段：" + ", ".join(missing_podium))
         if podium_present and not missing_podium:
             podium_strings = {
@@ -382,7 +392,7 @@ def validate_binding(
         }
         judges_present = bool(judge_config_fields & set(raw_live_challenge))
         missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
-        if require_live_challenge_complete and missing_judges:
+        if strict_live_contract and missing_judges:
             raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
         if judges_present and not missing_judges:
 
@@ -427,7 +437,7 @@ def validate_binding(
                     if key in raw_live_challenge
                 }
             )
-        elif require_live_challenge_complete:
+        elif strict_live_contract:
             raise ValidationError(
                 "现场轮次评委配置缺少字段：" + ", ".join(sorted(judge_config_fields))
             )
@@ -2179,6 +2189,88 @@ def _carry_questionnaire_answers(
     return carried
 
 
+def _has_live_audience_dependency(value) -> bool:
+    """Return whether a ruleset definition declares any audience-score input."""
+    if isinstance(value, dict):
+        if str(value.get("vote_source") or "").strip():
+            return True
+        if str(value.get("audience_source") or "").strip():
+            return True
+        if "audience_weight" in value:
+            try:
+                if Decimal(str(value.get("audience_weight") or "0")) != 0:
+                    return True
+            except (InvalidOperation, TypeError, ValueError):
+                return True
+        return any(_has_live_audience_dependency(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_has_live_audience_dependency(child) for child in value)
+    return False
+
+
+def _round_scoring_signature(contest_round) -> tuple:
+    rubric = contest_round.rubric
+    if rubric is None:
+        return (contest_round.scoring_mode, None)
+    criteria = tuple(
+        (
+            criterion.sequence,
+            criterion.name,
+            str(criterion.max_score),
+            criterion.description,
+        )
+        for criterion in rubric.criteria.all().order_by("sequence", "pk")
+    )
+    return (
+        contest_round.scoring_mode,
+        rubric.name,
+        rubric.description,
+        criteria,
+    )
+
+
+def _validate_2026_live_contract(root: dict, binding: dict) -> None:
+    """Validate the cross-domain invariants unique to the 2026 live format."""
+    live_config = binding.get("live_challenge") or {}
+    if (
+        not isinstance(live_config, dict)
+        or live_config.get("format_key") != LIVE_CHALLENGE_FORMAT_KEY
+    ):
+        return
+
+    if (
+        binding.get("vote_keys")
+        or binding.get("vote_scoring_rule_keys")
+        or binding.get("audience_keys")
+    ):
+        raise ValidationError("2026 现场赛制不得依赖观众投票或人工观众分。")
+    if _has_live_audience_dependency(root):
+        raise ValidationError("2026 现场赛制不得声明观众成绩来源。")
+
+    from singer_contest.models import ContestRound
+
+    round_keys = binding.get("round_keys") or {}
+    missing_keys = [key for key in ("r1", "r2", "r3") if key not in round_keys]
+    if missing_keys:
+        raise ValidationError("2026 现场赛制必须绑定 r1、r2、r3 三个评分轮次。")
+    rounds = list(
+        ContestRound.objects.filter(
+            pk__in=[round_keys[key] for key in ("r1", "r2", "r3")],
+        ).prefetch_related("rubric__criteria")
+    )
+    by_id = {round_.pk: round_ for round_ in rounds}
+    if any(round_keys[key] not in by_id for key in ("r1", "r2", "r3")):
+        raise ValidationError("2026 现场赛制绑定的 r1、r2、r3 轮次必须属于当前活动。")
+    signatures = {
+        key: _round_scoring_signature(by_id[round_keys[key]]) for key in ("r1", "r2", "r3")
+    }
+    if (
+        any(signature[1] is None for signature in signatures.values())
+        or len(set(signatures.values())) != 1
+    ):
+        raise ValidationError("2026 现场赛制的 r1、r2、r3 必须使用统一评分标准。")
+
+
 def _validate_frozen_questionnaire(definition, binding: dict) -> None:
     """The questionnaire freezes with the ruleset, so it must clear its own gate here.
 
@@ -2195,16 +2287,23 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
     if not isinstance(root, dict):
         raise ValidationError("赛制定义的根必须是对象。")
     raw = root.get("questionnaire")
+    live_config = binding.get("live_challenge") or {}
+    is_live_2026 = (
+        isinstance(live_config, dict) and live_config.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
+    )
     if raw is None:
+        if is_live_2026:
+            raise ValidationError("2026 赛制必须使用选手问卷收集第二、第三轮个人材料。")
         return
     plan = compile_questionnaire(raw)
     bound_round_keys = binding.get("round_keys") or {}
     validate_questionnaire_rounds(plan, bound_round_keys)
     validate_questionnaire_context_keys(plan, bound_round_keys)
-    if binding.get("live_challenge"):
+    if is_live_2026:
         from singer_contest.materials import validate_live_material_plan
 
         validate_live_material_plan(plan)
+        _validate_2026_live_contract(root, binding)
 
 
 def validate_ruleset_runtime_readiness(version: RulesetVersion) -> ValidationReport:
