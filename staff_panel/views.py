@@ -204,6 +204,7 @@ from singer_contest.services import (
     ensure_audience_not_consumed_by_confirmed_stage,
     finalize_advancement,
     latest_stage_result_queryset,
+    live_first_round_group_snapshot,
     lock_round,
     maybe_resolve_checkpoints,
     missing_score_cells,
@@ -2383,10 +2384,22 @@ def round_groups(request, pk):
         .prefetch_related("performances__singer")
         .order_by("sequence", "pk")
     )
+    frozen_group_snapshot = False
+    group_snapshot_error = ""
+    try:
+        live_snapshot = live_first_round_group_snapshot(contest_round)
+    except (PermissionDenied, ValidationError) as error:
+        live_snapshot = None
+        group_snapshot_error = domain_error_messages(error)
     initial_groups = [
         {"name": group.name, "singer_ids": [p.singer_id for p in group.performances.all()]}
         for group in groups
     ]
+    if not groups and live_snapshot is not None and request.method != "POST":
+        initial_groups = [
+            {"name": name, "singer_ids": list(singer_ids)} for name, singer_ids in live_snapshot
+        ]
+        frozen_group_snapshot = True
     if request.method == "POST":
         form = RoundGroupsForm(request.POST, singers=singers)
         if form.is_valid():
@@ -2410,7 +2423,14 @@ def round_groups(request, pk):
     return render(
         request,
         "staff_panel/round_groups.html",
-        {"round": contest_round, "form": form, "singers": singers, "group_slots": group_slots},
+        {
+            "round": contest_round,
+            "form": form,
+            "singers": singers,
+            "group_slots": group_slots,
+            "frozen_group_snapshot": frozen_group_snapshot,
+            "group_snapshot_error": group_snapshot_error,
+        },
     )
 
 

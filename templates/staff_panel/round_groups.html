@@ -9,6 +9,16 @@
     <div class="mt-5 bg-amber-50 border border-amber-200 text-amber-900 rounded p-3 text-sm">
         这是正式操作输入。请给每组命名并勾选选手；必须为当前轮次的全部选手建立唯一分组，保存后将在准备轮次前作为分组事实使用。
     </div>
+    {% if frozen_group_snapshot %}
+    <div class="mt-4 bg-blue-50 border border-blue-200 text-blue-900 rounded p-3 text-sm">
+        已从冻结的分组合唱分组自动填入第一轮评分节目。请核对后直接确认生成评分节目，无需再次录入名单。
+    </div>
+    {% endif %}
+    {% if group_snapshot_error %}
+    <div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">
+        当前冻结分组合唱分组不可用：{{ group_snapshot_error }}
+    </div>
+    {% endif %}
     {% if form.non_field_errors %}<div class="mt-4 bg-red-50 border border-red-200 text-red-700 rounded p-3 text-sm">{{ form.non_field_errors }}</div>{% endif %}
     <form method="post" class="mt-5 space-y-5">
         {% csrf_token %}
@@ -27,7 +37,7 @@
             </div>
         </fieldset>
         {% endfor %}
-        <button class="bg-brand text-white px-4 py-2 rounded text-sm">保存分组</button>
+        <button class="bg-brand text-white px-4 py-2 rounded text-sm">{% if frozen_group_snapshot %}确认并生成评分节目{% else %}保存分组{% endif %}</button>
     </form>
 </div>
 {% endblock %}

@@ -9,6 +9,7 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    ROUND_PERFORMANCE_STATE,
     RULESET_FREEZE,
     SINGER_CONTESTANT_NUMBER,
     authority_write,
@@ -42,7 +43,6 @@ from .group_chorus import (
 )
 from .judge_authority import (
     advance_performance,
-    advance_performance_group,
     lock_performance_score,
     prepare_judge_panel,
 )
@@ -50,6 +50,7 @@ from .judge_entry import judge_entry_credential
 from .models import (
     ContestRound,
     Judge,
+    Performance,
     PerformanceGroup,
     PerformanceRunState,
     PerformanceScoreState,
@@ -441,6 +442,70 @@ class Live2026AcceptanceTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "已冻结的分组合唱分组一致"):
             set_round_groups(self.first_round, mismatched, self.admin)
 
+    def test_live_freeze_rejects_preexisting_mismatched_scoring_groups(self):
+        first_ids = cast(list[int], self.group_specs[0]["singer_ids"])
+        second_ids = cast(list[int], self.group_specs[1]["singer_ids"])
+        mismatched = [
+            {
+                "name": self.group_specs[0]["name"],
+                "singer_ids": [second_ids[0], *first_ids[1:]],
+            },
+            {
+                "name": self.group_specs[1]["name"],
+                "singer_ids": [first_ids[0], *second_ids[1:]],
+            },
+            *self.group_specs[2:],
+        ]
+
+        self.ruleset.group_stage_keys = {}
+        self.ruleset.save(update_fields=["group_stage_keys"])
+        set_round_groups(self.first_round, mismatched, self.admin)
+        self.ruleset.group_stage_keys = {"r1": self.group_stage.pk}
+        self.ruleset.save(update_fields=["group_stage_keys"])
+
+        with self.assertRaisesMessage(ValidationError, "评分节目必须与已冻结的分组合唱分组一致"):
+            freeze_ruleset_version(self.version, self.admin)
+
+    def test_prepare_rechecks_preexisting_mismatched_scoring_groups(self):
+        freeze_ruleset_version(self.version, self.admin)
+        with authority_write(ROUND_PERFORMANCE_STATE):
+            group = PerformanceGroup.objects.create(
+                activity=self.activity,
+                round=self.first_round,
+                name="第 1 组",
+                sequence=1,
+                is_test_data=True,
+            )
+            Performance.objects.create(
+                activity=self.activity,
+                round=self.first_round,
+                singer=self.singers[3],
+                group=group,
+                sequence=1,
+                is_test_data=True,
+            )
+
+        with self.assertRaisesMessage(ValidationError, "评分节目必须与已冻结的分组合唱分组一致"):
+            prepare_round(self.first_round, self.admin)
+
+    def test_round_groups_page_prefills_frozen_chorus_groups(self):
+        freeze_ruleset_version(self.version, self.admin)
+        staff_client = Client()
+        staff_client.force_login(self.admin)
+
+        response = staff_client.get(reverse("staff:round_groups", args=[self.first_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["frozen_group_snapshot"])
+        self.assertContains(response, "已从冻结的分组合唱分组自动填入")
+        form = response.context["form"]
+        for index, spec in enumerate(self.group_specs, start=1):
+            self.assertEqual(form[f"group_name_{index}"].value(), spec["name"])
+            self.assertEqual(
+                form[f"group_singer_ids_{index}"].value(),
+                [str(singer_id) for singer_id in spec["singer_ids"]],
+            )
+
     def test_live_freeze_requires_five_groups_of_three(self):
         malformed = [
             {
@@ -552,13 +617,20 @@ class Live2026AcceptanceTests(TestCase):
             )
             self.assertEqual(response.status_code, 302, response.content)
 
-        advance_performance_group(prepared.pk, groups[0].pk, operator=self.admin)
+        def open_group(group):
+            response = staff_client.post(
+                reverse("staff:judge_performance_group_advance", args=[prepared.pk]),
+                {"group_id": group.pk},
+            )
+            self.assertEqual(response.status_code, 302, response.content)
+
+        open_group(groups[0])
         submit_http(performances_by_group[0][0], [0, 1, 2])
         submit_http(performances_by_group[0][1], [0, 1, 2, 3])
         submit_http(performances_by_group[0][2], [0, 1, 2, 3])
 
         # The first group is still short one score, but the next group may open.
-        advance_performance_group(prepared.pk, groups[1].pk, operator=self.admin)
+        open_group(groups[1])
         for performance in performances_by_group[1]:
             submit_http(performance, [0, 1, 2, 3])
 
@@ -567,7 +639,7 @@ class Live2026AcceptanceTests(TestCase):
             lock_http(performance)
 
         for group, group_performances in zip(groups[2:], performances_by_group[2:], strict=True):
-            advance_performance_group(prepared.pk, group.pk, operator=self.admin)
+            open_group(group)
             for performance in group_performances:
                 submit_http(performance, [0, 1, 2, 3])
                 lock_http(performance)

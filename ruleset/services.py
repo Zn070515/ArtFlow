@@ -2270,7 +2270,10 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         raise ValidationError("2026 现场赛制必须绑定第一轮冻结的分组合唱分组。")
     if group_stage_id not in (None, ""):
         from common.lifecycle import runtime_approved_singers
-        from singer_contest.group_chorus import validate_live_first_round_group_stage
+        from singer_contest.group_chorus import (
+            validate_live_first_round_group_stage,
+            validate_live_first_round_performance_groups,
+        )
         from singer_contest.models import GroupStage
 
         if first_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
@@ -2286,9 +2289,14 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         )
         if group_stage is None:
             raise ValidationError("2026 第一轮绑定的分组合唱分组不存在、未冻结或不属于当前活动。")
-        validate_live_first_round_group_stage(
+        group_snapshot = validate_live_first_round_group_stage(
             group_stage,
             runtime_approved_singers(first_round.activity).values_list("pk", flat=True),
+        )
+        validate_live_first_round_performance_groups(
+            first_round,
+            group_snapshot,
+            require_groups=False,
         )
     # r2/r3 are questionnaire material namespaces. Their physical scoring rounds are
     # created by the challenge service only after the relevant roster exists.

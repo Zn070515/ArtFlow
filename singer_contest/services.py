@@ -503,16 +503,31 @@ def _live_group_stage_for_round(contest_round: ContestRound, *, require_binding:
     return stage
 
 
-def _validate_live_round_group_setup(contest_round: ContestRound, *, require_groups: bool):
+def live_first_round_group_snapshot(contest_round: ContestRound, *, require_binding: bool = False):
+    """Return the frozen 2026 first-round group snapshot for staff setup screens."""
     from .group_chorus import validate_live_first_round_group_stage
 
-    stage = _live_group_stage_for_round(contest_round, require_binding=require_groups)
+    stage = _live_group_stage_for_round(contest_round, require_binding=require_binding)
     if stage is None:
         return None
     expected_ids = {singer.pk for singer in _round_source_singers(contest_round)}
-    snapshot = validate_live_first_round_group_stage(stage, expected_ids)
-    if require_groups and not PerformanceGroup.objects.filter(round=contest_round).exists():
-        raise ValidationError("请先按已冻结的分组合唱分组配置第一轮评分节目。")
+    return validate_live_first_round_group_stage(stage, expected_ids)
+
+
+def _validate_live_round_group_setup(contest_round: ContestRound, *, require_groups: bool):
+    from .group_chorus import validate_live_first_round_performance_groups
+
+    snapshot = live_first_round_group_snapshot(
+        contest_round,
+        require_binding=require_groups,
+    )
+    if snapshot is None:
+        return None
+    validate_live_first_round_performance_groups(
+        contest_round,
+        snapshot,
+        require_groups=require_groups,
+    )
     return snapshot
 
 
@@ -876,7 +891,7 @@ def set_round_groups(contest_round, group_specs, operator) -> list[PerformanceGr
         missing = sorted(set(singer_by_id) - seen)
         raise ValidationError(f"分组必须覆盖全部选手，缺少：{missing}。")
 
-    live_snapshot = _validate_live_round_group_setup(locked_round, require_groups=False)
+    live_snapshot = live_first_round_group_snapshot(locked_round)
     if live_snapshot is not None:
         incoming = [
             (name, {str(singer.pk) for singer in group_singers})

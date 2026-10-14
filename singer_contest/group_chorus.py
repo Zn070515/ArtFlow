@@ -18,7 +18,14 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ContestRound, Group, GroupMembership, GroupStage, SingerRegistration
+from .models import (
+    ContestRound,
+    Group,
+    GroupMembership,
+    GroupStage,
+    PerformanceGroup,
+    SingerRegistration,
+)
 
 
 def _operator(operator):
@@ -97,6 +104,42 @@ def validate_live_first_round_group_stage(
     if actual_ids != expected_ids:
         raise ValidationError("2026 第一轮分组合唱必须完整覆盖第一轮选手名单。")
     return snapshot
+
+
+def validate_live_first_round_performance_groups(
+    contest_round: ContestRound,
+    expected_snapshot: Collection[tuple[str, Collection[int | str]]],
+    *,
+    require_groups: bool,
+) -> None:
+    """Ensure existing scoring groups still match the frozen group-stage snapshot."""
+    groups = list(
+        PerformanceGroup.objects.filter(round=contest_round)
+        .order_by("sequence", "pk")
+        .prefetch_related("performances")
+    )
+    if not groups:
+        if require_groups:
+            raise ValidationError("请先按已冻结的分组合唱分组配置第一轮评分节目。")
+        return
+    actual_snapshot = [
+        (
+            group.name,
+            tuple(
+                str(singer_id)
+                for singer_id in group.performances.order_by("sequence", "pk").values_list(
+                    "singer_id", flat=True
+                )
+            ),
+        )
+        for group in groups
+    ]
+    expected = [
+        (name, tuple(str(singer_id) for singer_id in singer_ids))
+        for name, singer_ids in expected_snapshot
+    ]
+    if actual_snapshot != expected:
+        raise ValidationError("第一轮评分节目必须与已冻结的分组合唱分组一致。")
 
 
 def _source_roster_fingerprint(source_round: ContestRound, *, is_test_data: bool) -> str:
