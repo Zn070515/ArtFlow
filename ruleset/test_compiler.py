@@ -1883,6 +1883,91 @@ class BindingValidationTests(_RulesetModelBase):
                 },
             )
 
+    def test_accepts_and_normalizes_podium_and_independent_judge_configuration(self):
+        ruleset = self.make_ruleset()
+        round_ = self._singer_round(ruleset)
+        from singer_contest.models import Judge
+
+        judges = [
+            Judge.objects.create(activity=ruleset.activity, name=f"评委 {index}")
+            for index in range(1, 5)
+        ]
+        normalized = validate_binding(
+            ruleset,
+            {
+                "round_keys": {"first_round": round_.pk},
+                "live_challenge": {
+                    "participant_count": 15,
+                    "seat_count": 10,
+                    "challenge_count": 5,
+                    "first_round_weight": "40%",
+                    "challenge_round_weight": "60%",
+                    "podium_stage_key": "final_podium",
+                    "podium_first_round_key": "first_round",
+                    "podium_third_round_key": "third_round",
+                    "podium_aggregate_node": "podium_total",
+                    "podium_first_round_weight": "30%",
+                    "podium_third_round_weight": "70%",
+                    "challenge_judge_ids": [str(judges[0].pk), str(judges[1].pk)],
+                    "challenge_minimum_judge_count": "1",
+                    "final_judge_ids": [judges[2].pk, judges[3].pk],
+                    "final_minimum_judge_count": 2,
+                }
+            },
+        )
+        live = normalized["live_challenge"]
+        self.assertEqual(live["podium_first_round_weight"], "0.3000")
+        self.assertEqual(live["podium_third_round_weight"], "0.7000")
+        self.assertEqual(live["challenge_judge_ids"], [judges[0].pk, judges[1].pk])
+        self.assertEqual(live["final_judge_ids"], [judges[2].pk, judges[3].pk])
+        self.assertEqual(live["final_minimum_judge_count"], 2)
+
+    def test_rejects_inactive_or_foreign_live_challenge_judges(self):
+        ruleset = self.make_ruleset()
+        foreign = self.make_ruleset()
+        from singer_contest.models import Judge
+
+        foreign_judge = Judge.objects.create(activity=foreign.activity, name="外部评委")
+        with self.assertRaisesMessage(ValidationError, "现场轮次评委不存在"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "participant_count": 15,
+                        "seat_count": 10,
+                        "challenge_count": 5,
+                        "first_round_weight": "40%",
+                        "challenge_round_weight": "60%",
+                        "challenge_judge_ids": [foreign_judge.pk],
+                        "challenge_minimum_judge_count": 1,
+                        "final_judge_ids": [foreign_judge.pk],
+                        "final_minimum_judge_count": 1,
+                    }
+                },
+            )
+
+    def test_rejects_podium_first_round_key_without_round_binding(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaisesMessage(ValidationError, "第一轮键必须绑定到 round_keys"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "participant_count": 15,
+                        "seat_count": 10,
+                        "challenge_count": 5,
+                        "first_round_weight": "40%",
+                        "challenge_round_weight": "60%",
+                        "podium_stage_key": "podium",
+                        "podium_first_round_key": "missing",
+                        "podium_third_round_key": "third",
+                        "podium_aggregate_node": "total",
+                        "podium_first_round_weight": "30%",
+                        "podium_third_round_weight": "70%",
+                    }
+                },
+            )
+
     def test_rejects_bad_checkpoint_blocks(self):
         ruleset = self.make_ruleset()
         with self.assertRaises(ValidationError):

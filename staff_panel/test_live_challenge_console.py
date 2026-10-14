@@ -25,6 +25,16 @@ class LiveChallengeConsoleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "现场挑战")
         self.assertContains(response, "当前还没有建立挑战流程")
+        self.assertContains(response, 'name="command_id"')
+
+    def test_console_rejects_an_http_post_without_a_command_id(self):
+        response = self.client.post(
+            reverse("staff:live_challenge_console", args=[self.activity.pk]),
+            {"action": "create"},
+            follow=True,
+        )
+
+        self.assertContains(response, "现场挑战命令标识无效")
 
     def test_staff_can_open_material_progress_page(self):
         response = self.client.get(reverse("staff:live_material_progress", args=[self.activity.pk]))

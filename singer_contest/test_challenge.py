@@ -17,15 +17,14 @@ from django.test import TestCase
 from ruleset.models import ContestRuleset, RulesetVersion
 
 from .challenge_services import (
-    challenge_final_roster,
     advance_challenge_performance,
+    challenge_final_roster,
     confirm_challenge_match_result,
     confirm_challenge_pairing,
     confirm_challenge_session,
     create_challenge_session,
     create_final_round_from_challenge,
     lock_challenge_match_scores,
-    lock_challenge_performance,
     prepare_challenge_match,
     record_challenge_target,
     start_challenge_turn,
@@ -94,6 +93,7 @@ class LiveChallengeAuthorityTests(TestCase):
                     "score_version",
                 ]
             )
+            self.judges = judges
         self.singers = []
         for number in range(1, 16):
             with authority_write(ACCOUNT_AUTHORITY):
@@ -145,6 +145,10 @@ class LiveChallengeAuthorityTests(TestCase):
                         "first_round_weight": "0.5000",
                         "challenge_round_weight": "0.5000",
                         "order_policy": "official_number",
+                        "challenge_judge_ids": [judge.pk for judge in judges[:4]],
+                        "challenge_minimum_judge_count": 4,
+                        "final_judge_ids": [judge.pk for judge in judges[1:]],
+                        "final_minimum_judge_count": 4,
                     }
                 },
             )
@@ -395,6 +399,11 @@ class LiveChallengeAuthorityTests(TestCase):
             ),
             list(range(1, 11)),
         )
+        self.assertEqual(
+            list(final_round.round_judges.order_by("pk").values_list("judge_id", flat=True)),
+            [judge.pk for judge in self.judges[1:]],
+        )
+        self.assertEqual(Performance.objects.filter(round=final_round).count(), 10)
 
     def test_prepared_final_round_preserves_challenge_seat_order(self):
         session, match = self._paired_session(prefix="seat-order")
