@@ -193,6 +193,7 @@ from singer_contest.services import (
     _current_frozen_version,
     _current_resolve_status,
     _eligible_singers,
+    _live_group_stage_for_round,
     _version_binding,
     apply_scores,
     apply_scores_if_version,
@@ -3163,6 +3164,31 @@ def judge_create(request):
     return render(request, "staff_panel/judge_form.html", {"activities": activities})
 
 
+def _live_first_round_material_status(contest_round):
+    """Non-blocking R1 group material readiness for the live control page."""
+    try:
+        stage = _live_group_stage_for_round(contest_round)
+    except ValidationError:
+        # A read-only readiness banner must not surface a broken binding as a 500.
+        return None
+    if stage is None:
+        return None
+    rows = [
+        row
+        for row in live_material_summary(contest_round.activity)["first_round"]["groups"]
+        if row["stage_id"] == stage.pk
+    ]
+    if not rows:
+        return None
+    ready_count = sum(row["status"] == "ready" for row in rows)
+    return {
+        "stage_name": rows[0]["stage_name"],
+        "ready_count": ready_count,
+        "total_count": len(rows),
+        "missing_count": len(rows) - ready_count,
+    }
+
+
 def _judge_control_context(
     request,
     contest_round,
@@ -3274,6 +3300,7 @@ def _judge_control_context(
         policy_state = "ACTIVE"
     if policy_state_override:
         policy_state = policy_state_override
+    live_material_status = _live_first_round_material_status(contest_round)
     policy_state_labels = {
         "PREPARE_REQUIRED": "待准备评委组",
         "HOLD": "已暂停",
@@ -3303,6 +3330,7 @@ def _judge_control_context(
         "minimum_judge_count": minimum_judge_count,
         "policy_state": policy_state,
         "policy_state_label": policy_state_labels.get(policy_state, "现场状态待确认"),
+        "live_material_status": live_material_status,
         "attendance_form": attendance_form,
         "performance_action_form": JudgePerformanceActionForm(),
         "score_form": JudgeBoundScoreForm(

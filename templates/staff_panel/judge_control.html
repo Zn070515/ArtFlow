@@ -19,6 +19,16 @@
     <div class="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{{ error }}</div>
     {% endif %}
 
+    {% if live_material_status %}
+    <section class="rounded-lg border {% if live_material_status.missing_count %}border-amber-200 bg-amber-50 text-amber-900{% else %}border-green-200 bg-green-50 text-green-900{% endif %} px-4 py-3 text-sm">
+        {% if live_material_status.missing_count %}
+        第一轮小组材料：{{ live_material_status.ready_count }}/{{ live_material_status.total_count }} 组已齐，仍有 {{ live_material_status.missing_count }} 组缺少已审核材料。此提示不会替代工作人员对现场开始的确认。
+        {% else %}
+        第一轮小组材料：{{ live_material_status.total_count }}/{{ live_material_status.total_count }} 组已齐，可以进入现场评分准备。
+        {% endif %}
+    </section>
+    {% endif %}
+
     <section class="rounded-lg border border-gray-200 bg-white p-5">
         <div class="flex items-center justify-between gap-3">
             <h2 class="text-lg font-semibold text-gray-900">评委组</h2>
