@@ -27,6 +27,22 @@
     </div>
     {% endif %}
 
+    {% if first_round_needs_reset %}
+    <section class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-6">
+        <p class="font-semibold">第一轮已经准备好，晋级人数暂时改不了。</p>
+        <p class="mt-1">改「第一轮晋级数」需要先把这个轮次重置回草稿。重置会清掉第一轮已经准备好的评分数据（评分单元、评委席位与收分状态），需要管理员填写原因后执行。</p>
+        {% if can_freeze %}
+        <form method="post" action="{% url 'staff:round_reset' first_round.pk %}" class="mt-3 flex flex-wrap items-center gap-2">
+            {% csrf_token %}
+            <input name="reason" placeholder="重置原因（必填，例如：临时调整为 8 人晋级）" class="flex-1 min-w-64 border border-amber-300 rounded px-2 py-1 text-sm">
+            <button class="touch-target border border-amber-400 text-amber-900 rounded text-sm">重置第一轮并继续修改</button>
+        </form>
+        {% else %}
+        <p class="mt-2">这一步需要管理员操作，请联系管理员在轮次页面重置第一轮。</p>
+        {% endif %}
+    </section>
+    {% endif %}
+
     <section class="rounded-lg border border-gray-200 bg-white p-5 mb-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-3">今年决赛怎么进行</h2>
         <ol class="text-sm text-gray-700 space-y-1 list-decimal list-inside">
@@ -56,7 +72,7 @@
                 <label class="block text-sm text-gray-700">第一轮组数
                     <input name="live_group_count" type="number" min="1" value="{{ counts.group_count }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
                 </label>
-                <label class="block text-sm text-gray-700">每组人数
+                <label class="block text-sm text-gray-700">每组人数（建议值，可以不等长）
                     <input name="live_group_size" type="number" min="1" value="{{ counts.group_size }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
                 </label>
             </div>
@@ -67,7 +83,7 @@
                     踢馆人数由「第一轮参赛人数 − 第一轮晋级数」决定；第三轮人数等于第一轮晋级数（踢馆只决定席位，不改变人数）。当前：<span id="derived-formula">{{ counts.participant_count }} − {{ counts.seat_count }} = {{ counts.challenge_count }}</span>。
                 </p>
             </div>
-            <p class="mt-3 text-xs text-gray-500">第一轮组数 × 每组人数必须等于第一轮参赛人数；第一轮参赛人数必须大于第一轮晋级数。</p>
+            <p class="mt-3 text-xs text-gray-500">第一轮参赛人数必须大于第一轮晋级数。分组只要求「恰好这么多组、每个人都出现且只出现一次、没有空组」——所以临时有人退赛时，5 组可以是 3+3+3+3+2，不需要改这里任何数字。</p>
         </section>
 
         <section class="rounded-lg border border-gray-200 bg-white p-5">

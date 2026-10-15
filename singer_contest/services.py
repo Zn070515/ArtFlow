@@ -520,7 +520,6 @@ def live_first_round_group_snapshot(contest_round: ContestRound, *, require_bind
         stage,
         expected_ids,
         group_count=counts.group_count,
-        group_size=counts.group_size,
     )
 
 

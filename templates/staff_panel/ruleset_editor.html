@@ -20,7 +20,7 @@
     <div class="flex flex-wrap items-center gap-3 mb-6">
         <a href="{% url 'staff:ruleset_planning' version.pk %}" class="touch-target border border-brand text-brand rounded text-sm">业务准备工作台</a>
         <form method="post" action="{% url 'staff:ruleset_validate' version.pk %}">
-            {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">校验赛制</button>
+            {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">{% if live_challenge.format_key %}正式启用前检查{% else %}校验赛制{% endif %}</button>
         </form>
         <form method="post" action="{% url 'staff:ruleset_preview' version.pk %}">
             {% csrf_token %}<button class="touch-target border border-gray-300 rounded text-sm">模拟运行</button>

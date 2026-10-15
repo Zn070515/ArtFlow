@@ -9,7 +9,13 @@ leaving the four operator items — both weight pairs and both judge lists — e
 import json
 
 from accounts.models import User
-from common.authority import ACCOUNT_AUTHORITY, ACTIVITY_STATE, authority_write
+from common.authority import (
+    ACCOUNT_AUTHORITY,
+    ACTIVITY_STATE,
+    CONTEST_ROUND_STATE,
+    RULESET_FREEZE,
+    authority_write,
+)
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
@@ -101,6 +107,63 @@ class Live2026BuiltinTests(TestCase):
         )
 
         self.assertEqual(counts.challenge_count, 4)
+
+    def test_counts_follow_the_current_authority_not_any_frozen_row(self):
+        """A superseded version stays ``FROZEN`` forever, so resolution must not scan them.
+
+        Both versions can bind the same physical round; serving the older one's numbers would
+        silently disagree with the group stage, which does resolve through the current
+        authority.
+        """
+
+        from singer_contest.models import ContestRound
+
+        from ruleset.live_format import live_challenge_counts_for_round as resolve
+        from ruleset.templates import LIVE_2026_FIRST_ROUND_KEY
+
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第一轮",
+                sequence=1,
+            )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="2026 现场赛制", is_test_data=True
+        )
+        ruleset.round_keys = {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk}
+        ruleset.save(update_fields=["round_keys"])
+
+        def _frozen(version_number, seat_count, *, current):
+            # The guard manager reserves FROZEN/current rows for the freeze service; this test
+            # only needs the rows to exist, so it takes the same authority that service does.
+            with authority_write(RULESET_FREEZE):
+                return RulesetVersion.objects.create(
+                    ruleset=ruleset,
+                    version=version_number,
+                    status=RulesetVersion.Status.FROZEN,
+                    is_current=current,
+                    definition=(
+                        '{"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}'
+                    ),
+                    binding={
+                        "round_keys": {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk},
+                        "live_challenge": {
+                            "format_key": LIVE_CHALLENGE_FORMAT_KEY,
+                            "participant_count": 15,
+                            "seat_count": seat_count,
+                            "challenge_count": 15 - seat_count,
+                        },
+                    },
+                )
+
+        superseded = _frozen(1, 10, current=False)
+        current = _frozen(2, 8, current=True)
+
+        self.assertEqual(resolve(contest_round).seat_count, 8)
+        # A historical replay names its version rather than guessing from the round.
+        self.assertEqual(resolve(contest_round, version=superseded).seat_count, 10)
+        self.assertEqual(resolve(contest_round, version=current).seat_count, 8)
 
     def test_builtin_ships_with_the_service(self):
         self.assertEqual(self.template.name, LIVE_2026_TEMPLATE_NAME)

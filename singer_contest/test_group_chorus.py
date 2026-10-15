@@ -112,6 +112,41 @@ class GroupChorusStageServiceTests(TestCase):
             ).exists()
         )
 
+    def test_live_validation_accepts_groups_of_unequal_size(self):
+        """3+1 is a legitimate grouping; only the count is the ruleset's business."""
+
+        from .group_chorus import validate_live_first_round_group_stage
+
+        stage = create_group_stage(
+            self.activity,
+            stage_key="chorus",
+            name="分组合唱",
+            operator=self.operator,
+        )
+        record_group_stage(
+            stage,
+            [
+                {
+                    "name": "A组",
+                    "singer_ids": [singer.pk for singer in self.singers[:3]],
+                },
+                {"name": "B组", "singer_ids": [self.singers[3].pk]},
+            ],
+            self.operator,
+        )
+        confirm_group_stage(stage, self.operator)
+        frozen = freeze_group_stage(stage, self.operator)
+
+        snapshot = validate_live_first_round_group_stage(
+            frozen,
+            [singer.pk for singer in self.singers],
+            group_count=2,
+        )
+
+        self.assertEqual([name for name, _ids in snapshot], ["A组", "B组"])
+        self.assertEqual(len(snapshot[0][1]), 3)
+        self.assertEqual(len(snapshot[1][1]), 1)
+
     def test_confirmation_requires_a_complete_approved_roster_partition(self):
         stage = create_group_stage(
             self.activity,
