@@ -7521,6 +7521,62 @@ class RulesetTemplateLibraryTests(TestCase):
             with self.subTest(field=field):
                 self.assertIn(f'name="{field}"', html)
 
+    def test_builtin_provisioning_reports_a_stale_binding_instead_of_failing(self):
+        """Provisioning re-validates the whole surface, so a stale reference must not 500."""
+
+        from ruleset.models import ContestRuleset, RulesetTemplate
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY
+        from singer_contest.models import Judge
+
+        activity = self._clone_activity(title="2026 渡梦陈旧绑定")
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        payload = {"activity": activity.pk, "name": "2026 渡梦赛制"}
+        self.client.post(reverse("staff:ruleset_clone_from_template", args=[template.pk]), payload)
+
+        # A judge bound while active, then deactivated — exactly what the binding validator
+        # refuses, and what an existing ruleset may already carry.
+        judge = Judge.objects.create(activity=activity, name="临时评委")
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        ruleset.live_challenge = {
+            **ruleset.live_challenge,
+            "challenge_judge_ids": [judge.pk],
+            "challenge_minimum_judge_count": 1,
+            "final_judge_ids": [judge.pk],
+            "final_minimum_judge_count": 1,
+        }
+        ruleset.save(update_fields=["live_challenge"])
+        Judge.objects.filter(pk=judge.pk).update(is_active=False)
+
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            payload,
+            follow=True,
+        )
+
+        self.assertContains(response, "无法建立内置赛制")
+
+    def test_create_page_refuses_an_archived_activity(self):
+        """The create entry point answers the archived question like the clone one does."""
+
+        from ruleset.models import ContestRuleset, RulesetTemplate
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY
+
+        activity = _create_activity(
+            title="2026 归档活动",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            phase=Activity.Phase.ARCHIVED,
+            is_test_mode=True,
+        )
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+
+        response = self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": activity.pk, "name": "归档赛制", "template": template.pk},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ContestRuleset.objects.filter(activity=activity).exists())
+
     def test_clone_entry_point_rejects_a_non_production_template(self):
         """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
         from ruleset.models import ContestRuleset, RulesetTemplate

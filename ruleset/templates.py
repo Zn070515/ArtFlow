@@ -591,7 +591,25 @@ LIVE_2026_TEMPLATE_NAME = "2026 院十佳·渡梦 现场踢馆（系统内置）
 LIVE_2026_FIRST_ROUND_KEY = "r1"
 LIVE_2026_CHALLENGE_ROUND_KEY = "r2"
 LIVE_2026_THIRD_ROUND_KEY = "r3"
+# The format's shape, declared once. ``ruleset.services`` validates the frozen ruleset
+# against these and ``ruleset.live_format`` pre-fills them, so a change here moves all three
+# together instead of leaving the contract rejecting what provisioning just wrote.
+LIVE_2026_PARTICIPANT_COUNT = 15
 LIVE_2026_SEAT_COUNT = 10
+LIVE_2026_CHALLENGE_COUNT = 5
+LIVE_2026_FIXED_COUNTS = {
+    "participant_count": LIVE_2026_PARTICIPANT_COUNT,
+    "seat_count": LIVE_2026_SEAT_COUNT,
+    "challenge_count": LIVE_2026_CHALLENGE_COUNT,
+}
+# The podium keys are the format's identity, not a choice; the ratios beside them are the
+# operators'. ``ruleset_bind`` writes the same keys, so both read this one dict.
+LIVE_2026_PODIUM_KEYS = {
+    "podium_stage_key": "final_podium",
+    "podium_first_round_key": LIVE_2026_FIRST_ROUND_KEY,
+    "podium_third_round_key": LIVE_2026_THIRD_ROUND_KEY,
+    "podium_aggregate_node": "podium_total",
+}
 
 
 def live_2026_questionnaire():

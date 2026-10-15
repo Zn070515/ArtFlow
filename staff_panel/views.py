@@ -119,7 +119,7 @@ from ruleset.services import (
     update_ruleset_definition_section,
     validate_definition_completeness,
 )
-from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY
+from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, LIVE_2026_PODIUM_KEYS
 from singer_contest.challenge_services import (
     advance_challenge_performance,
     confirm_challenge_match_result,
@@ -5309,9 +5309,16 @@ def _provision_builtin_live_format(request, *, template, activity, name):
 
     if not is_live_2026_template(template):
         return None
-    version = provision_live_2026_ruleset(
-        activity, template=template, name=name, operator=request.user
-    )
+    try:
+        version = provision_live_2026_ruleset(
+            activity, template=template, name=name, operator=request.user
+        )
+    except ValidationError as error:
+        # Provisioning re-validates this activity's whole binding surface, so an existing
+        # stale reference (a deactivated judge, a deleted round) surfaces here. The binding
+        # editor reports those as messages; this entry point must not answer with a 500.
+        messages.error(request, f"无法建立内置赛制：{domain_error_messages(error)}")
+        return redirect("staff:contest_ruleset_create")
     messages.success(
         request,
         f"已建立「{template.name}」：第一轮与赛制形态已预填，请补充两套权重、三轮评委与评分表。",
@@ -5336,6 +5343,9 @@ def contest_ruleset_create(request):
             activity_type=Activity.Type.SINGER_CONTEST,
         )
         activity = lock_activity_for_action(activity)
+        # The clone entry point has always refused an archived activity; this one now creates
+        # a physical first round as well, so it has to answer the same question the same way.
+        _ensure_activity_mutable(activity)
         name = (request.POST.get("name") or "").strip()
         if not name:
             messages.error(request, "请填写赛制名称。")
@@ -5785,11 +5795,10 @@ def ruleset_bind(request, pk):
                     "live_challenge_weight", "challenge_round_weight"
                 ),
                 "order_policy": "official_number",
-                # These are product invariants, not operator-configurable DSL keys.
-                "podium_stage_key": "final_podium",
-                "podium_first_round_key": "r1",
-                "podium_third_round_key": "r3",
-                "podium_aggregate_node": "podium_total",
+                # These are product invariants, not operator-configurable DSL keys. The
+                # built-in's own pre-fill reads the same dict, so a change to the format's
+                # identity cannot make a hand-saved binding disagree with a provisioned one.
+                **LIVE_2026_PODIUM_KEYS,
                 "podium_first_round_weight": _live_value(
                     "live_podium_first_weight", "podium_first_round_weight"
                 ),
