@@ -29,13 +29,16 @@
 
 ## 生成方式
 
-图源由 [archify](https://github.com/tt-a1i/archify) **v3.0.1** 生成与校验。每个节点与连边都声明了 `sources`（仓库路径 + 行号区间），因此图与代码是**可核对的**，不是示意图：`validate` 打开 `--repo-root` 时会逐条比对被引用的文件在**固定提交**上确实存在该行。
+图源由 [archify](https://github.com/tt-a1i/archify) **v3.0.1** 生成与校验。每个节点（架构图里是 component）都声明了 `sources`（仓库路径 + 行号区间），因此图与代码是**可核对的**，不是示意图：`validate` 打开 `--repo-root` 时会逐条比对被引用的文件在**固定提交**上确实存在该行。连边（architecture 图里是 connection）是结构性的，只带 `from`/`to`/`variant`/`role`，不带 `sources`。
 
-图源里记录的固定提交是：
+每份图源在自己的 `meta.repository.revision` 里记录它被钉在哪个提交上。这不是一个统一的值，分成两批：
 
-```
-a093d581dcd579ecb42c413c0936766a2c1553da
-```
+| 图源 | 固定提交 |
+|---|---|
+| `01`–`06` | `bad157e4aa688513a58cb41b78b22ddc3baa68e6` |
+| `07`–`12` | `a093d581dcd579ecb42c413c0936766a2c1553da` |
+
+核对某张图时，以该图 JSON 里写的 revision 为准，不要套用另一批的。
 
 改动被引用的函数后，图源需要重新核对：**图中每一个 `sources` 都要在改动后的代码里重新定位**，然后再跑一遍校验。校验不会替你判断语义是否仍然正确。
 

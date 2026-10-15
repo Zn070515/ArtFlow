@@ -71,8 +71,10 @@
 
 ```
 prepare_site_load_rehearsal   → 建演员阵容并写出 manifest（唯一事实来源）
-cleanup_site_load_rehearsal   → 只删本次造出来的行，幂等
+cleanup_site_load_rehearsal   → 只删本次造出来的行，幂等（未实现，见下方说明）
 ```
+
+**实现状态（2026-10-15 核对）**：只落地了 `prepare_site_load_rehearsal`，参数仅 `--output-file` 与 `--product-revision`；`cleanup_site_load_rehearsal` 从未实现，执行会报 `Unknown command`。它建的是一条 **FORMAL** 活动（不是 test 生命周期），所以也没有"清空测试数据"那种内置出口——收尾只能人工删掉这条活动连同它带着的报名、轮次、票券和投票。跑本计划前先确认这一点，别让对账依赖一个不存在的命令。
 
 manifest 至少要带（**演员脚本只读它，不自己查库**）：
 
@@ -205,7 +207,7 @@ T+6:00  200 个
 
 ### P4 收尾（T+12:00 ~ T+13:30）
 
-先把观众降到 0（逐个关 context），等 5 秒让在途请求落地，停掉其余演员 → 跑 §6 的对账查询 → 导出对账结果 → 最后才 `cleanup_site_load_rehearsal`。
+先把观众降到 0（逐个关 context），等 5 秒让在途请求落地，停掉其余演员 → 跑 §6 的对账查询 → 导出对账结果 → 最后才清理本次造出来的活动（注意 §4：`cleanup_site_load_rehearsal` 未实现，这一步是人工删除）。
 
 **P3b 会把评委入口的最终状态翻一次**，对账前先把入口恢复成关（P3b 结束后它多半是"开放"）。状态没归位的话，"关闭入口后新 session = 0" 这条对账会算错窗口。
 
@@ -283,7 +285,7 @@ logs/load-sim/report.md              最终判定
 
 - 不在本轮改代码、不 merge、不重建镜像（除了跑之前必须的 `--build`）。
 - 不碰 `deploy_postgres_data` 之外的任何卷，不用 `docker volume prune`（本机 0 容器时它会把两个数据库一起删掉）。
-- 不在模拟过程中执行 `cleanup_site_load_rehearsal`（证据要留着）。
+- 不在模拟过程中清理本次造出来的活动（证据要留着）。
 - 报告不得用"页面都正常"替代对账结果。
 
 ## 10. 已定参数
