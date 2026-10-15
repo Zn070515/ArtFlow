@@ -247,6 +247,21 @@ def _normalize_string_map(raw, *, label):
     return out
 
 
+def _weight_pair_percent(first_raw: object, second_raw: object) -> tuple[Decimal, Decimal]:
+    """Parse a two-part weight pair given as percentages or as fractions.
+
+    Editors submit ``"40%"`` / ``"60%"``; the normalized surface stores ``"0.4000"`` /
+    ``"0.6000"``. Freeze re-validates whatever the surface holds, so both forms must parse —
+    and mapping each to its percentage makes normalization idempotent.
+    """
+
+    first = Decimal(str(first_raw).strip().removesuffix("%").strip())
+    second = Decimal(str(second_raw).strip().removesuffix("%").strip())
+    if first <= 1 and second <= 1:
+        return first * 100, second * 100
+    return first, second
+
+
 def validate_binding(
     ruleset: ContestRuleset,
     binding: dict | None,
@@ -298,32 +313,51 @@ def validate_binding(
         participant_count = _positive_int("participant_count")
         seat_count = _positive_int("seat_count")
         challenge_count = _positive_int("challenge_count")
-        try:
-            first_raw = (
-                str(raw_live_challenge.get("first_round_weight")).strip().removesuffix("%").strip()
-            )
-            challenge_raw = (
-                str(raw_live_challenge.get("challenge_round_weight"))
-                .strip()
-                .removesuffix("%")
-                .strip()
-            )
-            first_weight = Decimal(first_raw)
-            challenge_weight = Decimal(challenge_raw)
-        except (InvalidOperation, TypeError, ValueError):
-            raise ValidationError("踢馆成绩权重格式无效。") from None
-        if first_weight <= 0 or challenge_weight <= 0 or first_weight + challenge_weight != 100:
-            raise ValidationError("踢馆成绩权重必须合计 100%。")
+        weight_keys = ("first_round_weight", "challenge_round_weight")
+        absent_weights = [
+            key for key in weight_keys if not str(raw_live_challenge.get(key) or "").strip()
+        ]
+        # The editable ruleset surface may keep an incomplete draft, exactly as the podium
+        # and judge sections below already allow: the built-in 2026 format arrives carrying
+        # the format's fixed keys and no ratios, because the ratios are the operators' to
+        # choose. Freeze passes ``require_live_challenge_complete=True`` and rejects this
+        # shape, so an unfilled pair can never reach a frozen version.
+        if (
+            len(absent_weights) == len(weight_keys)
+            and live_format_key == (LIVE_CHALLENGE_FORMAT_KEY)
+            and not strict_live_contract
+        ):
+            live_challenge = {
+                "participant_count": participant_count,
+                "seat_count": seat_count,
+                "challenge_count": challenge_count,
+                "order_policy": "official_number",
+            }
+        else:
+            if absent_weights:
+                # Only reachable at freeze — the relaxed branch above covers a draft. An
+                # unfilled pair is an incomplete configuration, not a malformed value, so it
+                # reports as a sum failure rather than a format error.
+                raise ValidationError("踢馆成绩权重必须合计 100%。")
+            try:
+                first_weight, challenge_weight = _weight_pair_percent(
+                    raw_live_challenge.get("first_round_weight"),
+                    raw_live_challenge.get("challenge_round_weight"),
+                )
+            except (InvalidOperation, TypeError, ValueError):
+                raise ValidationError("踢馆成绩权重格式无效。") from None
+            if first_weight <= 0 or challenge_weight <= 0 or first_weight + challenge_weight != 100:
+                raise ValidationError("踢馆成绩权重必须合计 100%。")
+            live_challenge = {
+                "participant_count": participant_count,
+                "seat_count": seat_count,
+                "challenge_count": challenge_count,
+                "first_round_weight": f"{(first_weight / Decimal('100')):.4f}",
+                "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
+                "order_policy": "official_number",
+            }
         if participant_count != 15 or seat_count != 10 or challenge_count != 5:
             raise ValidationError("2026 现场踢馆必须配置 15 人、10 个席位和 5 次挑战。")
-        live_challenge = {
-            "participant_count": participant_count,
-            "seat_count": seat_count,
-            "challenge_count": challenge_count,
-            "first_round_weight": f"{(first_weight / Decimal('100')):.4f}",
-            "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
-            "order_policy": "official_number",
-        }
         if live_format_key:
             live_challenge["format_key"] = live_format_key
         podium_fields = {
@@ -352,32 +386,40 @@ def validate_binding(
                 raise ValidationError("最终冠亚季军配置的键名不能为空。")
             if podium_strings["podium_first_round_key"] not in normalized_round_keys:
                 raise ValidationError("最终冠亚季军的第一轮键必须绑定到 round_keys。")
-            try:
-                podium_first_raw = (
-                    str(raw_live_challenge.get("podium_first_round_weight"))
-                    .strip()
-                    .removesuffix("%")
-                    .strip()
+            podium_weight_keys = ("podium_first_round_weight", "podium_third_round_weight")
+            absent_podium_weights = [
+                key
+                for key in podium_weight_keys
+                if not str(raw_live_challenge.get(key) or "").strip()
+            ]
+            # Same incomplete-draft allowance as the challenge weight pair above: the
+            # built-in carries the podium *keys* — they are the format's identity — while the
+            # two ratios stay the operators' choice.
+            if (
+                len(absent_podium_weights) == len(podium_weight_keys)
+                and live_format_key == LIVE_CHALLENGE_FORMAT_KEY
+                and not strict_live_contract
+            ):
+                live_challenge.update(podium_strings)
+            else:
+                if absent_podium_weights:
+                    raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
+                try:
+                    podium_first, podium_third = _weight_pair_percent(
+                        raw_live_challenge.get("podium_first_round_weight"),
+                        raw_live_challenge.get("podium_third_round_weight"),
+                    )
+                except (InvalidOperation, TypeError, ValueError):
+                    raise ValidationError("最终冠亚季军成绩权重格式无效。") from None
+                if podium_first <= 0 or podium_third <= 0 or podium_first + podium_third != 100:
+                    raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
+                live_challenge.update(podium_strings)
+                live_challenge.update(
+                    {
+                        "podium_first_round_weight": f"{(podium_first / Decimal('100')):.4f}",
+                        "podium_third_round_weight": f"{(podium_third / Decimal('100')):.4f}",
+                    }
                 )
-                podium_third_raw = (
-                    str(raw_live_challenge.get("podium_third_round_weight"))
-                    .strip()
-                    .removesuffix("%")
-                    .strip()
-                )
-                podium_first = Decimal(podium_first_raw)
-                podium_third = Decimal(podium_third_raw)
-            except (InvalidOperation, TypeError, ValueError):
-                raise ValidationError("最终冠亚季军成绩权重格式无效。") from None
-            if podium_first <= 0 or podium_third <= 0 or podium_first + podium_third != 100:
-                raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
-            live_challenge.update(podium_strings)
-            live_challenge.update(
-                {
-                    "podium_first_round_weight": f"{(podium_first / Decimal('100')):.4f}",
-                    "podium_third_round_weight": f"{(podium_third / Decimal('100')):.4f}",
-                }
-            )
         elif podium_present:
             # The editable ruleset surface may keep an incomplete draft. Freeze uses
             # ``require_live_challenge_complete=True`` below and rejects this shape.

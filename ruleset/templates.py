@@ -30,6 +30,20 @@ def _d_with_checkpoints(nodes, checkpoints):
     )
 
 
+def _d_with_questionnaire(nodes, questionnaire):
+    """A definition that also ships the participant questionnaire it depends on.
+
+    The live formats collect their material through the questionnaire, so the format and the
+    questions it requires have to travel together. A ``RulesetTemplate`` is definition-only,
+    so this section is the only place they can be carried.
+    """
+
+    return json.dumps(
+        {"schema_version": 1, "nodes": nodes, "questionnaire": questionnaire},
+        ensure_ascii=False,
+    )
+
+
 # --- 2025 golden definitions (single source of truth) -----------------------
 
 
@@ -564,6 +578,90 @@ def _first_batch():
 
 _FIRST_BATCH_DEFINITIONS = _first_batch()
 
+# --- 2026 院十佳·渡梦 live challenge (system built-in) ----------------------
+#
+# The format's shape — 15 singers, 5 groups of 3, 10 seats, 5 challenge turns, the podium
+# keys and the two independent weight pairs — is already enforced at freeze by
+# ``ruleset.services._validate_2026_live_contract`` and ``validate_binding``. This built-in
+# is what makes that shape *arrive pre-filled*: creating a ruleset from it provisions the
+# first-round physical round and writes the platform-owned binding keys. The four operator
+# items (both weight pairs, both judge lists) are deliberately left for staff to fill.
+LIVE_2026_BUILTIN_KEY = "live_challenge_2026"
+LIVE_2026_TEMPLATE_NAME = "2026 院十佳·渡梦 现场踢馆（系统内置）"
+LIVE_2026_FIRST_ROUND_KEY = "r1"
+LIVE_2026_CHALLENGE_ROUND_KEY = "r2"
+LIVE_2026_THIRD_ROUND_KEY = "r3"
+LIVE_2026_SEAT_COUNT = 10
+
+
+def live_2026_questionnaire():
+    """The material this format collects: R2 and R3 songs plus accompaniments for all 15.
+
+    Every entrant prepares both rounds up front — a singer who never challenges may still
+    be challenged, and one who never reaches the third round may still get there — so both
+    rounds are declared ``required`` for every participant.
+    """
+
+    questions = []
+    for round_key, label in (
+        (LIVE_2026_CHALLENGE_ROUND_KEY, "踢馆曲目"),
+        (LIVE_2026_THIRD_ROUND_KEY, "第三轮曲目"),
+    ):
+        questions.extend(
+            [
+                {
+                    "key": f"{round_key}.song",
+                    "type": "text",
+                    "label": label,
+                    "round": round_key,
+                    "required": True,
+                },
+                {
+                    "key": f"{round_key}.accompaniment",
+                    "type": "file",
+                    "label": f"{label}伴奏",
+                    "round": round_key,
+                    "required": True,
+                    "file": {
+                        "purpose": "accompaniment",
+                        "extensions": [".mp3"],
+                        "max_mb": 100,
+                    },
+                },
+            ]
+        )
+    return {
+        "schema_version": 1,
+        "key": "singer_submission",
+        "pages": [
+            {
+                "key": "materials",
+                "title": "现场材料",
+                "sections": [{"key": "songs", "title": "歌曲", "questions": questions}],
+            }
+        ],
+    }
+
+
+def live_2026_definition():
+    """The first round's qualifier graph: score r1, rank it, seat the top ten."""
+
+    return _d_with_questionnaire(
+        [
+            {
+                "key": "assess_r1",
+                "type": "ASSESS",
+                "source": ENTRY_KEY,
+                "round": LIVE_2026_FIRST_ROUND_KEY,
+            },
+            {"key": "rank1", "type": "RANK", "source": "assess_r1"},
+            {"key": "top10", "type": "SELECT", "source": "rank1", "count": LIVE_2026_SEAT_COUNT},
+        ],
+        live_2026_questionnaire(),
+    )
+
+
+LIVE_2026_DEFINITION = live_2026_definition()
 GOLDEN_SCHIDUI = golden_schidui()
 GOLDEN_XIAOFENG = golden_xiaofeng()
 HISTORICAL_XIAOFENG_CONTROL_FLOW = historical_xiaofeng_control_flow()
@@ -584,10 +682,13 @@ GOLDEN_SCHIDUI_BUILTIN_KEY = "golden_schidui"
 # single keyless row only — never a fuzzy title guess.
 LEGACY_TEMPLATE_NAMES = {"院十佳": GOLDEN_SCHIDUI_BUILTIN_KEY}
 
-_PRODUCTION_TEMPLATE_NAMES = frozenset({HISTORICAL_SCHIDUI_NAME, "独立人气奖"})
+_PRODUCTION_TEMPLATE_NAMES = frozenset(
+    {HISTORICAL_SCHIDUI_NAME, "独立人气奖", LIVE_2026_TEMPLATE_NAME}
+)
 _UNSUPPORTED_TEMPLATE_NAMES = frozenset({"校十佳屏峰_历史未决回退"})
 _BUILTIN_KEYS_BY_NAME = {
     HISTORICAL_SCHIDUI_NAME: GOLDEN_SCHIDUI_BUILTIN_KEY,
+    LIVE_2026_TEMPLATE_NAME: LIVE_2026_BUILTIN_KEY,
     "合成_分组逐组补足演示": "synthetic_xiaofeng_group_fill",
     "校十佳屏峰_历史控制流": "historical_xiaofeng_control_flow",
     "校十佳屏峰_历史未决回退": "historical_xiaofeng_unresolved_fallback",
@@ -607,6 +708,12 @@ def _capability_for_template(name: str):
 
 def _catalog():
     catalog = [
+        (
+            LIVE_2026_TEMPLATE_NAME,
+            LIVE_2026_DEFINITION,
+            "2026「渡梦」院十佳：15 人 / 5 组×3 人 / 10 席位 / 5 次踢馆 / 第三轮按席位继承；"
+            "选它会自动建好第一轮并填好赛制形态，两套权重与三轮评委由工作人员赛前填写",
+        ),
         (
             HISTORICAL_SCHIDUI_NAME,
             GOLDEN_SCHIDUI,

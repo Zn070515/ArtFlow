@@ -7444,6 +7444,83 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(version.definition, template.definition)
         self.assertRedirects(response, reverse("staff:ruleset_planning", args=[version.pk]))
 
+    def test_clone_from_builtin_provisions_the_first_round_and_binding(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY, LIVE_2026_FIRST_ROUND_KEY
+        from singer_contest.models import ContestRound
+
+        activity = self._clone_activity()
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "2026 渡梦"},
+        )
+
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+        contest_round = ContestRound.objects.get(activity=activity)
+        self.assertEqual(ruleset.round_keys, {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk})
+        self.assertEqual(ruleset.live_challenge["format_key"], "2026_live_challenge")
+        self.assertEqual(ruleset.live_challenge["seat_count"], 10)
+        # Same page as any other creation, but the remaining configuration lives in the
+        # editor: the planning workbench cannot express this graph losslessly.
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_create_page_from_builtin_provisions_and_lands_on_the_editor(self):
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY
+        from singer_contest.models import ContestRound
+
+        activity = self._clone_activity(title="2026 渡梦")
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        response = self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": activity.pk, "name": "2026 渡梦赛制", "template": template.pk},
+        )
+
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+        self.assertEqual(ContestRound.objects.filter(activity=activity).count(), 1)
+        self.assertEqual(ruleset.live_challenge["participant_count"], 15)
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+
+    def test_builtin_derived_ruleset_keeps_every_field_editable(self):
+        """The built-in is a pre-filled ordinary ruleset, not a locked one."""
+
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY
+
+        activity = self._clone_activity(title="2026 渡梦可编辑")
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "2026 渡梦赛制"},
+        )
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+
+        response = self.client.get(reverse("staff:ruleset_edit", args=[version.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        live = response.context["live_challenge"]
+        self.assertEqual(live["participant_count"], 15)
+        self.assertFalse(live.get("first_round_weight"))
+        self.assertFalse(live.get("podium_first_round_weight"))
+        html = response.content.decode()
+        self.assertIn('name="live_participant_count" value="15"', html)
+        for field in (
+            "live_seat_count",
+            "live_challenge_count",
+            "live_first_weight",
+            "live_challenge_weight",
+            "live_podium_first_weight",
+            "live_podium_third_weight",
+            "live_challenge_minimum_judges",
+            "live_final_minimum_judges",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(f'name="{field}"', html)
+
     def test_clone_entry_point_rejects_a_non_production_template(self):
         """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
         from ruleset.models import ContestRuleset, RulesetTemplate

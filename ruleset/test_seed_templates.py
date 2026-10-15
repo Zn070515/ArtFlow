@@ -112,8 +112,8 @@ class TemplateLibraryTests(TestCase):
     def test_seed_is_idempotent(self):
         seed_ruleset_templates(None)
         first = RulesetTemplate.objects.count()
-        # 2 golden + 3 historical/synthetic scenarios + 10 production templates.
-        self.assertEqual(first, 15)
+        # 2 golden + 3 historical/synthetic scenarios + 10 first-batch + 1 live built-in.
+        self.assertEqual(first, 16)
         seed_ruleset_templates(None)
         self.assertEqual(RulesetTemplate.objects.count(), first)
 
@@ -165,7 +165,7 @@ class TemplateLibraryTests(TestCase):
             RulesetTemplate.objects.filter(builtin_key=GOLDEN_SCHIDUI_BUILTIN_KEY).count(), 1
         )
         self.assertEqual(RulesetTemplate.objects.filter(name="院十佳 2025（历史模板）").count(), 1)
-        self.assertEqual(RulesetTemplate.objects.count(), 15)
+        self.assertEqual(RulesetTemplate.objects.count(), 16)
 
     def test_2025_definition_content_is_unchanged(self):
         # §11.3: renaming the template must not touch the historical 2025 rules.
