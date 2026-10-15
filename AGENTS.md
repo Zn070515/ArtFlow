@@ -138,9 +138,12 @@ service and explicit unlock flow. `StageAwardDecision` is a computed candidate o
 Ruleset templates must expose `builtin_key` and capability status; only `Production`
 templates may be cloned into a production workflow. The built-in 2026 live format
 (`builtin_key = live_challenge_2026`) additionally provisions the first physical round and
-the format's fixed binding keys when a ruleset is created from it — it pre-fills those
-values, it does not lock them: every field stays operator-editable, and the two weight pairs
-and three judge lists are deliberately left empty for staff to fill. Vote sessions must declare their
+the format's binding keys when a ruleset is created from it — it pre-fills those values, it
+does not lock them. Nothing about the shape is a constant: the runtime reads
+`participant_count` / `seat_count` / `group_count` / `group_size` off the frozen binding
+(踢馆人数 is derived as 参赛人数 − 晋级数 and never read from storage), and
+`ruleset.services.validate_binding` enforces only that the numbers relate coherently. The
+two weight pairs and three judge lists are deliberately left empty for staff to fill. Vote sessions must declare their
 purpose, and a ruleset vote source must match that purpose at bound freeze time. An
 activity may be archived only while its result line is closed: the archive package is the
 permanent record, so it is built on `build_result_closure(...).closeable`, never on the

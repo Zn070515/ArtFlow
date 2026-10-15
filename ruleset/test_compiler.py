@@ -1884,6 +1884,10 @@ class BindingValidationTests(_RulesetModelBase):
                 "participant_count": 15,
                 "seat_count": 10,
                 "challenge_count": 5,
+                # Absent from the input, so the built-in default applies — and it is written
+                # back so a later unrelated save cannot silently drop it.
+                "group_count": 5,
+                "group_size": 3,
                 "first_round_weight": "0.4000",
                 "challenge_round_weight": "0.6000",
                 "order_policy": "official_number",
@@ -1974,16 +1978,20 @@ class BindingValidationTests(_RulesetModelBase):
         self.assertNotIn("r2", binding["round_keys"])
         self.assertNotIn("r3", binding["round_keys"])
 
-    def test_2026_live_contract_requires_ten_first_round_advancers(self):
+    def test_2026_live_contract_requires_first_round_advancers_to_match_seats(self):
         ruleset = self.make_ruleset()
         round_ = self._singer_round(ruleset)
         self._configure_live_first_round(round_, advance_count=9)
-        with self.assertRaisesMessage(ValidationError, "晋级人数必须为 10"):
+        with self.assertRaisesMessage(ValidationError, "必须等于初始席位数（10）"):
             _validate_2026_live_contract(
                 {"nodes": []},
                 {
                     "round_keys": {"r1": round_.pk},
-                    "live_challenge": {"format_key": "2026_live_challenge"},
+                    "live_challenge": {
+                        "format_key": "2026_live_challenge",
+                        "participant_count": 15,
+                        "seat_count": 10,
+                    },
                 },
             )
 
@@ -2170,6 +2178,81 @@ class BindingValidationTests(_RulesetModelBase):
                     }
                 },
             )
+
+    def test_rejects_grouping_that_does_not_multiply_out(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaisesMessage(ValidationError, "组数 × 每组人数"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "format_key": "2026_live_challenge",
+                        "participant_count": 15,
+                        "seat_count": 10,
+                        "group_count": 4,
+                        "group_size": 4,
+                    }
+                },
+            )
+
+    def test_rejects_participants_that_do_not_exceed_the_seats(self):
+        ruleset = self.make_ruleset()
+        with self.assertRaisesMessage(ValidationError, "必须大于第一轮晋级人数"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "format_key": "2026_live_challenge",
+                        "participant_count": 10,
+                        "seat_count": 10,
+                        "group_count": 5,
+                        "group_size": 2,
+                    }
+                },
+            )
+
+    def test_rejects_a_separately_posted_challenge_count(self):
+        """踢馆人数 is derived, so a caller that posts one is refused rather than obeyed."""
+
+        ruleset = self.make_ruleset()
+        with self.assertRaisesMessage(ValidationError, "不能单独设置"):
+            validate_binding(
+                ruleset,
+                {
+                    "live_challenge": {
+                        "format_key": "2026_live_challenge",
+                        "participant_count": 15,
+                        "seat_count": 10,
+                        "challenge_count": 3,
+                        "group_count": 5,
+                        "group_size": 3,
+                    }
+                },
+            )
+
+    def test_accepts_a_non_default_shape(self):
+        """12 singers, 4 groups of 3, 8 seats, 4 challengers — the reviewer's example."""
+
+        ruleset = self.make_ruleset()
+        normalized = validate_binding(
+            ruleset,
+            {
+                "live_challenge": {
+                    "format_key": "2026_live_challenge",
+                    "participant_count": "12",
+                    "seat_count": "8",
+                    "group_count": "4",
+                    "group_size": "3",
+                }
+            },
+        )["live_challenge"]
+
+        self.assertEqual(normalized["participant_count"], 12)
+        self.assertEqual(normalized["seat_count"], 8)
+        self.assertEqual(normalized["group_count"], 4)
+        self.assertEqual(normalized["group_size"], 3)
+        # Derived, not posted.
+        self.assertEqual(normalized["challenge_count"], 4)
 
     def test_accepts_and_normalizes_podium_and_independent_judge_configuration(self):
         ruleset = self.make_ruleset()

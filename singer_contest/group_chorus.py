@@ -73,9 +73,16 @@ def group_stage_roster_singers(stage: GroupStage) -> list[SingerRegistration]:
 
 
 def validate_live_first_round_group_stage(
-    stage: GroupStage, expected_singer_ids: Collection[int | str]
+    stage: GroupStage,
+    expected_singer_ids: Collection[int | str],
+    *,
+    group_count: int,
+    group_size: int,
 ) -> list[tuple[str, tuple[str, ...]]]:
-    """Validate and return the frozen five-by-three first-round group snapshot.
+    """Validate and return the frozen first-round group snapshot.
+
+    ``group_count``/``group_size`` come from the frozen ruleset — the 2026 default is five
+    groups of three, but the format is a starting draft the operators may change.
 
     The group stage owns the material-sharing roster.  The scoring round may materialize
     ``PerformanceGroup`` rows from it, but it must not create a second, divergent roster.
@@ -83,8 +90,8 @@ def validate_live_first_round_group_stage(
     if stage.status != GroupStage.Status.FROZEN:
         raise ValidationError("2026 第一轮必须使用已冻结的分组合唱分组。")
     groups = list(stage.groups.filter(is_active=True).order_by("group_order", "pk"))
-    if len(groups) != 5:
-        raise ValidationError("2026 第一轮分组合唱必须恰好为 5 组。")
+    if len(groups) != group_count:
+        raise ValidationError(f"2026 第一轮分组合唱必须恰好为 {group_count} 组。")
     expected_ids = {str(singer_id) for singer_id in expected_singer_ids}
     snapshot: list[tuple[str, tuple[str, ...]]] = []
     actual_ids: set[str] = set()
@@ -95,8 +102,8 @@ def validate_live_first_round_group_stage(
             .order_by("singer_id")
             .values_list("singer_id", flat=True)
         )
-        if len(singer_ids) != 3:
-            raise ValidationError("2026 第一轮分组合唱必须每组 3 人。")
+        if len(singer_ids) != group_size:
+            raise ValidationError(f"2026 第一轮分组合唱必须每组 {group_size} 人。")
         if actual_ids.intersection(singer_ids):
             raise ValidationError("2026 第一轮分组合唱成员不能重复。")
         actual_ids.update(singer_ids)

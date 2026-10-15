@@ -19,9 +19,9 @@ from singer_contest.materials import validate_live_material_plan
 from singer_contest.models import ContestRound
 
 from ruleset.live_format import (
-    LIVE_2026_FIXED_COUNTS,
     is_live_2026_template,
     live_2026_binding_preset,
+    live_challenge_counts_from_binding,
     provision_live_2026_ruleset,
 )
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -33,6 +33,7 @@ from ruleset.services import (
 )
 from ruleset.templates import (
     LIVE_2026_BUILTIN_KEY,
+    LIVE_2026_DEFAULTS,
     LIVE_2026_DEFINITION,
     LIVE_2026_FIRST_ROUND_KEY,
     LIVE_2026_TEMPLATE_NAME,
@@ -72,6 +73,35 @@ class Live2026BuiltinTests(TestCase):
             self.activity, template=self.template, name=name, operator=self.admin
         )
 
+    def test_counts_read_from_a_binding_and_default_the_grouping(self):
+        """Bindings frozen before grouping was a parameter still resolve, at the 5x3 default."""
+
+        counts = live_challenge_counts_from_binding(
+            {
+                "live_challenge": {
+                    "format_key": LIVE_CHALLENGE_FORMAT_KEY,
+                    "participant_count": 15,
+                    "seat_count": 10,
+                    "challenge_count": 5,
+                }
+            }
+        )
+
+        self.assertEqual(counts.participant_count, 15)
+        self.assertEqual(counts.seat_count, 10)
+        self.assertEqual(counts.group_count, 5)
+        self.assertEqual(counts.group_size, 3)
+        self.assertEqual(counts.challenge_count, 5)
+
+    def test_challenge_count_is_derived_not_read(self):
+        """A stored mirror that disagrees loses: the arithmetic is the definition."""
+
+        counts = live_challenge_counts_from_binding(
+            {"live_challenge": {"participant_count": 12, "seat_count": 8, "challenge_count": 99}}
+        )
+
+        self.assertEqual(counts.challenge_count, 4)
+
     def test_builtin_ships_with_the_service(self):
         self.assertEqual(self.template.name, LIVE_2026_TEMPLATE_NAME)
         self.assertEqual(
@@ -88,7 +118,7 @@ class Live2026BuiltinTests(TestCase):
         nodes = {node["key"]: node for node in parsed["nodes"]}
         self.assertEqual(nodes["assess_r1"]["round"], LIVE_2026_FIRST_ROUND_KEY)
         self.assertEqual(nodes["top10"]["type"], "SELECT")
-        self.assertEqual(nodes["top10"]["count"], LIVE_2026_FIXED_COUNTS["seat_count"])
+        self.assertEqual(nodes["top10"]["count"], LIVE_2026_DEFAULTS["seat_count"])
 
         # The material contract the format requires: R2 and R3 songs plus accompaniments,
         # both required for every entrant — including those who never reach those rounds.
@@ -99,7 +129,7 @@ class Live2026BuiltinTests(TestCase):
     def test_preset_carries_only_platform_invariants(self):
         preset = live_2026_binding_preset()
         self.assertEqual(preset["format_key"], LIVE_CHALLENGE_FORMAT_KEY)
-        for key, value in LIVE_2026_FIXED_COUNTS.items():
+        for key, value in LIVE_2026_DEFAULTS.items():
             self.assertEqual(preset[key], value)
         for key in (
             "podium_stage_key",
@@ -124,7 +154,7 @@ class Live2026BuiltinTests(TestCase):
 
         contest_round = ContestRound.objects.get(activity=self.activity)
         self.assertEqual(contest_round.name, "第一轮")
-        self.assertEqual(contest_round.advance_count, LIVE_2026_FIXED_COUNTS["seat_count"])
+        self.assertEqual(contest_round.advance_count, LIVE_2026_DEFAULTS["seat_count"])
         self.assertEqual(
             contest_round.score_completion_mode, ContestRound.CompletionMode.MINIMUM_VALID
         )
@@ -138,7 +168,7 @@ class Live2026BuiltinTests(TestCase):
         self.assertEqual(ruleset.round_keys, {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk})
         live = ruleset.live_challenge
         self.assertEqual(live["format_key"], LIVE_CHALLENGE_FORMAT_KEY)
-        self.assertEqual(live["participant_count"], LIVE_2026_FIXED_COUNTS["participant_count"])
+        self.assertEqual(live["participant_count"], LIVE_2026_DEFAULTS["participant_count"])
         for key in OPERATOR_ONLY_KEYS:
             self.assertNotIn(key, live)
 

@@ -432,19 +432,26 @@
             {% endfor %}
             <details class="sm:col-span-2 border border-brand/30 bg-blue-50 rounded p-3" open>
                 <summary class="cursor-pointer text-sm font-semibold text-brand">2026 现场挑战配置</summary>
+                {% if live_challenge.format_key %}
+                <p class="mt-2 text-xs"><a href="{% url 'staff:ruleset_live_2026_config' version.pk %}" class="inline-block border border-brand text-brand rounded px-3 py-1">打开 2026 决赛赛制配置（推荐）</a></p>
+                {% endif %}
                 <p class="text-xs text-gray-600 mt-2">选择 2026 现场赛制后，冻结会强制校验选手问卷、第二轮与第三轮歌曲/伴奏、统一算术平均评分和无观众分依赖。第二轮、第三轮材料会在现场流程需要时生成对应评分轮。</p>
                 <label class="block text-xs text-gray-700 mt-3">现场赛制类型
                     <select name="live_format_key" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
                         <option value=""{% if not live_challenge %} selected{% endif %}>不启用现场挑战</option>
-                        <option value="2026_live_challenge"{% if live_challenge %} selected{% endif %}>2026 现场挑战（15 人 / 10 席 / 5 次）</option>
+                        <option value="2026_live_challenge"{% if live_challenge %} selected{% endif %}>2026 现场挑战（三轮踢馆制）</option>
                     </select>
                 </label>
-                <div class="grid sm:grid-cols-5 gap-3 mt-3">
-                    <label class="text-xs text-gray-700">参赛人数<input name="live_participant_count" value="{{ live_challenge.participant_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">席位数<input name="live_seat_count" value="{{ live_challenge.seat_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">挑战次数<input name="live_challenge_count" value="{{ live_challenge.challenge_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">第一轮权重<input name="live_first_weight" value="{{ live_challenge.first_round_weight|default:'' }}" placeholder="40%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">挑战轮权重<input name="live_challenge_weight" value="{{ live_challenge.challenge_round_weight|default:'' }}" placeholder="60%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                <div class="grid sm:grid-cols-4 gap-3 mt-3">
+                    <label class="text-xs text-gray-700">第一轮参赛人数<input name="live_participant_count" value="{{ live_challenge.participant_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第一轮晋级数（初始席位数）<input name="live_seat_count" value="{{ live_challenge.seat_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">第一轮组数<input name="live_group_count" value="{{ live_challenge.group_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">每组人数<input name="live_group_size" value="{{ live_challenge.group_size|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                </div>
+                <p class="mt-2 text-xs text-gray-600">踢馆人数 = 第一轮参赛人数 − 第一轮晋级数（不可填写）：<span class="font-medium text-gray-900">{{ live_challenge.challenge_count|default:"—" }}</span>。第三轮人数等于第一轮晋级数。更友好的填写入口见上方「打开 2026 决赛赛制配置」。</p>
+                <div class="grid sm:grid-cols-2 gap-3 mt-3">
+                    <label class="text-xs text-gray-700">第一轮权重（一场踢馆）<input name="live_first_weight" value="{{ live_challenge.first_round_weight|default:'' }}" placeholder="40%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">踢馆轮权重（一场踢馆）<input name="live_challenge_weight" value="{{ live_challenge.challenge_round_weight|default:'' }}" placeholder="60%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                 </div>
                 <div class="grid sm:grid-cols-3 gap-3 mt-3 border-t border-blue-200 pt-3">
                     <div class="sm:col-span-3 text-xs text-gray-600">冠亚季军正式成绩 = 第一轮成绩 × 第一轮权重 + 第三轮成绩 × 第三轮权重；权重在创建赛制时确定，冻结后不可改变。</div>

@@ -1,6 +1,5 @@
 import json
 from decimal import Decimal
-from typing import cast
 
 from accounts.models import User
 from common.authority import (
@@ -63,7 +62,16 @@ from .models import (
 from .services import apply_scores, current_round_roster
 
 
-class LiveChallengeAuthorityTests(TestCase):
+class _LiveChallengeFixtureMixin:
+    """The frozen 2026 fixture, sized by ``PARTICIPANTS``/``SEATS``.
+
+    The counts are operator parameters now, so a subclass can move them and re-run the same
+    runtime against a different shape.
+    """
+
+    PARTICIPANTS = 15
+    SEATS = 10
+
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
             self.staff = User.objects.create_user(
@@ -107,7 +115,7 @@ class LiveChallengeAuthorityTests(TestCase):
             )
             self.judges = judges
         self.singers = []
-        for number in range(1, 16):
+        for number in range(1, self.PARTICIPANTS + 1):
             with authority_write(ACCOUNT_AUTHORITY):
                 user = User.objects.create_user(
                     username=f"challenge-singer-{number}", password="pass"
@@ -133,7 +141,7 @@ class LiveChallengeAuthorityTests(TestCase):
                     singer=singer,
                     average_score=Decimal(100 - number),
                     rank=number,
-                    is_advanced=number <= 10,
+                    is_advanced=number <= self.SEATS,
                     is_test_data=True,
                 )
         ruleset = ContestRuleset.objects.create(
@@ -154,9 +162,9 @@ class LiveChallengeAuthorityTests(TestCase):
                 binding={
                     "round_keys": {"r1": self.round.pk},
                     "live_challenge": {
-                        "participant_count": 15,
-                        "seat_count": 10,
-                        "challenge_count": 5,
+                        "participant_count": self.PARTICIPANTS,
+                        "seat_count": self.SEATS,
+                        "challenge_count": self.PARTICIPANTS - self.SEATS,
                         "first_round_weight": "0.5000",
                         "challenge_round_weight": "0.5000",
                         "order_policy": "official_number",
@@ -187,6 +195,8 @@ class LiveChallengeAuthorityTests(TestCase):
             )
             mark_submitted(response)
 
+
+class LiveChallengeAuthorityTests(_LiveChallengeFixtureMixin, TestCase):
     def test_first_round_confirmation_freezes_queue_and_ten_seats(self):
         session = create_challenge_session(
             self.round,
@@ -1096,18 +1106,93 @@ class LiveChallengeAuthorityTests(TestCase):
 
 
 @postgresql_only
-class RoundListPostgreSQLTransactionTests(TransactionTestCase):
+class LiveChallengeParameterizedCountsTests(_LiveChallengeFixtureMixin, TestCase):
+    """The counts are operator parameters now, not constants.
+
+    20 singers with 12 seats leaves 8 challengers — deliberately past both numbers the old
+    schema pinned (``position <= 10``, ``sequence <= 5``), so this is also what proves those
+    bounds really moved to the service.
+    """
+
+    PARTICIPANTS = 20
+    SEATS = 12
+
+    def test_challenge_session_uses_the_configured_counts(self):
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="param-create",
+        )
+
+        positions = list(
+            ChallengeSeat.objects.filter(session=session)
+            .order_by("position")
+            .values_list("position", flat=True)
+        )
+        sequences = list(
+            ChallengeTurn.objects.filter(session=session)
+            .order_by("sequence")
+            .values_list("sequence", flat=True)
+        )
+
+        self.assertEqual(positions, list(range(1, self.SEATS + 1)))
+        self.assertEqual(sequences, list(range(1, self.PARTICIPANTS - self.SEATS + 1)))
+
+    def test_session_becomes_confirmable_after_the_configured_number_of_turns(self):
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="param-ready-create",
+        )
+        challenge_count = self.PARTICIPANTS - self.SEATS
+        for sequence in range(1, challenge_count + 1):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"param-start-{sequence}",
+                expected_revision=session.revision,
+            )
+            waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"param-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="现场顺延",
+            )
+            session.refresh_from_db()
+            expected_state = (
+                ChallengeSession.State.READY_TO_CONFIRM
+                if sequence == challenge_count
+                else ChallengeSession.State.ACTIVE
+            )
+            self.assertEqual(session.state, expected_state, f"after turn {sequence}")
+
+        confirmed = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="param-confirm",
+            expected_revision=session.revision,
+        )
+        self.assertEqual(confirmed.state, ChallengeSession.State.CONFIRMED)
+        final_seats = ChallengeSeat.objects.filter(session=confirmed)
+        self.assertEqual(final_seats.count(), self.SEATS)
+        self.assertEqual(
+            len({seat.current_holder_id for seat in final_seats}),
+            self.SEATS,
+        )
+
+
+class RoundListPostgreSQLTransactionTests(_LiveChallengeFixtureMixin, TransactionTestCase):
     staff: User
     round: ContestRound
     version: RulesetVersion
 
     def test_staff_round_list_reads_a_generated_third_round_in_autocommit(self):
-        # Reuse the complete live challenge fixture, but deliberately run under
-        # TransactionTestCase so the real GET is not wrapped in Django's TestCase
-        # transaction. This is the production boundary where select_for_update()
-        # must not leak into a read-only readiness check.
-        LiveChallengeAuthorityTests.setUp(cast(LiveChallengeAuthorityTests, self))
-
+        # The mixin's setUp already ran: this deliberately uses TransactionTestCase so the
+        # real GET is not wrapped in Django's TestCase transaction. That is the production
+        # boundary where select_for_update() must not leak into a read-only readiness check.
         session = create_challenge_session(
             self.round,
             ruleset_version=self.version,

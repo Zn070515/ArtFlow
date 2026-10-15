@@ -591,16 +591,21 @@ LIVE_2026_TEMPLATE_NAME = "2026 院十佳·渡梦 现场踢馆（系统内置）
 LIVE_2026_FIRST_ROUND_KEY = "r1"
 LIVE_2026_CHALLENGE_ROUND_KEY = "r2"
 LIVE_2026_THIRD_ROUND_KEY = "r3"
-# The format's shape, declared once. ``ruleset.services`` validates the frozen ruleset
-# against these and ``ruleset.live_format`` pre-fills them, so a change here moves all three
-# together instead of leaving the contract rejecting what provisioning just wrote.
+# What the built-in *pre-fills*, not what it requires. The format is a starting draft the
+# operators may change: ``ruleset.services.validate_binding`` only enforces that the numbers
+# relate coherently (组数 × 每组人数 == 参赛人数, 踢馆人数 == 参赛人数 − 晋级数, …), so a
+# change to one of these moves the pre-fill without becoming a contract anything must equal.
 LIVE_2026_PARTICIPANT_COUNT = 15
 LIVE_2026_SEAT_COUNT = 10
 LIVE_2026_CHALLENGE_COUNT = 5
-LIVE_2026_FIXED_COUNTS = {
+LIVE_2026_GROUP_COUNT = 5
+LIVE_2026_GROUP_SIZE = 3
+LIVE_2026_DEFAULTS = {
     "participant_count": LIVE_2026_PARTICIPANT_COUNT,
     "seat_count": LIVE_2026_SEAT_COUNT,
     "challenge_count": LIVE_2026_CHALLENGE_COUNT,
+    "group_count": LIVE_2026_GROUP_COUNT,
+    "group_size": LIVE_2026_GROUP_SIZE,
 }
 # The podium keys are the format's identity, not a choice; the ratios beside them are the
 # operators'. ``ruleset_bind`` writes the same keys, so both read this one dict.

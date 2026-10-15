@@ -60,9 +60,8 @@ from .planning import (
 )
 from .schema import ENTRY_KEY, content_hash, parse_definition
 from .templates import (
-    LIVE_2026_CHALLENGE_COUNT,
-    LIVE_2026_PARTICIPANT_COUNT,
-    LIVE_2026_SEAT_COUNT,
+    LIVE_2026_GROUP_COUNT,
+    LIVE_2026_GROUP_SIZE,
 )
 
 LIVE_CHALLENGE_FORMAT_KEY = "2026_live_challenge"
@@ -317,7 +316,43 @@ def validate_binding(
 
         participant_count = _positive_int("participant_count")
         seat_count = _positive_int("seat_count")
-        challenge_count = _positive_int("challenge_count")
+
+        def _group_int(key: str, default: int) -> int:
+            # Absent on bindings written before grouping became a parameter; falling back to
+            # the built-in default keeps such a ruleset saveable until the operator changes it.
+            raw = str(raw_live_challenge.get(key) or "").strip()
+            if not raw:
+                return default
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                raise ValidationError(f"live_challenge.{key} 必须是正整数。") from None
+            if value <= 0:
+                raise ValidationError(f"live_challenge.{key} 必须是正整数。")
+            return value
+
+        group_count = _group_int("group_count", LIVE_2026_GROUP_COUNT)
+        group_size = _group_int("group_size", LIVE_2026_GROUP_SIZE)
+        # 踢馆人数 is derived and never taken from the form: every singer who misses the
+        # initial seats gets exactly one challenge opportunity, so the turn count *is* the
+        # number of singers left over.
+        challenge_count = participant_count - seat_count
+        if participant_count <= seat_count:
+            raise ValidationError("第一轮参赛人数必须大于第一轮晋级人数。")
+        if group_count * group_size != participant_count:
+            raise ValidationError("第一轮组数 × 每组人数必须等于第一轮参赛人数。")
+        posted_challenge_count = str(raw_live_challenge.get("challenge_count") or "").strip()
+        if posted_challenge_count and posted_challenge_count != str(challenge_count):
+            raise ValidationError("踢馆人数必须等于第一轮参赛人数减第一轮晋级数，不能单独设置。")
+        # Both branches below spread this: ``update_ruleset_binding`` persists exactly the dict
+        # this function returns, so a key omitted from either branch is deleted on the next save.
+        counts = {
+            "participant_count": participant_count,
+            "seat_count": seat_count,
+            "challenge_count": challenge_count,
+            "group_count": group_count,
+            "group_size": group_size,
+        }
         weight_keys = ("first_round_weight", "challenge_round_weight")
         absent_weights = [
             key for key in weight_keys if not str(raw_live_challenge.get(key) or "").strip()
@@ -332,12 +367,7 @@ def validate_binding(
             and live_format_key == (LIVE_CHALLENGE_FORMAT_KEY)
             and not strict_live_contract
         ):
-            live_challenge = {
-                "participant_count": participant_count,
-                "seat_count": seat_count,
-                "challenge_count": challenge_count,
-                "order_policy": "official_number",
-            }
+            live_challenge = {**counts, "order_policy": "official_number"}
         else:
             if absent_weights:
                 # Only reachable at freeze — the relaxed branch above covers a draft. An
@@ -354,22 +384,11 @@ def validate_binding(
             if first_weight <= 0 or challenge_weight <= 0 or first_weight + challenge_weight != 100:
                 raise ValidationError("踢馆成绩权重必须合计 100%。")
             live_challenge = {
-                "participant_count": participant_count,
-                "seat_count": seat_count,
-                "challenge_count": challenge_count,
+                **counts,
                 "first_round_weight": f"{(first_weight / Decimal('100')):.4f}",
                 "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
                 "order_policy": "official_number",
             }
-        if (
-            participant_count != LIVE_2026_PARTICIPANT_COUNT
-            or seat_count != LIVE_2026_SEAT_COUNT
-            or challenge_count != LIVE_2026_CHALLENGE_COUNT
-        ):
-            raise ValidationError(
-                f"2026 现场踢馆必须配置 {LIVE_2026_PARTICIPANT_COUNT} 人、"
-                f"{LIVE_2026_SEAT_COUNT} 个席位和 {LIVE_2026_CHALLENGE_COUNT} 次挑战。"
-            )
         if live_format_key:
             live_challenge["format_key"] = live_format_key
         podium_fields = {
@@ -449,7 +468,14 @@ def validate_binding(
         missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
         if strict_live_contract and missing_judges:
             raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
-        if judges_present and not missing_judges:
+        # "All four keys present, both lists empty" is a draft the operator has not filled in
+        # yet — the same allowance the weight and podium sections make above. At freeze the
+        # checks below still run and refuse it.
+        judges_chosen = bool(
+            raw_live_challenge.get("challenge_judge_ids")
+            or raw_live_challenge.get("final_judge_ids")
+        )
+        if judges_present and not missing_judges and (judges_chosen or strict_live_contract):
 
             def _judge_ids(key: str) -> list[int]:
                 raw_ids = raw_live_challenge.get(key)
@@ -2263,6 +2289,36 @@ def _has_live_audience_dependency(value) -> bool:
     return False
 
 
+def _live_first_round_select_count(root: dict, first_round_key: str) -> int | None:
+    """The qualifier SELECT's count for the first round, or ``None`` when the graph differs.
+
+    Walks the shape the built-in ships (ASSESS(round=r1) → RANK → SELECT) rather than guessing,
+    so a hand-edited graph is simply not checked here instead of being misread.
+    """
+
+    nodes = [node for node in (root.get("nodes") or []) if isinstance(node, dict)]
+    by_source: dict[object, list[dict]] = {}
+    for node in nodes:
+        by_source.setdefault(node.get("source"), []).append(node)
+    assess = next(
+        (
+            node
+            for node in nodes
+            if node.get("type") == "ASSESS" and str(node.get("round") or "") == first_round_key
+        ),
+        None,
+    )
+    if assess is None:
+        return None
+    for rank in by_source.get(assess.get("key"), []):
+        if rank.get("type") != "RANK":
+            continue
+        for select in by_source.get(rank.get("key"), []):
+            if select.get("type") == "SELECT" and isinstance(select.get("count"), int):
+                return select["count"]
+    return None
+
+
 def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     """Validate the cross-domain invariants unique to the 2026 live format."""
     live_config = binding.get("live_challenge") or {}
@@ -2293,8 +2349,22 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     )
     if first_round is None:
         raise ValidationError("2026 现场赛制绑定的第一轮物理评分轮不存在。")
-    if first_round.advance_count != LIVE_2026_SEAT_COUNT:
-        raise ValidationError(f"2026 现场赛制第一轮晋级人数必须为 {LIVE_2026_SEAT_COUNT}。")
+    # The counts are present whenever a ruleset actually freezes: ``validate_binding`` runs
+    # first and refuses to normalize a live block without them. A binding that never declared
+    # them is not the parameterized shape, so the counts-derived relations are skipped rather
+    # than compared against a zero that means "absent".
+    seat_count = int(live_config.get("seat_count") or 0)
+    if seat_count and first_round.advance_count != seat_count:
+        raise ValidationError(f"2026 现场赛制第一轮晋级人数必须等于初始席位数（{seat_count}）。")
+    # The definition's qualifier SELECT is a second copy of the seat count. It can only be
+    # *checked*, never derived: rewriting the definition at freeze would move content_hash and
+    # so the identity every audited StageResult is keyed under.
+    definition_count = _live_first_round_select_count(root, first_round_key)
+    if seat_count and definition_count is not None and definition_count != seat_count:
+        raise ValidationError(
+            f"2026 现场赛制第一轮的晋级名额（{definition_count}）"
+            f"与初始席位数（{seat_count}）不一致。"
+        )
     if first_round.score_completion_mode != ContestRound.CompletionMode.MINIMUM_VALID:
         raise ValidationError("2026 现场赛制第一轮必须使用最低有效评委数评分完成模式。")
     if first_round.judge_count is None or first_round.judge_count < 1:
@@ -2346,6 +2416,8 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         group_snapshot = validate_live_first_round_group_stage(
             group_stage,
             runtime_approved_singers(first_round.activity).values_list("pk", flat=True),
+            group_count=int(live_config.get("group_count") or LIVE_2026_GROUP_COUNT),
+            group_size=int(live_config.get("group_size") or LIVE_2026_GROUP_SIZE),
         )
         validate_live_first_round_performance_groups(
             first_round,

@@ -14,6 +14,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
+from ruleset.live_format import live_challenge_counts_from_binding
 from ruleset.models import RulesetVersion
 from ruleset.resolver import (
     AwardDecision,
@@ -43,6 +44,8 @@ class PodiumConfig:
     aggregate_node: str
     first_weight: Decimal
     third_weight: Decimal
+    #: 第一轮晋级数 / 初始席位数 — the third round holds exactly this many singers.
+    seat_count: int
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,7 @@ def podium_config(version: RulesetVersion) -> PodiumConfig:
         aggregate_node=str(live["podium_aggregate_node"]).strip(),
         first_weight=first_weight,
         third_weight=third_weight,
+        seat_count=live_challenge_counts_from_binding(binding).seat_count,
     )
 
 
@@ -182,8 +186,8 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
         else []
     )
     if session is not None and (
-        len(third_entries) != 10
-        or len(set(holder_ids)) != 10
+        len(third_entries) != config.seat_count
+        or len(set(holder_ids)) != config.seat_count
         or {entry.singer_id for entry in third_entries} != set(holder_ids)
     ):
         reasons.append("podium_final_ten_roster_incomplete")
@@ -211,7 +215,7 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
                 performance.singer_id: performance
                 for performance in Performance.objects.filter(round=third_round)
             }
-            if set(performances) != set(final_ids) or len(performances) != 10:
+            if set(performances) != set(final_ids) or len(performances) != config.seat_count:
                 reasons.append("podium_third_round_performances_incomplete")
             elif (
                 PerformanceScoreState.objects.filter(performance__in=performances.values())
@@ -221,7 +225,7 @@ def _facts(version: RulesetVersion, activity) -> PodiumFacts:
                 reasons.append("podium_third_round_performances_unlocked")
             elif (
                 PerformanceScoreState.objects.filter(performance__in=performances.values()).count()
-                != 10
+                != config.seat_count
             ):
                 reasons.append("podium_third_round_performances_unlocked")
 

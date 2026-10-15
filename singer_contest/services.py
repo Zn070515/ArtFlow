@@ -505,13 +505,23 @@ def _live_group_stage_for_round(contest_round: ContestRound, *, require_binding:
 
 def live_first_round_group_snapshot(contest_round: ContestRound, *, require_binding: bool = False):
     """Return the frozen 2026 first-round group snapshot for staff setup screens."""
+    from ruleset.live_format import live_challenge_counts_for_round
+
     from .group_chorus import validate_live_first_round_group_stage
 
     stage = _live_group_stage_for_round(contest_round, require_binding=require_binding)
     if stage is None:
         return None
+    counts = live_challenge_counts_for_round(contest_round, require=require_binding)
+    if counts is None:
+        return None
     expected_ids = {singer.pk for singer in _round_source_singers(contest_round)}
-    return validate_live_first_round_group_stage(stage, expected_ids)
+    return validate_live_first_round_group_stage(
+        stage,
+        expected_ids,
+        group_count=counts.group_count,
+        group_size=counts.group_size,
+    )
 
 
 def _validate_live_round_group_setup(contest_round: ContestRound, *, require_groups: bool):
