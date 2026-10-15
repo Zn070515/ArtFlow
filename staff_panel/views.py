@@ -95,6 +95,7 @@ from realtime.events import schedule_activity_event
 from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
+from ruleset.live_format import is_live_2026_template, provision_live_2026_ruleset
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.planning import (
     PlanningCompileResult,
@@ -5298,6 +5299,28 @@ def ruleset_planning_apply(request, pk):
     return JsonResponse({"ok": True, "redirect": reverse("staff:ruleset_edit", args=[saved.pk])})
 
 
+def _provision_builtin_live_format(request, *, template, activity, name):
+    """Provision the 2026 built-in format, or return ``None`` for an ordinary template.
+
+    The system built-in behaves exactly like any other ruleset creation — same page, same
+    editor, everything still editable — except that the first round and the format's fixed
+    binding keys arrive already filled in.
+    """
+
+    if not is_live_2026_template(template):
+        return None
+    version = provision_live_2026_ruleset(
+        activity, template=template, name=name, operator=request.user
+    )
+    messages.success(
+        request,
+        f"已建立「{template.name}」：第一轮与赛制形态已预填，请补充两套权重、三轮评委与评分表。",
+    )
+    # The planning workbench cannot express this graph losslessly (no AGGREGATE node), so it
+    # renders read-only; the editor is where the remaining configuration lives.
+    return redirect("staff:ruleset_edit", pk=version.pk)
+
+
 @staff_required
 @transaction.atomic
 def contest_ruleset_create(request):
@@ -5330,6 +5353,11 @@ def contest_ruleset_create(request):
                 pk=template_pk,
                 capability_status=RulesetTemplate.CapabilityStatus.PRODUCTION,
             )
+        provisioned = _provision_builtin_live_format(
+            request, template=template, activity=activity, name=name
+        )
+        if provisioned is not None:
+            return provisioned
         # One activity owns one ContestRuleset (versions live on RulesetVersion). If a
         # ruleset already exists, reuse it instead of creating a competing authority that
         # would make recompute_activity_result's single-authority assumption ambiguous.
@@ -5923,6 +5951,11 @@ def ruleset_clone_from_template(request, template_pk):
     activity = lock_activity_for_action(activity)
     _ensure_activity_mutable(activity)
     name = (request.POST.get("name") or "").strip() or template.name
+    provisioned = _provision_builtin_live_format(
+        request, template=template, activity=activity, name=name
+    )
+    if provisioned is not None:
+        return provisioned
     ruleset, _created = ContestRuleset.objects.get_or_create(
         activity=activity,
         defaults={

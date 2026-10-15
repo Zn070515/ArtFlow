@@ -32,6 +32,7 @@ from entry_access.services import (
     redeem_access_grant,
 )
 from ruleset.admin import RulesetVersionAdmin
+from ruleset.live_format import provision_live_2026_ruleset
 from ruleset.models import ContestRuleset, RulesetVersion
 from ruleset.services import (
     create_ruleset_version,
@@ -1694,6 +1695,11 @@ class AuthorityMutationMatrixTests(TestCase):
             ),
             "supersede_ruleset_version": lambda: supersede_ruleset_version(
                 self.version, created_by=actor
+            ),
+            # ``require_current_staff`` is the first statement, so the template is never
+            # reached by a rejected operator.
+            "provision_live_2026_ruleset": lambda: provision_live_2026_ruleset(
+                self.activity, template=None, name="live", operator=actor
             ),
         }
 

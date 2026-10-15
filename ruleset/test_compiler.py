@@ -1890,6 +1890,44 @@ class BindingValidationTests(_RulesetModelBase):
             },
         )
 
+    def test_normalized_live_weights_survive_revalidation(self):
+        """Freeze re-validates the surface it stored, so normalization must be idempotent.
+
+        The editor stores ``"0.4000"``/``"0.6000"``; feeding that back used to be read as a
+        pair summing to 1 instead of 100 and made an otherwise complete ruleset unfreezable.
+        """
+
+        ruleset = self.make_ruleset()
+        round_ = self._singer_round(ruleset)
+        surface = {
+            "format_key": "2026_live_challenge",
+            "participant_count": "15",
+            "seat_count": "10",
+            "challenge_count": "5",
+            "first_round_weight": "40%",
+            "challenge_round_weight": "60%",
+            "podium_stage_key": "final_podium",
+            "podium_first_round_key": "first_round",
+            "podium_third_round_key": "third_round",
+            "podium_aggregate_node": "podium_total",
+            "podium_first_round_weight": "30%",
+            "podium_third_round_weight": "70%",
+        }
+        normalized = validate_binding(
+            ruleset,
+            {"round_keys": {"first_round": round_.pk}, "live_challenge": surface},
+        )["live_challenge"]
+
+        again = validate_binding(
+            ruleset,
+            {
+                "round_keys": {"first_round": round_.pk},
+                "live_challenge": dict(normalized),
+            },
+        )["live_challenge"]
+
+        self.assertEqual(again, normalized)
+
     def test_2026_live_marker_is_preserved_in_the_binding(self):
         ruleset = self.make_ruleset()
         normalized = validate_binding(

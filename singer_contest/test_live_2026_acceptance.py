@@ -19,8 +19,8 @@ from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
-from ruleset.models import ContestRuleset, RulesetVersion
-from ruleset.services import freeze_ruleset_version
+from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+from ruleset.services import _snapshot_binding, freeze_ruleset_version, update_ruleset_binding
 
 from .challenge_services import (
     confirm_challenge_match_result,
@@ -535,6 +535,65 @@ class Live2026AcceptanceTests(TestCase):
         material_status = response.context["live_material_status"]
         self.assertEqual(material_status["missing_count"], 5)
         self.assertContains(response, "仍有 5 组缺少已审核材料")
+
+    def test_builtin_provisioned_ruleset_completes_and_freezes(self):
+        """The built-in's preset plus the four operator items must reach a freeze.
+
+        This is the seam that matters: provisioning writes only the format's fixed shape, so
+        the ratios and judge lists come from the operator afterwards — and the freeze contract
+        has to accept exactly that combination.
+        """
+
+        from ruleset.live_format import provision_live_2026_ruleset
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY, seed_ruleset_templates
+
+        seed_ruleset_templates(self.admin)
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+
+        # Start from a ruleset carrying only the format's shape, as provisioning leaves it.
+        self.ruleset.round_keys = {"r1": self.first_round.pk}
+        self.ruleset.live_challenge = {}
+        self.ruleset.save(update_fields=["round_keys", "live_challenge"])
+
+        version = provision_live_2026_ruleset(
+            self.activity, template=template, name="2026 渡梦内置", operator=self.admin
+        )
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.live_challenge["seat_count"], 10)
+        self.assertNotIn("first_round_weight", self.ruleset.live_challenge)
+        self.assertEqual(self.ruleset.group_stage_keys["r1"], self.group_stage.pk)
+
+        # The operator fills only the four items the format leaves open.
+        update_ruleset_binding(
+            self.ruleset,
+            binding={
+                **_snapshot_binding(self.ruleset),
+                "live_challenge": {
+                    **self.ruleset.live_challenge,
+                    "first_round_weight": "40%",
+                    "challenge_round_weight": "60%",
+                    "podium_first_round_weight": "30%",
+                    "podium_third_round_weight": "70%",
+                    "challenge_judge_ids": [judge.pk for judge in self.judges[:4]],
+                    "challenge_minimum_judge_count": 4,
+                    "final_judge_ids": [judge.pk for judge in self.judges[1:]],
+                    "final_minimum_judge_count": 4,
+                },
+            },
+            operator=self.admin,
+        )
+
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.live_challenge["first_round_weight"], "0.4000")
+        self.assertEqual(self.ruleset.live_challenge["podium_first_round_weight"], "0.3000")
+
+        frozen = freeze_ruleset_version(version, self.admin)
+
+        self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+        live = frozen.binding["live_challenge"]
+        self.assertEqual(live["format_key"], "2026_live_challenge")
+        self.assertEqual(live["participant_count"], 15)
+        self.assertEqual(live["first_round_weight"], "0.4000")
 
     def test_live_freeze_requires_five_groups_of_three(self):
         malformed = [
