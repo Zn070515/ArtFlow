@@ -7660,6 +7660,59 @@ class RulesetTemplateLibraryTests(TestCase):
 
         self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 
+    def test_changing_the_seat_count_on_a_prepared_round_rolls_everything_back(self):
+        """The binding edit and the round sync are one unit on the advanced page too."""
+
+        from common.authority import CONTEST_ROUND_STATE, authority_write
+        from ruleset.models import ContestRuleset
+        from singer_contest.models import ContestRound
+
+        activity, _ruleset, version = self._provisioned_version(title="2026 已准备第一轮")
+        contest_round = ContestRound.objects.get(activity=activity)
+        with authority_write(CONTEST_ROUND_STATE):
+            ContestRound.objects.filter(pk=contest_round.pk).update(
+                status=ContestRound.Status.PREPARED
+            )
+
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[version.pk]),
+            {
+                "live_format_key": "2026_live_challenge",
+                "live_participant_count": "15",
+                "live_seat_count": "8",
+                "live_group_count": "5",
+                "live_group_size": "3",
+                "live_first_weight": "40",
+                "live_challenge_weight": "60",
+                "live_podium_first_weight": "30",
+                "live_podium_third_weight": "70",
+                "round_binding_key": "r1",
+                "round_binding_value": str(contest_round.pk),
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "第一轮已准备或已锁定")
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        # Neither half moved: the binding must not say 8 beside a round that advances 10.
+        self.assertEqual(ruleset.live_challenge["seat_count"], 10)
+        self.assertEqual(ContestRound.objects.get(pk=contest_round.pk).advance_count, 10)
+
+    def test_activity_workspace_points_at_the_current_ruleset(self):
+        """The workspace answers "do we have a ruleset, and where do I continue?"."""
+
+        activity, _ruleset, version = self._provisioned_version(title="2026 工作区入口")
+
+        response = self.client.get(reverse("staff:activity_workspace", args=[activity.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.context["ruleset_summary"]
+        self.assertEqual(summary["version"].pk, version.pk)
+        self.assertTrue(summary["is_live_2026"])
+        self.assertTrue(summary["outstanding"])
+        self.assertContains(response, "继续准备今年赛制")
+        self.assertContains(response, "还缺：")
+
     def test_clone_entry_point_rejects_a_non_production_template(self):
         """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
         from ruleset.models import ContestRuleset, RulesetTemplate

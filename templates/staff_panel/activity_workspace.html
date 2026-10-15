@@ -99,9 +99,28 @@
         </section>
         <section class="bg-white border border-gray-200 rounded-lg p-5">
             <h2 class="font-semibold text-gray-900">赛制与评分</h2>
-            <p class="text-sm text-gray-500 mt-1">当前工作区创建的轮次、评分标准都会绑定到本活动。</p>
+            {% if ruleset_summary %}
+            <p class="text-sm text-gray-700 mt-2 font-medium">{{ ruleset_summary.version.ruleset.name }}</p>
+            <p class="text-sm text-gray-500 mt-1">
+                {% if ruleset_summary.is_live_2026 %}2026 现场踢馆 · {% endif %}{{ ruleset_summary.version.get_status_display }} · v{{ ruleset_summary.version.version }}{% if ruleset_summary.total_count %} · {{ ruleset_summary.done_count }}/{{ ruleset_summary.total_count }} 项完成{% endif %}
+            </p>
+            {% if ruleset_summary.outstanding %}
+            <p class="text-sm text-gray-600 mt-2">还缺：</p>
+            <ul class="mt-1 space-y-1 text-sm text-gray-700 list-disc list-inside">
+                {% for row in ruleset_summary.outstanding %}<li>{{ row.label }}</li>{% endfor %}
+            </ul>
+            {% elif ruleset_summary.total_count %}
+            <p class="text-sm text-emerald-700 mt-2">全部就绪，可以冻结。</p>
+            {% endif %}
+            <div class="flex flex-wrap gap-3 mt-4 text-sm">
+                <a class="touch-target bg-brand text-white rounded px-3 py-1" href="{{ ruleset_summary.continue_url }}">{% if ruleset_summary.is_live_2026 %}继续准备今年赛制{% else %}编辑赛制{% endif %}</a>
+                <a class="touch-target text-brand hover:underline" href="{% url 'staff:ruleset_validate' ruleset_summary.version.pk %}">{% if ruleset_summary.is_live_2026 %}正式启用前检查{% else %}校验赛制{% endif %}</a>
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500 mt-1">本活动还没有赛制。当前工作区创建的轮次、评分标准都会绑定到本活动。</p>
+            {% endif %}
             {% if can_configure_singer %}<div class="flex flex-wrap gap-3 mt-4 text-sm">
-                <a class="touch-target text-brand hover:underline" href="{% url 'staff:contest_ruleset_create' %}?activity={{ activity.pk }}">编辑赛制</a>
+                {% if not ruleset_summary %}<a class="touch-target text-brand hover:underline" href="{% url 'staff:contest_ruleset_create' %}?activity={{ activity.pk }}">新建赛制</a>{% endif %}
                 <a class="touch-target text-brand hover:underline" href="{% url 'staff:rubric_create' %}?activity_id={{ activity.pk }}">新建评分标准</a>
                 <a class="touch-target text-brand hover:underline" href="{% url 'staff:round_create' %}?activity_id={{ activity.pk }}">新建比赛轮次</a>
             </div>{% endif %}

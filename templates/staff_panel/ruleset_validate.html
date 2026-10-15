@@ -1,18 +1,40 @@
 {% extends "base.html" %}
 
-{% block title %}校验结果 — 赛制 — ArtFlow{% endblock %}
+{% block title %}{% if live_2026 %}正式启用前检查{% else %}校验结果{% endif %} — 赛制 — ArtFlow{% endblock %}
 
 {% block content %}
 <div class="max-w-4xl mx-auto px-4 py-10">
     <p class="text-sm text-gray-500 mb-2">
-        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">返回编辑</a> / 校验结果
+        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">返回编辑</a> /
+        {% if live_2026 %}正式启用前检查{% else %}校验结果{% endif %}
     </p>
     <h1 class="text-2xl font-bold text-gray-900 mb-2">{{ version.ruleset }}</h1>
 
+    {% if live_2026 %}
+    <p class="text-sm text-gray-500 mb-4">这里用的就是冻结时用的那套校验，所以「全部就绪」等于冻结真能通过。</p>
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">正式启用前检查</div>
+        <ul class="divide-y divide-gray-100">
+            {% for row in preflight %}
+            <li class="px-4 py-2 text-sm">
+                <span class="{% if row.done %}text-emerald-700{% else %}text-red-700{% endif %}">{% if row.done %}✓{% else %}✗{% endif %}</span>
+                <span class="{% if row.done %}text-gray-800{% else %}text-gray-900 font-medium{% endif %}">{{ row.label }}</span>
+                {% if not row.done and row.detail %}<span class="block mt-1 text-xs text-red-700">{{ row.detail }}</span>{% endif %}
+                {% if not row.done and row.url %}<a href="{{ row.url }}" class="inline-block mt-1 text-xs border border-brand text-brand rounded px-3 py-1">{{ row.action }}</a>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    <p class="text-sm text-gray-600 mb-4">
+        <a href="{{ config_url }}" class="border border-brand text-brand rounded px-3 py-1">回到 2026 决赛赛制配置</a>
+    </p>
+    <h2 class="text-sm font-semibold text-gray-700 mb-2">规则结构校验（高级）</h2>
+    {% else %}
     {% if passes %}
     <div class="mb-4 text-sm px-3 py-2 rounded bg-emerald-50 border border-emerald-300 text-emerald-800">校验通过</div>
     {% else %}
     <div class="mb-4 text-sm px-3 py-2 rounded bg-red-50 border border-red-300 text-red-800">存在错误，无法冻结。</div>
+    {% endif %}
     {% endif %}
 
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">

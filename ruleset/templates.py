@@ -580,10 +580,10 @@ _FIRST_BATCH_DEFINITIONS = _first_batch()
 
 # --- 2026 院十佳·渡梦 live challenge (system built-in) ----------------------
 #
-# The format's shape — 15 singers, 5 groups of 3, 10 seats, 5 challenge turns, the podium
-# keys and the two independent weight pairs — is already enforced at freeze by
-# ``ruleset.services._validate_2026_live_contract`` and ``validate_binding``. This built-in
-# is what makes that shape *arrive pre-filled*: creating a ruleset from it provisions the
+# What freeze enforces is that the numbers relate coherently (see
+# ``ruleset.services.validate_binding``); what this built-in does is make one particular set
+# *arrive pre-filled* — 15 singers, 5 groups of 3, 10 seats, 5 challenge turns. Everything
+# below is a starting value the operators may change: creating a ruleset from it provisions the
 # first-round physical round and writes the platform-owned binding keys. The four operator
 # items (both weight pairs, both judge lists) are deliberately left for staff to fill.
 LIVE_2026_BUILTIN_KEY = "live_challenge_2026"
@@ -618,7 +618,7 @@ LIVE_2026_PODIUM_KEYS = {
 
 
 def live_2026_questionnaire():
-    """The material this format collects: R2 and R3 songs plus accompaniments for all 15.
+    """The material this format collects: R2 and R3 songs plus accompaniments, for everyone.
 
     Every entrant prepares both rounds up front — a singer who never challenges may still
     be challenged, and one who never reaches the third round may still get there — so both

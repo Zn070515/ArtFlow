@@ -332,6 +332,10 @@ def validate_binding(
             return value
 
         group_count = _group_int("group_count", LIVE_2026_GROUP_COUNT)
+        # ``group_size`` is a pre-fill suggestion, not a contract: a singer dropping out on
+        # the day turns 15 into 14, and "5 groups of 3+3+3+3+2" is a perfectly ordinary answer
+        # that an equal-size identity would forbid. Only the group *count* is a parameter the
+        # freeze checks; the actual sizes belong to the group stage.
         group_size = _group_int("group_size", LIVE_2026_GROUP_SIZE)
         # 踢馆人数 is derived and never taken from the form: every singer who misses the
         # initial seats gets exactly one challenge opportunity, so the turn count *is* the
@@ -339,8 +343,6 @@ def validate_binding(
         challenge_count = participant_count - seat_count
         if participant_count <= seat_count:
             raise ValidationError("第一轮参赛人数必须大于第一轮晋级人数。")
-        if group_count * group_size != participant_count:
-            raise ValidationError("第一轮组数 × 每组人数必须等于第一轮参赛人数。")
         posted_challenge_count = str(raw_live_challenge.get("challenge_count") or "").strip()
         if posted_challenge_count and posted_challenge_count != str(challenge_count):
             raise ValidationError("踢馆人数必须等于第一轮参赛人数减第一轮晋级数，不能单独设置。")
@@ -2319,6 +2321,50 @@ def _live_first_round_select_count(root: dict, first_round_key: str) -> int | No
     return None
 
 
+def _with_first_round_select_count(nodes, first_round_key: str, seat_count: int) -> list | None:
+    """The node list with the first round's qualifier SELECT set to ``seat_count``.
+
+    Returns ``None`` when the graph is not the shipped ASSESS → RANK → SELECT shape, so a
+    hand-edited definition is left alone and the freeze check reports the disagreement
+    instead of this silently rewriting somebody's graph.
+    """
+
+    typed = [node for node in nodes if isinstance(node, dict)]
+    assess = next(
+        (
+            node
+            for node in typed
+            if node.get("type") == "ASSESS" and str(node.get("round") or "") == first_round_key
+        ),
+        None,
+    )
+    if assess is None:
+        return None
+    rank = next(
+        (
+            node
+            for node in typed
+            if node.get("type") == "RANK" and node.get("source") == assess.get("key")
+        ),
+        None,
+    )
+    if rank is None:
+        return None
+    select_key = next(
+        (
+            node.get("key")
+            for node in typed
+            if node.get("type") == "SELECT" and node.get("source") == rank.get("key")
+        ),
+        None,
+    )
+    if select_key is None:
+        return None
+    return [
+        {**node, "count": seat_count} if node.get("key") == select_key else node for node in nodes
+    ]
+
+
 def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     """Validate the cross-domain invariants unique to the 2026 live format."""
     live_config = binding.get("live_challenge") or {}
@@ -2417,7 +2463,6 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
             group_stage,
             runtime_approved_singers(first_round.activity).values_list("pk", flat=True),
             group_count=int(live_config.get("group_count") or LIVE_2026_GROUP_COUNT),
-            group_size=int(live_config.get("group_size") or LIVE_2026_GROUP_SIZE),
         )
         validate_live_first_round_performance_groups(
             first_round,

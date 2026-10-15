@@ -100,6 +100,7 @@ from ruleset.live_format import (
     is_live_2026_template,
     live_challenge_counts_for_activity,
     live_challenge_counts_from_binding,
+    preflight_live_2026,
     provision_live_2026_ruleset,
 )
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -616,11 +617,38 @@ def activity_workspace(request, pk):
         and not activity.is_locked
         and activity.phase != Activity.Phase.ARCHIVED
     )
+    # The workspace should answer "do we already have a ruleset, and where do I continue?"
+    # rather than pointing at the create page and leaving staff to work it out.
+    versions = RulesetVersion.objects.filter(ruleset__activity=activity)
+    editing_version = (
+        versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
+        or versions.filter(is_current=True).order_by("-version").first()
+    )
+    ruleset_summary = None
+    if editing_version is not None:
+        is_live_2026 = (
+            str((editing_version.ruleset.live_challenge or {}).get("format_key") or "")
+            == LIVE_CHALLENGE_FORMAT_KEY
+        )
+        checklist = _live_2026_checklist(editing_version) if is_live_2026 else []
+        ruleset_summary = {
+            "version": editing_version,
+            "is_live_2026": is_live_2026,
+            "outstanding": [row for row in checklist if not row["done"]],
+            "done_count": sum(1 for row in checklist if row["done"]),
+            "total_count": len(checklist),
+            "continue_url": (
+                reverse("staff:ruleset_live_2026_config", args=[editing_version.pk])
+                if is_live_2026
+                else reverse("staff:ruleset_edit", args=[editing_version.pk])
+            ),
+        }
     return render(
         request,
         "staff_panel/activity_workspace.html",
         {
             "activity": activity,
+            "ruleset_summary": ruleset_summary,
             "rounds": rounds,
             "vote_sessions": vote_sessions,
             "rubrics": rubrics,
@@ -5832,49 +5860,42 @@ def ruleset_bind(request, pk):
                 ),
             }
 
-        update_ruleset_binding(
-            version.ruleset,
-            binding={
-                "stage_key": request.POST.get("stage_key"),
-                "round_keys": _parse_pairs(
-                    "round_binding_key", "round_binding_value", "round_keys", {}
-                ),
-                "vote_keys": _parse_pairs(
-                    "vote_binding_key", "vote_binding_value", "vote_keys", {}
-                ),
-                "vote_scoring_rule_keys": _parse_pairs(
-                    "scoring_binding_key", "scoring_binding_value", "vote_scoring_rule_keys", {}
-                ),
-                "group_keys": _parse_pairs(
-                    "group_binding_key", "group_binding_value", "group_keys", {}
-                ),
-                "group_stage_keys": _parse_pairs(
-                    "group_stage_binding_key",
-                    "group_stage_binding_value",
-                    "group_stage_keys",
-                    {},
-                ),
-                "audience_keys": _parse_json("audience_keys", {}),
-                "live_challenge": live_challenge_binding,
-                "announcement_blocks": _parse_json("announcement_blocks", []),
-                "announcement_blocks_by_checkpoint": _parse_json(
-                    "announcement_blocks_by_checkpoint", {}
-                ),
-            },
-            operator=request.user,
-            base_binding=request.POST.get("base_binding") or None,
-        )
-    except ValidationError as exc:
-        messages.error(request, domain_error_messages(exc))
-        return redirect("staff:ruleset_edit", pk=pk)
-    except PermissionDenied as exc:
-        messages.error(request, domain_error_messages(exc))
-        return redirect("staff:ruleset_edit", pk=pk)
-    try:
-        # The first round's advance_count is what writes ``is_advanced``, so the seat count
-        # moving here has to move there too.
-        apply_live_2026_counts(version.ruleset, operator=request.user)
-    except ValidationError as exc:
+        payload = {
+            "stage_key": request.POST.get("stage_key"),
+            "round_keys": _parse_pairs(
+                "round_binding_key", "round_binding_value", "round_keys", {}
+            ),
+            "vote_keys": _parse_pairs("vote_binding_key", "vote_binding_value", "vote_keys", {}),
+            "vote_scoring_rule_keys": _parse_pairs(
+                "scoring_binding_key", "scoring_binding_value", "vote_scoring_rule_keys", {}
+            ),
+            "group_keys": _parse_pairs(
+                "group_binding_key", "group_binding_value", "group_keys", {}
+            ),
+            "group_stage_keys": _parse_pairs(
+                "group_stage_binding_key",
+                "group_stage_binding_value",
+                "group_stage_keys",
+                {},
+            ),
+            "audience_keys": _parse_json("audience_keys", {}),
+            "live_challenge": live_challenge_binding,
+            "announcement_blocks": _parse_json("announcement_blocks", []),
+            "announcement_blocks_by_checkpoint": _parse_json(
+                "announcement_blocks_by_checkpoint", {}
+            ),
+        }
+        # One unit, exactly as the 2026 configuration page does: if the counts cannot be
+        # carried through to the round and the definition, the binding edit must not stand.
+        with transaction.atomic():
+            update_ruleset_binding(
+                version.ruleset,
+                binding=payload,
+                operator=request.user,
+                base_binding=request.POST.get("base_binding") or None,
+            )
+            apply_live_2026_counts(version.ruleset, version, operator=request.user)
+    except (ValidationError, PermissionDenied) as exc:
         messages.error(request, domain_error_messages(exc))
         return redirect("staff:ruleset_edit", pk=pk)
     messages.success(request, "生产绑定已保存。")
@@ -5890,133 +5911,33 @@ def _live_weight_percent(raw) -> str:
         return ""
 
 
-def _live_2026_checklist(version, ruleset, counts) -> list[dict]:
-    """The "我还差什么" rows: what the freeze gate will still refuse, in plain language."""
+def _live_2026_checklist(version) -> list[dict]:
+    """The "我还差什么" rows — the freeze gate's own verdict, in plain language.
 
-    from common.lifecycle import runtime_approved_singers
-    from singer_contest.models import ContestRound, GroupStage
+    These are not a second opinion: ``preflight_live_2026`` runs the same validators the
+    freeze runs, in the same order, so "全部就绪" here means the freeze will actually pass.
+    """
 
-    config = dict(ruleset.live_challenge or {})
-    first_round_key = str(config.get("podium_first_round_key") or "r1")
-    round_id = (ruleset.round_keys or {}).get(first_round_key)
-    contest_round = (
-        ContestRound.objects.filter(pk=round_id, activity_id=ruleset.activity_id)
-        .prefetch_related("rubric__criteria")
-        .first()
-        if round_id not in (None, "")
-        else None
-    )
-    standard_missing = []
-    if contest_round is None:
-        standard_missing.append("物理评分轮")
-    else:
-        if not (contest_round.rubric_id and contest_round.rubric.criteria.exists()):
-            standard_missing.append("评分标准")
-        if not contest_round.judge_count:
-            standard_missing.append("评委人数")
-        if not contest_round.minimum_judge_count:
-            standard_missing.append("最低有效评委数")
-
-    group_stage_id = (ruleset.group_stage_keys or {}).get(first_round_key)
-    if group_stage_id in (None, "") and len(ruleset.group_stage_keys or {}) == 1:
-        group_stage_id = next(iter((ruleset.group_stage_keys or {}).values()))
-    group_stage = (
-        GroupStage.objects.filter(pk=group_stage_id, activity_id=ruleset.activity_id).first()
-        if group_stage_id not in (None, "")
-        else None
-    )
-
-    def _pair_filled(first_key: str, second_key: str) -> bool:
-        return bool(str(config.get(first_key) or "").strip()) and bool(
-            str(config.get(second_key) or "").strip()
+    actions = {
+        "binding": ("staff:ruleset_live_2026_config", "本页填写"),
+        "definition": ("staff:ruleset_edit", "去编辑器"),
+        "round": ("staff:round_list", "去轮次页"),
+        "questionnaire": ("staff:ruleset_questionnaire", "去填写"),
+        "successor": ("staff:ruleset_questionnaire", "去检查"),
+    }
+    rows = []
+    for item in preflight_live_2026(version):
+        route, action = actions.get(item.key, ("", ""))
+        rows.append(
+            {
+                "label": item.label,
+                "done": item.ready,
+                "detail": item.message,
+                "url": reverse(route, args=[version.pk]) if route else "",
+                "action": action,
+            }
         )
-
-    judge_keys = (
-        "challenge_judge_ids",
-        "challenge_minimum_judge_count",
-        "final_judge_ids",
-        "final_minimum_judge_count",
-    )
-    judges_filled = all(config.get(key) not in (None, "", []) for key in judge_keys)
-
-    try:
-        questionnaire_present = json.loads(version.definition).get("questionnaire") is not None
-    except (TypeError, ValueError):
-        questionnaire_present = False
-
-    approved_count = runtime_approved_singers(ruleset.activity).count()
-
-    return [
-        {
-            "label": "第一轮物理轮已绑定，评分标准、评委人数、最低有效评委数已填写",
-            "done": not standard_missing,
-            "detail": ("" if not standard_missing else "还缺：" + "、".join(standard_missing)),
-            "url": (
-                reverse("staff:round_edit", args=[contest_round.pk])
-                if contest_round is not None
-                else reverse("staff:round_create")
-            ),
-            "action": "去填写",
-        },
-        {
-            "label": (
-                f"第一轮分组合唱分组已冻结，且为 {counts.group_count} 组 × {counts.group_size} 人"
-            ),
-            "done": bool(group_stage and group_stage.status == GroupStage.Status.FROZEN),
-            "detail": "" if group_stage else "尚未建立第一轮分组",
-            "url": (
-                reverse("staff:group_stage_detail", args=[group_stage.pk])
-                if group_stage is not None
-                else reverse("staff:group_stage_create", args=[ruleset.activity_id])
-            ),
-            "action": "去填写",
-        },
-        {
-            "label": "组数 × 每组人数 = 第一轮参赛人数",
-            "done": counts.group_count * counts.group_size == counts.participant_count,
-            "detail": (f"{counts.group_count} × {counts.group_size} = {counts.participant_count}"),
-            "url": "",
-            "action": "",
-        },
-        {
-            "label": "踢馆成绩权重已填写且合计 100%",
-            "done": _pair_filled("first_round_weight", "challenge_round_weight"),
-            "detail": "",
-            "url": "",
-            "action": "",
-        },
-        {
-            "label": "冠亚季军成绩权重已填写且合计 100%",
-            "done": _pair_filled("podium_first_round_weight", "podium_third_round_weight"),
-            "detail": "",
-            "url": "",
-            "action": "",
-        },
-        {
-            "label": "第二轮（踢馆）与第三轮评委已选择，最低有效评委数已填写",
-            "done": judges_filled,
-            "detail": "",
-            "url": "",
-            "action": "",
-        },
-        {
-            "label": "选手问卷已声明第二、第三轮曲目与伴奏",
-            "done": questionnaire_present,
-            "detail": "",
-            "url": reverse("staff:ruleset_questionnaire", args=[version.pk]),
-            "action": "去填写",
-        },
-        {
-            "label": (
-                f"实际审核通过的选手数与「第一轮参赛人数」一致（{approved_count} / "
-                f"{counts.participant_count}）"
-            ),
-            "done": approved_count == counts.participant_count,
-            "detail": "运行时核定：名单未最终确定前只做提示，不阻塞配置。",
-            "url": reverse("staff:singer_registration_list"),
-            "action": "查看名单",
-        },
-    ]
+    return rows
 
 
 @staff_required
@@ -6068,7 +5989,7 @@ def ruleset_live_2026_config(request, pk):
                     operator=request.user,
                     base_binding=request.POST.get("base_binding") or None,
                 )
-                apply_live_2026_counts(ruleset, operator=request.user)
+                apply_live_2026_counts(ruleset, version, operator=request.user)
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, domain_error_messages(exc))
         else:
@@ -6079,7 +6000,12 @@ def ruleset_live_2026_config(request, pk):
     counts = live_challenge_counts_from_binding(_snapshot_binding(ruleset))
     first_round_key = str(config.get("podium_first_round_key") or "r1")
     round_id = (ruleset.round_keys or {}).get(first_round_key)
-    checklist = _live_2026_checklist(version, ruleset, counts)
+    first_round = (
+        ContestRound.objects.filter(pk=round_id, activity_id=ruleset.activity_id).first()
+        if round_id not in (None, "")
+        else None
+    )
+    checklist = _live_2026_checklist(version)
     return render(
         request,
         "staff_panel/ruleset_live_2026_config.html",
@@ -6108,11 +6034,13 @@ def ruleset_live_2026_config(request, pk):
             ),
             "challenge_judge_ids": [int(v) for v in config.get("challenge_judge_ids") or []],
             "final_judge_ids": [int(v) for v in config.get("final_judge_ids") or []],
-            "first_round": ContestRound.objects.filter(
-                pk=round_id, activity_id=ruleset.activity_id
-            ).first()
-            if round_id not in (None, "")
-            else None,
+            "first_round": first_round,
+            # 第一轮一旦准备过就不能再改晋级人数。 Say so before the operator fills the page
+            # in and gets refused on save, and hand an admin the way out.
+            "first_round_needs_reset": bool(
+                first_round
+                and (first_round.status != ContestRound.Status.DRAFT or first_round.is_locked)
+            ),
             "checklist": checklist,
             "outstanding": sum(1 for row in checklist if not row["done"]),
             "binding_signature": _binding_signature(ruleset),
@@ -6150,11 +6078,15 @@ def manual_decision(request, pk):
 
 @staff_required
 def ruleset_validate(request, pk):
-    version = get_object_or_404(RulesetVersion, pk=pk)
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset"), pk=pk)
     report, plan = compile_definition(version.definition)
     completeness_issues = validate_definition_completeness(version.definition)
     if completeness_issues:
         report = ValidationReport(report.issues + completeness_issues)
+    is_live_2026 = (
+        str((version.ruleset.live_challenge or {}).get("format_key") or "")
+        == LIVE_CHALLENGE_FORMAT_KEY
+    )
     return render(
         request,
         "staff_panel/ruleset_validate.html",
@@ -6164,6 +6096,13 @@ def ruleset_validate(request, pk):
             "issues": [i.to_dict() for i in report.issues],
             "counts": report.counts(),
             "summary": plan.summary if plan else None,
+            # For a 2026 ruleset the compile report is only the graph. The gate that decides
+            # whether freeze will pass is the preflight, which runs freeze's own validators.
+            "live_2026": is_live_2026,
+            "preflight": _live_2026_checklist(version) if is_live_2026 else [],
+            "config_url": (
+                reverse("staff:ruleset_live_2026_config", args=[version.pk]) if is_live_2026 else ""
+            ),
         },
     )
 

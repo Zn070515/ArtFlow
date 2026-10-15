@@ -2179,21 +2179,30 @@ class BindingValidationTests(_RulesetModelBase):
                 },
             )
 
-    def test_rejects_grouping_that_does_not_multiply_out(self):
+    def test_accepts_unequal_groups(self):
+        """One singer withdrawing gives 3+3+3+3+2, which the format must not forbid.
+
+        Only the group *count* is a parameter the freeze checks; the sizes belong to the
+        group stage, so nobody has to touch the ruleset for a last-minute withdrawal.
+        """
+
         ruleset = self.make_ruleset()
-        with self.assertRaisesMessage(ValidationError, "组数 × 每组人数"):
-            validate_binding(
-                ruleset,
-                {
-                    "live_challenge": {
-                        "format_key": "2026_live_challenge",
-                        "participant_count": 15,
-                        "seat_count": 10,
-                        "group_count": 4,
-                        "group_size": 4,
-                    }
-                },
-            )
+        normalized = validate_binding(
+            ruleset,
+            {
+                "live_challenge": {
+                    "format_key": "2026_live_challenge",
+                    "participant_count": "14",
+                    "seat_count": "10",
+                    "group_count": "5",
+                    "group_size": "3",
+                }
+            },
+        )["live_challenge"]
+
+        self.assertEqual(normalized["participant_count"], 14)
+        self.assertEqual(normalized["group_count"], 5)
+        self.assertEqual(normalized["challenge_count"], 4)
 
     def test_rejects_participants_that_do_not_exceed_the_seats(self):
         ruleset = self.make_ruleset()

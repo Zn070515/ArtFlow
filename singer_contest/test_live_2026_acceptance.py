@@ -103,7 +103,23 @@ def _live_questionnaire():
     }
 
 
-class Live2026AcceptanceTests(TestCase):
+class _Live2026AcceptanceFixtureMixin:
+    """The complete 2026 acceptance fixture, sized by the class attributes below.
+
+    The format's numbers are operator parameters, so a subclass moves them and re-runs the
+    same end-to-end path.
+    """
+
+    PARTICIPANTS = 15
+    SEATS = 10
+    GROUP_COUNT = 5
+    GROUP_SIZE = 3
+    JUDGE_COUNT = 5
+    #: The definition's qualifier SELECT. Defaults to the seat count; a subclass sets it to
+    #: the built-in's shipped number to reproduce a ruleset whose definition has not caught
+    #: up with an edited seat count yet.
+    DEFINITION_SELECT_COUNT: int | None = None
+
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
             self.admin = User.objects.create_user(
@@ -119,7 +135,7 @@ class Live2026AcceptanceTests(TestCase):
 
         self.judges = [
             Judge.objects.create(activity=self.activity, name=f"现场评委 {index}")
-            for index in range(1, 6)
+            for index in range(1, self.JUDGE_COUNT + 1)
         ]
         rubric = ScoringRubric.objects.create(
             activity=self.activity, name="2026 统一评分标准", is_test_data=True
@@ -135,14 +151,14 @@ class Live2026AcceptanceTests(TestCase):
                 sequence=1,
                 scoring_mode=ContestRound.ScoringMode.AVERAGE,
                 score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
-                judge_count=5,
+                judge_count=self.JUDGE_COUNT,
                 minimum_judge_count=4,
-                advance_count=10,
+                advance_count=self.SEATS,
                 rubric=rubric,
             )
 
         self.singers = []
-        for number in range(1, 16):
+        for number in range(1, self.PARTICIPANTS + 1):
             with authority_write(ACCOUNT_AUTHORITY):
                 user = User.objects.create_user(
                     username=f"live-2026-singer-{number}", password="pass"
@@ -167,9 +183,13 @@ class Live2026AcceptanceTests(TestCase):
         self.group_specs = [
             {
                 "name": f"第 {group_index} 组",
-                "singer_ids": [singer.pk for singer in self.singers[start : start + 3]],
+                "singer_ids": [
+                    singer.pk for singer in self.singers[start : start + self.GROUP_SIZE]
+                ],
             }
-            for group_index, start in enumerate(range(0, 15, 3), start=1)
+            for group_index, start in enumerate(
+                range(0, self.PARTICIPANTS, self.GROUP_SIZE), start=1
+            )
         ]
         self.group_stage = create_group_stage(
             self.activity,
@@ -190,9 +210,11 @@ class Live2026AcceptanceTests(TestCase):
         self.ruleset.group_stage_keys = {"r1": self.group_stage.pk}
         self.ruleset.live_challenge = {
             "format_key": "2026_live_challenge",
-            "participant_count": 15,
-            "seat_count": 10,
-            "challenge_count": 5,
+            "participant_count": self.PARTICIPANTS,
+            "seat_count": self.SEATS,
+            "challenge_count": self.PARTICIPANTS - self.SEATS,
+            "group_count": self.GROUP_COUNT,
+            "group_size": self.GROUP_SIZE,
             "first_round_weight": "40%",
             "challenge_round_weight": "60%",
             "order_policy": "official_number",
@@ -213,7 +235,12 @@ class Live2026AcceptanceTests(TestCase):
             "nodes": [
                 {"key": "assess_r1", "type": "ASSESS", "source": "entry", "round": "r1"},
                 {"key": "rank1", "type": "RANK", "source": "assess_r1"},
-                {"key": "top10", "type": "SELECT", "source": "rank1", "count": 10},
+                {
+                    "key": "top10",
+                    "type": "SELECT",
+                    "source": "rank1",
+                    "count": self.DEFINITION_SELECT_COUNT or self.SEATS,
+                },
             ],
             "questionnaire": _live_questionnaire(),
         }
@@ -272,6 +299,8 @@ class Live2026AcceptanceTests(TestCase):
             expected_revision=match.session.revision,
         )
 
+
+class Live2026AcceptanceTests(_Live2026AcceptanceFixtureMixin, TestCase):
     def test_freeze_dynamic_rounds_and_weighted_podium_without_audience(self):
         frozen = freeze_ruleset_version(self.version, self.admin)
         frozen.refresh_from_db()
@@ -604,7 +633,9 @@ class Live2026AcceptanceTests(TestCase):
             *[
                 {
                     "name": f"第 {index} 组",
-                    "singer_ids": [singer.pk for singer in self.singers[start : start + 3]],
+                    "singer_ids": [
+                        singer.pk for singer in self.singers[start : start + self.GROUP_SIZE]
+                    ],
                 }
                 for index, start in ((2, 6), (3, 9), (4, 12))
             ],
@@ -747,3 +778,63 @@ class Live2026AcceptanceTests(TestCase):
                 ],
             ).exists()
         )
+
+
+class Live2026ReshapedFormatTests(_Live2026AcceptanceFixtureMixin, TestCase):
+    """Editing the seat count must leave every copy of that number in step.
+
+    The fixture deliberately keeps the definition at the built-in's shipped 10 while the
+    binding and the physical round already say 8 — the state the configuration page used to
+    leave behind, and the one that made a reshaped format unfreezable.
+    """
+
+    PARTICIPANTS = 12
+    SEATS = 8
+    GROUP_COUNT = 4
+    GROUP_SIZE = 3
+    DEFINITION_SELECT_COUNT = 10
+
+    def test_freeze_refuses_while_the_definition_still_says_ten(self):
+        with self.assertRaisesMessage(ValidationError, "与初始席位数（8）不一致"):
+            freeze_ruleset_version(self.version, self.admin)
+
+    def test_preflight_mirrors_the_freeze_gate(self):
+        """The page must never say "全部就绪" while the freeze would refuse."""
+
+        from ruleset.live_format import apply_live_2026_counts, preflight_live_2026
+
+        blocked = [item for item in preflight_live_2026(self.version) if not item.ready]
+        self.assertTrue(blocked, "the definition still says 10 while the seats say 8")
+        self.assertIn("不一致", " ".join(item.message for item in blocked))
+
+        apply_live_2026_counts(self.ruleset, self.version, operator=self.admin)
+        self.version.refresh_from_db()
+
+        items = preflight_live_2026(self.version)
+        self.assertTrue(
+            all(item.ready for item in items),
+            [(item.key, item.message) for item in items if not item.ready],
+        )
+        # ...and the freeze agrees, which is the whole point of sharing the validators.
+        self.assertEqual(
+            freeze_ruleset_version(self.version, self.admin).status,
+            RulesetVersion.Status.FROZEN,
+        )
+
+    def test_syncing_the_counts_makes_the_reshaped_format_freezable(self):
+        from ruleset.live_format import apply_live_2026_counts
+
+        apply_live_2026_counts(self.ruleset, self.version, operator=self.admin)
+
+        self.version.refresh_from_db()
+        nodes = json.loads(self.version.definition)["nodes"]
+        select = next(node for node in nodes if node.get("key") == "top10")
+        self.assertEqual(select["count"], 8)
+        self.assertEqual(ContestRound.objects.get(pk=self.first_round.pk).advance_count, 8)
+
+        frozen = freeze_ruleset_version(self.version, self.admin)
+
+        self.assertEqual(frozen.status, RulesetVersion.Status.FROZEN)
+        self.assertEqual(frozen.binding["live_challenge"]["seat_count"], 8)
+        plan = json.loads(frozen.execution_plan or "{}")
+        self.assertEqual(plan.get("plan_version"), 1)
