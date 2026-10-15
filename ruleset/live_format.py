@@ -37,11 +37,11 @@ from .services import (
 from .templates import (
     LIVE_2026_BUILTIN_KEY,
     LIVE_2026_FIRST_ROUND_KEY,
+    LIVE_2026_FIXED_COUNTS,
+    LIVE_2026_PODIUM_KEYS,
     LIVE_2026_SEAT_COUNT,
-    LIVE_2026_THIRD_ROUND_KEY,
 )
 
-LIVE_2026_FIXED_COUNTS = {"participant_count": 15, "seat_count": 10, "challenge_count": 5}
 LIVE_2026_FIRST_ROUND_NAME = "第一轮"
 
 
@@ -55,18 +55,16 @@ def live_2026_binding_preset() -> dict:
     """The platform-owned binding keys: the part of the format that is not a choice.
 
     Deliberately excludes the four operator items — both weight pairs and both judge lists.
-    The ratios are not ours to pick (the format document leaves them undecided, explicitly
-    forbidding 40/60, 30/70 and 50/50), so a preset must never pre-fill them.
+    The document leaves both ratios undecided and says we must not settle them for the
+    operators (it names 40/60, 30/70 and 50/50 as ratios *we* may not pick), so a preset
+    must never pre-fill them. Operators remain free to choose any pair that sums to 100%.
     """
 
     return {
         "format_key": LIVE_CHALLENGE_FORMAT_KEY,
         **LIVE_2026_FIXED_COUNTS,
         "order_policy": "official_number",
-        "podium_stage_key": "final_podium",
-        "podium_first_round_key": LIVE_2026_FIRST_ROUND_KEY,
-        "podium_third_round_key": LIVE_2026_THIRD_ROUND_KEY,
-        "podium_aggregate_node": "podium_total",
+        **LIVE_2026_PODIUM_KEYS,
     }
 
 

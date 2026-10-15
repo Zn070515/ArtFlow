@@ -59,6 +59,11 @@ from .planning import (
     validate_planning_draft,
 )
 from .schema import ENTRY_KEY, content_hash, parse_definition
+from .templates import (
+    LIVE_2026_CHALLENGE_COUNT,
+    LIVE_2026_PARTICIPANT_COUNT,
+    LIVE_2026_SEAT_COUNT,
+)
 
 LIVE_CHALLENGE_FORMAT_KEY = "2026_live_challenge"
 
@@ -356,8 +361,15 @@ def validate_binding(
                 "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
                 "order_policy": "official_number",
             }
-        if participant_count != 15 or seat_count != 10 or challenge_count != 5:
-            raise ValidationError("2026 现场踢馆必须配置 15 人、10 个席位和 5 次挑战。")
+        if (
+            participant_count != LIVE_2026_PARTICIPANT_COUNT
+            or seat_count != LIVE_2026_SEAT_COUNT
+            or challenge_count != LIVE_2026_CHALLENGE_COUNT
+        ):
+            raise ValidationError(
+                f"2026 现场踢馆必须配置 {LIVE_2026_PARTICIPANT_COUNT} 人、"
+                f"{LIVE_2026_SEAT_COUNT} 个席位和 {LIVE_2026_CHALLENGE_COUNT} 次挑战。"
+            )
         if live_format_key:
             live_challenge["format_key"] = live_format_key
         podium_fields = {
@@ -2281,8 +2293,8 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     )
     if first_round is None:
         raise ValidationError("2026 现场赛制绑定的第一轮物理评分轮不存在。")
-    if first_round.advance_count != 10:
-        raise ValidationError("2026 现场赛制第一轮晋级人数必须为 10。")
+    if first_round.advance_count != LIVE_2026_SEAT_COUNT:
+        raise ValidationError(f"2026 现场赛制第一轮晋级人数必须为 {LIVE_2026_SEAT_COUNT}。")
     if first_round.score_completion_mode != ContestRound.CompletionMode.MINIMUM_VALID:
         raise ValidationError("2026 现场赛制第一轮必须使用最低有效评委数评分完成模式。")
     if first_round.judge_count is None or first_round.judge_count < 1:
