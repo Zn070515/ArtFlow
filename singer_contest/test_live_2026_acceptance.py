@@ -442,6 +442,24 @@ class Live2026AcceptanceTests(TestCase):
         with self.assertRaisesMessage(ValidationError, "已冻结的分组合唱分组一致"):
             set_round_groups(self.first_round, mismatched, self.admin)
 
+    def test_first_round_allows_group_members_in_a_different_performance_order(self):
+        freeze_ruleset_version(self.version, self.admin)
+        set_round_groups(self.first_round, self.group_specs, self.admin)
+        performances = list(
+            Performance.objects.filter(group__round=self.first_round, group__sequence=1).order_by(
+                "sequence", "pk"
+            )
+        )
+        with authority_write(ROUND_PERFORMANCE_STATE):
+            performances[0].sequence = 3
+            performances[0].save(update_fields=["sequence"])
+            performances[1].sequence = 1
+            performances[1].save(update_fields=["sequence"])
+
+        prepared = prepare_round(self.first_round, self.admin)
+
+        self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
+
     def test_live_freeze_rejects_preexisting_mismatched_scoring_groups(self):
         first_ids = cast(list[int], self.group_specs[0]["singer_ids"])
         second_ids = cast(list[int], self.group_specs[1]["singer_ids"])
@@ -505,6 +523,18 @@ class Live2026AcceptanceTests(TestCase):
                 form[f"group_singer_ids_{index}"].value(),
                 [str(singer_id) for singer_id in spec["singer_ids"]],
             )
+
+    def test_judge_control_shows_non_blocking_group_material_warning(self):
+        freeze_ruleset_version(self.version, self.admin)
+        staff_client = Client()
+        staff_client.force_login(self.admin)
+
+        response = staff_client.get(reverse("staff:judge_control", args=[self.first_round.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        material_status = response.context["live_material_status"]
+        self.assertEqual(material_status["missing_count"], 5)
+        self.assertContains(response, "仍有 5 组缺少已审核材料")
 
     def test_live_freeze_requires_five_groups_of_three(self):
         malformed = [

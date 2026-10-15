@@ -125,17 +125,15 @@ def validate_live_first_round_performance_groups(
     actual_snapshot = [
         (
             group.name,
-            tuple(
+            frozenset(
                 str(singer_id)
-                for singer_id in group.performances.order_by("sequence", "pk").values_list(
-                    "singer_id", flat=True
-                )
+                for singer_id in group.performances.values_list("singer_id", flat=True)
             ),
         )
         for group in groups
     ]
     expected = [
-        (name, tuple(str(singer_id) for singer_id in singer_ids))
+        (name, frozenset(str(singer_id) for singer_id in singer_ids))
         for name, singer_ids in expected_snapshot
     ]
     if actual_snapshot != expected:
