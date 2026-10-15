@@ -16,6 +16,7 @@ ArtFlow is a Django monolith for student arts department activity operations. Co
 - `farewell_show/`: graduation show program submissions and program order.
 - `voting/`: audience vote sessions, options, records.
 - `staff_panel/`: staff/admin dashboard views and operational workflows.
+- `realtime/`: WebSocket consumers, presence, and notification events. Notifications only — no authority decision may depend on them, and every flow must still complete over plain HTTP when they are down.
 - `exports/`, `archive/`, `incidents/`: export, archive, and incident records.
 
 Templates are under `templates/`. Tests live in the app that owns the behavior, either in `tests.py` or in `test_*.py` modules beside it. Local media under `media/` must not be committed.

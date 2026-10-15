@@ -115,7 +115,7 @@ This root Compose file is development/integration only. For an event operated fr
 
 ### Event/local-only contract
 
-Use `scripts/start-event.ps1` for the single Staff-operated primary machine. Its default publishes `web` solely as `127.0.0.1:8000`; `-Lan` is an explicit private-network opt-in that derives `ALLOWED_HOSTS` from one validated IPv4 address. PostgreSQL remains private in both modes; the event manifest provides no public ingress, TLS, WAF, or DDoS protection. Never run a second writable event stack. PowerPoint remains an independent presentation tool. Full purchaser instructions are in [event deployment](deployment-event.md).
+Use `scripts/start-event.ps1` for the single Staff-operated primary machine. Its default publishes only the Caddy `proxy` service, on `127.0.0.1:8000`; `web`, `realtime`, and `media` stay on the internal network and publish no host port. `-Lan` is an explicit private-network opt-in that derives `ALLOWED_HOSTS` from one validated IPv4 address. PostgreSQL remains private in both modes; the event manifest provides no public ingress, TLS, WAF, or DDoS protection. Never run a second writable event stack. PowerPoint remains an independent presentation tool. Full purchaser instructions are in [event deployment](deployment-event.md).
 
 ### PostgreSQL acceptance gate
 

@@ -54,7 +54,7 @@
                 <button class="touch-target bg-brand text-white rounded text-sm">确认最终十强</button>
             </form>
             {% elif session.state == "confirmed" %}
-            <p class="text-lg font-semibold text-emerald-800 mb-3">最终十强已经确认，可以按选手编号准备第三轮。</p>
+            <p class="text-lg font-semibold text-emerald-800 mb-3">最终十强已经确认，可以按席位顺序生成第三轮十人名单。</p>
             {% if not session.final_rounds.exists %}
             <form method="post">
                 {% csrf_token %}<input type="hidden" name="action" value="prepare_final_round"><input type="hidden" name="command_id" value="{{ command_ids.prepare_final_round }}"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">

@@ -111,7 +111,8 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
 | `DATABASE_ENGINE` | 必须是 `postgresql` |
 | `POSTGRES_DB` / `USER` / `PASSWORD` / `HOST` / `PORT` | 生产数据库连接（口令不能是占位值） |
 | `TRUST_X_FORWARDED_FOR` | 生产 manifest 固定为 `true`（见下一节） |
-| `RATE_LIMIT_BACKEND` | 生产 manifest 固定为 `database`，保证多 worker 共享限流桶 |
+
+`RATE_LIMIT_BACKEND` 不在模板里，也不需要填写：生产 manifest 直接把它固定为 `database`，保证多 worker 共享限流桶。
 
 `DATABASE_ENGINE=postgresql` 时生产者连接参数才会被读取；`SECRET_KEY`、`QR_SIGNING_KEY`、`STAFF_ACCESS_KEY`、`ADMIN_ACCESS_KEY`、`ALLOWED_HOSTS`、`CSRF_TRUSTED_ORIGINS` 和数据库口令在 `APP_ENV=production` 下都会被强校验。
 
@@ -159,7 +160,7 @@ docker compose --env-file .env.production -f deploy/compose.production.yml exec 
   数据库 readiness 仍由 Caddy 代理探针经真实请求路径访问 `/healthz/` 覆盖。
   完整 Django system checks 属于启动阶段（`manage.py check`，容器入口在 migrate 前执行）、
   `doctor` 和部署 gate，不再每 10~15 秒随探针运行。
-- 上传最大值按用途在 `files/services.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB）。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
+- 上传最大值按用途在 `files/policies.py` 规定（伴奏/图片 10MB，伴奏音轨 100MB，背景/演出视频最高 500MB），`files/services.py` 只按其执行校验。反向代理和 Gunicorn 的请求体上限、body 读取超时需足够容纳允许的最大上传；超过的请求应在到达应用前被拒绝。
 - 生产 Caddy manifest 固定 `request_body max_size 120MB`；现场/event profile 才可使用更高的本地上限。应用层还会执行用途上限、文件 magic/container 校验、每报名配额、版本保留、上传限流和磁盘低水位检查。不得把该值误解为慢连接、连接数或 volumetric DDoS 防护。
 - 视频导出、评分模板生成等耗时操作应配置足够的 worker 超时；不能静默吞掉超时错误。
 - 内部提交文件和生成文档由 Django 受控媒体视图流式返回，且已隔离到上文的独立 `media`
