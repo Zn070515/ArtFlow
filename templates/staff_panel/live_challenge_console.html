@@ -44,28 +44,28 @@
                 <h2 class="font-semibold text-gray-900">当前挑战流程</h2>
                 <p class="text-sm text-gray-600 mt-1">{{ session.get_state_display }} · 已处理到第 {{ session.current_turn_number }} 位挑战者</p>
             </div>
-            <span class="text-sm font-medium text-brand">五个挑战机会按固定顺序处理</span>
+            <span class="text-sm font-medium text-brand">踢馆机会按固定顺序处理</span>
         </div>
         <div class="p-4">
             {% if session.state == "ready_to_confirm" %}
-            <p class="text-lg font-semibold text-gray-900 mb-3">五次挑战机会都已处理，可以确认最终十强。</p>
+            <p class="text-lg font-semibold text-gray-900 mb-3">踢馆机会都已处理，可以确认最终名单。</p>
             <form method="post">
                 {% csrf_token %}<input type="hidden" name="action" value="confirm_session"><input type="hidden" name="command_id" value="{{ command_ids.confirm_session }}"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
-                <button class="touch-target bg-brand text-white rounded text-sm">确认最终十强</button>
+                <button class="touch-target bg-brand text-white rounded text-sm">确认最终名单</button>
             </form>
             {% elif session.state == "confirmed" %}
-            <p class="text-lg font-semibold text-emerald-800 mb-3">最终十强已经确认，可以按席位顺序生成第三轮十人名单。</p>
+            <p class="text-lg font-semibold text-emerald-800 mb-3">最终名单已经确认，可以按席位顺序生成第三轮名单。</p>
             {% if not session.final_rounds.exists %}
             <form method="post">
                 {% csrf_token %}<input type="hidden" name="action" value="prepare_final_round"><input type="hidden" name="command_id" value="{{ command_ids.prepare_final_round }}"><input type="hidden" name="session_id" value="{{ session.pk }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}">
-                <button class="touch-target bg-brand text-white rounded text-sm">生成第三轮十人名单</button>
+                <button class="touch-target bg-brand text-white rounded text-sm">生成第三轮名单</button>
             </form>
-            {% else %}<p class="text-sm text-gray-600">第三轮十人名单已生成，请到轮次页面准备评分。</p>{% endif %}
+            {% else %}<p class="text-sm text-gray-600">第三轮名单已生成，请到轮次页面准备评分。</p>{% endif %}
             {% elif current_turn %}
             <div class="grid md:grid-cols-3 gap-4 mb-4">
                 <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">当前挑战者</p><p class="font-semibold text-gray-900 mt-1">{{ current_turn.challenger.name }}</p></div>
                 <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">当前进度</p><p class="font-semibold text-gray-900 mt-1">{{ current_turn.get_state_display }}</p></div>
-                <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">席位机会</p><p class="font-semibold text-gray-900 mt-1">第 {{ current_turn.sequence }} / 5 次</p></div>
+                <div class="rounded border border-gray-200 p-3"><p class="text-xs text-gray-500">席位机会</p><p class="font-semibold text-gray-900 mt-1">第 {{ current_turn.sequence }} / {{ live_counts.challenge_count }} 次</p></div>
             </div>
 
             {% if current_turn.state == "pending" %}
@@ -139,13 +139,13 @@
         {% if current_turn %}
         <p class="text-sm text-emerald-800 mt-2">主持人交接：请宣布本场胜者及综合成绩，然后进入第 {{ current_turn.sequence }} 位挑战者。</p>
         {% else %}
-        <p class="text-sm text-emerald-800 mt-2">主持人交接：请宣布本场胜者及综合成绩，再由工作人员确认最终十强。</p>
+        <p class="text-sm text-emerald-800 mt-2">主持人交接：请宣布本场胜者及综合成绩，再由工作人员确认最终名单。</p>
         {% endif %}
     </section>
     {% endif %}
 
     <section class="bg-white border border-gray-200 rounded-lg p-4">
-        <h2 class="font-semibold text-gray-900 mb-3">五次机会进度</h2>
+        <h2 class="font-semibold text-gray-900 mb-3">踢馆机会进度</h2>
         <div class="grid sm:grid-cols-5 gap-2">
             {% for turn in session.turns.all %}<div class="rounded border border-gray-200 p-2 text-sm"><div class="text-xs text-gray-500">第 {{ turn.sequence }} 次</div><div class="font-medium mt-1">{{ turn.challenger.name }}</div><div class="text-xs text-gray-600 mt-1">{{ turn.get_state_display }}</div></div>{% endfor %}
         </div>

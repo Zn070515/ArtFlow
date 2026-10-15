@@ -200,9 +200,13 @@ class ChallengeSeat(models.Model):
             models.UniqueConstraint(
                 fields=["session", "current_holder"], name="challenge_seat_unique_holder"
             ),
+            # No upper bound: the seat count is an operator parameter now, and a CHECK cannot
+            # reach the frozen binding (another table, and JSON). The invariant that matters is
+            # "exactly N seats", a cross-row count the service enforces at creation and again
+            # at confirmation. See the seat-uniqueness constraints above for the shape guard.
             models.CheckConstraint(
-                condition=Q(position__gte=1) & Q(position__lte=10),
-                name="challenge_seat_position_range",
+                condition=Q(position__gte=1),
+                name="challenge_seat_position_positive",
             ),
         ]
 
@@ -284,9 +288,11 @@ class ChallengeTurn(models.Model):
             models.UniqueConstraint(
                 fields=["session", "challenger"], name="challenge_turn_unique_challenger"
             ),
+            # Same reasoning as the seat position above: 踢馆人数 is derived from the frozen
+            # binding, so the upper bound lives in the service, not in the schema.
             models.CheckConstraint(
-                condition=Q(sequence__gte=1) & Q(sequence__lte=5),
-                name="challenge_turn_sequence_range",
+                condition=Q(sequence__gte=1),
+                name="challenge_turn_sequence_positive",
             ),
         ]
 

@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}2026 决赛赛制配置 — {{ ruleset.name }} — ArtFlow{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-10">
+    <p class="text-sm text-gray-500 mb-2">
+        <a href="{% url 'staff:dashboard' %}" class="hover:underline">工作人员后台</a> /
+        <a href="{% url 'staff:ruleset_edit' version.pk %}" class="hover:underline">赛制编辑</a> /
+        2026 决赛赛制配置
+    </p>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between gap-4 mb-2">
+        <h1 class="text-2xl font-bold text-gray-900">2026 渡梦决赛赛制</h1>
+        <span class="text-xs bg-gray-50 border border-gray-300 text-gray-600 px-3 py-1 rounded font-medium">
+            初稿 · 尚未确认 · v{{ version.version }}
+        </span>
+    </div>
+    <p class="text-sm text-gray-500 mb-6">
+        系统已载入今年决赛初稿，所有内容均可修改。冻结之前改多少次都不影响已记录的成绩。
+    </p>
+
+    {% if messages %}
+    <div class="space-y-2 mb-4">
+        {% for message in messages %}
+        <div class="rounded border px-4 py-3 text-sm {% if message.tags == 'error' %}border-red-200 bg-red-50 text-red-800{% else %}border-green-200 bg-green-50 text-green-800{% endif %}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-3">今年决赛怎么进行</h2>
+        <ol class="text-sm text-gray-700 space-y-1 list-decimal list-inside">
+            <li><span class="font-medium text-gray-900">第一轮</span>：{{ counts.participant_count }} 名选手，分为 {{ counts.group_count }} 组，每组 {{ counts.group_size }} 人。</li>
+            <li>按第一轮成绩产生 <span class="font-medium text-gray-900">{{ counts.seat_count }}</span> 个初始席位。</li>
+            <li>其余 <span class="font-medium text-gray-900">{{ counts.challenge_count }}</span> 名选手进入<span class="font-medium text-gray-900">第二轮（踢馆）</span>，每人 1 次踢馆机会，共 {{ counts.challenge_count }} 次。</li>
+            <li>踢馆结束后仍保有 {{ counts.seat_count }} 个席位。</li>
+            <li><span class="font-medium text-gray-900">第三轮</span>：{{ counts.seat_count }} 人按席位顺序演唱。</li>
+            <li>第一轮成绩与第三轮成绩按权重合成，产生冠亚季军。</li>
+        </ol>
+    </section>
+
+    <form method="post" class="space-y-6">
+        {% csrf_token %}
+        <input type="hidden" name="base_binding" value="{{ binding_signature }}">
+
+        <section class="rounded-lg border border-gray-200 bg-white p-5">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">修改人数与流程</h2>
+            <p class="text-xs text-gray-500 mb-4">默认值不用改。改完之后系统只会检查这套数字是否自洽。</p>
+            <div class="grid sm:grid-cols-2 gap-4">
+                <label class="block text-sm text-gray-700">第一轮参赛人数
+                    <input name="live_participant_count" type="number" min="1" value="{{ counts.participant_count }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                </label>
+                <label class="block text-sm text-gray-700">第一轮晋级数（初始席位数）
+                    <input name="live_seat_count" type="number" min="1" value="{{ counts.seat_count }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                </label>
+                <label class="block text-sm text-gray-700">第一轮组数
+                    <input name="live_group_count" type="number" min="1" value="{{ counts.group_count }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                </label>
+                <label class="block text-sm text-gray-700">每组人数
+                    <input name="live_group_size" type="number" min="1" value="{{ counts.group_size }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                </label>
+            </div>
+            <div class="mt-4 rounded border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                <p><span class="font-semibold">踢馆人数：</span><output id="derived-challenge">{{ counts.challenge_count }}</output> 人（不可填写）</p>
+                <p class="mt-1"><span class="font-semibold">第三轮人数：</span><output id="derived-third">{{ counts.seat_count }}</output> 人（不可填写）</p>
+                <p class="mt-2 text-xs text-blue-800">
+                    踢馆人数由「第一轮参赛人数 − 第一轮晋级数」决定；第三轮人数等于第一轮晋级数（踢馆只决定席位，不改变人数）。当前：<span id="derived-formula">{{ counts.participant_count }} − {{ counts.seat_count }} = {{ counts.challenge_count }}</span>。
+                </p>
+            </div>
+            <p class="mt-3 text-xs text-gray-500">第一轮组数 × 每组人数必须等于第一轮参赛人数；第一轮参赛人数必须大于第一轮晋级数。</p>
+        </section>
+
+        <section class="rounded-lg border border-gray-200 bg-white p-5">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">成绩怎么算</h2>
+            <div class="grid sm:grid-cols-2 gap-4">
+                <div class="rounded border border-gray-200 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900 mb-2">一场踢馆的最终成绩</h3>
+                    <label class="block text-sm text-gray-700">第一轮成绩
+                        <span class="inline-flex items-center gap-1 ml-1">
+                            <input name="live_first_weight" type="number" min="0" max="100" value="{{ weights.first_round_weight }}" class="w-20 border border-gray-300 rounded px-2 py-1 text-sm">%
+                        </span>
+                    </label>
+                    <label class="block text-sm text-gray-700 mt-2">本场踢馆成绩
+                        <span class="inline-flex items-center gap-1 ml-1">
+                            <input name="live_challenge_weight" type="number" min="0" max="100" value="{{ weights.challenge_round_weight }}" class="w-20 border border-gray-300 rounded px-2 py-1 text-sm">%
+                        </span>
+                    </label>
+                    <p class="mt-2 text-xs text-gray-500">两项合计必须等于 100%。</p>
+                </div>
+                <div class="rounded border border-gray-200 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900 mb-2">最终冠亚季军成绩</h3>
+                    <label class="block text-sm text-gray-700">第一轮成绩
+                        <span class="inline-flex items-center gap-1 ml-1">
+                            <input name="live_podium_first_weight" type="number" min="0" max="100" value="{{ weights.podium_first_round_weight }}" class="w-20 border border-gray-300 rounded px-2 py-1 text-sm">%
+                        </span>
+                    </label>
+                    <label class="block text-sm text-gray-700 mt-2">第三轮成绩
+                        <span class="inline-flex items-center gap-1 ml-1">
+                            <input name="live_podium_third_weight" type="number" min="0" max="100" value="{{ weights.podium_third_round_weight }}" class="w-20 border border-gray-300 rounded px-2 py-1 text-sm">%
+                        </span>
+                    </label>
+                    <p class="mt-2 text-xs text-gray-500">两项合计必须等于 100%。</p>
+                    <p class="mt-2 text-xs font-medium text-gray-700">踢馆成绩只决定席位，不计入最终冠亚季军成绩。</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-lg border border-gray-200 bg-white p-5">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">评委怎么安排</h2>
+            <div class="space-y-4">
+                <div class="rounded border border-gray-200 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">第一轮评委</h3>
+                    {% if first_round %}
+                    <p class="mt-1 text-xs text-gray-600">
+                        评委人数 {{ first_round.judge_count|default:"未填写" }} · 最低需要 {{ first_round.minimum_judge_count|default:"未填写" }} · 评分标准 {{ first_round.rubric|default:"未选择" }} · 晋级 {{ first_round.advance_count }} 人
+                    </p>
+                    <a href="{% url 'staff:round_edit' first_round.pk %}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">去填写</a>
+                    {% else %}
+                    <p class="mt-1 text-xs text-amber-700">还没有绑定第一轮物理评分轮。</p>
+                    <a href="{% url 'staff:round_create' %}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">去填写</a>
+                    {% endif %}
+                </div>
+                <div class="rounded border border-gray-200 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">第二轮（踢馆）评委</h3>
+                    <div class="mt-2 flex flex-wrap gap-3">
+                        {% for judge in live_judges %}
+                        <label class="inline-flex items-center gap-2 text-xs text-gray-700">
+                            <input type="checkbox" name="live_challenge_judge_ids" value="{{ judge.pk }}"{% if judge.pk in challenge_judge_ids %} checked{% endif %}>{{ judge.name }}
+                        </label>
+                        {% empty %}<span class="text-xs text-gray-500">当前活动还没有启用的评委。</span>{% endfor %}
+                    </div>
+                    <label class="block text-xs text-gray-700 mt-3">最低需要
+                        <input name="live_challenge_minimum_judges" type="number" min="1" value="{{ config.challenge_minimum_judge_count|default:'' }}" class="w-20 mt-1 border border-gray-300 rounded px-2 py-1 text-sm">
+                    </label>
+                    <p class="mt-1 text-xs text-gray-500">整场踢馆共用这一份评委名单，最低需要不能超过所选评委数。</p>
+                </div>
+                <div class="rounded border border-gray-200 p-4">
+                    <h3 class="text-sm font-semibold text-gray-900">第三轮评委</h3>
+                    <div class="mt-2 flex flex-wrap gap-3">
+                        {% for judge in live_judges %}
+                        <label class="inline-flex items-center gap-2 text-xs text-gray-700">
+                            <input type="checkbox" name="live_final_judge_ids" value="{{ judge.pk }}"{% if judge.pk in final_judge_ids %} checked{% endif %}>{{ judge.name }}
+                        </label>
+                        {% empty %}<span class="text-xs text-gray-500">当前活动还没有启用的评委。</span>{% endfor %}
+                    </div>
+                    <label class="block text-xs text-gray-700 mt-3">最低需要
+                        <input name="live_final_minimum_judges" type="number" min="1" value="{{ config.final_minimum_judge_count|default:'' }}" class="w-20 mt-1 border border-gray-300 rounded px-2 py-1 text-sm">
+                    </label>
+                    <p class="mt-1 text-xs text-gray-500">第三轮人数：{{ counts.seat_count }} 人（等于第一轮晋级数）。</p>
+                </div>
+            </div>
+        </section>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <button class="touch-target bg-brand text-white rounded text-sm">保存赛制</button>
+            <a href="{% url 'staff:ruleset_edit' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">高级：原始绑定</a>
+            <a href="{% url 'staff:ruleset_questionnaire' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">选手问卷</a>
+        </div>
+        <p class="text-xs text-gray-500">同一份绑定在两处都能改；若两边同时打开，后保存的一方会被提示「已被其他编辑修改」。</p>
+    </form>
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-gray-900">我还差什么</h2>
+            <span class="text-sm {% if outstanding %}text-amber-700{% else %}text-green-700{% endif %}">
+                {% if outstanding %}冻结还差 {{ outstanding }} 项。{% else %}全部就绪，可以冻结。{% endif %}
+            </span>
+        </div>
+        <ul class="mt-3 space-y-2 text-sm">
+            {% for row in checklist %}
+            <li class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2">
+                <span>
+                    <span class="{% if row.done %}text-green-600{% else %}text-gray-400{% endif %}">{% if row.done %}✓{% else %}○{% endif %}</span>
+                    <span class="{% if row.done %}text-gray-700{% else %}text-gray-900 font-medium{% endif %}">{{ row.label }}</span>
+                    {% if row.detail %}<span class="ml-1 text-xs text-gray-500">{{ row.detail }}</span>{% endif %}
+                </span>
+                {% if row.url and not row.done %}
+                <a href="{{ row.url }}" class="text-xs border border-brand text-brand rounded px-3 py-1 shrink-0">{{ row.action }}</a>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-2">冻结</h2>
+        <p class="text-sm text-gray-600 mb-3">冻结之后，这套数字才成为比赛当晚不可随意更改的权威。在此之前改多少次都可以。</p>
+        {% if can_freeze %}
+        <form method="post" action="{% url 'staff:ruleset_freeze' version.pk %}">
+            {% csrf_token %}<button class="touch-target border border-brand text-brand rounded text-sm">冻结赛制</button>
+        </form>
+        {% else %}
+        <p class="text-sm text-gray-500">只有管理员可以冻结赛制。</p>
+        {% endif %}
+    </section>
+</div>
+
+<script>
+(function () {
+    var participants = document.querySelector('input[name="live_participant_count"]');
+    var seats = document.querySelector('input[name="live_seat_count"]');
+    var groups = document.querySelector('input[name="live_group_count"]');
+    var sizes = document.querySelector('input[name="live_group_size"]');
+    var challengeOut = document.getElementById('derived-challenge');
+    var thirdOut = document.getElementById('derived-third');
+    var formula = document.getElementById('derived-formula');
+    if (!participants || !seats || !challengeOut) { return; }
+    function refresh() {
+        var p = parseInt(participants.value, 10);
+        var s = parseInt(seats.value, 10);
+        var c = (p > 0 && s > 0) ? (p - s) : '';
+        challengeOut.textContent = c;
+        thirdOut.textContent = s > 0 ? s : '';
+        if (formula) {
+            formula.textContent = (c === '') ? '请先填写人数' : (p + ' − ' + s + ' = ' + c);
+        }
+    }
+    [participants, seats, groups, sizes].forEach(function (field) {
+        if (field) { field.addEventListener('input', refresh); }
+    });
+})();
+</script>
+{% endblock %}

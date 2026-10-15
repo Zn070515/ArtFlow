@@ -90,6 +90,14 @@ def _configured_weights(
     return configured_first, configured_challenge
 
 
+def _live_counts(version: RulesetVersion):
+    """The 2026 counts as frozen on this version — same source as the weights above."""
+
+    from ruleset.live_format import live_challenge_counts
+
+    return live_challenge_counts(version)
+
+
 def _hash_payload(payload: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
@@ -389,7 +397,7 @@ def _bump(session: ChallengeSession) -> None:
 
 
 def _finish_turn(session: ChallengeSession, turn: ChallengeTurn) -> None:
-    if turn.sequence == 5:
+    if turn.sequence == _live_counts(session.ruleset_version).challenge_count:
         session.state = ChallengeSession.State.READY_TO_CONFIRM
     else:
         session.current_turn_number = turn.sequence + 1
@@ -433,8 +441,9 @@ def challenge_final_roster(
         ChallengeSeat._base_manager.filter(session=session).order_by("third_round_position", "pk")
     )
     holder_ids = [seat.current_holder_id for seat in seats]
-    if len(seats) != 10 or len(set(holder_ids)) != 10:
-        raise ValidationError("核定后的踢馆会话必须保有十个不同席位持有人。")
+    seat_count = _live_counts(session.ruleset_version).seat_count
+    if len(seats) != seat_count or len(set(holder_ids)) != seat_count:
+        raise ValidationError(f"核定后的踢馆会话必须保有 {seat_count} 个不同席位持有人。")
     singers = {
         singer.pk: singer
         for singer in SingerRegistration._base_manager.filter(
@@ -478,22 +487,23 @@ def _validate_source_round(
         .filter(round=round_, singer__pre_status=SingerRegistration.PreStatus.APPROVED)
         .order_by("singer_id")
     )
-    if len(summaries) != 15:
-        raise ValidationError("第一轮必须恰好有 15 名已核定选手。")
+    counts = _live_counts(ruleset_version)
+    if len(summaries) != counts.participant_count:
+        raise ValidationError(f"第一轮必须恰好有 {counts.participant_count} 名已核定选手。")
     if any(summary.singer.official_number is None for summary in summaries):
         raise ValidationError("所有第一轮选手必须先配置官方选手编号。")
-    if len({summary.singer.official_number for summary in summaries}) != 15:
+    if len({summary.singer.official_number for summary in summaries}) != counts.participant_count:
         raise ValidationError("官方选手编号必须在活动内唯一。")
     scores = [summary.average_score for summary in summaries]
     if len(set(scores)) != len(scores):
         raise ValidationError("第一轮出现同分，不能自动建立踢馆顺序。")
     ranked = sorted(summaries, key=lambda row: row.average_score, reverse=True)
-    expected_advanced = {row.singer_id for row in ranked[:10]}
+    expected_advanced = {row.singer_id for row in ranked[: counts.seat_count]}
     actual_advanced = {row.singer_id for row in summaries if row.is_advanced}
     if actual_advanced != expected_advanced:
         raise ValidationError("第一轮晋级标记与正式成绩排名不一致。")
-    if len(actual_advanced) != 10:
-        raise ValidationError("第一轮必须核定十个初始席位。")
+    if len(actual_advanced) != counts.seat_count:
+        raise ValidationError(f"第一轮必须核定 {counts.seat_count} 个初始席位。")
     return summaries
 
 
@@ -562,8 +572,12 @@ def create_challenge_session(
             raise ValidationError("所有第一轮选手必须先配置官方选手编号。")
         return summary.singer.official_number
 
-    seats = sorted(ranked[:10], key=_official_number)
-    challengers = sorted(ranked[10:], key=lambda row: row.average_score)
+    # Everyone left without an initial seat challenges exactly once, so the queue length is
+    # the derived 踢馆人数 — a divergence would be caught by the confirm-time turn count, not
+    # silently truncated here.
+    counts = _live_counts(locked_version)
+    seats = sorted(ranked[: counts.seat_count], key=_official_number)
+    challengers = sorted(ranked[counts.seat_count :], key=lambda row: row.average_score)
     with authority_write(LIVE_CHALLENGE_STATE):
         session = ChallengeSession.objects.create(
             activity=locked_activity,
@@ -657,7 +671,8 @@ def start_challenge_turn(
     _check_revision(session, expected_revision)
     _ensure_session_dependencies_current(session)
     if session.state == ChallengeSession.State.READY_TO_CONFIRM:
-        raise ValidationError("五次挑战机会已经处理完，请确认最终十强。")
+        counts = _live_counts(session.ruleset_version)
+        raise ValidationError(f"{counts.challenge_count} 次踢馆机会已经处理完，请确认最终名单。")
     if session.state != ChallengeSession.State.ACTIVE:
         raise PermissionDenied("当前踢馆会话不可开始挑战选择。")
     turn = ChallengeTurn.objects.select_for_update().get(
@@ -1378,18 +1393,21 @@ def confirm_challenge_session(
         return replay
     _check_revision(session, expected_revision)
     _ensure_session_dependencies_current(session)
+    counts = _live_counts(session.ruleset_version)
     if session.state != ChallengeSession.State.READY_TO_CONFIRM:
-        raise ValidationError("五次挑战机会尚未全部处理。")
+        raise ValidationError(f"{counts.challenge_count} 次踢馆机会尚未全部处理。")
     turns = list(ChallengeTurn.objects.filter(session=session).order_by("sequence"))
-    if len(turns) != 5 or any(
+    if len(turns) != counts.challenge_count or any(
         turn.state not in {ChallengeTurn.State.WAIVED, ChallengeTurn.State.CONFIRMED}
         for turn in turns
     ):
-        raise ValidationError("五次挑战机会必须逐一处理后才能确认最终十强。")
+        raise ValidationError(
+            f"{counts.challenge_count} 次踢馆机会必须逐一处理后才能确认最终名单。"
+        )
     seats = list(ChallengeSeat.objects.filter(session=session))
     holders = [seat.current_holder_id for seat in seats]
-    if len(seats) != 10 or len(set(holders)) != 10:
-        raise ValidationError("最终十强必须恰好由十个不同席位持有人组成。")
+    if len(seats) != counts.seat_count or len(set(holders)) != counts.seat_count:
+        raise ValidationError(f"最终名单必须恰好由 {counts.seat_count} 个不同席位持有人组成。")
     now = timezone.now()
     with authority_write(LIVE_CHALLENGE_STATE):
         session.state = ChallengeSession.State.CONFIRMED

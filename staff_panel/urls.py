@@ -313,6 +313,11 @@ urlpatterns = [
     ),
     path("rulesets/<int:pk>/edit/", views.ruleset_edit, name="ruleset_edit"),
     path(
+        "rulesets/<int:pk>/live-2026/",
+        views.ruleset_live_2026_config,
+        name="ruleset_live_2026_config",
+    ),
+    path(
         "rulesets/<int:pk>/questionnaire/",
         questionnaire_staff_views.builder_view,
         name="ruleset_questionnaire",

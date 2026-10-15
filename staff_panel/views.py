@@ -95,7 +95,13 @@ from realtime.events import schedule_activity_event
 from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
-from ruleset.live_format import is_live_2026_template, provision_live_2026_ruleset
+from ruleset.live_format import (
+    apply_live_2026_counts,
+    is_live_2026_template,
+    live_challenge_counts_for_activity,
+    live_challenge_counts_from_binding,
+    provision_live_2026_ruleset,
+)
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.planning import (
     PlanningCompileResult,
@@ -103,8 +109,10 @@ from ruleset.planning import (
 )
 from ruleset.schema import ENTRY_KEY, NODE_TYPE_SPEC, OutputType, parse_definition
 from ruleset.services import (
+    LIVE_CHALLENGE_FORMAT_KEY,
     RulesetInvalidError,
     _binding_signature,
+    _snapshot_binding,
     apply_planning_to_ruleset,
     business_round_configuration_signature,
     create_ruleset_version,
@@ -483,6 +491,9 @@ def live_challenge_console(request, pk):
         .order_by("-created_at", "-pk")
         .first()
     )
+    # The console's wording follows the format's actual numbers, which the operators may have
+    # changed from the 15/10/5 default.
+    live_counts = live_challenge_counts_for_activity(activity)
     current_turn = None
     current_match = None
     last_confirmed_match = None
@@ -573,6 +584,7 @@ def live_challenge_console(request, pk):
             "match_state_labels": dict(ChallengeMatch.Status.choices),
             "command_ids": command_ids,
             "challenge_performance_controls": challenge_performance_controls,
+            "live_counts": live_counts,
         },
     )
 
@@ -5789,7 +5801,10 @@ def ruleset_bind(request, pk):
                 "format_key": "2026_live_challenge",
                 "participant_count": _live_value("live_participant_count", "participant_count"),
                 "seat_count": _live_value("live_seat_count", "seat_count"),
-                "challenge_count": _live_value("live_challenge_count", "challenge_count"),
+                # 踢馆人数 is derived (参赛人数 − 晋级数) and deliberately not read from the
+                # form: a value posted under this key is refused by ``validate_binding``.
+                "group_count": _live_value("live_group_count", "group_count"),
+                "group_size": _live_value("live_group_size", "group_size"),
                 "first_round_weight": _live_value("live_first_weight", "first_round_weight"),
                 "challenge_round_weight": _live_value(
                     "live_challenge_weight", "challenge_round_weight"
@@ -5855,8 +5870,255 @@ def ruleset_bind(request, pk):
     except PermissionDenied as exc:
         messages.error(request, domain_error_messages(exc))
         return redirect("staff:ruleset_edit", pk=pk)
+    try:
+        # The first round's advance_count is what writes ``is_advanced``, so the seat count
+        # moving here has to move there too.
+        apply_live_2026_counts(version.ruleset, operator=request.user)
+    except ValidationError as exc:
+        messages.error(request, domain_error_messages(exc))
+        return redirect("staff:ruleset_edit", pk=pk)
     messages.success(request, "生产绑定已保存。")
     return redirect("staff:ruleset_edit", pk=pk)
+
+
+def _live_weight_percent(raw) -> str:
+    """Render a stored weight fraction as the percentage the operators think in."""
+
+    try:
+        return f"{Decimal(str(raw)) * 100:g}"
+    except (InvalidOperation, ValueError):
+        return ""
+
+
+def _live_2026_checklist(version, ruleset, counts) -> list[dict]:
+    """The "我还差什么" rows: what the freeze gate will still refuse, in plain language."""
+
+    from common.lifecycle import runtime_approved_singers
+    from singer_contest.models import ContestRound, GroupStage
+
+    config = dict(ruleset.live_challenge or {})
+    first_round_key = str(config.get("podium_first_round_key") or "r1")
+    round_id = (ruleset.round_keys or {}).get(first_round_key)
+    contest_round = (
+        ContestRound.objects.filter(pk=round_id, activity_id=ruleset.activity_id)
+        .prefetch_related("rubric__criteria")
+        .first()
+        if round_id not in (None, "")
+        else None
+    )
+    standard_missing = []
+    if contest_round is None:
+        standard_missing.append("物理评分轮")
+    else:
+        if not (contest_round.rubric_id and contest_round.rubric.criteria.exists()):
+            standard_missing.append("评分标准")
+        if not contest_round.judge_count:
+            standard_missing.append("评委人数")
+        if not contest_round.minimum_judge_count:
+            standard_missing.append("最低有效评委数")
+
+    group_stage_id = (ruleset.group_stage_keys or {}).get(first_round_key)
+    if group_stage_id in (None, "") and len(ruleset.group_stage_keys or {}) == 1:
+        group_stage_id = next(iter((ruleset.group_stage_keys or {}).values()))
+    group_stage = (
+        GroupStage.objects.filter(pk=group_stage_id, activity_id=ruleset.activity_id).first()
+        if group_stage_id not in (None, "")
+        else None
+    )
+
+    def _pair_filled(first_key: str, second_key: str) -> bool:
+        return bool(str(config.get(first_key) or "").strip()) and bool(
+            str(config.get(second_key) or "").strip()
+        )
+
+    judge_keys = (
+        "challenge_judge_ids",
+        "challenge_minimum_judge_count",
+        "final_judge_ids",
+        "final_minimum_judge_count",
+    )
+    judges_filled = all(config.get(key) not in (None, "", []) for key in judge_keys)
+
+    try:
+        questionnaire_present = json.loads(version.definition).get("questionnaire") is not None
+    except (TypeError, ValueError):
+        questionnaire_present = False
+
+    approved_count = runtime_approved_singers(ruleset.activity).count()
+
+    return [
+        {
+            "label": "第一轮物理轮已绑定，评分标准、评委人数、最低有效评委数已填写",
+            "done": not standard_missing,
+            "detail": ("" if not standard_missing else "还缺：" + "、".join(standard_missing)),
+            "url": (
+                reverse("staff:round_edit", args=[contest_round.pk])
+                if contest_round is not None
+                else reverse("staff:round_create")
+            ),
+            "action": "去填写",
+        },
+        {
+            "label": (
+                f"第一轮分组合唱分组已冻结，且为 {counts.group_count} 组 × {counts.group_size} 人"
+            ),
+            "done": bool(group_stage and group_stage.status == GroupStage.Status.FROZEN),
+            "detail": "" if group_stage else "尚未建立第一轮分组",
+            "url": (
+                reverse("staff:group_stage_detail", args=[group_stage.pk])
+                if group_stage is not None
+                else reverse("staff:group_stage_create", args=[ruleset.activity_id])
+            ),
+            "action": "去填写",
+        },
+        {
+            "label": "组数 × 每组人数 = 第一轮参赛人数",
+            "done": counts.group_count * counts.group_size == counts.participant_count,
+            "detail": (f"{counts.group_count} × {counts.group_size} = {counts.participant_count}"),
+            "url": "",
+            "action": "",
+        },
+        {
+            "label": "踢馆成绩权重已填写且合计 100%",
+            "done": _pair_filled("first_round_weight", "challenge_round_weight"),
+            "detail": "",
+            "url": "",
+            "action": "",
+        },
+        {
+            "label": "冠亚季军成绩权重已填写且合计 100%",
+            "done": _pair_filled("podium_first_round_weight", "podium_third_round_weight"),
+            "detail": "",
+            "url": "",
+            "action": "",
+        },
+        {
+            "label": "第二轮（踢馆）与第三轮评委已选择，最低有效评委数已填写",
+            "done": judges_filled,
+            "detail": "",
+            "url": "",
+            "action": "",
+        },
+        {
+            "label": "选手问卷已声明第二、第三轮曲目与伴奏",
+            "done": questionnaire_present,
+            "detail": "",
+            "url": reverse("staff:ruleset_questionnaire", args=[version.pk]),
+            "action": "去填写",
+        },
+        {
+            "label": (
+                f"实际审核通过的选手数与「第一轮参赛人数」一致（{approved_count} / "
+                f"{counts.participant_count}）"
+            ),
+            "done": approved_count == counts.participant_count,
+            "detail": "运行时核定：名单未最终确定前只做提示，不阻塞配置。",
+            "url": reverse("staff:singer_registration_list"),
+            "action": "查看名单",
+        },
+    ]
+
+
+@staff_required
+def ruleset_live_2026_config(request, pk):
+    """The 傻瓜式 2026 决赛赛制配置页: one page for the format's few real choices."""
+
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
+    if version.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    ruleset = version.ruleset
+    if str((ruleset.live_challenge or {}).get("format_key") or "") != LIVE_CHALLENGE_FORMAT_KEY:
+        messages.error(
+            request,
+            "当前赛制不是 2026 现场踢馆赛制，请先在绑定时选择「2026 现场挑战」。",
+        )
+        return redirect("staff:ruleset_edit", pk=version.pk)
+
+    if request.method == "POST":
+        _ensure_activity_mutable(ruleset.activity)
+        binding = _snapshot_binding(ruleset)
+        config = dict(ruleset.live_challenge or {})
+        # 踢馆人数 is recomputed by ``validate_binding``; carrying the stored value forward
+        # would have it disagree with the freshly derived one the moment anybody changes the
+        # numbers, and the staleness guard would refuse the save.
+        config.pop("challenge_count", None)
+        binding["live_challenge"] = {
+            **config,
+            "participant_count": request.POST.get("live_participant_count"),
+            "seat_count": request.POST.get("live_seat_count"),
+            "group_count": request.POST.get("live_group_count"),
+            "group_size": request.POST.get("live_group_size"),
+            "first_round_weight": request.POST.get("live_first_weight"),
+            "challenge_round_weight": request.POST.get("live_challenge_weight"),
+            "podium_first_round_weight": request.POST.get("live_podium_first_weight"),
+            "podium_third_round_weight": request.POST.get("live_podium_third_weight"),
+            "challenge_judge_ids": request.POST.getlist("live_challenge_judge_ids"),
+            "challenge_minimum_judge_count": request.POST.get("live_challenge_minimum_judges"),
+            "final_judge_ids": request.POST.getlist("live_final_judge_ids"),
+            "final_minimum_judge_count": request.POST.get("live_final_minimum_judges"),
+        }
+        try:
+            # One unit: if the round cannot follow the new seat count, the binding edit must
+            # not stand either — a binding that says 8 seats beside a round that advances 10
+            # is exactly the kind of disagreeing state this page exists to prevent.
+            with transaction.atomic():
+                update_ruleset_binding(
+                    ruleset,
+                    binding=binding,
+                    operator=request.user,
+                    base_binding=request.POST.get("base_binding") or None,
+                )
+                apply_live_2026_counts(ruleset, operator=request.user)
+        except (ValidationError, PermissionDenied) as exc:
+            messages.error(request, domain_error_messages(exc))
+        else:
+            messages.success(request, "2026 决赛赛制已保存。")
+        return redirect("staff:ruleset_live_2026_config", pk=version.pk)
+
+    config = dict(ruleset.live_challenge or {})
+    counts = live_challenge_counts_from_binding(_snapshot_binding(ruleset))
+    first_round_key = str(config.get("podium_first_round_key") or "r1")
+    round_id = (ruleset.round_keys or {}).get(first_round_key)
+    checklist = _live_2026_checklist(version, ruleset, counts)
+    return render(
+        request,
+        "staff_panel/ruleset_live_2026_config.html",
+        {
+            "version": version,
+            "ruleset": ruleset,
+            "activity": ruleset.activity,
+            "counts": counts,
+            "config": config,
+            "weights": {
+                "first_round_weight": _live_weight_percent(config.get("first_round_weight")),
+                "challenge_round_weight": _live_weight_percent(
+                    config.get("challenge_round_weight")
+                ),
+                "podium_first_round_weight": _live_weight_percent(
+                    config.get("podium_first_round_weight")
+                ),
+                "podium_third_round_weight": _live_weight_percent(
+                    config.get("podium_third_round_weight")
+                ),
+            },
+            "live_judges": list(
+                Judge.objects.filter(activity=ruleset.activity, is_active=True).order_by(
+                    "name", "pk"
+                )
+            ),
+            "challenge_judge_ids": [int(v) for v in config.get("challenge_judge_ids") or []],
+            "final_judge_ids": [int(v) for v in config.get("final_judge_ids") or []],
+            "first_round": ContestRound.objects.filter(
+                pk=round_id, activity_id=ruleset.activity_id
+            ).first()
+            if round_id not in (None, "")
+            else None,
+            "checklist": checklist,
+            "outstanding": sum(1 for row in checklist if not row["done"]),
+            "binding_signature": _binding_signature(ruleset),
+            "can_freeze": request.user.is_admin,
+        },
+    )
 
 
 @admin_required

@@ -7510,7 +7510,8 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertIn('name="live_participant_count" value="15"', html)
         for field in (
             "live_seat_count",
-            "live_challenge_count",
+            "live_group_count",
+            "live_group_size",
             "live_first_weight",
             "live_challenge_weight",
             "live_podium_first_weight",
@@ -7520,6 +7521,9 @@ class RulesetTemplateLibraryTests(TestCase):
         ):
             with self.subTest(field=field):
                 self.assertIn(f'name="{field}"', html)
+        # 踢馆人数 is derived, so it must not be a postable field any more.
+        with self.subTest(field="live_challenge_count"):
+            self.assertNotIn('name="live_challenge_count"', html)
 
     def test_builtin_provisioning_reports_a_stale_binding_instead_of_failing(self):
         """Provisioning re-validates the whole surface, so a stale reference must not 500."""
@@ -7576,6 +7580,85 @@ class RulesetTemplateLibraryTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(ContestRuleset.objects.filter(activity=activity).exists())
+
+    def _provisioned_version(self, title="2026 渡梦配置页"):
+        from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY
+
+        activity = self._clone_activity(title=title)
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": activity.pk, "name": "2026 渡梦赛制"},
+        )
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        return activity, ruleset, RulesetVersion.objects.get(ruleset=ruleset)
+
+    def test_live_config_page_renders_the_flow_and_derived_counts(self):
+        _activity, _ruleset, version = self._provisioned_version()
+
+        response = self.client.get(reverse("staff:ruleset_live_2026_config", args=[version.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        # The flow is spelled out by round, in the agreed vocabulary.
+        for phrase in ("第一轮", "第二轮（踢馆）", "第三轮", "第一轮组数", "每组人数"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, html)
+        self.assertNotIn("挑战人数", html)
+        # 踢馆人数 is shown, but as derived text rather than a field.
+        self.assertIn("踢馆人数", html)
+        self.assertNotIn('name="live_challenge_count"', html)
+        self.assertNotIn('name="live_participant_count" value="15" disabled', html)
+
+    def test_live_config_page_saves_counts_and_syncs_the_first_round(self):
+        from ruleset.models import ContestRuleset
+        from singer_contest.models import ContestRound
+
+        activity, _ruleset, version = self._provisioned_version(title="2026 渡梦改人数")
+        response = self.client.post(
+            reverse("staff:ruleset_live_2026_config", args=[version.pk]),
+            {
+                "live_participant_count": "12",
+                "live_seat_count": "8",
+                "live_group_count": "4",
+                "live_group_size": "3",
+                "live_first_weight": "40",
+                "live_challenge_weight": "60",
+                "live_podium_first_weight": "30",
+                "live_podium_third_weight": "70",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "2026 决赛赛制已保存")
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        live = ruleset.live_challenge
+        self.assertEqual(live["participant_count"], 12)
+        self.assertEqual(live["seat_count"], 8)
+        self.assertEqual(live["group_count"], 4)
+        self.assertEqual(live["group_size"], 3)
+        # Derived, never posted.
+        self.assertEqual(live["challenge_count"], 4)
+        # ...and the physical round follows, or the seat count would only be a label.
+        contest_round = ContestRound.objects.get(activity=activity)
+        self.assertEqual(contest_round.advance_count, 8)
+        self.assertEqual(contest_round.status, ContestRound.Status.DRAFT)
+
+    def test_live_config_page_refuses_a_non_2026_ruleset(self):
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        activity = self._clone_activity(title="2026 非踢馆赛制")
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": activity.pk, "name": "空白赛制"},
+        )
+        ruleset = ContestRuleset.objects.get(activity=activity)
+        version = RulesetVersion.objects.get(ruleset=ruleset)
+
+        response = self.client.get(reverse("staff:ruleset_live_2026_config", args=[version.pk]))
+
+        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
 
     def test_clone_entry_point_rejects_a_non_production_template(self):
         """Only Production templates may be cloned into a workflow (AGENTS baseline)."""
