@@ -48,7 +48,12 @@ jobs:
           echo "requirements_file=$export_file" >> "$GITHUB_OUTPUT"
 
       - name: Audit frozen production dependencies
-        run: uvx --from pip-audit==2.9.0 pip-audit --requirement "${{ steps.production-requirements.outputs.requirements_file }}"
+        # GHSA-8pqf-f4m5-798g is a medium ReDoS in Twisted's IMAP wildcardToRegexp().
+        # Twisted 26.4.0 is the newest release on PyPI and the advisory has no patched
+        # version at all (first_patched_version is null), so there is nothing to upgrade
+        # to. ArtFlow reaches Twisted only through daphne, which does not use its IMAP
+        # client. Remove this ignore once upstream ships a fix.
+        run: uvx --from pip-audit==2.9.0 pip-audit --ignore-vuln GHSA-8pqf-f4m5-798g --requirement "${{ steps.production-requirements.outputs.requirements_file }}"
 
   codeql:
     name: CodeQL Python analysis
