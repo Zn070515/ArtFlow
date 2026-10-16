@@ -19,8 +19,17 @@ from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
+from ruleset.live_format import freeze_blocker
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
-from ruleset.services import _snapshot_binding, freeze_ruleset_version, update_ruleset_binding
+from ruleset.services import (
+    _snapshot_binding,
+    freeze_ruleset_version,
+    supersede_ruleset_version,
+    update_ruleset_binding,
+)
+from ruleset.services import (
+    create_ruleset_version as _create_version,
+)
 
 from .challenge_services import (
     confirm_challenge_match_result,
@@ -1032,3 +1041,205 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
         )
         self.assertEqual(stale_post.status_code, 403)
         self.assertEqual(self.ruleset.live_challenge["seat_count"], self.SEATS)
+
+
+class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
+    """What the operator sees right after the format becomes official.
+
+    Three seams the happy path crosses and nothing pinned: the page a freeze lands on, the
+    guidance a successor gives about the round it cannot move, and what happens to an older
+    draft once a newer version is the authority.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from accounts.services import mark_admin_verified
+
+        self.staff = Client()
+        # Freezing is @admin_required, which reads the elevated-verification marker rather
+        # than the role alone.
+        self.staff.force_login(self.admin)
+        session = self.staff.session
+        mark_admin_verified(session)
+        session.save()
+
+    def _config_url(self, version=None) -> str:
+        return reverse("staff:ruleset_live_2026_config", args=[(version or self.version).pk])
+
+    def _prepared_first_round(self):
+        """A first round the running authority owns *and* has already prepared."""
+
+        freeze_ruleset_version(self.version, self.admin)
+        set_round_groups(self.first_round, self.group_specs, self.admin)
+        prepare_round(self.first_round, self.admin)
+        self.first_round.refresh_from_db()
+        self.assertEqual(self.first_round.status, ContestRound.Status.PREPARED)
+        return supersede_ruleset_version(self.version, created_by=self.admin)
+
+    def _seat_change_payload(self, seats):
+        live = self.ruleset.live_challenge
+        return {
+            "live_participant_count": self.PARTICIPANTS,
+            "live_seat_count": seats,
+            "live_group_count": live["group_count"],
+            "live_group_size": live["group_size"],
+            "live_first_weight": "40%",
+            "live_challenge_weight": "60%",
+            "live_podium_first_weight": "30%",
+            "live_podium_third_weight": "70%",
+            "live_challenge_judge_ids": [str(judge.pk) for judge in self.judges[:4]],
+            "live_challenge_minimum_judges": 4,
+            "live_final_judge_ids": [str(judge.pk) for judge in self.judges[1:]],
+            "live_final_minimum_judges": 4,
+        }
+
+    def test_a_successful_freeze_lands_somewhere_that_accepts_it(self):
+        """The freeze used to succeed and then redirect the operator into a 403.
+
+        ``ruleset_edit`` refuses a frozen version, so the row froze, the success message was
+        replaced by an error page, and the honest reading of the screen was "it failed".
+        """
+
+        response = self.staff.post(
+            reverse("staff:ruleset_freeze", args=[self.version.pk]), follow=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.redirect_chain[-1][0],
+            reverse("staff:activity_workspace", args=[self.activity.pk]),
+        )
+        self.assertContains(response, "赛制已冻结")
+        self.version.refresh_from_db()
+        self.assertEqual(self.version.status, RulesetVersion.Status.FROZEN)
+
+        # The workspace's frozen view is the pair of links that must work from here.
+        view_url = reverse("staff:ruleset_validate", args=[self.version.pk])
+        self.assertContains(response, view_url)
+        self.assertEqual(self.staff.get(view_url).status_code, 200)
+        self.assertContains(response, "创建后继草稿")
+
+    def test_a_failed_freeze_leaves_the_operator_on_the_editor(self):
+        """A refusal has to land where the fix is, not on the workspace."""
+
+        self.first_round.rubric = None
+        self.first_round.save(update_fields=["rubric"])
+
+        response = self.staff.post(
+            reverse("staff:ruleset_freeze", args=[self.version.pk]), follow=True
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.redirect_chain[-1][0], self._config_url())
+        self.version.refresh_from_db()
+        self.assertEqual(self.version.status, RulesetVersion.Status.DRAFT)
+
+    def test_the_freeze_button_is_disabled_while_a_blocker_stands(self):
+        self.first_round.rubric = None
+        self.first_round.save(update_fields=["rubric"])
+
+        response = self.staff.get(self._config_url())
+
+        self.assertIsNotNone(response.context["blocker"])
+        self.assertContains(response, "<button disabled")
+        self.assertContains(response, "先处理上面的阻塞项")
+
+    def test_a_successor_offers_a_new_round_instead_of_resetting_the_running_one(self):
+        """Reset destroys prepared data and the guard still refuses afterwards.
+
+        The round the running authority binds cannot be moved, so resetting it is not a step
+        towards changing the number — it is only the loss of the prepared first round. That
+        state must offer the clone-and-rebind action and never the reset button.
+        """
+
+        successor = self._prepared_first_round()
+
+        response = self.staff.get(self._config_url(successor))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["first_round_is_protected"])
+        self.assertFalse(response.context["first_round_needs_reset"])
+        self.assertContains(response, "为这一版赛制复制一个可编辑的第一轮")
+        self.assertNotContains(response, "重置第一轮并继续修改")
+        self.assertNotContains(response, f"/staff/rounds/{self.first_round.pk}/reset/")
+
+    def test_cloning_the_first_round_makes_the_seat_change_one_save(self):
+        """The escape hatch end to end: clone, rebind, change the number, freeze."""
+
+        successor = self._prepared_first_round()
+        running_round = ContestRound.objects.get(pk=self.ruleset.round_keys["r1"])
+
+        response = self.staff.post(
+            reverse("staff:ruleset_live_2026_clone_first_round", args=[successor.pk]),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.ruleset.refresh_from_db()
+        cloned = ContestRound.objects.get(pk=self.ruleset.round_keys["r1"])
+        self.assertNotEqual(cloned.pk, running_round.pk)
+        self.assertEqual(cloned.status, ContestRound.Status.DRAFT)
+        # Configuration comes across; nothing the running round has recorded does.
+        self.assertEqual(cloned.judge_count, running_round.judge_count)
+        self.assertEqual(cloned.minimum_judge_count, running_round.minimum_judge_count)
+        self.assertEqual(cloned.rubric_id, running_round.rubric_id)
+        self.assertEqual(cloned.scoring_mode, running_round.scoring_mode)
+        self.assertEqual(cloned.entries.count(), 0)
+        # The authority keeps the round it promised.
+        running_round.refresh_from_db()
+        self.assertEqual(running_round.status, ContestRound.Status.PREPARED)
+
+        saved = self.staff.post(
+            self._config_url(successor),
+            self._seat_change_payload(self.SEATS - 2),
+            follow=True,
+        )
+
+        self.assertEqual(saved.status_code, 200)
+        self.assertContains(saved, "已保存")
+        cloned.refresh_from_db()
+        self.assertEqual(cloned.advance_count, self.SEATS - 2)
+        running_round.refresh_from_db()
+        self.assertEqual(running_round.advance_count, self.SEATS)
+        successor.refresh_from_db()
+        select = next(
+            node for node in json.loads(successor.definition)["nodes"] if node.get("key") == "top10"
+        )
+        self.assertEqual(select["count"], self.SEATS - 2)
+        # And the reshaped successor can actually be frozen.
+        self.assertIsNone(freeze_blocker(successor))
+
+    def test_an_older_draft_is_history_once_its_successor_is_frozen(self):
+        """``v1 DRAFT`` beside ``v2 FROZEN`` must not be an editing target.
+
+        The workspace used to prefer any draft over the authority, and the pages used to ask
+        only for a newer *draft* — so v1 stayed editable, and freezing it would have demoted
+        v2 and moved the activity's authority backwards to a definition it had left behind.
+        """
+
+        older = self.version
+        newer = _create_version(self.ruleset, definition=older.definition, created_by=self.admin)
+        freeze_ruleset_version(newer, self.admin)
+
+        workspace = self.staff.get(reverse("staff:activity_workspace", args=[self.activity.pk]))
+        summary = workspace.context["ruleset_summary"]
+        self.assertTrue(summary["is_frozen"])
+        self.assertEqual(summary["version"].pk, newer.pk)
+
+        # Neither the 2026 page nor the generic editor will open it for writing.
+        for route in ("staff:ruleset_live_2026_config", "staff:ruleset_edit"):
+            with self.subTest(route=route):
+                page = self.staff.get(reverse(route, args=[older.pk]))
+                self.assertEqual(page.status_code, 302)
+                self.assertEqual(
+                    page["Location"],
+                    reverse("staff:activity_workspace", args=[self.activity.pk]),
+                )
+                write = self.staff.post(reverse(route, args=[older.pk]), {})
+                self.assertEqual(write.status_code, 403)
+
+        # And the service refuses the freeze even if a page were bypassed.
+        with self.assertRaisesMessage(ValidationError, "不能冻结旧版本"):
+            freeze_ruleset_version(older, self.admin)
+        newer.refresh_from_db()
+        self.assertTrue(newer.is_current)

@@ -27,7 +27,17 @@
     </div>
     {% endif %}
 
-    {% if first_round_needs_reset %}
+    {% if first_round_is_protected %}
+    <section class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-6">
+        <p class="font-semibold">当前正式赛制正在使用这个第一轮，不能通过重置来修改晋级人数。</p>
+        <p class="mt-1">正式赛制绑定着这一轮的评分轮次，重置它只会清掉已经准备好的评分数据（评分单元、评委席位与收分状态），而修改仍然会被拒绝。要让这一版赛制用不同的晋级人数，就为它建一个自己的第一轮，再把这一版改绑过去。</p>
+        <form method="post" action="{% url 'staff:ruleset_live_2026_clone_first_round' version.pk %}" class="mt-3">
+            {% csrf_token %}
+            <button class="touch-target border border-amber-400 text-amber-900 rounded text-sm">为这一版赛制复制一个可编辑的第一轮</button>
+        </form>
+        <p class="mt-2 text-xs text-amber-800">复制只带第一轮的配置（评分方式、评委人数、评分表、分组），不带任何已录入的成绩或收分状态；正式赛制仍然使用原来那一轮，不受影响。</p>
+    </section>
+    {% elif first_round_needs_reset %}
     <section class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-6">
         <p class="font-semibold">第一轮已经准备好，晋级人数暂时改不了。</p>
         <p class="mt-1">改「第一轮晋级数」需要先把这个轮次重置回草稿。重置会清掉第一轮已经准备好的评分数据（评分单元、评委席位与收分状态），需要管理员填写原因后执行。</p>
@@ -222,12 +232,17 @@
     <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-2">冻结</h2>
         <p class="text-sm text-gray-600 mb-3">冻结之后，这套数字才成为比赛当晚不可随意更改的权威。在此之前改多少次都可以。</p>
-        {% if can_freeze %}
+        {% if not can_freeze %}
+        <p class="text-sm text-gray-500">只有管理员可以冻结赛制。</p>
+        {% elif blocker %}
+        <form method="post" action="{% url 'staff:ruleset_freeze' version.pk %}">
+            {% csrf_token %}<button disabled class="touch-target border border-gray-300 text-gray-400 rounded text-sm cursor-not-allowed">冻结赛制</button>
+        </form>
+        <p class="mt-2 text-sm text-amber-700">先处理上面的阻塞项：{{ blocker.label }}。</p>
+        {% else %}
         <form method="post" action="{% url 'staff:ruleset_freeze' version.pk %}">
             {% csrf_token %}<button class="touch-target border border-brand text-brand rounded text-sm">冻结赛制</button>
         </form>
-        {% else %}
-        <p class="text-sm text-gray-500">只有管理员可以冻结赛制。</p>
         {% endif %}
     </section>
 </div>

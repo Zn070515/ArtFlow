@@ -47,12 +47,25 @@ jobs:
           cmp --silent requirements.txt "$normalized_export"
           echo "requirements_file=$export_file" >> "$GITHUB_OUTPUT"
 
+      - name: Guard the Twisted advisory ignore
+        # The ignore in the next step is only justified by one fact: the lock resolves the
+        # newest Twisted release, which has no patched version for GHSA-8pqf-f4m5-798g. Pin
+        # that fact here so a dependency bump fails the build and forces the exception to be
+        # revisited, instead of leaving an allowlist nobody ever removes.
+        shell: bash
+        run: |
+          resolved="$(sed -n 's/^twisted==\([^ \\]*\).*/\1/p' requirements.txt)"
+          if [ "$resolved" != "26.4.0" ]; then
+            echo "::error::twisted resolves to '${resolved:-nothing}', not the 26.4.0 the audit's --ignore-vuln assumes; re-check GHSA-8pqf-f4m5-798g and drop the ignore if it is fixed" >&2
+            exit 1
+          fi
+
       - name: Audit frozen production dependencies
         # GHSA-8pqf-f4m5-798g is a medium ReDoS in Twisted's IMAP wildcardToRegexp().
         # Twisted 26.4.0 is the newest release on PyPI and the advisory has no patched
         # version at all (first_patched_version is null), so there is nothing to upgrade
         # to. ArtFlow reaches Twisted only through daphne, which does not use its IMAP
-        # client. Remove this ignore once upstream ships a fix.
+        # client. The step above fails as soon as the resolved version changes.
         run: uvx --from pip-audit==2.9.0 pip-audit --ignore-vuln GHSA-8pqf-f4m5-798g --requirement "${{ steps.production-requirements.outputs.requirements_file }}"
 
   codeql:

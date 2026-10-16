@@ -1,0 +1,47 @@
+fix: keep authority moving forwards, and land the operator where the page works
+
+The third review round found three P0s on the version lifecycle. All three share one root:
+several places each decided for themselves what "the current ruleset version" means.
+
+- Freezing succeeded and then redirected into ``ruleset_edit``, which refuses frozen
+  versions: the row froze, the success message was replaced by a 403, and the honest reading
+  of the screen was "it failed". The operator now lands on the workspace — the page that can
+  answer "and now what?" for a frozen version — and a *refused* freeze still lands back on
+  the page where the fix is. The existing tests asserted only "302" and never followed the
+  redirect, which is exactly how it stayed hidden.
+
+- A successor draft offered "重置第一轮并继续修改" for a first round the running authority
+  owns. Reset is not a step towards changing the number there: it destroys the prepared
+  first round's scores and seats, and the frozen-round guard still refuses the new number
+  afterwards. That state now offers the clone-and-rebind action instead, and never the reset
+  button. The clone copies configuration only — scoring mode, judge counts, rubric, roster
+  source — onto a fresh DRAFT round and rebinds the successor to it, so "change 10 to 8"
+  is genuinely one save again; the running authority keeps the round it promised.
+
+- ``v1 DRAFT`` beside a ``v2 FROZEN`` was still editable. The workspace preferred *any*
+  draft over the authority, and the guards asked only for a newer *draft*, so v1 stayed open
+  — and freezing it would have demoted v2 and moved the activity's authority backwards to a
+  definition it had already left behind. "Which version may be edited" is now one rule
+  (`newer_ruleset_version` / `editable_ruleset_version` / `version_is_editable`) used by the
+  workspace, ruleset creation, provisioning, the 2026 pages, the binding editor, the generic
+  editor, the definition writers, the questionnaire designer and the planning services. The
+  freeze service fails closed on it too, so a page that were bypassed could not invert the
+  authority: the UI guard is one rendering of the rule, not the rule.
+
+Also: the freeze button is disabled while a blocker stands (the server refused anyway; this
+is about not inviting the click), and the Security workflow now pins the fact its Twisted
+``--ignore-vuln`` rests on — the lock resolving 26.4.0 — so a dependency bump fails the
+build and forces the exception to be revisited instead of leaving it forever.
+
+Tests: Live2026VersionLifecycleTests covers the post-freeze landing (success and refusal),
+the disabled button, the protected round offering clone instead of reset, the clone action
+end to end (clone → change seats → the successor's definition and round follow → the freeze
+gate reports nothing left), and the older draft beside a frozen successor (workspace shows
+the authority, both pages refuse to open it for writing, the service refuses the freeze).
+Two existing fixtures had to change: one built "v1 DRAFT + v2 FROZEN" to exercise the
+frozen-round guard and now freezes v2 and edits v3, and one left a scratch v99 draft in
+front of the version it then froze.
+
+Verified: 2199 tests run, 2198 pass (40 skipped, 1 pre-existing local-only failure in
+tests/test_static_smoke.py that fails identically on the unmodified tree); ruff, ruff
+format, pyright, mypy, makemigrations --check, check, check_docs and check:css clean.

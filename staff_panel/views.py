@@ -98,6 +98,7 @@ from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.live_format import (
     _bound_first_round,
     apply_live_2026_counts,
+    clone_first_round_for_successor,
     freeze_blocker,
     is_live_2026_template,
     live_2026_readiness,
@@ -119,7 +120,10 @@ from ruleset.services import (
     apply_planning_to_ruleset,
     business_round_configuration_signature,
     create_ruleset_version,
+    current_frozen_round_ids,
+    editable_ruleset_version,
     freeze_ruleset_version,
+    newer_ruleset_version,
     prepare_planning_compile_for_version,
     prepare_planning_preflight,
     read_planning_draft,
@@ -129,6 +133,7 @@ from ruleset.services import (
     update_ruleset_binding,
     update_ruleset_definition_section,
     validate_definition_completeness,
+    version_is_editable,
 )
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, LIVE_2026_PODIUM_KEYS
 from singer_contest.challenge_services import (
@@ -622,12 +627,18 @@ def activity_workspace(request, pk):
     # The workspace should answer "do we already have a ruleset, and where do I continue?"
     # rather than pointing at the create page and leaving staff to work it out.
     versions = RulesetVersion.objects.filter(ruleset__activity=activity)
+    activity_ruleset = ContestRuleset.objects.filter(activity=activity).first()
     # A frozen authority is not a draft: it has no edit page at all, so offering it as
     # "继续准备" would land the operator on a 403. The workspace shows it as the official
     # version it now is, with the two things that are actually available — the pre-launch
     # check, and issuing a successor draft to change it.
-    draft_version = versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
-    editing_version = draft_version or versions.filter(is_current=True).order_by("-version").first()
+    #
+    # The draft must also be the *newest* version, not merely the newest draft: after v2 is
+    # frozen, an older v1 draft is still a DRAFT, and letting it win here would label the
+    # workspace with a version the activity has already moved past.
+    editing_version = (
+        editable_ruleset_version(activity_ruleset) if activity_ruleset is not None else None
+    ) or versions.filter(is_current=True).order_by("-version").first()
     ruleset_summary = None
     if editing_version is not None:
         is_frozen = editing_version.status == RulesetVersion.Status.FROZEN
@@ -5427,13 +5438,10 @@ def contest_ruleset_create(request):
                 )
                 messages.success(request, f"已将「{template.name}」克隆到该活动，进入准备。")
             else:
-                # Reuse the single authority: edit the latest DRAFT, or supersede a frozen
-                # current into a fresh editing DRAFT — never redirect into a frozen version.
-                draft = (
-                    existing.versions.filter(status=RulesetVersion.Status.DRAFT)
-                    .order_by("-version")
-                    .first()
-                )
+                # Reuse the single authority: continue on the newest DRAFT, or supersede a
+                # frozen current into a fresh editing DRAFT — never redirect into a frozen
+                # version, and never revive a draft an older version has moved past.
+                draft = editable_ruleset_version(existing)
                 if draft is None:
                     frozen = (
                         existing.versions.filter(status=RulesetVersion.Status.FROZEN)
@@ -5495,9 +5503,13 @@ def contest_ruleset_create(request):
 @staff_required
 @transaction.atomic
 def ruleset_edit(request, pk):
-    version = get_object_or_404(RulesetVersion, pk=pk)
-    if version.status == RulesetVersion.Status.FROZEN:
-        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
+    # The generic editor is the business editor and the raw-definition editor at once, so it
+    # is the other door onto the state the 2026 pages guard: a version with anything newer
+    # beside it is history, whatever its status.
+    stale_response = _refuse_frozen_or_superseded(request, version)
+    if stale_response is not None:
+        return stale_response
     if request.method == "POST":
         if request.POST.get("action") == "business_save":
             try:
@@ -5773,45 +5785,37 @@ def ruleset_edit(request, pk):
     )
 
 
-def _superseded_draft(version):
-    """The newer draft that has replaced ``version``, if there is one.
-
-    Every draft of a ruleset shares one ``ContestRuleset`` binding surface, so two live draft
-    pages both claim the same state: save 8 seats from v1 and v2's definition still says 10 —
-    a disagreement nobody actually created, reported later by the freeze contract. Newest
-    wins; an older draft's page hands over to it instead of writing.
-    """
-
-    if version.status != RulesetVersion.Status.DRAFT:
-        return None
-    return (
-        RulesetVersion._base_manager.filter(
-            ruleset_id=version.ruleset_id,
-            status=RulesetVersion.Status.DRAFT,
-            version__gt=version.version,
-        )
-        .order_by("-version")
-        .first()
-    )
-
-
-def _refuse_frozen_or_superseded(request, version, *, route: str):
+def _refuse_frozen_or_superseded(request, version, *, route: str | None = None):
     """Return a response when ``version`` must not be mutated, else ``None``.
 
-    A frozen version is read-only by definition. A superseded draft is read-only by
-    convention: it is still an ordinary row, but the numbers it would write belong to a
-    version the operators have already moved past.
+    A frozen version is read-only by definition. So is any version with a newer one beside it:
+    every version of a ruleset shares one ``ContestRuleset`` binding surface, so two live
+    pages both claim the same state — save 8 seats from v1 and v2's definition still says 10,
+    a disagreement nobody created, reported later by the freeze contract.
+
+    The newer version decides what the operator should see. A newer *draft* is where they
+    continue, so a page view hands over to it (``route`` names the page to hand over on). A
+    newer *frozen* authority has no edit page at all, so there is nothing to hand over to and
+    the workspace — which shows the real state and offers a successor draft — is the answer.
     """
 
     if version.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
-    successor = _superseded_draft(version)
-    if successor is None:
+    newer = newer_ruleset_version(version)
+    if newer is None:
         return None
     if request.method == "POST":
-        raise PermissionDenied("此版本已被更新的草稿替代，请在最新草稿上修改。")
-    messages.info(request, "此版本已被更新的草稿替代，已转到最新草稿。")
-    return redirect(route, pk=successor.pk)
+        raise PermissionDenied(
+            f"此版本已被 v{newer.version} 替代，请在最新版本上修改。"
+            if newer.status != RulesetVersion.Status.FROZEN
+            else f"此版本已被 v{newer.version} 正式冻结取代，不能再编辑；"
+            "如需调整，请从工作区创建后继草稿。"
+        )
+    if route is not None and newer.status == RulesetVersion.Status.DRAFT:
+        messages.info(request, "此版本已被更新的草稿替代，已转到最新草稿。")
+        return redirect(route, pk=newer.pk)
+    messages.info(request, f"此版本已被 v{newer.version} 替代，已转到该活动的工作区。")
+    return redirect("staff:activity_workspace", pk=version.ruleset.activity_id)
 
 
 @staff_required
@@ -6129,11 +6133,21 @@ def ruleset_live_2026_config(request, pk):
             "challenge_judge_ids": [int(v) for v in config.get("challenge_judge_ids") or []],
             "final_judge_ids": [int(v) for v in config.get("final_judge_ids") or []],
             "first_round": first_round,
-            # 第一轮一旦准备过就不能再改晋级人数。 Say so before the operator fills the page
-            # in and gets refused on save, and hand an admin the way out.
+            # 第一轮一旦准备过就不能再改晋级人数。 Two very different situations produce that,
+            # and offering the same button for both is the trap: when the round belongs to the
+            # running FROZEN authority, resetting it destroys the prepared first round *and*
+            # the guard still refuses the new number afterwards. Reset is only ever the way
+            # out for a round nothing authoritative is using; the protected case gets the
+            # clone-and-rebind action instead.
+            "first_round_is_protected": bool(
+                first_round
+                and first_round.pk in current_frozen_round_ids(ruleset, excluding_version=version)
+            ),
             "first_round_needs_reset": bool(
                 first_round
                 and (first_round.status != ContestRound.Status.DRAFT or first_round.is_locked)
+                and first_round.pk
+                not in current_frozen_round_ids(ruleset, excluding_version=version)
             ),
             "checklist": checklist,
             "outstanding": sum(1 for row in checklist if not row["done"] and not row["pending"]),
@@ -6145,6 +6159,35 @@ def ruleset_live_2026_config(request, pk):
             "can_freeze": request.user.is_admin,
         },
     )
+
+
+@staff_required
+@require_POST
+def ruleset_live_2026_clone_first_round(request, pk):
+    """Give a successor draft its own first round, so its seats can move.
+
+    The one action behind the "当前正式赛制仍在使用第一轮" refusal: copy the round's
+    configuration onto a fresh draft round, rebind this version to it, and come back here to
+    change the number. Nothing from the running round's runtime state comes across.
+    """
+
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
+    stale_response = _refuse_frozen_or_superseded(
+        request, version, route="staff:ruleset_live_2026_config"
+    )
+    if stale_response is not None:
+        return stale_response
+    try:
+        _ensure_activity_mutable(version.ruleset.activity)
+        cloned = clone_first_round_for_successor(version.ruleset, version, operator=request.user)
+    except (PermissionDenied, ValidationError) as exc:
+        messages.error(request, domain_error_messages(exc))
+    else:
+        messages.success(
+            request,
+            f"已为本版赛制新建「{cloned.name}」并改绑第一轮，现在可以直接修改晋级人数。",
+        )
+    return redirect("staff:ruleset_live_2026_config", pk=version.pk)
 
 
 @admin_required
@@ -6230,7 +6273,7 @@ def ruleset_preview(request, pk):
 @admin_required
 @require_POST
 def ruleset_freeze(request, pk):
-    version = get_object_or_404(RulesetVersion, pk=pk)
+    version = get_object_or_404(RulesetVersion.objects.select_related("ruleset"), pk=pk)
     try:
         freeze_ruleset_version(version, request.user)
     except PermissionDenied as exc:
@@ -6242,7 +6285,23 @@ def ruleset_freeze(request, pk):
         messages.error(request, domain_error_messages(exc))
     else:
         messages.success(request, "赛制已冻结。")
-    return redirect("staff:ruleset_edit", pk=pk)
+    return _post_freeze_redirect(version)
+
+
+def _post_freeze_redirect(version):
+    """Where to land after a freeze attempt — never on a page that will refuse it.
+
+    A successful freeze used to redirect into the editor, which refuses frozen versions: the
+    operator watched the row freeze and then got a 403 for it, with the success message
+    hidden behind the error page. The workspace is the page that can answer "and now what?"
+    for a frozen version, and it is also the safe landing when the freeze failed because the
+    version is not editable — an older draft, or one that was already frozen.
+    """
+
+    version.refresh_from_db(fields=["status"])
+    if not version_is_editable(version):
+        return redirect("staff:activity_workspace", pk=version.ruleset.activity_id)
+    return redirect(_ruleset_edit_url(version, is_live_2026=_is_live_2026_ruleset(version.ruleset)))
 
 
 @staff_required

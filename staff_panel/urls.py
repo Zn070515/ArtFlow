@@ -318,6 +318,11 @@ urlpatterns = [
         name="ruleset_live_2026_config",
     ),
     path(
+        "rulesets/<int:pk>/live-2026/first-round/clone/",
+        views.ruleset_live_2026_clone_first_round,
+        name="ruleset_live_2026_clone_first_round",
+    ),
+    path(
         "rulesets/<int:pk>/questionnaire/",
         questionnaire_staff_views.builder_view,
         name="ruleset_questionnaire",

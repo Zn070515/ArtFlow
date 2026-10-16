@@ -28,7 +28,7 @@ from common.authority import CONTEST_ROUND_STATE, authority_write
 from common.lifecycle import runtime_is_test
 from common.models import AuditLog
 from core.services import lock_activity_for_action
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Max
 
@@ -55,6 +55,7 @@ from .services import (
     create_ruleset_version,
     current_frozen_round_ids,
     current_frozen_version,
+    editable_ruleset_version,
     evaluate_freeze_gate,
     frozen_round_configuration_message,
     supersede_ruleset_version,
@@ -71,6 +72,9 @@ from .templates import (
 )
 
 LIVE_2026_FIRST_ROUND_NAME = "第一轮"
+#: Marks the round a successor draft owns, so the rounds list does not show two identical
+#: 第一轮 rows with no way to tell which one the running authority still uses.
+FIRST_ROUND_CLONE_SUFFIX = "（后继）"
 
 
 def is_live_2026_template(template) -> bool:
@@ -174,7 +178,18 @@ def live_2026_readiness(version) -> list[ReadinessItem]:
     root = _definition_root(version)
     round_keys = binding.get("round_keys") or {}
     live_format_key = str(live_config.get("format_key") or "")
-    items = [
+
+    # The gate is the freeze's own walk. Its normalized binding is what the definition row
+    # compiles against, and its verdict is what the page prints as the first blocker.
+    evaluation = evaluate_freeze_gate(version)
+    normalized = evaluation.normalized_binding
+
+    items = []
+    if evaluation.blocker is not None and evaluation.blocker.key == "version":
+        items.append(_blocked_item("version", evaluation.blocker.message))
+    else:
+        items.append(_ready_item("version"))
+    items += [
         _readiness_item("counts", lambda: _normalize_live_counts(live_config)),
         _readiness_item(
             "weights",
@@ -194,10 +209,6 @@ def live_2026_readiness(version) -> list[ReadinessItem]:
         _readiness_item("judges", lambda: _normalize_live_judges(live_config, strict=True)),
     ]
 
-    # The gate is the freeze's own walk. Its normalized binding is what the definition row
-    # compiles against, and its verdict is what the page prints as the first blocker.
-    evaluation = evaluate_freeze_gate(version)
-    normalized = evaluation.normalized_binding
     if normalized is None and all(item.ready for item in items):
         items.append(
             _blocked_item(
@@ -517,6 +528,89 @@ def apply_live_2026_counts(ruleset: ContestRuleset, version: RulesetVersion, *, 
     return contest_round
 
 
+@transaction.atomic
+def clone_first_round_for_successor(ruleset: ContestRuleset, version: RulesetVersion, *, operator):
+    """Copy the first round onto a new DRAFT round and rebind this version to it.
+
+    The frozen authority owns the round it binds, so a successor that needs different seats
+    cannot move that one. The way out — "create a round, rebind it, come back" — is four pages
+    of work for what the operator thinks of as "change 10 to 8", and a reset button is worse
+    than useless here: it destroys the running round's prepared data and the guard still
+    refuses afterwards. This is the way out in one action.
+
+    Configuration only. No entries, no scores, no snapshots come across; the new round is a
+    draft that has never been prepared.
+    """
+
+    from singer_contest.models import ContestRound
+
+    from .services import version_is_editable
+
+    current_operator = require_current_staff(operator)
+    lock_activity_for_action(ruleset.activity)
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
+    locked_version = RulesetVersion.objects.select_for_update().get(pk=version.pk)
+    if not version_is_editable(locked_version):
+        raise PermissionDenied("只有该赛制的最新草稿可以建立后继第一轮。")
+
+    source = _bound_first_round(locked_ruleset, lock=True)
+    if source is None:
+        raise ValidationError("当前赛制还没有绑定第一轮，请先在配置页保存一次。")
+    if source.pk not in current_frozen_round_ids(locked_ruleset, excluding_version=locked_version):
+        raise ValidationError("当前第一轮不属于正式赛制，直接在轮次页面修改即可，不需要复制。")
+
+    # The seats come from the *binding*, not from the round being replaced: when the operator
+    # has already saved 8, the binding says 8 while the old round still says 10, and the clone
+    # should agree with where they are going rather than with where the authority still is.
+    seat_count = live_challenge_counts_from_binding(_snapshot_binding(locked_ruleset)).seat_count
+    next_sequence = (
+        ContestRound.objects.filter(activity_id=locked_ruleset.activity_id).aggregate(
+            max_sequence=Max("sequence")
+        )["max_sequence"]
+        or 0
+    ) + 1
+    with authority_write(CONTEST_ROUND_STATE):
+        cloned = ContestRound.objects.create(
+            activity_id=locked_ruleset.activity_id,
+            round_type=source.round_type,
+            sequence=next_sequence,
+            name=f"{source.name or LIVE_2026_FIRST_ROUND_NAME}{FIRST_ROUND_CLONE_SUFFIX}",
+            scoring_mode=source.scoring_mode,
+            score_completion_mode=source.score_completion_mode,
+            judge_count=source.judge_count,
+            minimum_judge_count=source.minimum_judge_count,
+            advance_count=seat_count,
+            roster_source=source.roster_source,
+            roster_source_stage=source.roster_source_stage,
+            rubric=source.rubric,
+        )
+
+    current = _snapshot_binding(locked_ruleset)
+    first_round_key = str(
+        (locked_ruleset.live_challenge or {}).get("podium_first_round_key")
+        or LIVE_2026_FIRST_ROUND_KEY
+    )
+    update_ruleset_binding(
+        locked_ruleset,
+        binding={
+            **current,
+            "round_keys": {**current["round_keys"], first_round_key: cloned.pk},
+        },
+        operator=current_operator,
+    )
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"ContestRound:{cloned.pk}",
+        new_value=json.dumps(
+            {"cloned_from": source.pk, "first_round_key": first_round_key},
+            ensure_ascii=False,
+        ),
+        note="clone_first_round_for_successor",
+    )
+    return cloned
+
+
 def _first_round_for(ruleset: ContestRuleset):
     """The already-bound first round, or a freshly created one.
 
@@ -633,9 +727,9 @@ def _arriving_or_existing_draft(
     """The version the operator continues on: a new one only when the format first arrives."""
 
     if reuse:
-        draft = (
-            ruleset.versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
-        )
+        # The newest DRAFT, not the newest *draft*: a frozen successor makes every draft
+        # beside it history, and continuing on one would edit state the authority has left.
+        draft = editable_ruleset_version(ruleset)
         if draft is not None:
             return draft
         frozen = (

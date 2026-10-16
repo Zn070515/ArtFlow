@@ -8934,6 +8934,11 @@ class RulesetEditorTests(TestCase):
         invalid.refresh_from_db()
         self.assertEqual(invalid.status, "draft")
 
+        # The scratch row has to go before the successful freeze: with the newest-version
+        # rule, a version with anything newer beside it is history and may not take
+        # authority, whatever its own content says.
+        RulesetVersion._base_manager.filter(pk=invalid.pk).delete()
+
         # Always-bound freeze (P0-2) only passes once the activity carries the facts the
         # walkthrough references: enough approved singers + each round bound with a scale.
         _seed_bound_acceptance(self.activity, self.ruleset)
