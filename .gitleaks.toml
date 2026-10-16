@@ -1,13 +1,20 @@
-# Gitleaks config: keep the built-in rule set but allowlist a known false
-# positive. The generic-api-key rule flags the ORM kwarg shorthand
-# ``computed_by=computed_by`` (singer_contest/services.py) as a key value pair;
-# it is an internal keyword argument, not a secret.
+# Gitleaks config: keep the built-in rule set but allowlist the false positives
+# the generic-api-key rule produces on Python identifiers. Both entries below are
+# names, not credentials: the rule looks for ``<something with "key"> = <value>``
+# and a module-level constant qualifies as both sides of that shape.
+#
+# The scan covers every reachable commit, so an allowlist is the only way to clear
+# a finding in history — editing the source now would leave it in the scan.
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "ORM kwarg shorthand is not a secret"
+description = "Python identifiers that the generic-api-key rule reads as key/value pairs"
 regexes = [
+    # ORM kwarg shorthand in singer_contest/services.py.
     'computed_by=computed_by',
+    # An import list in staff_panel/views.py (commit 6f4ebb6): the rule reads
+    # ``..._KEY, LIVE_2026_PODIUM_KEYS`` as a key/value pair.
+    'LIVE_2026_PODIUM_KEYS',
 ]
