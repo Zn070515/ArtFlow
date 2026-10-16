@@ -1584,6 +1584,52 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
             status=status,
         )
 
+    def test_freeze_refuses_a_version_that_is_not_the_newest(self):
+        """Version numbers are monotonic, and a freeze is what moves the authority.
+
+        Freezing a row with a newer one beside it would demote the newer version and move the
+        activity's authority backwards — and the older row may carry a definition the
+        activity has already left behind. The rule lives in the service, not only in the
+        pages that call it.
+        """
+
+        ruleset, _round = self._ruleset_with_binding()
+        admin = self._admin()
+        older = self._draft_on(ruleset, version=1)
+        newer = self._draft_on(ruleset, version=2)
+
+        with self.assertRaisesMessage(ValidationError, "不能冻结旧版本"):
+            freeze_ruleset_version(older, admin)
+
+        older.refresh_from_db()
+        self.assertEqual(older.status, RulesetVersion.Status.DRAFT)
+        self.assertFalse(older.is_current)
+        # The newer row is still the one that can take authority.
+        self.assertEqual(freeze_ruleset_version(newer, admin).status, RulesetVersion.Status.FROZEN)
+
+    def test_editable_ruleset_version_ignores_a_draft_beside_a_frozen_successor(self):
+        """``v1 DRAFT`` beside ``v2 FROZEN`` is history, not an editing target."""
+
+        from ruleset.services import editable_ruleset_version, version_is_editable
+
+        ruleset, _round = self._ruleset_with_binding()
+        admin = self._admin()
+        older = self._draft_on(ruleset, version=1)
+        newer = self._draft_on(ruleset, version=2)
+        frozen = freeze_ruleset_version(newer, admin)
+
+        self.assertIsNone(editable_ruleset_version(ruleset))
+        self.assertFalse(version_is_editable(older))
+
+        # ...and a draft that really is the newest row is the editing target.
+        successor = supersede_ruleset_version(frozen, created_by=admin)
+        editable = editable_ruleset_version(ruleset)
+        self.assertIsNotNone(editable)
+        assert editable is not None  # for the type checker, not for the test
+        self.assertEqual(editable.pk, successor.pk)
+        self.assertTrue(version_is_editable(successor))
+        self.assertFalse(version_is_editable(frozen))
+
     def test_freeze_snapshots_binding_from_ruleset(self):
         ruleset, round_ = self._ruleset_with_binding()
         admin = self._admin()

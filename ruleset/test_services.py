@@ -541,10 +541,15 @@ class BusinessRulesetSaveTests(TestCase):
             )
         self.ruleset.round_keys = {"r1": round_.pk}
         self.ruleset.save(update_fields=["round_keys"])
+        # The draft under test has to be the newest row: a version with a newer one beside it
+        # is history under the newest-version rule, and this test is about the *frozen-round*
+        # guard, which only fires for a draft that may still be edited.
+        self.version.version = 2
+        self.version.save(update_fields=["version"])
         with authority_write(RULESET_FREEZE):
             RulesetVersion.objects.create(
                 ruleset=self.ruleset,
-                version=2,
+                version=1,
                 definition=self.version.definition,
                 status=RulesetVersion.Status.FROZEN,
                 is_current=True,

@@ -789,6 +789,7 @@ def save_planning_draft(
     locked, draft = _lock_planning_draft_version(version)
     if locked.status != RulesetVersion.Status.DRAFT:
         raise PermissionDenied("已冻结赛制版本不可编辑规划草稿。")
+    _refuse_superseded_version(locked)
     if draft.revision != expected_revision:
         raise ValidationError("规划草稿已被其他编辑修改，请刷新后重试。")
     validate_planning_draft(payload)
@@ -1174,6 +1175,7 @@ def apply_planning_to_ruleset(
     locked, draft = _lock_planning_draft_version(version)
     if locked.status != RulesetVersion.Status.DRAFT:
         raise PermissionDenied("已冻结赛制版本不可应用规划候选。")
+    _refuse_superseded_version(locked)
     if draft.revision != expected_revision:
         raise ValidationError("规划草稿已被其他编辑修改，请刷新后重试。")
     result = prepare_planning_preflight(locked, draft.payload)
@@ -1389,6 +1391,9 @@ def update_ruleset_definition(
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
+    # Every definition writer — the business editor, the raw editor, the questionnaire
+    # designer — lands here, so the newest-version rule lives here too.
+    _refuse_superseded_version(locked)
     if base_content_hash is not None and locked.content_hash != base_content_hash:
         raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
     parse_definition(definition)
@@ -1435,6 +1440,9 @@ def update_ruleset_definition_sections(
     locked = _lock_version_for_write(version)
     if locked.status == RulesetVersion.Status.FROZEN:
         raise PermissionDenied("已冻结赛制版本不可编辑。")
+    # Every definition writer — the business editor, the raw editor, the questionnaire
+    # designer — lands here, so the newest-version rule lives here too.
+    _refuse_superseded_version(locked)
     if base_content_hash is not None and locked.content_hash != base_content_hash:
         raise ValidationError("赛制已被其他编辑修改，请刷新后重试。")
     try:
@@ -1991,6 +1999,53 @@ ROSTER_FINAL_PHASES = frozenset(
 def entry_roster_is_final(activity) -> bool:
     """Whether the approved-singer roster is settled enough to prove roster facts."""
     return activity.phase in ROSTER_FINAL_PHASES
+
+
+def newer_ruleset_version(version: RulesetVersion) -> RulesetVersion | None:
+    """The version that has replaced this one, if any: anything with a higher number.
+
+    Deliberately ignores status. A higher-numbered row is newer whether it is the DRAFT that
+    superseded this one or the FROZEN authority that took over from it, and both make the
+    older row history. Asking only for a newer *DRAFT* — as the 2026 pages used to — misses
+    the ``v1 DRAFT`` beside a ``v2 FROZEN``, which is exactly the state left behind by the
+    rounds that used to create versions freely.
+    """
+
+    return version.ruleset.versions.filter(version__gt=version.version).order_by("version").first()
+
+
+def editable_ruleset_version(ruleset: ContestRuleset) -> RulesetVersion | None:
+    """The only version an operator may edit: the newest row, and only while it is a DRAFT.
+
+    Version numbers are monotonic, so "the newest DRAFT" and "the newest version" are the
+    same answer only while nobody has frozen anything. Reading them as the same answer is
+    what let an old draft stay editable after its successor became the authority — and, once
+    its own freeze demoted that successor, move the activity's authority *backwards*.
+    """
+
+    latest = ruleset.versions.order_by("-version").first()
+    if latest is None or latest.status != RulesetVersion.Status.DRAFT:
+        return None
+    return latest
+
+
+def version_is_editable(version: RulesetVersion) -> bool:
+    """Whether this version is the ruleset's newest row and still a DRAFT."""
+
+    return version.status == RulesetVersion.Status.DRAFT and newer_ruleset_version(version) is None
+
+
+def _refuse_superseded_version(version: RulesetVersion) -> None:
+    """Refuse a write to a version the ruleset has moved past.
+
+    Every writer calls this rather than each deciding for itself what "still current" means:
+    a version with a newer row beside it is history whether the newer row is a DRAFT or the
+    FROZEN authority, and the older row may carry a document the activity has left behind.
+    """
+
+    newer = newer_ruleset_version(version)
+    if newer is not None:
+        raise PermissionDenied(f"此版本已被 v{newer.version} 替代，不能继续编辑。")
 
 
 def frozen_binding_round_ids(binding) -> set[int]:
@@ -2654,6 +2709,7 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
 #: The freeze gate's checks, in the order they run. The label is what the readiness page
 #: prints; the key is what tests and templates refer to.
 FREEZE_GATE_LABELS: dict[str, str] = {
+    "version": "此版本是该赛制的最新版本",
     "finality": "当前正式赛制没有已核定的赛段结果",
     "binding": "人数、分组、两套权重与三轮评委齐备",
     "definition": "赛制定义可以编译（晋级名额与席位数一致）",
@@ -2698,6 +2754,21 @@ def evaluate_freeze_gate(
     """
 
     from singer_contest.models import StageResult
+
+    # Version numbers are monotonic, and freezing is how a version becomes the authority.
+    # Freezing an older row would demote the newer one and move the activity's authority
+    # backwards, so a version with anything newer beside it is history no matter how ready
+    # it looks. Fails closed here rather than only in the views: the UI guard is not the
+    # rule, it is one rendering of it.
+    newer = newer_ruleset_version(version)
+    if newer is not None:
+        error = ValidationError(
+            f"已存在更新的赛制版本（v{newer.version}），不能冻结旧版本。"
+            "请在新版本上继续，或用创建后继草稿的方式继续调整。"
+        )
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("version", error), normalized_binding=None, plan=None
+        )
 
     prior = _prior_current_frozen(version)
     if (
