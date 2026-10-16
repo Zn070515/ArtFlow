@@ -1,10 +1,10 @@
 """Provision the built-in 2026 live challenge ruleset (§八).
 
-The format is a *starting draft*, not a rule type. What is fixed is the algorithm — five
-challenge turns at most, seat inheritance, a weighted podium that ignores the challenge
-scores — while the numbers beside it (participants, seats, groups, both weight pairs, the
-judge lists) are the operators'. ``ruleset.services.validate_binding`` and
-``_validate_2026_live_contract`` enforce that those numbers relate coherently; nothing
+The format is a *starting draft*, not a rule type. What is fixed is the algorithm — one
+challenge turn per singer who missed an initial seat, seat inheritance, a weighted podium
+that ignores the challenge scores — while the numbers beside it (participants, seats, groups,
+both weight pairs, the judge lists) are the operators'. ``ruleset.services.validate_binding``
+and ``_validate_2026_live_contract`` enforce that those numbers relate coherently; nothing
 requires them to equal the built-in's pre-fill.
 
 What this module adds is *arrival*: creating a ruleset from the system built-in template also
@@ -34,10 +34,30 @@ from django.db.models import Max
 
 from .models import ContestRuleset, RulesetVersion
 from .services import (
+    FREEZE_GATE_LABELS,
     LIVE_CHALLENGE_FORMAT_KEY,
+    RulesetInvalidError,
+    _compile_frozen_definition,
+    _live_first_round,
+    _live_first_round_groups,
+    _live_first_round_judges,
+    _live_first_round_rubric,
+    _live_first_round_seats,
+    _normalize_live_challenge_weights,
+    _normalize_live_counts,
+    _normalize_live_judges,
+    _normalize_live_podium,
+    _prior_current_frozen,
     _snapshot_binding,
+    _validate_2026_live_contract,
+    _validate_frozen_questionnaire,
+    _validate_successor_questionnaire,
     create_ruleset_version,
+    current_frozen_round_ids,
     current_frozen_version,
+    evaluate_freeze_gate,
+    frozen_round_configuration_message,
+    supersede_ruleset_version,
     update_ruleset_binding,
 )
 from .templates import (
@@ -78,102 +98,205 @@ def live_2026_binding_preset() -> dict:
 
 @dataclass(frozen=True)
 class ReadinessItem:
-    """One line of the "我还差什么" checklist.
+    """One line of the "准备清单".
 
-    ``ready`` is decided by the freeze gate's own validators, never by a second opinion
-    written beside them — otherwise the page could say "全部就绪" and the freeze still fail.
+    ``state`` is one of ``ready`` / ``blocked`` / ``unknown``: a row whose own precondition
+    has not been met yet is genuinely unknown, and saying "missing" about it would be a second
+    lie of the same kind as saying "ready" about it.
     """
 
     key: str
     label: str
-    ready: bool
+    state: str
     message: str = ""
 
+    @property
+    def ready(self) -> bool:
+        return self.state == "ready"
 
-def preflight_live_2026(version) -> list[ReadinessItem]:
-    """Run the freeze gate's validators for a 2026 ruleset and report what each one says.
+    @property
+    def unknown(self) -> bool:
+        return self.state == "unknown"
 
-    The checks run in the same order freeze runs them and short-circuit the same way, so the
-    page's answer and the freeze's answer cannot drift apart.
+
+#: The 准备清单's rows, in the order an operator works through them. Each row names the
+#: concern; the validator behind it is the freeze's own, never a second opinion beside it.
+#: The keys the freeze gate also names come from there, so the two readings of one check
+#: cannot end up calling it different things.
+READINESS_LABELS: dict[str, str] = {
+    "counts": "第一轮参赛人数、晋级人数与分组数自洽",
+    "weights": "踢馆成绩权重（第一轮 + 踢馆）合计 100%",
+    "podium": "冠亚季军成绩权重（第一轮 + 第三轮）合计 100%",
+    "judges": "踢馆评委与第三轮评委齐备（含最低有效评委数）",
+    "round_seats": "第一轮的晋级名额与分组都和配置一致",
+    "round_judges": "第一轮按最低有效评委数评分并配好评委人数",
+    "rubric": "第一轮配置统一评分标准",
+    "round_contract": "现场赛制不依赖观众投票，且第一轮绑定了物理评分轮",
+    **FREEZE_GATE_LABELS,
+}
+
+#: The rows the coarse ``round_contract`` row is the catch-all for.
+_ROUND_ROW_KEYS = frozenset({"round_seats", "round_judges", "rubric"})
+
+
+def freeze_blocker(version, *, binding: dict | None = None):
+    """The first check the freeze would refuse on, or ``None`` when it would pass.
+
+    This is the page's "正式冻结检查": it returns what
+    :func:`~ruleset.services.evaluate_freeze_gate` reports, and that gate *is* the walk
+    :func:`~ruleset.services.freeze_ruleset_version` performs. The checklist below may be
+    more granular, but this line is by construction the answer the freeze button gives.
     """
 
-    from .compiler import ValidationReport, compile_definition
-    from .services import (
-        RulesetInvalidError,
-        _snapshot_binding,
-        _validate_2026_live_contract,
-        _validate_frozen_questionnaire,
-        _validate_successor_questionnaire,
-        build_bound_context,
-        validate_binding,
-        validate_definition_completeness,
-    )
+    return evaluate_freeze_gate(version, binding=binding).blocker
+
+
+def live_2026_readiness(version) -> list[ReadinessItem]:
+    """Every 准备清单 row with its own verdict — no short-circuiting.
+
+    The freeze asks "may I stop?" and the first refusal is the answer. This asks "what is
+    still missing?" and has to answer all of it at once: a fresh built-in draft is missing
+    the ratios, the judge panels, the rubric, the chorus grouping and usually the
+    questionnaire, and a page that reports only the first of those is not a checklist.
+
+    Every probe is the validator the freeze itself runs. Two rows are deliberately coarse —
+    ``binding`` and ``round_contract`` — and appear only when their granular siblings all
+    passed and the coarse validator still refuses, so a failure no granular row covers is
+    reported rather than hidden behind "全部就绪".
+    """
 
     ruleset = version.ruleset
-    items: list[ReadinessItem] = []
+    binding = _snapshot_binding(ruleset)
+    live_config = binding.get("live_challenge") or {}
+    if not live_config:
+        return [_blocked_item("counts", "当前赛制尚未声明 2026 现场踢馆赛制。")]
 
-    def _blocked(key: str, label: str, message: str) -> None:
-        items.append(ReadinessItem(key=key, label=label, ready=False, message=message))
+    root = _definition_root(version)
+    round_keys = binding.get("round_keys") or {}
+    live_format_key = str(live_config.get("format_key") or "")
+    items = [
+        _readiness_item("counts", lambda: _normalize_live_counts(live_config)),
+        _readiness_item(
+            "weights",
+            lambda: _normalize_live_challenge_weights(
+                live_config, strict=True, live_format_key=live_format_key
+            ),
+        ),
+        _readiness_item(
+            "podium",
+            lambda: _normalize_live_podium(
+                live_config,
+                strict=True,
+                live_format_key=live_format_key,
+                round_keys=round_keys,
+            ),
+        ),
+        _readiness_item("judges", lambda: _normalize_live_judges(live_config, strict=True)),
+    ]
 
-    def _ready(key: str, label: str) -> None:
-        items.append(ReadinessItem(key=key, label=label, ready=True))
-
-    try:
-        normalized = validate_binding(
-            ruleset,
-            _snapshot_binding(ruleset),
-            require_live_challenge_complete=True,
+    # The gate is the freeze's own walk. Its normalized binding is what the definition row
+    # compiles against, and its verdict is what the page prints as the first blocker.
+    evaluation = evaluate_freeze_gate(version)
+    normalized = evaluation.normalized_binding
+    if normalized is None and all(item.ready for item in items):
+        items.append(
+            _blocked_item(
+                "binding",
+                evaluation.blocker.message if evaluation.blocker else "赛制绑定未通过校验。",
+            )
         )
+
+    if normalized is None:
+        items.append(_unknown_item("definition"))
+    else:
+        items.append(
+            _readiness_item("definition", lambda: _compile_frozen_definition(version, normalized))
+        )
+
+    # The physical round's own rows read the stored surface directly, so they answer even
+    # while the binding rows above are still refusing: "第一轮评分表还没填" is exactly what
+    # the operator should be told at the same time as the ratios, not after them.
+    try:
+        first_round = _live_first_round(live_config, binding)
     except ValidationError as exc:
-        _blocked(
-            "binding",
-            "人数、分组、两套权重与三轮评委齐备",
-            _readiness_message(exc),
+        items.append(_blocked_item("round_seats", _readiness_message(exc)))
+    else:
+
+        def _first_round_seats() -> None:
+            """Everything the first round owns: the seat count's copies, and its grouping."""
+
+            _live_first_round_seats(root, live_config, first_round)
+            _live_first_round_groups(root, live_config, binding, first_round)
+
+        items.append(_readiness_item("round_seats", _first_round_seats))
+        items.append(_readiness_item("round_judges", lambda: _live_first_round_judges(first_round)))
+        items.append(_readiness_item("rubric", lambda: _live_first_round_rubric(first_round)))
+
+    if normalized is not None and all(item.ready for item in items if item.key in _ROUND_ROW_KEYS):
+        items.append(
+            _readiness_item(
+                "round_contract", lambda: _validate_2026_live_contract(root, normalized)
+            )
         )
-        return items
-    _ready("binding", "人数、分组、两套权重与三轮评委齐备")
 
-    try:
-        bound_context = build_bound_context(version, normalized)
-        report, plan = compile_definition(version.definition, context=bound_context, bound=True)
-        completeness = validate_definition_completeness(version.definition)
-        if completeness:
-            report = ValidationReport(report.issues + completeness)
-        if not report.passes():
-            raise RulesetInvalidError(report, plan)
-    except (ValidationError, RulesetInvalidError) as exc:
-        _blocked("definition", "赛制定义可以编译（晋级名额与席位数一致）", _readiness_message(exc))
-        return items
-    _ready("definition", "赛制定义可以编译（晋级名额与席位数一致）")
-
-    try:
-        _validate_2026_live_contract(json.loads(version.definition), normalized)
-    except (ValidationError, ValueError) as exc:
-        _blocked(
-            "round", "第一轮的评分轮、评委、晋级名额与分组都和配置一致", _readiness_message(exc)
+    if normalized is None:
+        items.append(_unknown_item("questionnaire"))
+    else:
+        items.append(
+            _readiness_item(
+                "questionnaire",
+                lambda: _validate_frozen_questionnaire(version.definition, normalized),
+            )
         )
-        return items
-    _ready("round", "第一轮的评分轮、评委、晋级名额与分组都和配置一致")
 
-    try:
-        _validate_frozen_questionnaire(version.definition, normalized)
-    except ValidationError as exc:
-        _blocked("questionnaire", "选手问卷与第二、三轮材料契约齐备", _readiness_message(exc))
-        return items
-    _ready("questionnaire", "选手问卷与第二、三轮材料契约齐备")
-
-    try:
-        _validate_successor_questionnaire(
-            RulesetVersion._base_manager.filter(
-                ruleset_id=ruleset.pk, status=RulesetVersion.Status.FROZEN
-            ).first(),
-            version,
+    items.append(
+        _readiness_item(
+            "successor",
+            lambda: _validate_successor_questionnaire(_prior_current_frozen(version), version),
         )
-    except ValidationError as exc:
-        _blocked("successor", "换版后的问卷答案可以承接", _readiness_message(exc))
-        return items
-    _ready("successor", "换版后的问卷答案可以承接")
+    )
+    if evaluation.blocker is not None and evaluation.blocker.key == "finality":
+        items.append(_blocked_item("finality", evaluation.blocker.message))
+    else:
+        items.append(_ready_item("finality"))
     return items
+
+
+def _readiness_item(key: str, probe) -> ReadinessItem:
+    """Run one validator on its own and report what it alone said."""
+
+    try:
+        probe()
+    except (ValidationError, RulesetInvalidError, ValueError) as exc:
+        return _blocked_item(key, _readiness_message(exc))
+    return _ready_item(key)
+
+
+def _ready_item(key: str) -> ReadinessItem:
+    return ReadinessItem(key=key, label=READINESS_LABELS[key], state="ready")
+
+
+def _blocked_item(key: str, message: str) -> ReadinessItem:
+    return ReadinessItem(key=key, label=READINESS_LABELS[key], state="blocked", message=message)
+
+
+def _unknown_item(key: str) -> ReadinessItem:
+    return ReadinessItem(
+        key=key,
+        label=READINESS_LABELS[key],
+        state="unknown",
+        message="需要先完成上一项才能检查。",
+    )
+
+
+def _definition_root(version) -> dict:
+    """The definition as the live-contract validators want it: a parsed mapping."""
+
+    try:
+        root = json.loads(version.definition)
+    except (TypeError, ValueError):
+        return {}
+    return root if isinstance(root, dict) else {}
 
 
 def _readiness_message(error: Exception) -> str:
@@ -191,22 +314,29 @@ def _readiness_message(error: Exception) -> str:
 
 @dataclass(frozen=True)
 class LiveChallengeCounts:
-    """The 2026 numbers as the runtime reads them off a frozen binding."""
+    """The 2026 numbers as the runtime reads them off a frozen binding.
+
+    ``suggested_group_size`` is named that way on purpose. The stored binding key is still
+    ``group_size`` — renaming it would strand the suggestion in every already-frozen binding
+    and, because the binding is part of ``_authority_hash``, is not worth doing — but nothing
+    validates it against anything, and a field called ``group_size`` beside the real contract
+    ``group_count`` reads like a rule the actual, unequal group sizes would then violate.
+    """
 
     participant_count: int
     seat_count: int
     group_count: int
-    group_size: int
+    suggested_group_size: int
     challenge_count: int
 
 
 def live_challenge_counts_from_binding(binding) -> LiveChallengeCounts:
     """Read the live counts out of a binding snapshot.
 
-    ``group_count``/``group_size`` are absent from every binding frozen before the counts
-    became parameters. They default to the built-in 5x3 rather than being back-filled: the
-    frozen binding is part of ``_authority_hash``, so rewriting one would invalidate every
-    audited ``StageResult`` that already points at it.
+    ``group_count`` and the suggested group size are absent from every binding frozen before
+    the counts became parameters. They default to the built-in 5x3 rather than being
+    back-filled: the frozen binding is part of ``_authority_hash``, so rewriting one would
+    invalidate every audited ``StageResult`` that already points at it.
 
     踢馆人数 is derived, never read from storage — a stored mirror keeps the frozen record
     self-describing, but the arithmetic is the definition.
@@ -224,7 +354,7 @@ def live_challenge_counts_from_binding(binding) -> LiveChallengeCounts:
         participant_count=participant_count,
         seat_count=seat_count,
         group_count=int(config.get("group_count") or LIVE_2026_GROUP_COUNT),
-        group_size=int(config.get("group_size") or LIVE_2026_GROUP_SIZE),
+        suggested_group_size=int(config.get("group_size") or LIVE_2026_GROUP_SIZE),
         challenge_count=participant_count - seat_count,
     )
 
@@ -339,6 +469,15 @@ def apply_live_2026_counts(ruleset: ContestRuleset, version: RulesetVersion, *, 
 
     contest_round = _bound_first_round(locked, lock=True)
     if contest_round is not None and contest_round.advance_count != seat_count:
+        # A frozen authority owns its rounds' execution configuration. The frozen binding
+        # keeps saying 10 seats while the round it binds advances 8, and the challenge
+        # service reads the *binding* — so the venue would be told to seat ten singers the
+        # round never produced, with no error until the first challenge session. A successor
+        # draft re-shapes the format by binding a new round, not by moving this one.
+        if contest_round.pk in current_frozen_round_ids(locked, excluding_version=version):
+            raise ValidationError(
+                frozen_round_configuration_message(contest_round.name or LIVE_2026_FIRST_ROUND_NAME)
+            )
         if contest_round.status != ContestRound.Status.DRAFT or contest_round.is_locked:
             raise ValidationError(
                 "第一轮已准备或已锁定，不能修改晋级人数。请先在轮次页面把它重置为草稿，"
@@ -414,10 +553,17 @@ def _first_round_for(ruleset: ContestRuleset):
 
 @transaction.atomic
 def provision_live_2026_ruleset(activity, *, template, name, operator) -> RulesetVersion:
-    """Create or reuse the activity's ruleset from the 2026 built-in, pre-filled.
+    """Create the activity's ruleset from the 2026 built-in, pre-filled — once.
 
-    Mirrors an ordinary ruleset creation — one ``ContestRuleset`` per activity, a new DRAFT
-    version from the template's definition — and adds the first round and the binding keys.
+    "Pre-filled" is an *arrival* property, not a reset button. Clicking the built-in again on
+    an activity that already runs the 2026 format must not write the built-in's 15/5/10 back
+    over the operators' 12/4/8, and must not leave a second DRAFT claiming the same shared
+    ``ContestRuleset`` binding surface — an older draft built on the new numbers is exactly
+    the "v2 的 definition 还写着 10" state the freeze contract later refuses.
+
+    So the preset is applied only when the ruleset does not carry the 2026 format yet; after
+    that this returns to the draft that already exists, or issues the successor of the frozen
+    version if that is all there is.
     """
 
     current_operator = require_current_staff(operator)
@@ -431,6 +577,9 @@ def provision_live_2026_ruleset(activity, *, template, name, operator) -> Rulese
     ruleset.save()
 
     contest_round = _first_round_for(ruleset)
+    already_formatted = (
+        str((ruleset.live_challenge or {}).get("format_key") or "") == LIVE_CHALLENGE_FORMAT_KEY
+    )
 
     # Reuse the whole surface: ``update_ruleset_binding`` replaces every field it is given,
     # so a partial payload would clear the keys another editor already set.
@@ -443,16 +592,17 @@ def provision_live_2026_ruleset(activity, *, template, name, operator) -> Rulese
                 **current["round_keys"],
                 LIVE_2026_FIRST_ROUND_KEY: contest_round.pk,
             },
-            "live_challenge": {
-                **(current.get("live_challenge") or {}),
-                **live_2026_binding_preset(),
-            },
+            "live_challenge": (
+                dict(current.get("live_challenge") or {})
+                if already_formatted
+                else live_2026_binding_preset()
+            ),
         },
         operator=current_operator,
     )
 
-    version = create_ruleset_version(
-        ruleset, definition=template.definition, created_by=current_operator
+    version = _arriving_or_existing_draft(
+        ruleset, template=template, operator=current_operator, reuse=already_formatted
     )
     # ``update_ruleset_binding`` writes no audit record of its own, so provisioning would
     # otherwise be invisible in the log.
@@ -464,10 +614,42 @@ def provision_live_2026_ruleset(activity, *, template, name, operator) -> Rulese
             {
                 "template": template.builtin_key,
                 "first_round": contest_round.pk,
-                "live_challenge": live_2026_binding_preset(),
+                "live_challenge": ("kept" if already_formatted else live_2026_binding_preset()),
             },
             ensure_ascii=False,
         ),
-        note="provision_live_2026_ruleset",
+        note=(
+            "provision_live_2026_ruleset_reuse"
+            if already_formatted
+            else "provision_live_2026_ruleset"
+        ),
     )
     return version
+
+
+def _arriving_or_existing_draft(
+    ruleset: ContestRuleset, *, template, operator, reuse: bool
+) -> RulesetVersion:
+    """The version the operator continues on: a new one only when the format first arrives."""
+
+    if reuse:
+        draft = (
+            ruleset.versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
+        )
+        if draft is not None:
+            return draft
+        frozen = (
+            ruleset.versions.filter(status=RulesetVersion.Status.FROZEN)
+            .order_by("-version")
+            .first()
+        )
+        # The successor of the running authority, not a fresh copy of the built-in: the
+        # operators' numbers live in the frozen definition and must come across.
+        return (
+            supersede_ruleset_version(frozen, created_by=operator)
+            if frozen is not None
+            else create_ruleset_version(
+                ruleset, definition=template.definition, created_by=operator
+            )
+        )
+    return create_ruleset_version(ruleset, definition=template.definition, created_by=operator)

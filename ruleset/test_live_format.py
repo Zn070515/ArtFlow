@@ -35,6 +35,7 @@ from ruleset.schema import parse_definition
 from ruleset.services import (
     LIVE_CHALLENGE_FORMAT_KEY,
     _snapshot_binding,
+    create_ruleset_version,
     validate_binding,
 )
 from ruleset.templates import (
@@ -42,6 +43,7 @@ from ruleset.templates import (
     LIVE_2026_DEFAULTS,
     LIVE_2026_DEFINITION,
     LIVE_2026_FIRST_ROUND_KEY,
+    LIVE_2026_PODIUM_KEYS,
     LIVE_2026_TEMPLATE_NAME,
     seed_ruleset_templates,
 )
@@ -96,7 +98,7 @@ class Live2026BuiltinTests(TestCase):
         self.assertEqual(counts.participant_count, 15)
         self.assertEqual(counts.seat_count, 10)
         self.assertEqual(counts.group_count, 5)
-        self.assertEqual(counts.group_size, 3)
+        self.assertEqual(counts.suggested_group_size, 3)
         self.assertEqual(counts.challenge_count, 5)
 
     def test_challenge_count_is_derived_not_read(self):
@@ -255,10 +257,142 @@ class Live2026BuiltinTests(TestCase):
         ruleset.announcement_blocks = [{"key": "opening", "title": "开场"}]
         ruleset.save(update_fields=["announcement_blocks"])
 
-        self._provision(name="再次进入编辑")
+        version = self._provision(name="再次进入编辑")
 
         ruleset.refresh_from_db()
         self.assertEqual(ContestRound.objects.filter(activity=self.activity).count(), 1)
         self.assertEqual(ruleset.round_keys[LIVE_2026_FIRST_ROUND_KEY], first_round_pk)
         self.assertEqual(ruleset.announcement_blocks, [{"key": "opening", "title": "开场"}])
-        self.assertEqual(ruleset.versions.count(), 2)
+        # One draft, not two: a second one would be a second page editing the same shared
+        # binding, and the older of the pair would keep writing state the newer one owns.
+        self.assertEqual(ruleset.versions.count(), 1)
+        self.assertEqual(ruleset.versions.get().pk, version.pk)
+
+    def test_a_successor_draft_cannot_move_the_running_authoritys_first_round(self):
+        """A frozen authority owns its round's execution configuration.
+
+        The frozen binding keeps saying 10 seats while the round it binds advances 8, and the
+        challenge service reads the *binding* — so the venue would be told to seat ten singers
+        the round never produced, with no error until the first challenge session of the night.
+        Re-shaping the format means binding a new round, not moving this one.
+        """
+
+        from ruleset.live_format import apply_live_2026_counts
+        from ruleset.models import ContestRuleset, RulesetVersion
+
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第一轮",
+                sequence=1,
+                advance_count=10,
+            )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="2026 现场赛制", is_test_data=True
+        )
+        ruleset.round_keys = {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk}
+        ruleset.live_challenge = {
+            **LIVE_2026_DEFAULTS,
+            "format_key": LIVE_CHALLENGE_FORMAT_KEY,
+            "order_policy": "official_number",
+            **LIVE_2026_PODIUM_KEYS,
+        }
+        ruleset.save(update_fields=["round_keys", "live_challenge"])
+
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                definition=LIVE_2026_DEFINITION,
+                binding=_snapshot_binding(ruleset),
+            )
+        # The successor the operator is editing, and the edit they are making.
+        version = create_ruleset_version(
+            ruleset, definition=LIVE_2026_DEFINITION, created_by=self.admin
+        )
+        ruleset.live_challenge = {**ruleset.live_challenge, "seat_count": 8, "challenge_count": 7}
+        ruleset.save(update_fields=["live_challenge"])
+
+        with self.assertRaisesMessage(ValidationError, "当前正式赛制仍在使用轮次“第一轮”"):
+            apply_live_2026_counts(ruleset, version, operator=self.admin)
+
+        # Nothing moved: the frozen authority's round still advances the ten it promised.
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.advance_count, 10)
+
+    def test_the_round_guard_lifts_once_the_draft_is_the_authority(self):
+        """With no other current FROZEN version, the sync proceeds as before."""
+
+        from ruleset.live_format import apply_live_2026_counts
+        from ruleset.models import ContestRuleset
+
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.PRELIMINARY,
+                name="第一轮",
+                sequence=1,
+                advance_count=10,
+            )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="2026 现场赛制", is_test_data=True
+        )
+        ruleset.round_keys = {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk}
+        ruleset.live_challenge = {
+            **LIVE_2026_DEFAULTS,
+            "format_key": LIVE_CHALLENGE_FORMAT_KEY,
+            "order_policy": "official_number",
+            **LIVE_2026_PODIUM_KEYS,
+        }
+        ruleset.save(update_fields=["round_keys", "live_challenge"])
+        version = create_ruleset_version(
+            ruleset, definition=LIVE_2026_DEFINITION, created_by=self.admin
+        )
+        ruleset.live_challenge = {**ruleset.live_challenge, "seat_count": 8, "challenge_count": 7}
+        ruleset.save(update_fields=["live_challenge"])
+
+        apply_live_2026_counts(ruleset, version, operator=self.admin)
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.advance_count, 8)
+
+    def test_reprovisioning_never_writes_the_builtin_numbers_back(self):
+        """The built-in is a pre-fill, not a reset button.
+
+        An operator who reshaped 15/5/10 into 12/4/8 and clicks the built-in entry again must
+        get their own draft back — not 15/5/10 with a fresh DRAFT on top, which is the "shared
+        binding says 10 while the round advances 8" state the freeze later refuses.
+        """
+
+        self._provision()
+        ruleset = ContestRuleset.objects.get(activity=self.activity)
+        reshaped = {
+            **ruleset.live_challenge,
+            "participant_count": 12,
+            "seat_count": 8,
+            "challenge_count": 4,
+            "group_count": 4,
+        }
+        ruleset.live_challenge = reshaped
+        ruleset.save(update_fields=["live_challenge"])
+        first_round = ContestRound.objects.get(activity=self.activity)
+        with authority_write(CONTEST_ROUND_STATE):
+            first_round.advance_count = 8
+            first_round.save(update_fields=["advance_count"])
+
+        version = self._provision(name="再次进入编辑")
+
+        ruleset.refresh_from_db()
+        live = ruleset.live_challenge
+        self.assertEqual(live["participant_count"], 12)
+        self.assertEqual(live["seat_count"], 8)
+        self.assertEqual(live["group_count"], 4)
+        self.assertEqual(live["challenge_count"], 4)
+        self.assertEqual(ruleset.versions.count(), 1)
+        self.assertEqual(version.pk, ruleset.versions.get().pk)
+        # The operators' ratios must survive too: the preset never carries them, but a
+        # re-provision that rebuilt the block from the preset would drop them.
+        self.assertNotIn("first_round_weight", live)

@@ -9067,6 +9067,47 @@ class RulesetEditorTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_ruleset_bind_refuses_a_frozen_version(self):
+        """A frozen version is the audited authority; its surface is not an editor."""
+
+        from common.authority import RULESET_FREEZE, authority_write
+
+        with authority_write(RULESET_FREEZE):
+            frozen = RulesetVersion.objects.create(
+                ruleset=self.ruleset,
+                version=9,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                definition=self.version.definition,
+                binding={},
+                created_by=self.admin,
+            )
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[frozen.pk]),
+            {"stage_key": "院十佳"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.stage_key, "")
+
+    def test_ruleset_bind_refuses_a_superseded_draft(self):
+        """Two drafts share one binding surface, so only the newest may write it."""
+
+        from ruleset.services import create_ruleset_version
+
+        create_ruleset_version(
+            self.ruleset, definition=self.version.definition, created_by=self.admin
+        )
+        # This route is POST-only, so there is no page to hand over to — the write is refused
+        # and the editor is where the operator sees the newer draft.
+        response = self.client.post(
+            reverse("staff:ruleset_bind", args=[self.version.pk]),
+            {"stage_key": "院十佳"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.stage_key, "")
+
 
 class JudgeControlContractTests(SimpleTestCase):
     def test_judge_control_routes_are_mounted(self):

@@ -446,9 +446,9 @@
                     <label class="text-xs text-gray-700">第一轮参赛人数<input name="live_participant_count" value="{{ live_challenge.participant_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                     <label class="text-xs text-gray-700">第一轮晋级数（初始席位数）<input name="live_seat_count" value="{{ live_challenge.seat_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                     <label class="text-xs text-gray-700">第一轮组数<input name="live_group_count" value="{{ live_challenge.group_count|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
-                    <label class="text-xs text-gray-700">每组人数<input name="live_group_size" value="{{ live_challenge.group_size|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
+                    <label class="text-xs text-gray-700">每组人数（建议值）<input name="live_group_size" value="{{ live_challenge.group_size|default:'' }}" type="number" min="1" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                 </div>
-                <p class="mt-2 text-xs text-gray-600">踢馆人数 = 第一轮参赛人数 − 第一轮晋级数（不可填写）：<span class="font-medium text-gray-900">{{ live_challenge.challenge_count|default:"—" }}</span>。第三轮人数等于第一轮晋级数。更友好的填写入口见上方「打开 2026 决赛赛制配置」。</p>
+                <p class="mt-2 text-xs text-gray-600">踢馆人数 = 第一轮参赛人数 − 第一轮晋级数（不可填写）：<span class="font-medium text-gray-900">{{ live_challenge.challenge_count|default:"—" }}</span>。第三轮人数等于第一轮晋级数。「每组人数」只是初稿建议，不参与任何校验：实际按冻结的分组名单走，5 组可以是 3+3+3+3+2。更友好的填写入口见上方「打开 2026 决赛赛制配置」。</p>
                 <div class="grid sm:grid-cols-2 gap-3 mt-3">
                     <label class="text-xs text-gray-700">第一轮权重（一场踢馆）<input name="live_first_weight" value="{{ live_challenge.first_round_weight|default:'' }}" placeholder="40%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>
                     <label class="text-xs text-gray-700">踢馆轮权重（一场踢馆）<input name="live_challenge_weight" value="{{ live_challenge.challenge_round_weight|default:'' }}" placeholder="60%" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm"></label>

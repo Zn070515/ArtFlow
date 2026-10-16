@@ -11,15 +11,33 @@
     <h1 class="text-2xl font-bold text-gray-900 mb-2">{{ version.ruleset }}</h1>
 
     {% if live_2026 %}
-    <p class="text-sm text-gray-500 mb-4">这里用的就是冻结时用的那套校验，所以「全部就绪」等于冻结真能通过。</p>
+    <p class="text-sm text-gray-500 mb-4">「正式冻结检查」走的就是点冻结时走的那套校验；「准备清单」用的是同一批校验，但一条条问完，所以不会只说第一个阻塞。</p>
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-4">
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">正式冻结检查</div>
+        <div class="px-4 py-3 text-sm">
+            {% if blocker %}
+            <p class="text-red-700">
+                <span class="font-medium">✗ 现在不能冻结。</span>
+                首个阻塞：{{ blocker.label }} —— {{ blocker.message }}
+            </p>
+            {% else %}
+            <p class="text-emerald-700">✓ 现在可以冻结。</p>
+            {% endif %}
+        </div>
+    </div>
     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
-        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">正式启用前检查</div>
+        <div class="bg-gray-50 border-b border-gray-200 px-4 py-2 text-sm font-semibold">准备清单</div>
         <ul class="divide-y divide-gray-100">
             {% for row in preflight %}
             <li class="px-4 py-2 text-sm">
+                {% if row.pending %}
+                <span class="text-gray-300">·</span>
+                <span class="text-gray-500">{{ row.label }}</span>
+                {% else %}
                 <span class="{% if row.done %}text-emerald-700{% else %}text-red-700{% endif %}">{% if row.done %}✓{% else %}✗{% endif %}</span>
                 <span class="{% if row.done %}text-gray-800{% else %}text-gray-900 font-medium{% endif %}">{{ row.label }}</span>
-                {% if not row.done and row.detail %}<span class="block mt-1 text-xs text-red-700">{{ row.detail }}</span>{% endif %}
+                {% endif %}
+                {% if not row.done and row.detail %}<span class="block mt-1 text-xs {% if row.pending %}text-gray-500{% else %}text-red-700{% endif %}">{{ row.detail }}</span>{% endif %}
                 {% if not row.done and row.url %}<a href="{{ row.url }}" class="inline-block mt-1 text-xs border border-brand text-brand rounded px-3 py-1">{{ row.action }}</a>{% endif %}
             </li>
             {% endfor %}
