@@ -378,10 +378,6 @@ def _round_is_claimed_by_a_binding(contest_round: ContestRound, ruleset: Contest
     ``ContestRuleset`` counts too — a round a successor draft cloned in is rebound on the
     ruleset immediately, while its version only carries the new key once that version is
     itself frozen.
-
-    A round no binding ever named is not part of any version's shape: the challenge's own
-    per-match scoring rounds are physical rounds like any other, and binding them to the
-    format would make the format's shape say something it does not mean.
     """
 
     from ruleset.models import RulesetVersion
@@ -396,6 +392,55 @@ def _round_is_claimed_by_a_binding(contest_round: ContestRound, ruleset: Contest
     return False
 
 
+def _format_names_rounds(ruleset: ContestRuleset) -> bool:
+    """Whether this format's shape names any physical round at all.
+
+    A ruleset that binds only vote sources or audience scores is not a round shape: the
+    classic round flow — create a round, prepare it, score it, lock it — is outside its
+    business, and gating it there would refuse rounds the format never had an opinion about.
+    Once a format does name a round, every round in that activity has to belong to it.
+    """
+
+    from ruleset.models import RulesetVersion
+
+    if ruleset.round_keys:
+        return True
+    for version in RulesetVersion._base_manager.filter(ruleset=ruleset):
+        if (version.binding or {}).get("round_keys"):
+            return True
+    return False
+
+
+def _round_is_derived_from_authority(contest_round: ContestRound, version) -> bool:
+    """Whether the *current* authority's own machinery created this physical round.
+
+    The 2026 format binds only the first round, and deliberately so: the challenge's
+    per-match scoring rounds come into existence at the venue, and the third round is
+    materialised from a confirmed session. Neither can be in the frozen binding, so the only
+    honest question about them is where they came from — a link back to the session that the
+    authority is running, not the mere absence of a binding.
+    """
+
+    from .models import ChallengeMatch, ChallengeSession
+
+    session_id = contest_round.roster_source_challenge_session_id
+    if (
+        session_id is not None
+        and contest_round.roster_source == ContestRound.RosterSource.CHALLENGE_SESSION
+    ):
+        session = ChallengeSession._base_manager.filter(pk=session_id).first()
+        if (
+            session is not None
+            and session.activity_id == contest_round.activity_id
+            and session.ruleset_version_id == version.pk
+            and session.state != ChallengeSession.State.REVOKED
+        ):
+            return True
+    return ChallengeMatch.objects.filter(
+        score_round=contest_round, session__ruleset_version=version
+    ).exists()
+
+
 def _round_execution_authority(contest_round: ContestRound) -> tuple[str, str] | None:
     """The refusal and its short form, or ``None`` when the round may run.
 
@@ -408,7 +453,7 @@ def _round_execution_authority(contest_round: ContestRound) -> tuple[str, str] |
     ruleset = ContestRuleset.objects.filter(activity_id=contest_round.activity_id).first()
     if ruleset is None:
         return None
-    if not _round_is_claimed_by_a_binding(contest_round, ruleset):
+    if not _format_names_rounds(ruleset):
         return None
     label = contest_round.name or contest_round.get_round_type_display()
     version = current_frozen_version(contest_round.activity)
@@ -418,14 +463,23 @@ def _round_execution_authority(contest_round: ContestRound) -> tuple[str, str] |
             f"当前活动还没有正式赛制，轮次“{label}”不能开始比赛。"
             "请先在赛制配置页完成「正式启用」，再准备轮次。",
         )
-    if contest_round.pk not in _bound_round_ids_for_version(version):
+    if contest_round.pk in _bound_round_ids_for_version(version):
+        return None
+    if _round_is_derived_from_authority(contest_round, version):
+        return None
+    if _round_is_claimed_by_a_binding(contest_round, ruleset):
         return (
             "不属于当前正式赛制",
             f"轮次“{label}”不属于当前正式赛制（v{version.version}），不能开始比赛。"
             "要让这一版赛制跑它自己的轮次，先把它正式启用；"
             "原本那一轮仍由当前正式赛制继续使用。",
         )
-    return None
+    # Not the format's, and not derived from the format either: a round nobody asked for.
+    return (
+        "不属于当前正式赛制",
+        f"轮次“{label}”不属于当前正式赛制，也不是现场赛制自己生成的轮次，不能开始比赛。"
+        "现场只能运行当前正式赛制绑定的轮次，以及踢馆赛现场生成的评分轮与第三轮。",
+    )
 
 
 def round_execution_authority_message(contest_round: ContestRound) -> str | None:
@@ -438,8 +492,9 @@ def round_execution_authority_message(contest_round: ContestRound) -> str | None
     behind a format the activity had not made official yet. This asks the missing question:
     which format does this round belong to, and is that the one the activity is running?
 
-    An activity with no ruleset at all is not governed by a format and is left alone, as is
-    a round no binding ever named.
+    An activity with no ruleset at all is not governed by a format, and neither is any
+    activity whose format names no rounds — a vote-only ruleset has no opinion about which
+    rounds run, so the classic round flow keeps working there.
     """
 
     found = _round_execution_authority(contest_round)
@@ -1337,7 +1392,8 @@ def reset_round_snapshots(
 
     For a test-mode activity, every parent carried into the reset must itself be
     test-marked; otherwise a test rehearsal snapshot is silently wiping formal
-    rows. A formal activity is intentionally allowed to unwind via this path.
+    rows. A formal activity is intentionally allowed to unwind via this path — up to
+    the point where the venue has an immutable snapshot of its own.
     """
     lock_activity_for_runtime_data(contest_round.activity)
     locked_round = (
@@ -1350,6 +1406,16 @@ def reset_round_snapshots(
         or ScoreSummary.objects.filter(round=locked_round, is_test_data=False).exists()
     ):
         raise ValidationError("Test round reset requires test-owned scores and singers.")
+    # A formal judge panel is not this lifecycle's to unwind. Its members hold ``PROTECT``
+    # references onto the round's RoundJudge rows, so carrying on would raise a
+    # ProtectedError *after* the round was already back to DRAFT — a 500 out of a path the
+    # successor freeze's own advice points at. Fail closed here instead, before anything
+    # moves, with the reason in the operator's words.
+    if RoundPanelSnapshot.objects.filter(round=locked_round, is_test_data=False).exists():
+        raise ValidationError(
+            "本轮已经建立正式评委组快照，不能重置。正式现场的评委组快照不可回收，"
+            "重置不会释放赛制，只会毁掉本轮的评分数据；如现场发生事故，请走事故纠正流程。"
+        )
 
     old_value = json.dumps(
         {

@@ -8,6 +8,7 @@ from io import BytesIO
 from typing import Any, cast
 
 from accounts.models import User
+from accounts.services import mark_admin_verified
 from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
@@ -38,7 +39,7 @@ from django.db import (
     transaction,
 )
 from django.db.models.deletion import ProtectedError
-from django.test import RequestFactory, TestCase, TransactionTestCase
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
 from exports.services import build_score_template_workbook
@@ -65,6 +66,7 @@ from .models import (
     PerformanceScoreState,
     RoundEntry,
     RoundJudge,
+    RoundPanelSnapshot,
     ScoreRecord,
     ScoreSource,
     ScoreSummary,
@@ -1758,6 +1760,143 @@ class RoundResetServiceTests(TestCase):
         reset_round_to_draft(self.round, self.actor, reason="already draft")
         self.round.refresh_from_db()
         self.assertEqual(self.round.status, ContestRound.Status.DRAFT)
+
+
+class FormalPanelResetAuthorityTests(TestCase):
+    """A formal judge panel is not recoverable, and nothing may pretend that it is.
+
+    ``reset_round_snapshots`` unwinds test panels and deliberately leaves formal ones alone,
+    while ``RoundPanelSnapshotMember.source_round_judge`` is ``PROTECT`` onto ``RoundJudge``.
+    Resuming the reset on a formal round therefore stops at a ``ProtectedError`` that the
+    round-reset view does not catch — a 500 reached by following the freeze gate's own
+    advice. Test-mode activities cannot see this: their panels are deleted first.
+    """
+
+    def setUp(self):
+        self.actor = _create_provisioned_user(
+            username="formal-reset-actor", password="pass", role=User.Role.ADMIN
+        )
+        self.activity = Activity.objects.create(
+            title="Formal contest",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        self.activity.phase = Activity.Phase.TESTING
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["phase"])
+        self.round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            judge_count=2,
+            minimum_judge_count=2,
+        )
+        singer_user = User.objects.create_user(username="formal-reset-singer", password="pass")
+        self.singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="Formal Singer",
+            student_id="20260002",
+            college="College",
+            class_name="Class",
+            phone="13800000002",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+    def _start_the_venue(self):
+        prepare_round(self.round, self.actor)
+        self.round.refresh_from_db()
+        panel = prepare_judge_panel(self.round.pk, operator=self.actor)
+        self.assertFalse(panel.is_test_data)
+        return panel
+
+    def test_a_round_with_a_formal_panel_cannot_be_reset(self):
+        panel = self._start_the_venue()
+
+        with self.assertRaisesMessage(ValidationError, "正式评委组"):
+            reset_round_to_draft(self.round, self.actor, reason="换版前撤销现场准备")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+        self.assertTrue(RoundPanelSnapshot.objects.filter(pk=panel.pk).exists())
+        self.assertTrue(RoundJudge.objects.filter(round=self.round).exists())
+
+    def test_the_round_reset_view_answers_instead_of_raising(self):
+        self._start_the_venue()
+        client = Client()
+        client.force_login(self.actor)
+        session = client.session
+        mark_admin_verified(session)
+        session.save()
+
+        response = client.post(
+            reverse("staff:round_reset", args=[self.round.pk]),
+            {"reason": "换版前撤销现场准备"},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "轮次重置失败")
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.PREPARED)
+
+
+class VoteOnlyFormatRoundTests(TestCase):
+    """A format that names no rounds has no say in which rounds run.
+
+    The execution-authority gate is scoped to the round *shape*: a ruleset binding only vote
+    sources or audience scores is about result computation, and the classic round flow
+    inside such an activity keeps working. Reading "not in the binding" as "not allowed"
+    there would refuse rounds the format never had an opinion about.
+    """
+
+    def test_the_classic_round_flow_still_works_under_a_vote_only_format(self):
+        admin = _create_provisioned_user(
+            username="vote-only-admin", password="pass", role=User.Role.ADMIN
+        )
+        activity = _create_activity(
+            title="Vote-only format",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        activity.phase = Activity.Phase.TESTING
+        with authority_write(ACTIVITY_STATE):
+            activity.save(update_fields=["phase"])
+        contest_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username="vote-only-singer", password="pass"),
+            name="Vote Only Singer",
+            student_id="20260003",
+            college="College",
+            class_name="Class",
+            phone="13800000003",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        ruleset = ContestRuleset.objects.create(activity=activity, name="Vote only")
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                definition=(
+                    '{"schema_version": 1, "nodes": ['
+                    '{"key": "assess-audience", "type": "ASSESS", "source": "entry", '
+                    '"vote_source": "aud1", "vote_purpose": "SCORE_COMPONENT", '
+                    '"scale": "hundred"}]}'
+                ),
+                binding={"audience_keys": {"aud1": "aud1"}},
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+
+        prepared = prepare_round(contest_round, admin)
+
+        self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
 
 
 class ParticipantRegistrationFlowTests(TestCase):

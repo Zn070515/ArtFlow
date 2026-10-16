@@ -1421,6 +1421,33 @@ class Live2026RoundExecutionAuthorityTests(_Live2026AcceptanceFixtureMixin, Test
         self.assertContains(response, reverse("staff:round_prepare", args=[running.pk]))
         self.assertContains(response, "不属于当前正式赛制")
 
+    def test_a_round_no_binding_ever_named_cannot_start(self):
+        """Unbound is not the same as "the format made it".
+
+        The gate has to leave the challenge's own scoring rounds alone — they are created at
+        the venue and belong to no binding — and it used to do that by asking only whether
+        any binding had ever named a round. That let an operator hand-create a round in an
+        activity with an official format and start it: entries, a panel, performances and
+        scores outside the format, and an open panel that then blocks a successor freeze.
+        """
+
+        freeze_ruleset_version(self.version, self.admin)
+        extra = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="临时加的轮次",
+            sequence=9,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "不属于当前正式赛制"):
+            prepare_round(extra, self.admin)
+
+        extra.status = ContestRound.Status.PREPARED
+        with authority_write(CONTEST_ROUND_STATE):
+            extra.save(update_fields=["status"])
+        with self.assertRaisesMessage(ValidationError, "不属于当前正式赛制"):
+            prepare_judge_panel(extra.pk, operator=self.admin)
+
     def test_a_successor_cannot_take_over_a_format_that_is_already_running(self):
         """Prepared and panel-open is running, even with no result confirmed yet."""
 

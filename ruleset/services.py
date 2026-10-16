@@ -2782,11 +2782,16 @@ def evaluate_freeze_gate(
             blocker=_freeze_blocker("finality", error), normalized_binding=None, plan=None
         )
     runtime_facts = _prior_authority_runtime_facts(prior) if prior is not None else []
-    if runtime_facts:
+    if prior is not None and runtime_facts:
         # A CONFIRMED result is the end of a round's life, not the beginning of it. Freezing
         # in the window before that hands ``current_frozen_version`` to the successor while
         # the venue is still working to the old one.
-        error = ValidationError(_live_takeover_refusal(runtime_facts))
+        error = ValidationError(
+            _live_takeover_refusal(
+                runtime_facts,
+                reset_releases_it=_prior_authority_reset_would_release_it(prior),
+            )
+        )
         return FreezeEvaluation(
             blocker=_freeze_blocker("finality", error), normalized_binding=None, plan=None
         )
@@ -2917,15 +2922,43 @@ def _prior_authority_runtime_facts(prior: RulesetVersion) -> list[str]:
     return facts
 
 
-def _live_takeover_refusal(facts: list[str]) -> str:
-    """The one refusal a mid-flight authority switch gets, with its way out."""
+def _prior_authority_reset_would_release_it(prior: RulesetVersion) -> bool:
+    """Whether resetting the bound rounds would actually free the authority.
 
-    return (
+    Only while no *formal* judge panel stands on one of them. A panel's members hold
+    ``PROTECT`` references onto the round's ``RoundJudge`` rows and the reset lifecycle
+    deliberately leaves formal snapshots alone, so ``reset_round_snapshots`` refuses such a
+    round outright. Advising "reset it first" there would send the operator to a closed door
+    — and, before that refusal existed, to a ``ProtectedError`` rendered as a 500.
+    """
+
+    from singer_contest.models import RoundPanelSnapshot
+
+    bound_round_ids = frozen_binding_round_ids(prior.binding)
+    if not bound_round_ids:
+        return True
+    return not RoundPanelSnapshot.objects.filter(
+        round_id__in=bound_round_ids, is_test_data=False
+    ).exists()
+
+
+def _live_takeover_refusal(facts: list[str], *, reset_releases_it: bool) -> str:
+    """The one refusal a mid-flight authority switch gets, with the way out that exists."""
+
+    opening = (
         "当前正式赛制已经开始现场运行（"
         + "；".join(facts)
         + "），不能直接换版。换版会让现场正在使用的赛制在运行中途被替换。"
-        "请先在「比赛轮次」把已经开始的轮次重置为草稿（管理员填写原因，"
-        "会清空该轮已准备的评分数据），再冻结这一版赛制。"
+    )
+    if reset_releases_it:
+        return (
+            opening + "请先在「比赛轮次」把已经开始的轮次重置为草稿（管理员填写原因，"
+            "会清空该轮已准备的评分数据），再冻结这一版赛制。"
+        )
+    return (
+        opening + "本轮已经建立正式评委组快照，正式现场的评委组快照不可回收，重置不会释放赛制，"
+        "所以没有普通的换版路径。请继续使用当前正式赛制；如现场发生事故，"
+        "请走事故纠正流程。"
     )
 
 

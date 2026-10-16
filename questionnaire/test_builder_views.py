@@ -14,7 +14,7 @@ from common.authority import ACCOUNT_AUTHORITY, authority_write
 from common.test_characterization import _CharacterizationBase
 from django.urls import reverse
 from ruleset.models import ContestRuleset, RulesetVersion
-from ruleset.services import freeze_ruleset_version
+from ruleset.services import LIVE_CHALLENGE_FORMAT_KEY, freeze_ruleset_version
 from singer_contest.models import ContestRound, RubricCriterion, ScoringRubric, SingerRegistration
 
 from .staff_views import PREVIEW_CONTEXTS
@@ -58,6 +58,43 @@ QUESTIONNAIRE = {
 }
 
 
+def _logical_round_questionnaire():
+    """The 2026 shape: one question per personal round, bound to a round key, not a round."""
+
+    return {
+        "schema_version": 1,
+        "key": "singer_submission",
+        "pages": [
+            {
+                "key": "materials",
+                "title": "现场材料",
+                "sections": [
+                    {
+                        "key": "songs",
+                        "title": "歌曲",
+                        "questions": [
+                            {
+                                "key": "r2.song",
+                                "type": "text",
+                                "label": "踢馆曲目",
+                                "round": "r2",
+                                "required": True,
+                            },
+                            {
+                                "key": "r3.song",
+                                "type": "text",
+                                "label": "第三轮曲目",
+                                "round": "r3",
+                                "required": True,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+
 def _definition():
     return json.dumps(
         {
@@ -95,18 +132,30 @@ class _BuilderBase(_CharacterizationBase):
         self._admin_user = user
         return user
 
-    def make_version(self, *, with_questionnaire=True, frozen=False):
+    def make_version(
+        self,
+        *,
+        with_questionnaire=True,
+        frozen=False,
+        round_name="r1",
+        questionnaire=None,
+        live_challenge=None,
+    ):
         activity = self.make_activity(is_test_mode=True, title=f"builder-{uuid4().hex[:6]}")
         ruleset = ContestRuleset.objects.create(activity=activity, name="RS", is_test_data=True)
         rubric = ScoringRubric.objects.create(activity=activity, name="r1评分", is_test_data=True)
         RubricCriterion.objects.create(rubric=rubric, name="总分", max_score=100, is_test_data=True)
         contest_round = ContestRound.objects.create(
-            activity=activity, round_type=ContestRound.RoundType.PRELIMINARY, name="r1"
+            activity=activity, round_type=ContestRound.RoundType.PRELIMINARY, name=round_name
         )
         contest_round.rubric = rubric
         contest_round.save(update_fields=["rubric"])
         ruleset.round_keys = {"r1": contest_round.pk}
-        ruleset.save(update_fields=["round_keys"])
+        if live_challenge is None:
+            ruleset.save(update_fields=["round_keys"])
+        else:
+            ruleset.live_challenge = live_challenge
+            ruleset.save(update_fields=["round_keys", "live_challenge"])
         for i in range(3):
             self.make_singer(
                 activity,
@@ -117,7 +166,7 @@ class _BuilderBase(_CharacterizationBase):
             )
         root = json.loads(_definition())
         if with_questionnaire:
-            root["questionnaire"] = QUESTIONNAIRE
+            root["questionnaire"] = QUESTIONNAIRE if questionnaire is None else questionnaire
         version = RulesetVersion.objects.create(
             ruleset=ruleset, definition=json.dumps(root, ensure_ascii=False)
         )
@@ -316,6 +365,89 @@ class BuilderViewTests(_BuilderBase):
         self.assertEqual(
             self.client.post(self.designer_url(older), {"action": "add"}).status_code, 403
         )
+
+    def _round_choices(self, version):
+        return dict(self.client.get(self.designer_url(version)).context["round_choices"])
+
+    def test_the_picker_keeps_a_round_key_a_question_already_uses(self):
+        """A key no binding declares must still round-trip.
+
+        Whatever a question is already bound to has to stay selectable, or editing that
+        question's label quietly drops the round it belongs to.
+        """
+
+        version = self.make_version(
+            questionnaire={
+                "schema_version": 1,
+                "key": "singer_submission",
+                "pages": [
+                    {
+                        "key": "materials",
+                        "title": "材料",
+                        "sections": [
+                            {
+                                "key": "songs",
+                                "title": "歌曲",
+                                "questions": [
+                                    {
+                                        "key": "r4.song",
+                                        "type": "text",
+                                        "label": "第四轮曲目",
+                                        "round": "r4",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        choices = self._round_choices(version)
+
+        self.assertIn("r4", choices)
+
+    def test_the_picker_keeps_the_formats_logical_rounds(self):
+        """2026's r2/r3 are logical rounds, not missing physical ones.
+
+        r2's scoring round is created by the challenge at the venue and r3 only after the
+        session is confirmed, so neither is in ``round_keys`` while the questionnaire is
+        written — and the built-in questionnaire binds questions to both.
+        """
+
+        version = self.make_version(
+            questionnaire=_logical_round_questionnaire(),
+            live_challenge={"format_key": LIVE_CHALLENGE_FORMAT_KEY},
+        )
+
+        choices = self._round_choices(version)
+
+        self.assertIn("r2", choices)
+        self.assertIn("r3", choices)
+        self.assertIn("踢馆轮", choices["r2"])
+        self.assertIn("第三轮", choices["r3"])
+
+    def test_a_frozen_version_names_its_own_rounds(self):
+        """The picker asked the live ruleset, so a rebound successor rewrote history.
+
+        A FROZEN version is self-authoritative: its binding snapshot is what its questions
+        were written against, and a successor draft may already have moved the shared
+        ``ContestRuleset`` to a different physical round.
+        """
+
+        frozen = self.make_version(frozen=True, round_name="初赛第一轮")
+        successor_round = ContestRound.objects.create(
+            activity=frozen.ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮（后继）",
+            sequence=2,
+        )
+        frozen.ruleset.round_keys = {"r1": successor_round.pk}
+        frozen.ruleset.save(update_fields=["round_keys"])
+
+        choices = self._round_choices(frozen)
+
+        self.assertEqual(choices["r1"], "r1 · 初赛第一轮")
 
     def test_the_round_picker_offers_the_binding_keys_and_nothing_it_made_up(self):
         """``sequence → rN`` is a guess, and the guess is wrong exactly where it matters.

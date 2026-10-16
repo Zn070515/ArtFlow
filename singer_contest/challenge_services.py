@@ -1093,12 +1093,19 @@ def prepare_challenge_match(
     # can reach an open-challenger action while the round still lacks its judge snapshot.
     from .judge_authority import prepare_judge_panel
 
-    prepare_judge_panel(score_round.pk, operator=current_operator)
+    # Link the round to its match *before* the panel is prepared. This round belongs to no
+    # binding by design — the format binds the first round, and the challenge creates its
+    # scoring rounds at the venue — so the execution-authority gate reads this link as the
+    # round's provenance back to the authority that is running. The status changes after the
+    # panel exists, as before, so an open-challenger action never reaches a round without one.
     match.score_round = score_round
+    with authority_write(LIVE_CHALLENGE_STATE):
+        match.save(update_fields=["score_round"])
+    prepare_judge_panel(score_round.pk, operator=current_operator)
     match.status = ChallengeMatch.Status.SCORING
     match.revision += 1
     with authority_write(LIVE_CHALLENGE_STATE):
-        match.save(update_fields=["score_round", "status", "revision"])
+        match.save(update_fields=["status", "revision"])
         _bump(session)
         session.save(update_fields=["revision", "updated_at"])
         _write_command(

@@ -25,6 +25,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from files.policies import FILE_PURPOSE_LABELS, FILE_PURPOSE_POLICIES, effective_file_policy
 from ruleset.models import RulesetVersion
 from ruleset.services import (
+    LIVE_CHALLENGE_FORMAT_KEY,
     newer_ruleset_version,
     update_ruleset_definition_section,
     version_is_editable,
@@ -290,6 +291,72 @@ def _read_only_reason(version: RulesetVersion) -> str:
     return "这一版赛制不能编辑。"
 
 
+def _round_identity_binding(version: RulesetVersion) -> dict:
+    """The round identity this version's questions are written against.
+
+    A FROZEN version answers for itself: its snapshot is the binding its questions were
+    authored against, and the shared ``ContestRuleset`` may already have been rebound for a
+    successor draft. While the version is a draft, the live ruleset *is* what will be
+    snapshotted at freeze, so that is what it reads.
+    """
+
+    if version.status == RulesetVersion.Status.FROZEN:
+        return version.binding or {}
+    ruleset = version.ruleset
+    return {
+        "round_keys": dict(ruleset.round_keys or {}),
+        "live_challenge": dict(ruleset.live_challenge or {}),
+    }
+
+
+def _round_choices(version: RulesetVersion, questionnaire: dict) -> list[tuple[str, str]]:
+    """Every round key a question may be bound to, named as well as the server can name it.
+
+    Three sources, because a round key is not always a physical round: the version's binding,
+    the logical rounds the format declares (2026's r2/r3 — their scoring rounds are created
+    live by the challenge and only after a confirmed session, so neither is in ``round_keys``
+    when the questionnaire is written), and whatever the questionnaire already uses.
+
+    What is *not* a source is ``ContestRound.sequence``: guessing ``r{sequence}`` is how an
+    existing question silently changed meaning, because a round cloned for a successor
+    carries ``sequence = max + 1`` and appeared as "r2" — the challenge round's key.
+    """
+
+    from singer_contest.materials import LIVE_PERSONAL_ROUND_NAMES, LIVE_PERSONAL_ROUNDS
+    from singer_contest.models import ContestRound
+
+    binding = _round_identity_binding(version)
+    rounds_by_id = {
+        str(contest_round.pk): contest_round
+        for contest_round in ContestRound.objects.filter(activity=version.ruleset.activity)
+    }
+    choices: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(key: str, label: str) -> None:
+        if key and key not in seen:
+            seen.add(key)
+            choices.append((key, f"{key} · {label or key}"))
+
+    for key, round_id in (binding.get("round_keys") or {}).items():
+        contest_round = rounds_by_id.get(str(round_id))
+        label = ""
+        if contest_round is not None:
+            label = contest_round.name or contest_round.get_round_type_display()
+        add(str(key), label)
+
+    live = binding.get("live_challenge") or {}
+    if str(live.get("format_key") or "") == LIVE_CHALLENGE_FORMAT_KEY:
+        for key in LIVE_PERSONAL_ROUNDS:
+            add(key, LIVE_PERSONAL_ROUND_NAMES.get(key, ""))
+
+    for page in questionnaire.get("pages") or []:
+        for section in page.get("sections") or []:
+            for question in section.get("questions") or []:
+                add(str(question.get("round") or "").strip(), "")
+    return choices
+
+
 def builder_view(request: HttpRequest, pk: int):
     """The designer, its JSON mode, and the write path they share."""
     require_current_staff(request.user)
@@ -332,23 +399,7 @@ def builder_view(request: HttpRequest, pk: int):
     plan = compile_questionnaire(questionnaire)
     rows = _rows(plan, answers={}, context={}, due_rounds=_bound_rounds(version))
     round_choices = [("", "不限定轮次")]
-    from singer_contest.models import ContestRound
-
-    round_keys = version.ruleset.round_keys or {}
-    rounds = ContestRound.objects.filter(activity=version.ruleset.activity).order_by(
-        "sequence", "pk"
-    )
-    rounds_by_id = {str(contest_round.pk): contest_round for contest_round in rounds}
-    # The format's own round keys are the authority on what a round is called. The picker
-    # used to add ``r{sequence}`` for every round it found, which is a guess — and a wrong
-    # one exactly where it matters: a round cloned for a successor carries ``sequence =
-    # max + 1``, so it appeared as "r2" while r2 in this format is the challenge round.
-    for key, round_id in round_keys.items():
-        contest_round = rounds_by_id.get(str(round_id))
-        if contest_round is None:
-            continue
-        label = contest_round.name or contest_round.get_round_type_display()
-        round_choices.append((key, f"{key} · {label}"))
+    round_choices.extend(_round_choices(version, questionnaire))
     return render(
         request,
         "staff_panel/questionnaire_builder.html",

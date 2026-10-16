@@ -19,6 +19,12 @@ from .models import GroupStage, SingerRegistration
 
 LIVE_PERSONAL_ROUNDS = ("r2", "r3")
 
+#: What those rounds are called where a round has to be *named* rather than described — the
+#: questionnaire designer's round picker. The material pages title the same rounds by what
+#: arrives there ("第二轮个人材料"), which is a sentence about the page, not a name for the
+#: round; the picker needs the latter.
+LIVE_PERSONAL_ROUND_NAMES = {"r2": "踢馆轮", "r3": "第三轮"}
+
 
 @dataclass(frozen=True)
 class LiveMaterialContract:

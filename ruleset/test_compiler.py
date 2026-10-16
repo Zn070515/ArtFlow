@@ -2508,3 +2508,101 @@ class BindingValidationTests(_RulesetModelBase):
                     "audience_keys": {"shared": "stage1"},
                 },
             )
+
+
+class FormalPanelFreezeTakeoverTests(_RulesetModelBase):
+    """A formal judge panel closes the "reset it, then freeze" way out.
+
+    The reset lifecycle deliberately leaves a formal panel standing, and its members hold
+    ``PROTECT`` references onto the round's ``RoundJudge`` rows — so a round carrying one
+    cannot be reset at all. The freeze gate has to know that before it prints the advice:
+    otherwise its own instructions point the operator at a dead end, and (before
+    ``reset_round_snapshots`` learned to refuse) at a ``ProtectedError`` rendered as a 500.
+    """
+
+    def _admin(self):
+        user = self.make_user("formal-panel-admin")
+        user.role = User.Role.ADMIN
+        with authority_write(ACCOUNT_AUTHORITY):
+            user.save()
+        return user
+
+    def _started_formal_authority(self):
+        """A formal activity whose frozen authority binds a round with a live panel."""
+
+        from common.authority import CONTEST_ROUND_STATE
+        from singer_contest.judge_authority import prepare_judge_panel
+        from singer_contest.models import (
+            ContestRound,
+            Judge,
+            RoundEntry,
+            RoundJudge,
+            RubricCriterion,
+            ScoringRubric,
+        )
+
+        ruleset = self.make_ruleset(is_test_mode=False)
+        activity = ruleset.activity
+        rubric = ScoringRubric.objects.create(
+            activity=activity, name="正式评分", is_test_data=False
+        )
+        RubricCriterion.objects.create(
+            rubric=rubric, name="总分", max_score=100, is_test_data=False
+        )
+        contest_round = ContestRound.objects.create(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮",
+            judge_count=1,
+            minimum_judge_count=1,
+            rubric=rubric,
+        )
+        ruleset.round_keys = {"r1": contest_round.pk}
+        ruleset.save(update_fields=["round_keys"])
+
+        admin = self._admin()
+        version = RulesetVersion.objects.create(ruleset=ruleset, version=1, definition=DEF)
+        frozen = freeze_ruleset_version(version, admin)
+
+        judge = Judge.objects.create(activity=activity, name="现场评委")
+        RoundJudge.objects.create(round=contest_round, judge=judge)
+        RoundEntry.objects.create(round=contest_round, singer=activity.singer_registrations.first())
+        contest_round.status = ContestRound.Status.PREPARED
+        with authority_write(CONTEST_ROUND_STATE):
+            contest_round.save(update_fields=["status"])
+        panel = prepare_judge_panel(contest_round.pk, operator=admin)
+        self.assertFalse(panel.is_test_data)
+        return admin, ruleset, frozen, contest_round
+
+    def test_a_formal_panel_forbids_the_takeover_and_says_so(self):
+        from ruleset.live_format import freeze_blocker
+
+        admin, ruleset, frozen, contest_round = self._started_formal_authority()
+        successor = supersede_ruleset_version(frozen, created_by=admin)
+
+        blocker = freeze_blocker(successor)
+
+        self.assertIsNotNone(blocker)
+        assert blocker is not None  # for the type checker, not for the test
+        self.assertEqual(blocker.key, "finality")
+        self.assertIn("已经开始现场运行", blocker.message)
+        self.assertIn("正式评委组快照", blocker.message)
+        # The advice is not the reset: that path is closed for this round.
+        self.assertNotIn("重置为草稿", blocker.message)
+        with self.assertRaisesMessage(ValidationError, "已经开始现场运行"):
+            freeze_ruleset_version(successor, admin)
+        frozen.refresh_from_db()
+        self.assertTrue(frozen.is_current)
+
+    def test_the_closed_path_is_closed_in_the_service_too(self):
+        from singer_contest.models import ContestRound, RoundJudge
+        from singer_contest.services import reset_round_to_draft
+
+        admin, _ruleset, _frozen, contest_round = self._started_formal_authority()
+
+        with self.assertRaisesMessage(ValidationError, "评委组快照不可回收"):
+            reset_round_to_draft(contest_round, admin, reason="换版前撤销现场准备")
+
+        contest_round.refresh_from_db()
+        self.assertEqual(contest_round.status, ContestRound.Status.PREPARED)
+        self.assertTrue(RoundJudge.objects.filter(round=contest_round).exists())
