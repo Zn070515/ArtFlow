@@ -7462,11 +7462,12 @@ class RulesetTemplateLibraryTests(TestCase):
         self.assertEqual(ruleset.round_keys, {LIVE_2026_FIRST_ROUND_KEY: contest_round.pk})
         self.assertEqual(ruleset.live_challenge["format_key"], "2026_live_challenge")
         self.assertEqual(ruleset.live_challenge["seat_count"], 10)
-        # Same page as any other creation, but the remaining configuration lives in the
-        # editor: the planning workbench cannot express this graph losslessly.
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+        # Neither the planning workbench (it cannot express this graph losslessly) nor the
+        # advanced editor is where the remaining work is done: provisioning lands on the
+        # 2026 configuration page, which is built for exactly what it leaves open.
+        self.assertRedirects(response, reverse("staff:ruleset_live_2026_config", args=[version.pk]))
 
-    def test_create_page_from_builtin_provisions_and_lands_on_the_editor(self):
+    def test_create_page_from_builtin_provisions_and_lands_on_the_config_page(self):
         from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
         from ruleset.templates import LIVE_2026_BUILTIN_KEY
         from singer_contest.models import ContestRound
@@ -7482,7 +7483,7 @@ class RulesetTemplateLibraryTests(TestCase):
         version = RulesetVersion.objects.get(ruleset=ruleset)
         self.assertEqual(ContestRound.objects.filter(activity=activity).count(), 1)
         self.assertEqual(ruleset.live_challenge["participant_count"], 15)
-        self.assertRedirects(response, reverse("staff:ruleset_edit", args=[version.pk]))
+        self.assertRedirects(response, reverse("staff:ruleset_live_2026_config", args=[version.pk]))
 
     def test_builtin_derived_ruleset_keeps_every_field_editable(self):
         """The built-in is a pre-filled ordinary ruleset, not a locked one."""

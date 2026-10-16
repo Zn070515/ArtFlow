@@ -288,6 +288,57 @@ class BuilderViewTests(_BuilderBase):
         )
         self.assertContains(self.client.get(self.designer_url(frozen)), "已冻结赛制版本不可编辑")
 
+    def _newer_version_of(self, version):
+        """A frozen successor on the same ruleset, which makes ``version`` history."""
+
+        newer = RulesetVersion.objects.create(
+            ruleset=version.ruleset,
+            version=version.version + 1,
+            definition=version.definition,
+        )
+        freeze_ruleset_version(newer, self.admin())
+        newer.refresh_from_db()
+        return newer
+
+    def test_a_draft_its_successor_has_replaced_is_read_only_too(self):
+        """``v1 DRAFT`` beside ``v2 FROZEN`` is history, and history is not an editing target.
+
+        The write path already refused it, so the editable page was a false affordance: the
+        operator could add, edit and save, and only met the refusal after doing the work.
+        """
+
+        older = self.make_version()
+        newer = self._newer_version_of(older)
+
+        page = self.client.get(self.designer_url(older))
+
+        self.assertContains(page, f"已被 v{newer.version} 替代")
+        self.assertEqual(
+            self.client.post(self.designer_url(older), {"action": "add"}).status_code, 403
+        )
+
+    def test_the_round_picker_offers_the_binding_keys_and_nothing_it_made_up(self):
+        """``sequence → rN`` is a guess, and the guess is wrong exactly where it matters.
+
+        A round cloned for a successor carries ``sequence = max + 1``, so the designer
+        offered "r2 · 第一轮" beside the real "r1 · 第一轮" — while r2 in this format means
+        the challenge round. The format's own round keys are the authority on what a round
+        is called; nothing else gets to name one.
+        """
+
+        version = self.make_version()
+        ContestRound.objects.create(
+            activity=version.ruleset.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="第一轮（复制）",
+            sequence=2,
+        )
+
+        response = self.client.get(self.designer_url(version))
+
+        choices = dict(response.context["round_choices"])
+        self.assertEqual(set(choices), {"", "r1"})
+
 
 class PreviewViewTests(_BuilderBase):
     def setUp(self):

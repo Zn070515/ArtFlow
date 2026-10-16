@@ -20,7 +20,7 @@
 
     {% if read_only %}
     <div class="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2 rounded mb-4">
-        已冻结赛制版本不可编辑。若要修改问卷，请先创建后继版本。
+        {{ read_only_reason }}
     </div>
     {% endif %}
 

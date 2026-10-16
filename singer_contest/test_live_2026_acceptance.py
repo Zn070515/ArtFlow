@@ -19,6 +19,7 @@ from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 from ruleset.live_format import freeze_blocker
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.services import (
@@ -70,7 +71,13 @@ from .models import (
     SingerRegistration,
 )
 from .podium_services import build_podium_result
-from .services import apply_scores, lock_round, prepare_round, set_round_groups
+from .services import (
+    apply_scores,
+    lock_round,
+    prepare_round,
+    reset_round_to_draft,
+    set_round_groups,
+)
 
 
 def _live_questionnaire():
@@ -1076,6 +1083,12 @@ class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
         self.assertEqual(self.first_round.status, ContestRound.Status.PREPARED)
         return supersede_ruleset_version(self.version, created_by=self.admin)
 
+    def _bound_first_round(self):
+        """A first round the running authority owns, before the venue touches it."""
+
+        freeze_ruleset_version(self.version, self.admin)
+        return supersede_ruleset_version(self.version, created_by=self.admin)
+
     def _seat_change_payload(self, seats):
         live = self.ruleset.live_challenge
         return {
@@ -1164,9 +1177,13 @@ class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
         self.assertNotContains(response, f"/staff/rounds/{self.first_round.pk}/reset/")
 
     def test_cloning_the_first_round_makes_the_seat_change_one_save(self):
-        """The escape hatch end to end: clone, rebind, change the number, freeze."""
+        """The escape hatch end to end: clone, rebind, change the number, freeze.
 
-        successor = self._prepared_first_round()
+        The reshape happens before the venue starts, which is the whole point: once the
+        first round is prepared the format can no longer be swapped underneath it.
+        """
+
+        successor = self._bound_first_round()
         running_round = ContestRound.objects.get(pk=self.ruleset.round_keys["r1"])
 
         response = self.staff.post(
@@ -1187,7 +1204,8 @@ class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
         self.assertEqual(cloned.entries.count(), 0)
         # The authority keeps the round it promised.
         running_round.refresh_from_db()
-        self.assertEqual(running_round.status, ContestRound.Status.PREPARED)
+        self.assertEqual(running_round.status, ContestRound.Status.DRAFT)
+        self.assertEqual(running_round.advance_count, self.SEATS)
 
         saved = self.staff.post(
             self._config_url(successor),
@@ -1206,8 +1224,69 @@ class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
             node for node in json.loads(successor.definition)["nodes"] if node.get("key") == "top10"
         )
         self.assertEqual(select["count"], self.SEATS - 2)
-        # And the reshaped successor can actually be frozen.
+        # And the reshaped successor can actually be frozen, because the venue has not
+        # started: the round it leaves behind is still a draft.
         self.assertIsNone(freeze_blocker(successor))
+        freeze_ruleset_version(successor, self.admin)
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.round_keys["r1"], cloned.pk)
+
+    def test_provisioning_the_builtin_lands_on_the_2026_configuration_page(self):
+        """The entry point for the built-in dropped the operator on the advanced editor.
+
+        The 2026 page exists for exactly the work provisioning leaves open — the ratios, the
+        three judge lists, the rubric — and the editor then offered it as "推荐". Opening the
+        page the operator needs is the whole point of having built it.
+        """
+
+        from ruleset.templates import LIVE_2026_BUILTIN_KEY, seed_ruleset_templates
+
+        seed_ruleset_templates(self.admin)
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+
+        response = self.staff.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 渡梦现场赛制", "template": template.pk},
+        )
+
+        newest = RulesetVersion.objects.filter(ruleset=self.ruleset).order_by("-version").first()
+        self.assertIsNotNone(newest)
+        assert newest is not None  # for the type checker, not for the test
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"], reverse("staff:ruleset_live_2026_config", args=[newest.pk])
+        )
+
+    def test_cloning_the_first_round_copies_its_execution_configuration(self):
+        """The copy has to be the round the operator was looking at, not a defaults reset.
+
+        ``order_policy`` and ``tie_order_policy`` are execution semantics: a clone that came
+        back as the model default would change how the venue calls singers up, silently.
+        """
+
+        successor = self._bound_first_round()
+        running = ContestRound.objects.get(pk=self.ruleset.round_keys["r1"])
+        running.order_policy = ContestRound.OrderPolicy.DRAW
+        running.tie_order_policy = ContestRound.TieOrderPolicy.DRAW
+        running.scheduled_at = timezone.now()
+        running.venue = "屏峰校区体育馆"
+        with authority_write(CONTEST_ROUND_STATE):
+            running.save(
+                update_fields=["order_policy", "tie_order_policy", "scheduled_at", "venue"]
+            )
+
+        self.staff.post(
+            reverse("staff:ruleset_live_2026_clone_first_round", args=[successor.pk]),
+            follow=True,
+        )
+
+        self.ruleset.refresh_from_db()
+        cloned = ContestRound.objects.get(pk=self.ruleset.round_keys["r1"])
+        self.assertNotEqual(cloned.pk, running.pk)
+        self.assertEqual(cloned.order_policy, ContestRound.OrderPolicy.DRAW)
+        self.assertEqual(cloned.tie_order_policy, ContestRound.TieOrderPolicy.DRAW)
+        self.assertEqual(cloned.scheduled_at, running.scheduled_at)
+        self.assertEqual(cloned.venue, "屏峰校区体育馆")
 
     def test_an_older_draft_is_history_once_its_successor_is_frozen(self):
         """``v1 DRAFT`` beside ``v2 FROZEN`` must not be an editing target.
@@ -1243,3 +1322,132 @@ class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
             freeze_ruleset_version(older, self.admin)
         newer.refresh_from_db()
         self.assertTrue(newer.is_current)
+
+
+class Live2026RoundExecutionAuthorityTests(_Live2026AcceptanceFixtureMixin, TestCase):
+    """The last gate between a frozen format and the venue.
+
+    Two holes on either side of the same boundary. A round that a *successor draft* had
+    cloned in could start the whole live scoring chain while its own version was still a
+    draft, because the roster source is 报名名单 and the setup readiness answered READY
+    without ever asking which format the round belonged to. And a successor could take
+    authority away from a format that was already running, because the only finality check
+    was a CONFIRMED stage result — a state that arrives at the *end* of a round, long after
+    the venue is using it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.staff = Client()
+        self.staff.force_login(self.admin)
+
+    def _successor_with_a_cloned_first_round(self):
+        """v1 frozen on the first round, v2 a draft that binds its own copied round."""
+
+        freeze_ruleset_version(self.version, self.admin)
+        running = ContestRound.objects.get(pk=self.first_round.pk)
+        successor = supersede_ruleset_version(self.version, created_by=self.admin)
+        response = self.staff.post(
+            reverse("staff:ruleset_live_2026_clone_first_round", args=[successor.pk]),
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.ruleset.refresh_from_db()
+        cloned = ContestRound.objects.get(pk=self.ruleset.round_keys["r1"])
+        self.assertNotEqual(cloned.pk, running.pk)
+        return successor, running, cloned
+
+    def _start_round(self, contest_round) -> ContestRound:
+        set_round_groups(contest_round, self.group_specs, self.admin)
+        return prepare_round(contest_round, self.admin)
+
+    def test_a_cloned_round_cannot_start_before_its_own_version_is_frozen(self):
+        """The escape hatch does not hand out a running round on credit."""
+
+        successor, _running, cloned = self._successor_with_a_cloned_first_round()
+        set_round_groups(cloned, self.group_specs, self.admin)
+
+        with self.assertRaisesMessage(ValidationError, "不属于当前正式赛制"):
+            prepare_round(cloned, self.admin)
+        self.assertEqual(ContestRound.objects.get(pk=cloned.pk).status, ContestRound.Status.DRAFT)
+
+        freeze_ruleset_version(successor, self.admin)
+
+        self.assertEqual(prepare_round(cloned, self.admin).status, ContestRound.Status.PREPARED)
+
+    def test_the_round_a_replaced_authority_bound_cannot_start_under_the_new_one(self):
+        """The other direction: an old round does not inherit the new authority."""
+
+        successor, running, cloned = self._successor_with_a_cloned_first_round()
+        freeze_ruleset_version(successor, self.admin)
+
+        set_round_groups(running, self.group_specs, self.admin)
+        with self.assertRaisesMessage(ValidationError, "不属于当前正式赛制"):
+            prepare_round(running, self.admin)
+
+        set_round_groups(cloned, self.group_specs, self.admin)
+        self.assertEqual(prepare_round(cloned, self.admin).status, ContestRound.Status.PREPARED)
+
+    def test_prepare_judge_panel_asks_the_same_question(self):
+        """Defense in depth: the panel is a second door onto the same room.
+
+        It reads the round's own status, which is *not* the authority — a round can carry
+        PREPARED from a format that has since been replaced. The round is put in that state
+        directly, because what is pinned here is that this guard holds on its own.
+        """
+
+        successor, running, _cloned = self._successor_with_a_cloned_first_round()
+        freeze_ruleset_version(successor, self.admin)
+        running.status = ContestRound.Status.PREPARED
+        with authority_write(CONTEST_ROUND_STATE):
+            running.save(update_fields=["status"])
+
+        with self.assertRaisesMessage(ValidationError, "不属于当前正式赛制"):
+            prepare_judge_panel(running.pk, operator=self.admin)
+
+    def test_the_round_list_does_not_offer_to_start_a_round_the_format_does_not_bind(self):
+        """The same false affordance as the editors, on the page the button is clicked.
+
+        The list reads each round's own setup readiness, so an unbound round reads as 就绪
+        and the button promises a click the service would refuse.
+        """
+
+        _successor, running, cloned = self._successor_with_a_cloned_first_round()
+
+        response = self.staff.get(reverse("staff:round_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("staff:round_prepare", args=[cloned.pk]))
+        self.assertContains(response, reverse("staff:round_prepare", args=[running.pk]))
+        self.assertContains(response, "不属于当前正式赛制")
+
+    def test_a_successor_cannot_take_over_a_format_that_is_already_running(self):
+        """Prepared and panel-open is running, even with no result confirmed yet."""
+
+        freeze_ruleset_version(self.version, self.admin)
+        self._start_round(self.first_round)
+        prepare_judge_panel(self.first_round.pk, operator=self.admin)
+        successor = supersede_ruleset_version(self.version, created_by=self.admin)
+
+        blocker = freeze_blocker(successor)
+        self.assertIsNotNone(blocker)
+        assert blocker is not None  # for the type checker, not for the test
+        self.assertEqual(blocker.key, "finality")
+        self.assertIn("已经开始现场运行", blocker.message)
+        self.assertIn("已经准备", blocker.message)
+        self.assertIn("现场评委组已经建立", blocker.message)
+
+        with self.assertRaisesMessage(ValidationError, "已经开始现场运行"):
+            freeze_ruleset_version(successor, self.admin)
+        self.version.refresh_from_db()
+        self.assertTrue(self.version.is_current)
+
+        # The way out is stated and it works: unwind the prepared round, then freeze.
+        reset_round_to_draft(self.first_round, self.admin, reason="换版前撤销现场准备")
+        self.first_round.refresh_from_db()
+        self.assertEqual(self.first_round.status, ContestRound.Status.DRAFT)
+
+        frozen = freeze_ruleset_version(successor, self.admin)
+        self.assertTrue(frozen.is_current)
+        self.version.refresh_from_db()
+        self.assertFalse(self.version.is_current)

@@ -45,7 +45,10 @@
                         <a href="{% url 'staff:audience_score_entry' r.activity_id %}" class="text-brand hover:underline text-xs">观众分</a>
                         {% if r.status == "draft" %}
                         <a href="{% url 'staff:round_edit' r.pk %}" class="text-brand hover:underline text-xs">编辑</a>
-                        {% if r.setup_readiness == "ready" %}
+                        {% if r.execution_authority_label %}
+                        {# The round's own setup is finished, but the format running the activity does not bind it. #}
+                        <span class="text-amber-700 text-xs" title="{{ r.execution_authority_message }}">{{ r.execution_authority_label }}</span>
+                        {% elif r.setup_readiness == "ready" %}
                         <a href="{% url 'staff:round_groups' r.pk %}" class="text-gray-500 hover:underline text-xs">分组</a>
                         {% if r.order_policy == "manual" %}<a href="{% url 'staff:round_running_order' r.pk %}" class="text-gray-500 hover:underline text-xs">人工顺序</a>{% endif %}
                         <form method="post" action="{% url 'staff:round_prepare' r.pk %}" class="inline" onsubmit="return confirm('确认准备本轮？准备后会冻结出场/分组快照。');">

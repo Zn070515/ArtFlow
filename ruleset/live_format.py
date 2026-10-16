@@ -582,7 +582,14 @@ def clone_first_round_for_successor(ruleset: ContestRuleset, version: RulesetVer
             advance_count=seat_count,
             roster_source=source.roster_source,
             roster_source_stage=source.roster_source_stage,
+            roster_source_challenge_session_id=source.roster_source_challenge_session_id,
             rubric=source.rubric,
+            # Execution configuration, not just scoring configuration. A copy that fell back
+            # to the model defaults would quietly change how the venue calls singers up.
+            order_policy=source.order_policy,
+            tie_order_policy=source.tie_order_policy,
+            scheduled_at=source.scheduled_at,
+            venue=source.venue,
         )
 
     current = _snapshot_binding(locked_ruleset)

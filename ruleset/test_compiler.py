@@ -1729,6 +1729,54 @@ class RulesetFrozenAuthorityTests(_RulesetModelBase):
         with self.assertRaises(ValidationError):
             supersede_ruleset_version(version, created_by=admin)
 
+    def test_supersede_refuses_a_version_the_activity_has_left_behind(self):
+        """A retired FROZEN version must not be copied forward as the newest row.
+
+        The freeze gate already refuses to freeze an old version, so the other way to move
+        the activity's authority backwards is to *supersede* one: copy v1's definition and
+        binding into a fresh DRAFT, which becomes the newest row, is therefore editable and
+        freezable, and quietly reverts the format to something the activity left behind —
+        a semantic rollback wearing a higher version number.
+        """
+
+        ruleset, _round = self._ruleset_with_binding()
+        admin = self._admin()
+        v1 = freeze_ruleset_version(self._draft_on(ruleset, version=1), admin)
+        v2 = supersede_ruleset_version(v1, created_by=admin)
+        freeze_ruleset_version(v2, admin)
+        v1.refresh_from_db()
+        self.assertFalse(v1.is_current)
+
+        with self.assertRaisesMessage(ValidationError, "不能从 v1 再创建后继草稿"):
+            supersede_ruleset_version(v1, created_by=admin)
+
+        self.assertEqual(
+            list(ruleset.versions.order_by("version").values_list("version", flat=True)), [1, 2]
+        )
+
+    def test_supersede_refuses_a_second_successor_draft(self):
+        """One successor at a time: the operator continues on the draft that exists."""
+
+        ruleset, _round = self._ruleset_with_binding()
+        admin = self._admin()
+        frozen = freeze_ruleset_version(self._draft_on(ruleset, version=1), admin)
+        first = supersede_ruleset_version(frozen, created_by=admin)
+
+        with self.assertRaisesMessage(ValidationError, "v2"):
+            supersede_ruleset_version(frozen, created_by=admin)
+
+        self.assertEqual(
+            list(ruleset.versions.order_by("version").values_list("version", flat=True)), [1, 2]
+        )
+        self.assertEqual(
+            list(
+                ruleset.versions.filter(status=RulesetVersion.Status.DRAFT).values_list(
+                    "pk", flat=True
+                )
+            ),
+            [first.pk],
+        )
+
     def test_create_ruleset_version_avoids_collision(self):
         ruleset = self.make_ruleset()
         admin = self._admin()

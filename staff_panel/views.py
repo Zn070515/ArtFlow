@@ -231,6 +231,8 @@ from singer_contest.services import (
     prepare_round,
     reset_round_to_draft,
     result_closure_as_dict,
+    round_execution_authority_label,
+    round_execution_authority_message,
     round_roster_stage_choices,
     round_setup_readiness,
     set_manual_decision,
@@ -2060,6 +2062,19 @@ def round_list(request):
             contest_round,
             "setup_readiness_label",
             readiness_labels.get(readiness, ""),
+        )
+        # The readiness above is about this round's own roster, so a round the current
+        # official format does not bind reads as 就绪 here and then refuses to start. The
+        # button is the promise; it is not offered where the click would be refused.
+        setattr(
+            contest_round,
+            "execution_authority_label",
+            round_execution_authority_label(contest_round),
+        )
+        setattr(
+            contest_round,
+            "execution_authority_message",
+            round_execution_authority_message(contest_round),
         )
     return render(
         request,
@@ -5311,8 +5326,9 @@ def ruleset_planning(request, pk):
                 "issues": [],
                 "change_summary": [],
             },
-            "planning_read_only": projection.read_only
-            or version.status != RulesetVersion.Status.DRAFT,
+            # Editable means the *newest* draft, not merely a draft: a version a newer one has
+            # replaced is history, and the page used to offer it as an editing target anyway.
+            "planning_read_only": projection.read_only or not version_is_editable(version),
         },
     )
 
@@ -5378,9 +5394,10 @@ def _provision_builtin_live_format(request, *, template, activity, name):
         request,
         f"已建立「{template.name}」：第一轮与赛制形态已预填，请补充两套权重、三轮评委与评分表。",
     )
-    # The planning workbench cannot express this graph losslessly (no AGGREGATE node), so it
-    # renders read-only; the editor is where the remaining configuration lives.
-    return redirect("staff:ruleset_edit", pk=version.pk)
+    # Neither the planning workbench (its graph has no AGGREGATE node, so it renders
+    # read-only) nor the advanced editor is where this work is done: the 2026 page exists
+    # for exactly what provisioning leaves open, and it links on to the editor from there.
+    return redirect("staff:ruleset_live_2026_config", pk=version.pk)
 
 
 @staff_required
