@@ -73,7 +73,7 @@ from .scoring import (
     ScoreCompletionState,
     assess_score_completeness,
 )
-from .services import validate_score
+from .services import ensure_round_executable_under_current_authority, validate_score
 
 
 @dataclass(frozen=True)
@@ -472,6 +472,11 @@ def prepare_judge_panel(
         raise ValidationError("比赛轮次必须先完成准备，才能建立评委组快照。")
     if contest_round.status == ContestRound.Status.LOCKED or contest_round.is_locked:
         raise PermissionDenied("已锁定轮次不能建立评委组快照。")
+
+    # The round's own status is not the authority that makes it runnable: a round can carry
+    # PREPARED from a format the activity has since replaced. This is the second door onto
+    # the same room, so it asks prepare_round's question rather than trusting the status.
+    ensure_round_executable_under_current_authority(contest_round)
 
     # A paused panel is still *this* round's panel (§12.6: HOLD keeps the panel and only
     # stops formal submissions). Looking only for ACTIVE missed it, so a second press of

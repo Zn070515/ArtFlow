@@ -24,7 +24,11 @@ from django.http import HttpRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from files.policies import FILE_PURPOSE_LABELS, FILE_PURPOSE_POLICIES, effective_file_policy
 from ruleset.models import RulesetVersion
-from ruleset.services import update_ruleset_definition_section
+from ruleset.services import (
+    newer_ruleset_version,
+    update_ruleset_definition_section,
+    version_is_editable,
+)
 
 from .builder import (
     add_question,
@@ -269,14 +273,35 @@ def _apply_action(questionnaire: dict, action: str, post) -> dict:
     raise ValidationError(f"未知操作：{action!r}。")
 
 
+def _read_only_reason(version: RulesetVersion) -> str:
+    """Why this version's designer is read-only, in the operator's words.
+
+    "Not editable" has two causes and they need different next steps: a frozen version is
+    the authority and the way on is a successor draft, while a draft that a newer version
+    has replaced is history and the way on is that newer version. The write path has always
+    refused both; the page has to say which one this is.
+    """
+
+    if version.status == RulesetVersion.Status.FROZEN:
+        return "已冻结赛制版本不可编辑。若要修改问卷，请先创建后继版本。"
+    newer = newer_ruleset_version(version)
+    if newer is not None:
+        return f"这一版赛制已被 v{newer.version} 替代，不能继续编辑。请在最新版本上修改问卷。"
+    return "这一版赛制不能编辑。"
+
+
 def builder_view(request: HttpRequest, pk: int):
     """The designer, its JSON mode, and the write path they share."""
     require_current_staff(request.user)
     version = get_object_or_404(RulesetVersion, pk=pk)
-    read_only = version.status == RulesetVersion.Status.FROZEN
+    # The same rule every other editor asks: the newest row, and only while it is a DRAFT.
+    # Reading the status alone left a superseded draft looking editable, so the operator
+    # filled the form in and met the refusal at save time.
+    read_only = not version_is_editable(version)
+    read_only_reason = _read_only_reason(version) if read_only else ""
     if request.method == "POST":
         if read_only:
-            raise PermissionDenied("已冻结赛制版本不可编辑。")
+            raise PermissionDenied(read_only_reason)
         action = request.POST.get("action") or ""
         try:
             base_content_hash = request.POST.get("base_content_hash") or ""
@@ -314,17 +339,11 @@ def builder_view(request: HttpRequest, pk: int):
         "sequence", "pk"
     )
     rounds_by_id = {str(contest_round.pk): contest_round for contest_round in rounds}
-    candidate_rounds = list(round_keys.items())
-    known_keys = {key for key, _round_id in candidate_rounds}
-    candidate_rounds.extend(
-        (
-            f"r{contest_round.sequence}",
-            contest_round.pk,
-        )
-        for contest_round in rounds
-        if contest_round.sequence and f"r{contest_round.sequence}" not in known_keys
-    )
-    for key, round_id in candidate_rounds:
+    # The format's own round keys are the authority on what a round is called. The picker
+    # used to add ``r{sequence}`` for every round it found, which is a guess — and a wrong
+    # one exactly where it matters: a round cloned for a successor carries ``sequence =
+    # max + 1``, so it appeared as "r2" while r2 in this format is the challenge round.
+    for key, round_id in round_keys.items():
         contest_round = rounds_by_id.get(str(round_id))
         if contest_round is None:
             continue
@@ -338,6 +357,7 @@ def builder_view(request: HttpRequest, pk: int):
             "ruleset": version.ruleset,
             "activity": version.ruleset.activity,
             "read_only": read_only,
+            "read_only_reason": read_only_reason,
             "questionnaire": questionnaire,
             "questionnaire_json": json.dumps(questionnaire, ensure_ascii=False, indent=2),
             "pages": _page_model(plan, rows),

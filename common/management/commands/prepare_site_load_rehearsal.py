@@ -126,9 +126,11 @@ class Command(BaseCommand):
             registrations, (participant, participant_password) = self._create_performers(activity)
             rounds = self._create_rounds(activity, registrations, operator)
             version = self._freeze_questionnaire_ruleset(activity, rounds, admin)
-            # `prepare_round` is what seats the judges: with `judge_count` set and none assigned
-            # yet it creates the round's own J1..Jn, so the panel is prepared over that set
-            # rather than over judges the fixture made up separately.
+            # A round only runs under the format that is officially current, so the freeze
+            # comes first. `prepare_round` is what seats the judges: with `judge_count` set
+            # and none assigned yet it creates the round's own J1..Jn, so the panel is
+            # prepared over that set rather than over judges the fixture made up separately.
+            prepare_round(rounds["r1"], operator)
             panel = self._prepare_panel(rounds["r1"], operator)
             current = self._start_performance(rounds["r1"], operator)
             activity = transition_activity_phase(
@@ -322,7 +324,6 @@ class Command(BaseCommand):
             ],
             operator,
         )
-        prepare_round(rounds["r1"], operator)
         return rounds
 
     @staticmethod

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 from accounts.services import require_current_admin, require_current_staff
 from common.authority import (
@@ -104,6 +104,9 @@ from .scoring import (
     assess_score_completeness,
     official_average,
 )
+
+if TYPE_CHECKING:
+    from ruleset.models import ContestRuleset
 
 
 class ResultClosureCode(StrEnum):
@@ -366,6 +369,102 @@ class RoundSetupReadiness(StrEnum):
     UNBOUND_TO_FROZEN_RULESET = "unbound_to_frozen_ruleset"
     MATERIALIZATION_REQUIRED = "materialization_required"
     STALE = "stale"
+
+
+def _round_is_claimed_by_a_binding(contest_round: ContestRound, ruleset: ContestRuleset) -> bool:
+    """Whether any binding of the activity's format names this physical round.
+
+    Both surfaces count. The frozen snapshots are what a version's shape is, and the live
+    ``ContestRuleset`` counts too — a round a successor draft cloned in is rebound on the
+    ruleset immediately, while its version only carries the new key once that version is
+    itself frozen.
+
+    A round no binding ever named is not part of any version's shape: the challenge's own
+    per-match scoring rounds are physical rounds like any other, and binding them to the
+    format would make the format's shape say something it does not mean.
+    """
+
+    from ruleset.models import RulesetVersion
+
+    target = str(contest_round.pk)
+    if target in {str(value) for value in (ruleset.round_keys or {}).values()}:
+        return True
+    for version in RulesetVersion._base_manager.filter(ruleset=ruleset):
+        round_keys = (version.binding or {}).get("round_keys") or {}
+        if target in {str(value) for value in round_keys.values()}:
+            return True
+    return False
+
+
+def _round_execution_authority(contest_round: ContestRound) -> tuple[str, str] | None:
+    """The refusal and its short form, or ``None`` when the round may run.
+
+    The two come from one walk so the round list's cell label and the message a refused
+    click gives cannot end up describing different problems.
+    """
+
+    from ruleset.models import ContestRuleset
+
+    ruleset = ContestRuleset.objects.filter(activity_id=contest_round.activity_id).first()
+    if ruleset is None:
+        return None
+    if not _round_is_claimed_by_a_binding(contest_round, ruleset):
+        return None
+    label = contest_round.name or contest_round.get_round_type_display()
+    version = current_frozen_version(contest_round.activity)
+    if version is None:
+        return (
+            "当前活动还没有正式赛制",
+            f"当前活动还没有正式赛制，轮次“{label}”不能开始比赛。"
+            "请先在赛制配置页完成「正式启用」，再准备轮次。",
+        )
+    if contest_round.pk not in _bound_round_ids_for_version(version):
+        return (
+            "不属于当前正式赛制",
+            f"轮次“{label}”不属于当前正式赛制（v{version.version}），不能开始比赛。"
+            "要让这一版赛制跑它自己的轮次，先把它正式启用；"
+            "原本那一轮仍由当前正式赛制继续使用。",
+        )
+    return None
+
+
+def round_execution_authority_message(contest_round: ContestRound) -> str | None:
+    """Why this round may not start running under the activity's current official format.
+
+    :func:`round_setup_readiness` answers "is this round's own roster finished?", which for
+    a 报名名单 round is true the moment the round exists — including for the round a
+    successor draft cloned in and rebound while that successor was still only a draft.
+    Starting it there puts the whole live chain (panel, performances, scores, results)
+    behind a format the activity had not made official yet. This asks the missing question:
+    which format does this round belong to, and is that the one the activity is running?
+
+    An activity with no ruleset at all is not governed by a format and is left alone, as is
+    a round no binding ever named.
+    """
+
+    found = _round_execution_authority(contest_round)
+    return found[1] if found else None
+
+
+def round_execution_authority_label(contest_round: ContestRound) -> str:
+    """:func:`round_execution_authority_message` as a round-list cell label."""
+
+    found = _round_execution_authority(contest_round)
+    return found[0] if found else ""
+
+
+def ensure_round_executable_under_current_authority(contest_round: ContestRound) -> None:
+    """The one gate every "start running this round" entry point asks.
+
+    Attached at :func:`prepare_round` (the round starts) and
+    :func:`singer_contest.judge_authority.prepare_judge_panel` (the venue starts), so the
+    two doors into live scoring ask the same question instead of each deciding for itself
+    what makes a round runnable.
+    """
+
+    message = round_execution_authority_message(contest_round)
+    if message is not None:
+        raise ValidationError(message)
 
 
 def round_setup_readiness(contest_round: ContestRound) -> RoundSetupReadiness:
@@ -712,6 +811,8 @@ def prepare_round(contest_round: ContestRound, operator) -> ContestRound:
     if locked_round.status != ContestRound.Status.DRAFT:
         raise ValidationError("比赛轮次只能从草稿状态准备。")
     _ensure_round_setup_ready(locked_round)
+    # The readiness above is about this round's own roster; this is about whose format it is.
+    ensure_round_executable_under_current_authority(locked_round)
     _validate_live_round_group_setup(locked_round, require_groups=True)
     # P0-B runtime boundary: the frozen ruleset's deferred roster facts (SELECT quotas,
     # vote candidate rosters, group capacity, full/subset coverage) are proven here — the

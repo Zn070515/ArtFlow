@@ -240,3 +240,30 @@ class RulesetPlanningWorkflowTests(RulesetPlanningViewTests):
         self.assertTrue(response.context["planning_read_only"])
         self.assertContains(response, "专业工具")
         self.assertContains(response, "只展示历史摘要")
+
+    def test_a_draft_a_newer_version_has_replaced_is_read_only_too(self):
+        """The workbench asked only "is this a draft?", and a superseded draft still is one.
+
+        So the page presented as editable and the refusal arrived at submit time, after the
+        operator had done the work — the same false affordance the questionnaire designer had.
+        """
+
+        older = self._version()
+        newer = RulesetVersion.objects.create(
+            ruleset=older.ruleset,
+            version=older.version + 1,
+            definition=_acceptance_definition_json(),
+            created_by=self.staff,
+        )
+
+        response = self.client.get(reverse("staff:ruleset_planning", args=[older.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["planning_read_only"])
+        # ...while the version that replaced it is the one the workbench is for.
+        self.assertNotEqual(newer.pk, older.pk)
+        self.assertFalse(
+            self.client.get(reverse("staff:ruleset_planning", args=[newer.pk])).context[
+                "planning_read_only"
+            ]
+        )

@@ -2710,7 +2710,7 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
 #: prints; the key is what tests and templates refer to.
 FREEZE_GATE_LABELS: dict[str, str] = {
     "version": "此版本是该赛制的最新版本",
-    "finality": "当前正式赛制没有已核定的赛段结果",
+    "finality": "当前正式赛制没有进入现场运行、也没有已核定的赛段结果",
     "binding": "人数、分组、两套权重与三轮评委齐备",
     "definition": "赛制定义可以编译（晋级名额与席位数一致）",
     "round": "第一轮的评分轮、评委、晋级名额与分组都和配置一致",
@@ -2778,6 +2778,15 @@ def evaluate_freeze_gate(
         # M1-R9 (§五): a confirmed handcard must stay attributable to the authority it was
         # frozen under, so the successor cannot take over until the result is released.
         error = ValidationError("当前冻结赛制已核定赛段结果，不可生成后继赛制版本。")
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("finality", error), normalized_binding=None, plan=None
+        )
+    runtime_facts = _prior_authority_runtime_facts(prior) if prior is not None else []
+    if runtime_facts:
+        # A CONFIRMED result is the end of a round's life, not the beginning of it. Freezing
+        # in the window before that hands ``current_frozen_version`` to the successor while
+        # the venue is still working to the old one.
+        error = ValidationError(_live_takeover_refusal(runtime_facts))
         return FreezeEvaluation(
             blocker=_freeze_blocker("finality", error), normalized_binding=None, plan=None
         )
@@ -2854,6 +2863,70 @@ def _compile_frozen_definition(version: RulesetVersion, normalized_binding: dict
         raise RulesetInvalidError(report, plan)
     assert plan is not None
     return plan
+
+
+#: How a round that has left DRAFT is described when it is what is holding the format in
+#: place. The statuses are the live ones; anything else is not runtime evidence.
+_LIVE_ROUND_STATES: dict[str, str] = {
+    "prepared": "已经准备好",
+    "scoring": "正在评分",
+    "locked": "已经锁定",
+}
+
+_LIVE_PANEL_STATES: dict[str, str] = {"active": "进行中", "hold": "已暂停"}
+
+
+def _prior_authority_runtime_facts(prior: RulesetVersion) -> list[str]:
+    """What the running authority is already doing, in the venue's own words.
+
+    The finality rule used to be a single CONFIRMED ``StageResult``, which is the *end* of a
+    round: by the time one exists the format has been frozen, materialised, seated, panelled
+    and scored. The window that needs guarding is the one before it, where a successor freeze
+    would flip ``current_frozen_version`` mid-flight and send scoring, readiness and result
+    publication to the successor's binding while the venue works to the old one.
+    """
+
+    from singer_contest.models import ContestRound, RoundPanelSnapshot
+
+    facts: list[str] = []
+    bound_round_ids = frozen_binding_round_ids(prior.binding)
+    started = (
+        ContestRound.objects.filter(pk__in=bound_round_ids)
+        .exclude(status=ContestRound.Status.DRAFT)
+        .order_by("sequence", "pk")
+    )
+    for contest_round in started:
+        state = _LIVE_ROUND_STATES.get(contest_round.status)
+        if state is None:
+            continue
+        label = contest_round.name or contest_round.get_round_type_display()
+        facts.append(f"轮次“{label}”{state}")
+
+    # Scoped to the activity, not to the binding: the panel is the venue's, and it outlives
+    # a round being reset in a formal activity, so the round's own status is not enough.
+    panel = (
+        RoundPanelSnapshot.objects.filter(
+            activity_id=prior.ruleset.activity_id,
+            state__in=list(_LIVE_PANEL_STATES),
+        )
+        .order_by("pk")
+        .first()
+    )
+    if panel is not None:
+        facts.append(f"现场评委组已经建立（{_LIVE_PANEL_STATES[panel.state]}）")
+    return facts
+
+
+def _live_takeover_refusal(facts: list[str]) -> str:
+    """The one refusal a mid-flight authority switch gets, with its way out."""
+
+    return (
+        "当前正式赛制已经开始现场运行（"
+        + "；".join(facts)
+        + "），不能直接换版。换版会让现场正在使用的赛制在运行中途被替换。"
+        "请先在「比赛轮次」把已经开始的轮次重置为草稿（管理员填写原因，"
+        "会清空该轮已准备的评分数据），再冻结这一版赛制。"
+    )
 
 
 def _prior_current_frozen(version: RulesetVersion) -> RulesetVersion | None:
@@ -3002,6 +3075,19 @@ def supersede_ruleset_version(
     )
     if locked.status != RulesetVersion.Status.FROZEN:
         raise ValidationError("只有已冻结的赛制版本可以被继任覆盖。")
+    # Only *the* authority may be superseded. The freeze gate already refuses to freeze an
+    # old version, so superseding one is the remaining way to move the activity's authority
+    # backwards: the successor copies this version's definition and binding, and because it
+    # is the newest row it is both editable and freezable. Superseding a retired v1 beside a
+    # running v2 would re-issue v1's format as v3 — a rollback wearing a higher number.
+    newer = newer_ruleset_version(locked)
+    if newer is not None:
+        raise ValidationError(
+            f"已存在更新的赛制版本（v{newer.version}），不能从 v{locked.version} 再创建后继草稿。"
+            "请继续在新版本上准备。"
+        )
+    if not locked.is_current:
+        raise ValidationError("只有当前正式赛制可以创建后继草稿。")
     last = locked.ruleset.versions.order_by("-version").values_list("version", flat=True).first()
     next_version = (last or 0) + 1
     return RulesetVersion.objects.create(
