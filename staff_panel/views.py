@@ -96,11 +96,13 @@ from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.live_format import (
+    _bound_first_round,
     apply_live_2026_counts,
+    freeze_blocker,
     is_live_2026_template,
+    live_2026_readiness,
     live_challenge_counts_for_activity,
     live_challenge_counts_from_binding,
-    preflight_live_2026,
     provision_live_2026_ruleset,
 )
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
@@ -620,27 +622,29 @@ def activity_workspace(request, pk):
     # The workspace should answer "do we already have a ruleset, and where do I continue?"
     # rather than pointing at the create page and leaving staff to work it out.
     versions = RulesetVersion.objects.filter(ruleset__activity=activity)
-    editing_version = (
-        versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
-        or versions.filter(is_current=True).order_by("-version").first()
-    )
+    # A frozen authority is not a draft: it has no edit page at all, so offering it as
+    # "继续准备" would land the operator on a 403. The workspace shows it as the official
+    # version it now is, with the two things that are actually available — the pre-launch
+    # check, and issuing a successor draft to change it.
+    draft_version = versions.filter(status=RulesetVersion.Status.DRAFT).order_by("-version").first()
+    editing_version = draft_version or versions.filter(is_current=True).order_by("-version").first()
     ruleset_summary = None
     if editing_version is not None:
+        is_frozen = editing_version.status == RulesetVersion.Status.FROZEN
         is_live_2026 = (
             str((editing_version.ruleset.live_challenge or {}).get("format_key") or "")
             == LIVE_CHALLENGE_FORMAT_KEY
         )
-        checklist = _live_2026_checklist(editing_version) if is_live_2026 else []
+        checklist = _live_2026_checklist(editing_version) if is_live_2026 and not is_frozen else []
         ruleset_summary = {
             "version": editing_version,
             "is_live_2026": is_live_2026,
-            "outstanding": [row for row in checklist if not row["done"]],
+            "is_frozen": is_frozen,
+            "outstanding": [row for row in checklist if not row["done"] and not row["pending"]],
             "done_count": sum(1 for row in checklist if row["done"]),
             "total_count": len(checklist),
             "continue_url": (
-                reverse("staff:ruleset_live_2026_config", args=[editing_version.pk])
-                if is_live_2026
-                else reverse("staff:ruleset_edit", args=[editing_version.pk])
+                "" if is_frozen else _ruleset_edit_url(editing_version, is_live_2026=is_live_2026)
             ),
         }
     return render(
@@ -5448,6 +5452,11 @@ def contest_ruleset_create(request):
                 else:
                     version = draft
                 messages.info(request, "该活动已有赛制，进入现有赛制编辑。")
+            # The planning workbench cannot express the 2026 format's graph, so it renders
+            # read-only there; sending the operator to the configuration page instead is the
+            # difference between "you cannot edit this here" and "here is where you edit".
+            if _is_live_2026_ruleset(version.ruleset):
+                return redirect("staff:ruleset_live_2026_config", pk=version.pk)
             return redirect("staff:ruleset_planning", pk=version.pk)
         definition = template.definition if template else _starter_definition()
         ruleset = ContestRuleset.objects.create(
@@ -5764,6 +5773,47 @@ def ruleset_edit(request, pk):
     )
 
 
+def _superseded_draft(version):
+    """The newer draft that has replaced ``version``, if there is one.
+
+    Every draft of a ruleset shares one ``ContestRuleset`` binding surface, so two live draft
+    pages both claim the same state: save 8 seats from v1 and v2's definition still says 10 —
+    a disagreement nobody actually created, reported later by the freeze contract. Newest
+    wins; an older draft's page hands over to it instead of writing.
+    """
+
+    if version.status != RulesetVersion.Status.DRAFT:
+        return None
+    return (
+        RulesetVersion._base_manager.filter(
+            ruleset_id=version.ruleset_id,
+            status=RulesetVersion.Status.DRAFT,
+            version__gt=version.version,
+        )
+        .order_by("-version")
+        .first()
+    )
+
+
+def _refuse_frozen_or_superseded(request, version, *, route: str):
+    """Return a response when ``version`` must not be mutated, else ``None``.
+
+    A frozen version is read-only by definition. A superseded draft is read-only by
+    convention: it is still an ordinary row, but the numbers it would write belong to a
+    version the operators have already moved past.
+    """
+
+    if version.status == RulesetVersion.Status.FROZEN:
+        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    successor = _superseded_draft(version)
+    if successor is None:
+        return None
+    if request.method == "POST":
+        raise PermissionDenied("此版本已被更新的草稿替代，请在最新草稿上修改。")
+    messages.info(request, "此版本已被更新的草稿替代，已转到最新草稿。")
+    return redirect(route, pk=successor.pk)
+
+
 @staff_required
 @require_POST
 @transaction.atomic
@@ -5775,6 +5825,9 @@ def ruleset_bind(request, pk):
     """
     version = get_object_or_404(RulesetVersion, pk=pk)
     lock_activity_for_action(version.ruleset.activity)
+    stale_response = _refuse_frozen_or_superseded(request, version, route="staff:ruleset_bind")
+    if stale_response is not None:
+        return stale_response
 
     def _parse_json(name, empty):
         raw = (request.POST.get(name) or "").strip()
@@ -5911,29 +5964,67 @@ def _live_weight_percent(raw) -> str:
         return ""
 
 
-def _live_2026_checklist(version) -> list[dict]:
-    """The "我还差什么" rows — the freeze gate's own verdict, in plain language.
+def _is_live_2026_ruleset(ruleset) -> bool:
+    """Whether a ruleset's editable surface declares the 2026 live format."""
 
-    These are not a second opinion: ``preflight_live_2026`` runs the same validators the
-    freeze runs, in the same order, so "全部就绪" here means the freeze will actually pass.
+    return str((ruleset.live_challenge or {}).get("format_key") or "") == LIVE_CHALLENGE_FORMAT_KEY
+
+
+def _ruleset_edit_url(version, *, is_live_2026: bool) -> str:
+    """Where a *draft* ruleset's operator continues working."""
+
+    route = "staff:ruleset_live_2026_config" if is_live_2026 else "staff:ruleset_edit"
+    return reverse(route, args=[version.pk])
+
+
+def _live_2026_checklist(version) -> list[dict]:
+    """The 准备清单 rows — the freeze's own verdicts, each linking to the page that fixes it.
+
+    The link is resolved per row rather than from one shared ``(route, args)`` pair, because
+    the rows live on different pages with different parameters: ``round_list`` takes no
+    argument while ``round_edit`` takes a round, and a row whose route cannot be reversed
+    takes down every page that renders the checklist.
     """
 
-    actions = {
-        "binding": ("staff:ruleset_live_2026_config", "本页填写"),
-        "definition": ("staff:ruleset_edit", "去编辑器"),
-        "round": ("staff:round_list", "去轮次页"),
-        "questionnaire": ("staff:ruleset_questionnaire", "去填写"),
-        "successor": ("staff:ruleset_questionnaire", "去检查"),
+    ruleset = version.ruleset
+    config_url = reverse("staff:ruleset_live_2026_config", args=[version.pk])
+    edit_url = reverse("staff:ruleset_edit", args=[version.pk])
+    questionnaire_url = reverse("staff:ruleset_questionnaire", args=[version.pk])
+    bound_round = _bound_first_round(ruleset)
+    round_url = (
+        reverse("staff:round_edit", args=[bound_round.pk])
+        if bound_round is not None
+        else reverse("staff:round_create") + f"?activity_id={ruleset.activity_id}"
+    )
+    links = {
+        "counts": (config_url, "本页填写"),
+        "weights": (config_url, "本页填写"),
+        "podium": (config_url, "本页填写"),
+        "judges": (config_url, "本页填写"),
+        "binding": (config_url, "本页填写"),
+        "definition": (edit_url, "去编辑器"),
+        "round_seats": (round_url, "去轮次页"),
+        "round_judges": (round_url, "去轮次页"),
+        "rubric": (round_url, "去轮次页"),
+        "round_contract": (round_url, "去轮次页"),
+        "questionnaire": (questionnaire_url, "去填写"),
+        "successor": (questionnaire_url, "去检查"),
+        # 已核定结果要靠撤回赛段结果来释放，那不是一页配置。
+        "finality": ("", ""),
     }
     rows = []
-    for item in preflight_live_2026(version):
-        route, action = actions.get(item.key, ("", ""))
+    for item in live_2026_readiness(version):
+        url, action = links.get(item.key, ("", ""))
         rows.append(
             {
+                "key": item.key,
                 "label": item.label,
                 "done": item.ready,
+                # A row whose own prerequisite has not been met is neither done nor missing;
+                # counting it as missing would misreport how much is actually left.
+                "pending": item.unknown,
                 "detail": item.message,
-                "url": reverse(route, args=[version.pk]) if route else "",
+                "url": url,
                 "action": action,
             }
         )
@@ -5945,8 +6036,11 @@ def ruleset_live_2026_config(request, pk):
     """The 傻瓜式 2026 决赛赛制配置页: one page for the format's few real choices."""
 
     version = get_object_or_404(RulesetVersion.objects.select_related("ruleset__activity"), pk=pk)
-    if version.status == RulesetVersion.Status.FROZEN:
-        raise PermissionDenied("已冻结赛制版本不可编辑。")
+    stale_response = _refuse_frozen_or_superseded(
+        request, version, route="staff:ruleset_live_2026_config"
+    )
+    if stale_response is not None:
+        return stale_response
     ruleset = version.ruleset
     if str((ruleset.live_challenge or {}).get("format_key") or "") != LIVE_CHALLENGE_FORMAT_KEY:
         messages.error(
@@ -6042,7 +6136,11 @@ def ruleset_live_2026_config(request, pk):
                 and (first_round.status != ContestRound.Status.DRAFT or first_round.is_locked)
             ),
             "checklist": checklist,
-            "outstanding": sum(1 for row in checklist if not row["done"]),
+            "outstanding": sum(1 for row in checklist if not row["done"] and not row["pending"]),
+            # The authoritative answer, from the walk the freeze itself performs: the
+            # checklist below is more granular, but this is the line that cannot disagree
+            # with the freeze button.
+            "blocker": freeze_blocker(version),
             "binding_signature": _binding_signature(ruleset),
             "can_freeze": request.user.is_admin,
         },
@@ -6100,6 +6198,9 @@ def ruleset_validate(request, pk):
             # whether freeze will pass is the preflight, which runs freeze's own validators.
             "live_2026": is_live_2026,
             "preflight": _live_2026_checklist(version) if is_live_2026 else [],
+            # The authoritative verdict, straight from the freeze's own walk. The checklist
+            # above can only be read as "what is left"; this is "冻结会不会通过".
+            "blocker": freeze_blocker(version) if is_live_2026 else None,
             "config_url": (
                 reverse("staff:ruleset_live_2026_config", args=[version.pk]) if is_live_2026 else ""
             ),

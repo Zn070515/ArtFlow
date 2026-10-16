@@ -46,7 +46,7 @@
     <section class="rounded-lg border border-gray-200 bg-white p-5 mb-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-3">今年决赛怎么进行</h2>
         <ol class="text-sm text-gray-700 space-y-1 list-decimal list-inside">
-            <li><span class="font-medium text-gray-900">第一轮</span>：{{ counts.participant_count }} 名选手，分为 {{ counts.group_count }} 组，每组 {{ counts.group_size }} 人。</li>
+            <li><span class="font-medium text-gray-900">第一轮</span>：{{ counts.participant_count }} 名选手，分为 {{ counts.group_count }} 组（初稿按每组约 {{ counts.suggested_group_size }} 人安排，实际以冻结的分组名单为准）。</li>
             <li>按第一轮成绩产生 <span class="font-medium text-gray-900">{{ counts.seat_count }}</span> 个初始席位。</li>
             <li>其余 <span class="font-medium text-gray-900">{{ counts.challenge_count }}</span> 名选手进入<span class="font-medium text-gray-900">第二轮（踢馆）</span>，每人 1 次踢馆机会，共 {{ counts.challenge_count }} 次。</li>
             <li>踢馆结束后仍保有 {{ counts.seat_count }} 个席位。</li>
@@ -73,7 +73,7 @@
                     <input name="live_group_count" type="number" min="1" value="{{ counts.group_count }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
                 </label>
                 <label class="block text-sm text-gray-700">每组人数（建议值，可以不等长）
-                    <input name="live_group_size" type="number" min="1" value="{{ counts.group_size }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
+                    <input name="live_group_size" type="number" min="1" value="{{ counts.suggested_group_size }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm">
                 </label>
             </div>
             <div class="mt-4 rounded border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
@@ -176,21 +176,42 @@
     </form>
 
     <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-2">正式冻结检查</h2>
+        {% if blocker %}
+        <p class="text-sm text-red-700">
+            <span class="font-medium">✗ 现在不能冻结。</span>
+            首个阻塞：{{ blocker.label }} —— {{ blocker.message }}
+        </p>
+        <p class="mt-1 text-xs text-gray-500">这一行走的就是点「冻结赛制」时走的那套校验，所以它说不行，冻结就会被拒。</p>
+        {% else %}
+        <p class="text-sm text-emerald-700">✓ 这套赛制可以冻结。</p>
+        {% endif %}
+    </section>
+
+    <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
         <div class="flex items-center justify-between gap-3">
-            <h2 class="text-lg font-semibold text-gray-900">我还差什么</h2>
+            <h2 class="text-lg font-semibold text-gray-900">我还差什么（准备清单）</h2>
             <span class="text-sm {% if outstanding %}text-amber-700{% else %}text-green-700{% endif %}">
-                {% if outstanding %}冻结还差 {{ outstanding }} 项。{% else %}全部就绪，可以冻结。{% endif %}
+                {% if outstanding %}还缺 {{ outstanding }} 项。{% elif blocker %}还差上面那一项。{% else %}全部就绪，可以冻结。{% endif %}
             </span>
         </div>
         <ul class="mt-3 space-y-2 text-sm">
             {% for row in checklist %}
             <li class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2">
                 <span>
-                    <span class="{% if row.done %}text-green-600{% else %}text-gray-400{% endif %}">{% if row.done %}✓{% else %}○{% endif %}</span>
-                    <span class="{% if row.done %}text-gray-700{% else %}text-gray-900 font-medium{% endif %}">{{ row.label }}</span>
+                    {% if row.pending %}
+                    <span class="text-gray-300">·</span>
+                    <span class="text-gray-500">{{ row.label }}</span>
+                    {% elif row.done %}
+                    <span class="text-green-600">✓</span>
+                    <span class="text-gray-700">{{ row.label }}</span>
+                    {% else %}
+                    <span class="text-amber-600">○</span>
+                    <span class="text-gray-900 font-medium">{{ row.label }}</span>
+                    {% endif %}
                     {% if row.detail %}<span class="ml-1 text-xs text-gray-500">{{ row.detail }}</span>{% endif %}
                 </span>
-                {% if row.url and not row.done %}
+                {% if row.url and not row.done and not row.pending %}
                 <a href="{{ row.url }}" class="text-xs border border-brand text-brand rounded px-3 py-1 shrink-0">{{ row.action }}</a>
                 {% endif %}
             </li>

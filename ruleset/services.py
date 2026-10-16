@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import cast
 
@@ -266,6 +266,276 @@ def _weight_pair_percent(first_raw: object, second_raw: object) -> tuple[Decimal
     return first, second
 
 
+def _live_positive_int(raw_live_challenge: dict, key: str) -> int:
+    try:
+        value = int(str(raw_live_challenge.get(key)))
+    except (TypeError, ValueError):
+        raise ValidationError(f"live_challenge.{key} 必须是正整数。") from None
+    if value <= 0:
+        raise ValidationError(f"live_challenge.{key} 必须是正整数。")
+    return value
+
+
+def _live_group_int(raw_live_challenge: dict, key: str, default: int) -> int:
+    # Absent on bindings written before grouping became a parameter; falling back to the
+    # built-in default keeps such a ruleset saveable until the operator changes it.
+    text = str(raw_live_challenge.get(key) or "").strip()
+    if not text:
+        return default
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        raise ValidationError(f"live_challenge.{key} 必须是正整数。") from None
+    if value <= 0:
+        raise ValidationError(f"live_challenge.{key} 必须是正整数。")
+    return value
+
+
+def _normalize_live_counts(raw_live_challenge: dict) -> dict:
+    """The counts every other section rests on. 踢馆人数 is derived, never posted."""
+
+    participant_count = _live_positive_int(raw_live_challenge, "participant_count")
+    seat_count = _live_positive_int(raw_live_challenge, "seat_count")
+    group_count = _live_group_int(raw_live_challenge, "group_count", LIVE_2026_GROUP_COUNT)
+    # ``group_size`` is a pre-fill suggestion, not a contract: a singer dropping out on
+    # the day turns 15 into 14, and "5 groups of 3+3+3+3+2" is a perfectly ordinary answer
+    # that an equal-size identity would forbid. Only the group *count* is a parameter the
+    # freeze checks; the actual sizes belong to the group stage.
+    group_size = _live_group_int(raw_live_challenge, "group_size", LIVE_2026_GROUP_SIZE)
+    # 踢馆人数 is derived and never taken from the form: every singer who misses the
+    # initial seats gets exactly one challenge opportunity, so the turn count *is* the
+    # number of singers left over.
+    challenge_count = participant_count - seat_count
+    if participant_count <= seat_count:
+        raise ValidationError("第一轮参赛人数必须大于第一轮晋级人数。")
+    posted_challenge_count = str(raw_live_challenge.get("challenge_count") or "").strip()
+    if posted_challenge_count and posted_challenge_count != str(challenge_count):
+        raise ValidationError("踢馆人数必须等于第一轮参赛人数减第一轮晋级数，不能单独设置。")
+    return {
+        "participant_count": participant_count,
+        "seat_count": seat_count,
+        "challenge_count": challenge_count,
+        "group_count": group_count,
+        "group_size": group_size,
+    }
+
+
+def _normalize_live_challenge_weights(
+    raw_live_challenge: dict, *, strict: bool, live_format_key: str
+) -> dict:
+    """The 第一轮 / 踢馆 pair, always alongside the order policy it implies."""
+
+    weight_keys = ("first_round_weight", "challenge_round_weight")
+    absent_weights = [
+        key for key in weight_keys if not str(raw_live_challenge.get(key) or "").strip()
+    ]
+    # The editable ruleset surface may keep an incomplete draft, exactly as the podium
+    # and judge sections already allow: the built-in 2026 format arrives carrying
+    # the format's fixed keys and no ratios, because the ratios are the operators' to
+    # choose. Freeze passes ``require_live_challenge_complete=True`` and rejects this
+    # shape, so an unfilled pair can never reach a frozen version.
+    if (
+        len(absent_weights) == len(weight_keys)
+        and live_format_key == LIVE_CHALLENGE_FORMAT_KEY
+        and not strict
+    ):
+        return {"order_policy": "official_number"}
+    if absent_weights:
+        # Only reachable at freeze — the relaxed branch above covers a draft. An
+        # unfilled pair is an incomplete configuration, not a malformed value, so it
+        # reports as a sum failure rather than a format error.
+        raise ValidationError("踢馆成绩权重必须合计 100%。")
+    try:
+        first_weight, challenge_weight = _weight_pair_percent(
+            raw_live_challenge.get("first_round_weight"),
+            raw_live_challenge.get("challenge_round_weight"),
+        )
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError("踢馆成绩权重格式无效。") from None
+    if first_weight <= 0 or challenge_weight <= 0 or first_weight + challenge_weight != 100:
+        raise ValidationError("踢馆成绩权重必须合计 100%。")
+    return {
+        "first_round_weight": f"{(first_weight / Decimal('100')):.4f}",
+        "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
+        "order_policy": "official_number",
+    }
+
+
+#: The podium's fixed keys. They are the format's identity — only the two ratios beside them
+#: are the operators' choice — so the keys are preset and the ratios never are.
+_LIVE_PODIUM_FIELDS = frozenset(
+    {
+        "podium_stage_key",
+        "podium_first_round_key",
+        "podium_third_round_key",
+        "podium_aggregate_node",
+        "podium_first_round_weight",
+        "podium_third_round_weight",
+    }
+)
+
+#: The two judge lists the format's later rounds need, plus their minimum valid counts.
+_LIVE_JUDGE_CONFIG_FIELDS = frozenset(
+    {
+        "challenge_judge_ids",
+        "challenge_minimum_judge_count",
+        "final_judge_ids",
+        "final_minimum_judge_count",
+    }
+)
+
+
+def _normalize_live_podium(
+    raw_live_challenge: dict,
+    *,
+    strict: bool,
+    live_format_key: str,
+    round_keys: dict,
+) -> dict:
+    """The 冠亚季军 node identity and its 第一轮 / 第三轮 weight pair."""
+
+    podium_fields = _LIVE_PODIUM_FIELDS
+    podium_present = bool(podium_fields & set(raw_live_challenge))
+    missing_podium = sorted(podium_fields - set(raw_live_challenge))
+    if strict and missing_podium:
+        raise ValidationError("最终冠亚季军配置缺少字段：" + ", ".join(missing_podium))
+    if not podium_present:
+        return {}
+    if missing_podium:
+        # The editable ruleset surface may keep an incomplete draft. Freeze uses
+        # ``require_live_challenge_complete=True`` and rejects this shape.
+        return {key: raw_live_challenge[key] for key in podium_fields if key in raw_live_challenge}
+    podium_strings = {
+        key: str(raw_live_challenge.get(key) or "").strip()
+        for key in (
+            "podium_stage_key",
+            "podium_first_round_key",
+            "podium_third_round_key",
+            "podium_aggregate_node",
+        )
+    }
+    if any(not value for value in podium_strings.values()):
+        raise ValidationError("最终冠亚季军配置的键名不能为空。")
+    if podium_strings["podium_first_round_key"] not in round_keys:
+        raise ValidationError("最终冠亚季军的第一轮键必须绑定到 round_keys。")
+    podium_weight_keys = ("podium_first_round_weight", "podium_third_round_weight")
+    absent_podium_weights = [
+        key for key in podium_weight_keys if not str(raw_live_challenge.get(key) or "").strip()
+    ]
+    # Same incomplete-draft allowance as the challenge weight pair above: the
+    # built-in carries the podium *keys* — they are the format's identity — while the
+    # two ratios stay the operators' choice.
+    if (
+        len(absent_podium_weights) == len(podium_weight_keys)
+        and live_format_key == LIVE_CHALLENGE_FORMAT_KEY
+        and not strict
+    ):
+        return dict(podium_strings)
+    if absent_podium_weights:
+        raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
+    try:
+        podium_first, podium_third = _weight_pair_percent(
+            raw_live_challenge.get("podium_first_round_weight"),
+            raw_live_challenge.get("podium_third_round_weight"),
+        )
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError("最终冠亚季军成绩权重格式无效。") from None
+    if podium_first <= 0 or podium_third <= 0 or podium_first + podium_third != 100:
+        raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
+    return {
+        **podium_strings,
+        "podium_first_round_weight": f"{(podium_first / Decimal('100')):.4f}",
+        "podium_third_round_weight": f"{(podium_third / Decimal('100')):.4f}",
+    }
+
+
+def _normalize_live_judges(raw_live_challenge: dict, *, strict: bool) -> dict:
+    """The 踢馆 and 第三轮 judge panels, each with its own minimum valid count."""
+
+    judge_config_fields = _LIVE_JUDGE_CONFIG_FIELDS
+    judges_present = bool(judge_config_fields & set(raw_live_challenge))
+    missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
+    if strict and missing_judges:
+        raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
+    if not judges_present:
+        # ``strict`` already refused above: every field is missing in this shape.
+        return {}
+    # "All four keys present, both lists empty" is a draft the operator has not filled in yet
+    # — the same allowance the weight and podium sections make above. A part-filled section is
+    # carried through as-is. At freeze ``strict`` is set and the checks below refuse both.
+    judges_chosen = bool(
+        raw_live_challenge.get("challenge_judge_ids") or raw_live_challenge.get("final_judge_ids")
+    )
+    if missing_judges or (not judges_chosen and not strict):
+        return {
+            key: raw_live_challenge[key] for key in judge_config_fields if key in raw_live_challenge
+        }
+
+    def _judge_ids(key: str) -> list[int]:
+        raw_ids = raw_live_challenge.get(key)
+        if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
+            raise ValidationError(f"live_challenge.{key} 必须是非空评委 ID 列表。")
+        try:
+            ids = [int(str(value)) for value in raw_ids]
+        except (TypeError, ValueError):
+            raise ValidationError(f"live_challenge.{key} 含有无效评委 ID。") from None
+        if any(value < 1 for value in ids) or len(ids) != len(set(ids)):
+            raise ValidationError(f"live_challenge.{key} 必须是正整数且不能重复。")
+        return ids
+
+    challenge_judge_ids = _judge_ids("challenge_judge_ids")
+    final_judge_ids = _judge_ids("final_judge_ids")
+    try:
+        challenge_minimum = int(str(raw_live_challenge.get("challenge_minimum_judge_count")))
+        final_minimum = int(str(raw_live_challenge.get("final_minimum_judge_count")))
+    except (TypeError, ValueError):
+        raise ValidationError("现场轮次最低有效评委数必须是正整数。") from None
+    if not 1 <= challenge_minimum <= len(challenge_judge_ids):
+        raise ValidationError("挑战轮最低有效评委数必须在挑战轮评委数范围内。")
+    if not 1 <= final_minimum <= len(final_judge_ids):
+        raise ValidationError("第三轮最低有效评委数必须在第三轮评委数范围内。")
+    return {
+        "challenge_judge_ids": challenge_judge_ids,
+        "challenge_minimum_judge_count": challenge_minimum,
+        "final_judge_ids": final_judge_ids,
+        "final_minimum_judge_count": final_minimum,
+    }
+
+
+def _normalize_live_challenge(
+    raw_live_challenge: dict,
+    *,
+    strict: bool,
+    live_format_key: str,
+    normalized_round_keys: dict,
+) -> dict:
+    """The whole normalized ``live_challenge`` block, section by section.
+
+    Each section is a separate call so the readiness checklist can ask about them one at a
+    time and report everything that is missing, while the freeze door still asks them in the
+    order below and stops at the first refusal. One set of validators, two readings.
+    """
+
+    live_challenge: dict[str, object] = dict(_normalize_live_counts(raw_live_challenge))
+    live_challenge.update(
+        _normalize_live_challenge_weights(
+            raw_live_challenge, strict=strict, live_format_key=live_format_key
+        )
+    )
+    live_challenge.update(
+        _normalize_live_podium(
+            raw_live_challenge,
+            strict=strict,
+            live_format_key=live_format_key,
+            round_keys=normalized_round_keys,
+        )
+    )
+    live_challenge.update(_normalize_live_judges(raw_live_challenge, strict=strict))
+    if live_format_key:
+        live_challenge["format_key"] = live_format_key
+    return live_challenge
+
+
 def validate_binding(
     ruleset: ContestRuleset,
     binding: dict | None,
@@ -304,226 +574,12 @@ def validate_binding(
     )
     live_challenge: dict[str, object] = {}
     if raw_live_challenge:
-
-        def _positive_int(key: str) -> int:
-            try:
-                value = int(str(raw_live_challenge.get(key)))
-            except (TypeError, ValueError):
-                raise ValidationError(f"live_challenge.{key} 必须是正整数。") from None
-            if value <= 0:
-                raise ValidationError(f"live_challenge.{key} 必须是正整数。")
-            return value
-
-        participant_count = _positive_int("participant_count")
-        seat_count = _positive_int("seat_count")
-
-        def _group_int(key: str, default: int) -> int:
-            # Absent on bindings written before grouping became a parameter; falling back to
-            # the built-in default keeps such a ruleset saveable until the operator changes it.
-            raw = str(raw_live_challenge.get(key) or "").strip()
-            if not raw:
-                return default
-            try:
-                value = int(raw)
-            except (TypeError, ValueError):
-                raise ValidationError(f"live_challenge.{key} 必须是正整数。") from None
-            if value <= 0:
-                raise ValidationError(f"live_challenge.{key} 必须是正整数。")
-            return value
-
-        group_count = _group_int("group_count", LIVE_2026_GROUP_COUNT)
-        # ``group_size`` is a pre-fill suggestion, not a contract: a singer dropping out on
-        # the day turns 15 into 14, and "5 groups of 3+3+3+3+2" is a perfectly ordinary answer
-        # that an equal-size identity would forbid. Only the group *count* is a parameter the
-        # freeze checks; the actual sizes belong to the group stage.
-        group_size = _group_int("group_size", LIVE_2026_GROUP_SIZE)
-        # 踢馆人数 is derived and never taken from the form: every singer who misses the
-        # initial seats gets exactly one challenge opportunity, so the turn count *is* the
-        # number of singers left over.
-        challenge_count = participant_count - seat_count
-        if participant_count <= seat_count:
-            raise ValidationError("第一轮参赛人数必须大于第一轮晋级人数。")
-        posted_challenge_count = str(raw_live_challenge.get("challenge_count") or "").strip()
-        if posted_challenge_count and posted_challenge_count != str(challenge_count):
-            raise ValidationError("踢馆人数必须等于第一轮参赛人数减第一轮晋级数，不能单独设置。")
-        # Both branches below spread this: ``update_ruleset_binding`` persists exactly the dict
-        # this function returns, so a key omitted from either branch is deleted on the next save.
-        counts = {
-            "participant_count": participant_count,
-            "seat_count": seat_count,
-            "challenge_count": challenge_count,
-            "group_count": group_count,
-            "group_size": group_size,
-        }
-        weight_keys = ("first_round_weight", "challenge_round_weight")
-        absent_weights = [
-            key for key in weight_keys if not str(raw_live_challenge.get(key) or "").strip()
-        ]
-        # The editable ruleset surface may keep an incomplete draft, exactly as the podium
-        # and judge sections below already allow: the built-in 2026 format arrives carrying
-        # the format's fixed keys and no ratios, because the ratios are the operators' to
-        # choose. Freeze passes ``require_live_challenge_complete=True`` and rejects this
-        # shape, so an unfilled pair can never reach a frozen version.
-        if (
-            len(absent_weights) == len(weight_keys)
-            and live_format_key == (LIVE_CHALLENGE_FORMAT_KEY)
-            and not strict_live_contract
-        ):
-            live_challenge = {**counts, "order_policy": "official_number"}
-        else:
-            if absent_weights:
-                # Only reachable at freeze — the relaxed branch above covers a draft. An
-                # unfilled pair is an incomplete configuration, not a malformed value, so it
-                # reports as a sum failure rather than a format error.
-                raise ValidationError("踢馆成绩权重必须合计 100%。")
-            try:
-                first_weight, challenge_weight = _weight_pair_percent(
-                    raw_live_challenge.get("first_round_weight"),
-                    raw_live_challenge.get("challenge_round_weight"),
-                )
-            except (InvalidOperation, TypeError, ValueError):
-                raise ValidationError("踢馆成绩权重格式无效。") from None
-            if first_weight <= 0 or challenge_weight <= 0 or first_weight + challenge_weight != 100:
-                raise ValidationError("踢馆成绩权重必须合计 100%。")
-            live_challenge = {
-                **counts,
-                "first_round_weight": f"{(first_weight / Decimal('100')):.4f}",
-                "challenge_round_weight": f"{(challenge_weight / Decimal('100')):.4f}",
-                "order_policy": "official_number",
-            }
-        if live_format_key:
-            live_challenge["format_key"] = live_format_key
-        podium_fields = {
-            "podium_stage_key",
-            "podium_first_round_key",
-            "podium_third_round_key",
-            "podium_aggregate_node",
-            "podium_first_round_weight",
-            "podium_third_round_weight",
-        }
-        podium_present = bool(podium_fields & set(raw_live_challenge))
-        missing_podium = sorted(podium_fields - set(raw_live_challenge))
-        if strict_live_contract and missing_podium:
-            raise ValidationError("最终冠亚季军配置缺少字段：" + ", ".join(missing_podium))
-        if podium_present and not missing_podium:
-            podium_strings = {
-                key: str(raw_live_challenge.get(key) or "").strip()
-                for key in (
-                    "podium_stage_key",
-                    "podium_first_round_key",
-                    "podium_third_round_key",
-                    "podium_aggregate_node",
-                )
-            }
-            if any(not value for value in podium_strings.values()):
-                raise ValidationError("最终冠亚季军配置的键名不能为空。")
-            if podium_strings["podium_first_round_key"] not in normalized_round_keys:
-                raise ValidationError("最终冠亚季军的第一轮键必须绑定到 round_keys。")
-            podium_weight_keys = ("podium_first_round_weight", "podium_third_round_weight")
-            absent_podium_weights = [
-                key
-                for key in podium_weight_keys
-                if not str(raw_live_challenge.get(key) or "").strip()
-            ]
-            # Same incomplete-draft allowance as the challenge weight pair above: the
-            # built-in carries the podium *keys* — they are the format's identity — while the
-            # two ratios stay the operators' choice.
-            if (
-                len(absent_podium_weights) == len(podium_weight_keys)
-                and live_format_key == LIVE_CHALLENGE_FORMAT_KEY
-                and not strict_live_contract
-            ):
-                live_challenge.update(podium_strings)
-            else:
-                if absent_podium_weights:
-                    raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
-                try:
-                    podium_first, podium_third = _weight_pair_percent(
-                        raw_live_challenge.get("podium_first_round_weight"),
-                        raw_live_challenge.get("podium_third_round_weight"),
-                    )
-                except (InvalidOperation, TypeError, ValueError):
-                    raise ValidationError("最终冠亚季军成绩权重格式无效。") from None
-                if podium_first <= 0 or podium_third <= 0 or podium_first + podium_third != 100:
-                    raise ValidationError("最终冠亚季军成绩权重必须合计 100%。")
-                live_challenge.update(podium_strings)
-                live_challenge.update(
-                    {
-                        "podium_first_round_weight": f"{(podium_first / Decimal('100')):.4f}",
-                        "podium_third_round_weight": f"{(podium_third / Decimal('100')):.4f}",
-                    }
-                )
-        elif podium_present:
-            # The editable ruleset surface may keep an incomplete draft. Freeze uses
-            # ``require_live_challenge_complete=True`` below and rejects this shape.
-            live_challenge.update(
-                {key: raw_live_challenge[key] for key in podium_fields if key in raw_live_challenge}
-            )
-
-        judge_config_fields = {
-            "challenge_judge_ids",
-            "challenge_minimum_judge_count",
-            "final_judge_ids",
-            "final_minimum_judge_count",
-        }
-        judges_present = bool(judge_config_fields & set(raw_live_challenge))
-        missing_judges = sorted(judge_config_fields - set(raw_live_challenge))
-        if strict_live_contract and missing_judges:
-            raise ValidationError("现场轮次评委配置缺少字段：" + ", ".join(missing_judges))
-        # "All four keys present, both lists empty" is a draft the operator has not filled in
-        # yet — the same allowance the weight and podium sections make above. At freeze the
-        # checks below still run and refuse it.
-        judges_chosen = bool(
-            raw_live_challenge.get("challenge_judge_ids")
-            or raw_live_challenge.get("final_judge_ids")
+        live_challenge = _normalize_live_challenge(
+            raw_live_challenge,
+            strict=strict_live_contract,
+            live_format_key=live_format_key,
+            normalized_round_keys=normalized_round_keys,
         )
-        if judges_present and not missing_judges and (judges_chosen or strict_live_contract):
-
-            def _judge_ids(key: str) -> list[int]:
-                raw_ids = raw_live_challenge.get(key)
-                if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
-                    raise ValidationError(f"live_challenge.{key} 必须是非空评委 ID 列表。")
-                try:
-                    ids = [int(str(value)) for value in raw_ids]
-                except (TypeError, ValueError):
-                    raise ValidationError(f"live_challenge.{key} 含有无效评委 ID。") from None
-                if any(value < 1 for value in ids) or len(ids) != len(set(ids)):
-                    raise ValidationError(f"live_challenge.{key} 必须是正整数且不能重复。")
-                return ids
-
-            challenge_judge_ids = _judge_ids("challenge_judge_ids")
-            final_judge_ids = _judge_ids("final_judge_ids")
-            try:
-                challenge_minimum = int(
-                    str(raw_live_challenge.get("challenge_minimum_judge_count"))
-                )
-                final_minimum = int(str(raw_live_challenge.get("final_minimum_judge_count")))
-            except (TypeError, ValueError):
-                raise ValidationError("现场轮次最低有效评委数必须是正整数。") from None
-            if not 1 <= challenge_minimum <= len(challenge_judge_ids):
-                raise ValidationError("挑战轮最低有效评委数必须在挑战轮评委数范围内。")
-            if not 1 <= final_minimum <= len(final_judge_ids):
-                raise ValidationError("第三轮最低有效评委数必须在第三轮评委数范围内。")
-            live_challenge.update(
-                {
-                    "challenge_judge_ids": challenge_judge_ids,
-                    "challenge_minimum_judge_count": challenge_minimum,
-                    "final_judge_ids": final_judge_ids,
-                    "final_minimum_judge_count": final_minimum,
-                }
-            )
-        elif judges_present:
-            live_challenge.update(
-                {
-                    key: raw_live_challenge[key]
-                    for key in judge_config_fields
-                    if key in raw_live_challenge
-                }
-            )
-        elif strict_live_contract:
-            raise ValidationError(
-                "现场轮次评委配置缺少字段：" + ", ".join(sorted(judge_config_fields))
-            )
     announcement_blocks = binding.get("announcement_blocks") or []
     if not isinstance(announcement_blocks, list):
         raise ValidationError("announcement_blocks 必须是列表。")
@@ -810,24 +866,9 @@ def prepare_planning_preflight(
     ruleset = ContestRuleset.objects.get(pk=version.ruleset_id)
     current_binding = _snapshot_binding(ruleset)
     current_round_keys = dict(current_binding.get("round_keys") or {})
-    current_frozen_binding = (
-        RulesetVersion._base_manager.filter(
-            ruleset_id=version.ruleset_id,
-            status=RulesetVersion.Status.FROZEN,
-            is_current=True,
-        )
-        .values_list("binding", flat=True)
-        .first()
-    )
-    frozen_round_ids = {
-        int(round_id)
-        for round_id in (
-            current_frozen_binding.get("round_keys", {})
-            if isinstance(current_frozen_binding, dict)
-            else {}
-        ).values()
-        if str(round_id).isdigit() and int(round_id) > 0
-    }
+    # No exclusion here: a frozen version reaching the workbench is still bound by its own
+    # binding, so its rounds stay protected from itself.
+    frozen_round_ids = current_frozen_round_ids(ruleset)
     raw_execution_refs = payload.get("execution_refs") or {}
     if not isinstance(raw_execution_refs, dict):
         return replace(
@@ -1667,24 +1708,7 @@ def save_business_ruleset(
         for round_id in relevant_ids
     ):
         raise ValidationError("比赛轮次配置已被其他编辑修改，请刷新后重试。")
-    current_frozen = (
-        RulesetVersion._base_manager.filter(
-            ruleset_id=locked.ruleset_id,
-            status=RulesetVersion.Status.FROZEN,
-            is_current=True,
-        )
-        .exclude(pk=locked.pk)
-        .values_list("binding", flat=True)
-        .first()
-    )
-    frozen_round_keys = (
-        current_frozen.get("round_keys", {}) if isinstance(current_frozen, dict) else {}
-    )
-    protected_round_ids = {
-        int(round_id)
-        for round_id in frozen_round_keys.values()
-        if str(round_id).isdigit() and int(round_id) > 0
-    }
+    protected_round_ids = current_frozen_round_ids(locked.ruleset, excluding_version=locked)
     locked_rounds = {round_.pk: round_ for round_ in locked_round_configuration}
     if requested_ids - set(locked_rounds):
         raise ValidationError("业务编辑器只能绑定属于当前活动的轮次。")
@@ -1837,7 +1861,7 @@ def save_business_ruleset(
             changed = any(getattr(round_, field) != value for field, value in desired.items())
             if mapped_id in protected_round_ids and changed:
                 raise PermissionDenied(
-                    f"当前冻结赛制仍使用轮次“{round_.name or mapped_id}”，不能修改其执行配置。"
+                    frozen_round_configuration_message(round_.name or str(mapped_id))
                 )
             if (round_.status != ContestRound.Status.DRAFT or round_.is_locked) and changed:
                 raise PermissionDenied(
@@ -1967,6 +1991,55 @@ ROSTER_FINAL_PHASES = frozenset(
 def entry_roster_is_final(activity) -> bool:
     """Whether the approved-singer roster is settled enough to prove roster facts."""
     return activity.phase in ROSTER_FINAL_PHASES
+
+
+def frozen_binding_round_ids(binding) -> set[int]:
+    """The physical rounds a frozen binding points at.
+
+    A frozen authority owns the *execution configuration* of every round it binds: the
+    challenge service reads the seats out of the frozen binding, so a round that advances 8
+    while the binding says 10 makes the venue's session creation fail on the night. Every
+    write path that could move such a round's configuration has to ask this question, so they
+    all ask it through this one function instead of each re-deriving the set.
+    """
+
+    if not isinstance(binding, dict):
+        return set()
+    return {
+        int(round_id)
+        for round_id in (binding.get("round_keys") or {}).values()
+        if str(round_id).isdigit() and int(round_id) > 0
+    }
+
+
+def current_frozen_round_ids(ruleset: ContestRuleset, *, excluding_version=None) -> set[int]:
+    """:func:`frozen_binding_round_ids`, read off the ruleset's current FROZEN authority.
+
+    ``excluding_version`` drops one version from the answer, for a caller that is itself that
+    authority (a re-freeze reads its own binding, not a competing one).
+    """
+
+    queryset = RulesetVersion._base_manager.filter(
+        ruleset_id=ruleset.pk,
+        status=RulesetVersion.Status.FROZEN,
+        is_current=True,
+    )
+    if excluding_version is not None:
+        queryset = queryset.exclude(pk=excluding_version.pk)
+    return frozen_binding_round_ids(queryset.values_list("binding", flat=True).first())
+
+
+def frozen_round_configuration_message(round_name: str) -> str:
+    """The one refusal every path that would move a frozen round's configuration gives.
+
+    The way out is stated, because there is one and it is not obvious: a successor version
+    may re-shape the format, but it has to bind a *new* physical round to do it.
+    """
+
+    return (
+        f"当前正式赛制仍在使用轮次“{round_name}”，不能直接修改它的执行配置。"
+        "请在「比赛轮次」新建一个轮次，把这个赛制改绑到新轮次后再修改。"
+    )
 
 
 def current_frozen_version(activity) -> RulesetVersion | None:
@@ -2365,14 +2438,14 @@ def _with_first_round_select_count(nodes, first_round_key: str, seat_count: int)
     ]
 
 
-def _validate_2026_live_contract(root: dict, binding: dict) -> None:
-    """Validate the cross-domain invariants unique to the 2026 live format."""
-    live_config = binding.get("live_challenge") or {}
-    if (
-        not isinstance(live_config, dict)
-        or live_config.get("format_key") != LIVE_CHALLENGE_FORMAT_KEY
-    ):
-        return
+def live_2026_first_round_key(live_config: dict) -> str:
+    """The business key of the physical round the 2026 format runs its first round on."""
+
+    return str(live_config.get("podium_first_round_key") or "r1").strip()
+
+
+def _live_audience_free(root: dict, binding: dict) -> None:
+    """The format is scored entirely on stage: no vote source, no audience score."""
 
     if (
         binding.get("vote_keys")
@@ -2383,10 +2456,14 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     if _has_live_audience_dependency(root):
         raise ValidationError("2026 现场赛制不得声明观众成绩来源。")
 
+
+def _live_first_round(live_config: dict, binding: dict):
+    """The physical ``ContestRound`` the format's first round is bound to."""
+
     from singer_contest.models import ContestRound
 
     round_keys = binding.get("round_keys") or {}
-    first_round_key = str(live_config.get("podium_first_round_key") or "r1").strip()
+    first_round_key = live_2026_first_round_key(live_config)
     first_round_id = round_keys.get(first_round_key)
     if first_round_id in (None, ""):
         raise ValidationError("2026 现场赛制必须绑定第一轮物理评分轮。")
@@ -2395,22 +2472,36 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
     )
     if first_round is None:
         raise ValidationError("2026 现场赛制绑定的第一轮物理评分轮不存在。")
+    return first_round
+
+
+def _live_first_round_seats(root: dict, live_config: dict, first_round) -> None:
+    """Every copy of the seat count: the round's advancers, and the definition's SELECT."""
+
+    seat_count = int(live_config.get("seat_count") or 0)
     # The counts are present whenever a ruleset actually freezes: ``validate_binding`` runs
     # first and refuses to normalize a live block without them. A binding that never declared
     # them is not the parameterized shape, so the counts-derived relations are skipped rather
     # than compared against a zero that means "absent".
-    seat_count = int(live_config.get("seat_count") or 0)
     if seat_count and first_round.advance_count != seat_count:
         raise ValidationError(f"2026 现场赛制第一轮晋级人数必须等于初始席位数（{seat_count}）。")
     # The definition's qualifier SELECT is a second copy of the seat count. It can only be
     # *checked*, never derived: rewriting the definition at freeze would move content_hash and
     # so the identity every audited StageResult is keyed under.
+    first_round_key = live_2026_first_round_key(live_config)
     definition_count = _live_first_round_select_count(root, first_round_key)
     if seat_count and definition_count is not None and definition_count != seat_count:
         raise ValidationError(
             f"2026 现场赛制第一轮的晋级名额（{definition_count}）"
             f"与初始席位数（{seat_count}）不一致。"
         )
+
+
+def _live_first_round_judges(first_round) -> None:
+    """How the first round is scored: minimum-valid completion and a judge panel."""
+
+    from singer_contest.models import ContestRound
+
     if first_round.score_completion_mode != ContestRound.CompletionMode.MINIMUM_VALID:
         raise ValidationError("2026 现场赛制第一轮必须使用最低有效评委数评分完成模式。")
     if first_round.judge_count is None or first_round.judge_count < 1:
@@ -2424,12 +2515,28 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         raise ValidationError(
             "2026 现场赛制第一轮最低有效评委数必须在 1 至评委人数之间，不能超过评委人数。"
         )
+
+
+def _live_first_round_rubric(first_round) -> dict:
+    """The one shared scoring standard, returned as the standard freeze snapshots."""
+
+    from singer_contest.models import ContestRound
+
     standard = scoring_standard_snapshot(first_round)
     if standard["scoring_mode"] != ContestRound.ScoringMode.AVERAGE:
         raise ValidationError("2026 现场赛制必须使用所有有效评委分的算术平均。")
     rubric = standard.get("rubric")
     if not isinstance(rubric, dict) or not rubric.get("criteria"):
         raise ValidationError("2026 现场赛制第一轮必须配置统一评分标准。")
+    return standard
+
+
+def _live_first_round_groups(root: dict, live_config: dict, binding: dict, first_round) -> None:
+    """The frozen chorus grouping every first-round performance is scored inside."""
+
+    from singer_contest.models import ContestRound
+
+    first_round_key = live_2026_first_round_key(live_config)
     group_stage_keys = binding.get("group_stage_keys") or {}
     group_stage_id = group_stage_keys.get(first_round_key)
     if group_stage_id in (None, "") and len(group_stage_keys) == 1:
@@ -2438,37 +2545,66 @@ def _validate_2026_live_contract(root: dict, binding: dict) -> None:
         group_stage_id = next(iter(group_stage_keys.values()))
     if "questionnaire" in root and group_stage_id in (None, ""):
         raise ValidationError("2026 现场赛制必须绑定第一轮冻结的分组合唱分组。")
-    if group_stage_id not in (None, ""):
-        from common.lifecycle import runtime_approved_singers
-        from singer_contest.group_chorus import (
-            validate_live_first_round_group_stage,
-            validate_live_first_round_performance_groups,
-        )
-        from singer_contest.models import GroupStage
+    if group_stage_id in (None, ""):
+        return
+    from common.lifecycle import runtime_approved_singers
+    from singer_contest.group_chorus import (
+        validate_live_first_round_group_stage,
+        validate_live_first_round_performance_groups,
+    )
+    from singer_contest.models import GroupStage
 
-        if first_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
-            raise ValidationError("2026 现场赛制第一轮必须使用全部审核通过的选手名单。")
-        group_stage = (
-            GroupStage.objects.filter(
-                pk=group_stage_id,
-                activity_id=first_round.activity_id,
-                status=GroupStage.Status.FROZEN,
-            )
-            .prefetch_related("groups__memberships")
-            .first()
+    if first_round.effective_roster_source() != ContestRound.RosterSource.APPROVED:
+        raise ValidationError("2026 现场赛制第一轮必须使用全部审核通过的选手名单。")
+    group_stage = (
+        GroupStage.objects.filter(
+            pk=group_stage_id,
+            activity_id=first_round.activity_id,
+            status=GroupStage.Status.FROZEN,
         )
-        if group_stage is None:
-            raise ValidationError("2026 第一轮绑定的分组合唱分组不存在、未冻结或不属于当前活动。")
-        group_snapshot = validate_live_first_round_group_stage(
-            group_stage,
-            runtime_approved_singers(first_round.activity).values_list("pk", flat=True),
-            group_count=int(live_config.get("group_count") or LIVE_2026_GROUP_COUNT),
-        )
-        validate_live_first_round_performance_groups(
-            first_round,
-            group_snapshot,
-            require_groups=False,
-        )
+        .prefetch_related("groups__memberships")
+        .first()
+    )
+    if group_stage is None:
+        raise ValidationError("2026 第一轮绑定的分组合唱分组不存在、未冻结或不属于当前活动。")
+    group_snapshot = validate_live_first_round_group_stage(
+        group_stage,
+        runtime_approved_singers(first_round.activity).values_list("pk", flat=True),
+        group_count=int(live_config.get("group_count") or LIVE_2026_GROUP_COUNT),
+    )
+    validate_live_first_round_performance_groups(
+        first_round,
+        group_snapshot,
+        require_groups=False,
+    )
+
+
+def live_2026_is_bound(binding: dict) -> bool:
+    """Whether a binding declares the 2026 live format at all."""
+
+    live_config = (binding or {}).get("live_challenge") or {}
+    return (
+        isinstance(live_config, dict) and live_config.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
+    )
+
+
+def _validate_2026_live_contract(root: dict, binding: dict) -> None:
+    """Validate the cross-domain invariants unique to the 2026 live format.
+
+    The sections below run in the order they are stated, and each is also reachable on its
+    own — the readiness checklist asks them one by one so it can name everything that is
+    missing, while this door stops at the first refusal, as the freeze must.
+    """
+    live_config = binding.get("live_challenge") or {}
+    if not live_2026_is_bound(binding):
+        return
+
+    _live_audience_free(root, binding)
+    first_round = _live_first_round(live_config, binding)
+    _live_first_round_seats(root, live_config, first_round)
+    _live_first_round_judges(first_round)
+    standard = _live_first_round_rubric(first_round)
+    _live_first_round_groups(root, live_config, binding, first_round)
     # r2/r3 are questionnaire material namespaces. Their physical scoring rounds are
     # created by the challenge service only after the relevant roster exists.
     live_config["scoring_standard"] = standard
@@ -2509,7 +2645,168 @@ def _validate_frozen_questionnaire(definition, binding: dict) -> None:
         from singer_contest.materials import validate_live_material_plan
 
         validate_live_material_plan(plan)
-        _validate_2026_live_contract(root, binding)
+        # The 2026 format's own cross-domain contract is *not* re-checked here: it is about
+        # the plan and the rounds, not about the questionnaire, and the freeze gate runs it
+        # as its own step (``evaluate_freeze_gate``) so a failure is reported as the thing it
+        # actually is rather than as a questionnaire problem.
+
+
+#: The freeze gate's checks, in the order they run. The label is what the readiness page
+#: prints; the key is what tests and templates refer to.
+FREEZE_GATE_LABELS: dict[str, str] = {
+    "finality": "当前正式赛制没有已核定的赛段结果",
+    "binding": "人数、分组、两套权重与三轮评委齐备",
+    "definition": "赛制定义可以编译（晋级名额与席位数一致）",
+    "round": "第一轮的评分轮、评委、晋级名额与分组都和配置一致",
+    "questionnaire": "选手问卷与第二、三轮材料契约齐备",
+    "successor": "换版后的问卷答案可以承接",
+}
+
+
+@dataclass(frozen=True)
+class FreezeBlocker:
+    """The first check the freeze refuses on, in the freeze's own words."""
+
+    key: str
+    label: str
+    message: str
+    error: Exception
+
+
+@dataclass(frozen=True)
+class FreezeEvaluation:
+    """What the freeze gate would decide, and the material it would freeze with."""
+
+    blocker: FreezeBlocker | None
+    normalized_binding: dict | None
+    plan: ExecutionPlan | None
+
+
+def evaluate_freeze_gate(
+    version: RulesetVersion, *, binding: dict | None = None
+) -> FreezeEvaluation:
+    """Run the freeze's own checks, in order, without writing anything.
+
+    :func:`freeze_ruleset_version` and the "正式启用前检查" page both read this, so the
+    page's verdict and the freeze's answer cannot drift: one walk, over the same validators,
+    in the same order. Only the gate *before* these checks — the activity lock and the
+    effective-admin requirement — stays with the freeze, because it is about the caller
+    rather than about the version.
+
+    ``binding`` supplies the editable input surface; when omitted it is snapshotted from the
+    ruleset, exactly as an unattended freeze does.
+    """
+
+    from singer_contest.models import StageResult
+
+    prior = _prior_current_frozen(version)
+    if (
+        prior is not None
+        and prior.stage_results.filter(status=StageResult.Status.CONFIRMED).exists()
+    ):
+        # M1-R9 (§五): a confirmed handcard must stay attributable to the authority it was
+        # frozen under, so the successor cannot take over until the result is released.
+        error = ValidationError("当前冻结赛制已核定赛段结果，不可生成后继赛制版本。")
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("finality", error), normalized_binding=None, plan=None
+        )
+
+    freeze_binding = _snapshot_binding(version.ruleset) if binding is None else binding
+    try:
+        normalized_binding = validate_binding(
+            version.ruleset,
+            freeze_binding,
+            require_live_challenge_complete=True,
+        )
+    except ValidationError as error:
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("binding", error), normalized_binding=None, plan=None
+        )
+    # §6.1: freeze the conversion authority itself (rule id + mode + output scale). The
+    # editable surface only names the rule; the snapshot records what it meant, so a replay
+    # reads the frozen identity instead of asking the DB which rule the session "has now".
+    normalized_binding["vote_scoring_rule_keys"] = vote_scoring_binding_snapshot(
+        normalized_binding.get("vote_scoring_rule_keys")
+    )
+
+    try:
+        plan = _compile_frozen_definition(version, normalized_binding)
+    except (ValidationError, RulesetInvalidError) as error:
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("definition", error),
+            normalized_binding=normalized_binding,
+            plan=None,
+        )
+
+    try:
+        _validate_frozen_questionnaire(version.definition, normalized_binding)
+    except ValidationError as error:
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("questionnaire", error),
+            normalized_binding=normalized_binding,
+            plan=plan,
+        )
+    try:
+        # The format's own cross-domain invariants: the rounds, the seats, the judges, the
+        # chorus grouping. Its own step, so the page names the right kind of problem.
+        _validate_2026_live_contract(json.loads(version.definition), normalized_binding)
+    except (ValidationError, ValueError) as error:
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("round", error),
+            normalized_binding=normalized_binding,
+            plan=plan,
+        )
+    try:
+        _validate_successor_questionnaire(prior, version)
+    except ValidationError as error:
+        return FreezeEvaluation(
+            blocker=_freeze_blocker("successor", error),
+            normalized_binding=normalized_binding,
+            plan=plan,
+        )
+    return FreezeEvaluation(blocker=None, normalized_binding=normalized_binding, plan=plan)
+
+
+def _compile_frozen_definition(version: RulesetVersion, normalized_binding: dict) -> ExecutionPlan:
+    """The definition step of the freeze gate: a bound compile plus the completeness report.
+
+    Shared by :func:`evaluate_freeze_gate` and the readiness checklist's own row, so the two
+    cannot end up compiling slightly different things.
+    """
+
+    bound_context = build_bound_context(version, normalized_binding)
+    report, plan = compile_definition(version.definition, context=bound_context, bound=True)
+    completeness_issues = validate_definition_completeness(version.definition)
+    if completeness_issues:
+        report = ValidationReport(report.issues + completeness_issues)
+    if not report.passes():
+        raise RulesetInvalidError(report, plan)
+    assert plan is not None
+    return plan
+
+
+def _prior_current_frozen(version: RulesetVersion) -> RulesetVersion | None:
+    """The running authority this version would replace, if there is one."""
+
+    return (
+        RulesetVersion._base_manager.filter(ruleset_id=version.ruleset_id)
+        .exclude(pk=version.pk)
+        .filter(is_current=True, status=RulesetVersion.Status.FROZEN)
+        .first()
+    )
+
+
+def _freeze_blocker(key: str, error: Exception) -> FreezeBlocker:
+    """Name a refusal the way the readiness page prints it."""
+
+    report = getattr(error, "report", None)
+    if report is None:
+        messages = getattr(error, "messages", None)
+        message = " ".join(str(item) for item in messages) if messages else str(error)
+    else:
+        errors = [issue.message for issue in report.issues if issue.severity.value == "error"]
+        message = errors[0] if errors else "赛制定义未通过校验。"
+    return FreezeBlocker(key=key, label=FREEZE_GATE_LABELS[key], message=message, error=error)
 
 
 def validate_ruleset_runtime_readiness(version: RulesetVersion) -> ValidationReport:
@@ -2557,47 +2854,17 @@ def freeze_ruleset_version(
     if locked.status == RulesetVersion.Status.FROZEN:
         raise ValidationError("该赛制版本已冻结。")
 
-    # M1-R9 (§五): a normal successor Freeze demotes the running FROZEN authority. That is
-    # only legal while no result grounded in it is CONFIRMED — finality means a confirmed
-    # handcard must stay attributable to the authority it was frozen under. If the current
-    # version already has a CONFIRMED StageResult, reject the re-freeze (the operator must
-    # first unlock the result via :func:`unlock_stage_result` to release finality).
-    from singer_contest.models import StageResult
-
-    prior = (
-        RulesetVersion._base_manager.filter(ruleset_id=locked.ruleset_id)
-        .exclude(pk=locked.pk)
-        .filter(is_current=True, status=RulesetVersion.Status.FROZEN)
-        .first()
-    )
-    if (
-        prior is not None
-        and prior.stage_results.filter(status=StageResult.Status.CONFIRMED).exists()
-    ):
-        raise ValidationError("当前冻结赛制已核定赛段结果，不可生成后继赛制版本。")
-
-    freeze_binding = _snapshot_binding(locked.ruleset) if binding is None else binding
-    normalized_binding = validate_binding(
-        locked.ruleset,
-        freeze_binding,
-        require_live_challenge_complete=True,
-    )
-    # §6.1: freeze the conversion authority itself (rule id + mode + output scale). The
-    # editable surface only names the rule; the snapshot records what it meant, so a replay
-    # reads the frozen identity instead of asking the DB which rule the session "has now".
-    normalized_binding["vote_scoring_rule_keys"] = vote_scoring_binding_snapshot(
-        normalized_binding.get("vote_scoring_rule_keys")
-    )
-    bound_context = build_bound_context(locked, normalized_binding)
-    report, plan = compile_definition(locked.definition, context=bound_context, bound=True)
-    completeness_issues = validate_definition_completeness(locked.definition)
-    if completeness_issues:
-        report = ValidationReport(report.issues + completeness_issues)
-    if not report.passes():
-        raise RulesetInvalidError(report, plan)
+    # The gate is the same walk the "正式启用前检查" page runs, so the page cannot promise a
+    # freeze that the freeze then refuses. It also owns the finality rule: a successor may
+    # demote the running authority only while no result grounded in it is CONFIRMED.
+    evaluation = evaluate_freeze_gate(locked, binding=binding)
+    if evaluation.blocker is not None:
+        raise evaluation.blocker.error
+    prior = _prior_current_frozen(locked)
+    normalized_binding = evaluation.normalized_binding
+    plan = evaluation.plan
+    assert normalized_binding is not None
     assert plan is not None
-    _validate_frozen_questionnaire(locked.definition, normalized_binding)
-    _validate_successor_questionnaire(prior, locked)
 
     old_status = "draft"
     with authority_write(RULESET_FREEZE):

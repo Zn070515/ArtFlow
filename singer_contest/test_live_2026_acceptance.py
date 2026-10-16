@@ -2,7 +2,7 @@
 
 import json
 from decimal import Decimal
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from accounts.models import User
 from common.authority import (
@@ -103,7 +103,15 @@ def _live_questionnaire():
     }
 
 
-class _Live2026AcceptanceFixtureMixin:
+if TYPE_CHECKING:
+    # The mixin is only ever combined with ``TestCase``, but it calls ``self.assertEqual``
+    # itself; typing it against TestCase is what lets mypy see those assertions.
+    _FixtureBase = TestCase
+else:
+    _FixtureBase = object
+
+
+class _Live2026AcceptanceFixtureMixin(_FixtureBase):
     """The complete 2026 acceptance fixture, sized by the class attributes below.
 
     The format's numbers are operator parameters, so a subclass moves them and re-runs the
@@ -798,23 +806,40 @@ class Live2026ReshapedFormatTests(_Live2026AcceptanceFixtureMixin, TestCase):
         with self.assertRaisesMessage(ValidationError, "与初始席位数（8）不一致"):
             freeze_ruleset_version(self.version, self.admin)
 
-    def test_preflight_mirrors_the_freeze_gate(self):
-        """The page must never say "全部就绪" while the freeze would refuse."""
+    def test_the_readiness_list_mirrors_the_freeze_gate(self):
+        """The page must never say "全部就绪" while the freeze would refuse.
 
-        from ruleset.live_format import apply_live_2026_counts, preflight_live_2026
+        Two readings of one set of validators: ``freeze_blocker`` is the freeze's own first
+        refusal, ``live_2026_readiness`` is every row with its own verdict. They have to agree
+        in both directions, or the page is lying to the operator one way or the other.
+        """
 
-        blocked = [item for item in preflight_live_2026(self.version) if not item.ready]
-        self.assertTrue(blocked, "the definition still says 10 while the seats say 8")
-        self.assertIn("不一致", " ".join(item.message for item in blocked))
+        from ruleset.live_format import apply_live_2026_counts, freeze_blocker, live_2026_readiness
+
+        blocker = freeze_blocker(self.version)
+        self.assertIsNotNone(blocker, "the definition still says 10 while the seats say 8")
+        self.assertIn("不一致", blocker.message)
+
+        blocked = [row for row in live_2026_readiness(self.version) if row.state == "blocked"]
+        # The gate names the whole first-round family as one step; the checklist splits it into
+        # that same family's rows, and the row that carries the gate's own message is the one
+        # the operator has to act on.
+        self.assertTrue(
+            {row.key for row in blocked}
+            & {"round_seats", "round_judges", "rubric", "round_contract"}
+        )
+        self.assertEqual(blocker.message, blocked[0].message)
 
         apply_live_2026_counts(self.ruleset, self.version, operator=self.admin)
         self.version.refresh_from_db()
 
-        items = preflight_live_2026(self.version)
-        self.assertTrue(
-            all(item.ready for item in items),
-            [(item.key, item.message) for item in items if not item.ready],
-        )
+        self.assertIsNone(freeze_blocker(self.version))
+        unfinished = [
+            (row.key, row.state, row.message)
+            for row in live_2026_readiness(self.version)
+            if not row.ready
+        ]
+        self.assertEqual(unfinished, [])
         # ...and the freeze agrees, which is the whole point of sharing the validators.
         self.assertEqual(
             freeze_ruleset_version(self.version, self.admin).status,
@@ -838,3 +863,172 @@ class Live2026ReshapedFormatTests(_Live2026AcceptanceFixtureMixin, TestCase):
         self.assertEqual(frozen.binding["live_challenge"]["seat_count"], 8)
         plan = json.loads(frozen.execution_plan or "{}")
         self.assertEqual(plan.get("plan_version"), 1)
+
+
+class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
+    """The pages that render the 准备清单 must answer 200 for every blocker they can report.
+
+    Each row is a link to the page that fixes it, and a row whose route cannot be reversed is
+    a 500. The most ordinary unfinished state there is — 第一轮评分表还没填 — used to take down
+    the configuration page, the workspace and the pre-launch check at once, because the round
+    row reversed ``round_list`` with a version PK that route does not accept.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.staff = Client()
+        self.staff.force_login(self.admin)
+
+    def _config_url(self) -> str:
+        return reverse("staff:ruleset_live_2026_config", args=[self.version.pk])
+
+    def test_shrinking_the_seats_on_a_successor_draft_is_refused_with_a_way_out(self):
+        """The frozen authority's round may not be moved out from under it.
+
+        v1 is frozen and owns the first round's execution configuration. A successor draft
+        asking for 4 seats where the round advances 10 would leave the frozen binding telling
+        the venue to seat ten singers the round never produced. The page must refuse the whole
+        edit — binding and round are one unit — and name the way that does work.
+        """
+
+        live = self.ruleset.live_challenge
+        freeze_ruleset_version(self.version, self.admin)
+        self.staff.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": self.ruleset.name},
+        )
+        successor = RulesetVersion.objects.get(
+            ruleset=self.ruleset, status=RulesetVersion.Status.DRAFT
+        )
+
+        response = self.staff.post(
+            reverse("staff:ruleset_live_2026_config", args=[successor.pk]),
+            {
+                "live_participant_count": self.PARTICIPANTS,
+                "live_seat_count": 4,
+                "live_group_count": live["group_count"],
+                "live_group_size": live["group_size"],
+                "live_first_weight": "40%",
+                "live_challenge_weight": "60%",
+                "live_podium_first_weight": "30%",
+                "live_podium_third_weight": "70%",
+                "live_challenge_judge_ids": [str(judge.pk) for judge in self.judges[:4]],
+                "live_challenge_minimum_judges": 4,
+                "live_final_judge_ids": [str(judge.pk) for judge in self.judges[1:]],
+                "live_final_minimum_judges": 4,
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "当前正式赛制仍在使用轮次")
+        # The refusal is a refusal: neither the binding nor the round moved.
+        self.ruleset.refresh_from_db()
+        self.assertEqual(self.ruleset.live_challenge["seat_count"], self.SEATS)
+        self.assertEqual(ContestRound.objects.get(pk=self.first_round.pk).advance_count, self.SEATS)
+
+    def test_an_unfilled_first_round_rubric_does_not_take_the_pages_down(self):
+        # The rubric is the operator's to attach, so an early draft simply does not have one.
+        self.first_round.rubric = None
+        self.first_round.save(update_fields=["rubric"])
+
+        response = self.staff.get(self._config_url())
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["key"]: row for row in response.context["checklist"]}
+        self.assertFalse(rows["rubric"]["done"])
+        # The link goes to the round that is actually unfinished, and resolves.
+        self.assertEqual(
+            rows["rubric"]["url"], reverse("staff:round_edit", args=[self.first_round.pk])
+        )
+        for row in rows.values():
+            if row["done"] or row["key"] == "finality":
+                # 已核定结果要靠撤回赛段结果释放，那不是一页配置。
+                continue
+            self.assertNotEqual(row["url"], "", f"{row['key']} should offer a way to fix it")
+
+    def test_the_workspace_and_the_pre_launch_check_also_answer(self):
+        self.first_round.rubric = None
+        self.first_round.save(update_fields=["rubric"])
+
+        workspace = self.staff.get(reverse("staff:activity_workspace", args=[self.activity.pk]))
+        self.assertEqual(workspace.status_code, 200)
+        pre_launch = self.staff.get(reverse("staff:ruleset_validate", args=[self.version.pk]))
+        self.assertEqual(pre_launch.status_code, 200)
+
+    def test_the_workspace_offers_the_next_step_for_a_row_that_has_no_round_yet(self):
+        """Before provisioning there is no physical round, so the row must not guess one."""
+
+        self.ruleset.round_keys = {}
+        self.ruleset.save(update_fields=["round_keys"])
+
+        response = self.staff.get(self._config_url())
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["key"]: row for row in response.context["checklist"]}
+        self.assertTrue(rows["round_seats"]["url"].startswith(reverse("staff:round_create")))
+        self.assertIn(f"activity_id={self.activity.pk}", rows["round_seats"]["url"])
+
+    def test_a_frozen_authority_is_shown_as_official_not_as_an_editable_draft(self):
+        """The workspace used to offer "继续准备今年赛制" on a frozen version, i.e. a 403."""
+
+        freeze_ruleset_version(self.version, self.admin)
+
+        response = self.staff.get(reverse("staff:activity_workspace", args=[self.activity.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.context["ruleset_summary"]
+        self.assertTrue(summary["is_frozen"])
+        self.assertEqual(summary["continue_url"], "")
+        self.assertContains(response, "今年赛制已经正式冻结")
+        self.assertContains(response, "创建后继草稿")
+        self.assertNotContains(
+            response, reverse("staff:ruleset_live_2026_config", args=[self.version.pk])
+        )
+
+    def test_issuing_a_successor_draft_from_the_workspace_lands_on_the_editor(self):
+        freeze_ruleset_version(self.version, self.admin)
+        frozen_pk = self.version.pk
+
+        response = self.staff.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 院十佳现场赛制"},
+        )
+
+        successor = RulesetVersion.objects.get(
+            ruleset=self.ruleset, status=RulesetVersion.Status.DRAFT
+        )
+        self.assertEqual(response.status_code, 302)
+        # The configuration page, not the read-only planning workbench.
+        self.assertEqual(
+            response["Location"], reverse("staff:ruleset_live_2026_config", args=[successor.pk])
+        )
+        self.assertEqual(successor.pk, max(self.ruleset.versions.values_list("pk", flat=True)))
+        # The running authority is untouched until the successor is frozen.
+        self.assertTrue(RulesetVersion.objects.get(pk=frozen_pk).is_current)
+
+    def test_an_older_draft_hands_over_to_the_newest_one(self):
+        """Two drafts share one binding surface, so only the newest one may write it."""
+
+        from ruleset.services import create_ruleset_version as _create_version
+
+        newer = _create_version(
+            self.ruleset, definition=self.version.definition, created_by=self.admin
+        )
+
+        stale_get = self.staff.get(
+            reverse("staff:ruleset_live_2026_config", args=[self.version.pk])
+        )
+        self.assertEqual(stale_get.status_code, 302)
+        self.assertEqual(
+            stale_get["Location"],
+            reverse("staff:ruleset_live_2026_config", args=[newer.pk]),
+        )
+
+        # And a POST from the stale page cannot write the shared binding either.
+        stale_post = self.staff.post(
+            reverse("staff:ruleset_live_2026_config", args=[self.version.pk]),
+            {"live_participant_count": "15", "live_seat_count": "4"},
+        )
+        self.assertEqual(stale_post.status_code, 403)
+        self.assertEqual(self.ruleset.live_challenge["seat_count"], self.SEATS)

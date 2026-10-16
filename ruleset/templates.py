@@ -593,8 +593,12 @@ LIVE_2026_CHALLENGE_ROUND_KEY = "r2"
 LIVE_2026_THIRD_ROUND_KEY = "r3"
 # What the built-in *pre-fills*, not what it requires. The format is a starting draft the
 # operators may change: ``ruleset.services.validate_binding`` only enforces that the numbers
-# relate coherently (组数 × 每组人数 == 参赛人数, 踢馆人数 == 参赛人数 − 晋级数, …), so a
-# change to one of these moves the pre-fill without becoming a contract anything must equal.
+# relate coherently (参赛人数 > 晋级数, 踢馆人数 == 参赛人数 − 晋级数, …), so a change to one of
+# these moves the pre-fill without becoming a contract anything must equal.
+#
+# ``group_size`` is the weakest of them: it is a *suggestion* for how to lay the first round
+# out, and nothing validates it against anything. Only the group *count* is a parameter — a
+# singer dropping out on the day leaves 3+3+3+3+2, which is an ordinary answer.
 LIVE_2026_PARTICIPANT_COUNT = 15
 LIVE_2026_SEAT_COUNT = 10
 LIVE_2026_CHALLENGE_COUNT = 5

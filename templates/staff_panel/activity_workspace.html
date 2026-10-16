@@ -104,6 +104,21 @@
             <p class="text-sm text-gray-500 mt-1">
                 {% if ruleset_summary.is_live_2026 %}2026 现场踢馆 · {% endif %}{{ ruleset_summary.version.get_status_display }} · v{{ ruleset_summary.version.version }}{% if ruleset_summary.total_count %} · {{ ruleset_summary.done_count }}/{{ ruleset_summary.total_count }} 项完成{% endif %}
             </p>
+            {% if ruleset_summary.is_frozen %}
+            <p class="text-sm text-emerald-700 mt-2">今年赛制已经正式冻结，比赛按它执行。</p>
+            <div class="flex flex-wrap gap-3 mt-4 text-sm">
+                <a class="touch-target bg-brand text-white rounded px-3 py-1" href="{% url 'staff:ruleset_validate' ruleset_summary.version.pk %}">查看正式赛制 / 正式启用前检查</a>
+            </div>
+            {% if can_configure_singer %}
+            <form method="post" action="{% url 'staff:contest_ruleset_create' %}" class="mt-3">
+                {% csrf_token %}
+                <input type="hidden" name="activity" value="{{ activity.pk }}">
+                <input type="hidden" name="name" value="{{ ruleset_summary.version.ruleset.name }}">
+                <button class="touch-target border border-gray-300 rounded text-sm">创建后继草稿</button>
+            </form>
+            <p class="text-xs text-gray-500 mt-1">要调整今年赛制的数字，就开一份后继草稿；正式赛制在它被冻结之前一直有效。</p>
+            {% endif %}
+            {% else %}
             {% if ruleset_summary.outstanding %}
             <p class="text-sm text-gray-600 mt-2">还缺：</p>
             <ul class="mt-1 space-y-1 text-sm text-gray-700 list-disc list-inside">
@@ -116,6 +131,7 @@
                 <a class="touch-target bg-brand text-white rounded px-3 py-1" href="{{ ruleset_summary.continue_url }}">{% if ruleset_summary.is_live_2026 %}继续准备今年赛制{% else %}编辑赛制{% endif %}</a>
                 <a class="touch-target text-brand hover:underline" href="{% url 'staff:ruleset_validate' ruleset_summary.version.pk %}">{% if ruleset_summary.is_live_2026 %}正式启用前检查{% else %}校验赛制{% endif %}</a>
             </div>
+            {% endif %}
             {% else %}
             <p class="text-sm text-gray-500 mt-1">本活动还没有赛制。当前工作区创建的轮次、评分标准都会绑定到本活动。</p>
             {% endif %}

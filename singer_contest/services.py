@@ -57,6 +57,7 @@ from ruleset.resolver import (
 from ruleset.services import (
     LIVE_CHALLENGE_FORMAT_KEY,
     current_frozen_version,
+    frozen_binding_round_ids,
     require_runtime_readiness,
 )
 from voting.models import VoteSession
@@ -1067,15 +1068,9 @@ def configure_draft_round_from_planning(
         locked_round.rubric = rubric
 
     current_frozen = current_frozen_version(locked_activity)
-    frozen_round_ids = {
-        int(round_id)
-        for round_id in (
-            current_frozen.binding.get("round_keys", {})
-            if current_frozen is not None and isinstance(current_frozen.binding, dict)
-            else {}
-        ).values()
-        if str(round_id).isdigit() and int(round_id) > 0
-    }
+    frozen_round_ids = frozen_binding_round_ids(
+        current_frozen.binding if current_frozen is not None else None
+    )
     if locked_round.pk in frozen_round_ids and any(
         old_value[field] != getattr(locked_round, field) for field in old_value
     ):
