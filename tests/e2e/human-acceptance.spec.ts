@@ -57,7 +57,9 @@ async function registerAndOpenWorkspace(page: Page) {
 
 test("the first admin bootstrap reaches the Singer workspace and preserves scope", async ({ page }) => {
   const { activityTitle } = await registerAndOpenWorkspace(page);
-  await expect(page.getByRole("link", { name: "编辑赛制" })).toBeVisible();
+  // A brand-new activity has no ruleset yet, so the workspace offers to create one rather
+  // than to edit one; the capability this pins is the ruleset entry point being reachable.
+  await expect(page.getByRole("link", { name: "新建赛制" })).toBeVisible();
   await expect(page.getByRole("link", { name: "新建评分标准" })).toBeVisible();
   await expect(page.getByRole("link", { name: "新建比赛轮次" })).toBeVisible();
   await expect(page.getByRole("link", { name: "创建投票场次" })).toBeVisible();
