@@ -60,6 +60,8 @@ from .services import (
     frozen_round_configuration_message,
     supersede_ruleset_version,
     update_ruleset_binding,
+    validate_binding,
+    version_is_editable,
 )
 from .templates import (
     LIVE_2026_BUILTIN_KEY,
@@ -132,15 +134,46 @@ READINESS_LABELS: dict[str, str] = {
     "weights": "踢馆成绩权重（第一轮 + 踢馆）合计 100%",
     "podium": "冠亚季军成绩权重（第一轮 + 第三轮）合计 100%",
     "judges": "踢馆评委与第三轮评委齐备（含最低有效评委数）",
-    "round_seats": "第一轮的晋级名额与分组都和配置一致",
+    "round_seats": "第一轮的晋级名额与人数配置一致",
     "round_judges": "第一轮按最低有效评委数评分并配好评委人数",
     "rubric": "第一轮配置统一评分标准",
+    "groups": "第一轮分组名单已录好并冻结",
     "round_contract": "现场赛制不依赖观众投票，且第一轮绑定了物理评分轮",
     **FREEZE_GATE_LABELS,
 }
 
 #: The rows the coarse ``round_contract`` row is the catch-all for.
-_ROUND_ROW_KEYS = frozenset({"round_seats", "round_judges", "rubric"})
+_ROUND_ROW_KEYS = frozenset({"round_seats", "round_judges", "rubric", "groups"})
+
+
+#: The operator-facing task layer. One task may be backed by several validators, but the
+#: task list itself is fixed: a validator that only becomes checkable after its prerequisite
+#: passes must not change the denominator, or progress appears to stall (or go backwards).
+_PREPARATION_TASK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("counts", "比赛人数与晋级人数", ("counts", "round_seats")),
+    ("challenge_weights", "踢馆成绩计算", ("weights",)),
+    ("podium_weights", "冠亚季军成绩计算", ("podium",)),
+    ("judges", "三轮评委", ("judges", "round_judges")),
+    ("rubric", "第一轮评分标准", ("rubric",)),
+    ("groups", "第一轮分组", ("groups",)),
+    ("questionnaire", "选手问卷", ("questionnaire",)),
+)
+
+#: Every granular row that belongs to a user task. Rows outside this set are system checks.
+PREPARATION_TASK_ROW_KEYS = frozenset(
+    key for _task, _label, keys in _PREPARATION_TASK_SPECS for key in keys
+)
+
+
+@dataclass(frozen=True)
+class PreparationTask:
+    """One operator task, backed by one or more readiness validators."""
+
+    key: str
+    label: str
+    ready: bool
+    pending: bool
+    detail: str = ""
 
 
 def freeze_blocker(version, *, binding: dict | None = None):
@@ -232,14 +265,20 @@ def live_2026_readiness(version) -> list[ReadinessItem]:
     except ValidationError as exc:
         items.append(_blocked_item("round_seats", _readiness_message(exc)))
     else:
-
-        def _first_round_seats() -> None:
-            """Everything the first round owns: the seat count's copies, and its grouping."""
-
-            _live_first_round_seats(root, live_config, first_round)
-            _live_first_round_groups(root, live_config, binding, first_round)
-
-        items.append(_readiness_item("round_seats", _first_round_seats))
+        # Advancement quota and the chorus grouping are different operator jobs with
+        # different fixing pages. Keeping them in one row let the checklist send a staff
+        # member to the round editor when the real missing fact was an unbound GroupStage.
+        items.append(
+            _readiness_item(
+                "round_seats", lambda: _live_first_round_seats(root, live_config, first_round)
+            )
+        )
+        items.append(
+            _readiness_item(
+                "groups",
+                lambda: _live_first_round_groups(root, live_config, binding, first_round),
+            )
+        )
         items.append(_readiness_item("round_judges", lambda: _live_first_round_judges(first_round)))
         items.append(_readiness_item("rubric", lambda: _live_first_round_rubric(first_round)))
 
@@ -250,13 +289,26 @@ def live_2026_readiness(version) -> list[ReadinessItem]:
             )
         )
 
-    if normalized is None:
+    # The questionnaire read does not depend on weights or judge lists, so it must not be
+    # hidden behind them. When the strict freeze gate stops earlier, ask the same normalizer
+    # in its relaxed (editable-surface) mode: the questionnaire's own verdict is then real
+    # instead of "unknown", and fixing an unrelated binding no longer makes it appear to
+    # complete a task the operator never touched.
+    questionnaire_binding = normalized
+    if questionnaire_binding is None:
+        try:
+            questionnaire_binding = validate_binding(
+                version.ruleset, _snapshot_binding(version.ruleset)
+            )
+        except (ValidationError, RulesetInvalidError):
+            questionnaire_binding = None
+    if questionnaire_binding is None:
         items.append(_unknown_item("questionnaire"))
     else:
         items.append(
             _readiness_item(
                 "questionnaire",
-                lambda: _validate_frozen_questionnaire(version.definition, normalized),
+                lambda: _validate_frozen_questionnaire(version.definition, questionnaire_binding),
             )
         )
 
@@ -271,6 +323,47 @@ def live_2026_readiness(version) -> list[ReadinessItem]:
     else:
         items.append(_ready_item("finality"))
     return items
+
+
+def live_2026_preparation_tasks(version) -> list[PreparationTask]:
+    """The stable operator task list, derived from the granular readiness rows.
+
+    The denominator is fixed. A row that is ``unknown`` because its prerequisite has not
+    been met yet is still an unfinished task, and it never becomes a *new* task when the
+    prerequisite clears — it was always in the same task. This is what makes "I saved two
+    weights, so two tasks completed" a true statement instead of a momentarily true one.
+    """
+
+    items = {item.key: item for item in live_2026_readiness(version)}
+    tasks: list[PreparationTask] = []
+    for key, label, row_keys in _PREPARATION_TASK_SPECS:
+        rows = [items[row_key] for row_key in row_keys if row_key in items]
+        if not rows:
+            tasks.append(
+                PreparationTask(
+                    key=key,
+                    label=label,
+                    ready=False,
+                    pending=True,
+                    detail="等待前置条件后自动检查。",
+                )
+            )
+            continue
+        blocked = next((row for row in rows if row.state == "blocked"), None)
+        unknown = next((row for row in rows if row.unknown), None)
+        ready = all(row.ready for row in rows)
+        detail_row = blocked or unknown
+        tasks.append(
+            PreparationTask(
+                key=key,
+                label=label,
+                ready=ready,
+                # Unknown is incomplete, not done; ``pending`` only changes the wording.
+                pending=not ready and blocked is None,
+                detail="" if ready or detail_row is None else detail_row.message,
+            )
+        )
+    return tasks
 
 
 def _readiness_item(key: str, probe) -> ReadinessItem:
@@ -526,6 +619,154 @@ def apply_live_2026_counts(ruleset: ContestRuleset, version: RulesetVersion, *, 
                     note="apply_live_2026_counts",
                 )
     return contest_round
+
+
+@dataclass(frozen=True)
+class Live2026PreparationSave:
+    """What the workbench's one save command produced."""
+
+    version: RulesetVersion
+    created_rubric: object | None = None
+
+
+def _optional_positive_int(value: object, *, label: str) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        number = int(text)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{label}必须是正整数。") from exc
+    if number <= 0:
+        raise ValidationError(f"{label}必须是正整数。")
+    return number
+
+
+@transaction.atomic
+def save_live_2026_preparation(
+    version: RulesetVersion,
+    *,
+    operator,
+    live_challenge: dict,
+    base_binding: str | None = None,
+    first_judge_count: object | None = None,
+    first_minimum_judges: object | None = None,
+    first_rubric=None,
+    new_rubric_name: str = "",
+    new_rubric_criteria: list[dict] | None = None,
+) -> Live2026PreparationSave:
+    """The 2026 workbench's one preparation aggregate command.
+
+    Order matters: the activity lock, then the ruleset, version and first round. Binding,
+    counts, first-round execution configuration and the rubric are one unit — a save either
+    makes all of them agree or changes none of them. The fixed first-round rules (average,
+    minimum-valid completion, approved roster) are applied here, not asked as questions.
+    """
+
+    from singer_contest.models import ContestRound
+    from singer_contest.services import (
+        configure_draft_round_from_planning,
+        create_scoring_rubric,
+    )
+
+    current_operator = require_current_staff(operator)
+    lock_activity_for_action(version.ruleset.activity)
+    locked_version = (
+        RulesetVersion.objects.select_for_update().select_related("ruleset").get(pk=version.pk)
+    )
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked_version.ruleset_id)
+    if locked_version.status != RulesetVersion.Status.DRAFT:
+        raise ValidationError("只有草稿赛制可以继续准备。")
+    if not version_is_editable(locked_version):
+        raise ValidationError("这一版赛制已被更新的版本替代，请到最新版本继续准备。")
+
+    binding = _snapshot_binding(locked_ruleset)
+    stored_config = dict(locked_ruleset.live_challenge or {})
+    stored_config.pop("challenge_count", None)
+    posted_config = dict(live_challenge or {})
+    posted_config.pop("challenge_count", None)
+    binding["live_challenge"] = {**stored_config, **posted_config}
+    updated_ruleset = update_ruleset_binding(
+        locked_ruleset,
+        binding=binding,
+        operator=current_operator,
+        base_binding=base_binding,
+    )
+    apply_live_2026_counts(updated_ruleset, locked_version, operator=current_operator)
+
+    judge_count = _optional_positive_int(first_judge_count, label="第一轮评委人数")
+    minimum_judges = _optional_positive_int(first_minimum_judges, label="第一轮最低有效评委数")
+    if judge_count is not None and minimum_judges is not None and minimum_judges > judge_count:
+        raise ValidationError("第一轮最低有效评委数不能超过评委人数。")
+    if first_rubric is not None and first_rubric.activity_id != updated_ruleset.activity_id:
+        raise ValidationError("评分标准必须属于当前活动。")
+
+    created_rubric = None
+    if str(new_rubric_name or "").strip() or new_rubric_criteria:
+        if not str(new_rubric_name or "").strip():
+            raise ValidationError("新建评分标准必须填写名称。")
+        if not new_rubric_criteria:
+            raise ValidationError("新建评分标准至少需要一个评分项。")
+        created_rubric = create_scoring_rubric(
+            updated_ruleset.activity,
+            name=new_rubric_name,
+            description="",
+            criteria=new_rubric_criteria,
+            operator=current_operator,
+            planning=True,
+        )
+    rubric = created_rubric or first_rubric
+
+    first_round = _bound_first_round(updated_ruleset)
+    if first_round is None:
+        if judge_count is not None or minimum_judges is not None or rubric is not None:
+            raise ValidationError("还没有绑定第一轮评分轮，无法填写第一轮评委或评分标准。")
+    else:
+        first_round = ContestRound.objects.get(pk=first_round.pk)
+        wanted: dict[str, object] = {
+            "advance_count": live_challenge_counts_from_binding(
+                _snapshot_binding(updated_ruleset)
+            ).seat_count,
+            "scoring_mode": ContestRound.ScoringMode.AVERAGE,
+            "score_completion_mode": ContestRound.CompletionMode.MINIMUM_VALID,
+            "roster_source": ContestRound.RosterSource.APPROVED,
+        }
+        if judge_count is not None:
+            wanted["judge_count"] = judge_count
+        if minimum_judges is not None:
+            wanted["minimum_judge_count"] = minimum_judges
+        if rubric is not None:
+            wanted["rubric"] = rubric
+        changes: dict[str, object] = {}
+        for field, value in wanted.items():
+            stored = getattr(first_round, "rubric_id" if field == "rubric" else field)
+            target = getattr(value, "pk", value)
+            if stored != target:
+                changes[field] = value
+        effective_judge_count = changes.get("judge_count", first_round.judge_count)
+        effective_minimum = changes.get("minimum_judge_count", first_round.minimum_judge_count)
+        if (
+            isinstance(effective_judge_count, int)
+            and isinstance(effective_minimum, int)
+            and effective_minimum > effective_judge_count
+        ):
+            raise ValidationError("第一轮最低有效评委数不能超过评委人数。")
+        if changes:
+            if first_round.status != ContestRound.Status.DRAFT or first_round.is_locked:
+                raise ValidationError(
+                    "第一轮已准备或已锁定，不能修改评委人数、最低有效评委数、评分标准或"
+                    "晋级人数；请先在轮次页重置，或为这一版赛制复制一个可编辑的第一轮。"
+                )
+            configure_draft_round_from_planning(
+                first_round,
+                operator=current_operator,
+                configuration=changes,
+            )
+
+    saved_version = RulesetVersion.objects.select_related("ruleset").get(pk=locked_version.pk)
+    return Live2026PreparationSave(version=saved_version, created_rubric=created_rubric)
 
 
 @transaction.atomic
