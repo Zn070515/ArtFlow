@@ -6291,6 +6291,7 @@ def ruleset_live_2026_config(request, pk):
         GroupStage.objects.filter(
             activity=ruleset.activity,
             managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version,
             status__in=[GroupStage.Status.DRAFT, GroupStage.Status.CONFIRMED],
         )
         .order_by("-pk")

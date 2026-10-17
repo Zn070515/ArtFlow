@@ -848,6 +848,7 @@ def create_live_2026_group_stage(version: RulesetVersion, *, operator):
         .filter(
             activity_id=locked_ruleset.activity_id,
             managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=locked_version,
             status__in=[GroupStage.Status.DRAFT, GroupStage.Status.CONFIRMED],
         )
         .order_by("-pk")
@@ -855,6 +856,15 @@ def create_live_2026_group_stage(version: RulesetVersion, *, operator):
     )
     if resumable is not None:
         return resumable
+
+    binding = _snapshot_binding(locked_ruleset)
+    first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
+    bound_id = (binding.get("group_stage_keys") or {}).get(first_round_key)
+    predecessor = None
+    if bound_id not in (None, ""):
+        predecessor = GroupStage.objects.filter(
+            pk=bound_id, activity_id=locked_ruleset.activity_id
+        ).first()
 
     base = GroupStage.LIVE_2026_KEY_PREFIX
     used = set(
@@ -874,6 +884,8 @@ def create_live_2026_group_stage(version: RulesetVersion, *, operator):
         operator=current_operator,
         roster_source=GroupStage.RosterSource.ALL_APPROVED,
         managed_by=GroupStage.ManagedBy.LIVE_2026,
+        managed_by_version=locked_version,
+        replaces_group_stage=predecessor,
     )
 
 
@@ -946,12 +958,11 @@ def bind_live_2026_group_stage(
 def auto_bind_live_2026_group_stage(group_stage, operator):
     """Best-effort: a stage frozen through the ordinary group page joins the 2026 draft.
 
-    Freezing the grouping and binding it to the format are one operator intention. The
-    generic group page does not know about rulesets, so this hook is deliberately narrow:
-    it fills an empty first-round slot, and it replaces an inherited one only when the new
-    stage came from the workbench's own "re-adjust grouping" action (recognised by the
-    workbench key prefix). A conflict never fails the freeze; the workbench offers an
-    explicit bind action instead.
+    A workbench stage belongs to the version that created it and remembers the binding it
+    intended to replace. Auto-binding is a compare-and-swap against that intent: if the
+    draft's binding changed in the meantime (another staff member explicitly chose a
+    different stage), the freeze keeps the new stage selectable but never overwrites the
+    newer choice. A generic stage may only fill an empty slot.
     """
 
     try:
@@ -960,26 +971,40 @@ def auto_bind_live_2026_group_stage(group_stage, operator):
             {"live_challenge": ruleset.live_challenge or {}}
         ):
             return None
+
+        def _binding_state(version):
+            binding = _snapshot_binding(version.ruleset)
+            first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
+            existing = (binding.get("group_stage_keys") or {}).get(first_round_key)
+            return first_round_key, existing
+
+        if group_stage.managed_by_version_id is not None:
+            version = (
+                RulesetVersion.objects.filter(
+                    pk=group_stage.managed_by_version_id,
+                    status=RulesetVersion.Status.DRAFT,
+                )
+                .select_related("ruleset")
+                .first()
+            )
+            if version is None or not version_is_editable(version):
+                return None
+            _key, existing = _binding_state(version)
+            actual = int(existing) if existing not in (None, "") else None
+            if actual != group_stage.replaces_group_stage_id:
+                # A newer explicit choice won; leave it alone.
+                return None
+            return bind_live_2026_group_stage(version, group_stage, operator=operator)
+
+        # Legacy/generic stages have no owner intent. They may fill an empty first-round
+        # slot on the newest editable 2026 draft, never replace an existing binding.
         for version in RulesetVersion.objects.filter(
             ruleset=ruleset, status=RulesetVersion.Status.DRAFT
         ).order_by("-version"):
             if not version_is_editable(version):
                 continue
-            binding = _snapshot_binding(ruleset)
-            first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
-            existing = (binding.get("group_stage_keys") or {}).get(first_round_key)
+            _key, existing = _binding_state(version)
             if existing in (None, ""):
-                return bind_live_2026_group_stage(version, group_stage, operator=operator)
-            if str(existing) == str(group_stage.pk):
-                return None
-            from singer_contest.models import GroupStage
-
-            if group_stage.managed_by == GroupStage.ManagedBy.LIVE_2026:
-                # A successor's re-adjustment: replace the inherited stage in the *draft's*
-                # surface. The frozen version's own binding snapshot stays immutable.
-                # Provenance is an explicit field, not a key-shaped guess: the generic
-                # create form only makes GENERIC stages, and the reserved key namespace
-                # is refused there.
                 return bind_live_2026_group_stage(version, group_stage, operator=operator)
             return None
     except (ValidationError, PermissionDenied):

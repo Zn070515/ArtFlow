@@ -269,6 +269,8 @@ def create_group_stage(
     roster_source: str = GroupStage.RosterSource.ALL_APPROVED,
     roster_source_round=None,
     managed_by: str = GroupStage.ManagedBy.GENERIC,
+    managed_by_version=None,
+    replaces_group_stage=None,
 ) -> GroupStage:
     current_operator = _operator(operator)
     locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
@@ -296,6 +298,8 @@ def create_group_stage(
             stage_key=normalized_key,
             name=str(name or "").strip(),
             managed_by=managed_by,
+            managed_by_version=managed_by_version,
+            replaces_group_stage=replaces_group_stage,
             roster_source=source,
             roster_source_round=roster_source_round,
             is_test_data=locked_activity.is_test_mode,
