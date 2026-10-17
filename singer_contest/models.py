@@ -1040,6 +1040,8 @@ class ContestRound(models.Model):
     objects = ContestRoundManager()
 
     if TYPE_CHECKING:
+        from entry_access.models import AccessGrant, EphemeralSession
+
         performances: models.Manager["Performance"]
         activity_id: int
         rubric_id: int | None
@@ -1047,6 +1049,9 @@ class ContestRound(models.Model):
         entries: models.Manager["RoundEntry"]
         groups: models.Manager["Group"]
         round_judges: models.Manager["RoundJudge"]
+        group_stages_sourcing: models.Manager["GroupStage"]
+        access_grants: models.Manager["AccessGrant"]
+        ephemeral_sessions: models.Manager["EphemeralSession"]
 
         def get_round_type_display(self) -> str: ...
 
