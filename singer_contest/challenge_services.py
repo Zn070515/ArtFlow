@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from decimal import Decimal
 from typing import Any
 
-from accounts.services import require_current_staff
+from accounts.services import require_current_admin, require_current_staff
 from common.authority import CONTEST_ROUND_STATE, LIVE_CHALLENGE_STATE, authority_write
 from common.models import AuditLog
 from core.policies import ActivityAction
@@ -562,7 +562,14 @@ def create_challenge_session(
         if existing_command.result_id is None:
             raise ValidationError("踢馆创建命令缺少结果记录。")
         return ChallengeSession._base_manager.get(pk=existing_command.result_id)
-    existing_session = ChallengeSession.objects.filter(input_fingerprint=input_fp).first()
+    # A revoked session is history. The same first-round result may be allowed to establish
+    # a fresh session after the mistaken one was withdrawn (the partial unique constraint in
+    # ChallengeSession.Meta enforces the same rule at the database boundary).
+    existing_session = (
+        ChallengeSession.objects.filter(input_fingerprint=input_fp)
+        .exclude(state=ChallengeSession.State.REVOKED)
+        .first()
+    )
     if existing_session is not None:
         raise ValidationError("该第一轮结果已经建立踢馆会话。")
     ranked = sorted(summaries, key=lambda row: row.average_score, reverse=True)
@@ -638,6 +645,108 @@ def create_challenge_session(
             "challengers": [turn.challenger_id for turn in session.turns.order_by("sequence")],
             "seats": [seat.current_holder_id for seat in session.seats.order_by("position")],
         },
+    )
+    return session
+
+
+def challenge_session_revoke_blocker(session: ChallengeSession) -> str | None:
+    """Why this session may not be revoked, or ``None`` in the pre-start window.
+
+    Shared by the service and the console so the button and the command cannot disagree.
+    The window is deliberately narrow: before the first turn moves, a mistake is only a
+    frozen copy of the first-round result, and withdrawing it restores the ordinary
+    unlock/reset path. Once the venue has acted, the session is event history.
+    """
+
+    if session.state != ChallengeSession.State.ACTIVE:
+        return "只有尚未开始的进行中踢馆会话可以撤销。"
+    if (
+        ChallengeTurn.objects.filter(session=session)
+        .exclude(state=ChallengeTurn.State.PENDING)
+        .exists()
+    ):
+        return "已经有挑战机会开始处理，不能撤销踢馆会话；请登记事故并走完整纠正流程。"
+    if ChallengeMatch.objects.filter(session=session).exists():
+        return "已经建立踢馆比赛，不能撤销踢馆会话；请登记事故并走完整纠正流程。"
+    if ContestRound.objects.filter(
+        roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
+        roster_source_challenge_session=session,
+    ).exists():
+        return "已经生成第三轮名单，不能撤销踢馆会话；请登记事故并走完整纠正流程。"
+    if any(
+        seat.current_holder_id != seat.initial_holder_id
+        for seat in ChallengeSeat.objects.filter(session=session)
+    ):
+        return "席位持有人已经变化，不能撤销踢馆会话；请登记事故并走完整纠正流程。"
+    return None
+
+
+@transaction.atomic
+def revoke_challenge_session(
+    session_id: int,
+    *,
+    operator,
+    command_id: object,
+    expected_revision: object,
+    reason: str,
+) -> ChallengeSession:
+    """Withdraw a challenge session that has not started its first match.
+
+    This is the narrow recovery path behind the round-reset/unlock and successor-freeze
+    refusals. It exists so a mistaken creation — or a first-round score that must be
+    corrected thirty seconds later — is recoverable without touching the database. Once a
+    turn moves, a match exists or a final round is generated, the venue has acted on the
+    session and only the full incident process may unwind it.
+    """
+
+    current_operator = require_current_admin(operator)
+    normalized_reason = (reason or "").strip()
+    if not normalized_reason:
+        raise ValidationError("撤销踢馆会话必须填写原因。")
+    _, session = _session_for_update(session_id, current_operator)
+    normalized_command = _command_id(command_id)
+    payload_hash = _hash_payload(
+        {
+            "operation": "challenge.session.revoke",
+            "session_id": session.pk,
+            "expected_revision": expected_revision,
+            "reason": normalized_reason,
+        }
+    )
+    replay = _replay_command(
+        session=session,
+        command_id=normalized_command,
+        operation="challenge.session.revoke",
+        payload_hash=payload_hash,
+        result_model=ChallengeSession,
+    )
+    if replay is not None:
+        return replay
+    _check_revision(session, expected_revision)
+    blocker = challenge_session_revoke_blocker(session)
+    if blocker is not None:
+        raise ValidationError(blocker)
+    old_state = session.state
+    with authority_write(LIVE_CHALLENGE_STATE):
+        session.state = ChallengeSession.State.REVOKED
+        session.revision += 1
+        session.save(update_fields=["state", "revision", "updated_at"])
+        _write_command(
+            session=session,
+            command_id=normalized_command,
+            operation="challenge.session.revoke",
+            payload_hash=payload_hash,
+            operator=current_operator,
+            result_type="ChallengeSession",
+            result_id=session.pk,
+            result_payload={"session_id": session.pk, "reason": normalized_reason},
+        )
+    _record_audit(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.CHALLENGE_SESSION_REVOKE,
+        target=f"ChallengeSession:{session.pk}",
+        old_value={"state": old_state},
+        new_value={"state": ChallengeSession.State.REVOKED, "reason": normalized_reason},
     )
     return session
 

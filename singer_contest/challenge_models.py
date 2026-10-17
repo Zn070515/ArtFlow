@@ -118,8 +118,14 @@ class ChallengeSession(models.Model):
     class Meta:
         base_manager_name = "objects"
         constraints = [
+            # A revoked session is history, not a live claim on the first round's result.
+            # Keeping it in the uniqueness set would make the recovery path one-way: an
+            # operator who revokes a mistaken session could never recreate one from the same
+            # (unchanged) first-round result. The service excludes REVOKED on its own check;
+            # this partial index makes the database agree.
             models.UniqueConstraint(
                 fields=["activity", "source_round", "input_fingerprint"],
+                condition=~Q(state="revoked"),
                 name="challenge_session_unique_input",
             ),
             models.CheckConstraint(

@@ -99,6 +99,7 @@ from .services import (
     reset_round_snapshots,
     reset_round_to_draft,
     reset_test_round_snapshots,
+    round_execution_authority_message,
     snapshot_fingerprint,
     unlock_round,
     validate_score,
@@ -1974,6 +1975,113 @@ class VoteOnlyFormatRoundTests(TestCase):
         prepared = prepare_round(classic_round, admin)
 
         self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
+
+    def test_a_successor_draft_does_not_change_the_running_formats_scope(self):
+        """The editing surface is not runtime authority.
+
+        A successor draft that sets ``ContestRuleset.round_keys`` is preparation, not a
+        freeze. Letting the mutable surface answer "does the current format manage rounds?"
+        made a draft change what the running vote-only v1 permits: existing classic rounds
+        became unrunnable the moment someone started configuring v2.
+        """
+
+        admin = _create_provisioned_user(
+            username="draft-scope-admin", password="pass", role=User.Role.ADMIN
+        )
+        activity = _create_activity(
+            title="Draft scope leak",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        activity.phase = Activity.Phase.TESTING
+        with authority_write(ACTIVITY_STATE):
+            activity.save(update_fields=["phase"])
+        ruleset = ContestRuleset.objects.create(activity=activity, name="Vote-only running")
+        vote_only_definition = (
+            '{"schema_version": 1, "nodes": ['
+            '{"key": "assess-audience", "type": "ASSESS", "source": "entry", '
+            '"vote_source": "aud1", "vote_purpose": "SCORE_COMPONENT", '
+            '"scale": "hundred"}]}'
+        )
+        with authority_write(RULESET_FREEZE):
+            running = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=vote_only_definition,
+                binding={"audience_keys": {"aud1": "aud1"}},
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username="draft-scope-singer", password="pass"),
+            name="Draft Scope Singer",
+            student_id="20260005",
+            college="College",
+            class_name="Class",
+            phone="13800000005",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        classic_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="正式赛制不管理的轮次",
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        self.assertIsNone(round_execution_authority_message(classic_round))
+        self.assertEqual(prepare_round(classic_round, admin).status, ContestRound.Status.PREPARED)
+
+        future_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="后继草稿准备接管的第一轮",
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        with authority_write(RULESET_FREEZE):
+            draft = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=2,
+                definition=vote_only_definition,
+                binding={},
+                status=RulesetVersion.Status.DRAFT,
+                is_current=False,
+            )
+        ruleset.round_keys = {"r1": future_round.pk}
+        ruleset.save(update_fields=["round_keys"])
+
+        another_classic_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="正式赛制仍不管理的轮次",
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        self.assertIsNone(round_execution_authority_message(another_classic_round))
+        self.assertEqual(
+            prepare_round(another_classic_round, admin).status,
+            ContestRound.Status.PREPARED,
+        )
+
+        # Only the successor's own freeze may move the running scope.
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=running.pk).update(is_current=False)
+            RulesetVersion._base_manager.filter(pk=draft.pk).update(
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+                binding={"round_keys": {"r1": future_round.pk}},
+            )
+        unbound_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="新赛制不认领的轮次",
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        with self.assertRaisesMessage(ValidationError, "不属于当前正式赛制"):
+            prepare_round(unbound_round, admin)
 
 
 class ParticipantRegistrationFlowTests(TestCase):

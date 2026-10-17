@@ -10,6 +10,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from common.authority import (
+    LIVE_CHALLENGE_STATE,
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
@@ -36,6 +37,11 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
     from incidents.models import IncidentRecord
     from singer_contest.models import (
         Award,
+        ChallengeCommand,
+        ChallengeMatch,
+        ChallengeSeat,
+        ChallengeSession,
+        ChallengeTurn,
         CompositeResult,
         CriterionScore,
         Group,
@@ -81,6 +87,24 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         "scores": ScoreRecord.objects.filter(round__activity=activity, is_test_data=True).count(),
         "score_summaries": ScoreSummary.objects.filter(
             round__activity=activity, is_test_data=True
+        ).count(),
+        # Challenge facts are runtime, not configuration: their rows PROTECT singers and
+        # rounds, so they must be visible to "can this activity leave test mode?" and be
+        # removed by the clear lifecycle before the singers they point at.
+        "challenge_sessions": ChallengeSession.objects.filter(
+            activity=activity, is_test_data=True
+        ).count(),
+        "challenge_seats": ChallengeSeat.objects.filter(
+            session__activity=activity, session__is_test_data=True, is_test_data=True
+        ).count(),
+        "challenge_turns": ChallengeTurn.objects.filter(
+            session__activity=activity, session__is_test_data=True, is_test_data=True
+        ).count(),
+        "challenge_matches": ChallengeMatch.objects.filter(
+            session__activity=activity, session__is_test_data=True, is_test_data=True
+        ).count(),
+        "challenge_commands": ChallengeCommand.objects.filter(
+            session__activity=activity, session__is_test_data=True
         ).count(),
         "awards": Award.objects.filter(activity=activity, is_test_data=True).count(),
         "stage_results": StageResult.objects.filter(activity=activity, is_test_data=True).count(),
@@ -197,6 +221,11 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     from incidents.models import IncidentRecord
     from singer_contest.models import (
         Award,
+        ChallengeCommand,
+        ChallengeMatch,
+        ChallengeSeat,
+        ChallengeSession,
+        ChallengeTurn,
         ContestRound,
         GroupStage,
         ManualDecision,
@@ -311,6 +340,30 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     with authority_write(TEST_DATA_CLEANUP):
         Ticket.objects.filter(activity=locked_activity, is_test_data=True).delete()
     Program.objects.filter(activity=locked_activity, is_test_data=True).delete()
+    # Challenge facts are disposable runtime, and every row PROTECTs a singer, a round or
+    # the session itself. Remove the graph in dependency-reverse order under the single
+    # authority that owns challenge state; leaving it to the singer delete below would
+    # raise ProtectedError and roll the whole cleanup back.
+    with authority_write(LIVE_CHALLENGE_STATE):
+        ChallengeCommand.objects.filter(  # type: ignore[no-untyped-call]
+            session__activity=locked_activity, session__is_test_data=True
+        ).delete()
+        ChallengeMatch.objects.filter(  # type: ignore[no-untyped-call]
+            session__activity=locked_activity, session__is_test_data=True
+        ).delete()
+        ChallengeTurn.objects.filter(  # type: ignore[no-untyped-call]
+            session__activity=locked_activity,
+            session__is_test_data=True,
+            is_test_data=True,
+        ).delete()
+        ChallengeSeat.objects.filter(  # type: ignore[no-untyped-call]
+            session__activity=locked_activity,
+            session__is_test_data=True,
+            is_test_data=True,
+        ).delete()
+        ChallengeSession.objects.filter(  # type: ignore[no-untyped-call]
+            activity=locked_activity, is_test_data=True
+        ).delete()
     # The group draw is runtime fact, so it is removed rather than promoted: its Groups,
     # memberships and group-scoped material checks cascade from here. It has to go before
     # the singers its memberships point at.

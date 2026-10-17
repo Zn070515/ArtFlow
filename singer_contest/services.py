@@ -400,17 +400,18 @@ def _format_names_rounds(ruleset: ContestRuleset) -> bool:
     business, and gating it there would refuse rounds the format never had an opinion about.
     Once a format does name a round, every round in that activity has to belong to it.
 
-    Only the live editable surface and the current FROZEN authority decide this. A retired
-    version's binding is history: it says which rounds *were* this format's, and that is what
-    ``_round_is_claimed_by_a_binding`` is for. Letting it vote here would keep a successor
-    that deliberately became vote-only under the old round shape forever — a current v2 with
-    no round binding could never run a classic round because v1 once had one.
+    The runtime authority answers first: while a current FROZEN version exists, its binding
+    — and only its binding — defines the scope. The editable ``ContestRuleset`` surface is
+    a successor draft's workspace, and a draft must never change what the running format
+    permits. Only before the first freeze does the mutable surface speak: a draft preparing
+    a round-based format must not run unbound rounds through the classic flow.
+
+    A retired version's binding is history either way: it says which rounds *were* this
+    format's, and that is what ``_round_is_claimed_by_a_binding`` is for.
     """
 
     from ruleset.models import RulesetVersion
 
-    if ruleset.round_keys:
-        return True
     current = (
         RulesetVersion._base_manager.filter(
             ruleset=ruleset,
@@ -420,7 +421,9 @@ def _format_names_rounds(ruleset: ContestRuleset) -> bool:
         .order_by("-pk")
         .first()
     )
-    return bool(current is not None and (current.binding or {}).get("round_keys"))
+    if current is not None:
+        return bool((current.binding or {}).get("round_keys"))
+    return bool(ruleset.round_keys)
 
 
 def _round_is_derived_from_authority(contest_round: ContestRound, version) -> bool:
@@ -3512,13 +3515,14 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
 _LIVE_CHALLENGE_SOURCE_MSG = (
     "本轮已经建立正式踢馆会话（席位与挑战队列已经物化），不能重置或解锁。"
     "踢馆会话冻结了本轮的正式成绩和晋级名单，重置会清空这些事实而会话仍然引用它们。"
-    "请继续使用当前正式赛制；如现场发生事故，须先走专门的踢馆会话撤销流程。"
+    "如尚未开始处理任何一次挑战机会，请在「现场挑战」页填写原因撤销该会话后再更正；"
+    "若已经开始，请登记事故并走完整纠正流程。"
 )
 
 _LIVE_CHALLENGE_SCORE_ROUND_MSG = (
     "本轮是正式踢馆比赛的评分轮，不能重置或解锁。"
-    "该轮次的成绩属于一个仍然有效的踢馆会话；请继续使用当前正式赛制，"
-    "如现场发生事故，须先走专门的踢馆会话撤销流程。"
+    "该轮次的成绩属于一个仍然有效的踢馆会话；这已经超出开赛前撤销窗口，"
+    "请继续使用当前正式赛制，并登记事故走完整纠正流程。"
 )
 
 
