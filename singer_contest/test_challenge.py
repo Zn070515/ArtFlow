@@ -21,6 +21,7 @@ from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
+from django.db.models.deletion import ProtectedError
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from entry_access.services import redeem_access_grant
@@ -46,6 +47,7 @@ from .challenge_services import (
     start_challenge_turn,
     waive_challenge_turn,
 )
+from .group_chorus import create_group_stage
 from .judge_authority import (
     _current_challenge_target,
     advance_performance,
@@ -63,6 +65,7 @@ from .models import (
     ChallengeSession,
     ChallengeTurn,
     ContestRound,
+    GroupStage,
     Judge,
     Performance,
     PerformanceRunState,
@@ -1737,6 +1740,53 @@ class ChallengeResidueAuditTests(_LiveChallengeFixtureMixin, TestCase):
         self.assertIn("rebound=1", output.getvalue())
         self.assertIn("deleted=0", output.getvalue())
         self.assertTrue(ContestRound.objects.filter(pk=orphan.pk).exists())
+
+    def test_a_round_sourced_by_a_group_stage_is_never_deleted(self):
+        orphan = self._orphan_round()
+        create_group_stage(
+            self.activity,
+            stage_key="residue_group",
+            name="残留检查分组",
+            operator=self.staff,
+            roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
+            roster_source_round=orphan,
+        )
+
+        output = StringIO()
+        call_command("audit_challenge_residue", "--delete", stdout=output)
+
+        self.assertIn("still_linked=1", output.getvalue())
+        self.assertIn("deleted=0", output.getvalue())
+        self.assertTrue(ContestRound.objects.filter(pk=orphan.pk).exists())
+
+    def test_one_protected_candidate_does_not_stop_the_rest(self):
+        from singer_contest.management.commands import (
+            audit_challenge_residue as audit_command,
+        )
+
+        protected = self._orphan_round()
+        deletable = self._orphan_round()
+        real_delete = audit_command._delete_orphan_under_lock
+
+        def fake_delete(round_id: int) -> str:
+            if round_id == protected.pk:
+                raise ProtectedError("protected", set())
+            return real_delete(round_id)
+
+        output = StringIO()
+        errors = StringIO()
+        with patch.object(audit_command, "_delete_orphan_under_lock", side_effect=fake_delete):
+            call_command(
+                "audit_challenge_residue",
+                "--delete",
+                stdout=output,
+                stderr=errors,
+            )
+
+        self.assertIn(f"skipped round={protected.pk}", errors.getvalue())
+        self.assertIn("deleted=1", output.getvalue())
+        self.assertTrue(ContestRound.objects.filter(pk=protected.pk).exists())
+        self.assertFalse(ContestRound.objects.filter(pk=deletable.pk).exists())
 
     def test_a_round_reclaimed_by_a_version_binding_is_never_deleted(self):
         orphan = self._orphan_round()
