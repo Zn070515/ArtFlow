@@ -52,7 +52,6 @@ from .services import (
     _validate_2026_live_contract,
     _validate_frozen_questionnaire,
     _validate_successor_questionnaire,
-    business_round_configuration_signature,
     create_ruleset_version,
     current_frozen_round_ids,
     current_frozen_version,
@@ -81,7 +80,42 @@ def _is_live_2026_binding(binding: dict) -> bool:
     return isinstance(live, dict) and live.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
 
 
+#: Prefix for the workbench-owned GroupStage keys. A successor that needs a different
+#: grouping gets a new stage with the next suffix; staff never see the key.
+LIVE_2026_GROUP_STAGE_KEY_PREFIX = "r1_chorus"
+
 LIVE_2026_FIRST_ROUND_NAME = "第一轮"
+
+
+def first_round_configuration_signature(first_round) -> str:
+    """The first round's own optimistic-concurrency token.
+
+    Deliberately scoped to this round, not the activity: editing an unrelated round must
+    not invalidate a save on the 2026 workbench.
+    """
+
+    if first_round is None:
+        return ""
+    snapshot = {
+        "pk": first_round.pk,
+        **{
+            field: getattr(first_round, field)
+            for field in (
+                "name",
+                "scoring_mode",
+                "score_completion_mode",
+                "judge_count",
+                "minimum_judge_count",
+                "rubric_id",
+                "advance_count",
+                "roster_source",
+                "roster_source_stage",
+            )
+        },
+    }
+    return json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
 #: Marks the round a successor draft owns, so the rounds list does not show two identical
 #: 第一轮 rows with no way to tell which one the running authority still uses.
 FIRST_ROUND_CLONE_SUFFIX = "（后继）"
@@ -659,7 +693,7 @@ def save_live_2026_preparation(
     operator,
     live_challenge: dict,
     base_binding: str | None = None,
-    base_round_configuration: str | None = None,
+    base_first_round_configuration: str | None = None,
     first_judge_count: object | None = None,
     first_minimum_judges: object | None = None,
     first_rubric=None,
@@ -692,14 +726,13 @@ def save_live_2026_preparation(
         raise ValidationError("只有草稿赛制可以继续准备。")
     if not version_is_editable(locked_version):
         raise ValidationError("这一版赛制已被更新的版本替代，请到最新版本继续准备。")
-    if base_round_configuration is not None and base_round_configuration != (
-        business_round_configuration_signature(
-            ContestRound.objects.filter(activity_id=locked_ruleset.activity_id)
-        )
+    locked_first_round = _bound_first_round(locked_ruleset)
+    if base_first_round_configuration is not None and base_first_round_configuration != (
+        first_round_configuration_signature(locked_first_round)
     ):
         # ``base_binding`` covers the ruleset surface; the first round's configuration is a
-        # separate aggregate. A stale form must not silently overwrite another staff
-        # member's judge count or rubric.
+        # separate aggregate. Scoped to this round, so editing an unrelated round does not
+        # produce a false conflict for the operator.
         raise ValidationError("第一轮配置已被其他工作人员修改，请刷新后重试。")
 
     binding = _snapshot_binding(locked_ruleset)
@@ -797,9 +830,11 @@ def bind_live_2026_group_stage(
     operator,
     base_binding: str | None = None,
 ) -> ContestRuleset:
-    """Bind a frozen first-round GroupStage to this 2026 draft.
+    """Bind (or re-bind) a frozen first-round GroupStage to this 2026 draft.
 
     The workbench owns the lifecycle; staff never edit ``group_stage_keys`` themselves.
+    Re-binding changes the *draft's* editing surface only — a frozen version's own binding
+    snapshot is immutable, so the running authority keeps its grouping.
     """
 
     from singer_contest.models import GroupStage
@@ -826,8 +861,8 @@ def bind_live_2026_group_stage(
     first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
     group_stage_keys = dict(binding.get("group_stage_keys") or {})
     existing = group_stage_keys.get(first_round_key)
-    if existing not in (None, "", stage.pk):
-        raise ValidationError("第一轮已经绑定了另一个分组合唱分组。")
+    if str(existing) == str(stage.pk):
+        return locked_ruleset
     group_stage_keys[first_round_key] = stage.pk
     binding["group_stage_keys"] = group_stage_keys
     updated = update_ruleset_binding(
@@ -841,7 +876,11 @@ def bind_live_2026_group_stage(
         action_type=AuditLog.ActionType.OTHER,
         target=f"RulesetVersion:{version.pk}",
         new_value=json.dumps(
-            {"group_stage_id": stage.pk, "first_round_key": first_round_key},
+            {
+                "group_stage_id": stage.pk,
+                "previous_group_stage_id": existing,
+                "first_round_key": first_round_key,
+            },
             ensure_ascii=False,
         ),
         note="bind_live_2026_group_stage",
@@ -854,8 +893,10 @@ def auto_bind_live_2026_group_stage(group_stage, operator):
 
     Freezing the grouping and binding it to the format are one operator intention. The
     generic group page does not know about rulesets, so this hook is deliberately narrow:
-    only a 2026 draft with an empty first-round group binding is changed, and a conflict
-    never fails the freeze (the workbench offers an explicit bind action instead).
+    it fills an empty first-round slot, and it replaces an inherited one only when the new
+    stage came from the workbench's own "re-adjust grouping" action (recognised by the
+    workbench key prefix). A conflict never fails the freeze; the workbench offers an
+    explicit bind action instead.
     """
 
     try:
@@ -871,9 +912,16 @@ def auto_bind_live_2026_group_stage(group_stage, operator):
                 continue
             binding = _snapshot_binding(ruleset)
             first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
-            if (binding.get("group_stage_keys") or {}).get(first_round_key) not in (None, ""):
+            existing = (binding.get("group_stage_keys") or {}).get(first_round_key)
+            if existing in (None, ""):
+                return bind_live_2026_group_stage(version, group_stage, operator=operator)
+            if str(existing) == str(group_stage.pk):
                 return None
-            return bind_live_2026_group_stage(version, group_stage, operator=operator)
+            if str(group_stage.stage_key).startswith(LIVE_2026_GROUP_STAGE_KEY_PREFIX):
+                # A successor's re-adjustment: replace the inherited stage in the *draft's*
+                # surface. The frozen version's own binding snapshot stays immutable.
+                return bind_live_2026_group_stage(version, group_stage, operator=operator)
+            return None
     except (ValidationError, PermissionDenied):
         return None
     return None
