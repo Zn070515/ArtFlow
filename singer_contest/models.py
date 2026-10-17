@@ -599,11 +599,22 @@ class GroupStage(models.Model):
         help_text="ROUND_ADVANCED 来源在确认时的晋级名单指纹。",
     )
 
+    #: Reserved key namespace for stages the 2026 workbench creates. The generic create
+    #: form refuses it, and auto-binding trusts ``managed_by`` rather than the key shape.
+    LIVE_2026_KEY_PREFIX = "__artflow_live2026_r1_group"
+
+    class ManagedBy(models.TextChoices):
+        GENERIC = "generic", "通用"
+        LIVE_2026 = "live_2026", "2026 工作台"
+
     activity = models.ForeignKey(
         "core.Activity", on_delete=models.CASCADE, related_name="group_stages"
     )
     stage_key = models.CharField(max_length=100)
     name = models.CharField(max_length=100)
+    managed_by = models.CharField(
+        max_length=16, choices=ManagedBy.choices, default=ManagedBy.GENERIC
+    )
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     confirmed_by = models.ForeignKey(

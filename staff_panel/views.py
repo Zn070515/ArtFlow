@@ -96,12 +96,12 @@ from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.live_format import (
-    LIVE_2026_GROUP_STAGE_KEY_PREFIX,
     PREPARATION_TASK_ROW_KEYS,
     _bound_first_round,
     apply_live_2026_counts,
     bind_live_2026_group_stage,
     clone_first_round_for_successor,
+    create_live_2026_group_stage,
     first_round_configuration_signature,
     freeze_blocker,
     is_live_2026_template,
@@ -6142,26 +6142,6 @@ def _live_2026_tasks(version) -> list[dict]:
     return rows
 
 
-LIVE_2026_GROUP_STAGE_NAME = "第一轮分组合唱"
-
-
-def _next_group_stage_key(activity) -> str:
-    """The next workbench-owned stage key; staff never see or choose it."""
-
-    base = LIVE_2026_GROUP_STAGE_KEY_PREFIX
-    used = set(
-        GroupStage.objects.filter(activity=activity, stage_key__startswith=base).values_list(
-            "stage_key", flat=True
-        )
-    )
-    if base not in used:
-        return base
-    index = 2
-    while f"{base}_v{index}" in used:
-        index += 1
-    return f"{base}_v{index}"
-
-
 def _parse_rubric_criteria(text: str) -> list[dict]:
     """Parse the workbench's "名称,满分" lines into rubric criteria."""
 
@@ -6202,13 +6182,7 @@ def ruleset_live_2026_config(request, pk):
         action = (request.POST.get("action") or "").strip()
         if action == "create_group_stage":
             try:
-                stage = create_group_stage(
-                    ruleset.activity,
-                    stage_key=_next_group_stage_key(ruleset.activity),
-                    name=LIVE_2026_GROUP_STAGE_NAME,
-                    operator=request.user,
-                    roster_source=GroupStage.RosterSource.ALL_APPROVED,
-                )
+                stage = create_live_2026_group_stage(version, operator=request.user)
             except (PermissionDenied, ValidationError) as exc:
                 messages.error(request, domain_error_messages(exc))
                 return redirect("staff:ruleset_live_2026_config", pk=version.pk)
@@ -6313,6 +6287,15 @@ def ruleset_live_2026_config(request, pk):
         .exclude(pk=bound_group_stage.pk if bound_group_stage else -1)
         .order_by("-pk")
     )
+    resumable_group_stage = (
+        GroupStage.objects.filter(
+            activity=ruleset.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            status__in=[GroupStage.Status.DRAFT, GroupStage.Status.CONFIRMED],
+        )
+        .order_by("-pk")
+        .first()
+    )
     first_round_editable = bool(
         first_round
         and first_round.status == ContestRound.Status.DRAFT
@@ -6382,6 +6365,7 @@ def ruleset_live_2026_config(request, pk):
             "first_round_editable": first_round_editable,
             "base_first_round_configuration": first_round_configuration_signature(first_round),
             "bound_group_stage": bound_group_stage,
+            "resumable_group_stage": resumable_group_stage,
             "ready_group_stages": [
                 stage for stage in unbound_group_stages if stage.status == GroupStage.Status.FROZEN
             ],

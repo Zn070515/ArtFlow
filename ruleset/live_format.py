@@ -80,10 +80,6 @@ def _is_live_2026_binding(binding: dict) -> bool:
     return isinstance(live, dict) and live.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
 
 
-#: Prefix for the workbench-owned GroupStage keys. A successor that needs a different
-#: grouping gets a new stage with the next suffix; staff never see the key.
-LIVE_2026_GROUP_STAGE_KEY_PREFIX = "r1_chorus"
-
 LIVE_2026_FIRST_ROUND_NAME = "第一轮"
 
 
@@ -823,6 +819,65 @@ def save_live_2026_preparation(
 
 
 @transaction.atomic
+def create_live_2026_group_stage(version: RulesetVersion, *, operator):
+    """Create (or resume) the workbench-owned first-round group stage.
+
+    Key allocation, the resume check and the INSERT all happen under the Activity lock.
+    Two staff clicking at the same time therefore share the unfinished stage or get
+    distinct keys — never a duplicate-key ``IntegrityError``.
+    """
+
+    from singer_contest.group_chorus import create_group_stage
+    from singer_contest.models import GroupStage
+
+    current_operator = require_current_staff(operator)
+    lock_activity_for_action(version.ruleset.activity)
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
+    locked_version = (
+        RulesetVersion.objects.select_for_update().select_related("ruleset").get(pk=version.pk)
+    )
+    if locked_version.status != RulesetVersion.Status.DRAFT or not version_is_editable(
+        locked_version
+    ):
+        raise ValidationError("只有最新草稿可以创建第一轮分组。")
+    if not _is_live_2026_binding(_snapshot_binding(locked_ruleset)):
+        raise ValidationError("当前赛制不是 2026 现场踢馆赛制。")
+
+    resumable = (
+        GroupStage.objects.select_for_update()
+        .filter(
+            activity_id=locked_ruleset.activity_id,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            status__in=[GroupStage.Status.DRAFT, GroupStage.Status.CONFIRMED],
+        )
+        .order_by("-pk")
+        .first()
+    )
+    if resumable is not None:
+        return resumable
+
+    base = GroupStage.LIVE_2026_KEY_PREFIX
+    used = set(
+        GroupStage.objects.filter(
+            activity_id=locked_ruleset.activity_id, stage_key__startswith=base
+        ).values_list("stage_key", flat=True)
+    )
+    stage_key = base
+    index = 2
+    while stage_key in used:
+        stage_key = f"{base}_v{index}"
+        index += 1
+    return create_group_stage(
+        locked_ruleset.activity,
+        stage_key=stage_key,
+        name="第一轮分组合唱",
+        operator=current_operator,
+        roster_source=GroupStage.RosterSource.ALL_APPROVED,
+        managed_by=GroupStage.ManagedBy.LIVE_2026,
+    )
+
+
+@transaction.atomic
 def bind_live_2026_group_stage(
     version: RulesetVersion,
     group_stage,
@@ -917,9 +972,14 @@ def auto_bind_live_2026_group_stage(group_stage, operator):
                 return bind_live_2026_group_stage(version, group_stage, operator=operator)
             if str(existing) == str(group_stage.pk):
                 return None
-            if str(group_stage.stage_key).startswith(LIVE_2026_GROUP_STAGE_KEY_PREFIX):
+            from singer_contest.models import GroupStage
+
+            if group_stage.managed_by == GroupStage.ManagedBy.LIVE_2026:
                 # A successor's re-adjustment: replace the inherited stage in the *draft's*
                 # surface. The frozen version's own binding snapshot stays immutable.
+                # Provenance is an explicit field, not a key-shaped guess: the generic
+                # create form only makes GENERIC stages, and the reserved key namespace
+                # is refused there.
                 return bind_live_2026_group_stage(version, group_stage, operator=operator)
             return None
     except (ValidationError, PermissionDenied):

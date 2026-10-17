@@ -1,6 +1,7 @@
 """Positive PostgreSQL-sized acceptance path for the 2026 live format."""
 
 import json
+import threading
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
@@ -18,10 +19,11 @@ from common.authority import (
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase
+from django.db import connection
+from django.test import Client, TestCase, TransactionTestCase
 from django.urls import reverse
 from django.utils import timezone
-from ruleset.live_format import freeze_blocker
+from ruleset.live_format import create_live_2026_group_stage, freeze_blocker
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.services import (
     _snapshot_binding,
@@ -33,6 +35,7 @@ from ruleset.services import (
     create_ruleset_version as _create_version,
 )
 from ruleset.templates import LIVE_2026_BUILTIN_KEY
+from tests.helpers import postgresql_only
 
 from .challenge_services import (
     confirm_challenge_match_result,
@@ -1801,7 +1804,9 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertFalse(tasks["groups"]["ready"])
 
         self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
-        stage = GroupStage.objects.get(activity=self.activity, stage_key="r1_chorus")
+        stage = GroupStage.objects.get(
+            activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+        )
         payload: dict[str, object] = {}
         for index, start in enumerate(range(0, 15, 3), start=1):
             payload[f"group_name_{index}"] = f"第 {index} 组"
@@ -1889,7 +1894,9 @@ class Live2026FreshWorkbenchTests(TestCase):
             follow=True,
         )
         self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
-        stage_a = GroupStage.objects.get(activity=self.activity, stage_key="r1_chorus")
+        stage_a = GroupStage.objects.get(
+            activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+        )
         self._finish_group_stage(stage_a, group_count=5)
         self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
         version1.refresh_from_db()
@@ -1921,9 +1928,24 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertFalse(tasks["groups"]["ready"])
         self.assertIsNotNone(page.context["bound_group_stage"])
 
+        first_round_key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+        # A generic stage — even one whose key looks like the workbench's — does not
+        # replace the inherited binding. Provenance is ``managed_by``, not the key shape.
+        generic_stage = create_group_stage(
+            self.activity,
+            stage_key="generic_chorus",
+            name="通用分组",
+            operator=self.admin,
+        )
+        self._finish_group_stage(generic_stage, group_count=4)
+        version2.ruleset.refresh_from_db()
+        self.assertEqual(version2.ruleset.group_stage_keys[first_round_key], stage_a.pk)
+
         self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
         stage_b = (
-            GroupStage.objects.filter(activity=self.activity, stage_key__startswith="r1_chorus")
+            GroupStage.objects.filter(
+                activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+            )
             .exclude(pk=stage_a.pk)
             .get()
         )
@@ -1944,3 +1966,103 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertTrue(version2.is_current)
         self.assertEqual(version2.binding["group_stage_keys"][first_round_key], stage_b.pk)
         self.assertEqual(version1.binding["group_stage_keys"][first_round_key], stage_a.pk)
+
+    def test_repeated_re_adjust_reuses_the_unfinished_stage(self):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 分组复用"},
+            follow=True,
+        )
+        version = RulesetVersion.objects.get(ruleset__activity=self.activity)
+
+        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        first = GroupStage.objects.get(
+            activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+        )
+        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+
+        stages = list(
+            GroupStage.objects.filter(
+                activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+            )
+        )
+        self.assertEqual(len(stages), 1)
+        self.assertEqual(stages[0].pk, first.pk)
+
+    def test_the_reserved_group_key_cannot_be_created_generically(self):
+        with self.assertRaisesMessage(ValidationError, "保留"):
+            create_group_stage(
+                self.activity,
+                stage_key=GroupStage.LIVE_2026_KEY_PREFIX,
+                name="伪装成工作台分组",
+                operator=self.admin,
+            )
+
+
+@postgresql_only
+class Live2026GroupStageCreationRaceTests(TransactionTestCase):
+    """Two staff creating the workbench grouping at once share one stage, never a 500."""
+
+    reset_sequences = True
+
+    def setUp(self):
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.staff = User.objects.create_user(
+                username="workbench-race-staff", password="pass", role=User.Role.STAFF
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="工作台分组并发",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                phase=Activity.Phase.TESTING,
+                is_test_mode=True,
+            )
+        ruleset = ContestRuleset.objects.create(
+            activity=self.activity, name="2026 并发", is_test_data=True
+        )
+        ruleset.live_challenge = {"format_key": "2026_live_challenge"}
+        ruleset.save(update_fields=["live_challenge"])
+        with authority_write(RULESET_FREEZE):
+            self.version = RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=json.dumps(
+                    {"schema_version": 1, "nodes": [{"key": "roster", "type": "ROSTER"}]}
+                ),
+                status=RulesetVersion.Status.DRAFT,
+                is_current=False,
+            )
+
+    def test_two_creators_share_the_unfinished_stage(self):
+        barrier = threading.Barrier(2)
+        results: list[int] = []
+        errors: list[Exception] = []
+
+        def target():
+            try:
+                barrier.wait(timeout=10)
+                version = RulesetVersion.objects.get(pk=self.version.pk)
+                results.append(create_live_2026_group_stage(version, operator=self.staff).pk)
+            except Exception as error:  # noqa: BLE001 - the assertion is about which error
+                errors.append(error)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=target) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=20)
+
+        for thread in threads:
+            self.assertFalse(thread.is_alive(), "a creator never finished")
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(len(set(results)), 1)
+        self.assertEqual(
+            GroupStage.objects.filter(
+                activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+            ).count(),
+            1,
+        )

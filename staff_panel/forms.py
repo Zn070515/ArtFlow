@@ -385,6 +385,8 @@ class GroupStageCreateForm(forms.Form):
         value = self.cleaned_data["stage_key"].strip()
         if not value:
             raise forms.ValidationError("赛段标识不能为空。")
+        if value.startswith(GroupStage.LIVE_2026_KEY_PREFIX):
+            raise forms.ValidationError("该赛段标识是 2026 现场赛制保留的，请换一个。")
         return value
 
     def clean_name(self):
