@@ -27,6 +27,35 @@
     </div>
     {% endif %}
 
+    <section class="rounded-lg border border-gray-200 bg-white p-5 mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-gray-900">赛制准备进度</h2>
+            <span class="text-sm font-medium {% if remaining_count %}text-amber-700{% else %}text-green-700{% endif %}">
+                已完成 {{ completed_count }} / {{ total_count }} 项{% if remaining_count %}，还需 {{ remaining_count }} 项{% endif %}
+            </span>
+        </div>
+        <ul class="mt-3 space-y-2 text-sm">
+            {% for task in tasks %}
+            <li class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2">
+                <span>
+                    {% if task.ready %}
+                    <span class="text-green-600">✓</span>
+                    <span class="text-gray-700">{{ task.label }}</span>
+                    {% else %}
+                    <span class="text-amber-600">○</span>
+                    <span class="text-gray-900 font-medium">{{ task.label }}</span>
+                    {% endif %}
+                    {% if task.detail %}<span class="ml-1 text-xs text-gray-500">{{ task.detail }}</span>{% endif %}
+                </span>
+                {% if not task.ready and task.url %}
+                <a href="{{ task.url }}" class="text-xs border border-brand text-brand rounded px-3 py-1 shrink-0">{{ task.action }}</a>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="mt-3 text-xs text-gray-500">进度只统计这 7 个操作任务；系统会在冻结前再跑一轮技术校验。</p>
+    </section>
+
     {% if first_round_is_protected %}
     <section class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 mb-6">
         <p class="font-semibold">当前正式赛制正在使用这个第一轮，不能通过重置来修改晋级人数。</p>
@@ -69,7 +98,7 @@
         {% csrf_token %}
         <input type="hidden" name="base_binding" value="{{ binding_signature }}">
 
-        <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <section id="section-people" class="rounded-lg border border-gray-200 bg-white p-5">
             <h2 class="text-lg font-semibold text-gray-900 mb-1">修改人数与流程</h2>
             <p class="text-xs text-gray-500 mb-4">默认值不用改。改完之后系统只会检查这套数字是否自洽。</p>
             <div class="grid sm:grid-cols-2 gap-4">
@@ -96,7 +125,7 @@
             <p class="mt-3 text-xs text-gray-500">第一轮参赛人数必须大于第一轮晋级数。分组只要求「恰好这么多组、每个人都出现且只出现一次、没有空组」——所以临时有人退赛时，5 组可以是 3+3+3+3+2，不需要改这里任何数字。</p>
         </section>
 
-        <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <section id="section-scoring" class="rounded-lg border border-gray-200 bg-white p-5">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">成绩怎么算</h2>
             <div class="grid sm:grid-cols-2 gap-4">
                 <div class="rounded border border-gray-200 p-4">
@@ -131,19 +160,27 @@
             </div>
         </section>
 
-        <section class="rounded-lg border border-gray-200 bg-white p-5">
+        <section id="section-judges" class="rounded-lg border border-gray-200 bg-white p-5">
             <h2 class="text-lg font-semibold text-gray-900 mb-4">评委怎么安排</h2>
             <div class="space-y-4">
                 <div class="rounded border border-gray-200 p-4">
-                    <h3 class="text-sm font-semibold text-gray-900">第一轮评委</h3>
+                    <h3 class="text-sm font-semibold text-gray-900">第一轮</h3>
                     {% if first_round %}
-                    <p class="mt-1 text-xs text-gray-600">
-                        评委人数 {{ first_round.judge_count|default:"未填写" }} · 最低需要 {{ first_round.minimum_judge_count|default:"未填写" }} · 评分标准 {{ first_round.rubric|default:"未选择" }} · 晋级 {{ first_round.advance_count }} 人
-                    </p>
-                    <a href="{% url 'staff:round_edit' first_round.pk %}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">去填写</a>
+                    <div class="mt-2 grid sm:grid-cols-2 gap-3">
+                        <label class="block text-xs text-gray-700">评委人数
+                            <input name="live_first_judge_count" type="number" min="1" value="{{ first_judge_count|default_if_none:'' }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm" {% if not first_round_editable %}disabled{% endif %}>
+                        </label>
+                        <label class="block text-xs text-gray-700">最低有效评委数
+                            <input name="live_first_minimum_judges" type="number" min="1" value="{{ first_minimum_judges|default_if_none:'' }}" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm" {% if not first_round_editable %}disabled{% endif %}>
+                        </label>
+                    </div>
+                    <p class="mt-2 text-xs text-gray-600">评分方式固定为所有有效评委的算术平均；晋级人数由上方「第一轮晋级数」决定（当前 {{ counts.seat_count }} 人）。</p>
+                    {% if not first_round_editable %}
+                    <p class="mt-2 text-xs text-amber-700">第一轮已经准备或已锁定，评委人数、最低有效评委数与评分标准不能再改。需要修改时，先在轮次页重置；如果这一轮属于当前正式赛制，请用上方「复制一个可编辑的第一轮」。</p>
+                    {% endif %}
                     {% else %}
                     <p class="mt-1 text-xs text-amber-700">还没有绑定第一轮物理评分轮。</p>
-                    <a href="{% url 'staff:round_create' %}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">去填写</a>
+                    <a href="{% url 'staff:round_create' %}?activity_id={{ activity.pk }}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">去创建</a>
                     {% endif %}
                 </div>
                 <div class="rounded border border-gray-200 p-4">
@@ -177,6 +214,50 @@
             </div>
         </section>
 
+        <section id="section-rubric" class="rounded-lg border border-gray-200 bg-white p-5">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">第一轮评分标准</h2>
+            <p class="text-xs text-gray-500 mb-4">第一轮统一使用这一份评分标准。评分项满分合计必须为 100 分。</p>
+            {% if first_round %}
+            <label class="block text-sm text-gray-700">使用已有评分标准
+                <select name="live_first_rubric_id" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm" {% if not first_round_editable %}disabled{% endif %}>
+                    <option value="">保持当前选择</option>
+                    {% for rubric in rubrics %}
+                    <option value="{{ rubric.pk }}"{% if rubric.pk == first_rubric_id %} selected{% endif %}>{{ rubric.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <details class="mt-4 rounded border border-gray-200 p-3">
+                <summary class="text-sm text-gray-700 cursor-pointer">新建一份评分标准</summary>
+                <div class="mt-3 space-y-3">
+                    <label class="block text-xs text-gray-700">名称
+                        <input name="live_new_rubric_name" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm" placeholder="例如：2026 院十佳第一轮评分表" {% if not first_round_editable %}disabled{% endif %}>
+                    </label>
+                    <label class="block text-xs text-gray-700">评分项（每行「名称,满分」，合计 100）
+                        <textarea name="live_new_rubric_criteria" rows="5" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm font-mono" placeholder="演唱技巧,40&#10;舞台表现,30&#10;情感表达,30" {% if not first_round_editable %}disabled{% endif %}></textarea>
+                    </label>
+                    <p class="text-xs text-gray-500">填写了名称和评分项就会新建并使用它；否则使用上面的已有评分标准。</p>
+                </div>
+            </details>
+            {% else %}
+            <p class="text-sm text-amber-700">还没有绑定第一轮评分轮，暂时不能配置评分标准。</p>
+            {% endif %}
+        </section>
+
+        <section id="section-groups" class="rounded-lg border border-gray-200 bg-white p-5">
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">第一轮分组名单</h2>
+            {% if tasks %}
+            {% for task in tasks %}
+            {% if task.key == "groups" %}
+            <p class="text-sm {% if task.ready %}text-green-700{% else %}text-amber-700{% endif %}">
+                {% if task.ready %}✓ 分组已经录好、确认并冻结。{% else %}○ 还没有完成：{{ task.detail }}{% endif %}
+            </p>
+            <p class="mt-2 text-sm text-gray-600">分组是独立的一份名单，不在轮次编辑页里维护。</p>
+            <a href="{{ task.url }}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">{{ task.action }}</a>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        </section>
+
         <div class="flex flex-wrap items-center gap-3">
             <button class="touch-target bg-brand text-white rounded text-sm">保存赛制</button>
             <a href="{% url 'staff:ruleset_edit' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">高级：原始绑定</a>
@@ -199,34 +280,32 @@
     </section>
 
     <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
-        <div class="flex items-center justify-between gap-3">
-            <h2 class="text-lg font-semibold text-gray-900">我还差什么（准备清单）</h2>
-            <span class="text-sm {% if outstanding %}text-amber-700{% else %}text-green-700{% endif %}">
-                {% if outstanding %}还缺 {{ outstanding }} 项。{% elif blocker %}还差上面那一项。{% else %}全部就绪，可以冻结。{% endif %}
-            </span>
-        </div>
-        <ul class="mt-3 space-y-2 text-sm">
-            {% for row in checklist %}
-            <li class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2">
-                <span>
-                    {% if row.pending %}
-                    <span class="text-gray-300">·</span>
-                    <span class="text-gray-500">{{ row.label }}</span>
-                    {% elif row.done %}
-                    <span class="text-green-600">✓</span>
-                    <span class="text-gray-700">{{ row.label }}</span>
-                    {% else %}
-                    <span class="text-amber-600">○</span>
-                    <span class="text-gray-900 font-medium">{{ row.label }}</span>
+        <details>
+            <summary class="text-lg font-semibold text-gray-900 cursor-pointer">系统检查（冻结前）</summary>
+            <p class="mt-1 text-xs text-gray-500">这些是系统在冻结时自己核对的一致性项目，通常不需要手动处理；填完上面的 7 项后它们会自动通过。</p>
+            <ul class="mt-3 space-y-2 text-sm">
+                {% for row in system_checklist %}
+                <li class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2">
+                    <span>
+                        {% if row.pending %}
+                        <span class="text-gray-300">·</span>
+                        <span class="text-gray-500">{{ row.label }}</span>
+                        {% elif row.done %}
+                        <span class="text-green-600">✓</span>
+                        <span class="text-gray-700">{{ row.label }}</span>
+                        {% else %}
+                        <span class="text-amber-600">○</span>
+                        <span class="text-gray-900 font-medium">{{ row.label }}</span>
+                        {% endif %}
+                        {% if row.detail %}<span class="ml-1 text-xs text-gray-500">{{ row.detail }}</span>{% endif %}
+                    </span>
+                    {% if row.url and not row.done and not row.pending %}
+                    <a href="{{ row.url }}" class="text-xs border border-brand text-brand rounded px-3 py-1 shrink-0">{{ row.action }}</a>
                     {% endif %}
-                    {% if row.detail %}<span class="ml-1 text-xs text-gray-500">{{ row.detail }}</span>{% endif %}
-                </span>
-                {% if row.url and not row.done and not row.pending %}
-                <a href="{{ row.url }}" class="text-xs border border-brand text-brand rounded px-3 py-1 shrink-0">{{ row.action }}</a>
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
+                </li>
+                {% endfor %}
+            </ul>
+        </details>
     </section>
 
     <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">

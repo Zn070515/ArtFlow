@@ -7632,7 +7632,8 @@ class RulesetTemplateLibraryTests(TestCase):
             follow=True,
         )
 
-        self.assertContains(response, "2026 决赛赛制已保存")
+        self.assertContains(response, "已保存")
+        self.assertContains(response, "当前进度")
         ruleset = ContestRuleset.objects.get(activity=activity)
         live = ruleset.live_challenge
         self.assertEqual(live["participant_count"], 12)

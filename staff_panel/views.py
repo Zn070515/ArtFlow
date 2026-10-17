@@ -96,15 +96,18 @@ from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.live_format import (
+    PREPARATION_TASK_ROW_KEYS,
     _bound_first_round,
     apply_live_2026_counts,
     clone_first_round_for_successor,
     freeze_blocker,
     is_live_2026_template,
+    live_2026_preparation_tasks,
     live_2026_readiness,
     live_challenge_counts_for_activity,
     live_challenge_counts_from_binding,
     provision_live_2026_ruleset,
+    save_live_2026_preparation,
 )
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.planning import (
@@ -5999,9 +6002,12 @@ def _live_weight_percent(raw) -> str:
     """Render a stored weight fraction as the percentage the operators think in."""
 
     try:
-        return f"{Decimal(str(raw)) * 100:g}"
+        value = Decimal(str(raw)) * 100
     except (InvalidOperation, ValueError):
         return ""
+    if value == value.to_integral_value():
+        return str(int(value))
+    return f"{value.normalize():f}"
 
 
 def _is_live_2026_ruleset(ruleset) -> bool:
@@ -6032,21 +6038,23 @@ def _live_2026_checklist(version) -> list[dict]:
     questionnaire_url = reverse("staff:ruleset_questionnaire", args=[version.pk])
     bound_round = _bound_first_round(ruleset)
     round_url = (
-        reverse("staff:round_edit", args=[bound_round.pk])
+        "#section-people"
         if bound_round is not None
         else reverse("staff:round_create") + f"?activity_id={ruleset.activity_id}"
     )
+    group_url = _live_2026_group_url(version)
     links = {
-        "counts": (config_url, "本页填写"),
-        "weights": (config_url, "本页填写"),
-        "podium": (config_url, "本页填写"),
-        "judges": (config_url, "本页填写"),
+        "counts": ("#section-people", "本页填写"),
+        "weights": ("#section-scoring", "本页填写"),
+        "podium": ("#section-scoring", "本页填写"),
+        "judges": ("#section-judges", "本页填写"),
         "binding": (config_url, "本页填写"),
         "definition": (edit_url, "去编辑器"),
-        "round_seats": (round_url, "去轮次页"),
-        "round_judges": (round_url, "去轮次页"),
-        "rubric": (round_url, "去轮次页"),
-        "round_contract": (round_url, "去轮次页"),
+        "round_seats": (round_url, "本页填写"),
+        "round_judges": ("#section-judges", "本页填写"),
+        "rubric": ("#section-rubric", "本页填写"),
+        "groups": (group_url, "去录入分组"),
+        "round_contract": (edit_url, "去编辑器"),
         "questionnaire": (questionnaire_url, "去填写"),
         "successor": (questionnaire_url, "去检查"),
         # 已核定结果要靠撤回赛段结果来释放，那不是一页配置。
@@ -6061,7 +6069,7 @@ def _live_2026_checklist(version) -> list[dict]:
                 "label": item.label,
                 "done": item.ready,
                 # A row whose own prerequisite has not been met is neither done nor missing;
-                # counting it as missing would misreport how much is actually left.
+                # the user-task layer counts it as unfinished without pretending to know why.
                 "pending": item.unknown,
                 "detail": item.message,
                 "url": url,
@@ -6069,6 +6077,74 @@ def _live_2026_checklist(version) -> list[dict]:
             }
         )
     return rows
+
+
+def _live_2026_group_url(version) -> str:
+    """The group stage that owns the first-round grouping, linked from the task list."""
+
+    ruleset = version.ruleset
+    first_round_key = str((ruleset.live_challenge or {}).get("podium_first_round_key") or "r1")
+    stage_keys = ruleset.group_stage_keys or {}
+    stage_id = stage_keys.get(first_round_key)
+    if stage_id in (None, "") and len(stage_keys) == 1:
+        stage_id = next(iter(stage_keys.values()))
+    stage = None
+    if stage_id not in (None, ""):
+        stage = GroupStage.objects.filter(pk=stage_id, activity=ruleset.activity_id).first()
+    if stage is None:
+        stage = GroupStage.objects.filter(activity=ruleset.activity_id).order_by("-pk").first()
+    if stage is not None:
+        return reverse("staff:group_stage_detail", args=[stage.pk])
+    return reverse("staff:group_stage_create", args=[ruleset.activity_id])
+
+
+def _live_2026_tasks(version) -> list[dict]:
+    """The stable seven-task operator view of the preparation checklist."""
+
+    links = {
+        "counts": ("#section-people", "本页填写"),
+        "challenge_weights": ("#section-scoring", "本页填写"),
+        "podium_weights": ("#section-scoring", "本页填写"),
+        "judges": ("#section-judges", "本页填写"),
+        "rubric": ("#section-rubric", "本页填写"),
+        "groups": (_live_2026_group_url(version), "去录入分组"),
+        "questionnaire": (
+            reverse("staff:ruleset_questionnaire", args=[version.pk]),
+            "去填写",
+        ),
+    }
+    rows = []
+    for task in live_2026_preparation_tasks(version):
+        url, action = links.get(task.key, ("", ""))
+        rows.append(
+            {
+                "key": task.key,
+                "label": task.label,
+                "ready": task.ready,
+                "pending": task.pending,
+                "detail": task.detail,
+                "url": url,
+                "action": action,
+            }
+        )
+    return rows
+
+
+def _parse_rubric_criteria(text: str) -> list[dict]:
+    """Parse the workbench's "名称,满分" lines into rubric criteria."""
+
+    criteria: list[dict] = []
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip().replace("，", ",")
+        if not line:
+            continue
+        name, separator, score = line.partition(",")
+        if not separator or not name.strip() or not score.strip():
+            raise ValidationError(
+                f"评分项第 {line_number} 行格式应为「名称,满分」，例如「演唱技巧,40」。"
+            )
+        criteria.append({"name": name.strip(), "max_score": score.strip()})
+    return criteria
 
 
 @staff_required
@@ -6091,14 +6167,7 @@ def ruleset_live_2026_config(request, pk):
 
     if request.method == "POST":
         _ensure_activity_mutable(ruleset.activity)
-        binding = _snapshot_binding(ruleset)
-        config = dict(ruleset.live_challenge or {})
-        # 踢馆人数 is recomputed by ``validate_binding``; carrying the stored value forward
-        # would have it disagree with the freshly derived one the moment anybody changes the
-        # numbers, and the staleness guard would refuse the save.
-        config.pop("challenge_count", None)
-        binding["live_challenge"] = {
-            **config,
+        live_challenge = {
             "participant_count": request.POST.get("live_participant_count"),
             "seat_count": request.POST.get("live_seat_count"),
             "group_count": request.POST.get("live_group_count"),
@@ -6112,22 +6181,50 @@ def ruleset_live_2026_config(request, pk):
             "final_judge_ids": request.POST.getlist("live_final_judge_ids"),
             "final_minimum_judge_count": request.POST.get("live_final_minimum_judges"),
         }
+        rubric_id = (request.POST.get("live_first_rubric_id") or "").strip()
+        first_rubric = None
+        if rubric_id:
+            first_rubric = ScoringRubric.objects.filter(
+                pk=rubric_id, activity=ruleset.activity
+            ).first()
+            if first_rubric is None:
+                messages.error(request, "选择的评分标准不属于当前活动。")
+                return redirect("staff:ruleset_live_2026_config", pk=version.pk)
         try:
-            # One unit: if the round cannot follow the new seat count, the binding edit must
-            # not stand either — a binding that says 8 seats beside a round that advances 10
-            # is exactly the kind of disagreeing state this page exists to prevent.
-            with transaction.atomic():
-                update_ruleset_binding(
-                    ruleset,
-                    binding=binding,
-                    operator=request.user,
-                    base_binding=request.POST.get("base_binding") or None,
-                )
-                apply_live_2026_counts(ruleset, version, operator=request.user)
+            new_rubric_criteria = _parse_rubric_criteria(
+                request.POST.get("live_new_rubric_criteria") or ""
+            )
+        except ValidationError as exc:
+            messages.error(request, domain_error_messages(exc))
+            return redirect("staff:ruleset_live_2026_config", pk=version.pk)
+
+        before = {task.key: task for task in live_2026_preparation_tasks(version)}
+        try:
+            result = save_live_2026_preparation(
+                version,
+                operator=request.user,
+                live_challenge=live_challenge,
+                base_binding=request.POST.get("base_binding") or None,
+                first_judge_count=request.POST.get("live_first_judge_count"),
+                first_minimum_judges=request.POST.get("live_first_minimum_judges"),
+                first_rubric=first_rubric,
+                new_rubric_name=request.POST.get("live_new_rubric_name") or "",
+                new_rubric_criteria=new_rubric_criteria,
+            )
         except (ValidationError, PermissionDenied) as exc:
             messages.error(request, domain_error_messages(exc))
         else:
-            messages.success(request, "2026 决赛赛制已保存。")
+            after = live_2026_preparation_tasks(result.version)
+            newly = [task.label for task in after if task.ready and not before[task.key].ready]
+            remaining = [task.label for task in after if not task.ready]
+            completed = sum(1 for task in after if task.ready)
+            parts = ["已保存。"]
+            if newly:
+                parts.append("本次完成：" + "、".join(newly) + "。")
+            parts.append(f"当前进度：{completed} / {len(after)}。")
+            if remaining:
+                parts.append("还需完成：" + "、".join(remaining) + "。")
+            messages.success(request, "".join(parts))
         return redirect("staff:ruleset_live_2026_config", pk=version.pk)
 
     config = dict(ruleset.live_challenge or {})
@@ -6140,6 +6237,14 @@ def ruleset_live_2026_config(request, pk):
         else None
     )
     checklist = _live_2026_checklist(version)
+    tasks = _live_2026_tasks(version)
+    completed_count = sum(1 for task in tasks if task["ready"])
+    first_round_editable = bool(
+        first_round
+        and first_round.status == ContestRound.Status.DRAFT
+        and not first_round.is_locked
+        and first_round.pk not in current_frozen_round_ids(ruleset, excluding_version=version)
+    )
     return render(
         request,
         "staff_panel/ruleset_live_2026_config.html",
@@ -6186,7 +6291,21 @@ def ruleset_live_2026_config(request, pk):
                 not in current_frozen_round_ids(ruleset, excluding_version=version)
             ),
             "checklist": checklist,
-            "outstanding": sum(1 for row in checklist if not row["done"] and not row["pending"]),
+            "system_checklist": [
+                row for row in checklist if row["key"] not in PREPARATION_TASK_ROW_KEYS
+            ],
+            "tasks": tasks,
+            "completed_count": completed_count,
+            "total_count": len(tasks),
+            "remaining_count": len(tasks) - completed_count,
+            "rubrics": ScoringRubric.objects.filter(
+                activity=ruleset.activity,
+                is_test_data=runtime_is_test(ruleset.activity),
+            ).order_by("sequence", "pk"),
+            "first_judge_count": first_round.judge_count if first_round else None,
+            "first_minimum_judges": first_round.minimum_judge_count if first_round else None,
+            "first_rubric_id": first_round.rubric_id if first_round else None,
+            "first_round_editable": first_round_editable,
             # The authoritative answer, from the walk the freeze itself performs: the
             # checklist below is more granular, but this is the line that cannot disagree
             # with the freeze button.

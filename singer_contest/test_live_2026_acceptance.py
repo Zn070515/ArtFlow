@@ -953,10 +953,8 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         rows = {row["key"]: row for row in response.context["checklist"]}
         self.assertFalse(rows["rubric"]["done"])
-        # The link goes to the round that is actually unfinished, and resolves.
-        self.assertEqual(
-            rows["rubric"]["url"], reverse("staff:round_edit", args=[self.first_round.pk])
-        )
+        # The workbench, not the generic round editor, is where the rubric is filled.
+        self.assertEqual(rows["rubric"]["url"], "#section-rubric")
         for row in rows.values():
             if row["done"] or row["key"] == "finality":
                 # 已核定结果要靠撤回赛段结果释放，那不是一页配置。
@@ -984,6 +982,161 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
         rows = {row["key"]: row for row in response.context["checklist"]}
         self.assertTrue(rows["round_seats"]["url"].startswith(reverse("staff:round_create")))
         self.assertIn(f"activity_id={self.activity.pk}", rows["round_seats"]["url"])
+
+    def _config_post(self, **overrides):
+        live = self.ruleset.live_challenge
+        data = {
+            "live_participant_count": str(self.PARTICIPANTS),
+            "live_seat_count": str(self.SEATS),
+            "live_group_count": str(self.GROUP_COUNT),
+            "live_group_size": str(self.GROUP_SIZE),
+            "live_first_weight": live["first_round_weight"],
+            "live_challenge_weight": live["challenge_round_weight"],
+            "live_podium_first_weight": live["podium_first_round_weight"],
+            "live_podium_third_weight": live["podium_third_round_weight"],
+            "live_challenge_judge_ids": [str(judge.pk) for judge in self.judges[:4]],
+            "live_challenge_minimum_judges": str(live["challenge_minimum_judge_count"]),
+            "live_final_judge_ids": [str(judge.pk) for judge in self.judges[1:]],
+            "live_final_minimum_judges": str(live["final_minimum_judge_count"]),
+            "live_first_judge_count": str(self.first_round.judge_count or ""),
+            "live_first_minimum_judges": str(self.first_round.minimum_judge_count or ""),
+            "live_first_rubric_id": str(self.first_round.rubric_id or ""),
+        }
+        data.update(overrides)
+        return data
+
+    def _tasks(self):
+        response = self.staff.get(self._config_url())
+        self.assertEqual(response.status_code, 200)
+        tasks = {task["key"]: task for task in response.context["tasks"]}
+        return (
+            response,
+            tasks,
+            response.context["completed_count"],
+            response.context["remaining_count"],
+        )
+
+    def test_filling_both_weight_pairs_completes_two_tasks_and_never_goes_back(self):
+        config = dict(self.ruleset.live_challenge)
+        config.update(
+            {
+                "first_round_weight": "",
+                "challenge_round_weight": "",
+                "podium_first_round_weight": "",
+                "podium_third_round_weight": "",
+            }
+        )
+        self.ruleset.live_challenge = config
+        self.ruleset.save(update_fields=["live_challenge"])
+
+        _, tasks, before_completed, before_remaining = self._tasks()
+        self.assertFalse(tasks["challenge_weights"]["ready"])
+        self.assertFalse(tasks["podium_weights"]["ready"])
+
+        self.staff.post(
+            self._config_url(),
+            self._config_post(
+                live_first_weight="40%",
+                live_challenge_weight="60%",
+                live_podium_first_weight="30%",
+                live_podium_third_weight="70%",
+            ),
+            follow=True,
+        )
+
+        response, tasks, after_completed, after_remaining = self._tasks()
+        self.assertTrue(tasks["challenge_weights"]["ready"])
+        self.assertTrue(tasks["podium_weights"]["ready"])
+        self.assertEqual(after_completed, before_completed + 2)
+        self.assertEqual(after_remaining, before_remaining - 2)
+        self.assertEqual(response.context["weights"]["first_round_weight"], "40")
+        self.assertEqual(response.context["weights"]["podium_third_round_weight"], "70")
+
+    def test_filling_the_judge_panels_completes_its_task(self):
+        config = dict(self.ruleset.live_challenge)
+        config.update({"challenge_judge_ids": [], "final_judge_ids": []})
+        self.ruleset.live_challenge = config
+        self.ruleset.save(update_fields=["live_challenge"])
+
+        _, tasks, before_completed, before_remaining = self._tasks()
+        self.assertFalse(tasks["judges"]["ready"])
+
+        self.staff.post(self._config_url(), self._config_post(), follow=True)
+
+        _, tasks, after_completed, after_remaining = self._tasks()
+        self.assertTrue(tasks["judges"]["ready"])
+        self.assertEqual(after_completed, before_completed + 1)
+        self.assertEqual(after_remaining, before_remaining - 1)
+
+    def test_the_workbench_fills_first_round_judges_and_rubric_without_the_round_editor(self):
+        rubric = self.first_round.rubric
+        with authority_write(CONTEST_ROUND_STATE):
+            self.first_round.judge_count = None
+            self.first_round.minimum_judge_count = None
+            self.first_round.rubric = None
+            self.first_round.save(update_fields=["judge_count", "minimum_judge_count", "rubric"])
+
+        _, tasks, before_completed, before_remaining = self._tasks()
+        self.assertFalse(tasks["judges"]["ready"])
+        self.assertFalse(tasks["rubric"]["ready"])
+
+        self.staff.post(
+            self._config_url(),
+            self._config_post(
+                live_first_judge_count=str(self.JUDGE_COUNT),
+                live_first_minimum_judges="4",
+                live_first_rubric_id=str(rubric.pk),
+            ),
+            follow=True,
+        )
+
+        self.first_round.refresh_from_db()
+        self.assertEqual(self.first_round.judge_count, self.JUDGE_COUNT)
+        self.assertEqual(self.first_round.minimum_judge_count, 4)
+        self.assertEqual(self.first_round.rubric_id, rubric.pk)
+        _, tasks, after_completed, after_remaining = self._tasks()
+        self.assertTrue(tasks["judges"]["ready"])
+        self.assertTrue(tasks["rubric"]["ready"])
+        self.assertEqual(after_completed, before_completed + 2)
+        self.assertEqual(after_remaining, before_remaining - 2)
+
+    def test_the_workbench_can_create_a_rubric_inline(self):
+        with authority_write(CONTEST_ROUND_STATE):
+            self.first_round.rubric = None
+            self.first_round.save(update_fields=["rubric"])
+
+        self.staff.post(
+            self._config_url(),
+            self._config_post(
+                live_first_rubric_id="",
+                live_new_rubric_name="现场评分表",
+                live_new_rubric_criteria="演唱技巧,40\n舞台表现,30\n情感表达,30",
+            ),
+            follow=True,
+        )
+
+        self.first_round.refresh_from_db()
+        rubric = ScoringRubric.objects.get(pk=self.first_round.rubric_id)
+        self.assertEqual(rubric.name, "现场评分表")
+        self.assertEqual(rubric.criteria.count(), 3)
+        self.assertEqual(
+            sum(criterion.max_score for criterion in rubric.criteria.all()),
+            Decimal("100"),
+        )
+
+    def test_the_checklist_links_each_task_to_the_page_that_fixes_it(self):
+        response, _, _, _ = self._tasks()
+        rows = {row["key"]: row for row in response.context["checklist"]}
+
+        self.assertEqual(
+            rows["groups"]["url"],
+            reverse("staff:group_stage_detail", args=[self.group_stage.pk]),
+        )
+        self.assertEqual(rows["rubric"]["url"], "#section-rubric")
+        self.assertEqual(rows["round_judges"]["url"], "#section-judges")
+        self.assertEqual(rows["round_seats"]["url"], "#section-people")
+        for key in ("round_seats", "round_judges", "rubric"):
+            self.assertNotIn("/rounds/", rows[key]["url"])
 
     def test_a_frozen_authority_is_shown_as_official_not_as_an_editable_draft(self):
         """The workspace used to offer "继续准备今年赛制" on a frozen version, i.e. a 403."""
