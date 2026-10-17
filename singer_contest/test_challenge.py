@@ -6,6 +6,7 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    LIVE_CHALLENGE_STATE,
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     SINGER_CONTESTANT_NUMBER,
@@ -16,9 +17,12 @@ from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
+from django.utils import timezone
 from entry_access.services import redeem_access_grant
 from questionnaire.services import get_or_create_response, mark_submitted, save_draft_answers
+from ruleset.live_format import freeze_blocker
 from ruleset.models import ContestRuleset, RulesetVersion
+from ruleset.services import freeze_ruleset_version, supersede_ruleset_version
 from tests.helpers import postgresql_only
 
 from .challenge_services import (
@@ -59,7 +63,13 @@ from .models import (
     ScoreSummary,
     SingerRegistration,
 )
-from .services import apply_scores, current_round_roster
+from .services import (
+    apply_scores,
+    current_round_roster,
+    reset_round_to_draft,
+    round_execution_authority_message,
+    unlock_round,
+)
 
 
 class _LiveChallengeFixtureMixin:
@@ -71,6 +81,7 @@ class _LiveChallengeFixtureMixin:
 
     PARTICIPANTS = 15
     SEATS = 10
+    IS_TEST_MODE = True
 
     def setUp(self):
         with authority_write(ACCOUNT_AUTHORITY):
@@ -81,7 +92,7 @@ class _LiveChallengeFixtureMixin:
             self.activity = Activity.objects.create(
                 title="Live challenge",
                 activity_type=Activity.Type.SINGER_CONTEST,
-                is_test_mode=True,
+                is_test_mode=self.IS_TEST_MODE,
             )
         transition_activity_phase(self.activity, Activity.Phase.TESTING, actor=self.staff)
         with authority_write(CONTEST_ROUND_STATE):
@@ -142,12 +153,12 @@ class _LiveChallengeFixtureMixin:
                     average_score=Decimal(100 - number),
                     rank=number,
                     is_advanced=number <= self.SEATS,
-                    is_test_data=True,
+                    is_test_data=self.IS_TEST_MODE,
                 )
         ruleset = ContestRuleset.objects.create(
             activity=self.activity,
             name="2026 现场赛制",
-            is_test_data=True,
+            is_test_data=self.IS_TEST_MODE,
         )
         with authority_write(RULESET_FREEZE):
             self.version = RulesetVersion.objects.create(
@@ -1103,6 +1114,106 @@ class LiveChallengeAuthorityTests(_LiveChallengeFixtureMixin, TestCase):
                 command_id="tie-confirm",
                 expected_revision=match.session.revision,
             )
+
+
+class LiveChallengeAuthorityConsumerTests(_LiveChallengeFixtureMixin, TestCase):
+    """A materialised challenge session is runtime authority, not a derived view.
+
+    R1 does not need a judge panel to reach the challenge: a rapid-score path can lock and
+    finalize it directly. The reset and freeze gates used to look only for panels and
+    CONFIRMED stage results, so this window could reset R1 — deleting the scores, entries and
+    judges the session had frozen — unlock it, and then freeze a successor, leaving an ACTIVE
+    session under a v1 that is no longer the activity's current authority.
+    """
+
+    IS_TEST_MODE = False
+
+    def _session(self):
+        return create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="formal-consumer-create",
+        )
+
+    def _assert_takeover_is_closed(self) -> None:
+        successor = supersede_ruleset_version(self.version, created_by=self.staff)
+
+        blocker = freeze_blocker(successor)
+        self.assertIsNotNone(blocker)
+        assert blocker is not None  # for the type checker, not for the test
+        self.assertEqual(blocker.key, "finality")
+        self.assertIn("踢馆会话", blocker.message)
+        # The reset is not an escape hatch here: it would delete the facts the session froze.
+        self.assertNotIn("重置为草稿", blocker.message)
+        with self.assertRaisesMessage(ValidationError, "踢馆会话"):
+            freeze_ruleset_version(successor, self.staff)
+
+        self.version.refresh_from_db()
+        self.assertTrue(self.version.is_current)
+
+    def test_a_live_session_blocks_reset_unlock_and_successor_freeze(self):
+        session = self._session()
+
+        with self.assertRaisesMessage(ValidationError, "踢馆会话"):
+            reset_round_to_draft(self.round, self.staff, reason="换版前撤销现场准备")
+        with self.assertRaisesMessage(ValidationError, "踢馆会话"):
+            unlock_round(self.round, self.staff, note="换版前撤销现场准备")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.LOCKED)
+        self.assertTrue(self.round.is_locked)
+        self._assert_takeover_is_closed()
+        session.refresh_from_db()
+        self.assertEqual(session.ruleset_version_id, self.version.pk)
+
+    def test_a_confirmed_session_before_the_third_round_blocks_the_same_actions(self):
+        session = self._session()
+        # The narrow window the reviewer named: the ten seats are confirmed, but no third
+        # round exists yet, so neither the downstream-round guard nor a stage-result guard
+        # can see the session.
+        with authority_write(LIVE_CHALLENGE_STATE):
+            session.state = ChallengeSession.State.CONFIRMED
+            session.confirmed_by = self.staff
+            session.confirmed_at = timezone.now()
+            session.save(update_fields=["state", "confirmed_by", "confirmed_at"])
+
+        with self.assertRaisesMessage(ValidationError, "踢馆会话"):
+            reset_round_to_draft(self.round, self.staff, reason="换版前撤销现场准备")
+        with self.assertRaisesMessage(ValidationError, "踢馆会话"):
+            unlock_round(self.round, self.staff, note="换版前撤销现场准备")
+
+        self.round.refresh_from_db()
+        self.assertEqual(self.round.status, ContestRound.Status.LOCKED)
+        self._assert_takeover_is_closed()
+
+    def test_a_revoked_match_no_longer_provides_round_provenance(self):
+        session = self._session()
+        turn = session.turns.order_by("sequence").first()
+        seat = session.seats.order_by("position").first()
+        assert turn is not None and seat is not None
+        score_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            name="撤销的踢馆评分轮",
+            judge_count=4,
+            minimum_judge_count=4,
+        )
+        with authority_write(LIVE_CHALLENGE_STATE):
+            ChallengeMatch.objects.create(
+                session=session,
+                turn=turn,
+                seat=seat,
+                challenger=turn.challenger,
+                defender=seat.current_holder,
+                status=ChallengeMatch.Status.REVOKED,
+                score_round=score_round,
+                is_test_data=session.is_test_data,
+            )
+
+        # The round is not bound by the format and its only challenge link is revoked, so it
+        # must not be treated as one the current authority generated.
+        self.assertIsNotNone(round_execution_authority_message(score_round))
 
 
 @postgresql_only
