@@ -17,7 +17,6 @@ from core.services import transition_activity_phase
 from django.core.exceptions import ValidationError
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
-from django.utils import timezone
 from entry_access.services import redeem_access_grant
 from questionnaire.services import get_or_create_response, mark_submitted, save_draft_answers
 from ruleset.live_format import freeze_blocker
@@ -1169,14 +1168,30 @@ class LiveChallengeAuthorityConsumerTests(_LiveChallengeFixtureMixin, TestCase):
 
     def test_a_confirmed_session_before_the_third_round_blocks_the_same_actions(self):
         session = self._session()
-        # The narrow window the reviewer named: the ten seats are confirmed, but no third
-        # round exists yet, so neither the downstream-round guard nor a stage-result guard
-        # can see the session.
-        with authority_write(LIVE_CHALLENGE_STATE):
-            session.state = ChallengeSession.State.CONFIRMED
-            session.confirmed_by = self.staff
-            session.confirmed_at = timezone.now()
-            session.save(update_fields=["state", "confirmed_by", "confirmed_at"])
+        # The narrow window the reviewer named: the ten seats are confirmed through the real
+        # service, but no third round exists yet, so neither the downstream-round guard nor a
+        # stage-result guard can see the session.
+        for sequence in range(1, 6):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"formal-confirm-start-{sequence}",
+                expected_revision=session.revision,
+            )
+            session = waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"formal-confirm-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="现场顺延",
+            ).session
+        session = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="formal-confirm-session",
+            expected_revision=session.revision,
+        )
+        self.assertEqual(session.state, ChallengeSession.State.CONFIRMED)
 
         with self.assertRaisesMessage(ValidationError, "踢馆会话"):
             reset_round_to_draft(self.round, self.staff, reason="换版前撤销现场准备")
