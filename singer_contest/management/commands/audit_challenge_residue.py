@@ -8,9 +8,10 @@ The audit trail can: ``CHALLENGE_SCORE_PREPARE`` records the generated ``score_r
 and ``CHALLENGE_FINAL_ROUND_PREPARE`` records the R3 in its target.
 
 The default run is read-only. ``--delete`` removes only DRAFT, unlocked rounds inside an
-activity that is still in the TEST lifecycle, that nothing links to, and that no ruleset
-editing or history surface claims. A round an operator deliberately rebound is no longer
-residue; deleting it would leave a dangling formal binding.
+activity that is still in the TEST lifecycle, that no match, session or group stage still
+links to, and that no ruleset editing or history surface claims. A round an operator
+deliberately rebound is no longer residue; deleting it would leave a dangling formal
+binding. One candidate refusing deletion never stops the others.
 """
 
 from __future__ import annotations
@@ -21,8 +22,10 @@ from collections import Counter
 from common.authority import TEST_DATA_CLEANUP, authority_write
 from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 
 from singer_contest.models import ChallengeMatch, ContestRound
 from singer_contest.services import _round_is_claimed_by_a_binding
@@ -79,6 +82,11 @@ def _classify(contest_round: ContestRound, *, activity) -> str:
         and contest_round.roster_source_challenge_session_id
     ):
         # The final round still belongs to a live session; normal cleanup owns it.
+        return "still_linked"
+    if contest_round.group_stages_sourcing.exists():
+        # A group stage PROTECTs its source round. Any surviving FK — DRAFT or not — means
+        # this round has been reused; deciding whether that stage may let go is the stage
+        # lifecycle's job, not this repair command's.
         return "still_linked"
     if _is_claimed_by_any_binding(contest_round):
         return "rebound"
@@ -172,7 +180,13 @@ class Command(BaseCommand):
 
         deleted = 0
         for contest_round in orphaned:
-            outcome = _delete_orphan_under_lock(contest_round.pk)
+            try:
+                outcome = _delete_orphan_under_lock(contest_round.pk)
+            except (ValidationError, ProtectedError) as error:
+                # A conservative refusal on one candidate must not stop the others. Each
+                # candidate is its own transaction, so previous deletions stay committed.
+                self.stderr.write(f"  skipped round={contest_round.pk} reason=protected: {error}")
+                continue
             if outcome == "deleted":
                 deleted += 1
             else:
