@@ -192,11 +192,18 @@ def _session_for_update(session_id: int, operator):
     if initial is None:
         raise ValidationError("踢馆会话不存在。")
     locked_activity = lock_activity_for_action(initial.activity, ActivityAction.SCORE)
+    # The first read happened before the activity lock; the cleanup lifecycle may have
+    # removed the session while this command waited. Re-read under the lock and turn that
+    # disappearance into a domain error — an ORM ``DoesNotExist`` here would escape the
+    # console's ValidationError handler as a 500.
     session = (
         ChallengeSession.objects.select_for_update()
         .select_related("activity", "source_round", "ruleset_version")
-        .get(pk=session_id)
+        .filter(pk=session_id)
+        .first()
     )
+    if session is None:
+        raise ValidationError("踢馆会话已结束或已被清理，请刷新页面。")
     if session.activity_id != locked_activity.pk:
         raise ValidationError("踢馆会话活动上下文不一致。")
     return current_operator, session
