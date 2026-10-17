@@ -97,6 +97,7 @@
     <form method="post" class="space-y-6">
         {% csrf_token %}
         <input type="hidden" name="base_binding" value="{{ binding_signature }}">
+        <input type="hidden" name="base_round_configuration" value="{{ base_round_configuration }}">
 
         <section id="section-people" class="rounded-lg border border-gray-200 bg-white p-5">
             <h2 class="text-lg font-semibold text-gray-900 mb-1">修改人数与流程</h2>
@@ -215,8 +216,8 @@
         </section>
 
         <section id="section-rubric" class="rounded-lg border border-gray-200 bg-white p-5">
-            <h2 class="text-lg font-semibold text-gray-900 mb-1">第一轮评分标准</h2>
-            <p class="text-xs text-gray-500 mb-4">第一轮统一使用这一份评分标准。评分项满分合计必须为 100 分。</p>
+            <h2 class="text-lg font-semibold text-gray-900 mb-1">三轮统一评分标准</h2>
+            <p class="text-xs text-gray-500 mb-4">第一轮、踢馆轮、第三轮都使用这一套评分项；评分项满分合计必须为 100 分。</p>
             {% if first_round %}
             <label class="block text-sm text-gray-700">使用已有评分标准
                 <select name="live_first_rubric_id" class="mt-1 w-full border border-gray-300 rounded px-2 py-1 text-sm" {% if not first_round_editable %}disabled{% endif %}>
@@ -243,21 +244,6 @@
             {% endif %}
         </section>
 
-        <section id="section-groups" class="rounded-lg border border-gray-200 bg-white p-5">
-            <h2 class="text-lg font-semibold text-gray-900 mb-1">第一轮分组名单</h2>
-            {% if tasks %}
-            {% for task in tasks %}
-            {% if task.key == "groups" %}
-            <p class="text-sm {% if task.ready %}text-green-700{% else %}text-amber-700{% endif %}">
-                {% if task.ready %}✓ 分组已经录好、确认并冻结。{% else %}○ 还没有完成：{{ task.detail }}{% endif %}
-            </p>
-            <p class="mt-2 text-sm text-gray-600">分组是独立的一份名单，不在轮次编辑页里维护。</p>
-            <a href="{{ task.url }}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">{{ task.action }}</a>
-            {% endif %}
-            {% endfor %}
-            {% endif %}
-        </section>
-
         <div class="flex flex-wrap items-center gap-3">
             <button class="touch-target bg-brand text-white rounded text-sm">保存赛制</button>
             <a href="{% url 'staff:ruleset_edit' version.pk %}" class="touch-target border border-gray-300 rounded text-sm">高级：原始绑定</a>
@@ -265,6 +251,44 @@
         </div>
         <p class="text-xs text-gray-500">同一份绑定在两处都能改；若两边同时打开，后保存的一方会被提示「已被其他编辑修改」。</p>
     </form>
+
+    <section id="section-groups" class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">第一轮分组名单</h2>
+        {% for task in tasks %}
+        {% if task.key == "groups" %}
+        <p class="text-sm {% if task.ready %}text-green-700{% else %}text-amber-700{% endif %}">
+            {% if task.ready %}✓ 分组已经录好、确认、冻结并绑定到本版赛制。{% else %}○ {{ task.detail }}{% endif %}
+        </p>
+        {% endif %}
+        {% endfor %}
+
+        {% if bound_group_stage %}
+        <p class="mt-2 text-sm text-gray-700">当前绑定：{{ bound_group_stage.name }}（{{ bound_group_stage.get_status_display }}）。</p>
+        <a href="{% url 'staff:group_stage_detail' bound_group_stage.pk %}" class="inline-block mt-2 text-xs border border-brand text-brand rounded px-3 py-1">打开分组页</a>
+        {% else %}
+        <p class="mt-2 text-sm text-gray-600">分组是独立的一份名单，不在轮次编辑页里维护。先创建分组，再录入名单、确认并冻结；冻结后会自动绑定到本版赛制。</p>
+        <form method="post" class="mt-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_group_stage">
+            <button class="touch-target bg-brand text-white rounded text-sm">创建第一轮分组</button>
+        </form>
+        {% if unbound_group_stages %}
+        <form method="post" class="mt-4 flex flex-wrap items-end gap-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="bind_group_stage">
+            <label class="block text-sm text-gray-700">已有分组
+                <select name="group_stage_id" class="mt-1 border border-gray-300 rounded px-2 py-1 text-sm">
+                    {% for stage in unbound_group_stages %}
+                    <option value="{{ stage.pk }}">{{ stage.name }}（{{ stage.get_status_display }}）</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button class="touch-target border border-brand text-brand rounded text-sm">绑定选中的已冻结分组</button>
+        </form>
+        <p class="mt-2 text-xs text-gray-500">只有状态为「已冻结」的分组可以绑定；草稿或已确认的分组请先打开完成流程。</p>
+        {% endif %}
+        {% endif %}
+    </section>
 
     <section class="rounded-lg border border-gray-200 bg-white p-5 mt-6">
         <h2 class="text-lg font-semibold text-gray-900 mb-2">正式冻结检查</h2>

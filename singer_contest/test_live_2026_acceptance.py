@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, cast
 
 from accounts.models import User
+from accounts.services import mark_admin_verified
 from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
@@ -31,6 +32,7 @@ from ruleset.services import (
 from ruleset.services import (
     create_ruleset_version as _create_version,
 )
+from ruleset.templates import LIVE_2026_BUILTIN_KEY
 
 from .challenge_services import (
     confirm_challenge_match_result,
@@ -59,6 +61,7 @@ from .judge_authority import (
 from .judge_entry import judge_entry_credential
 from .models import (
     ContestRound,
+    GroupStage,
     Judge,
     Performance,
     PerformanceGroup,
@@ -1138,6 +1141,28 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
         for key in ("round_seats", "round_judges", "rubric"):
             self.assertNotIn("/rounds/", rows[key]["url"])
 
+    def test_a_stale_first_round_configuration_is_refused(self):
+        page = self.staff.get(self._config_url())
+        stale_configuration = page.context["base_round_configuration"]
+
+        # Another staff member changes the first round while this page sits open.
+        with authority_write(CONTEST_ROUND_STATE):
+            self.first_round.judge_count = self.JUDGE_COUNT + 1
+            self.first_round.save(update_fields=["judge_count"])
+
+        response = self.staff.post(
+            self._config_url(),
+            self._config_post(
+                base_round_configuration=stale_configuration,
+                live_first_judge_count=str(self.JUDGE_COUNT + 1),
+            ),
+            follow=True,
+        )
+
+        self.assertContains(response, "第一轮配置已被其他工作人员修改")
+        self.first_round.refresh_from_db()
+        self.assertEqual(self.first_round.judge_count, self.JUDGE_COUNT + 1)
+
     def test_a_frozen_authority_is_shown_as_official_not_as_an_editable_draft(self):
         """The workspace used to offer "继续准备今年赛制" on a frozen version, i.e. a 403."""
 
@@ -1631,3 +1656,152 @@ class Live2026RoundExecutionAuthorityTests(_Live2026AcceptanceFixtureMixin, Test
         self.assertTrue(frozen.is_current)
         self.version.refresh_from_db()
         self.assertFalse(self.version.is_current)
+
+
+class Live2026FreshWorkbenchTests(TestCase):
+    """A brand-new built-in activity is completed through Staff HTTP routes only.
+
+    No fixture pre-binds a GroupStage, no test writes ``group_stage_keys`` directly, and
+    no step opens the generic round editor. If this passes, a staff member who has never
+    heard of ContestRound or GroupStage can go from "new activity" to "frozen format".
+    """
+
+    def setUp(self):
+        from django.core.management import call_command
+
+        call_command("seed_ruleset_templates")
+        with authority_write(ACCOUNT_AUTHORITY):
+            self.admin = User.objects.create_user(
+                username="fresh-workbench-admin", password="pass", role=User.Role.ADMIN
+            )
+        with authority_write(ACTIVITY_STATE):
+            self.activity = Activity.objects.create(
+                title="2026 全新工作台",
+                activity_type=Activity.Type.SINGER_CONTEST,
+                is_test_mode=True,
+            )
+        transition_activity_phase(self.activity, Activity.Phase.TESTING, actor=self.admin)
+        self.judges = [
+            Judge.objects.create(activity=self.activity, name=f"现场评委 {index}")
+            for index in range(1, 6)
+        ]
+        self.singers = []
+        for number in range(1, 16):
+            with authority_write(ACCOUNT_AUTHORITY):
+                user = User.objects.create_user(
+                    username=f"fresh-workbench-singer-{number}", password="pass"
+                )
+            singer = SingerRegistration.objects.create(
+                activity=self.activity,
+                user=user,
+                name=f"选手 {number}",
+                student_id=f"fresh-workbench-{number:02d}",
+                college="艺术学院",
+                class_name="一班",
+                phone=f"1390000{number:04d}",
+                song_name=f"第一轮曲目 {number}",
+                pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=True,
+            )
+            with authority_write(SINGER_CONTESTANT_NUMBER):
+                singer.official_number = number
+                singer.save(update_fields=["official_number", "updated_at"])
+            self.singers.append(singer)
+        self.client.force_login(self.admin)
+        session = self.client.session
+        mark_admin_verified(session)
+        session.save()
+
+    def _config_url(self, version: RulesetVersion) -> str:
+        return reverse("staff:ruleset_live_2026_config", args=[version.pk])
+
+    def test_a_fresh_built_in_is_prepared_grouped_and_frozen_through_the_ui(self):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        response = self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 渡梦工作台"},
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        version = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        ruleset = version.ruleset
+        first_round = ContestRound.objects.get(pk=ruleset.round_keys["r1"])
+
+        # Genuinely fresh: the operator items and the grouping are still empty.
+        self.assertIsNone(first_round.judge_count)
+        self.assertIsNone(first_round.rubric_id)
+        self.assertEqual(ruleset.group_stage_keys, {})
+
+        page = self.client.get(self._config_url(version))
+        self.assertEqual(page.status_code, 200)
+        tasks = {task["key"]: task for task in page.context["tasks"]}
+        self.assertFalse(tasks["challenge_weights"]["ready"])
+        self.assertFalse(tasks["podium_weights"]["ready"])
+        self.assertFalse(tasks["groups"]["ready"])
+
+        saved = self.client.post(
+            self._config_url(version),
+            {
+                "base_binding": page.context["binding_signature"],
+                "base_round_configuration": page.context["base_round_configuration"],
+                "live_participant_count": "15",
+                "live_seat_count": "10",
+                "live_group_count": "5",
+                "live_group_size": "3",
+                "live_first_weight": "40",
+                "live_challenge_weight": "60",
+                "live_podium_first_weight": "30",
+                "live_podium_third_weight": "70",
+                "live_challenge_judge_ids": [str(judge.pk) for judge in self.judges[:4]],
+                "live_challenge_minimum_judges": "4",
+                "live_final_judge_ids": [str(judge.pk) for judge in self.judges[1:]],
+                "live_final_minimum_judges": "4",
+                "live_first_judge_count": "5",
+                "live_first_minimum_judges": "4",
+                "live_new_rubric_name": "2026 统一评分表",
+                "live_new_rubric_criteria": "演唱技巧,40\n舞台表现,30\n情感表达,30",
+            },
+            follow=True,
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertContains(saved, "已保存")
+        first_round.refresh_from_db()
+        self.assertEqual(first_round.judge_count, 5)
+        self.assertEqual(first_round.minimum_judge_count, 4)
+        self.assertIsNotNone(first_round.rubric_id)
+
+        page = self.client.get(self._config_url(version))
+        tasks = {task["key"]: task for task in page.context["tasks"]}
+        self.assertTrue(tasks["challenge_weights"]["ready"])
+        self.assertTrue(tasks["podium_weights"]["ready"])
+        self.assertTrue(tasks["judges"]["ready"])
+        self.assertTrue(tasks["rubric"]["ready"])
+        self.assertFalse(tasks["groups"]["ready"])
+
+        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        stage = GroupStage.objects.get(activity=self.activity, stage_key="r1_chorus")
+        payload: dict[str, object] = {}
+        for index, start in enumerate(range(0, 15, 3), start=1):
+            payload[f"group_name_{index}"] = f"第 {index} 组"
+            payload[f"group_singer_ids_{index}"] = [
+                str(singer.pk) for singer in self.singers[start : start + 3]
+            ]
+        self.client.post(reverse("staff:group_stage_record", args=[stage.pk]), payload, follow=True)
+        self.client.post(reverse("staff:group_stage_confirm", args=[stage.pk]), follow=True)
+        self.client.post(reverse("staff:group_stage_freeze", args=[stage.pk]), follow=True)
+
+        stage.refresh_from_db()
+        ruleset.refresh_from_db()
+        self.assertEqual(stage.status, GroupStage.Status.FROZEN)
+        self.assertEqual(ruleset.group_stage_keys, {"r1": stage.pk})
+
+        page = self.client.get(self._config_url(version))
+        self.assertEqual(page.context["completed_count"], 7)
+        self.assertEqual(page.context["remaining_count"], 0)
+
+        frozen = self.client.post(reverse("staff:ruleset_freeze", args=[version.pk]), follow=True)
+        self.assertEqual(frozen.status_code, 200)
+        version.refresh_from_db()
+        self.assertEqual(version.status, RulesetVersion.Status.FROZEN)
+        self.assertTrue(version.is_current)
+        self.assertEqual(version.binding["group_stage_keys"], {"r1": stage.pk})
