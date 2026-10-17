@@ -50,7 +50,7 @@
             {% if can_revoke_session %}
             <section class="rounded border border-amber-200 bg-amber-50 p-3 mb-4">
                 <h3 class="font-semibold text-amber-900">撤销尚未开始的挑战流程</h3>
-                <p class="text-sm text-amber-800 mt-1">只有还没有处理任何一次挑战机会、也没有建立比赛时才能撤销。撤销后第一轮恢复可解锁/重置，可以修正成绩后重新建立挑战流程；撤销记录保留在审计日志中。</p>
+                <p class="text-sm text-amber-800 mt-1">只有还没有处理任何一次挑战机会、也没有建立比赛时才能撤销。撤销后第一轮恢复解锁资格，可以更正正式成绩后重新建立挑战流程；只有本轮没有不可回收的正式评委组快照时才能重置轮次。撤销记录保留在审计日志中。</p>
                 <form method="post" class="flex flex-wrap items-end gap-3 mt-2" onsubmit="return confirm('确认撤销挑战流程？撤销后可以更正第一轮成绩并重新建立，但撤销记录会保留在审计日志中。');">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="revoke">

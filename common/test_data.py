@@ -43,6 +43,7 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         ChallengeSession,
         ChallengeTurn,
         CompositeResult,
+        ContestRound,
         CriterionScore,
         Group,
         GroupStage,
@@ -56,6 +57,22 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
     )
     from tickets.models import Ticket, TicketAccessSession
     from voting.models import VoteBallot, VoteOption, VoteRecord, VoteSession
+
+    challenge_round_ids = set(
+        ChallengeMatch.objects.filter(
+            session__activity=activity,
+            session__is_test_data=True,
+            score_round__isnull=False,
+        ).values_list("score_round_id", flat=True)
+    )
+    challenge_round_ids.update(
+        ContestRound.objects.filter(
+            activity=activity,
+            roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
+            roster_source_challenge_session__activity=activity,
+            roster_source_challenge_session__is_test_data=True,
+        ).values_list("pk", flat=True)
+    )
 
     return {
         "singer_registrations": SingerRegistration.objects.filter(
@@ -106,6 +123,11 @@ def get_test_data_counts(activity: Any) -> dict[str, int]:
         "challenge_commands": ChallengeCommand.objects.filter(
             session__activity=activity, session__is_test_data=True
         ).count(),
+        # Challenge-score and final rounds are generated runtime, not configuration. They
+        # have no is_test_data column of their own, so their identity is the link back to a
+        # TEST session; counting them is what makes "the rehearsal left something behind"
+        # visible before the activity leaves test mode.
+        "challenge_rounds": len(challenge_round_ids),
         "awards": Award.objects.filter(activity=activity, is_test_data=True).count(),
         "stage_results": StageResult.objects.filter(activity=activity, is_test_data=True).count(),
         "stage_decisions": StageDecision.objects.filter(
@@ -344,6 +366,27 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
     # the session itself. Remove the graph in dependency-reverse order under the single
     # authority that owns challenge state; leaving it to the singer delete below would
     # raise ProtectedError and roll the whole cleanup back.
+    #
+    # Two of those rounds were *generated* by the challenge and are not retained config:
+    # each ChallengeMatch owns a per-match scoring round, and a confirmed session owns the
+    # final R3 (``ContestRound.roster_source_challenge_session`` is PROTECT). The reset loop
+    # above returned them to DRAFT; they must be deleted here, between the match rows that
+    # point at them and the session the final round protects.
+    challenge_round_ids: set[int] = set(
+        ChallengeMatch.objects.filter(
+            session__activity=locked_activity,
+            session__is_test_data=True,
+            score_round__isnull=False,
+        ).values_list("score_round_id", flat=True)
+    )
+    challenge_round_ids.update(
+        ContestRound.objects.filter(
+            activity=locked_activity,
+            roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
+            roster_source_challenge_session__activity=locked_activity,
+            roster_source_challenge_session__is_test_data=True,
+        ).values_list("pk", flat=True)
+    )
     with authority_write(LIVE_CHALLENGE_STATE):
         ChallengeCommand.objects.filter(  # type: ignore[no-untyped-call]
             session__activity=locked_activity, session__is_test_data=True
@@ -351,6 +394,12 @@ def clear_activity_test_data(activity: Any, *, operator: Any) -> dict[str, int]:
         ChallengeMatch.objects.filter(  # type: ignore[no-untyped-call]
             session__activity=locked_activity, session__is_test_data=True
         ).delete()
+    with authority_write(TEST_DATA_CLEANUP):
+        for challenge_round_id in sorted(challenge_round_ids):
+            ContestRound.objects.filter(  # type: ignore[no-untyped-call]
+                pk=challenge_round_id, activity=locked_activity
+            ).delete()
+    with authority_write(LIVE_CHALLENGE_STATE):
         ChallengeTurn.objects.filter(  # type: ignore[no-untyped-call]
             session__activity=locked_activity,
             session__is_test_data=True,

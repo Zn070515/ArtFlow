@@ -19,7 +19,7 @@ from django.db.models import Max
 from django.utils import timezone
 from questionnaire.projection import questionnaire_song_for_key
 from ruleset.models import RulesetVersion
-from ruleset.services import LIVE_CHALLENGE_FORMAT_KEY
+from ruleset.services import LIVE_CHALLENGE_FORMAT_KEY, current_frozen_version
 
 from .materials import LIVE_PERSONAL_ROUNDS
 from .models import (
@@ -413,6 +413,12 @@ def _ensure_session_dependencies_current(
         versions = versions.select_for_update()
     source_round = source_rounds.get(pk=session.source_round_id, activity_id=session.activity_id)
     version = versions.get(pk=session.ruleset_version_id)
+    # Defense in depth: the freeze finality gate should make a successor unable to replace
+    # this authority, but a legacy/restored row or an internal caller could still present a
+    # session bound to a retired version. No live command may act under it.
+    current = current_frozen_version(session.activity)
+    if current is None or current.pk != version.pk:
+        raise ValidationError("当前正式赛制已变化，当前踢馆会话不能继续沿用。")
     summaries = _validate_source_round(source_round, version)
     current_source_fp = _source_fingerprint(source_round, summaries)
     current_ruleset_hash = _current_ruleset_hash(version)
@@ -527,6 +533,12 @@ def create_challenge_session(
         .select_related("ruleset")
         .get(pk=ruleset_version.pk)
     )
+    # The caller names a version, but the activity's current FROZEN authority is the only
+    # one that may materialise live challenge state. The Staff UI already passes the same
+    # version; enforcing it here keeps the service correct for every other caller.
+    current = current_frozen_version(locked_activity)
+    if current is None or current.pk != locked_version.pk:
+        raise ValidationError("踢馆会话只能从当前正式赛制建立。")
     first_weight, challenge_weight = _configured_weights(
         locked_version, first_round_weight, challenge_round_weight
     )

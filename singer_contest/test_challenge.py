@@ -12,7 +12,7 @@ from common.authority import (
     SINGER_CONTESTANT_NUMBER,
     authority_write,
 )
-from common.test_data import clear_activity_test_data, get_test_data_counts
+from common.test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -1346,64 +1346,203 @@ class LiveChallengeAuthorityConsumerTests(_LiveChallengeFixtureMixin, TestCase):
                 reason="staff 不能撤销",
             )
 
+    def test_revoke_with_a_formal_panel_allows_unlock_but_not_reset(self):
+        # A real first round is prepared and panelled before it is locked. Once the session
+        # is revoked, unlocking is legitimate again — but the formal panel still owns its
+        # RoundJudge rows, so the reset refusal is the correct behaviour, not a failed revoke.
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.SCORING
+            self.round.is_locked = False
+            self.round.save(update_fields=["status", "is_locked"])
+        panel = prepare_judge_panel(self.round.pk, operator=self.staff)
+        self.assertFalse(panel.is_test_data)
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.LOCKED
+            self.round.is_locked = True
+            self.round.save(update_fields=["status", "is_locked"])
+
+        session = self._session()
+        revoke_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="formal-revoke-panel",
+            expected_revision=session.revision,
+            reason="第一轮成绩需要更正",
+        )
+
+        unlocked = unlock_round(self.round, self.staff, note="撤销后更正第一轮")
+        self.assertEqual(unlocked.status, ContestRound.Status.SCORING)
+        with self.assertRaisesMessage(ValidationError, "评委组快照不可回收"):
+            reset_round_to_draft(self.round, self.staff, reason="撤销后更正第一轮")
+
+    def test_create_session_rejects_a_retired_frozen_version(self):
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
+            RulesetVersion.objects.create(
+                ruleset=self.version.ruleset,
+                version=2,
+                definition=self.version.definition,
+                binding=self.version.binding,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+
+        with self.assertRaisesMessage(ValidationError, "当前正式赛制"):
+            create_challenge_session(
+                self.round,
+                ruleset_version=self.version,
+                operator=self.staff,
+                command_id="retired-version-create",
+            )
+
+        self.assertFalse(ChallengeSession.objects.filter(activity=self.activity).exists())
+
+    def test_a_session_stops_when_its_version_is_no_longer_current(self):
+        session = self._session()
+        # Legacy/restored state: the session's version is retired behind its back. No live
+        # command may keep acting under it even though the fingerprints still match.
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=self.version.pk).update(is_current=False)
+            RulesetVersion.objects.create(
+                ruleset=self.version.ruleset,
+                version=2,
+                definition=self.version.definition,
+                binding=self.version.binding,
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+
+        with self.assertRaisesMessage(ValidationError, "当前正式赛制已变化"):
+            start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id="stale-version-start",
+                expected_revision=session.revision,
+            )
+
 
 class ChallengeTestDataCleanupTests(_LiveChallengeFixtureMixin, TestCase):
     """A completed TEST rehearsal must actually be clearable.
 
-    Challenge rows PROTECT their singers, their rounds and the session itself, but the
-    cleanup lifecycle used to know nothing about them. The round-reset phase (which ignores
-    TEST sessions by design) then succeeded, the singer delete hit ``ProtectedError``, and
-    the whole ``@transaction.atomic`` cleanup rolled back — a full rehearsal could not leave
-    test mode.
+    Challenge rows PROTECT their singers, their rounds and the session itself, and two of
+    those rounds are *generated* by the challenge: each match's scoring round and the final
+    R3 (``ContestRound.roster_source_challenge_session`` is PROTECT). Cleanup must delete the
+    generated rounds — not merely reset them — or the session delete fails, or a DRAFT
+    challenge round follows the activity into FORMAL and pollutes its sequence.
     """
 
-    def test_clear_test_data_removes_the_whole_challenge_graph(self):
-        session = create_challenge_session(
+    def _session(self):
+        return create_challenge_session(
             self.round,
             ruleset_version=self.version,
             operator=self.staff,
             command_id="cleanup-create",
         )
-        turn = session.turns.order_by("sequence").first()
-        seat = session.seats.order_by("position").first()
-        assert turn is not None and seat is not None
-        score_round = ContestRound.objects.create(
-            activity=self.activity,
-            round_type=ContestRound.RoundType.SEMI_FINAL,
-            name="踢馆评分轮",
-            judge_count=4,
-            minimum_judge_count=4,
-        )
-        with authority_write(LIVE_CHALLENGE_STATE):
-            ChallengeMatch.objects.create(
-                session=session,
-                turn=turn,
-                seat=seat,
-                challenger=turn.challenger,
-                defender=seat.current_holder,
-                status=ChallengeMatch.Status.READY_FOR_SCORING,
-                score_round=score_round,
-                is_test_data=session.is_test_data,
+
+    def _waive_all_turns(self, session):
+        for sequence in range(1, self.PARTICIPANTS - self.SEATS + 1):
+            turn = start_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"cleanup-start-{sequence}",
+                expected_revision=session.revision,
             )
+            session = waive_challenge_turn(
+                session.pk,
+                operator=self.staff,
+                command_id=f"cleanup-waive-{sequence}",
+                expected_revision=turn.session.revision,
+                reason="彩排顺延",
+            ).session
+        return session
+
+    def test_clear_test_data_removes_a_real_dynamic_score_round(self):
+        session = self._session()
+        turn = start_challenge_turn(
+            session.pk,
+            operator=self.staff,
+            command_id="cleanup-dynamic-start",
+            expected_revision=session.revision,
+        )
+        target = record_challenge_target(
+            session.pk,
+            seat_position=1,
+            operator=self.staff,
+            command_id="cleanup-dynamic-target",
+            expected_revision=turn.session.revision,
+        )
+        match = confirm_challenge_pairing(
+            session.pk,
+            operator=self.staff,
+            command_id="cleanup-dynamic-pair",
+            expected_revision=target.session.revision,
+        )
+        match = prepare_challenge_match(
+            session.pk,
+            operator=self.staff,
+            command_id="cleanup-dynamic-prepare",
+            expected_revision=match.session.revision,
+        )
+        score_round_id = match.score_round_id
+        assert score_round_id is not None
+        self.assertTrue(RoundPanelSnapshot.objects.filter(round_id=score_round_id).exists())
+        self.assertTrue(Performance.objects.filter(round_id=score_round_id).exists())
 
         counts = get_test_data_counts(self.activity)
-        self.assertEqual(counts["challenge_sessions"], 1)
-        self.assertEqual(counts["challenge_seats"], self.SEATS)
-        self.assertEqual(counts["challenge_turns"], self.PARTICIPANTS - self.SEATS)
-        self.assertEqual(counts["challenge_matches"], 1)
-        self.assertEqual(counts["challenge_commands"], 1)
+        self.assertEqual(counts["challenge_rounds"], 1)
 
         cleared = clear_activity_test_data(self.activity, operator=self.staff)
 
-        self.assertEqual(cleared["challenge_sessions"], 1)
-        self.assertEqual(cleared["singer_registrations"], self.PARTICIPANTS)
+        self.assertEqual(cleared["challenge_rounds"], 1)
+        self.assertFalse(ContestRound.objects.filter(pk=score_round_id).exists())
+        self.assertFalse(RoundPanelSnapshot.objects.filter(round_id=score_round_id).exists())
+        self.assertFalse(Performance.objects.filter(round_id=score_round_id).exists())
+        self.assertFalse(ChallengeSession.objects.filter(activity=self.activity).exists())
+        self.assertFalse(SingerRegistration.objects.filter(activity=self.activity).exists())
+        # The configured first round is retained; only generated runtime rounds go.
+        self.assertTrue(ContestRound.objects.filter(pk=self.round.pk).exists())
+
+    def test_clear_test_data_removes_the_final_round_and_keeps_it_out_of_formal(self):
+        session = self._waive_all_turns(self._session())
+        session = confirm_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="cleanup-confirm",
+            expected_revision=session.revision,
+        )
+        final_round = create_final_round_from_challenge(
+            session.pk,
+            operator=self.staff,
+            command_id="cleanup-final-round",
+            expected_revision=session.revision,
+        )
+        self.assertEqual(final_round.roster_source, ContestRound.RosterSource.CHALLENGE_SESSION)
+        self.assertEqual(final_round.status, ContestRound.Status.PREPARED)
+
+        counts = get_test_data_counts(self.activity)
+        self.assertEqual(counts["challenge_rounds"], 1)
+        cleared = clear_activity_test_data(self.activity, operator=self.staff)
+        self.assertEqual(cleared["challenge_rounds"], 1)
+
+        self.assertFalse(ContestRound.objects.filter(pk=final_round.pk).exists())
         self.assertFalse(ChallengeSession.objects.filter(activity=self.activity).exists())
         self.assertFalse(ChallengeSeat.objects.filter(session__activity=self.activity).exists())
         self.assertFalse(ChallengeTurn.objects.filter(session__activity=self.activity).exists())
-        self.assertFalse(ChallengeMatch.objects.filter(session__activity=self.activity).exists())
         self.assertFalse(ChallengeCommand.objects.filter(session__activity=self.activity).exists())
         self.assertFalse(SingerRegistration.objects.filter(activity=self.activity).exists())
-        # Rounds are retained configuration: cleanup resets them, it does not delete them.
+        self.assertTrue(ContestRound.objects.filter(pk=self.round.pk).exists())
+
+        leave_test_mode(self.activity, operator=self.staff, clear=True, reason="彩排结束")
+        self.activity.refresh_from_db()
+        self.assertFalse(self.activity.is_test_mode)
+        self.assertEqual(self.activity.data_lifecycle, Activity.DataLifecycle.FORMAL)
+        self.assertFalse(ContestRound.objects.filter(pk=final_round.pk).exists())
+        self.assertFalse(
+            ContestRound.objects.filter(
+                activity=self.activity,
+                roster_source=ContestRound.RosterSource.CHALLENGE_SESSION,
+            ).exists()
+        )
         self.assertTrue(ContestRound.objects.filter(pk=self.round.pk).exists())
 
 
