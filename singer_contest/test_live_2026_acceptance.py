@@ -1836,6 +1836,7 @@ class Live2026FreshWorkbenchTests(TestCase):
     def _form_data(self, page, *, group_count=5, include_first_round=False):
         data = {
             "base_binding": page.context["binding_signature"],
+            "base_binding_revision": page.context["binding_revision"],
             "base_first_round_configuration": page.context["base_first_round_configuration"],
             "live_participant_count": "15",
             "live_seat_count": "10",
@@ -2058,9 +2059,15 @@ class Live2026FreshWorkbenchTests(TestCase):
             operator=self.admin,
         )
         self._finish_group_stage(alternate, group_count=5)
+        page = self.client.get(self._config_url(version2))
         self.client.post(
             self._config_url(version2),
-            {"action": "bind_group_stage", "group_stage_id": alternate.pk},
+            {
+                "action": "bind_group_stage",
+                "group_stage_id": alternate.pk,
+                "base_binding": page.context["binding_signature"],
+                "base_binding_revision": page.context["binding_revision"],
+            },
             follow=True,
         )
         version2.ruleset.refresh_from_db()
@@ -2139,6 +2146,151 @@ class Live2026FreshWorkbenchTests(TestCase):
         abandoned.refresh_from_db()
         self.assertEqual(abandoned.status, GroupStage.Status.DRAFT)
         self.assertNotEqual(successor_stage.pk, abandoned.pk)
+
+    def test_a_stale_explicit_group_bind_is_refused(self):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 显式绑定并发"},
+            follow=True,
+        )
+        version = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version))
+        self.client.post(
+            self._config_url(version),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+        self.client.post(self._config_url(version), {"action": "create_group_stage"}, follow=True)
+        bound = GroupStage.objects.get(
+            activity=self.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version,
+        )
+        self._finish_group_stage(bound, group_count=5)
+
+        stage_c = create_group_stage(
+            self.activity, stage_key="generic_c", name="分组 C", operator=self.admin
+        )
+        self._finish_group_stage(stage_c, group_count=5)
+        stage_d = create_group_stage(
+            self.activity, stage_key="generic_d", name="分组 D", operator=self.admin
+        )
+        self._finish_group_stage(stage_d, group_count=5)
+
+        stale_page = self.client.get(self._config_url(version))
+        stale_tokens = {
+            "action": "bind_group_stage",
+            "base_binding": stale_page.context["binding_signature"],
+            "base_binding_revision": stale_page.context["binding_revision"],
+        }
+        self.client.post(
+            self._config_url(version),
+            {**stale_tokens, "group_stage_id": stage_c.pk},
+            follow=True,
+        )
+        version.ruleset.refresh_from_db()
+        key = str(version.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+        self.assertEqual(version.ruleset.group_stage_keys[key], stage_c.pk)
+
+        # The second staff member's page still carries the pre-C token.
+        response = self.client.post(
+            self._config_url(version),
+            {**stale_tokens, "group_stage_id": stage_d.pk},
+            follow=True,
+        )
+
+        self.assertContains(response, "已被其他编辑修改")
+        version.ruleset.refresh_from_db()
+        self.assertEqual(version.ruleset.group_stage_keys[key], stage_c.pk)
+
+    def test_auto_bind_uses_the_binding_revision_so_a_c_a_is_not_mistaken_for_no_change(self):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 ABA"},
+            follow=True,
+        )
+        version1 = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version1))
+        self.client.post(
+            self._config_url(version1),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        stage_a = GroupStage.objects.get(
+            activity=self.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version1,
+        )
+        self._finish_group_stage(stage_a, group_count=5)
+        self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
+        version1.refresh_from_db()
+
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 ABA（后继）"},
+            follow=True,
+        )
+        version2 = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        assert version2 is not None
+        key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+
+        # The preview records A and the revision at that moment.
+        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        preview = (
+            GroupStage.objects.filter(
+                activity=self.activity,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=version2,
+            )
+            .order_by("-pk")
+            .get()
+        )
+
+        stage_c = create_group_stage(
+            self.activity, stage_key="generic_aba_c", name="分组 C", operator=self.admin
+        )
+        self._finish_group_stage(stage_c, group_count=5)
+
+        page = self.client.get(self._config_url(version2))
+        self.client.post(
+            self._config_url(version2),
+            {
+                "action": "bind_group_stage",
+                "group_stage_id": stage_c.pk,
+                "base_binding": page.context["binding_signature"],
+                "base_binding_revision": page.context["binding_revision"],
+            },
+            follow=True,
+        )
+        page = self.client.get(self._config_url(version2))
+        self.client.post(
+            self._config_url(version2),
+            {
+                "action": "bind_group_stage",
+                "group_stage_id": stage_a.pk,
+                "base_binding": page.context["binding_signature"],
+                "base_binding_revision": page.context["binding_revision"],
+            },
+            follow=True,
+        )
+        version2.ruleset.refresh_from_db()
+        self.assertEqual(version2.ruleset.group_stage_keys[key], stage_a.pk)
+
+        # A -> C -> A looks unchanged to a value-only CAS; the revision is not the same.
+        self._finish_group_stage(preview, group_count=5)
+        version2.ruleset.refresh_from_db()
+        preview.refresh_from_db()
+        self.assertEqual(preview.status, GroupStage.Status.FROZEN)
+        self.assertEqual(version2.ruleset.group_stage_keys[key], stage_a.pk)
 
 
 @postgresql_only

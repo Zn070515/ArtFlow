@@ -1938,7 +1938,12 @@ def save_business_ruleset(
 
 @transaction.atomic
 def update_ruleset_binding(
-    ruleset: ContestRuleset, *, binding: dict, operator, base_binding: str | None = None
+    ruleset: ContestRuleset,
+    *,
+    binding: dict,
+    operator,
+    base_binding: str | None = None,
+    base_binding_revision: int | None = None,
 ) -> ContestRuleset:
     """Persist a ContestRuleset binding edit under the Activity-first lock.
 
@@ -1951,6 +1956,9 @@ def update_ruleset_binding(
     locked = ContestRuleset.objects.select_for_update().get(pk=ruleset.pk)
     if base_binding is not None and _binding_signature(locked) != base_binding:
         raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
+    if base_binding_revision is not None and base_binding_revision != locked.binding_revision:
+        # The monotonic counter also catches A -> C -> A, which a content signature cannot.
+        raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
     normalized = validate_binding(locked, binding)
     locked.stage_key = normalized["stage_key"]
     locked.round_keys = normalized["round_keys"]
@@ -1962,9 +1970,11 @@ def update_ruleset_binding(
     locked.live_challenge = normalized.get("live_challenge") or {}
     locked.announcement_blocks = normalized["announcement_blocks"]
     locked.announcement_blocks_by_checkpoint = normalized["announcement_blocks_by_checkpoint"]
+    locked.binding_revision = (locked.binding_revision or 0) + 1
     locked.save(
         update_fields=[
             "stage_key",
+            "binding_revision",
             "round_keys",
             "vote_keys",
             "vote_scoring_rule_keys",
