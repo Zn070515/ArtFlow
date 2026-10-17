@@ -2781,15 +2781,23 @@ def evaluate_freeze_gate(
         return FreezeEvaluation(
             blocker=_freeze_blocker("finality", error), normalized_binding=None, plan=None
         )
-    runtime_facts = _prior_authority_runtime_facts(prior) if prior is not None else []
-    if prior is not None and runtime_facts:
+    live_challenge = _prior_authority_live_challenge(prior) if prior is not None else None
+    runtime_facts = (
+        _prior_authority_runtime_facts(prior, live_challenge=live_challenge)
+        if prior is not None
+        else []
+    )
+    if prior is not None and (runtime_facts or live_challenge is not None):
         # A CONFIRMED result is the end of a round's life, not the beginning of it. Freezing
         # in the window before that hands ``current_frozen_version`` to the successor while
-        # the venue is still working to the old one.
+        # the venue is still working to the old one. A materialised challenge session is the
+        # same fact one step further: seats and a challenge queue now exist under the old
+        # authority, and no round reset can hand them back.
         error = ValidationError(
             _live_takeover_refusal(
                 runtime_facts,
                 reset_releases_it=_prior_authority_reset_would_release_it(prior),
+                challenge_materialized=live_challenge is not None,
             )
         )
         return FreezeEvaluation(
@@ -2881,7 +2889,31 @@ _LIVE_ROUND_STATES: dict[str, str] = {
 _LIVE_PANEL_STATES: dict[str, str] = {"active": "进行中", "hold": "已暂停"}
 
 
-def _prior_authority_runtime_facts(prior: RulesetVersion) -> list[str]:
+def _prior_authority_live_challenge(prior: RulesetVersion):
+    """A non-revoked formal challenge session in the activity, if one exists.
+
+    A session materialises seats, a challenge queue and per-match scoring rounds, and binds
+    its ``source_score_version`` / ``source_roster_fingerprint`` to the first round's result.
+    Once one exists a successor takeover would leave that machinery running under an
+    authority the activity no longer uses, and no ordinary reset releases it: the source
+    round may have no panel at all, yet resetting it would delete the facts the session
+    froze. That is why the session is checked alongside the panel, not instead of it.
+    """
+
+    from singer_contest.models import ChallengeSession
+
+    return (
+        ChallengeSession._base_manager.filter(
+            activity_id=prior.ruleset.activity_id,
+            is_test_data=False,
+        )
+        .exclude(state=ChallengeSession.State.REVOKED)
+        .order_by("pk")
+        .first()
+    )
+
+
+def _prior_authority_runtime_facts(prior: RulesetVersion, *, live_challenge=None) -> list[str]:
     """What the running authority is already doing, in the venue's own words.
 
     The finality rule used to be a single CONFIRMED ``StageResult``, which is the *end* of a
@@ -2919,21 +2951,28 @@ def _prior_authority_runtime_facts(prior: RulesetVersion) -> list[str]:
     )
     if panel is not None:
         facts.append(f"现场评委组已经建立（{_LIVE_PANEL_STATES[panel.state]}）")
+    if live_challenge is not None:
+        facts.append(f"正式踢馆会话已经建立（{live_challenge.get_state_display()}）")
     return facts
 
 
 def _prior_authority_reset_would_release_it(prior: RulesetVersion) -> bool:
     """Whether resetting the bound rounds would actually free the authority.
 
-    Only while no *formal* judge panel stands on one of them. A panel's members hold
-    ``PROTECT`` references onto the round's ``RoundJudge`` rows and the reset lifecycle
-    deliberately leaves formal snapshots alone, so ``reset_round_snapshots`` refuses such a
-    round outright. Advising "reset it first" there would send the operator to a closed door
-    — and, before that refusal existed, to a ``ProtectedError`` rendered as a 500.
+    Only while no *formal* judge panel stands on one of them and no live challenge session
+    consumed them. A panel's members hold ``PROTECT`` references onto the round's
+    ``RoundJudge`` rows and the reset lifecycle deliberately leaves formal snapshots alone,
+    so ``reset_round_snapshots`` refuses such a round outright. A challenge session is
+    worse: it has no panel requirement at all, yet the reset would delete the scores and
+    advancement its seats and queue were frozen from. Advising "reset it first" in either
+    case would send the operator to a closed door — and, before those refusals existed, to a
+    ``ProtectedError`` rendered as a 500 or to an authority zombie.
     """
 
     from singer_contest.models import RoundPanelSnapshot
 
+    if _prior_authority_live_challenge(prior) is not None:
+        return False
     bound_round_ids = frozen_binding_round_ids(prior.binding)
     if not bound_round_ids:
         return True
@@ -2942,7 +2981,9 @@ def _prior_authority_reset_would_release_it(prior: RulesetVersion) -> bool:
     ).exists()
 
 
-def _live_takeover_refusal(facts: list[str], *, reset_releases_it: bool) -> str:
+def _live_takeover_refusal(
+    facts: list[str], *, reset_releases_it: bool, challenge_materialized: bool = False
+) -> str:
     """The one refusal a mid-flight authority switch gets, with the way out that exists."""
 
     opening = (
@@ -2950,6 +2991,12 @@ def _live_takeover_refusal(facts: list[str], *, reset_releases_it: bool) -> str:
         + "；".join(facts)
         + "），不能直接换版。换版会让现场正在使用的赛制在运行中途被替换。"
     )
+    if challenge_materialized:
+        return (
+            opening + "正式踢馆会话及其席位、挑战队列已经物化，重置轮次不会释放赛制，"
+            "所以没有普通的换版路径。请继续使用当前正式赛制；如需纠正，"
+            "须先走专门的踢馆会话事故撤销流程。"
+        )
     if reset_releases_it:
         return (
             opening + "请先在「比赛轮次」把已经开始的轮次重置为草稿（管理员填写原因，"

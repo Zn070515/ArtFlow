@@ -393,22 +393,34 @@ def _round_is_claimed_by_a_binding(contest_round: ContestRound, ruleset: Contest
 
 
 def _format_names_rounds(ruleset: ContestRuleset) -> bool:
-    """Whether this format's shape names any physical round at all.
+    """Whether this format's *current* shape names any physical round at all.
 
     A ruleset that binds only vote sources or audience scores is not a round shape: the
     classic round flow — create a round, prepare it, score it, lock it — is outside its
     business, and gating it there would refuse rounds the format never had an opinion about.
     Once a format does name a round, every round in that activity has to belong to it.
+
+    Only the live editable surface and the current FROZEN authority decide this. A retired
+    version's binding is history: it says which rounds *were* this format's, and that is what
+    ``_round_is_claimed_by_a_binding`` is for. Letting it vote here would keep a successor
+    that deliberately became vote-only under the old round shape forever — a current v2 with
+    no round binding could never run a classic round because v1 once had one.
     """
 
     from ruleset.models import RulesetVersion
 
     if ruleset.round_keys:
         return True
-    for version in RulesetVersion._base_manager.filter(ruleset=ruleset):
-        if (version.binding or {}).get("round_keys"):
-            return True
-    return False
+    current = (
+        RulesetVersion._base_manager.filter(
+            ruleset=ruleset,
+            status=RulesetVersion.Status.FROZEN,
+            is_current=True,
+        )
+        .order_by("-pk")
+        .first()
+    )
+    return bool(current is not None and (current.binding or {}).get("round_keys"))
 
 
 def _round_is_derived_from_authority(contest_round: ContestRound, version) -> bool:
@@ -436,9 +448,15 @@ def _round_is_derived_from_authority(contest_round: ContestRound, version) -> bo
             and session.state != ChallengeSession.State.REVOKED
         ):
             return True
-    return ChallengeMatch.objects.filter(
-        score_round=contest_round, session__ruleset_version=version
-    ).exists()
+    return (
+        ChallengeMatch.objects.filter(score_round=contest_round, session__ruleset_version=version)
+        # A revoked match no longer provides authority, exactly as in ``judge_authority``.
+        # Without the exclusions a withdrawn challenge would keep its scoring round runnable
+        # under a format that has already disowned it.
+        .exclude(status=ChallengeMatch.Status.REVOKED)
+        .exclude(session__state=ChallengeSession.State.REVOKED)
+        .exists()
+    )
 
 
 def _round_execution_authority(contest_round: ContestRound) -> tuple[str, str] | None:
@@ -1406,6 +1424,10 @@ def reset_round_snapshots(
         or ScoreSummary.objects.filter(round=locked_round, is_test_data=False).exists()
     ):
         raise ValidationError("Test round reset requires test-owned scores and singers.")
+    # A live challenge session owns this round's result by reference. Reset is the one path
+    # that would delete the facts it froze while leaving the session (and its seats and
+    # queue) alive, so it fails closed here, before any row moves.
+    ensure_round_not_consumed_by_live_challenge(locked_round)
     # A formal judge panel is not this lifecycle's to unwind. Its members hold ``PROTECT``
     # references onto the round's RoundJudge rows, so carrying on would raise a
     # ProtectedError *after* the round was already back to DRAFT — a 500 out of a path the
@@ -1500,6 +1522,7 @@ def reset_round_to_draft(contest_round: ContestRound, actor, *, reason: str = ""
         raise PermissionDenied("活动结果已锁定，无法重置轮次。")
     if locked_round.status == ContestRound.Status.DRAFT:
         return locked_round
+    ensure_round_not_consumed_by_live_challenge(locked_round)
     ensure_round_not_consumed_by_confirmed_stage(locked_round)
     for other in (
         ContestRound.objects.select_for_update()
@@ -2226,6 +2249,10 @@ def unlock_round(contest_round: ContestRound, actor, *, note: str = "") -> Conte
         return locked_round
     if locked_round.status != ContestRound.Status.LOCKED or not locked_round.is_locked:
         raise PermissionDenied("该比赛轮次未锁定。")
+    # Unlock is the other half of the same hole: the session's frozen source fingerprint
+    # names a locked result, and returning the round to SCORING destroys that identity
+    # before any downstream challenge command gets a chance to complain.
+    ensure_round_not_consumed_by_live_challenge(locked_round)
     ensure_round_not_consumed_by_confirmed_stage(locked_round)
     for other in (
         ContestRound.objects.select_for_update()
@@ -3480,6 +3507,52 @@ def _stage_consumed_facts(stage) -> dict[str, set]:
         "manual": set(manual_keys),
         "duels": set(duel_keys),
     }
+
+
+_LIVE_CHALLENGE_SOURCE_MSG = (
+    "本轮已经建立正式踢馆会话（席位与挑战队列已经物化），不能重置或解锁。"
+    "踢馆会话冻结了本轮的正式成绩和晋级名单，重置会清空这些事实而会话仍然引用它们。"
+    "请继续使用当前正式赛制；如现场发生事故，须先走专门的踢馆会话撤销流程。"
+)
+
+_LIVE_CHALLENGE_SCORE_ROUND_MSG = (
+    "本轮是正式踢馆比赛的评分轮，不能重置或解锁。"
+    "该轮次的成绩属于一个仍然有效的踢馆会话；请继续使用当前正式赛制，"
+    "如现场发生事故，须先走专门的踢馆会话撤销流程。"
+)
+
+
+def ensure_round_not_consumed_by_live_challenge(contest_round) -> None:
+    """Reject un-winding a round a non-revoked formal challenge session stands on.
+
+    ``ChallengeSession.source_round`` is ``PROTECT`` only against *deleting* the round, so
+    the reset lifecycle can move the round back to DRAFT, delete its scores, entries and
+    judges, and leave the session — with its ``source_score_version``,
+    ``source_roster_fingerprint``, seats and challenge queue — pointing at facts that no
+    longer exist. Unlocking is the same defect one step earlier: the round returns to
+    SCORING under a session whose fingerprints still name the old result. The challenge
+    commands' staleness check would report that only after the authority was destroyed.
+
+    The equivalent test-mode window is left to the test-data cleanup lifecycle, which owns
+    unwinding disposable challenge rows; this gate is about the formal venue.
+    """
+
+    from .models import ChallengeMatch, ChallengeSession
+
+    live_sessions = ChallengeSession._base_manager.filter(
+        activity_id=contest_round.activity_id,
+        is_test_data=False,
+    ).exclude(state=ChallengeSession.State.REVOKED)
+    if live_sessions.filter(source_round_id=contest_round.pk).exists():
+        raise ValidationError(_LIVE_CHALLENGE_SOURCE_MSG)
+    if (
+        ChallengeMatch._base_manager.filter(score_round_id=contest_round.pk)
+        .exclude(status=ChallengeMatch.Status.REVOKED)
+        .exclude(session__state=ChallengeSession.State.REVOKED)
+        .exclude(session__is_test_data=True)
+        .exists()
+    ):
+        raise ValidationError(_LIVE_CHALLENGE_SCORE_ROUND_MSG)
 
 
 def ensure_round_not_consumed_by_confirmed_stage(contest_round) -> None:

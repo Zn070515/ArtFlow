@@ -1898,6 +1898,83 @@ class VoteOnlyFormatRoundTests(TestCase):
 
         self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
 
+    def test_a_successor_that_became_vote_only_is_not_held_by_its_round_history(
+        self,
+    ):
+        """A retired version's round binding is history, not the current format's shape.
+
+        v1 named rounds; v2 deliberately cleared the binding and became vote-only. Reading
+        every historical version to answer "does this format manage rounds?" kept v2's
+        activity under v1's shape forever: a classic round that v2 has no opinion about was
+        refused as "not part of the current official format".
+        """
+
+        admin = _create_provisioned_user(
+            username="vote-only-successor-admin", password="pass", role=User.Role.ADMIN
+        )
+        activity = _create_activity(
+            title="Vote-only successor",
+            activity_type=Activity.Type.SINGER_CONTEST,
+            is_test_mode=False,
+        )
+        activity.phase = Activity.Phase.TESTING
+        with authority_write(ACTIVITY_STATE):
+            activity.save(update_fields=["phase"])
+        historical_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="历史第一轮",
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        ruleset = ContestRuleset.objects.create(activity=activity, name="Vote only successor")
+        vote_only_definition = (
+            '{"schema_version": 1, "nodes": ['
+            '{"key": "assess-audience", "type": "ASSESS", "source": "entry", '
+            '"vote_source": "aud1", "vote_purpose": "SCORE_COMPONENT", '
+            '"scale": "hundred"}]}'
+        )
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=1,
+                definition=vote_only_definition,
+                binding={"round_keys": {"r1": historical_round.pk}},
+                status=RulesetVersion.Status.FROZEN,
+                is_current=False,
+            )
+            RulesetVersion.objects.create(
+                ruleset=ruleset,
+                version=2,
+                definition=vote_only_definition,
+                binding={"audience_keys": {"aud1": "aud1"}},
+                status=RulesetVersion.Status.FROZEN,
+                is_current=True,
+            )
+
+        classic_round = _create_round(
+            activity=activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            name="当前赛制不管理的轮次",
+            judge_count=1,
+            minimum_judge_count=1,
+        )
+        SingerRegistration.objects.create(
+            activity=activity,
+            user=User.objects.create_user(username="vote-only-successor-singer", password="pass"),
+            name="Vote Only Successor Singer",
+            student_id="20260004",
+            college="College",
+            class_name="Class",
+            phone="13800000004",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+
+        prepared = prepare_round(classic_round, admin)
+
+        self.assertEqual(prepared.status, ContestRound.Status.PREPARED)
+
 
 class ParticipantRegistrationFlowTests(TestCase):
     def setUp(self):
