@@ -412,6 +412,13 @@ def freeze_group_stage(stage: GroupStage, operator) -> GroupStage:
         stage=locked_stage,
         new_value=json.dumps(_snapshot(locked_stage), ensure_ascii=False),
     )
+    # A frozen first-round grouping is the 2026 format's input. Join it to the newest
+    # editable 2026 draft here so the ordinary group page completes the whole task; a
+    # conflict is left to the workbench's explicit bind action instead of failing the
+    # freeze. Imported lazily: ruleset.live_format reaches back into singer_contest.
+    from ruleset.live_format import auto_bind_live_2026_group_stage
+
+    auto_bind_live_2026_group_stage(locked_stage, current_operator)
     return locked_stage
 
 

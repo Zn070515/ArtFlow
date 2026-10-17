@@ -99,6 +99,7 @@ from ruleset.live_format import (
     PREPARATION_TASK_ROW_KEYS,
     _bound_first_round,
     apply_live_2026_counts,
+    bind_live_2026_group_stage,
     clone_first_round_for_successor,
     freeze_blocker,
     is_live_2026_template,
@@ -6079,8 +6080,13 @@ def _live_2026_checklist(version) -> list[dict]:
     return rows
 
 
-def _live_2026_group_url(version) -> str:
-    """The group stage that owns the first-round grouping, linked from the task list."""
+def _bound_live_2026_group_stage(version):
+    """The *explicitly bound* first-round group stage, or ``None``.
+
+    Never fall back to "the newest GroupStage in the activity": an older, cancelled or
+    test grouping would send the operator to the wrong object. The workbench section owns
+    creation and explicit binding when this returns ``None``.
+    """
 
     ruleset = version.ruleset
     first_round_key = str((ruleset.live_challenge or {}).get("podium_first_round_key") or "r1")
@@ -6088,14 +6094,18 @@ def _live_2026_group_url(version) -> str:
     stage_id = stage_keys.get(first_round_key)
     if stage_id in (None, "") and len(stage_keys) == 1:
         stage_id = next(iter(stage_keys.values()))
-    stage = None
-    if stage_id not in (None, ""):
-        stage = GroupStage.objects.filter(pk=stage_id, activity=ruleset.activity_id).first()
-    if stage is None:
-        stage = GroupStage.objects.filter(activity=ruleset.activity_id).order_by("-pk").first()
+    if stage_id in (None, ""):
+        return None
+    return GroupStage.objects.filter(pk=stage_id, activity=ruleset.activity_id).first()
+
+
+def _live_2026_group_url(version) -> str:
+    """Where the group task is completed: the bound stage, or the workbench section."""
+
+    stage = _bound_live_2026_group_stage(version)
     if stage is not None:
         return reverse("staff:group_stage_detail", args=[stage.pk])
-    return reverse("staff:group_stage_create", args=[ruleset.activity_id])
+    return "#section-groups"
 
 
 def _live_2026_tasks(version) -> list[dict]:
@@ -6128,6 +6138,10 @@ def _live_2026_tasks(version) -> list[dict]:
             }
         )
     return rows
+
+
+LIVE_2026_GROUP_STAGE_KEY = "r1_chorus"
+LIVE_2026_GROUP_STAGE_NAME = "第一轮分组合唱"
 
 
 def _parse_rubric_criteria(text: str) -> list[dict]:
@@ -6167,6 +6181,44 @@ def ruleset_live_2026_config(request, pk):
 
     if request.method == "POST":
         _ensure_activity_mutable(ruleset.activity)
+        action = (request.POST.get("action") or "").strip()
+        if action == "create_group_stage":
+            stage = GroupStage.objects.filter(
+                activity=ruleset.activity, stage_key=LIVE_2026_GROUP_STAGE_KEY
+            ).first()
+            if stage is None:
+                try:
+                    stage = create_group_stage(
+                        ruleset.activity,
+                        stage_key=LIVE_2026_GROUP_STAGE_KEY,
+                        name=LIVE_2026_GROUP_STAGE_NAME,
+                        operator=request.user,
+                        roster_source=GroupStage.RosterSource.ALL_APPROVED,
+                    )
+                except (PermissionDenied, ValidationError) as exc:
+                    messages.error(request, domain_error_messages(exc))
+                    return redirect("staff:ruleset_live_2026_config", pk=version.pk)
+            return redirect("staff:group_stage_detail", pk=stage.pk)
+        if action == "bind_group_stage":
+            stage = GroupStage.objects.filter(
+                pk=request.POST.get("group_stage_id"), activity=ruleset.activity
+            ).first()
+            if stage is None:
+                messages.error(request, "选择的合并分组不属于当前活动。")
+                return redirect("staff:ruleset_live_2026_config", pk=version.pk)
+            try:
+                bind_live_2026_group_stage(
+                    version,
+                    stage,
+                    operator=request.user,
+                    base_binding=request.POST.get("base_binding") or None,
+                )
+            except (PermissionDenied, ValidationError) as exc:
+                messages.error(request, domain_error_messages(exc))
+            else:
+                messages.success(request, "第一轮分组已绑定到本版赛制。")
+            return redirect("staff:ruleset_live_2026_config", pk=version.pk)
+
         live_challenge = {
             "participant_count": request.POST.get("live_participant_count"),
             "seat_count": request.POST.get("live_seat_count"),
@@ -6205,6 +6257,7 @@ def ruleset_live_2026_config(request, pk):
                 operator=request.user,
                 live_challenge=live_challenge,
                 base_binding=request.POST.get("base_binding") or None,
+                base_round_configuration=request.POST.get("base_round_configuration") or None,
                 first_judge_count=request.POST.get("live_first_judge_count"),
                 first_minimum_judges=request.POST.get("live_first_minimum_judges"),
                 first_rubric=first_rubric,
@@ -6239,6 +6292,12 @@ def ruleset_live_2026_config(request, pk):
     checklist = _live_2026_checklist(version)
     tasks = _live_2026_tasks(version)
     completed_count = sum(1 for task in tasks if task["ready"])
+    bound_group_stage = _bound_live_2026_group_stage(version)
+    unbound_group_stages = (
+        GroupStage.objects.filter(activity=ruleset.activity)
+        .exclude(pk=bound_group_stage.pk if bound_group_stage else -1)
+        .order_by("-pk")
+    )
     first_round_editable = bool(
         first_round
         and first_round.status == ContestRound.Status.DRAFT
@@ -6306,6 +6365,11 @@ def ruleset_live_2026_config(request, pk):
             "first_minimum_judges": first_round.minimum_judge_count if first_round else None,
             "first_rubric_id": first_round.rubric_id if first_round else None,
             "first_round_editable": first_round_editable,
+            "base_round_configuration": business_round_configuration_signature(
+                ContestRound.objects.filter(activity_id=ruleset.activity_id)
+            ),
+            "bound_group_stage": bound_group_stage,
+            "unbound_group_stages": unbound_group_stages,
             # The authoritative answer, from the walk the freeze itself performs: the
             # checklist below is more granular, but this is the line that cannot disagree
             # with the freeze button.

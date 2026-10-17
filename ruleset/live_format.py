@@ -52,12 +52,14 @@ from .services import (
     _validate_2026_live_contract,
     _validate_frozen_questionnaire,
     _validate_successor_questionnaire,
+    business_round_configuration_signature,
     create_ruleset_version,
     current_frozen_round_ids,
     current_frozen_version,
     editable_ruleset_version,
     evaluate_freeze_gate,
     frozen_round_configuration_message,
+    live_2026_first_round_key,
     supersede_ruleset_version,
     update_ruleset_binding,
     validate_binding,
@@ -72,6 +74,12 @@ from .templates import (
     LIVE_2026_PODIUM_KEYS,
     LIVE_2026_SEAT_COUNT,
 )
+
+
+def _is_live_2026_binding(binding: dict) -> bool:
+    live = (binding or {}).get("live_challenge") or {}
+    return isinstance(live, dict) and live.get("format_key") == LIVE_CHALLENGE_FORMAT_KEY
+
 
 LIVE_2026_FIRST_ROUND_NAME = "第一轮"
 #: Marks the round a successor draft owns, so the rounds list does not show two identical
@@ -136,7 +144,7 @@ READINESS_LABELS: dict[str, str] = {
     "judges": "踢馆评委与第三轮评委齐备（含最低有效评委数）",
     "round_seats": "第一轮的晋级名额与人数配置一致",
     "round_judges": "第一轮按最低有效评委数评分并配好评委人数",
-    "rubric": "第一轮配置统一评分标准",
+    "rubric": "三轮统一评分标准已配置",
     "groups": "第一轮分组名单已录好并冻结",
     "round_contract": "现场赛制不依赖观众投票，且第一轮绑定了物理评分轮",
     **FREEZE_GATE_LABELS,
@@ -154,7 +162,7 @@ _PREPARATION_TASK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("challenge_weights", "踢馆成绩计算", ("weights",)),
     ("podium_weights", "冠亚季军成绩计算", ("podium",)),
     ("judges", "三轮评委", ("judges", "round_judges")),
-    ("rubric", "第一轮评分标准", ("rubric",)),
+    ("rubric", "三轮统一评分标准", ("rubric",)),
     ("groups", "第一轮分组", ("groups",)),
     ("questionnaire", "选手问卷", ("questionnaire",)),
 )
@@ -651,6 +659,7 @@ def save_live_2026_preparation(
     operator,
     live_challenge: dict,
     base_binding: str | None = None,
+    base_round_configuration: str | None = None,
     first_judge_count: object | None = None,
     first_minimum_judges: object | None = None,
     first_rubric=None,
@@ -673,14 +682,25 @@ def save_live_2026_preparation(
 
     current_operator = require_current_staff(operator)
     lock_activity_for_action(version.ruleset.activity)
+    # Same aggregate lock order as the other ruleset writers: Activity -> ContestRuleset
+    # -> RulesetVersion. The save command is not a second lock protocol.
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
     locked_version = (
         RulesetVersion.objects.select_for_update().select_related("ruleset").get(pk=version.pk)
     )
-    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=locked_version.ruleset_id)
     if locked_version.status != RulesetVersion.Status.DRAFT:
         raise ValidationError("只有草稿赛制可以继续准备。")
     if not version_is_editable(locked_version):
         raise ValidationError("这一版赛制已被更新的版本替代，请到最新版本继续准备。")
+    if base_round_configuration is not None and base_round_configuration != (
+        business_round_configuration_signature(
+            ContestRound.objects.filter(activity_id=locked_ruleset.activity_id)
+        )
+    ):
+        # ``base_binding`` covers the ruleset surface; the first round's configuration is a
+        # separate aggregate. A stale form must not silently overwrite another staff
+        # member's judge count or rubric.
+        raise ValidationError("第一轮配置已被其他工作人员修改，请刷新后重试。")
 
     binding = _snapshot_binding(locked_ruleset)
     stored_config = dict(locked_ruleset.live_challenge or {})
@@ -767,6 +787,96 @@ def save_live_2026_preparation(
 
     saved_version = RulesetVersion.objects.select_related("ruleset").get(pk=locked_version.pk)
     return Live2026PreparationSave(version=saved_version, created_rubric=created_rubric)
+
+
+@transaction.atomic
+def bind_live_2026_group_stage(
+    version: RulesetVersion,
+    group_stage,
+    *,
+    operator,
+    base_binding: str | None = None,
+) -> ContestRuleset:
+    """Bind a frozen first-round GroupStage to this 2026 draft.
+
+    The workbench owns the lifecycle; staff never edit ``group_stage_keys`` themselves.
+    """
+
+    from singer_contest.models import GroupStage
+
+    current_operator = require_current_staff(operator)
+    lock_activity_for_action(version.ruleset.activity)
+    locked_ruleset = ContestRuleset.objects.select_for_update().get(pk=version.ruleset_id)
+    locked_version = (
+        RulesetVersion.objects.select_for_update().select_related("ruleset").get(pk=version.pk)
+    )
+    if locked_version.status != RulesetVersion.Status.DRAFT or not version_is_editable(
+        locked_version
+    ):
+        raise ValidationError("只有最新草稿可以绑定第一轮分组。")
+    stage = GroupStage.objects.get(pk=group_stage.pk)
+    if stage.activity_id != locked_ruleset.activity_id:
+        raise ValidationError("分组合唱赛段不属于当前活动。")
+    if stage.status != GroupStage.Status.FROZEN:
+        raise ValidationError("只有已冻结的分组合唱分组可以绑定。")
+
+    binding = _snapshot_binding(locked_ruleset)
+    if not _is_live_2026_binding(binding):
+        raise ValidationError("当前赛制不是 2026 现场踢馆赛制。")
+    first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
+    group_stage_keys = dict(binding.get("group_stage_keys") or {})
+    existing = group_stage_keys.get(first_round_key)
+    if existing not in (None, "", stage.pk):
+        raise ValidationError("第一轮已经绑定了另一个分组合唱分组。")
+    group_stage_keys[first_round_key] = stage.pk
+    binding["group_stage_keys"] = group_stage_keys
+    updated = update_ruleset_binding(
+        locked_ruleset,
+        binding=binding,
+        operator=current_operator,
+        base_binding=base_binding,
+    )
+    AuditLog.objects.create(
+        operator=current_operator,
+        action_type=AuditLog.ActionType.OTHER,
+        target=f"RulesetVersion:{version.pk}",
+        new_value=json.dumps(
+            {"group_stage_id": stage.pk, "first_round_key": first_round_key},
+            ensure_ascii=False,
+        ),
+        note="bind_live_2026_group_stage",
+    )
+    return updated
+
+
+def auto_bind_live_2026_group_stage(group_stage, operator):
+    """Best-effort: a stage frozen through the ordinary group page joins the 2026 draft.
+
+    Freezing the grouping and binding it to the format are one operator intention. The
+    generic group page does not know about rulesets, so this hook is deliberately narrow:
+    only a 2026 draft with an empty first-round group binding is changed, and a conflict
+    never fails the freeze (the workbench offers an explicit bind action instead).
+    """
+
+    try:
+        ruleset = ContestRuleset.objects.filter(activity_id=group_stage.activity_id).first()
+        if ruleset is None or not _is_live_2026_binding(
+            {"live_challenge": ruleset.live_challenge or {}}
+        ):
+            return None
+        for version in RulesetVersion.objects.filter(
+            ruleset=ruleset, status=RulesetVersion.Status.DRAFT
+        ).order_by("-version"):
+            if not version_is_editable(version):
+                continue
+            binding = _snapshot_binding(ruleset)
+            first_round_key = live_2026_first_round_key(binding.get("live_challenge") or {})
+            if (binding.get("group_stage_keys") or {}).get(first_round_key) not in (None, ""):
+                return None
+            return bind_live_2026_group_stage(version, group_stage, operator=operator)
+    except (ValidationError, PermissionDenied):
+        return None
+    return None
 
 
 @transaction.atomic
