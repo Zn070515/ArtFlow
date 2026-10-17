@@ -8,10 +8,10 @@ The audit trail can: ``CHALLENGE_SCORE_PREPARE`` records the generated ``score_r
 and ``CHALLENGE_FINAL_ROUND_PREPARE`` records the R3 in its target.
 
 The default run is read-only. ``--delete`` removes only DRAFT, unlocked rounds inside an
-activity that is still in the TEST lifecycle, that no match, session or group stage still
-links to, and that no ruleset editing or history surface claims. A round an operator
-deliberately rebound is no longer residue; deleting it would leave a dangling formal
-binding. One candidate refusing deletion never stops the others.
+activity that is still in the TEST lifecycle, that no match, challenge session, group stage
+or entry-access grant still links to, and that no ruleset editing or history surface
+claims. A round an operator deliberately rebound is no longer residue; deleting it would
+leave a dangling formal binding. One candidate refusing deletion never stops the others.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from common.models import AuditLog
 from common.test_data import lock_activity_for_runtime_data
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandParser
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 
 from singer_contest.models import ChallengeMatch, ContestRound
@@ -87,6 +87,11 @@ def _classify(contest_round: ContestRound, *, activity) -> str:
         # A group stage PROTECTs its source round. Any surviving FK — DRAFT or not — means
         # this round has been reused; deciding whether that stage may let go is the stage
         # lifecycle's job, not this repair command's.
+        return "still_linked"
+    if contest_round.access_grants.exists() or contest_round.ephemeral_sessions.exists():
+        # Entry access accepts any round in the entry point's activity, including a DRAFT
+        # one, and both FKs are PROTECT. Checking the grant is enough in normal data, but
+        # an ephemeral session can outlive it; check both surfaces explicitly.
         return "still_linked"
     if _is_claimed_by_any_binding(contest_round):
         return "rebound"
@@ -182,7 +187,7 @@ class Command(BaseCommand):
         for contest_round in orphaned:
             try:
                 outcome = _delete_orphan_under_lock(contest_round.pk)
-            except (ValidationError, ProtectedError) as error:
+            except (ValidationError, ProtectedError, IntegrityError) as error:
                 # A conservative refusal on one candidate must not stop the others. Each
                 # candidate is its own transaction, so previous deletions stay committed.
                 self.stderr.write(f"  skipped round={contest_round.pk} reason=protected: {error}")

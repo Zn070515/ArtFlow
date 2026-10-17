@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
@@ -24,7 +25,12 @@ from django.core.management import call_command
 from django.db.models.deletion import ProtectedError
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
-from entry_access.services import redeem_access_grant
+from entry_access.models import EntryPoint
+from entry_access.services import (
+    create_entry_point,
+    issue_access_grant,
+    redeem_access_grant,
+)
 from questionnaire.services import get_or_create_response, mark_submitted, save_draft_answers
 from ruleset.live_format import freeze_blocker
 from ruleset.models import ContestRuleset, RulesetVersion
@@ -1750,6 +1756,28 @@ class ChallengeResidueAuditTests(_LiveChallengeFixtureMixin, TestCase):
             operator=self.staff,
             roster_source=GroupStage.RosterSource.ROUND_ADVANCED,
             roster_source_round=orphan,
+        )
+
+        output = StringIO()
+        call_command("audit_challenge_residue", "--delete", stdout=output)
+
+        self.assertIn("still_linked=1", output.getvalue())
+        self.assertIn("deleted=0", output.getvalue())
+        self.assertTrue(ContestRound.objects.filter(pk=orphan.pk).exists())
+
+    def test_a_round_holding_an_access_grant_is_never_deleted(self):
+        orphan = self._orphan_round()
+        entry_point = create_entry_point(
+            self.activity,
+            kind=EntryPoint.Kind.OPERATIONAL,
+            label="残留检查入口",
+            actor=self.staff,
+        )
+        issue_access_grant(
+            entry_point,
+            actor=self.staff,
+            ttl=timedelta(minutes=10),
+            round=orphan,
         )
 
         output = StringIO()
