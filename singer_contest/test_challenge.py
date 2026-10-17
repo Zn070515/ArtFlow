@@ -12,9 +12,10 @@ from common.authority import (
     SINGER_CONTESTANT_NUMBER,
     authority_write,
 )
+from common.test_data import clear_activity_test_data, get_test_data_counts
 from core.models import Activity
 from core.services import transition_activity_phase
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from entry_access.services import redeem_access_grant
@@ -35,6 +36,7 @@ from .challenge_services import (
     lock_challenge_match_scores,
     prepare_challenge_match,
     record_challenge_target,
+    revoke_challenge_session,
     start_challenge_turn,
     waive_challenge_turn,
 )
@@ -49,6 +51,7 @@ from .judge_authority import (
     submit_judge_score,
 )
 from .models import (
+    ChallengeCommand,
     ChallengeMatch,
     ChallengeSeat,
     ChallengeSession,
@@ -140,6 +143,7 @@ class _LiveChallengeFixtureMixin:
                 phone=f"1390000{number:04d}",
                 song_name=f"歌曲 {number}",
                 pre_status=SingerRegistration.PreStatus.APPROVED,
+                is_test_data=self.IS_TEST_MODE,
             )
             with authority_write(SINGER_CONTESTANT_NUMBER):
                 singer.official_number = number
@@ -1229,6 +1233,178 @@ class LiveChallengeAuthorityConsumerTests(_LiveChallengeFixtureMixin, TestCase):
         # The round is not bound by the format and its only challenge link is revoked, so it
         # must not be treated as one the current authority generated.
         self.assertIsNotNone(round_execution_authority_message(score_round))
+
+    def test_revoke_in_the_pre_start_window_frees_the_source_round(self):
+        session = self._session()
+
+        revoked = revoke_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="formal-revoke-before-start",
+            expected_revision=session.revision,
+            reason="第一轮 7 号选手成绩录错",
+        )
+
+        self.assertEqual(revoked.state, ChallengeSession.State.REVOKED)
+        unlocked = unlock_round(self.round, self.staff, note="撤销踢馆会话后更正第一轮")
+        self.assertEqual(unlocked.status, ContestRound.Status.SCORING)
+        reset = reset_round_to_draft(self.round, self.staff, reason="撤销踢馆会话后更正第一轮")
+        self.assertEqual(reset.status, ContestRound.Status.DRAFT)
+        self.assertFalse(ScoreSummary.objects.filter(round=self.round).exists())
+
+    def test_a_revoked_session_can_be_recreated_from_the_same_first_round(self):
+        session = self._session()
+        revoke_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="formal-revoke-then-recreate",
+            expected_revision=session.revision,
+            reason="误创建",
+        )
+
+        replacement = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="formal-recreate-after-revoke",
+        )
+
+        self.assertNotEqual(replacement.pk, session.pk)
+        self.assertEqual(replacement.state, ChallengeSession.State.ACTIVE)
+        self.assertEqual(
+            ChallengeSession.objects.filter(
+                activity=self.activity, state=ChallengeSession.State.ACTIVE
+            ).count(),
+            1,
+        )
+
+    def test_revoke_is_refused_once_a_turn_has_started(self):
+        session = self._session()
+        started = start_challenge_turn(
+            session.pk,
+            operator=self.staff,
+            command_id="formal-revoke-start-turn",
+            expected_revision=session.revision,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "已经有挑战机会开始处理"):
+            revoke_challenge_session(
+                session.pk,
+                operator=self.staff,
+                command_id="formal-revoke-after-start",
+                expected_revision=started.session.revision,
+                reason="开始后才发现录错",
+            )
+
+    def test_revoke_is_refused_once_a_match_exists(self):
+        session = self._session()
+        turn = session.turns.order_by("sequence").first()
+        seat = session.seats.order_by("position").first()
+        assert turn is not None and seat is not None
+        with authority_write(LIVE_CHALLENGE_STATE):
+            ChallengeMatch.objects.create(
+                session=session,
+                turn=turn,
+                seat=seat,
+                challenger=turn.challenger,
+                defender=seat.current_holder,
+                status=ChallengeMatch.Status.READY_FOR_SCORING,
+                is_test_data=session.is_test_data,
+            )
+
+        with self.assertRaisesMessage(ValidationError, "已经建立踢馆比赛"):
+            revoke_challenge_session(
+                session.pk,
+                operator=self.staff,
+                command_id="formal-revoke-after-match",
+                expected_revision=session.revision,
+                reason="已建立比赛",
+            )
+
+    def test_revoke_requires_a_reason_and_an_admin(self):
+        session = self._session()
+
+        with self.assertRaisesMessage(ValidationError, "必须填写原因"):
+            revoke_challenge_session(
+                session.pk,
+                operator=self.staff,
+                command_id="formal-revoke-no-reason",
+                expected_revision=session.revision,
+                reason="   ",
+            )
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            staff = User.objects.create_user(
+                username="formal-revoke-staff", password="pass", role=User.Role.STAFF
+            )
+        with self.assertRaises(PermissionDenied):
+            revoke_challenge_session(
+                session.pk,
+                operator=staff,
+                command_id="formal-revoke-staff-attempt",
+                expected_revision=session.revision,
+                reason="staff 不能撤销",
+            )
+
+
+class ChallengeTestDataCleanupTests(_LiveChallengeFixtureMixin, TestCase):
+    """A completed TEST rehearsal must actually be clearable.
+
+    Challenge rows PROTECT their singers, their rounds and the session itself, but the
+    cleanup lifecycle used to know nothing about them. The round-reset phase (which ignores
+    TEST sessions by design) then succeeded, the singer delete hit ``ProtectedError``, and
+    the whole ``@transaction.atomic`` cleanup rolled back — a full rehearsal could not leave
+    test mode.
+    """
+
+    def test_clear_test_data_removes_the_whole_challenge_graph(self):
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="cleanup-create",
+        )
+        turn = session.turns.order_by("sequence").first()
+        seat = session.seats.order_by("position").first()
+        assert turn is not None and seat is not None
+        score_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            name="踢馆评分轮",
+            judge_count=4,
+            minimum_judge_count=4,
+        )
+        with authority_write(LIVE_CHALLENGE_STATE):
+            ChallengeMatch.objects.create(
+                session=session,
+                turn=turn,
+                seat=seat,
+                challenger=turn.challenger,
+                defender=seat.current_holder,
+                status=ChallengeMatch.Status.READY_FOR_SCORING,
+                score_round=score_round,
+                is_test_data=session.is_test_data,
+            )
+
+        counts = get_test_data_counts(self.activity)
+        self.assertEqual(counts["challenge_sessions"], 1)
+        self.assertEqual(counts["challenge_seats"], self.SEATS)
+        self.assertEqual(counts["challenge_turns"], self.PARTICIPANTS - self.SEATS)
+        self.assertEqual(counts["challenge_matches"], 1)
+        self.assertEqual(counts["challenge_commands"], 1)
+
+        cleared = clear_activity_test_data(self.activity, operator=self.staff)
+
+        self.assertEqual(cleared["challenge_sessions"], 1)
+        self.assertEqual(cleared["singer_registrations"], self.PARTICIPANTS)
+        self.assertFalse(ChallengeSession.objects.filter(activity=self.activity).exists())
+        self.assertFalse(ChallengeSeat.objects.filter(session__activity=self.activity).exists())
+        self.assertFalse(ChallengeTurn.objects.filter(session__activity=self.activity).exists())
+        self.assertFalse(ChallengeMatch.objects.filter(session__activity=self.activity).exists())
+        self.assertFalse(ChallengeCommand.objects.filter(session__activity=self.activity).exists())
+        self.assertFalse(SingerRegistration.objects.filter(activity=self.activity).exists())
+        # Rounds are retained configuration: cleanup resets them, it does not delete them.
+        self.assertTrue(ContestRound.objects.filter(pk=self.round.pk).exists())
 
 
 @postgresql_only

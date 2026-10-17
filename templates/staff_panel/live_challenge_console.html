@@ -23,7 +23,7 @@
     <section class="bg-white border border-gray-200 rounded-lg p-5">
         <h2 class="text-lg font-semibold text-gray-900">当前还没有建立挑战流程</h2>
         <p class="text-sm text-gray-600 mt-1 mb-4">请在第一轮结果已经锁定并核定后建立一次挑战流程。</p>
-        <form method="post" class="flex flex-wrap items-end gap-3">
+        <form method="post" class="flex flex-wrap items-end gap-3" onsubmit="return confirm('建立后第一轮成绩将被踢馆流程消费，普通解锁和换版将关闭。确认第一轮成绩、十强席位和挑战队列无误后继续。');">
             {% csrf_token %}
             <input type="hidden" name="action" value="create">
             <input type="hidden" name="command_id" value="{{ command_ids.create }}">
@@ -47,6 +47,25 @@
             <span class="text-sm font-medium text-brand">踢馆机会按固定顺序处理</span>
         </div>
         <div class="p-4">
+            {% if can_revoke_session %}
+            <section class="rounded border border-amber-200 bg-amber-50 p-3 mb-4">
+                <h3 class="font-semibold text-amber-900">撤销尚未开始的挑战流程</h3>
+                <p class="text-sm text-amber-800 mt-1">只有还没有处理任何一次挑战机会、也没有建立比赛时才能撤销。撤销后第一轮恢复可解锁/重置，可以修正成绩后重新建立挑战流程；撤销记录保留在审计日志中。</p>
+                <form method="post" class="flex flex-wrap items-end gap-3 mt-2" onsubmit="return confirm('确认撤销挑战流程？撤销后可以更正第一轮成绩并重新建立，但撤销记录会保留在审计日志中。');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="revoke">
+                    <input type="hidden" name="command_id" value="{{ command_ids.revoke }}">
+                    <input type="hidden" name="session_id" value="{{ session.pk }}">
+                    <input type="hidden" name="expected_revision" value="{{ session.revision }}">
+                    <label class="block text-xs text-amber-900">撤销原因
+                        <input name="reason" required maxlength="240" class="mt-1 border border-amber-300 rounded px-2 py-1 text-sm" placeholder="例如：第一轮 7 号选手成绩录错">
+                    </label>
+                    <button class="touch-target border border-amber-400 text-amber-900 rounded text-sm">撤销挑战流程</button>
+                </form>
+            </section>
+            {% elif user.is_admin and revoke_blocker %}
+            <p class="text-xs text-gray-500 mb-3">{{ revoke_blocker }}</p>
+            {% endif %}
             {% if session.state == "ready_to_confirm" %}
             <p class="text-lg font-semibold text-gray-900 mb-3">踢馆机会都已处理，可以确认最终名单。</p>
             <form method="post">

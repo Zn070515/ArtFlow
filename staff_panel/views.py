@@ -138,6 +138,7 @@ from ruleset.services import (
 from ruleset.templates import GOLDEN_SCHIDUI_BUILTIN_KEY, LIVE_2026_PODIUM_KEYS
 from singer_contest.challenge_services import (
     advance_challenge_performance,
+    challenge_session_revoke_blocker,
     confirm_challenge_match_result,
     confirm_challenge_pairing,
     confirm_challenge_session,
@@ -147,6 +148,7 @@ from singer_contest.challenge_services import (
     lock_challenge_performance,
     prepare_challenge_match,
     record_challenge_target,
+    revoke_challenge_session,
     start_challenge_turn,
     waive_challenge_turn,
 )
@@ -403,6 +405,14 @@ def live_challenge_console(request, pk):
                     operator=request.user,
                     command_id=command_id,
                 )
+            elif action == "revoke":
+                revoke_challenge_session(
+                    session_id,
+                    operator=request.user,
+                    command_id=command_id,
+                    expected_revision=expected_revision,
+                    reason=request.POST.get("reason") or "",
+                )
             elif action == "start":
                 start_challenge_turn(
                     session_id,
@@ -495,8 +505,11 @@ def live_challenge_console(request, pk):
             messages.success(request, "现场挑战已更新。")
         return redirect("staff:live_challenge_console", pk=activity.pk)
 
+    # A revoked session is history, not the console's current workflow. Hiding it lets the
+    # operator immediately establish a fresh session from the same first-round result.
     live_session = (
         ChallengeSession.objects.filter(activity=activity)
+        .exclude(state=ChallengeSession.State.REVOKED)
         .select_related("source_round", "ruleset_version")
         .order_by("-created_at", "-pk")
         .first()
@@ -512,6 +525,7 @@ def live_challenge_console(request, pk):
         action: uuid4().hex
         for action in (
             "create",
+            "revoke",
             "start",
             "waive",
             "pair",
@@ -578,12 +592,17 @@ def live_challenge_console(request, pk):
         status=ContestRound.Status.LOCKED,
         advancement_status=ContestRound.AdvancementStatus.FINALIZED,
     ).order_by("sequence", "pk")
+    revoke_blocker = (
+        challenge_session_revoke_blocker(live_session) if live_session is not None else None
+    )
     return render(
         request,
         "staff_panel/live_challenge_console.html",
         {
             "activity": activity,
             "session": live_session,
+            "can_revoke_session": request.user.is_admin and revoke_blocker is None,
+            "revoke_blocker": revoke_blocker,
             "current_turn": current_turn,
             "current_match": current_match,
             "last_confirmed_match": last_confirmed_match,

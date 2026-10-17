@@ -26,6 +26,9 @@ class LiveChallengeConsoleTests(TestCase):
         self.assertContains(response, "现场挑战")
         self.assertContains(response, "当前还没有建立挑战流程")
         self.assertContains(response, 'name="command_id"')
+        # Establishing the session is an irreversible authority transition; the button
+        # must say so before the click, not only in a refusal message afterwards.
+        self.assertContains(response, "普通解锁和换版将关闭")
 
     def test_console_rejects_an_http_post_without_a_command_id(self):
         response = self.client.post(

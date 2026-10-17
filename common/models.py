@@ -62,6 +62,7 @@ class AuditLog(models.Model):
         CHALLENGE_SCORE_LOCK = "challenge_score_lock", "锁定踢馆评分"
         CHALLENGE_MATCH_CONFIRM = "challenge_match_confirm", "确认踢馆结果"
         CHALLENGE_SESSION_CONFIRM = "challenge_session_confirm", "确认最终十强"
+        CHALLENGE_SESSION_REVOKE = "challenge_session_revoke", "撤销踢馆会话"
         CHALLENGE_FINAL_ROUND_PREPARE = "challenge_final_round_prepare", "生成第三轮名单"
         ARCHIVE_ACTIVITY = "archive_activity", "归档活动"
         UNARCHIVE_ACTIVITY = "unarchive_activity", "解归档活动"
