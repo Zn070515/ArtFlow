@@ -96,6 +96,7 @@
     <form method="post" class="space-y-6">
         {% csrf_token %}
         <input type="hidden" name="base_binding" value="{{ binding_signature }}">
+        <input type="hidden" name="base_binding_revision" value="{{ binding_revision }}">
         <input type="hidden" name="base_first_round_configuration" value="{{ base_first_round_configuration }}">
 
         <section id="section-people" class="rounded-lg border border-gray-200 bg-white p-5">
@@ -286,6 +287,8 @@
         <form method="post" class="mt-4 flex flex-wrap items-end gap-3">
             {% csrf_token %}
             <input type="hidden" name="action" value="bind_group_stage">
+            <input type="hidden" name="base_binding" value="{{ binding_signature }}">
+            <input type="hidden" name="base_binding_revision" value="{{ binding_revision }}">
             <label class="block text-sm text-gray-700">可直接使用的已冻结分组
                 <select name="group_stage_id" class="mt-1 border border-gray-300 rounded px-2 py-1 text-sm">
                     {% for stage in ready_group_stages %}

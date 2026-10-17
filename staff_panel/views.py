@@ -6142,6 +6142,16 @@ def _live_2026_tasks(version) -> list[dict]:
     return rows
 
 
+def _binding_revision_from_post(value) -> int | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError("赛制版本校验值无效，请刷新后重试。") from exc
+
+
 def _parse_rubric_criteria(text: str) -> list[dict]:
     """Parse the workbench's "名称,满分" lines into rubric criteria."""
 
@@ -6200,6 +6210,9 @@ def ruleset_live_2026_config(request, pk):
                     selected_stage,
                     operator=request.user,
                     base_binding=request.POST.get("base_binding") or None,
+                    base_binding_revision=_binding_revision_from_post(
+                        request.POST.get("base_binding_revision")
+                    ),
                 )
             except (PermissionDenied, ValidationError) as exc:
                 messages.error(request, domain_error_messages(exc))
@@ -6245,6 +6258,9 @@ def ruleset_live_2026_config(request, pk):
                 operator=request.user,
                 live_challenge=live_challenge,
                 base_binding=request.POST.get("base_binding") or None,
+                base_binding_revision=_binding_revision_from_post(
+                    request.POST.get("base_binding_revision")
+                ),
                 base_first_round_configuration=request.POST.get("base_first_round_configuration")
                 or None,
                 first_judge_count=request.POST.get("live_first_judge_count"),
@@ -6364,6 +6380,7 @@ def ruleset_live_2026_config(request, pk):
             "first_minimum_judges": first_round.minimum_judge_count if first_round else None,
             "first_rubric_id": first_round.rubric_id if first_round else None,
             "first_round_editable": first_round_editable,
+            "binding_revision": ruleset.binding_revision,
             "base_first_round_configuration": first_round_configuration_signature(first_round),
             "bound_group_stage": bound_group_stage,
             "resumable_group_stage": resumable_group_stage,

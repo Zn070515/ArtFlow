@@ -175,6 +175,9 @@ class ContestRuleset(models.Model):
         blank=True,
         related_name="contest_rulesets",
     )
+    #: Monotonic binding revision. Content signatures cannot distinguish A -> C -> A,
+    #: so optimistic concurrency and the workbench's auto-bind CAS use this counter.
+    binding_revision = models.PositiveBigIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

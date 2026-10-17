@@ -689,6 +689,7 @@ def save_live_2026_preparation(
     operator,
     live_challenge: dict,
     base_binding: str | None = None,
+    base_binding_revision: int | None = None,
     base_first_round_configuration: str | None = None,
     first_judge_count: object | None = None,
     first_minimum_judges: object | None = None,
@@ -742,6 +743,7 @@ def save_live_2026_preparation(
         binding=binding,
         operator=current_operator,
         base_binding=base_binding,
+        base_binding_revision=base_binding_revision,
     )
     apply_live_2026_counts(updated_ruleset, locked_version, operator=current_operator)
 
@@ -886,6 +888,7 @@ def create_live_2026_group_stage(version: RulesetVersion, *, operator):
         managed_by=GroupStage.ManagedBy.LIVE_2026,
         managed_by_version=locked_version,
         replaces_group_stage=predecessor,
+        expected_binding_revision=locked_ruleset.binding_revision,
     )
 
 
@@ -896,6 +899,7 @@ def bind_live_2026_group_stage(
     *,
     operator,
     base_binding: str | None = None,
+    base_binding_revision: int | None = None,
 ) -> ContestRuleset:
     """Bind (or re-bind) a frozen first-round GroupStage to this 2026 draft.
 
@@ -937,6 +941,7 @@ def bind_live_2026_group_stage(
         binding=binding,
         operator=current_operator,
         base_binding=base_binding,
+        base_binding_revision=base_binding_revision,
     )
     AuditLog.objects.create(
         operator=current_operator,
@@ -988,6 +993,10 @@ def auto_bind_live_2026_group_stage(group_stage, operator):
                 .first()
             )
             if version is None or not version_is_editable(version):
+                return None
+            if version.ruleset.binding_revision != group_stage.expected_binding_revision:
+                # The binding changed since this preview was created — even if it changed
+                # back to the same stage id (A -> C -> A). A later explicit intent wins.
                 return None
             _key, existing = _binding_state(version)
             actual = int(existing) if existing not in (None, "") else None

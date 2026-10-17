@@ -271,6 +271,7 @@ def create_group_stage(
     managed_by: str = GroupStage.ManagedBy.GENERIC,
     managed_by_version=None,
     replaces_group_stage=None,
+    expected_binding_revision: int = 0,
 ) -> GroupStage:
     current_operator = _operator(operator)
     locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
@@ -282,6 +283,15 @@ def create_group_stage(
         raise ValidationError("该赛段标识是 2026 现场赛制保留的，请换一个。")
     if managed_by == GroupStage.ManagedBy.LIVE_2026 and not reserved:
         raise ValidationError("2026 现场赛制的分组必须使用保留的赛段标识。")
+    if managed_by == GroupStage.ManagedBy.LIVE_2026:
+        if managed_by_version is None:
+            raise ValidationError("2026 现场赛制的分组必须记录所属赛制版本。")
+        if managed_by_version.ruleset.activity_id != locked_activity.pk:
+            raise ValidationError("分组所属赛制版本不属于当前活动。")
+    elif managed_by_version is not None or replaces_group_stage is not None:
+        raise ValidationError("通用分组不能声明赛制版本或替换目标。")
+    if replaces_group_stage is not None and replaces_group_stage.activity_id != locked_activity.pk:
+        raise ValidationError("被替换的分组不属于当前活动。")
     source = str(roster_source or GroupStage.RosterSource.ALL_APPROVED).strip()
     if source not in {choice.value for choice in GroupStage.RosterSource}:
         raise ValidationError("未知的分组合唱名单来源。")
@@ -300,6 +310,7 @@ def create_group_stage(
             managed_by=managed_by,
             managed_by_version=managed_by_version,
             replaces_group_stage=replaces_group_stage,
+            expected_binding_revision=expected_binding_revision,
             roster_source=source,
             roster_source_round=roster_source_round,
             is_test_data=locked_activity.is_test_mode,
