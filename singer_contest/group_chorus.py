@@ -268,9 +268,18 @@ def create_group_stage(
     operator,
     roster_source: str = GroupStage.RosterSource.ALL_APPROVED,
     roster_source_round=None,
+    managed_by: str = GroupStage.ManagedBy.GENERIC,
 ) -> GroupStage:
     current_operator = _operator(operator)
     locked_activity = lock_activity_for_action(activity, ActivityAction.SCORE)
+    normalized_key = str(stage_key or "").strip()
+    if managed_by not in GroupStage.ManagedBy.values:
+        raise ValidationError("未知的分组合唱赛段来源。")
+    reserved = normalized_key.startswith(GroupStage.LIVE_2026_KEY_PREFIX)
+    if reserved and managed_by != GroupStage.ManagedBy.LIVE_2026:
+        raise ValidationError("该赛段标识是 2026 现场赛制保留的，请换一个。")
+    if managed_by == GroupStage.ManagedBy.LIVE_2026 and not reserved:
+        raise ValidationError("2026 现场赛制的分组必须使用保留的赛段标识。")
     source = str(roster_source or GroupStage.RosterSource.ALL_APPROVED).strip()
     if source not in {choice.value for choice in GroupStage.RosterSource}:
         raise ValidationError("未知的分组合唱名单来源。")
@@ -284,8 +293,9 @@ def create_group_stage(
     with authority_write(GROUP_STAGE_STATE):
         stage = GroupStage.objects.create(
             activity=locked_activity,
-            stage_key=str(stage_key or "").strip(),
+            stage_key=normalized_key,
             name=str(name or "").strip(),
+            managed_by=managed_by,
             roster_source=source,
             roster_source_round=roster_source_round,
             is_test_data=locked_activity.is_test_mode,
