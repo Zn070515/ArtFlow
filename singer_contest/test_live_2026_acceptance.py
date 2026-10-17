@@ -1143,7 +1143,7 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
 
     def test_a_stale_first_round_configuration_is_refused(self):
         page = self.staff.get(self._config_url())
-        stale_configuration = page.context["base_round_configuration"]
+        stale_configuration = page.context["base_first_round_configuration"]
 
         # Another staff member changes the first round while this page sits open.
         with authority_write(CONTEST_ROUND_STATE):
@@ -1153,7 +1153,7 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
         response = self.staff.post(
             self._config_url(),
             self._config_post(
-                base_round_configuration=stale_configuration,
+                base_first_round_configuration=stale_configuration,
                 live_first_judge_count=str(self.JUDGE_COUNT + 1),
             ),
             follow=True,
@@ -1162,6 +1162,28 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
         self.assertContains(response, "第一轮配置已被其他工作人员修改")
         self.first_round.refresh_from_db()
         self.assertEqual(self.first_round.judge_count, self.JUDGE_COUNT + 1)
+
+    def test_an_unrelated_round_change_does_not_conflict(self):
+        page = self.staff.get(self._config_url())
+        token = page.context["base_first_round_configuration"]
+
+        with authority_write(CONTEST_ROUND_STATE):
+            other = ContestRound.objects.create(
+                activity=self.activity,
+                round_type=ContestRound.RoundType.SEMI_FINAL,
+                name="无关的另一个轮次",
+                judge_count=3,
+            )
+            other.minimum_judge_count = 2
+            other.save(update_fields=["minimum_judge_count"])
+
+        response = self.staff.post(
+            self._config_url(),
+            self._config_post(base_first_round_configuration=token),
+            follow=True,
+        )
+
+        self.assertContains(response, "已保存")
 
     def test_a_frozen_authority_is_shown_as_official_not_as_an_editable_draft(self):
         """The workspace used to offer "继续准备今年赛制" on a frozen version, i.e. a 403."""
@@ -1743,7 +1765,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._config_url(version),
             {
                 "base_binding": page.context["binding_signature"],
-                "base_round_configuration": page.context["base_round_configuration"],
+                "base_first_round_configuration": page.context["base_first_round_configuration"],
                 "live_participant_count": "15",
                 "live_seat_count": "10",
                 "live_group_count": "5",
@@ -1805,3 +1827,120 @@ class Live2026FreshWorkbenchTests(TestCase):
         self.assertEqual(version.status, RulesetVersion.Status.FROZEN)
         self.assertTrue(version.is_current)
         self.assertEqual(version.binding["group_stage_keys"], {"r1": stage.pk})
+
+    def _form_data(self, page, *, group_count=5, include_first_round=False):
+        data = {
+            "base_binding": page.context["binding_signature"],
+            "base_first_round_configuration": page.context["base_first_round_configuration"],
+            "live_participant_count": "15",
+            "live_seat_count": "10",
+            "live_group_count": str(group_count),
+            "live_group_size": "3",
+            "live_first_weight": "40",
+            "live_challenge_weight": "60",
+            "live_podium_first_weight": "30",
+            "live_podium_third_weight": "70",
+            "live_challenge_judge_ids": [str(judge.pk) for judge in self.judges[:4]],
+            "live_challenge_minimum_judges": "4",
+            "live_final_judge_ids": [str(judge.pk) for judge in self.judges[1:]],
+            "live_final_minimum_judges": "4",
+        }
+        if include_first_round:
+            data.update(
+                {
+                    "live_first_judge_count": "5",
+                    "live_first_minimum_judges": "4",
+                    "live_new_rubric_name": "统一评分表",
+                    "live_new_rubric_criteria": "演唱技巧,40\n舞台表现,30\n情感表达,30",
+                }
+            )
+        return data
+
+    def _finish_group_stage(self, stage, *, group_count):
+        base, remainder = divmod(len(self.singers), group_count)
+        payload: dict[str, object] = {}
+        start = 0
+        for index in range(1, group_count + 1):
+            size = base + (1 if index <= remainder else 0)
+            payload[f"group_name_{index}"] = f"第 {index} 组"
+            payload[f"group_singer_ids_{index}"] = [
+                str(singer.pk) for singer in self.singers[start : start + size]
+            ]
+            start += size
+        self.client.post(reverse("staff:group_stage_record", args=[stage.pk]), payload, follow=True)
+        self.client.post(reverse("staff:group_stage_confirm", args=[stage.pk]), follow=True)
+        self.client.post(reverse("staff:group_stage_freeze", args=[stage.pk]), follow=True)
+        stage.refresh_from_db()
+
+    def test_a_successor_can_replace_the_inherited_grouping(self):
+        """The built-in is a starting draft: a running format must not lock its shape in."""
+
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 渡梦工作台"},
+            follow=True,
+        )
+        version1 = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version1))
+        self.client.post(
+            self._config_url(version1),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        stage_a = GroupStage.objects.get(activity=self.activity, stage_key="r1_chorus")
+        self._finish_group_stage(stage_a, group_count=5)
+        self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
+        version1.refresh_from_db()
+        self.assertEqual(version1.status, RulesetVersion.Status.FROZEN)
+
+        # Successor: the grouping shape changes from 5 groups to 4.
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 渡梦工作台（后继）"},
+            follow=True,
+        )
+        version2 = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        assert version2 is not None
+        page = self.client.get(self._config_url(version2))
+        self.client.post(
+            self._config_url(version2),
+            self._form_data(page, group_count=4),
+            follow=True,
+        )
+
+        page = self.client.get(self._config_url(version2))
+        tasks = {task["key"]: task for task in page.context["tasks"]}
+        self.assertFalse(tasks["groups"]["ready"])
+        self.assertIsNotNone(page.context["bound_group_stage"])
+
+        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        stage_b = (
+            GroupStage.objects.filter(activity=self.activity, stage_key__startswith="r1_chorus")
+            .exclude(pk=stage_a.pk)
+            .get()
+        )
+        self._finish_group_stage(stage_b, group_count=4)
+
+        version2.ruleset.refresh_from_db()
+        first_round_key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+        self.assertEqual(version2.ruleset.group_stage_keys[first_round_key], stage_b.pk)
+
+        page = self.client.get(self._config_url(version2))
+        self.assertEqual(page.context["completed_count"], 7)
+        self.assertEqual(page.context["remaining_count"], 0)
+
+        self.client.post(reverse("staff:ruleset_freeze", args=[version2.pk]), follow=True)
+        version2.refresh_from_db()
+        version1.refresh_from_db()
+        self.assertEqual(version2.status, RulesetVersion.Status.FROZEN)
+        self.assertTrue(version2.is_current)
+        self.assertEqual(version2.binding["group_stage_keys"][first_round_key], stage_b.pk)
+        self.assertEqual(version1.binding["group_stage_keys"][first_round_key], stage_a.pk)

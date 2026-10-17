@@ -96,11 +96,13 @@ from ruleset import editor as ruleset_editor
 from ruleset.business_editor import infer_business_stages
 from ruleset.compiler import ValidationReport, compile_definition
 from ruleset.live_format import (
+    LIVE_2026_GROUP_STAGE_KEY_PREFIX,
     PREPARATION_TASK_ROW_KEYS,
     _bound_first_round,
     apply_live_2026_counts,
     bind_live_2026_group_stage,
     clone_first_round_for_successor,
+    first_round_configuration_signature,
     freeze_blocker,
     is_live_2026_template,
     live_2026_preparation_tasks,
@@ -6140,8 +6142,24 @@ def _live_2026_tasks(version) -> list[dict]:
     return rows
 
 
-LIVE_2026_GROUP_STAGE_KEY = "r1_chorus"
 LIVE_2026_GROUP_STAGE_NAME = "第一轮分组合唱"
+
+
+def _next_group_stage_key(activity) -> str:
+    """The next workbench-owned stage key; staff never see or choose it."""
+
+    base = LIVE_2026_GROUP_STAGE_KEY_PREFIX
+    used = set(
+        GroupStage.objects.filter(activity=activity, stage_key__startswith=base).values_list(
+            "stage_key", flat=True
+        )
+    )
+    if base not in used:
+        return base
+    index = 2
+    while f"{base}_v{index}" in used:
+        index += 1
+    return f"{base}_v{index}"
 
 
 def _parse_rubric_criteria(text: str) -> list[dict]:
@@ -6183,33 +6201,29 @@ def ruleset_live_2026_config(request, pk):
         _ensure_activity_mutable(ruleset.activity)
         action = (request.POST.get("action") or "").strip()
         if action == "create_group_stage":
-            stage = GroupStage.objects.filter(
-                activity=ruleset.activity, stage_key=LIVE_2026_GROUP_STAGE_KEY
-            ).first()
-            if stage is None:
-                try:
-                    stage = create_group_stage(
-                        ruleset.activity,
-                        stage_key=LIVE_2026_GROUP_STAGE_KEY,
-                        name=LIVE_2026_GROUP_STAGE_NAME,
-                        operator=request.user,
-                        roster_source=GroupStage.RosterSource.ALL_APPROVED,
-                    )
-                except (PermissionDenied, ValidationError) as exc:
-                    messages.error(request, domain_error_messages(exc))
-                    return redirect("staff:ruleset_live_2026_config", pk=version.pk)
+            try:
+                stage = create_group_stage(
+                    ruleset.activity,
+                    stage_key=_next_group_stage_key(ruleset.activity),
+                    name=LIVE_2026_GROUP_STAGE_NAME,
+                    operator=request.user,
+                    roster_source=GroupStage.RosterSource.ALL_APPROVED,
+                )
+            except (PermissionDenied, ValidationError) as exc:
+                messages.error(request, domain_error_messages(exc))
+                return redirect("staff:ruleset_live_2026_config", pk=version.pk)
             return redirect("staff:group_stage_detail", pk=stage.pk)
         if action == "bind_group_stage":
-            stage = GroupStage.objects.filter(
+            selected_stage = GroupStage.objects.filter(
                 pk=request.POST.get("group_stage_id"), activity=ruleset.activity
             ).first()
-            if stage is None:
+            if selected_stage is None:
                 messages.error(request, "选择的合并分组不属于当前活动。")
                 return redirect("staff:ruleset_live_2026_config", pk=version.pk)
             try:
                 bind_live_2026_group_stage(
                     version,
-                    stage,
+                    selected_stage,
                     operator=request.user,
                     base_binding=request.POST.get("base_binding") or None,
                 )
@@ -6257,7 +6271,8 @@ def ruleset_live_2026_config(request, pk):
                 operator=request.user,
                 live_challenge=live_challenge,
                 base_binding=request.POST.get("base_binding") or None,
-                base_round_configuration=request.POST.get("base_round_configuration") or None,
+                base_first_round_configuration=request.POST.get("base_first_round_configuration")
+                or None,
                 first_judge_count=request.POST.get("live_first_judge_count"),
                 first_minimum_judges=request.POST.get("live_first_minimum_judges"),
                 first_rubric=first_rubric,
@@ -6365,11 +6380,14 @@ def ruleset_live_2026_config(request, pk):
             "first_minimum_judges": first_round.minimum_judge_count if first_round else None,
             "first_rubric_id": first_round.rubric_id if first_round else None,
             "first_round_editable": first_round_editable,
-            "base_round_configuration": business_round_configuration_signature(
-                ContestRound.objects.filter(activity_id=ruleset.activity_id)
-            ),
+            "base_first_round_configuration": first_round_configuration_signature(first_round),
             "bound_group_stage": bound_group_stage,
-            "unbound_group_stages": unbound_group_stages,
+            "ready_group_stages": [
+                stage for stage in unbound_group_stages if stage.status == GroupStage.Status.FROZEN
+            ],
+            "unfinished_group_stages": [
+                stage for stage in unbound_group_stages if stage.status != GroupStage.Status.FROZEN
+            ],
             # The authoritative answer, from the walk the freeze itself performs: the
             # checklist below is more granular, but this is the line that cannot disagree
             # with the freeze button.
