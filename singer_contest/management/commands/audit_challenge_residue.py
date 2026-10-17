@@ -8,20 +8,24 @@ The audit trail can: ``CHALLENGE_SCORE_PREPARE`` records the generated ``score_r
 and ``CHALLENGE_FINAL_ROUND_PREPARE`` records the R3 in its target.
 
 The default run is read-only. ``--delete`` removes only DRAFT, unlocked rounds inside an
-activity that is still in the TEST lifecycle; anything still linked to a match or a live
-session is left to the normal cleanup lifecycle.
+activity that is still in the TEST lifecycle, that nothing links to, and that no ruleset
+editing or history surface claims. A round an operator deliberately rebound is no longer
+residue; deleting it would leave a dangling formal binding.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 
 from common.authority import TEST_DATA_CLEANUP, authority_write
 from common.models import AuditLog
-from django.core.exceptions import ValidationError
+from common.test_data import lock_activity_for_runtime_data
 from django.core.management.base import BaseCommand, CommandParser
+from django.db import transaction
 
 from singer_contest.models import ChallengeMatch, ContestRound
+from singer_contest.services import _round_is_claimed_by_a_binding
 
 
 def _audited_challenge_round_ids() -> set[int]:
@@ -49,6 +53,71 @@ def _audited_challenge_round_ids() -> set[int]:
     return ids
 
 
+def _is_claimed_by_any_binding(contest_round: ContestRound) -> bool:
+    """Whether any editing or history surface still names this round.
+
+    A genuine old dynamic score round never appears in a ruleset binding. If one now does,
+    an operator has deliberately reused it, and the repair command must not treat it as
+    residue: deleting it would leave a dangling ``round_keys`` entry.
+    """
+
+    from ruleset.models import ContestRuleset
+
+    return any(
+        _round_is_claimed_by_a_binding(contest_round, ruleset)
+        for ruleset in ContestRuleset.objects.filter(activity_id=contest_round.activity_id)
+    )
+
+
+def _classify(contest_round: ContestRound, *, activity) -> str:
+    if not activity.is_test_mode or activity.data_lifecycle != activity.DataLifecycle.TEST:
+        return "outside_test"
+    if ChallengeMatch.objects.filter(score_round_id=contest_round.pk).exists():
+        return "still_linked"
+    if (
+        contest_round.roster_source == ContestRound.RosterSource.CHALLENGE_SESSION
+        and contest_round.roster_source_challenge_session_id
+    ):
+        # The final round still belongs to a live session; normal cleanup owns it.
+        return "still_linked"
+    if _is_claimed_by_any_binding(contest_round):
+        return "rebound"
+    if contest_round.status != ContestRound.Status.DRAFT or contest_round.is_locked:
+        return "not_removable"
+    return "orphaned"
+
+
+@transaction.atomic
+def _delete_orphan_under_lock(round_id: int) -> str:
+    """Re-validate and delete one candidate while holding the activity lock.
+
+    The scan and the delete are separate moments. Locking the activity and re-reading the
+    round closes the TOCTOU window against a concurrent rebind, cleanup, or
+    ``leave_test_mode``. The locked activity instance is attached to the round so the
+    model's own deletion guard sees the fresh lifecycle, not a stale cached relation.
+    """
+
+    initial = ContestRound._base_manager.select_related("activity").filter(pk=round_id).first()
+    if initial is None:
+        return "missing"
+    locked_activity = lock_activity_for_runtime_data(initial.activity)
+    contest_round = (
+        ContestRound.objects.select_for_update()
+        .select_related("activity")
+        .filter(pk=round_id)
+        .first()
+    )
+    if contest_round is None:
+        return "missing"
+    contest_round.activity = locked_activity
+    outcome = _classify(contest_round, activity=locked_activity)
+    if outcome != "orphaned":
+        return outcome
+    with authority_write(TEST_DATA_CLEANUP):
+        contest_round.delete()
+    return "deleted"
+
+
 class Command(BaseCommand):
     help = (
         "Audit (and optionally delete) challenge-generated TEST rounds orphaned by the old cleanup."
@@ -74,35 +143,22 @@ class Command(BaseCommand):
         if options["activity_id"] is not None:
             candidates = candidates.filter(activity_id=options["activity_id"])
 
+        counts: Counter[str] = Counter()
         orphaned: list[ContestRound] = []
-        still_linked = 0
-        outside_test = 0
-        not_removable = 0
+        audited = 0
         for contest_round in candidates.order_by("pk"):
-            activity = contest_round.activity
-            if not activity.is_test_mode or activity.data_lifecycle != activity.DataLifecycle.TEST:
-                outside_test += 1
-                continue
-            if ChallengeMatch.objects.filter(score_round_id=contest_round.pk).exists():
-                still_linked += 1
-                continue
-            if (
-                contest_round.roster_source == ContestRound.RosterSource.CHALLENGE_SESSION
-                and contest_round.roster_source_challenge_session_id
-            ):
-                # The final round still belongs to a live session; normal cleanup owns it.
-                still_linked += 1
-                continue
-            if contest_round.status != ContestRound.Status.DRAFT or contest_round.is_locked:
-                not_removable += 1
-                continue
-            orphaned.append(contest_round)
+            audited += 1
+            outcome = _classify(contest_round, activity=contest_round.activity)
+            counts[outcome] += 1
+            if outcome == "orphaned":
+                orphaned.append(contest_round)
 
-        self.stdout.write(f"audited={len(candidates)}")
-        self.stdout.write(f"orphaned={len(orphaned)}")
-        self.stdout.write(f"still_linked={still_linked}")
-        self.stdout.write(f"outside_test={outside_test}")
-        self.stdout.write(f"not_removable={not_removable}")
+        self.stdout.write(f"audited={audited}")
+        self.stdout.write(f"orphaned={counts['orphaned']}")
+        self.stdout.write(f"still_linked={counts['still_linked']}")
+        self.stdout.write(f"outside_test={counts['outside_test']}")
+        self.stdout.write(f"rebound={counts['rebound']}")
+        self.stdout.write(f"not_removable={counts['not_removable']}")
         for contest_round in orphaned:
             self.stdout.write(
                 f"  orphan round={contest_round.pk} activity={contest_round.activity_id} "
@@ -116,11 +172,9 @@ class Command(BaseCommand):
 
         deleted = 0
         for contest_round in orphaned:
-            try:
-                with authority_write(TEST_DATA_CLEANUP):
-                    contest_round.delete()
-            except ValidationError as error:
-                self.stderr.write(f"  failed round={contest_round.pk}: {error}")
-                continue
-            deleted += 1
+            outcome = _delete_orphan_under_lock(contest_round.pk)
+            if outcome == "deleted":
+                deleted += 1
+            else:
+                self.stderr.write(f"  skipped round={contest_round.pk} reason={outcome}")
         self.stdout.write(f"deleted={deleted}")

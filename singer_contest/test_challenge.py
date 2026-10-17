@@ -1725,6 +1725,38 @@ class ChallengeResidueAuditTests(_LiveChallengeFixtureMixin, TestCase):
         self.assertFalse(ContestRound.objects.filter(pk=orphan.pk).exists())
         self.assertTrue(ContestRound.objects.filter(pk=linked_round.pk).exists())
 
+    def test_a_round_reclaimed_by_the_editable_ruleset_is_never_deleted(self):
+        orphan = self._orphan_round()
+        ruleset = ContestRuleset.objects.get(activity=self.activity)
+        ruleset.round_keys = {"r1": orphan.pk}
+        ruleset.save(update_fields=["round_keys"])
+
+        output = StringIO()
+        call_command("audit_challenge_residue", "--delete", stdout=output)
+
+        self.assertIn("rebound=1", output.getvalue())
+        self.assertIn("deleted=0", output.getvalue())
+        self.assertTrue(ContestRound.objects.filter(pk=orphan.pk).exists())
+
+    def test_a_round_reclaimed_by_a_version_binding_is_never_deleted(self):
+        orphan = self._orphan_round()
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion.objects.create(
+                ruleset=self.version.ruleset,
+                version=2,
+                definition=self.version.definition,
+                binding={"round_keys": {"residue": orphan.pk}},
+                status=RulesetVersion.Status.DRAFT,
+                is_current=False,
+            )
+
+        output = StringIO()
+        call_command("audit_challenge_residue", "--delete", stdout=output)
+
+        self.assertIn("rebound=1", output.getvalue())
+        self.assertIn("deleted=0", output.getvalue())
+        self.assertTrue(ContestRound.objects.filter(pk=orphan.pk).exists())
+
 
 @postgresql_only
 class LiveChallengeParameterizedCountsTests(_LiveChallengeFixtureMixin, TestCase):
