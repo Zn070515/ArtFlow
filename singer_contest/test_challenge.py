@@ -1,5 +1,8 @@
 import json
 from decimal import Decimal
+from io import StringIO
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from accounts.models import User
 from common.authority import (
@@ -12,10 +15,12 @@ from common.authority import (
     SINGER_CONTESTANT_NUMBER,
     authority_write,
 )
+from common.models import AuditLog
 from common.test_data import clear_activity_test_data, get_test_data_counts, leave_test_mode
 from core.models import Activity
 from core.services import transition_activity_phase
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.management import call_command
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
 from entry_access.services import redeem_access_grant
@@ -26,6 +31,7 @@ from ruleset.services import freeze_ruleset_version, supersede_ruleset_version
 from tests.helpers import postgresql_only
 
 from .challenge_services import (
+    _session_for_update,
     advance_challenge_performance,
     challenge_final_roster,
     confirm_challenge_match_result,
@@ -68,6 +74,8 @@ from .models import (
 from .services import (
     apply_scores,
     current_round_roster,
+    lock_round,
+    prepare_round,
     reset_round_to_draft,
     round_execution_authority_message,
     unlock_round,
@@ -105,6 +113,7 @@ class _LiveChallengeFixtureMixin:
                 sequence=1,
                 judge_count=5,
                 minimum_judge_count=4,
+                advance_count=self.SEATS,
                 score_completion_mode=ContestRound.CompletionMode.MINIMUM_VALID,
             )
             judges = [
@@ -1420,6 +1429,77 @@ class LiveChallengeAuthorityConsumerTests(_LiveChallengeFixtureMixin, TestCase):
                 expected_revision=session.revision,
             )
 
+    def test_the_full_revoke_correction_relock_and_recreate_path(self):
+        """The incident recovery must work through the real round lifecycle.
+
+        A formal first round is prepared, panelled, scored through the real matrix and
+        locked by ``lock_round`` (which supersedes the active panel). After a mistaken
+        session is revoked, the round is unlocked, one score is corrected and recalculated,
+        then relocked — and the changed fingerprint permits a replacement session.
+        """
+
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.status = ContestRound.Status.DRAFT
+            self.round.is_locked = False
+            self.round.save(update_fields=["status", "is_locked"])
+            # prepare_round materialises the judge assignment itself; the mixin seeded it
+            # for the challenge fixture, so clear it to keep this a real preparation.
+            RoundJudge.objects.filter(round=self.round).delete()
+        prepare_round(self.round, self.staff)
+        # prepare_round materialised its own judge assignment; read the authoritative set
+        # rather than the mixin's pre-seeded judges.
+        judges = list(Judge.objects.filter(round_assignments__round=self.round).order_by("pk"))
+        panel = prepare_judge_panel(self.round.pk, operator=self.staff)
+        self.assertFalse(panel.is_test_data)
+        apply_scores(
+            self.round,
+            {
+                (singer.pk, judge.pk): Decimal(100 - singer.official_number)
+                for singer in self.singers
+                for judge in judges
+            },
+            self.staff,
+        )
+        lock_round(self.round, self.staff)
+        self.round.refresh_from_db()
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.advancement_status = ContestRound.AdvancementStatus.FINALIZED
+            self.round.save(update_fields=["advancement_status"])
+
+        session = self._session()
+        revoke_challenge_session(
+            session.pk,
+            operator=self.staff,
+            command_id="formal-full-recovery-revoke",
+            expected_revision=session.revision,
+            reason="第一轮 7 号选手成绩录错",
+        )
+        unlock_round(self.round, self.staff, note="撤销踢馆会话后更正第一轮")
+
+        apply_scores(
+            self.round,
+            {(self.singers[0].pk, judges[0].pk): Decimal("99.99")},
+            self.staff,
+        )
+        lock_round(self.round, self.staff)
+        self.round.refresh_from_db()
+        with authority_write(CONTEST_ROUND_STATE):
+            self.round.advancement_status = ContestRound.AdvancementStatus.FINALIZED
+            self.round.save(update_fields=["advancement_status"])
+
+        replacement = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="formal-full-recovery-recreate",
+        )
+
+        self.assertNotEqual(replacement.pk, session.pk)
+        self.assertEqual(replacement.state, ChallengeSession.State.ACTIVE)
+        self.assertNotEqual(
+            replacement.source_roster_fingerprint, session.source_roster_fingerprint
+        )
+
 
 class ChallengeTestDataCleanupTests(_LiveChallengeFixtureMixin, TestCase):
     """A completed TEST rehearsal must actually be clearable.
@@ -1544,6 +1624,106 @@ class ChallengeTestDataCleanupTests(_LiveChallengeFixtureMixin, TestCase):
             ).exists()
         )
         self.assertTrue(ContestRound.objects.filter(pk=self.round.pk).exists())
+
+    def test_a_command_that_loses_its_session_to_cleanup_gets_a_domain_error(self):
+        # The first read happens before the activity lock. If cleanup removed the session
+        # while this command waited, the second read must produce a business message, not
+        # an ORM DoesNotExist escaping the console as a 500.
+        session = self._session()
+        clear_activity_test_data(self.activity, operator=self.staff)
+
+        stale_initial = SimpleNamespace(activity=self.activity)
+
+        class _StaleFirstRead:
+            def filter(self, **kwargs):
+                return self
+
+            def first(self):
+                return stale_initial
+
+        with patch.object(
+            ChallengeSession.objects, "select_related", return_value=_StaleFirstRead()
+        ):
+            with self.assertRaisesMessage(ValidationError, "已结束或已被清理"):
+                _session_for_update(session.pk, self.staff)
+
+
+class ChallengeResidueAuditTests(_LiveChallengeFixtureMixin, TestCase):
+    """The old cleanup could strand generated score rounds without their match link.
+
+    Those rows cannot be recognised by shape (``ContestRound`` has no test marker); the
+    audit trail is the only provenance left. The command must stay read-only by default and
+    remove only the unlinked DRAFT rows in a TEST activity.
+    """
+
+    def _orphan_round(self) -> ContestRound:
+        contest_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            name="踢馆第 1 场评分",
+            judge_count=4,
+            minimum_judge_count=4,
+        )
+        AuditLog.objects.create(
+            operator=self.staff,
+            action_type=AuditLog.ActionType.CHALLENGE_SCORE_PREPARE,
+            target="ChallengeMatch:1",
+            new_value=json.dumps({"score_round_id": contest_round.pk}),
+        )
+        return contest_round
+
+    def test_read_only_audit_reports_without_deleting(self):
+        contest_round = self._orphan_round()
+        output = StringIO()
+
+        call_command("audit_challenge_residue", stdout=output)
+
+        self.assertIn("orphaned=1", output.getvalue())
+        self.assertIn("read-only run", output.getvalue())
+        self.assertTrue(ContestRound.objects.filter(pk=contest_round.pk).exists())
+
+    def test_delete_removes_orphans_but_leaves_linked_rounds(self):
+        orphan = self._orphan_round()
+        session = create_challenge_session(
+            self.round,
+            ruleset_version=self.version,
+            operator=self.staff,
+            command_id="residue-linked-create",
+        )
+        turn = session.turns.order_by("sequence").first()
+        seat = session.seats.order_by("position").first()
+        assert turn is not None and seat is not None
+        linked_round = ContestRound.objects.create(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.SEMI_FINAL,
+            name="仍被比赛引用的评分轮",
+            judge_count=4,
+            minimum_judge_count=4,
+        )
+        with authority_write(LIVE_CHALLENGE_STATE):
+            ChallengeMatch.objects.create(
+                session=session,
+                turn=turn,
+                seat=seat,
+                challenger=turn.challenger,
+                defender=seat.current_holder,
+                status=ChallengeMatch.Status.READY_FOR_SCORING,
+                score_round=linked_round,
+                is_test_data=session.is_test_data,
+            )
+        AuditLog.objects.create(
+            operator=self.staff,
+            action_type=AuditLog.ActionType.CHALLENGE_SCORE_PREPARE,
+            target="ChallengeMatch:2",
+            new_value=json.dumps({"score_round_id": linked_round.pk}),
+        )
+
+        output = StringIO()
+        call_command("audit_challenge_residue", "--delete", stdout=output)
+
+        self.assertIn("deleted=1", output.getvalue())
+        self.assertFalse(ContestRound.objects.filter(pk=orphan.pk).exists())
+        self.assertTrue(ContestRound.objects.filter(pk=linked_round.pk).exists())
 
 
 @postgresql_only
