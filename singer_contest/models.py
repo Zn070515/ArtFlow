@@ -615,6 +615,25 @@ class GroupStage(models.Model):
     managed_by = models.CharField(
         max_length=16, choices=ManagedBy.choices, default=ManagedBy.GENERIC
     )
+    #: The draft that asked for this stage. A stage belongs to the version that created
+    #: it; a successor must not resume an abandoned preview from an older version.
+    managed_by_version = models.ForeignKey(
+        "ruleset.RulesetVersion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="managed_group_stages",
+    )
+    #: The binding the creator intended to replace (None when filling an empty slot).
+    #: Auto-binding is a compare-and-swap against this value, so a stage frozen after a
+    #: newer explicit choice never overwrites that choice.
+    replaces_group_stage = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replacement_group_stages",
+    )
     status = models.CharField(max_length=12, choices=Status, default=Status.DRAFT)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     confirmed_by = models.ForeignKey(

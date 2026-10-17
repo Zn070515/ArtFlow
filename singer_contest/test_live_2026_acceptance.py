@@ -1999,6 +1999,147 @@ class Live2026FreshWorkbenchTests(TestCase):
                 operator=self.admin,
             )
 
+    def test_a_late_frozen_stage_does_not_overwrite_a_newer_explicit_binding(self):
+        """Freezing an older preview must not undo a later explicit choice."""
+
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 晚冻结"},
+            follow=True,
+        )
+        version1 = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version1))
+        self.client.post(
+            self._config_url(version1),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        stage_a = GroupStage.objects.get(
+            activity=self.activity, managed_by=GroupStage.ManagedBy.LIVE_2026
+        )
+        self._finish_group_stage(stage_a, group_count=5)
+        self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
+        version1.refresh_from_db()
+
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 晚冻结（后继）"},
+            follow=True,
+        )
+        version2 = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        assert version2 is not None
+        first_round_key = str(version2.ruleset.live_challenge.get("podium_first_round_key") or "r1")
+
+        # A starts a re-adjustment preview (B) but has not frozen it yet.
+        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        preview = (
+            GroupStage.objects.filter(
+                activity=self.activity,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=version2,
+            )
+            .exclude(pk=stage_a.pk)
+            .get()
+        )
+
+        # B explicitly chooses a different frozen stage C.
+        alternate = create_group_stage(
+            self.activity,
+            stage_key="generic_alternate",
+            name="备用分组",
+            operator=self.admin,
+        )
+        self._finish_group_stage(alternate, group_count=5)
+        self.client.post(
+            self._config_url(version2),
+            {"action": "bind_group_stage", "group_stage_id": alternate.pk},
+            follow=True,
+        )
+        version2.ruleset.refresh_from_db()
+        self.assertEqual(version2.ruleset.group_stage_keys[first_round_key], alternate.pk)
+
+        # The older preview freezes later. It must not overwrite C.
+        self._finish_group_stage(preview, group_count=5)
+        preview.refresh_from_db()
+        version2.ruleset.refresh_from_db()
+        self.assertEqual(preview.status, GroupStage.Status.FROZEN)
+        self.assertEqual(version2.ruleset.group_stage_keys[first_round_key], alternate.pk)
+
+        page = self.client.get(self._config_url(version2))
+        ready_ids = {stage.pk for stage in page.context["ready_group_stages"]}
+        self.assertIn(preview.pk, ready_ids)
+
+    def test_a_successor_does_not_resume_the_previous_versions_abandoned_stage(self):
+        template = RulesetTemplate.objects.get(builtin_key=LIVE_2026_BUILTIN_KEY)
+        self.client.post(
+            reverse("staff:ruleset_clone_from_template", args=[template.pk]),
+            {"activity": self.activity.pk, "name": "2026 分组版本归属"},
+            follow=True,
+        )
+        version1 = RulesetVersion.objects.get(ruleset__activity=self.activity)
+        page = self.client.get(self._config_url(version1))
+        self.client.post(
+            self._config_url(version1),
+            self._form_data(page, group_count=5, include_first_round=True),
+            follow=True,
+        )
+
+        # An unfinished preview owned by v1.
+        self.client.post(self._config_url(version1), {"action": "create_group_stage"}, follow=True)
+        abandoned = (
+            GroupStage.objects.filter(
+                activity=self.activity,
+                managed_by=GroupStage.ManagedBy.LIVE_2026,
+                managed_by_version=version1,
+            )
+            .order_by("-pk")
+            .get()
+        )
+
+        # v1 completes with a different, frozen stage and freezes.
+        final_stage = create_group_stage(
+            self.activity,
+            stage_key="generic_ready",
+            name="正式分组",
+            operator=self.admin,
+        )
+        self._finish_group_stage(final_stage, group_count=5)
+        self.client.post(reverse("staff:ruleset_freeze", args=[version1.pk]), follow=True)
+        version1.refresh_from_db()
+
+        self.client.post(
+            reverse("staff:contest_ruleset_create"),
+            {"activity": self.activity.pk, "name": "2026 分组版本归属（后继）"},
+            follow=True,
+        )
+        version2 = (
+            RulesetVersion.objects.filter(
+                ruleset__activity=self.activity, status=RulesetVersion.Status.DRAFT
+            )
+            .order_by("-version")
+            .first()
+        )
+        assert version2 is not None
+
+        self.client.post(self._config_url(version2), {"action": "create_group_stage"}, follow=True)
+        successor_stage = GroupStage.objects.get(
+            activity=self.activity,
+            managed_by=GroupStage.ManagedBy.LIVE_2026,
+            managed_by_version=version2,
+        )
+
+        abandoned.refresh_from_db()
+        self.assertEqual(abandoned.status, GroupStage.Status.DRAFT)
+        self.assertNotEqual(successor_stage.pk, abandoned.pk)
+
 
 @postgresql_only
 class Live2026GroupStageCreationRaceTests(TransactionTestCase):
