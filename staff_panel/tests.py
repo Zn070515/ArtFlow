@@ -308,6 +308,39 @@ class ContestRoundCreateHTTPTests(TestCase):
         self.assertEqual(contest_round.judge_count, 3)
         self.assertEqual(contest_round.minimum_judge_count, 3)
 
+    def test_round_edit_reports_duplicate_sequence_as_form_error(self):
+        self.client.post(reverse("staff:round_create"), self._round_create_data(sequence="1"))
+        self.client.post(reverse("staff:round_create"), self._round_create_data(sequence="2"))
+        first, _second = ContestRound.objects.filter(activity=self.activity).order_by("sequence")
+
+        payload = self._round_create_data(sequence="2")
+        payload["name"] = first.name
+        response = self.client.post(reverse("staff:round_edit", args=[first.pk]), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "轮次序号已被其他工作人员使用")
+        first.refresh_from_db()
+        self.assertEqual(first.sequence, 1)
+
+    def test_round_edit_reports_db_unique_race_as_form_error(self):
+        contest_round = _create_round(
+            activity=self.activity,
+            round_type=ContestRound.RoundType.PRELIMINARY,
+            sequence=1,
+        )
+        payload = self._round_create_data(sequence="1")
+        payload["name"] = "Updated round"
+
+        with patch("singer_contest.models.ContestRound.save", side_effect=IntegrityError):
+            response = self.client.post(
+                reverse("staff:round_edit", args=[contest_round.pk]), payload
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "轮次序号已被其他工作人员使用")
+        contest_round.refresh_from_db()
+        self.assertNotEqual(contest_round.name, "Updated round")
+
     @patch("staff_panel.views.ContestRound.objects.create", side_effect=IntegrityError)
     def test_round_create_reports_race_duplicate_as_form_error(self, _create):
         response = self.client.post(

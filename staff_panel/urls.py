@@ -275,6 +275,11 @@ urlpatterns = [
         name="stage_result_confirm",
     ),
     path(
+        "stage-results/<int:pk>/podium-tie/",
+        views.stage_result_podium_tie,
+        name="stage_result_podium_tie",
+    ),
+    path(
         "stage-results/<int:pk>/unlock/",
         views.stage_result_unlock,
         name="stage_result_unlock",

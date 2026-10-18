@@ -36,6 +36,37 @@
     </div>
     {% endif %}
 
+    {% if podium_tie_groups %}
+    <section class="mb-6 border border-amber-300 bg-amber-50 rounded-lg p-4 space-y-4">
+        <div>
+            <h2 class="text-sm font-semibold text-amber-900">最终名次同分，需要人工裁决</h2>
+            <p class="text-xs text-amber-800 mt-1">系统不会自动破平。只能调整同分选手之间的先后，不能改变不同分数之间的顺序；裁决绑定当前原始成绩，成绩更正后自动失效。</p>
+        </div>
+        {% for group in podium_tie_groups %}
+        <form method="post" action="{% url 'staff:stage_result_podium_tie' stage.pk %}" class="border-t border-amber-200 pt-3 space-y-2">
+            {% csrf_token %}
+            <input type="hidden" name="base_input_fingerprint" value="{{ stage.input_fingerprint }}">
+            <p class="text-sm text-amber-900">同分：<span class="font-mono font-semibold">{{ group.score|floatformat:2 }}</span>{% if group.decided %}（已有人工顺序，可重新提交）{% endif %}</p>
+            <div class="flex flex-wrap gap-3">
+                {% for singer in group.singers %}
+                <label class="text-xs text-gray-700">#{{ singer.name }}
+                    <input type="number" name="order_{{ singer.id }}" value="{{ singer.position }}" min="1" max="{{ group.singers|length }}" required class="mt-1 w-16 border border-amber-300 rounded px-2 py-1 text-sm">
+                </label>
+                {% endfor %}
+            </div>
+            <label class="block text-xs text-gray-700">裁决原因
+                <textarea name="reason" required maxlength="1000" rows="2" class="mt-1 w-full border border-amber-300 rounded px-2 py-1 text-sm" placeholder="例如：同分，经评委组复议按第三轮表现排序"></textarea>
+            </label>
+            {% if can_decide_podium_tie %}
+            <button type="submit" class="bg-amber-600 text-white px-3 py-1.5 rounded text-sm hover:bg-amber-700">提交人工裁决并重新计算</button>
+            {% else %}
+            <p class="text-xs text-amber-800">请由工作人员提交人工裁决。</p>
+            {% endif %}
+        </form>
+        {% endfor %}
+    </section>
+    {% endif %}
+
     {% if stage.status == "ready_to_confirm" %}
     {% if can_confirm_stage_result %}
     <form method="post" action="{% url 'staff:stage_result_confirm' stage.pk %}" class="mb-6 flex items-center gap-3" onsubmit="return confirm('确认核定并锁定该赛段结果？确认后将成为正式手卡依据。');">

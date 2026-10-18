@@ -8,6 +8,7 @@ from common.authority import (
     JUDGE_PANEL_STATE,
     JUDGE_SCORE_SUBMISSION,
     JUDGE_SESSION_STATE,
+    PODIUM_TIE_DECISION,
     ROUND_PERFORMANCE_STATE,
     SCORE_FACT_WRITE,
     SCORE_SUMMARY_RECALCULATE,
@@ -3465,6 +3466,131 @@ class StageResult(models.Model):
 
     def __str__(self):
         return f"{self.activity.title} — {self.stage_key} ({self.get_status_display()})"
+
+
+class PodiumTieDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    """Guard: a final-podium tie decision is a formal, audited fact."""
+
+    def _ensure_auth(self):
+        if not authority_authorized(PODIUM_TIE_DECISION):
+            raise ValidationError("冠亚季军同分裁决只能通过正式 service 写入。")
+
+    def update(self, **kwargs):
+        self._ensure_auth()
+        return super().update(**kwargs)
+
+    def delete(self):
+        self._ensure_auth()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs):
+        _reject_conflict_upsert(args, kwargs, self.model.__name__)
+        self._ensure_auth()
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        self._ensure_auth()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+PodiumTieDecisionManager = models.Manager.from_queryset(PodiumTieDecisionQuerySet)
+
+
+class PodiumTieDecision(models.Model):
+    """An audited manual ordering *within one equal-score group* of the final podium.
+
+    The automatic computation never breaks a tie: equal official weighted scores mean
+    REVIEW, never "the first in running order wins". This row is the explicit exception
+    path. It only expresses an ordering among singers whose scores are already equal —
+    cross-group order cannot be expressed here, because every row is keyed by one score.
+
+    The row is bound to ``input_fingerprint``, the raw-facts snapshot it was decided
+    against. When scores are corrected the fingerprint changes, the old decision stops
+    applying, and the podium returns to REVIEW instead of silently keeping a stale pick.
+    """
+
+    activity = models.ForeignKey(
+        "core.Activity", on_delete=models.CASCADE, related_name="podium_tie_decisions"
+    )
+    ruleset_version = models.ForeignKey(
+        "ruleset.RulesetVersion",
+        on_delete=models.PROTECT,
+        related_name="podium_tie_decisions",
+    )
+    stage_key = models.CharField(max_length=100)
+    tie_score = models.DecimalField(max_digits=10, decimal_places=2)
+    singer_ids = models.JSONField(
+        default=list, help_text="The tied group, as an ascending list of singer pks."
+    )
+    ordering = models.JSONField(
+        default=list, help_text="The same singer pks in the operator's chosen order."
+    )
+    reason = models.TextField()
+    input_fingerprint = models.CharField(
+        max_length=64,
+        help_text="Raw-facts fingerprint this decision was made against.",
+    )
+    is_test_data = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="podium_tie_decisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = PodiumTieDecisionManager()
+
+    if TYPE_CHECKING:
+        activity_id: int
+        ruleset_version_id: int
+
+    class Meta:
+        base_manager_name = "objects"
+        ordering = ["-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "activity",
+                    "ruleset_version",
+                    "stage_key",
+                    "tie_score",
+                    "input_fingerprint",
+                ],
+                name="podium_tie_unique_decision_per_baseline",
+            )
+        ]
+
+    def clean(self):
+        if not str(self.reason or "").strip():
+            raise ValidationError("必须说明人工裁决原因。")
+        try:
+            singer_ids = [int(value) for value in (self.singer_ids or [])]
+            ordering = [int(value) for value in (self.ordering or [])]
+        except (TypeError, ValueError):
+            raise ValidationError("人工裁决的选手顺序无效。") from None
+        if (
+            len(singer_ids) < 2
+            or sorted(singer_ids) != sorted(ordering)
+            or len(set(ordering)) != len(ordering)
+        ):
+            raise ValidationError("人工裁决必须为同分组内的全部选手给出唯一顺序。")
+
+    def save(self, *args, **kwargs):
+        if not authority_authorized(PODIUM_TIE_DECISION):
+            raise ValidationError("冠亚季军同分裁决只能通过正式 service 写入。")
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if not authority_authorized(PODIUM_TIE_DECISION):
+            raise ValidationError("冠亚季军同分裁决只能通过正式 service 删除。")
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.stage_key} @ {self.tie_score}: {self.ordering}"
 
 
 class StageDecisionQuerySet(AuthorityQuerySetMixin, models.QuerySet):
