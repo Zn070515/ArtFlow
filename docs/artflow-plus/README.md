@@ -1,0 +1,59 @@
+# ArtFlow-Plus（v2）开发主线
+
+本分支从 `v1.0.0` 的发布提交 `80bdc95843678be99fe24c877b0b6164f6147d83` 切出。
+`v1.0.0` 的应用基线是 `a98dcc80525ab5de0c539b73d93382ebc5b2bfa4`；发布提交只多了
+`.github/workflows/publish.yml`。
+
+## 两条时代线
+
+| 分支 | 角色 | 允许的改动 |
+| --- | --- | --- |
+| `main` | ArtFlow 1.x 生产维护线 | 真实彩排/现场发现的问题、部署问题、P0–P2 正确性、必要的现场 UX 修复，以及对应的回归测试 |
+| `artflow-plus` | ArtFlow-Plus（v2）开发主线 | 新领域模型、新前后端架构、技术栈现代化；可以大规模重构 |
+
+- `main` 已封版为 v1.0.0；不再接受“顺便优化”和 opportunistic refactor。
+- `v1.0.0` tag 永不移动。后续生产修复走 `hotfix/*` → `main` → 验证 → tag `v1.0.1`，
+  由 `publish.yml` 自动发布新镜像。
+- `release/1.x` 暂不单独创建：在 `main` 仍是 1.x 生产线期间它与 `main` 重复；
+  等 Plus 准备接管 `main` 时再从当时的 1.x 末端切出长期维护分支。
+
+## 修复如何向前传播
+
+不要机械 merge `main` → `artflow-plus`。按事故性质分三类：
+
+1. **实现 bug**（Django view/模板/ORM 的局部问题）：只修 `main`。Plus 若已换实现，
+   不 cherry-pick 旧代码。
+2. **业务不变量**（例如“一位评委对一名选手一轮只能有一个正式 score fact”、
+   “结果修改后旧公示必须立即失效”）：v1 修代码并加回归；同时把规则提炼成 Plus 的
+   domain spec / Golden fixture / contract test，用新架构重新实现。
+3. **部署事故**（例如持久化 `STATIC_ROOT` 让旧 JS 覆盖新镜像）：把事故提炼成部署
+   不变量（“部署的新版本必须能证明客户端产物与服务器版本一致”），不要求搬运旧实现。
+
+## M0：Legacy Extraction（先提炼，再实现）
+
+M0 不写 React，也不删旧代码。目标是把 v1 的真实业务知识变成新架构可以依赖的资产：
+
+```text
+docs/
+├── domains/       # activity / registration / evaluation / voting / tickets / results / archive
+├── invariants/    # authority / concurrency / lifecycle
+├── incidents/     # 真实事故与根因，例如 stale-static-assets、duplicate-score-fact
+└── architecture/
+    ├── adr/       # v1 的关键决策，标注仍适用 / 被 Plus 取代
+    └── target/    # Plus 目标架构
+tests/golden/      # 从 v1 提炼的可重复业务样例
+```
+
+第一条新实现从一个很小的 vertical slice 开始：
+
+```text
+Activity → Definition Draft → Compiler → Definition Release → Execution Run
+```
+
+完整跑通之后再逐步迁移 Registration、Evaluation、Voting、Result。
+
+## 分支纪律
+
+- 临时分支：`feat/*`、`fix/*`、`research/*`，从 `artflow-plus` 切出，短生命周期。
+- 生产修复：`hotfix/*`，从 `main` 切出；只允许最小修复和测试。
+- 版本 tag 只从 `main` 打；`v*` tag 是发布权威，普通 push 不构建镜像。
