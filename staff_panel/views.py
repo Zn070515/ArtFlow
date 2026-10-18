@@ -221,6 +221,7 @@ from singer_contest.services import (
     _current_resolve_status,
     _eligible_singers,
     _live_group_stage_for_round,
+    _stage_consumed_facts,
     _version_binding,
     apply_scores,
     apply_scores_if_version,
@@ -2561,20 +2562,85 @@ def round_score_entry(request, pk):
             {"round": contest_round, "preparation_required": True},
         )
 
+    correction_mode = False
+    correction_performance = None
+    correction_return_url = ""
+    requested = str(request.GET.get("correction_performance") or "").strip()
+    if requested:
+        correction_performance = (
+            Performance.objects.filter(
+                pk=int(requested) if requested.isdigit() else 0,
+                round=contest_round,
+                activity_id=contest_round.activity_id,
+            )
+            .select_related("singer")
+            .first()
+        )
+        score_state = (
+            PerformanceScoreState.objects.filter(performance=correction_performance).first()
+            if correction_performance
+            else None
+        )
+        stage = None
+        stage_id = str(request.GET.get("stage_result_id") or "").strip()
+        if (
+            correction_performance is not None
+            and score_state is not None
+            and score_state.state == PerformanceScoreState.State.OPEN
+            and contest_round.status == ContestRound.Status.SCORING
+            and not contest_round.is_locked
+            and stage_id.isdigit()
+        ):
+            stage = StageResult.objects.filter(
+                pk=int(stage_id),
+                activity_id=contest_round.activity_id,
+                status=StageResult.Status.READY_TO_CONFIRM,
+            ).first()
+            if stage is not None:
+                latest = (
+                    StageResult.objects.filter(
+                        activity_id=contest_round.activity_id,
+                        stage_key=stage.stage_key,
+                    )
+                    .order_by("-result_version", "-pk")
+                    .first()
+                )
+                if (
+                    latest is None
+                    or latest.pk != stage.pk
+                    or contest_round.pk not in _stage_consumed_facts(stage)["rounds"]
+                ):
+                    stage = None
+        if stage is None:
+            messages.error(request, "纠错模式无效：请从已解锁的赛段结果页重新进入。")
+            return redirect("staff:round_list")
+        correction_mode = True
+        correction_return_url = reverse("staff:stage_result_detail", args=[stage.pk])
+
     return render(
         request,
         "staff_panel/round_score_entry.html",
         {
             "round": contest_round,
-            "grid_payload": _round_grid_payload(contest_round),
+            "grid_payload": _round_grid_payload(
+                contest_round,
+                only_singer_id=correction_performance.singer_id
+                if correction_mode and correction_performance
+                else None,
+            ),
             "is_locked": contest_round.is_locked
             or contest_round.status == ContestRound.Status.LOCKED,
+            "correction_mode": correction_mode,
+            "correction_performance": correction_performance,
+            "correction_return_url": correction_return_url,
         },
     )
 
 
-def _round_grid_payload(contest_round: ContestRound) -> dict:
+def _round_grid_payload(contest_round: ContestRound, *, only_singer_id: int | None = None) -> dict:
     singers = prime_questionnaire_answers(_eligible_singers(contest_round))
+    if only_singer_id is not None:
+        singers = [singer for singer in singers if singer.pk == only_singer_id]
     judges = list(authoritative_panel_judges(contest_round))
     scores = {
         (s.singer_id, s.judge_id): str(s.score)
@@ -3332,13 +3398,19 @@ def stage_result_lock_round(request, pk):
         messages.error(request, f"轮次锁定失败：{domain_error_messages(error)}")
         return redirect("staff:stage_result_detail", pk=stage.pk)
     try:
-        maybe_resolve_checkpoints(stage.activity, request.user)
+        resolved = maybe_resolve_checkpoints(stage.activity, request.user)
     except (PermissionDenied, ValidationError) as error:
         messages.warning(
             request, f"轮次已锁定，但赛段未能自动重新计算：{domain_error_messages(error)}"
         )
     else:
-        messages.success(request, "轮次已锁定，赛段结果已重新计算；请核对后核定。")
+        if stage.stage_key in resolved:
+            messages.success(request, "轮次已锁定，赛段结果已重新计算；请核对后核定。")
+        else:
+            messages.success(
+                request,
+                "该轮次已锁定；仍有其他原始事实未完成，完成后再重新计算。",
+            )
     latest = (
         StageResult.objects.filter(activity=stage.activity, stage_key=stage.stage_key)
         .order_by("-result_version", "-pk")

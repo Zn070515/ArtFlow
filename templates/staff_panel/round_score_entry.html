@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}{{ round.name }} 快速录入 — ArtFlow{% endblock %}
+{% block title %}{{ round.name }}{% if correction_mode %} 评分纠错{% else %} 快速录入{% endif %} — ArtFlow{% endblock %}
 
 {% block content %}
 {% if preparation_required %}
@@ -18,18 +18,37 @@
 {% else %}
 <div class="max-w-7xl mx-auto px-4 py-8" id="rapid-entry" data-api-url="{% url 'staff:round_scores_api' round.pk %}" data-ws-url="/ws/staff/activity/{{ round.activity_id }}/" data-activity-id="{{ round.activity_id }}" data-round-id="{{ round.pk }}" data-operator-id="{{ request.user.pk }}" data-locked="{% if is_locked %}true{% else %}false{% endif %}">
     {% csrf_token %}
-    <p class="text-sm text-gray-500 mb-2"><a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 快速录入</p>
+    <p class="text-sm text-gray-500 mb-2">
+        {% if correction_mode %}
+        <a href="{{ correction_return_url }}" class="hover:underline">结果纠错</a> / 评分纠错
+        {% else %}
+        <a href="{% url 'staff:round_list' %}" class="hover:underline">比赛轮次</a> / 快速录入
+        {% endif %}
+    </p>
 
     <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <h1 class="text-2xl font-bold text-gray-900">{{ round.name|default:round.get_round_type_display }}</h1>
+        <h1 class="text-2xl font-bold text-gray-900">
+            {% if correction_mode %}{{ round.name }} · 评分纠错{% else %}{{ round.name|default:round.get_round_type_display }}{% endif %}
+        </h1>
         <div class="flex items-center gap-3">
             <span class="text-xs text-gray-500">{{ round.get_scoring_mode_display }}</span>
             <span class="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded">{{ round.get_status_display }}</span>
             {% if is_locked %}
             <span class="text-xs text-orange-600 bg-orange-50 px-2 py-0.5 rounded font-medium">已锁定</span>
             {% endif %}
+            {% if correction_mode %}
+            <span class="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-medium">纠错模式</span>
+            <a href="{{ correction_return_url }}" class="text-xs border border-gray-300 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-50">保存并返回纠错页</a>
+            {% endif %}
         </div>
     </div>
+
+    {% if correction_mode %}
+    <div class="bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-3 rounded mb-4">
+        <p class="font-medium">本次只修改：{{ correction_performance.singer.name }}</p>
+        <p class="text-xs mt-1 text-amber-800">该表演的评分门已被管理员重新开放，其他选手的评分仍锁定。修正后请回到结果纠错页重新锁定该表演。</p>
+    </div>
+    {% endif %}
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
         <div class="md:col-span-2 bg-white border border-gray-200 rounded-lg p-4">
@@ -118,6 +137,11 @@
                 {% endfor %}
             </tbody>
         </table>
+    </div>
+    {% endif %}
+    {% if correction_mode %}
+    <div class="mt-4 flex justify-end">
+        <a href="{{ correction_return_url }}" class="bg-gray-900 text-white px-4 py-2 rounded text-sm">保存并返回纠错页</a>
     </div>
     {% endif %}
 </div>
