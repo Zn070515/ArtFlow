@@ -3250,11 +3250,13 @@ def judge_performance_score_reopen(request, pk):
 
     _require_admin(request.user)
     performance_id = str(request.POST.get("performance_id") or "").strip()
-    if not performance_id.isdigit():
-        messages.error(request, "表演参数无效。")
+    stage_result_id = str(request.POST.get("stage_result_id") or "").strip()
+    if not performance_id.isdigit() or not stage_result_id.isdigit():
+        messages.error(request, "表演或赛段结果参数无效。")
         return redirect("staff:dashboard")
     try:
         reopen_performance_score_for_correction(
+            int(stage_result_id),
             int(performance_id),
             operator=request.user,
             reason=request.POST.get("reason", ""),
@@ -3265,10 +3267,7 @@ def judge_performance_score_reopen(request, pk):
         messages.success(
             request, "已重新开放该表演评分；修正后请重新锁定评分、锁定轮次并重新计算。"
         )
-    stage_result_id = str(request.POST.get("stage_result_id") or "").strip()
-    if stage_result_id.isdigit():
-        return redirect("staff:stage_result_detail", pk=stage_result_id)
-    return redirect("staff:dashboard")
+    return redirect("staff:stage_result_detail", pk=stage_result_id)
 
 
 @admin_required

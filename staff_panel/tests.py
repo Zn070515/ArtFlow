@@ -6057,6 +6057,65 @@ class ResultReleaseHttpTests(TestCase):
         self.assertNotIn("private-authority-canary", str(released))
         self.assertNotIn("private-fingerprint-canary", str(released))
 
+    def test_archive_package_keeps_every_release_with_its_frozen_snapshot(self):
+        ResultRelease.objects.create(
+            post=self.post,
+            stage_result=self.stage_result,
+            post_version=self.post.version,
+            result_version=self.stage_result.result_version,
+            candidate_revision=2,
+            result_snapshot={
+                "stage_key": "final_podium",
+                "decisions": [{"rank": 1, "contestant": "7"}],
+                "awards": [{"award": "冠军", "contestant": "7"}],
+            },
+            ruleset_version=self.version,
+            authority_hash="a" * 64,
+            input_fingerprint="f" * 64,
+            status=ResultRelease.Status.SUPERSEDED,
+            released_by=self.admin,
+            transition_by=self.admin,
+            transition_at=timezone.now(),
+            note="旧版 A>B",
+        )
+        ResultRelease.objects.create(
+            post=self.post,
+            stage_result=self.stage_result,
+            post_version=self.post.version,
+            result_version=self.stage_result.result_version,
+            candidate_revision=3,
+            result_snapshot={
+                "stage_key": "final_podium",
+                "decisions": [{"rank": 1, "contestant": "8"}],
+                "awards": [{"award": "冠军", "contestant": "8"}],
+            },
+            ruleset_version=self.version,
+            authority_hash="a" * 64,
+            input_fingerprint="f" * 64,
+            status=ResultRelease.Status.ACTIVE,
+            released_by=self.admin,
+            note="更正后 B>A",
+        )
+
+        artifact = next(
+            item
+            for item in build_archive_package(self.activity)
+            if item.name == "result_release_history.xlsx"
+        )
+        sheet = load_workbook(BytesIO(artifact.content)).active
+        assert sheet is not None
+        rows = list(sheet.iter_rows(values_only=True))
+        header = list(rows[0])
+        records = rows[1:]
+        self.assertEqual(len(records), 2)
+        by_status = {row[header.index("Status")]: row for row in records}
+        self.assertIn("已被新版本取代", by_status)
+        self.assertIn("生效", by_status)
+        superseded = by_status["已被新版本取代"]
+        self.assertEqual(superseded[header.index("Candidate Revision")], 2)
+        self.assertIn('"contestant": "7"', str(superseded[header.index("Snapshot Decisions")]))
+        self.assertEqual(superseded[header.index("Transition By")], self.admin.username)
+
 
 class RoundScoresApiTests(TestCase):
     """M1-H rapid-entry API: grid, sparse cell save, stale-edit conflict, auto re-resolve."""

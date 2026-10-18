@@ -2179,6 +2179,16 @@ def lock_round(contest_round: ContestRound, operator) -> ContestRound:
         or locked_round.is_locked
     ):
         raise PermissionDenied("该比赛轮次已锁定。")
+    from .models import PerformanceScoreState
+
+    if PerformanceScoreState.objects.filter(
+        performance__round=locked_round,
+        state=PerformanceScoreState.State.OPEN,
+    ).exists():
+        # A correction seam opens one performance gate. Locking the round around an open
+        # gate would produce LOCKED + OPEN, which the podium then reports as HOLD and
+        # cannot be repaired without unlocking the whole round again.
+        raise PermissionDenied("仍有表演评分处于开放状态，请先逐项锁定后再锁定轮次。")
     if not expected_score_cells(locked_round):
         raise PermissionDenied("当前轮次没有可锁定的完整评分矩阵。")
     if not round_scores_complete(locked_round):
