@@ -13,6 +13,7 @@ from voting.policies import vote_ui_state
 
 from .live_state import activity_result_posts, shared_live_state
 from .models import PublicMedia, PublicPost
+from .services import active_result_release_for_post
 
 
 def _public_contest(request, public_code: str) -> Activity:
@@ -194,12 +195,21 @@ def home(request):
 def post_detail(request, pk):
     post = get_object_or_404(PublicPost.published_public(), pk=pk)
     media_items = post.media_items.filter(is_published=True)
+    active_release = None
+    if post.post_type == PublicPost.PostType.RESULT_PUBLICATION:
+        active_release = active_result_release_for_post(post)
+        if active_release is None:
+            # published_public() should have excluded this post; never fall back to the
+            # editorial body as if it were the formal result.
+            raise Http404
     return render(
         request,
         "public_portal/post_detail.html",
         {
             "post": post,
             "media_items": media_items,
+            "active_release": active_release,
+            "result_snapshot": active_release.result_snapshot if active_release else {},
         },
     )
 

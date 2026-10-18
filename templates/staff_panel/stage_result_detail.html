@@ -20,7 +20,9 @@
         {% else %}
         <span class="text-xs bg-gray-50 border border-gray-300 text-gray-700 px-3 py-1 rounded font-medium">待齐数据</span>
         {% endif %}
+        {% if stage.status == "confirmed" %}
         <a href="{% url 'staff:stage_result_pdf' stage.pk %}" class="text-xs border border-gray-300 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-50">下载 PDF 手卡</a>
+        {% endif %}
     </div>
     <p class="text-xs text-gray-500 mb-4">
         {{ stage.ruleset_version.ruleset.name }} ·

@@ -2680,7 +2680,38 @@ class StaffPanelSmokeTests(TestCase):
         activity.refresh_from_db()
         self.assertEqual(activity.phase, Activity.Phase.ARCHIVED)
         self.assertTrue(activity.is_locked)
-        self.assertTrue(ArchivePackage.objects.filter(activity=activity, is_current=True).exists())
+        package = ArchivePackage.objects.get(activity=activity, is_current=True)
+        with package.file.open("rb") as stored, zipfile.ZipFile(BytesIO(stored.read())) as archive:
+            sheet = load_workbook(BytesIO(archive.read("activity_info.xlsx"))).active
+        assert sheet is not None
+        values = {row[0]: row[1] for row in sheet.iter_rows(values_only=True)}
+        self.assertEqual(values["Phase"], "已归档")
+        self.assertIn("Archived At", values)
+        self.assertEqual(values["Archived By"], self.admin.username)
+
+    @patch(
+        "exports.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_archive_refuses_a_2026_podium_that_was_never_published(self, _closure):
+        """The podium format's formal result is also a public result."""
+
+        activity, version, result = self._make_bound_result_activity()
+        confirm_stage_result(result, confirmed_by=self.admin)
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=version.pk).update(
+                binding={
+                    **(version.binding or {}),
+                    "live_challenge": {"podium_stage_key": "final"},
+                }
+            )
+
+        with self.assertRaises(PermissionDenied) as caught:
+            archive_activity(activity, self.admin)
+
+        self.assertIn("结果公示", str(caught.exception))
+        activity.refresh_from_db()
+        self.assertNotEqual(activity.phase, Activity.Phase.ARCHIVED)
 
     def test_permanent_archive_omits_temporary_staff_notes(self):
         """GOAL §19.2: "归档" must not be what makes a 临时 Staff note permanent.
@@ -9994,16 +10025,38 @@ class StageResultPdfTests(TestCase):
         self.assertEqual(participant.status_code, 403)
         self.client.raise_request_exception = True
 
-    def test_stage_result_pdf_renders_a_real_document(self):
+    def test_stage_result_pdf_renders_only_a_confirmed_handcard(self):
         self.client.force_login(self.staff)
 
-        response = self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk]))
+        # A candidate is not a handcard, even though it has decisions to print.
+        self.assertEqual(
+            self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk])).status_code,
+            404,
+        )
 
+        with authority_write(STAGE_RESULT_CONFIRM):
+            self.stage.status = StageResult.Status.CONFIRMED
+            self.stage.confirmed_by = self.staff
+            self.stage.confirmed_at = timezone.now()
+            self.stage.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+
+        response = self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
         self.assertTrue(response.content.startswith(b"%PDF"))
         # A handcard with one row is far larger than a blank one-page document.
         self.assertGreater(len(response.content), 1500)
+
+        # Once the result stops being the confirmed authority, the URL stops producing it.
+        with authority_write(STAGE_RESULT_CONFIRM):
+            self.stage.status = StageResult.Status.READY_TO_CONFIRM
+            self.stage.confirmed_by = None
+            self.stage.confirmed_at = None
+            self.stage.save(update_fields=["status", "confirmed_by", "confirmed_at"])
+        self.assertEqual(
+            self.client.get(reverse("staff:stage_result_pdf", args=[self.stage.pk])).status_code,
+            404,
+        )
 
     def test_stage_result_pdf_rejects_an_unknown_stage(self):
         self.client.force_login(self.staff)

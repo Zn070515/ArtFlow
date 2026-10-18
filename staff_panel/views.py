@@ -3230,7 +3230,12 @@ def stage_result_pdf(request, pk):
     Renders the same blocks the staff page shows, so the printed handcard and the page
     can never disagree about what the result is.
     """
-    stage = get_object_or_404(latest_stage_result_queryset(), pk=pk)
+    # A handcard is the asset a host reads on stage; only a CONFIRMED result may leave
+    # the system as one. Candidates (HOLD/REVIEW/READY) are explicitly not handcards.
+    stage = get_object_or_404(
+        latest_stage_result_queryset().filter(status=StageResult.Status.CONFIRMED),
+        pk=pk,
+    )
     blocks = stage_decisions_by_blocks(stage)
     decisions = [decision for block in blocks for decision in block["decisions"]]
     prime_questionnaire_answers(decision.singer for decision in decisions)
