@@ -1963,9 +1963,9 @@ def update_ruleset_binding(
         # The monotonic counter also catches A -> C -> A, which a content signature cannot.
         raise ValidationError("赛制绑定已被其他编辑修改，请刷新后重试。")
     normalized = validate_binding(locked, binding)
-    group_stage_binding_changed = dict(locked.group_stage_keys or {}) != normalized[
-        "group_stage_keys"
-    ]
+    group_stage_binding_changed = (
+        dict(locked.group_stage_keys or {}) != normalized["group_stage_keys"]
+    )
     locked.stage_key = normalized["stage_key"]
     locked.round_keys = normalized["round_keys"]
     locked.vote_keys = normalized["vote_keys"]

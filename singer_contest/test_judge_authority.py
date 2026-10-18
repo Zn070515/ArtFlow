@@ -1501,9 +1501,7 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
             is_test_data=True,
         )
         judge = Judge.objects.create(activity=self.activity, name="Race judge")
-        self.other_judge = Judge.objects.create(
-            activity=self.activity, name="Race judge B"
-        )
+        self.other_judge = Judge.objects.create(activity=self.activity, name="Race judge B")
         RoundEntry.objects.create(round=self.round, singer=self.singer, running_order=1)
         RoundJudge.objects.create(round=self.round, judge=judge)
         RoundJudge.objects.create(round=self.round, judge=self.other_judge)
@@ -1553,8 +1551,7 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
                 connection.close()
 
         threads = [
-            threading.Thread(target=target, args=(command_id,))
-            for command_id in command_ids
+            threading.Thread(target=target, args=(command_id,)) for command_id in command_ids
         ]
         for thread in threads:
             thread.start()
@@ -1572,9 +1569,7 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
         self.assertEqual(len({result.score_record_id for result in results}), 1)
         self.assertEqual(ScoreRecord.objects.count(), 1)
         self.assertEqual(
-            JudgeScoreReceipt.objects.filter(
-                status=JudgeScoreReceipt.Status.SUCCEEDED
-            ).count(),
+            JudgeScoreReceipt.objects.filter(status=JudgeScoreReceipt.Status.SUCCEEDED).count(),
             1,
         )
 
@@ -1607,7 +1602,7 @@ class JudgeScoreConcurrencyTests(TransactionTestCase):
             )
 
         barrier = threading.Barrier(2)
-        outcomes = {}
+        outcomes: dict[str, object] = {}
 
         def lock_target():
             try:

@@ -273,12 +273,8 @@ class PodiumResultServiceTests(TestCase):
         """Make the top two finalists carry identical first- and third-round scores."""
 
         tied = self.singers[:2]
-        first_score = ScoreSummary.objects.get(
-            round=self.first_round, singer=tied[0]
-        ).average_score
-        third_score = ScoreSummary.objects.get(
-            round=self.final_round, singer=tied[0]
-        ).average_score
+        first_score = ScoreSummary.objects.get(round=self.first_round, singer=tied[0]).average_score
+        third_score = ScoreSummary.objects.get(round=self.final_round, singer=tied[0]).average_score
         with authority_write(SCORE_SUMMARY_RECALCULATE):
             for singer in tied:
                 ScoreSummary.objects.filter(round=self.first_round, singer=singer).update(
@@ -494,9 +490,10 @@ class PodiumResultServiceTests(TestCase):
             action_type=AuditLog.ActionType.MANUAL_DECISION,
             target=f"StageResult:{stage.pk}",
         ).order_by("pk")
-        self.assertEqual(audits.count(), 2)
-        self.assertIn('"ordering"', audits.last().old_value)
-        self.assertIn(str(tied[1].pk), audits.last().new_value)
+        records = list(audits)
+        self.assertEqual(len(records), 2)
+        self.assertIn('"ordering"', records[-1].old_value)
+        self.assertIn(str(tied[1].pk), records[-1].new_value)
 
     def test_a_tie_decision_cannot_move_someone_across_score_groups(self):
         from .podium_services import create_podium_tie_decision, persist_podium_result

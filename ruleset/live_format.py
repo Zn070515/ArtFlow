@@ -855,8 +855,7 @@ def create_live_2026_group_stage(
         raise ValidationError("当前赛制不是 2026 现场踢馆赛制。")
     if (
         base_group_stage_binding_revision is not None
-        and base_group_stage_binding_revision
-        != locked_ruleset.group_stage_binding_revision
+        and base_group_stage_binding_revision != locked_ruleset.group_stage_binding_revision
     ):
         # The page still believes an older stage is bound (or that nothing changed since
         # its preview). Deriving the replacement target from the newer row would record

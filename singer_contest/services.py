@@ -3026,9 +3026,7 @@ def persist_stage_result(version, activity, result, *, stage_key, computed_by):
         # Same raw facts, new candidate output: the row is rewritten in place, so a
         # confirmation built from the previous screen must be told the candidate moved.
         latest.candidate_revision = (latest.candidate_revision or 0) + 1
-        latest.save(
-            update_fields=["status", "reasons", "created_by", "candidate_revision"]
-        )
+        latest.save(update_fields=["status", "reasons", "created_by", "candidate_revision"])
         with authority_write(STAGE_RESULT_RESOLVE):
             StageDecision.objects.filter(stage_result=latest).delete()
             CompositeResult.objects.filter(stage_result=latest).delete()

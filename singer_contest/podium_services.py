@@ -452,8 +452,7 @@ def podium_tie_groups(version: RulesetVersion, activity) -> list[dict]:
     valid = _valid_tie_decisions(version, activity, config, facts.fingerprint, groups)
     singer_ids = {entry.singer_id for members in groups.values() for entry, _ in members}
     names = {
-        singer.pk: singer.name
-        for singer in SingerRegistration.objects.filter(pk__in=singer_ids)
+        singer.pk: singer.name for singer in SingerRegistration.objects.filter(pk__in=singer_ids)
     }
     result: list[dict] = []
     for score in tie_scores:
@@ -517,10 +516,7 @@ def create_podium_tie_decision(
         raise ValidationError("该最终结果存在更新版本，请裁定最新结果。")
     if locked.status == StageResult.Status.CONFIRMED:
         raise ValidationError("已核定的最终结果不能再做人工裁决。")
-    if (
-        base_candidate_revision is not None
-        and locked.candidate_revision != base_candidate_revision
-    ):
+    if base_candidate_revision is not None and locked.candidate_revision != base_candidate_revision:
         # The raw facts may be unchanged while another staff member already replaced the
         # candidate (a different tie ordering or a recompute). The page's baseline covers
         # both dimensions: facts via the fingerprint, candidate via this revision.
@@ -528,10 +524,7 @@ def create_podium_tie_decision(
     facts = _facts(version, locked.activity)
     if facts.reasons:
         raise ValidationError("最终冠亚季军结果尚未满足正式裁决条件。")
-    if (
-        not str(base_input_fingerprint or "").strip()
-        or base_input_fingerprint != facts.fingerprint
-    ):
+    if not str(base_input_fingerprint or "").strip() or base_input_fingerprint != facts.fingerprint:
         raise ValidationError("最终结果已被更新，请刷新后重新计算。")
 
     try:
@@ -547,8 +540,7 @@ def create_podium_tie_decision(
         (
             members
             for members in groups.values()
-            if len(members) > 1
-            and {entry.singer_id for entry, _ in members} == wanted
+            if len(members) > 1 and {entry.singer_id for entry, _ in members} == wanted
         ),
         None,
     )
