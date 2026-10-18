@@ -1364,7 +1364,11 @@ def post_preview(request, pk):
             "preview": True,
             "active_release": active_release,
             "result_snapshot": active_release.result_snapshot if active_release else {},
-            "display_title": post.public_title if active_release else post.title,
+            "display_title": (
+                (active_release.result_snapshot or {}).get("public_title") or post.public_title
+                if active_release
+                else post.title
+            ),
         },
     )
 

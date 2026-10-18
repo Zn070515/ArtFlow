@@ -134,11 +134,13 @@ try {
     status: initialMedia.status,
   });
   const initialResults = await request(fixture.public_results_path);
-  check("unreleased result is absent from result list", !initialResults.body.includes(fixture.public_title), {
+  check("unreleased result is absent from result list", !initialResults.body.includes(fixture.editorial_title), {
     status: initialResults.status,
   });
 
-  const confirm = await postForm(fixture.confirm_path, {});
+  const confirm = await postForm(fixture.confirm_path, {
+    base_candidate_revision: String(fixture.candidate_revision),
+  });
   check("current result confirmation succeeds", confirm.status === 302, { status: confirm.status });
   const releaseValues = { stage_result_id: String(fixture.stage_id), note: "M2-D2 rehearsal release" };
   const release = await postForm(fixture.release_path, releaseValues);
@@ -171,9 +173,12 @@ try {
     status: visibleMedia.status,
   });
   const visibleResults = await request(fixture.public_results_path);
-  check("active release appears in result list", visibleResults.body.includes(fixture.public_title), {
-    status: visibleResults.status,
-  });
+  check(
+    "active release appears in result list without the editorial title",
+    visibleResults.body.includes(fixture.public_title) &&
+      !visibleResults.body.includes(fixture.editorial_title),
+    { status: visibleResults.status },
+  );
 
   const revoke = await postForm(fixture.revoke_path, { note: "M2-D2 rehearsal revoke" });
   check("explicit revoke succeeds", revoke.status === 302, { status: revoke.status });

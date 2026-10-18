@@ -3269,6 +3269,11 @@ class StageResultQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Guard: a CONFIRMED stage result is immutable; only confirm_stage_result() confirms."""
 
     def _ensure_mutable(self):
+        # The model-level guard already allows a scoped service (confirm/unlock, and the
+        # exact-scope rehearsal cleanup) to act on confirmed rows; the queryset path must
+        # not be stricter than the instance path or cleanup can never remove its fixture.
+        if authority_authorized(STAGE_RESULT_CONFIRM):
+            return
         if self.filter(status=StageResult.Status.CONFIRMED).exists():
             raise ValidationError("A confirmed stage result is immutable.")
 

@@ -914,12 +914,18 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
         self.assertEqual(response.status_code, 404)
 
-    def test_activity_entry_and_live_ssr_use_the_system_result_title(self):
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_activity_entry_and_live_ssr_use_the_system_result_title(self, _closure):
+        from .services import release_result_post
+
         self.confirm_stage_result()
         self.post.title = "李四夺冠"
         self.post.subtitle = "恭喜李四获得冠军"
         self.post.save(update_fields=["title", "subtitle"])
-        self._save(self.make_release())
+        release_result_post(self.post, self.stage_result, self.operator, note="正式发布")
         system_title = f"{self.activity.title} · 正式赛果"
         public_code = self.activity.public_code
 
@@ -931,6 +937,17 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
             self.assertContains(response, system_title)
             self.assertNotContains(response, "李四夺冠")
             self.assertNotContains(response, "恭喜李四")
+
+        # Renaming the activity after publication must not rename the result.
+        self.activity.title = "李四夺冠活动"
+        with authority_write(ACTIVITY_STATE):
+            self.activity.save(update_fields=["title"])
+        frozen_entry = self.client.get(reverse("public_portal:activity_entry", args=[public_code]))
+        frozen_live = self.client.get(reverse("public_portal:activity_live", args=[public_code]))
+        for response in (frozen_entry, frozen_live):
+            # The page's own activity heading may change; the *result* link must not.
+            self.assertContains(response, system_title)
+            self.assertNotContains(response, "李四夺冠活动 · 正式赛果")
 
     def test_release_is_hidden_when_a_newer_stage_result_exists(self):
         self.confirm_stage_result()
@@ -1248,6 +1265,24 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
         with self.assertRaisesRegex(ValidationError, "正式发布服务"):
             self.make_release().save()
 
+        for manager in (PublicPost.objects, PublicPost._base_manager):
+            with self.assertRaisesRegex(ValidationError, "conflict upsert"):
+                manager.bulk_create(
+                    [
+                        PublicPost(
+                            pk=self.post.pk,
+                            title="forged",
+                            post_type=PublicPost.PostType.NORMAL_ARTICLE,
+                            status=PublicPost.Status.PUBLISHED,
+                            related_activity=self.activity,
+                            version=1,
+                        )
+                    ],
+                    update_conflicts=True,
+                    update_fields=["title"],
+                    unique_fields=["pk"],
+                )
+
     def test_a_released_post_and_its_media_are_frozen_until_revoked(self):
         from django.core.files.uploadedfile import SimpleUploadedFile
 
@@ -1271,6 +1306,33 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
             media.save()
         with self.assertRaisesRegex(ValidationError, "撤销"):
             PublicMedia.objects.filter(pk=media.pk).update(caption="changed")
+        with self.assertRaisesRegex(ValidationError, "冲突 upsert|conflict"):
+            PublicMedia.objects.bulk_create(
+                [
+                    PublicMedia(
+                        pk=media.pk,
+                        post=self.post,
+                        image=SimpleUploadedFile("forged.jpg", b"image", content_type="image/jpeg"),
+                        caption="forged",
+                    )
+                ],
+                update_conflicts=True,
+                update_fields=["caption"],
+                unique_fields=["pk"],
+            )
+        with self.assertRaises(ValidationError):
+            PublicMedia.objects.filter(pk=media.pk)._raw_delete("default")
+
+        # An unrelated post is not frozen by a result post elsewhere in the table.
+        normal = PublicPost.objects.create(
+            title="Normal announcement",
+            post_type=PublicPost.PostType.NORMAL_ARTICLE,
+            status=PublicPost.Status.PUBLISHED,
+        )
+        normal.title = "Updated announcement"
+        PublicPost.objects.bulk_update([normal], ["title"])
+        normal.refresh_from_db()
+        self.assertEqual(normal.title, "Updated announcement")
 
         revoke_result_release(self.post, self.operator, note="先撤销再编辑")
         self.post.title = "changed"
