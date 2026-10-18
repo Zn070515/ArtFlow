@@ -4023,7 +4023,16 @@ def _submit_staff_judge_score(request, pk, *, paper):
                 reason=values["reason"],
             )
     except (PermissionDenied, ValidationError) as error:
-        messages.error(request, f"评分提交失败：{domain_error_messages(error)}")
+        detail = domain_error_messages(error)
+        if "DUPLICATE_SCORE_FACT" in detail:
+            # The grid, the judge terminal and this proxy form all write the same fact:
+            # one score per (round, singer, judge). A bare code sent the operator looking
+            # for a bug when the score was already there — possibly entered in the grid.
+            detail = (
+                "该评委对这一表演已经有一条分数。请到「录分」网格直接修改原分数，"
+                "不能再用代录新增第二条。"
+            )
+        messages.error(request, f"评分提交失败：{detail}")
     else:
         messages.success(request, "工作人员评分已记录，并绑定到当前评委席位和表演上下文。")
     return redirect("staff:judge_control", pk=pk)
