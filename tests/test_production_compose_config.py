@@ -596,6 +596,25 @@ def test_production_manifest_forwards_every_documented_settings_knob():
     )
 
 
+def test_every_django_process_has_the_collected_static_manifest():
+    """A 404 from the media pool must stay a 404, not become a 500.
+
+    Every Django process renders the error templates, and those templates use
+    `{% static %}`. With DEBUG=False that resolves through the manifest storage, so a
+    container that never received the collected `staticfiles.json` raises
+    `ValueError: Missing staticfiles manifest entry` while rendering the 404 page; the
+    500 page then raises the same error and the client sees 500. Only `web` populates
+    the volume, so `media` and `realtime` must mount it read-only.
+    """
+    for manifest_path in (PRODUCTION_COMPOSE_PATH, EVENT_COMPOSE_PATH):
+        services = load_compose(manifest_path)["services"]
+        for name in ("media", "realtime"):
+            volumes = services[name].get("volumes", [])
+            assert "static_data:/app/staticfiles:ro" in volumes, (
+                f"{manifest_path.name}: {name} cannot render an error page"
+            )
+
+
 def test_environment_examples_document_optional_public_metadata_and_staged_hsts():
     production = PRODUCTION_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
     event = EVENT_ENV_EXAMPLE_PATH.read_text(encoding="utf-8")

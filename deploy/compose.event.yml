@@ -157,6 +157,10 @@ services:
       LIVE_STATE_CACHE_SECONDS: ${LIVE_STATE_CACHE_SECONDS:-1}
       ADMIN_VERIFICATION_TTL_SECONDS: ${ADMIN_VERIFICATION_TTL_SECONDS:-900}
       TICKET_ACCESS_SESSION_TTL_SECONDS: ${TICKET_ACCESS_SESSION_TTL_SECONDS:-28800}
+    volumes:
+      # Same reason as the media pool: a Django-rendered error page must resolve
+      # `{% static %}` from the manifest instead of failing into a 500.
+      - static_data:/app/staticfiles:ro
     command: ["daphne", "-b", "0.0.0.0", "-p", "8001", "config.asgi:application"]
     healthcheck:
       test:
@@ -237,6 +241,11 @@ services:
         "30",
       ]
     volumes:
+      # `{% static %}` resolves through the manifest storage when DEBUG=False. Without
+      # the collected manifest, a 404 from this pool becomes a 500 (and the 500 template
+      # raises the same error), so private files would answer 500 instead of 404. `web`
+      # populates the volume before it reports healthy and `proxy` waits for that.
+      - static_data:/app/staticfiles:ro
       - media_data:/app/media
     healthcheck:
       test:
