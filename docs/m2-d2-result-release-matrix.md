@@ -18,6 +18,7 @@
 | RELEASE-07 | unlock 已公示 StageResult | active release 进入 `SUPERSEDED`，旧文章/媒体立即不可见 |
 | RELEASE-08 | 扫描响应、归档索引和 inspector | 不出现 cookie、CSRF、token、完整 fingerprint、authority hash、评分或学生私密字段 |
 | RELEASE-09 | 直接构造 active release 指向公告或草稿文章 | 模型 `full_clean()` 拒绝；历史 `REVOKED`/`SUPERSEDED` 行仍可保留 |
+| RELEASE-10 | ACTIVE release 后请求结果文章的 editorial cover/PublicMedia 直链 | 仍为 404；普通公告/展示文章的公开媒体仍为 200，正式事实只由冻结 snapshot 构成 |
 
 ## 运行边界与量化字段
 
@@ -52,6 +53,18 @@ release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONF
 新增模型边界测试同时证明 active release 不能绑定公告或草稿文章。fixture 已精确清理，
 源数据库与 volumes 未 reset；本次仍不外推学校公网容量，也不替代 SSO/MFA、TLS/WAF、
 volumetric DDoS、留存和部署 ownership 的外部验收。
+
+## 2026-10-18 editorial media 收口重跑
+
+在本地 SQLite 开发数据库、`http://127.0.0.1:8765` 上运行同一份
+`scripts/m2_d2_result_release_rehearsal.mjs`（仅将 fixture inspect/cleanup 的
+`docker compose exec` 换成本机 `uv run python manage.py`，断言未改）。共 19 个请求，
+`2xx=4`、`3xx=6`、`4xx=9`、`5xx=0`、超时 `0`；p50 `22.26 ms`，p95/p99/max
+`78.11 ms`，20/20 检查通过。本轮新增/修改的断言为：ACTIVE release 后结果文章的
+editorial media 仍返回 404（`formal result release does not publish editorial media`）。
+Inspector 仍为 `release_audit=2`、`revoke_audit=1`、`supersede_audit=1`、历史 `2`
+条、active `0` 条、最终 `READY_TO_CONFIRM`。该次不是 Compose/PostgreSQL 彩排，也不外推
+学校公网容量；fixture 已由 cleanup 精确清理。
 
 ## 生产/学校边界
 

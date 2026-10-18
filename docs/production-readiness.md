@@ -201,13 +201,22 @@ M2-D2 将内部结果核定和公开内容发布明确分离：`PublicPost.PUBLI
 不能单独使 `RESULT_PUBLICATION` 对公网可见。公开结果必须在当前正式活动、当前冻结赛制、
 最新且 `CONFIRMED` 的 `StageResult` 通过闭场检查后，由管理员带二次验证和非空原因，
 通过独立事务创建 `ResultRelease.ACTIVE`。撤销、解锁和生成更新结果会保留历史并使旧
-release 进入 `REVOKED`/`SUPERSEDED`；公共首页、结果列表、详情和受控媒体统一使用同一
-fail-closed 查询边界。
+release 进入 `REVOKED`/`SUPERSEDED`；公共首页、结果列表和详情统一使用同一 fail-closed
+查询边界。
 
-归档的 `public_content_index.xlsx` 分开记录 editorial status 与 result release status、
-result version 和 release 时间，不导出 authority hash、input fingerprint、学生私密字段或
-bearer。M2-D2 的代码证据仍不能替代学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存审批和
-部署 ownership；这些项目继续保持外部 `HOLD`，并必须在学校接入前单独验收。
+正式结果的公众事实只由该 release 冻结的 `result_snapshot` 构成。结果文章的 editorial
+`cover_image` 和 `PublicMedia` 既不渲染，也不因 release 生效而获得匿名 `/media/...`
+访问权：受控媒体网关只服务非结果类公开文章的 editorial 资产，普通公告/展示文章的封面和
+媒体仍正常返回 200。已经流出的海报 URL 在更正后不会继续匿名可读；正式结果若需要海报，
+应建立 release-owned 资产，而不是重新放开自由上传。
+
+归档的 `public_content_index.xlsx` 分开记录 editorial title/public title、editorial status
+与 result release status、result version 和 release 时间；`result_release_history.xlsx`
+额外导出冻结的 Snapshot Activity ID/Title 与 Snapshot Public Title，使每条 release
+自包含。旧 SUPERSEDED/REVOKED 行缺失身份时保持空白，不用归档时的活动名伪造历史。
+归档不导出 authority hash、input fingerprint、学生私密字段或 bearer。M2-D2 的代码证据
+仍不能替代学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存审批和部署 ownership；这些项目
+继续保持外部 `HOLD`，并必须在学校接入前单独验收。
 
 #### 2026-09-21 M2-D2 本地 Docker 黑盒彩排
 
@@ -235,6 +244,21 @@ release `2` 条、active release `0` 条，最终 StageResult 为 `READY_TO_CONF
 边界回归还确认 active release 不能绑定公告或草稿文章。fixture 已精确清理，源数据库与
 volumes 未 reset。本次证据只覆盖应用层 authority，不替代学校 SSO/MFA、TLS/WAF、
 volumetric DDoS、留存审批和部署 ownership 的外部 `HOLD`。
+
+#### 2026-10-18 editorial media 收口与归档标题重跑
+
+受控媒体网关不再把 `RESULT_PUBLICATION` 的 editorial cover/`PublicMedia` 视为公开资产：
+ACTIVE release 只公开冻结 snapshot，旧海报 URL 保持 404，普通公告/展示文章的公开媒体仍为
+200。归档 `result_release_history.xlsx` 新增冻结的 Snapshot Activity ID/Title 与
+Snapshot Public Title；`public_content_index.xlsx` 并排记录 editorial/public title。
+
+在本地 SQLite 开发数据库、`http://127.0.0.1:8765` 上运行完整 Node 彩排脚本（仅将
+fixture inspect/cleanup 换成本机 `uv run python manage.py`）：19 个请求、20 个断言、
+`2xx=4`、`3xx=6`、`4xx=9`、`5xx=0`、超时 `0`，20/20 通过；其中 ACTIVE release 后
+editorial media 为 404。Inspector 仍为 `release_audit=2`、`revoke_audit=1`、
+`supersede_audit=1`、历史 `2` 条、active `0` 条、最终 `READY_TO_CONFIRM`。该记录不是
+Compose/PostgreSQL 彩排，也不替代学校 SSO/MFA、TLS/WAF、volumetric DDoS、留存和部署
+ownership 的外部验收。
 
 ### 2026-09-27 Production release-readiness 收口
 

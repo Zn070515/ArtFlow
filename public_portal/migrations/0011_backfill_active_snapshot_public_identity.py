@@ -2,11 +2,16 @@ from django.db import migrations
 
 
 def backfill_active_snapshot_public_identity(apps, schema_editor):
-    """Freeze the public identity for ACTIVE releases published before it was stored.
+    """Best-effort public identity for ACTIVE releases published before it was stored.
 
-    ACTIVE releases still describe the current confirmed result, so the current activity
-    title is the title that result is published under. Superseded/revoked rows stay
-    sparse: their historical public title cannot be reconstructed.
+    This is *not* a reconstruction of the historical heading. Only releases created
+    after this migration freeze the title at release time; for these legacy rows the
+    activity title read here is whatever it is *now*, and the activity may have been
+    renamed after the release. It is recorded because ACTIVE rows describe the current
+    public result and need a usable heading, not because "A · 正式赛果" is proven to be
+    what the audience saw. Superseded/revoked rows stay sparse: their historical public
+    title cannot be reconstructed at all, so borrowing the current title would fabricate
+    it. Treat only post-0011 releases as strong historical snapshots.
     """
 
     ResultRelease = apps.get_model("public_portal", "ResultRelease")

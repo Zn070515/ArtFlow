@@ -6108,6 +6108,8 @@ class ResultReleaseHttpTests(TestCase):
         unreleased = archive_row()
         self.assertEqual(unreleased["Editorial Status"], "已发布")
         self.assertEqual(unreleased["Result Release Status"], "未发布")
+        self.assertEqual(unreleased["Title"], "HTTP Final Result")
+        self.assertEqual(unreleased["Public Title"], f"{self.activity.title} · 正式赛果")
         self.assertIsNone(unreleased["Result Version"])
         self.assertNotIn(
             "1111111111111111111111111111111111111111111111111111111111111111", str(unreleased)
@@ -6119,6 +6121,9 @@ class ResultReleaseHttpTests(TestCase):
                 stage_result=self.stage_result,
                 post_version=self.post.version,
                 result_version=self.stage_result.result_version,
+                # Deliberately different from the live activity title: the archive must
+                # export what the release froze, not today's editable activity title.
+                result_snapshot={"public_title": "冻结发布标题 · 正式赛果"},
                 ruleset_version=self.version,
                 authority_hash="private-authority-canary",
                 input_fingerprint="private-fingerprint-canary",
@@ -6129,6 +6134,8 @@ class ResultReleaseHttpTests(TestCase):
         self.assertEqual(released["Editorial Status"], "已发布")
         self.assertEqual(released["Result Release Status"], "生效")
         self.assertEqual(released["Result Version"], 1)
+        self.assertEqual(released["Title"], "HTTP Final Result")
+        self.assertEqual(released["Public Title"], "冻结发布标题 · 正式赛果")
         self.assertNotIn("private-authority-canary", str(released))
         self.assertNotIn("private-fingerprint-canary", str(released))
 
@@ -6162,6 +6169,9 @@ class ResultReleaseHttpTests(TestCase):
                 candidate_revision=3,
                 result_snapshot={
                     "stage_key": "final_podium",
+                    "activity_id": self.activity.pk,
+                    "activity_title": "归档时的旧活动名",
+                    "public_title": "归档时的旧活动名 · 正式赛果",
                     "decisions": [{"rank": 1, "contestant": "8"}],
                     "awards": [{"award": "冠军", "contestant": "8"}],
                 },
@@ -6191,6 +6201,17 @@ class ResultReleaseHttpTests(TestCase):
         self.assertEqual(superseded[header.index("Candidate Revision")], 2)
         self.assertIn('"contestant": "7"', str(superseded[header.index("Snapshot Decisions")]))
         self.assertEqual(superseded[header.index("Transition By")], self.admin.username)
+        # The legacy row never recorded a public identity; the ZIP must say so by leaving
+        # the cells empty rather than borrowing today's activity title.
+        # openpyxl stores an empty string as an empty cell, which reads back as None.
+        self.assertIsNone(superseded[header.index("Snapshot Activity ID")])
+        self.assertIsNone(superseded[header.index("Snapshot Public Title")])
+        active = by_status["生效"]
+        self.assertEqual(active[header.index("Snapshot Activity ID")], self.activity.pk)
+        self.assertEqual(active[header.index("Snapshot Activity Title")], "归档时的旧活动名")
+        self.assertEqual(
+            active[header.index("Snapshot Public Title")], "归档时的旧活动名 · 正式赛果"
+        )
 
 
 class RoundScoresApiTests(TestCase):

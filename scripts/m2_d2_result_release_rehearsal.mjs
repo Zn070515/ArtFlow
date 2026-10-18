@@ -169,9 +169,11 @@ try {
     status: visibleDetail.status,
   });
   const visibleMedia = await request(fixture.media_url_path);
-  check("active release permits its controlled media", visibleMedia.status === 200, {
-    status: visibleMedia.status,
-  });
+  check(
+    "formal result release does not publish editorial media",
+    visibleMedia.status === 404,
+    { status: visibleMedia.status },
+  );
   const visibleResults = await request(fixture.public_results_path);
   check(
     "active release appears in result list without the editorial title",

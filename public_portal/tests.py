@@ -867,11 +867,62 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
             media_path = Path(media_root) / "public/gallery/result.jpg"
             media_path.parent.mkdir(parents=True)
             media_path.write_bytes(b"public-result-media")
+            self.client.raise_request_exception = False
             response = self.client.get(
                 reverse("controlled_media", kwargs={"path": "public/gallery/result.jpg"})
             )
             _close_file_response_resources(response)
-        self.assertEqual(response.status_code, 200)
+        # The page hides editorial media, so the gateway must not still serve it: an
+        # ACTIVE release publishes the frozen snapshot, not the upload it replaced.
+        self.assertEqual(response.status_code, 404)
+
+    def test_result_publication_cover_is_never_anonymous(self):
+        self.post.cover_image = "public/gallery/result-cover.jpg"
+        self.post.save(update_fields=["cover_image"])
+        self.confirm_stage_result()
+        self._save(self.make_release())
+
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            cover_path = Path(media_root) / "public/gallery/result-cover.jpg"
+            cover_path.parent.mkdir(parents=True)
+            cover_path.write_bytes(b"stale-result-cover")
+            self.client.raise_request_exception = False
+            response = self.client.get(
+                reverse("controlled_media", kwargs={"path": "public/gallery/result-cover.jpg"})
+            )
+            _close_file_response_resources(response)
+        self.assertEqual(response.status_code, 404)
+
+    def test_ordinary_public_posts_still_serve_their_editorial_media(self):
+        announcement = PublicPost.objects.create(
+            title="Ordinary announcement",
+            post_type=PublicPost.PostType.ANNOUNCEMENT,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=self.activity,
+            cover_image="public/gallery/announcement-cover.jpg",
+            published_at=timezone.now(),
+        )
+        announcement_media = PublicMedia.objects.create(
+            post=announcement,
+            related_activity=self.activity,
+            image="public/gallery/announcement.jpg",
+            caption="Announcement media",
+        )
+        cover_name, media_name = announcement.cover_image.name, announcement_media.image.name
+        assert cover_name is not None and media_name is not None
+        paths = (cover_name, media_name)
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            for relative_path in paths:
+                file_path = Path(media_root) / relative_path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_bytes(b"ordinary-public-media")
+            responses = [
+                self.client.get(reverse("controlled_media", kwargs={"path": relative_path}))
+                for relative_path in paths
+            ]
+            for response in responses:
+                _close_file_response_resources(response)
+        self.assertEqual([response.status_code for response in responses], [200, 200])
 
     def test_revoked_and_superseded_releases_are_not_public(self):
         for status in (ResultRelease.Status.REVOKED, ResultRelease.Status.SUPERSEDED):

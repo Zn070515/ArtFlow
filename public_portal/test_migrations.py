@@ -48,7 +48,12 @@ class ResultReleaseSnapshotBackfillTests(MigrationTransactionTestCase):
         executor = MigrationExecutor(connection)
         executor.migrate(executor.loader.graph.leaf_nodes())
 
-    def test_an_active_release_gains_its_published_candidate_snapshot(self):
+    def test_an_active_release_gains_its_candidate_snapshot_and_a_best_effort_identity(self):
+        # The snapshot is provable for the candidate (it is read from the stage result the
+        # release already points at). The title is best effort only: a legacy ACTIVE row
+        # has no record of the heading it was published under, so 0011 stores whatever
+        # the activity is called at migration time. Do not read this assertion as proof
+        # that the historical public title was recovered.
         try:
             self._migrate_to([BEFORE])
             legacy_apps = self._apps_at(BEFORE)
