@@ -29,8 +29,19 @@ class PublicPostQuerySet(models.QuerySet):
         self._ensure_not_released()
         return super().delete()
 
+    def bulk_create(self, objs, *args, **kwargs) -> list[Any]:
+        if parse_bulk_create_options(args, kwargs).update_conflicts:
+            raise ValidationError("公开文章不允许通过 conflict upsert 修改。")
+        return super().bulk_create(objs, *args, **kwargs)
+
     def bulk_update(self, objs, fields, *args, **kwargs) -> int:
-        self._ensure_not_released()
+        # Only the rows actually being written matter: a result post elsewhere in the
+        # table must not freeze an unrelated announcement edit.
+        pks = [obj.pk for obj in objs if getattr(obj, "pk", None)]
+        if ResultRelease.objects.filter(
+            post_id__in=pks, status=ResultRelease.Status.ACTIVE
+        ).exists():
+            raise ValidationError("结果已公示，编辑或移动前必须先撤销当前结果发布。")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 
@@ -180,6 +191,12 @@ class PublicPost(models.Model):
 
         if self.post_type != self.PostType.RESULT_PUBLICATION:
             return self.title
+        release = (
+            self.result_releases.filter(status=ResultRelease.Status.ACTIVE).order_by("-pk").first()
+        )
+        frozen_title = (release.result_snapshot or {}).get("public_title") if release else ""
+        if frozen_title:
+            return str(frozen_title)
         activity = self.related_activity if self.related_activity_id else None
         activity_title = activity.title if activity is not None else ""
         return f"{activity_title} · 正式赛果" if activity_title else "正式赛果"
@@ -331,7 +348,7 @@ class ResultRelease(models.Model):
         return f"{self.post} — {self.stage_result} ({self.get_status_display()})"
 
 
-class PublicMediaQuerySet(models.QuerySet):
+class PublicMediaQuerySet(AuthorityQuerySetMixin, models.QuerySet):
     """Media of a released post is frozen with the post itself."""
 
     def _ensure_not_released(self) -> None:
@@ -349,6 +366,8 @@ class PublicMediaQuerySet(models.QuerySet):
         return super().delete()
 
     def bulk_create(self, objs, *args, **kwargs) -> list[Any]:
+        if parse_bulk_create_options(args, kwargs).update_conflicts:
+            raise ValidationError("公开媒体不允许通过 conflict upsert 修改。")
         post_ids = {obj.post_id for obj in objs if obj.post_id}
         if ResultRelease.objects.filter(
             post_id__in=post_ids, status=ResultRelease.Status.ACTIVE
@@ -357,7 +376,15 @@ class PublicMediaQuerySet(models.QuerySet):
         return super().bulk_create(objs, *args, **kwargs)
 
     def bulk_update(self, objs, fields, *args, **kwargs) -> int:
-        self._ensure_not_released()
+        pks = [obj.pk for obj in objs if getattr(obj, "pk", None)]
+        stored_post_ids = set(
+            PublicMedia._base_manager.filter(pk__in=pks).values_list("post_id", flat=True)
+        )
+        post_ids = {obj.post_id for obj in objs if obj.post_id} | stored_post_ids
+        if ResultRelease.objects.filter(
+            post_id__in=post_ids, status=ResultRelease.Status.ACTIVE
+        ).exists():
+            raise ValidationError("所属文章的结果已公示，编辑媒体前必须先撤销结果发布。")
         return super().bulk_update(objs, fields, *args, **kwargs)
 
 

@@ -129,12 +129,18 @@ def _result_snapshot(stage: StageResult) -> dict:
         }
         for decision in award_rows
     ]
+    activity_title = stage.activity.title
     return {
         "stage_key": stage.stage_key,
         "result_version": stage.result_version,
         "candidate_revision": stage.candidate_revision,
         "input_fingerprint": stage.input_fingerprint,
         "ruleset_version_id": stage.ruleset_version_id,
+        "activity_id": stage.activity_id,
+        "activity_title": activity_title,
+        # The public identity is frozen with the result: renaming the activity later must
+        # not silently rename a published result (revoke and re-release instead).
+        "public_title": f"{activity_title} · 正式赛果",
         "decisions": decisions,
         "awards": awards,
     }
