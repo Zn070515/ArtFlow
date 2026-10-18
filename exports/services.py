@@ -933,10 +933,22 @@ def _public_content_index_workbook(activity: Activity) -> Workbook:
     for post in posts:
         latest_release = next(iter(post.result_releases.all()), None)
         is_result = post.post_type == PublicPost.PostType.RESULT_PUBLICATION
+        if is_result:
+            # Read the release the row is describing, not post.public_title: that property
+            # looks only for an ACTIVE release and otherwise falls back to the *current*
+            # activity title. A revoked release would then be labelled with today's name,
+            # contradicting result_release_history.xlsx in the same ZIP.
+            public_title = (
+                str((latest_release.result_snapshot or {}).get("public_title") or "")
+                if latest_release
+                else ""
+            )
+        else:
+            public_title = post.title
         ws.append(
             [
                 post.title,
-                post.public_title,
+                public_title,
                 post.get_post_type_display(),
                 post.get_status_display(),
                 (
@@ -969,6 +981,10 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
     the activity may have been renamed since, but the ZIP must still answer "what heading
     did this release publish under?". Pre-snapshot (legacy) rows stay blank rather than
     borrowing the current activity title, which would fabricate a history nobody recorded.
+    The internal input fingerprint is deliberately absent: it is provenance for runtime
+    verification, and the archive contract excludes complete fingerprints and authority
+    hashes. Version, candidate revision, stage key and frozen decisions already say what
+    was published.
     """
 
     wb = Workbook()
@@ -989,7 +1005,6 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
             "Released By",
             "Transition At",
             "Transition By",
-            "Input Fingerprint",
             "Stage Key",
             "Snapshot Available",
             "Snapshot Decisions",
@@ -1022,7 +1037,6 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
                 release.released_by.username if release.released_by else "",
                 (release.transition_at.strftime("%Y-%m-%d %H:%M") if release.transition_at else ""),
                 release.transition_by.username if release.transition_by else "",
-                release.input_fingerprint,
                 snapshot.get("stage_key", release.stage_result.stage_key),
                 "yes" if snapshot else "no (legacy)",
                 json.dumps(snapshot.get("decisions", []), ensure_ascii=False, sort_keys=True),

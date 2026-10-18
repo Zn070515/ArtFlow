@@ -6109,7 +6109,9 @@ class ResultReleaseHttpTests(TestCase):
         self.assertEqual(unreleased["Editorial Status"], "已发布")
         self.assertEqual(unreleased["Result Release Status"], "未发布")
         self.assertEqual(unreleased["Title"], "HTTP Final Result")
-        self.assertEqual(unreleased["Public Title"], f"{self.activity.title} · 正式赛果")
+        # A result post with no release has no published heading yet; the archive must not
+        # invent today's activity title for it. openpyxl reads an empty cell as None.
+        self.assertIsNone(unreleased["Public Title"])
         self.assertIsNone(unreleased["Result Version"])
         self.assertNotIn(
             "1111111111111111111111111111111111111111111111111111111111111111", str(unreleased)
@@ -6138,6 +6140,44 @@ class ResultReleaseHttpTests(TestCase):
         self.assertEqual(released["Public Title"], "冻结发布标题 · 正式赛果")
         self.assertNotIn("private-authority-canary", str(released))
         self.assertNotIn("private-fingerprint-canary", str(released))
+
+    def test_archive_index_keeps_a_revoked_release_under_its_frozen_public_title(self):
+        with authority_write(RESULT_RELEASE_STATE):
+            ResultRelease.objects.create(
+                post=self.post,
+                stage_result=self.stage_result,
+                post_version=self.post.version,
+                result_version=self.stage_result.result_version,
+                result_snapshot={"public_title": "旧标题 · 正式赛果"},
+                ruleset_version=self.version,
+                authority_hash="a" * 64,
+                input_fingerprint="f" * 64,
+                status=ResultRelease.Status.REVOKED,
+                released_by=self.admin,
+                transition_by=self.admin,
+                transition_at=timezone.now(),
+                note="旧版发布",
+            )
+        # The renamed activity is exactly what the old fallback would have published into
+        # the archive: a revoked release must keep the heading frozen at release time.
+        self.activity.title = "改名为渡梦十佳"
+        self.activity.save(update_fields=["title"])
+
+        artifact = next(
+            item
+            for item in build_archive_package(self.activity)
+            if item.name == "public_content_index.xlsx"
+        )
+        sheet = load_workbook(BytesIO(artifact.content)).active
+        assert sheet is not None
+        headers = [cell.value for cell in sheet[1]]
+        records = [
+            dict(zip(headers, row, strict=True))
+            for row in sheet.iter_rows(min_row=2, values_only=True)
+        ]
+        record = next(row for row in records if row["Title"] == "HTTP Final Result")
+        self.assertEqual(record["Result Release Status"], "已撤销")
+        self.assertEqual(record["Public Title"], "旧标题 · 正式赛果")
 
     def test_archive_package_keeps_every_release_with_its_frozen_snapshot(self):
         with authority_write(RESULT_RELEASE_STATE):
@@ -6194,6 +6234,10 @@ class ResultReleaseHttpTests(TestCase):
         header = list(rows[0])
         records = rows[1:]
         self.assertEqual(len(records), 2)
+        # The archive contract excludes complete fingerprints and authority hashes; the
+        # release's version/candidate/stage and frozen decisions already identify it.
+        self.assertNotIn("Input Fingerprint", header)
+        self.assertNotIn("f" * 64, str(rows))
         by_status = {row[header.index("Status")]: row for row in records}
         self.assertIn("已被新版本取代", by_status)
         self.assertIn("生效", by_status)
