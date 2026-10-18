@@ -36,11 +36,16 @@ class FakeElement {
     this.dataset = dataset;
     this.value = value;
     this.textContent = textContent;
+    this.tagName = "INPUT";
     this.style = {};
     this.disabled = false;
     this.classList = new FakeClassList();
     this.listeners = new Map();
     this.selectorResults = new Map();
+    this.closestResult = null;
+    this.previousElementSibling = null;
+    this.nextElementSibling = null;
+    this.focusCount = 0;
   }
 
   addEventListener(type, listener) {
@@ -60,10 +65,12 @@ class FakeElement {
   }
 
   closest() {
-    return null;
+    return this.closestResult;
   }
 
-  focus() {}
+  focus() {
+    this.focusCount += 1;
+  }
   select() {}
   blur() {}
 }
@@ -219,6 +226,28 @@ function assertPendingRecord(record, {
   assert.deepEqual(actual, expected);
   assert.match(record.updated_at, /^\d{4}-\d{2}-\d{2}T/);
 }
+
+test("ArrowUp moves to the same judge in the previous row", () => {
+  const runtime = boot();
+  const previousInput = new FakeElement({ dataset: { singerId: "0", judgeId: "9" } });
+  const previousRow = new FakeElement();
+  previousRow.selectorResults.set('input[data-judge-id="9"]', previousInput);
+  const row = new FakeElement();
+  row.previousElementSibling = previousRow;
+  runtime.input.closestResult = row;
+  let prevented = false;
+
+  runtime.tbody.dispatch("keydown", {
+    target: runtime.input,
+    key: "ArrowUp",
+    preventDefault: () => {
+      prevented = true;
+    },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(previousInput.focusCount, 1);
+});
 
 test("validated edits persist a pending record before the POST", async () => {
   let recordAtFetch = null;

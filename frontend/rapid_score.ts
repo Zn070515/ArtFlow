@@ -913,6 +913,12 @@
       if (nextRow) {
         moveTo(nextRow.querySelector<HTMLInputElement>('input[data-judge-id="' + judgeId + '"]'));
       }
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const previousRow = row.previousElementSibling;
+      if (previousRow) {
+        moveTo(previousRow.querySelector<HTMLInputElement>('input[data-judge-id="' + judgeId + '"]'));
+      }
     } else if (event.key === "ArrowRight") {
       event.preventDefault();
       const cols = row.querySelectorAll<HTMLInputElement>("input[data-judge-id]");
