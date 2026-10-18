@@ -16,12 +16,18 @@ test 都消费同一份输入/期望。这样“旧实现”和“新实现”�
 
 | 文件 | 覆盖不变量 | 场景 |
 | --- | --- | --- |
-| `result-release-lifecycle.json` | RES-01…RES-06 | 确认 → 发布 → 冻结编辑 → 撤销 → 再发布 → 解锁 |
-| `duplicate-score-fact.json` | SCOR-01、SCOR-06 | 快速录分后代录同一席位被拒绝；编辑原分数成功 |
-| `capability-reissue-close.json` | TICK-02、TICK-03 | 重新签发/关闭入口与 claim 的并发窗口 |
-| `unknown-roster.json` | LIFE-07 | 报名未定时冻结成功、执行失败；名单确定后执行通过 |
-| `static-artifact-identity.json` | DEPL-02 | 新镜像的静态产物必须替换旧卷内容 |
-| `archive-identity.json` | RES-07 | 活动改名后归档仍导出冻结标题；legacy 行留空 |
+| [`result-release-lifecycle.json`](result-release-lifecycle.json) | RES-01…RES-06 | 确认 → 发布 → 冻结编辑 → 撤销 → 再发布 → 解锁 |
+| [`duplicate-score-fact.json`](duplicate-score-fact.json) | SCOR-01、SCOR-02、SCOR-06 | 快速录分后代录同一席位被拒绝；编辑原分数成功；陈旧上下文被拒绝 |
+| [`capability-reissue-close.json`](capability-reissue-close.json) | TICK-01…TICK-03、TICK-06 | 无凭证被拒；重签失效旧码；关闭入口只拒绝新 claim |
+| [`unknown-roster.json`](unknown-roster.json) | LIFE-07、CONC-01 | 名单未定时冻结成功（DEFERRED）、执行失败；名单确定后执行通过 |
+| [`static-artifact-identity.json`](static-artifact-identity.json) | DEPL-02、DEPL-04 | 新镜像静态产物替换旧卷；media worker 必须能渲染 404 |
+| [`archive-identity.json`](archive-identity.json) | RES-06、RES-07、LIFE-05 | 活动改名后归档仍导出冻结标题；legacy 行留空；不导出 fingerprint |
+
+格式见 [`SCHEMA.md`](SCHEMA.md)。校验（不需要 Django）：
+
+```powershell
+uv run python tests/golden/validate_fixtures.py
+```
 
 ## 规则
 

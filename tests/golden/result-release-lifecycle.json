@@ -1,0 +1,141 @@
+{
+  "schema": "artflow.golden.fixture.v1",
+  "id": "result-release-lifecycle",
+  "invariants": ["RES-01", "RES-02", "RES-03", "RES-04", "CONC-07"],
+  "description": "确认后的正式结果只能由 release snapshot 公开；编辑被冻结，撤销后重新发布，解锁使旧 release 失效。",
+  "facts": {
+    "activity": {
+      "key": "act-2026",
+      "title": "2026 院十佳",
+      "phase": "rehearsal",
+      "lifecycle": "formal"
+    },
+    "ruleset": {
+      "version": "v1",
+      "status": "frozen",
+      "is_current": true,
+      "authority_hash": "ruleset-hash-1"
+    },
+    "stage_result": {
+      "key": "final_podium",
+      "status": "confirmed",
+      "candidate_revision": 3,
+      "result_version": 1,
+      "input_fingerprint": "fp-1",
+      "ruleset_hash": "ruleset-hash-1",
+      "decisions": [
+        {"rank": 1, "contestant": "singer-a", "score": "98.30"},
+        {"rank": 2, "contestant": "singer-b", "score": "97.80"}
+      ],
+      "awards": [
+        {"award": "冠军", "contestant": "singer-a"}
+      ]
+    },
+    "post": {
+      "key": "post-result",
+      "type": "result_publication",
+      "status": "published",
+      "version": 1,
+      "editorial_title": "编辑标题",
+      "editorial_content": "与正式赛果无关的正文"
+    },
+    "release": null
+  },
+  "steps": [
+    {
+      "step": 1,
+      "command": "release_result",
+      "actor": "admin:fixture-admin",
+      "input": {
+        "post": "post-result",
+        "stage_result": "final_podium",
+        "expected_candidate_revision": 3,
+        "note": "正式发布"
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["ResultReleased"],
+        "read_model": {
+          "release_status": "active",
+          "public_title": "2026 院十佳 · 正式赛果",
+          "snapshot_candidate_revision": 3,
+          "snapshot_fingerprint": "fp-1",
+          "snapshot_decisions": 2
+        }
+      }
+    },
+    {
+      "step": 2,
+      "command": "edit_result_post",
+      "actor": "staff:fixture-staff",
+      "input": {
+        "post": "post-result",
+        "editorial_title": "改后的标题",
+        "base_version": 1
+      },
+      "expect": {
+        "outcome": "rejected",
+        "reason": "RESULT_POST_FROZEN",
+        "side_effects": "none"
+      }
+    },
+    {
+      "step": 3,
+      "command": "revoke_result_release",
+      "actor": "admin:fixture-admin",
+      "input": {
+        "post": "post-result",
+        "note": "发现结果需要复核"
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["ResultReleaseRevoked"],
+        "read_model": {
+          "release_status": "revoked",
+          "public_post_visible": false,
+          "release_history_count": 1
+        }
+      }
+    },
+    {
+      "step": 4,
+      "command": "release_result",
+      "actor": "admin:fixture-admin",
+      "input": {
+        "post": "post-result",
+        "stage_result": "final_podium",
+        "expected_candidate_revision": 3,
+        "note": "复核后重新发布"
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["ResultReleased"],
+        "read_model": {
+          "release_status": "active",
+          "release_history_count": 2,
+          "public_post_visible": true
+        }
+      }
+    },
+    {
+      "step": 5,
+      "command": "unlock_stage_result",
+      "actor": "admin:fixture-admin",
+      "input": {
+        "stage_result": "final_podium",
+        "expected_candidate_revision": 3,
+        "note": "需要更正名次"
+      },
+      "expect": {
+        "outcome": "accepted",
+        "events": ["StageResultUnlocked", "ResultReleaseSuperseded"],
+        "read_model": {
+          "stage_status": "ready_to_confirm",
+          "candidate_revision": 4,
+          "release_status": "superseded",
+          "public_post_visible": false
+        }
+      }
+    }
+  ]
+}
