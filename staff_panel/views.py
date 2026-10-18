@@ -6149,10 +6149,18 @@ def _live_2026_tasks(version) -> list[dict]:
     return rows
 
 
-def _binding_revision_from_post(value) -> int | None:
+def _binding_revision_from_post(value) -> int:
+    """The human form's binding OCC token. Missing is refused, not ignored.
+
+    Every current binding form renders this token. A page opened before the token
+    existed would otherwise silently fall back to the weaker content signature and
+    reopen the A -> C -> A window, so an absent value fails closed with a refresh.
+    Internal/service callers may still call the service without a token.
+    """
+
     text = str(value or "").strip()
     if not text:
-        return None
+        raise ValidationError("页面版本过旧，请刷新后重试。")
     try:
         return int(text)
     except (TypeError, ValueError) as exc:

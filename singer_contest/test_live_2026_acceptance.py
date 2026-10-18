@@ -26,6 +26,7 @@ from django.utils import timezone
 from ruleset.live_format import create_live_2026_group_stage, freeze_blocker
 from ruleset.models import ContestRuleset, RulesetTemplate, RulesetVersion
 from ruleset.services import (
+    _binding_signature,
     _snapshot_binding,
     freeze_ruleset_version,
     supersede_ruleset_version,
@@ -923,9 +924,12 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
             ruleset=self.ruleset, status=RulesetVersion.Status.DRAFT
         )
 
+        current_ruleset = ContestRuleset.objects.get(pk=self.ruleset.pk)
         response = self.staff.post(
             reverse("staff:ruleset_live_2026_config", args=[successor.pk]),
             {
+                "base_binding": _binding_signature(current_ruleset),
+                "base_binding_revision": current_ruleset.binding_revision,
                 "live_participant_count": self.PARTICIPANTS,
                 "live_seat_count": 4,
                 "live_group_count": live["group_count"],
@@ -991,7 +995,10 @@ class Live2026ReadinessPageTests(_Live2026AcceptanceFixtureMixin, TestCase):
 
     def _config_post(self, **overrides):
         live = self.ruleset.live_challenge
+        current_ruleset = ContestRuleset.objects.get(pk=self.ruleset.pk)
         data = {
+            "base_binding": _binding_signature(current_ruleset),
+            "base_binding_revision": current_ruleset.binding_revision,
             "live_participant_count": str(self.PARTICIPANTS),
             "live_seat_count": str(self.SEATS),
             "live_group_count": str(self.GROUP_COUNT),
@@ -1294,7 +1301,10 @@ class Live2026VersionLifecycleTests(_Live2026AcceptanceFixtureMixin, TestCase):
 
     def _seat_change_payload(self, seats):
         live = self.ruleset.live_challenge
+        current_ruleset = ContestRuleset.objects.get(pk=self.ruleset.pk)
         return {
+            "base_binding": _binding_signature(current_ruleset),
+            "base_binding_revision": current_ruleset.binding_revision,
             "live_participant_count": self.PARTICIPANTS,
             "live_seat_count": seats,
             "live_group_count": live["group_count"],
@@ -1768,6 +1778,7 @@ class Live2026FreshWorkbenchTests(TestCase):
             self._config_url(version),
             {
                 "base_binding": page.context["binding_signature"],
+                "base_binding_revision": page.context["binding_revision"],
                 "base_first_round_configuration": page.context["base_first_round_configuration"],
                 "live_participant_count": "15",
                 "live_seat_count": "10",
