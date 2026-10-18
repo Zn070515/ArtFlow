@@ -45,6 +45,7 @@ from singer_contest.models import (
     StageResult,
 )
 from singer_contest.services import (
+    _current_frozen_version,
     _eligible_singers,
     authoritative_panel_judges,
     bound_ruleset_version_label,
@@ -550,7 +551,13 @@ def build_execution_package(activity: Activity, request: Any = None) -> list[Pac
 # --- Archive package (post-event, authoritative record) ---
 
 
-def _activity_info_workbook(activity: Activity) -> Workbook:
+def _activity_info_workbook(
+    activity: Activity,
+    *,
+    archive_state: str = "",
+    archived_at=None,
+    archived_by=None,
+) -> Workbook:
     wb = Workbook()
     ws = _active_worksheet(wb)
     ws.title = "Activity Info"
@@ -558,9 +565,15 @@ def _activity_info_workbook(activity: Activity) -> Workbook:
     ws.append(["Title", activity.title])
     ws.append(["Subtitle", activity.subtitle])
     ws.append(["Type", activity.get_activity_type_display()])
-    ws.append(["Phase", activity.get_phase_display()])
+    # When this workbook is built as part of the archive command, it must describe the
+    # state the command is producing, not the phase it read before transitioning.
+    ws.append(["Phase", archive_state or activity.get_phase_display()])
     ws.append(["Description", activity.description])
     ws.append(["Created At", activity.created_at.strftime("%Y-%m-%d %H:%M")])
+    if archived_at is not None:
+        ws.append(["Archived At", archived_at.strftime("%Y-%m-%d %H:%M")])
+    if archived_by is not None:
+        ws.append(["Archived By", archived_by.get_username()])
     _autosize_sheet(ws)
     return wb
 
@@ -1007,10 +1020,24 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
     return wb
 
 
-def build_archive_package(activity: Activity) -> list[PackageArtifact]:
+def build_archive_package(
+    activity: Activity,
+    *,
+    archive_state: str = "",
+    archived_at=None,
+    archived_by=None,
+) -> list[PackageArtifact]:
     """Build the post-event archive package (authoritative record)."""
     artifacts = [
-        _xlsx("activity_info", _activity_info_workbook(activity)),
+        _xlsx(
+            "activity_info",
+            _activity_info_workbook(
+                activity,
+                archive_state=archive_state,
+                archived_at=archived_at,
+                archived_by=archived_by,
+            ),
+        ),
         _xlsx("registration_list", _registration_archive_workbook(activity)),
         _xlsx("material_checklist", _material_checklist_workbook(activity)),
         _xlsx("program_list", _program_archive_workbook(activity)),
@@ -1169,6 +1196,25 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         if not closure.closeable:
             reasons = "、".join(code.value for code in closure.blocking_reasons)
             raise PermissionDenied(f"正式结果尚未核定闭环（{reasons}），不能归档。")
+        # The 2026 podium format's formal result is also a *public* result. Archiving
+        # before the release would lock the activity and make the publication impossible
+        # without un-archiving, so the release is part of this format's closure.
+        version = _current_frozen_version(locked_activity)
+        live = (version.binding or {}).get("live_challenge") if version is not None else None
+        podium_key = str((live or {}).get("podium_stage_key") or "").strip()
+        if (
+            podium_key
+            and not ResultRelease.objects.filter(
+                status=ResultRelease.Status.ACTIVE,
+                stage_result__activity=locked_activity,
+                stage_result__stage_key=podium_key,
+                stage_result__status=StageResult.Status.CONFIRMED,
+                post__related_activity=locked_activity,
+                post__post_type=PublicPost.PostType.RESULT_PUBLICATION,
+                post__status=PublicPost.Status.PUBLISHED,
+            ).exists()
+        ):
+            raise PermissionDenied("正式赛果尚未公开发布（缺少生效的结果公示），不能归档。")
 
     group_stages = GroupStage.objects.filter(
         activity=locked_activity,
@@ -1188,7 +1234,13 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
                 f"分组合唱赛段「{group_stage.name}」仍有组别材料未就绪，不能归档。"
             )
 
-    artifacts = build_archive_package(locked_activity)
+    archive_at = timezone.now()
+    artifacts = build_archive_package(
+        locked_activity,
+        archive_state=str(Activity.Phase.ARCHIVED.label),
+        archived_at=archive_at,
+        archived_by=current_actor,
+    )
     ArchivePackage.objects.filter(activity=locked_activity, is_current=True).update(
         is_current=False
     )
@@ -1219,7 +1271,7 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
                 locked_activity, actor=current_actor, note=note
             )
         locked_activity.is_locked = True
-        locked_activity.locked_at = timezone.now()
+        locked_activity.locked_at = archive_at
         locked_activity.locked_by = current_actor
         with authority_write(ACTIVITY_STATE):
             locked_activity.save(update_fields=["is_locked", "locked_at", "locked_by"])

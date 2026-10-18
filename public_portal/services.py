@@ -11,11 +11,12 @@ from core.services import lock_activity_for_action
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, OuterRef, Q, Subquery
 from django.utils import timezone
+from questionnaire.projection import generic_song_label
 from ruleset.models import RulesetVersion
-from singer_contest.models import StageResult
-from singer_contest.services import build_result_closure
+from singer_contest.models import SingerRegistration, StageResult
+from singer_contest.services import _OUTCOME_LABELS, build_result_closure
 
 from .models import PublicPost, ResultRelease
 
@@ -75,27 +76,55 @@ def _result_snapshot(stage: StageResult) -> dict:
     different ranking, so the historical record could no longer say what was published.
     """
 
+    decision_rows = list(
+        stage.decisions.order_by("rank", "pk").values(
+            "rank", "singer_id", "outcome_code", "score", "reason"
+        )
+    )
+    award_rows = list(
+        stage.award_decisions.order_by("name", "pk").values("name", "singer_id", "source_node")
+    )
+    singer_ids = {row["singer_id"] for row in decision_rows} | {
+        row["singer_id"] for row in award_rows
+    }
+    singers = {singer.pk: singer for singer in SingerRegistration.objects.filter(pk__in=singer_ids)}
     decisions = [
         {
             "rank": decision["rank"],
             "contestant": str(decision["singer_id"]),
+            "contestant_id": decision["singer_id"],
+            "contestant_name": (
+                singers[decision["singer_id"]].name
+                if decision["singer_id"] in singers
+                else str(decision["singer_id"])
+            ),
+            "song_label": (
+                generic_song_label(singers[decision["singer_id"]])
+                if decision["singer_id"] in singers
+                else ""
+            ),
             "outcome_code": decision["outcome_code"],
+            "outcome_label": _OUTCOME_LABELS.get(
+                decision["outcome_code"], decision["outcome_code"]
+            ),
             "score": (str(decision["score"]) if decision["score"] is not None else None),
             "reason": decision["reason"],
         }
-        for decision in stage.decisions.order_by("rank", "pk").values(
-            "rank", "singer_id", "outcome_code", "score", "reason"
-        )
+        for decision in decision_rows
     ]
     awards = [
         {
             "award": decision["name"],
             "contestant": str(decision["singer_id"]),
+            "contestant_id": decision["singer_id"],
+            "contestant_name": (
+                singers[decision["singer_id"]].name
+                if decision["singer_id"] in singers
+                else str(decision["singer_id"])
+            ),
             "source_node": decision["source_node"],
         }
-        for decision in stage.award_decisions.order_by("name", "pk").values(
-            "name", "singer_id", "source_node"
-        )
+        for decision in award_rows
     ]
     return {
         "stage_key": stage.stage_key,
@@ -169,6 +198,46 @@ def _validate_release_target(
         if not closure.closeable:
             raise ValidationError("结果闭场检查未通过，暂不能发布。")
     return version
+
+
+def active_result_release_for_post(post: PublicPost):
+    """The release whose snapshot defines this post's formal result.
+
+    This mirrors ``PublicPost.published_public()`` exactly. The listing filter decides
+    whether a result post is public; the page must then render the same release, never the
+    editorial ``content`` field as the result.
+    """
+
+    activity_id = post.related_activity_id
+    if activity_id is None:
+        return None
+    latest_version = (
+        StageResult.objects.filter(
+            activity_id=OuterRef("stage_result__activity_id"),
+            stage_key=OuterRef("stage_result__stage_key"),
+        )
+        .order_by("-result_version", "-pk")
+        .values("result_version")[:1]
+    )
+    return (
+        ResultRelease.objects.filter(
+            post=post,
+            status=ResultRelease.Status.ACTIVE,
+            post_version=post.version,
+            result_version=F("stage_result__result_version"),
+            ruleset_version_id=F("stage_result__ruleset_version_id"),
+            authority_hash=F("stage_result__ruleset_hash"),
+            input_fingerprint=F("stage_result__input_fingerprint"),
+            stage_result__status=StageResult.Status.CONFIRMED,
+            stage_result__activity_id=activity_id,
+            stage_result__ruleset_version__status=RulesetVersion.Status.FROZEN,
+            stage_result__ruleset_version__is_current=True,
+            stage_result__ruleset_version__ruleset__activity_id=activity_id,
+            stage_result__result_version=Subquery(latest_version),
+        )
+        .select_related("stage_result")
+        .first()
+    )
 
 
 def _active_release_line(stage_result: StageResult):

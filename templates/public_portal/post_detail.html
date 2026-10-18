@@ -13,6 +13,48 @@
     {% if post.cover_image %}
     <img src="{{ post.cover_image.url }}" alt="{{ post.title }}" class="mt-6 w-full rounded-lg">
     {% endif %}
+
+    {% if active_release %}
+    <section class="mt-8 border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-brand/5 border-b border-gray-200 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 class="text-lg font-semibold text-gray-900">正式赛果</h2>
+            <span class="text-xs text-gray-500">结果版本 v{{ active_release.result_version }} · 候选 v{{ active_release.candidate_revision }}</span>
+        </div>
+        {% if result_snapshot.awards %}
+        <div class="px-4 py-4 grid sm:grid-cols-3 gap-3">
+            {% for award in result_snapshot.awards %}
+            <div class="border border-amber-200 bg-amber-50 rounded-lg px-3 py-2">
+                <p class="text-xs text-amber-800">{{ award.award }}</p>
+                <p class="font-semibold text-gray-900">{{ award.contestant_name|default:award.contestant }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if result_snapshot.decisions %}
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="bg-gray-50 text-gray-600">
+                    <th class="text-left px-4 py-2 font-medium w-16">名次</th>
+                    <th class="text-left px-4 py-2 font-medium">选手</th>
+                    <th class="text-left px-4 py-2 font-medium">曲目</th>
+                    <th class="text-right px-4 py-2 font-medium w-24">得分</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+                {% for decision in result_snapshot.decisions %}
+                <tr>
+                    <td class="px-4 py-2 text-gray-500">{{ decision.rank|default:"—" }}</td>
+                    <td class="px-4 py-2 font-medium text-gray-900">{{ decision.contestant_name|default:decision.contestant }}</td>
+                    <td class="px-4 py-2 text-gray-500">{{ decision.song_label }}</td>
+                    <td class="px-4 py-2 text-right font-mono text-gray-800">{{ decision.score|floatformat:2|default:"—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </section>
+    {% endif %}
+
     {% if post.content %}
     <div class="mt-6 text-gray-800 leading-relaxed whitespace-pre-line">{{ post.content }}</div>
     {% endif %}

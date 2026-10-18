@@ -1067,6 +1067,71 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
         release.refresh_from_db()
         self.assertEqual(release.result_snapshot["candidate_revision"], published_revision)
 
+    @patch(
+        "public_portal.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_the_public_page_renders_the_release_snapshot_not_the_editorial_body(self, closure):
+        from decimal import Decimal
+
+        from common.authority import ACCOUNT_AUTHORITY, STAGE_RESULT_RESOLVE, authority_write
+        from django.urls import reverse
+        from singer_contest.models import SingerRegistration, StageAwardDecision, StageDecision
+        from singer_contest.services import unlock_stage_result
+
+        from .services import release_result_post
+
+        with authority_write(ACCOUNT_AUTHORITY):
+            singer_user = User.objects.create_user(username="snapshot-singer", password="pass")
+        singer = SingerRegistration.objects.create(
+            activity=self.activity,
+            user=singer_user,
+            name="正确冠军",
+            student_id="snapshot-001",
+            college="Arts",
+            class_name="Class 1",
+            phone="13800000000",
+            song_name="歌曲",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        with authority_write(STAGE_RESULT_RESOLVE):
+            StageDecision.objects.create(
+                stage_result=self.stage_result,
+                singer=singer,
+                outcome_code="finalist",
+                rank=1,
+                score=Decimal("93.52"),
+            )
+            StageAwardDecision.objects.create(
+                stage_result=self.stage_result,
+                activity=self.activity,
+                singer=singer,
+                name="冠军",
+            )
+        self.confirm_stage_result()
+        # Deliberately wrong editorial body: the formal result must not come from here.
+        self.post.content = "冠军：错误的人"
+        self.post.save(update_fields=["content"])
+        release = release_result_post(
+            self.post,
+            self.stage_result,
+            self.operator,
+            note="正式发布",
+        )
+
+        self.assertEqual(release.result_snapshot["awards"][0]["contestant_name"], "正确冠军")
+        response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "正式赛果")
+        self.assertContains(response, "正确冠军")
+        self.assertContains(response, "93.52")
+        self.assertEqual(response.context["active_release"].pk, release.pk)
+
+        unlock_stage_result(self.stage_result, operator=self.operator, note="纠正结果")
+        gone = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
+        self.assertEqual(gone.status_code, 404)
+
     def test_release_rejects_missing_note_and_non_admin(self):
         from .services import release_result_post
 
