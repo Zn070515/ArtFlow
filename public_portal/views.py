@@ -172,10 +172,14 @@ def home(request):
         )
         .distinct()[:6]
     )
-    activity_photos = PublicMedia.objects.filter(
-        is_published=True,
-        post__in=posts,
-    ).select_related("post")[:12]
+    activity_photos = (
+        PublicMedia.objects.filter(
+            is_published=True,
+            post__in=posts,
+        )
+        .exclude(post__post_type=PublicPost.PostType.RESULT_PUBLICATION)
+        .select_related("post")[:12]
+    )
 
     return render(
         request,
@@ -210,6 +214,7 @@ def post_detail(request, pk):
             "media_items": media_items,
             "active_release": active_release,
             "result_snapshot": active_release.result_snapshot if active_release else {},
+            "display_title": post.public_title if active_release else post.title,
         },
     )
 

@@ -18,6 +18,7 @@ from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
     CONTEST_ROUND_STATE,
+    RESULT_RELEASE_STATE,
     RULESET_FREEZE,
     SCORE_SUMMARY_RECALCULATE,
     STAGE_RESULT_CONFIRM,
@@ -2736,18 +2737,19 @@ class StaffPanelSmokeTests(TestCase):
             published_at=timezone.now(),
         )
         # ACTIVE, but built from an older post version; the public page would 404.
-        ResultRelease.objects.create(
-            post=post,
-            stage_result=result,
-            post_version=0,
-            result_version=result.result_version,
-            ruleset_version=version,
-            authority_hash=result.ruleset_hash,
-            input_fingerprint=result.input_fingerprint,
-            status=ResultRelease.Status.ACTIVE,
-            released_by=self.admin,
-            note="stale release",
-        )
+        with authority_write(RESULT_RELEASE_STATE):
+            ResultRelease.objects.create(
+                post=post,
+                stage_result=result,
+                post_version=0,
+                result_version=result.result_version,
+                ruleset_version=version,
+                authority_hash=result.ruleset_hash,
+                input_fingerprint=result.input_fingerprint,
+                status=ResultRelease.Status.ACTIVE,
+                released_by=self.admin,
+                note="stale release",
+            )
 
         with self.assertRaises(PermissionDenied) as caught:
             archive_activity(activity, self.admin)
@@ -6111,17 +6113,18 @@ class ResultReleaseHttpTests(TestCase):
             "1111111111111111111111111111111111111111111111111111111111111111", str(unreleased)
         )
 
-        ResultRelease.objects.create(
-            post=self.post,
-            stage_result=self.stage_result,
-            post_version=self.post.version,
-            result_version=self.stage_result.result_version,
-            ruleset_version=self.version,
-            authority_hash="private-authority-canary",
-            input_fingerprint="private-fingerprint-canary",
-            released_by=self.admin,
-            note="已审核",
-        )
+        with authority_write(RESULT_RELEASE_STATE):
+            ResultRelease.objects.create(
+                post=self.post,
+                stage_result=self.stage_result,
+                post_version=self.post.version,
+                result_version=self.stage_result.result_version,
+                ruleset_version=self.version,
+                authority_hash="private-authority-canary",
+                input_fingerprint="private-fingerprint-canary",
+                released_by=self.admin,
+                note="已审核",
+            )
         released = archive_row()
         self.assertEqual(released["Editorial Status"], "已发布")
         self.assertEqual(released["Result Release Status"], "生效")
@@ -6130,44 +6133,45 @@ class ResultReleaseHttpTests(TestCase):
         self.assertNotIn("private-fingerprint-canary", str(released))
 
     def test_archive_package_keeps_every_release_with_its_frozen_snapshot(self):
-        ResultRelease.objects.create(
-            post=self.post,
-            stage_result=self.stage_result,
-            post_version=self.post.version,
-            result_version=self.stage_result.result_version,
-            candidate_revision=2,
-            result_snapshot={
-                "stage_key": "final_podium",
-                "decisions": [{"rank": 1, "contestant": "7"}],
-                "awards": [{"award": "冠军", "contestant": "7"}],
-            },
-            ruleset_version=self.version,
-            authority_hash="a" * 64,
-            input_fingerprint="f" * 64,
-            status=ResultRelease.Status.SUPERSEDED,
-            released_by=self.admin,
-            transition_by=self.admin,
-            transition_at=timezone.now(),
-            note="旧版 A>B",
-        )
-        ResultRelease.objects.create(
-            post=self.post,
-            stage_result=self.stage_result,
-            post_version=self.post.version,
-            result_version=self.stage_result.result_version,
-            candidate_revision=3,
-            result_snapshot={
-                "stage_key": "final_podium",
-                "decisions": [{"rank": 1, "contestant": "8"}],
-                "awards": [{"award": "冠军", "contestant": "8"}],
-            },
-            ruleset_version=self.version,
-            authority_hash="a" * 64,
-            input_fingerprint="f" * 64,
-            status=ResultRelease.Status.ACTIVE,
-            released_by=self.admin,
-            note="更正后 B>A",
-        )
+        with authority_write(RESULT_RELEASE_STATE):
+            ResultRelease.objects.create(
+                post=self.post,
+                stage_result=self.stage_result,
+                post_version=self.post.version,
+                result_version=self.stage_result.result_version,
+                candidate_revision=2,
+                result_snapshot={
+                    "stage_key": "final_podium",
+                    "decisions": [{"rank": 1, "contestant": "7"}],
+                    "awards": [{"award": "冠军", "contestant": "7"}],
+                },
+                ruleset_version=self.version,
+                authority_hash="a" * 64,
+                input_fingerprint="f" * 64,
+                status=ResultRelease.Status.SUPERSEDED,
+                released_by=self.admin,
+                transition_by=self.admin,
+                transition_at=timezone.now(),
+                note="旧版 A>B",
+            )
+            ResultRelease.objects.create(
+                post=self.post,
+                stage_result=self.stage_result,
+                post_version=self.post.version,
+                result_version=self.stage_result.result_version,
+                candidate_revision=3,
+                result_snapshot={
+                    "stage_key": "final_podium",
+                    "decisions": [{"rank": 1, "contestant": "8"}],
+                    "awards": [{"award": "冠军", "contestant": "8"}],
+                },
+                ruleset_version=self.version,
+                authority_hash="a" * 64,
+                input_fingerprint="f" * 64,
+                status=ResultRelease.Status.ACTIVE,
+                released_by=self.admin,
+                note="更正后 B>A",
+            )
 
         artifact = next(
             item

@@ -1,9 +1,37 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from common.authority import (
+    RESULT_RELEASE_STATE,
+    AuthorityQuerySetMixin,
+    authority_authorized,
+    parse_bulk_create_options,
+)
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Exists, F, OuterRef, Q, Subquery
+
+
+class PublicPostQuerySet(models.QuerySet):
+    """An ACTIVE release freezes the post surface; every mutation must revoke first."""
+
+    def _ensure_not_released(self) -> None:
+        if ResultRelease.objects.filter(
+            post_id__in=self.values("pk"), status=ResultRelease.Status.ACTIVE
+        ).exists():
+            raise ValidationError("结果已公示，编辑或移动前必须先撤销当前结果发布。")
+
+    def update(self, **kwargs) -> int:
+        self._ensure_not_released()
+        return super().update(**kwargs)
+
+    def delete(self) -> Any:
+        self._ensure_not_released()
+        return super().delete()
+
+    def bulk_update(self, objs, fields, *args, **kwargs) -> int:
+        self._ensure_not_released()
+        return super().bulk_update(objs, fields, *args, **kwargs)
 
 
 class PublicPost(models.Model):
@@ -116,8 +144,75 @@ class PublicPost(models.Model):
             .filter(~Q(post_type=cls.PostType.RESULT_PUBLICATION) | Exists(active_result_release))
         )
 
+    objects = PublicPostQuerySet.as_manager()
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if (
+            not self._state.adding
+            and self.pk
+            and ResultRelease.objects.filter(
+                post_id=self.pk, status=ResultRelease.Status.ACTIVE
+            ).exists()
+        ):
+            raise ValidationError("结果已公示，编辑或移动前必须先撤销当前结果发布。")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> Any:
+        if (
+            self.pk
+            and ResultRelease.objects.filter(
+                post_id=self.pk, status=ResultRelease.Status.ACTIVE
+            ).exists()
+        ):
+            raise ValidationError("结果已公示，删除前必须先撤销当前结果发布。")
+        return super().delete(*args, **kwargs)
+
+    @property
+    def public_title(self) -> str:
+        """The public heading for a result publication, generated from the activity.
+
+        A formal result's public identity must not be an editable title: the title can
+        contradict the snapshot. ``published_public()`` only exposes result posts that
+        have a valid active release, so this system title is the one those readers see.
+        """
+
+        if self.post_type != self.PostType.RESULT_PUBLICATION:
+            return self.title
+        activity = self.related_activity if self.related_activity_id else None
+        activity_title = activity.title if activity is not None else ""
+        return f"{activity_title} · 正式赛果" if activity_title else "正式赛果"
+
     def __str__(self):
         return self.title
+
+
+class ResultReleaseQuerySet(AuthorityQuerySetMixin, models.QuerySet):
+    """Guard: a release (and especially its public snapshot) is a formal fact."""
+
+    def _ensure_auth(self) -> None:
+        if not authority_authorized(RESULT_RELEASE_STATE):
+            raise ValidationError("结果发布记录只能通过正式发布服务写入。")
+
+    def update(self, **kwargs) -> int:
+        self._ensure_auth()
+        return super().update(**kwargs)
+
+    def delete(self) -> Any:
+        self._ensure_auth()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs) -> list[Any]:
+        self._ensure_auth()
+        if parse_bulk_create_options(args, kwargs).update_conflicts:
+            raise ValidationError("结果发布记录不能通过冲突 upsert 写入。")
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs) -> int:
+        self._ensure_auth()
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+ResultReleaseManager = models.Manager.from_queryset(ResultReleaseQuerySet)
 
 
 class ResultRelease(models.Model):
@@ -174,6 +269,8 @@ class ResultRelease(models.Model):
     transition_at = models.DateTimeField(null=True, blank=True)
     note = models.TextField()
 
+    objects = ResultReleaseManager()
+
     if TYPE_CHECKING:
         # Django creates the ``<fk>_id`` shadow attributes at runtime; declare them so
         # Pylance can see them (see AGENTS.md, Pylance & Pyright Type Checking).
@@ -216,12 +313,49 @@ class ResultRelease(models.Model):
                         {"post": "An active result release requires a published post."}
                     )
 
-    def save(self, *args, **kwargs):
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not authority_authorized(RESULT_RELEASE_STATE):
+            raise ValidationError("结果发布记录只能通过正式发布服务写入。")
         self.full_clean()
-        return super().save(*args, **kwargs)
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> Any:
+        if not authority_authorized(RESULT_RELEASE_STATE):
+            raise ValidationError("结果发布记录只能通过正式发布服务删除。")
+        return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.post} — {self.stage_result} ({self.get_status_display()})"
+
+
+class PublicMediaQuerySet(models.QuerySet):
+    """Media of a released post is frozen with the post itself."""
+
+    def _ensure_not_released(self) -> None:
+        if ResultRelease.objects.filter(
+            post_id__in=self.values("post_id"), status=ResultRelease.Status.ACTIVE
+        ).exists():
+            raise ValidationError("所属文章的结果已公示，编辑媒体前必须先撤销结果发布。")
+
+    def update(self, **kwargs) -> int:
+        self._ensure_not_released()
+        return super().update(**kwargs)
+
+    def delete(self) -> Any:
+        self._ensure_not_released()
+        return super().delete()
+
+    def bulk_create(self, objs, *args, **kwargs) -> list[Any]:
+        post_ids = {obj.post_id for obj in objs if obj.post_id}
+        if ResultRelease.objects.filter(
+            post_id__in=post_ids, status=ResultRelease.Status.ACTIVE
+        ).exists():
+            raise ValidationError("所属文章的结果已公示，新增媒体前必须先撤销结果发布。")
+        return super().bulk_create(objs, *args, **kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs) -> int:
+        self._ensure_not_released()
+        return super().bulk_update(objs, fields, *args, **kwargs)
 
 
 class PublicMedia(models.Model):
@@ -240,6 +374,31 @@ class PublicMedia(models.Model):
     is_published = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    if TYPE_CHECKING:
+        post_id: int
+
+    objects = PublicMediaQuerySet.as_manager()
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if (
+            self.post_id
+            and ResultRelease.objects.filter(
+                post_id=self.post_id, status=ResultRelease.Status.ACTIVE
+            ).exists()
+        ):
+            raise ValidationError("所属文章的结果已公示，编辑媒体前必须先撤销结果发布。")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> Any:
+        if (
+            self.post_id
+            and ResultRelease.objects.filter(
+                post_id=self.post_id, status=ResultRelease.Status.ACTIVE
+            ).exists()
+        ):
+            raise ValidationError("所属文章的结果已公示，删除媒体前必须先撤销结果发布。")
+        return super().delete(*args, **kwargs)
 
     class Meta:
         ordering = ["sort_order", "pk"]

@@ -9,7 +9,7 @@
     <div class="bg-white border border-gray-200 rounded-lg divide-y divide-gray-100">
         {% for post in posts %}
         <a href="{% url 'public_portal:post_detail' post.pk %}" class="flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors">
-            <span class="text-sm text-gray-900">{{ post.title }}</span>
+            <span class="text-sm text-gray-900">{{ post.public_title }}</span>
             <span class="text-xs text-gray-400">{{ post.published_at|date:"Y-m-d" }}</span>
         </a>
         {% endfor %}

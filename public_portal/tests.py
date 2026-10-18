@@ -12,6 +12,7 @@ from accounts.models import User
 from common.authority import (
     ACCOUNT_AUTHORITY,
     ACTIVITY_STATE,
+    RESULT_RELEASE_STATE,
     RULESET_FREEZE,
     STAGE_RESULT_CONFIRM,
     STAGE_RESULT_RESOLVE,
@@ -672,6 +673,11 @@ class ResultReleaseModelTests(TestCase):
             version=7,
         )
 
+    def _save(self, release):
+        with authority_write(RESULT_RELEASE_STATE):
+            release.save()
+        return release
+
     def make_release(self, *, post=None, stage_result=None, status=None):
         stage_result = stage_result or self.stage_result
         return ResultRelease(
@@ -694,7 +700,7 @@ class ResultReleaseModelTests(TestCase):
         )
         release = self.make_release()
         release.full_clean()
-        release.save()
+        self._save(release)
 
         stored = ResultRelease.objects.get(pk=release.pk)
         self.assertEqual(stored.post_version, 7)
@@ -707,14 +713,14 @@ class ResultReleaseModelTests(TestCase):
         )
 
     def test_only_one_active_release_can_target_each_post(self):
-        self.make_release().save()
+        self._save(self.make_release())
         duplicate = self.make_release()
         with self.assertRaises((IntegrityError, ValidationError)):
             with transaction.atomic():
-                duplicate.save()
+                self._save(duplicate)
 
     def test_only_one_active_release_can_target_each_stage_result(self):
-        self.make_release().save()
+        self._save(self.make_release())
         other_post = PublicPost.objects.create(
             title="Other Result Post",
             post_type=PublicPost.PostType.RESULT_PUBLICATION,
@@ -724,7 +730,7 @@ class ResultReleaseModelTests(TestCase):
         duplicate = self.make_release(post=other_post)
         with self.assertRaises((IntegrityError, ValidationError)):
             with transaction.atomic():
-                duplicate.save()
+                self._save(duplicate)
 
     def test_active_release_rejects_post_and_stage_result_activity_mismatch(self):
         other_post = PublicPost.objects.create(
@@ -800,20 +806,22 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         self.assertNotEqual(response.status_code, 200)
 
     def test_active_release_is_visible_through_all_public_result_paths(self):
+        media = self.create_public_media()
         self.confirm_stage_result()
         release = self.make_release()
-        release.save()
-        media = self.create_public_media()
+        self._save(release)
 
         home = self.client.get(reverse("public_portal:home"))
         result_list = self.client.get(reverse("public_portal:result_list"))
         detail = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
 
         self.assertIn(self.post, list(home.context["results"]))
-        self.assertIn(media, list(home.context["activity_photos"]))
-        self.assertContains(result_list, self.post.title)
+        # Editorial media of a formal result is not part of the public result surface.
+        self.assertNotIn(media, list(home.context["activity_photos"]))
+        self.assertContains(result_list, self.post.public_title)
         self.assertEqual(detail.status_code, 200)
-        self.assertIn(media, list(detail.context["media_items"]))
+        self.assertContains(detail, "正式赛果")
+        self.assertNotContains(detail, media.caption or "public/gallery/result.jpg")
 
         with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
             media_path = Path(media_root) / "public/gallery/result.jpg"
@@ -829,20 +837,22 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         for status in (ResultRelease.Status.REVOKED, ResultRelease.Status.SUPERSEDED):
             with self.subTest(status=status):
                 release = self.make_release(status=status)
-                release.save()
+                self._save(release)
                 self.client.raise_request_exception = False
                 response = self.client.get(
                     reverse("public_portal:post_detail", args=[self.post.pk])
                 )
                 self.assertEqual(response.status_code, 404)
-                release.delete()
+                with authority_write(RESULT_RELEASE_STATE):
+                    release.delete()
 
     def test_release_is_hidden_after_post_version_changes(self):
         self.confirm_stage_result()
         release = self.make_release()
-        release.save()
-        self.post.version += 1
-        self.post.save(update_fields=["version"])
+        self._save(release)
+        # Simulate the drift directly: the model guard refuses this through the public
+        # save path, which is exactly the invariant under test.
+        PublicPost._base_manager.filter(pk=self.post.pk).update(version=self.post.version + 1)
 
         self.client.raise_request_exception = False
         response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
@@ -851,7 +861,7 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
     def test_release_is_hidden_when_a_newer_stage_result_exists(self):
         self.confirm_stage_result()
         release = self.make_release()
-        release.save()
+        self._save(release)
         with authority_write(STAGE_RESULT_RESOLVE):
             StageResult.objects.create(
                 activity=self.activity,
@@ -882,7 +892,7 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
         )
         release = self.make_release()
         release.ruleset_version = alternate_version
-        release.save()
+        self._save(release)
 
         self.client.raise_request_exception = False
         response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
@@ -931,17 +941,18 @@ class ResultReleaseVisibilityTests(ResultReleaseModelTests):
             status=PublicPost.Status.PUBLISHED,
             related_activity=test_activity,
         )
-        ResultRelease.objects.create(
-            post=test_post,
-            stage_result=test_stage,
-            post_version=test_post.version,
-            result_version=test_stage.result_version,
-            ruleset_version=test_version,
-            authority_hash=test_version.authority_hash,
-            input_fingerprint=test_stage.input_fingerprint,
-            released_by=self.operator,
-            note="Test release",
-        )
+        with authority_write(RESULT_RELEASE_STATE):
+            ResultRelease.objects.create(
+                post=test_post,
+                stage_result=test_stage,
+                post_version=test_post.version,
+                result_version=test_stage.result_version,
+                ruleset_version=test_version,
+                authority_hash=test_version.authority_hash,
+                input_fingerprint=test_stage.input_fingerprint,
+                released_by=self.operator,
+                note="Test release",
+            )
 
         self.client.raise_request_exception = False
         response = self.client.get(reverse("public_portal:post_detail", args=[test_post.pk]))
@@ -1110,9 +1121,11 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
                     name=award,
                 )
         self.confirm_stage_result()
-        # Deliberately wrong editorial body: the formal result must not come from here.
+        # Deliberately wrong editorial fields: the formal result must not come from here.
+        self.post.title = "李四夺冠"
+        self.post.subtitle = "恭喜李四获得冠军"
         self.post.content = "冠军：错误的人"
-        self.post.save(update_fields=["content"])
+        self.post.save(update_fields=["title", "subtitle", "content"])
         release = release_result_post(
             self.post,
             self.stage_result,
@@ -1129,7 +1142,10 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
         self.assertContains(response, "正式赛果")
         self.assertContains(response, "正确冠军")
         self.assertContains(response, "93.52")
-        # The editorial body must not compete with the formal result on the public page.
+        self.assertContains(response, f"{self.activity.title} · 正式赛果")
+        # No editorial field may compete with the formal result on the public page.
+        self.assertNotContains(response, "李四夺冠")
+        self.assertNotContains(response, "恭喜李四")
         self.assertNotContains(response, "冠军：错误的人")
         body = response.content.decode()
         self.assertLess(body.index("冠军"), body.index("亚军"))
@@ -1144,6 +1160,50 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
         unlock_stage_result(self.stage_result, operator=self.operator, note="纠正结果")
         gone = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
         self.assertEqual(gone.status_code, 404)
+
+    def test_direct_orm_writes_to_a_release_are_refused(self):
+        release = self._save(self.make_release())
+
+        with self.assertRaisesRegex(ValidationError, "正式发布服务"):
+            ResultRelease.objects.filter(pk=release.pk).update(note="forged")
+        release.result_snapshot = {"awards": [{"award": "冠军", "contestant_name": "伪造"}]}
+        with self.assertRaisesRegex(ValidationError, "正式发布服务"):
+            release.save()
+        with self.assertRaisesRegex(ValidationError, "正式发布服务"):
+            release.delete()
+        with self.assertRaisesRegex(ValidationError, "正式发布服务"):
+            self.make_release().save()
+
+    def test_a_released_post_and_its_media_are_frozen_until_revoked(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from .models import PublicMedia
+        from .services import revoke_result_release
+
+        media = PublicMedia.objects.create(
+            post=self.post,
+            image=SimpleUploadedFile("result.jpg", b"image", content_type="image/jpeg"),
+            caption="original",
+        )
+        self._save(self.make_release())
+
+        with self.assertRaisesRegex(ValidationError, "撤销"):
+            self.post.title = "changed"
+            self.post.save()
+        with self.assertRaisesRegex(ValidationError, "撤销"):
+            PublicPost.objects.filter(pk=self.post.pk).update(title="changed")
+        with self.assertRaisesRegex(ValidationError, "撤销"):
+            media.caption = "changed"
+            media.save()
+        with self.assertRaisesRegex(ValidationError, "撤销"):
+            PublicMedia.objects.filter(pk=media.pk).update(caption="changed")
+
+        revoke_result_release(self.post, self.operator, note="先撤销再编辑")
+        self.post.title = "changed"
+        self.post.save(update_fields=["title"])
+        media.refresh_from_db()
+        media.caption = "changed"
+        media.save(update_fields=["caption"])
 
     def test_release_rejects_missing_note_and_non_admin(self):
         from .services import release_result_post

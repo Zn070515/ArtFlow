@@ -140,5 +140,5 @@ def _compute_shared_live_state(activity: Activity) -> SharedLiveState:
         start_timestamp=vote_session.start_time.timestamp() if vote_session else None,
         end_timestamp=vote_session.end_time.timestamp() if vote_session else None,
         result_post_id=result_post.pk if result_post else None,
-        result_title=result_post.title if result_post else "",
+        result_title=result_post.public_title if result_post else "",
     )

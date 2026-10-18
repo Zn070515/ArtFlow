@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from accounts.services import require_current_admin, require_current_staff
+from common.authority import RESULT_RELEASE_STATE, authority_write
 from common.models import AuditLog
 from core.models import Activity
 from core.policies import ActivityAction
@@ -276,7 +277,8 @@ def _supersede_locked_release_line(*, stage_result: StageResult, operator, note:
         release.transition_by = operator
         release.transition_at = transition_at
         release.note = note
-        release.save(update_fields=["status", "transition_by", "transition_at", "note"])
+        with authority_write(RESULT_RELEASE_STATE):
+            release.save(update_fields=["status", "transition_by", "transition_at", "note"])
         _audit_release_transition(
             operator=operator,
             action_type=AuditLog.ActionType.SUPERSEDE_RESULT_RELEASE,
@@ -335,19 +337,20 @@ def release_result_post(
             raise ValidationError("该结果公示已有不一致的生效发布记录。")
         raise ValidationError("该文章或赛段已有其他生效的结果发布记录。")
 
-    release = ResultRelease.objects.create(
-        post=locked_post,
-        stage_result=locked_stage,
-        post_version=locked_post.version,
-        result_version=locked_stage.result_version,
-        candidate_revision=locked_stage.candidate_revision,
-        result_snapshot=_result_snapshot(locked_stage),
-        ruleset_version=version,
-        authority_hash=version.authority_hash,
-        input_fingerprint=locked_stage.input_fingerprint,
-        released_by=current_operator,
-        note=note,
-    )
+    with authority_write(RESULT_RELEASE_STATE):
+        release = ResultRelease.objects.create(
+            post=locked_post,
+            stage_result=locked_stage,
+            post_version=locked_post.version,
+            result_version=locked_stage.result_version,
+            candidate_revision=locked_stage.candidate_revision,
+            result_snapshot=_result_snapshot(locked_stage),
+            ruleset_version=version,
+            authority_hash=version.authority_hash,
+            input_fingerprint=locked_stage.input_fingerprint,
+            released_by=current_operator,
+            note=note,
+        )
     _audit_release_transition(
         operator=current_operator,
         action_type=AuditLog.ActionType.RELEASE_RESULT,
@@ -399,7 +402,8 @@ def revoke_result_release(
     release.transition_by = current_operator
     release.transition_at = timezone.now()
     release.note = note
-    release.save(update_fields=["status", "transition_by", "transition_at", "note"])
+    with authority_write(RESULT_RELEASE_STATE):
+        release.save(update_fields=["status", "transition_by", "transition_at", "note"])
     _audit_release_transition(
         operator=current_operator,
         action_type=AuditLog.ActionType.REVOKE_RESULT,
