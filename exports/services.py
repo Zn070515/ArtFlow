@@ -913,6 +913,9 @@ def _public_content_index_workbook(activity: Activity) -> Workbook:
     ws.append(
         [
             "Title",
+            # The editorial title is not the public heading once a result is released;
+            # keep both so the ZIP distinguishes the record from what the audience saw.
+            "Public Title",
             "Type",
             "Editorial Status",
             "Result Release Status",
@@ -933,6 +936,7 @@ def _public_content_index_workbook(activity: Activity) -> Workbook:
         ws.append(
             [
                 post.title,
+                post.public_title,
                 post.get_post_type_display(),
                 post.get_status_display(),
                 (
@@ -961,6 +965,10 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
     ``public_content_index`` only keeps the latest release per post. A superseded release
     that was later re-published would disappear from that view, and its frozen
     ``result_snapshot`` is the only surviving record of what the public actually saw.
+    That is why the snapshot's public identity is exported beside the editable post title:
+    the activity may have been renamed since, but the ZIP must still answer "what heading
+    did this release publish under?". Pre-snapshot (legacy) rows stay blank rather than
+    borrowing the current activity title, which would fabricate a history nobody recorded.
     """
 
     wb = Workbook()
@@ -969,6 +977,9 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
     ws.append(
         [
             "Post",
+            "Snapshot Activity ID",
+            "Snapshot Activity Title",
+            "Snapshot Public Title",
             "Release ID",
             "Status",
             "Result Version",
@@ -999,6 +1010,9 @@ def _result_release_history_workbook(activity: Activity) -> Workbook:
         ws.append(
             [
                 release.post.title,
+                snapshot.get("activity_id", ""),
+                snapshot.get("activity_title", ""),
+                snapshot.get("public_title", ""),
                 release.pk,
                 release.get_status_display(),
                 release.result_version,

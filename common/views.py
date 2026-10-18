@@ -64,7 +64,14 @@ def controlled_media(request, path):
     """
     relative_path = Path(path).as_posix()
     backend = get_delivery_backend()
-    public_posts = PublicPost.published_public()
+    # An ACTIVE result release makes the post itself public, but its editorial cover and
+    # media are exactly the free-form assets the frozen release snapshot replaced. They
+    # must not become anonymously reachable merely because the formal result is now
+    # public — a stale poster URL ("李四冠军") would then outlive the corrected result. A
+    # formal result poster needs its own release-owned asset, not an editorial upload.
+    public_editorial_posts = PublicPost.published_public().exclude(
+        post_type=PublicPost.PostType.RESULT_PUBLICATION
+    )
 
     submission_file = (
         SubmissionFile.objects.select_related("singer_registration", "program", "uploaded_by")
@@ -81,13 +88,13 @@ def controlled_media(request, path):
                 relative_path = derivative_name
         return backend.deliver(relative_path, download_name=submission_file.original_name)
 
-    if public_posts.filter(cover_image=relative_path).exists():
+    if public_editorial_posts.filter(cover_image=relative_path).exists():
         return backend.deliver(relative_path)
 
     if PublicMedia.objects.filter(
         image=relative_path,
         is_published=True,
-        post__in=public_posts,
+        post__in=public_editorial_posts,
     ).exists():
         return backend.deliver(relative_path)
 
