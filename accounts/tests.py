@@ -468,6 +468,42 @@ class AdminVerificationTTLTests(TestCase):
         self.assertTrue(response["Location"].startswith(f"{reverse('accounts:admin_login')}?"))
         self.assertIn(f"next={target}", response["Location"])
 
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_admin_post_reverification_returns_to_the_form_page(self):
+        """The 405 an operator saw after re-verifying and freezing.
+
+        ``ruleset_freeze`` is POST-only. ``admin_required`` sent the operator back to
+        that action URL after login, which is then fetched with GET and answered 405.
+        A POST must return to the page that rendered the form instead.
+        """
+        self.client.force_login(self.admin)
+        session = self.client.session
+        session["artflow_admin_verified"] = False
+        session.save()
+        form_page = "http://testserver/staff/rulesets/1/live-2026/"
+
+        response = self.client.post(
+            reverse("staff:ruleset_freeze", args=[1]),
+            HTTP_REFERER=form_page,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        query = parse_qs(urlsplit(response["Location"]).query)
+        self.assertEqual(query["next"], [form_page])
+
+    @override_settings(ADMIN_ACCESS_KEY="admin-secret", ADMIN_VERIFICATION_TTL_SECONDS=3600)
+    def test_admin_post_reverification_never_returns_to_the_post_only_url(self):
+        self.client.force_login(self.admin)
+        session = self.client.session
+        session["artflow_admin_verified"] = False
+        session.save()
+
+        response = self.client.post(reverse("staff:ruleset_freeze", args=[1]))
+
+        self.assertEqual(response.status_code, 302)
+        query = parse_qs(urlsplit(response["Location"]).query)
+        self.assertEqual(query["next"], [reverse("staff:dashboard")])
+
     @override_settings(ADMIN_ACCESS_KEY="admin-secret")
     def test_admin_login_uses_mark_verified_helper(self):
         response = self.client.post(

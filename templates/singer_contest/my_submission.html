@@ -104,7 +104,7 @@
         <h2 class="font-medium text-gray-900 mb-3">已提交文件</h2>
         <ul class="space-y-1">
             {% for file in files %}
-            <li class="flex justify-between text-xs text-gray-600"><span>{{ file.original_name }} <span class="text-green-600">（当前版本）</span></span><span>{{ file.get_file_purpose_display }} · v{{ file.version }}</span></li>
+            <li class="flex justify-between text-xs text-gray-600"><span><a href="{% url 'controlled_media' file.file.name %}" download="{{ file.original_name }}" class="text-brand hover:underline">{{ file.original_name }}</a> <span class="text-green-600">（当前版本）</span></span><span>{{ file.get_file_purpose_display }} · v{{ file.version }}</span></li>
             {% endfor %}
         </ul>
     </div>

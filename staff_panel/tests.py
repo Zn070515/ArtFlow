@@ -2128,6 +2128,44 @@ class StaffPanelSmokeTests(TestCase):
         finally:
             _close_file_response_resources(staff_response)
 
+    def test_registration_detail_links_each_attachment_for_download(self):
+        """Staff must be able to fetch the bytes, not just read the filename.
+
+        The page listed ``original_name`` and size but had no link, so the only way to
+        retrieve an accompaniment was to reconstruct its stored path by hand and request
+        ``/media/...`` directly. The link goes through ``controlled_media`` and carries
+        the original name so the browser saves it as the participant uploaded it.
+        """
+        registration = SingerRegistration.objects.create(
+            activity=self.singer_activity,
+            user=self.participant,
+            name="Li Hua",
+            student_id="20260001",
+            college="Info",
+            class_name="CS1",
+            phone="13800000000",
+            song_name="Song",
+            pre_status=SingerRegistration.PreStatus.APPROVED,
+        )
+        uploaded = SubmissionFile.objects.create(
+            singer_registration=registration,
+            file=SimpleUploadedFile("song.mp3", b"audio"),
+            original_name="song.mp3",
+            file_size=5,
+            uploaded_by=self.participant,
+        )
+
+        self.client.force_login(self.staff)
+        response = self.client.get(
+            reverse("staff:singer_registration_detail", args=[registration.pk])
+        )
+
+        self.assertContains(
+            response,
+            reverse("controlled_media", kwargs={"path": uploaded.file.name}),
+        )
+        self.assertContains(response, 'download="song.mp3"')
+
     def test_packages_include_contest_and_farewell_operational_indexes(self):
         registration = SingerRegistration.objects.create(
             activity=self.singer_activity,
