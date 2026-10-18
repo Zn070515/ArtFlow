@@ -29,7 +29,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost, ResultRelease
-from public_portal.services import qr_print_host_warning
+from public_portal.services import active_result_release_for_post, qr_print_host_warning
 from questionnaire.projection import generic_song_label, prime_questionnaire_answers
 from singer_contest.group_chorus import (
     current_group_members,
@@ -1202,19 +1202,22 @@ def archive_activity(activity: Activity, actor: Any, *, note: str = "") -> Any:
         version = _current_frozen_version(locked_activity)
         live = (version.binding or {}).get("live_challenge") if version is not None else None
         podium_key = str((live or {}).get("podium_stage_key") or "").strip()
-        if (
-            podium_key
-            and not ResultRelease.objects.filter(
-                status=ResultRelease.Status.ACTIVE,
-                stage_result__activity=locked_activity,
-                stage_result__stage_key=podium_key,
-                stage_result__status=StageResult.Status.CONFIRMED,
-                post__related_activity=locked_activity,
-                post__post_type=PublicPost.PostType.RESULT_PUBLICATION,
-                post__status=PublicPost.Status.PUBLISHED,
-            ).exists()
-        ):
-            raise PermissionDenied("正式赛果尚未公开发布（缺少生效的结果公示），不能归档。")
+        if podium_key:
+            # Use the same selector the public page uses: an ACTIVE row whose post_version,
+            # result version, ruleset version, authority hash and fingerprint still match
+            # the current confirmed result. A stale ACTIVE row must not count as published.
+            result_posts = PublicPost.objects.filter(
+                related_activity=locked_activity,
+                post_type=PublicPost.PostType.RESULT_PUBLICATION,
+                status=PublicPost.Status.PUBLISHED,
+            )
+            released = any(
+                (release := active_result_release_for_post(post)) is not None
+                and release.stage_result.stage_key == podium_key
+                for post in result_posts
+            )
+            if not released:
+                raise PermissionDenied("正式赛果尚未公开发布（缺少生效的结果公示），不能归档。")
 
     group_stages = GroupStage.objects.filter(
         activity=locked_activity,

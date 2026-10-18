@@ -81,8 +81,10 @@ def _result_snapshot(stage: StageResult) -> dict:
             "rank", "singer_id", "outcome_code", "score", "reason"
         )
     )
+    # Persistence inserts awards in resolver order (冠军/亚军/季军), which is the order the
+    # public cards must keep; ordering by the Chinese name would sort 亚军 before 冠军.
     award_rows = list(
-        stage.award_decisions.order_by("name", "pk").values("name", "singer_id", "source_node")
+        stage.award_decisions.order_by("pk").values("name", "singer_id", "source_node")
     )
     singer_ids = {row["singer_id"] for row in decision_rows} | {
         row["singer_id"] for row in award_rows

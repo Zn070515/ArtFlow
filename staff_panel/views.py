@@ -82,6 +82,7 @@ from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from public_portal.models import PublicPost, ResultRelease
 from public_portal.services import (
+    active_result_release_for_post,
     qr_print_host_warning,
     release_result_post,
     revoke_result_release,
@@ -1349,10 +1350,21 @@ def post_create(request):
 def post_preview(request, pk):
     post = get_object_or_404(PublicPost, pk=pk)
     media_items = post.media_items.filter(is_published=True)
+    active_release = (
+        active_result_release_for_post(post)
+        if post.post_type == PublicPost.PostType.RESULT_PUBLICATION
+        else None
+    )
     return render(
         request,
         "public_portal/post_detail.html",
-        {"post": post, "media_items": media_items, "preview": True},
+        {
+            "post": post,
+            "media_items": media_items,
+            "preview": True,
+            "active_release": active_release,
+            "result_snapshot": active_release.result_snapshot if active_release else {},
+        },
     )
 
 

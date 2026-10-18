@@ -2713,6 +2713,47 @@ class StaffPanelSmokeTests(TestCase):
         activity.refresh_from_db()
         self.assertNotEqual(activity.phase, Activity.Phase.ARCHIVED)
 
+    @patch(
+        "exports.services.build_result_closure",
+        return_value=SimpleNamespace(closeable=True),
+    )
+    def test_archive_does_not_count_a_stale_active_release_as_published(self, _closure):
+        activity, version, result = self._make_bound_result_activity()
+        confirm_stage_result(result, confirmed_by=self.admin)
+        with authority_write(RULESET_FREEZE):
+            RulesetVersion._base_manager.filter(pk=version.pk).update(
+                binding={
+                    **(version.binding or {}),
+                    "live_challenge": {"podium_stage_key": "final"},
+                }
+            )
+        post = PublicPost.objects.create(
+            title="Stale result publication",
+            post_type=PublicPost.PostType.RESULT_PUBLICATION,
+            status=PublicPost.Status.PUBLISHED,
+            related_activity=activity,
+            version=1,
+            published_at=timezone.now(),
+        )
+        # ACTIVE, but built from an older post version; the public page would 404.
+        ResultRelease.objects.create(
+            post=post,
+            stage_result=result,
+            post_version=0,
+            result_version=result.result_version,
+            ruleset_version=version,
+            authority_hash=result.ruleset_hash,
+            input_fingerprint=result.input_fingerprint,
+            status=ResultRelease.Status.ACTIVE,
+            released_by=self.admin,
+            note="stale release",
+        )
+
+        with self.assertRaises(PermissionDenied) as caught:
+            archive_activity(activity, self.admin)
+
+        self.assertIn("结果公示", str(caught.exception))
+
     def test_permanent_archive_omits_temporary_staff_notes(self):
         """GOAL §19.2: "归档" must not be what makes a 临时 Staff note permanent.
 

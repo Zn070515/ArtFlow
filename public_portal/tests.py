@@ -1102,12 +1102,13 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
                 rank=1,
                 score=Decimal("93.52"),
             )
-            StageAwardDecision.objects.create(
-                stage_result=self.stage_result,
-                activity=self.activity,
-                singer=singer,
-                name="冠军",
-            )
+            for award in ("冠军", "亚军", "季军"):
+                StageAwardDecision.objects.create(
+                    stage_result=self.stage_result,
+                    activity=self.activity,
+                    singer=singer,
+                    name=award,
+                )
         self.confirm_stage_result()
         # Deliberately wrong editorial body: the formal result must not come from here.
         self.post.content = "冠军：错误的人"
@@ -1119,14 +1120,26 @@ class ResultReleaseServiceTests(ResultReleaseModelTests):
             note="正式发布",
         )
 
-        self.assertEqual(release.result_snapshot["awards"][0]["contestant_name"], "正确冠军")
+        snapshot_awards = release.result_snapshot["awards"]
+        self.assertEqual([award["award"] for award in snapshot_awards], ["冠军", "亚军", "季军"])
+        self.assertEqual(snapshot_awards[0]["contestant_name"], "正确冠军")
         response = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "正式赛果")
         self.assertContains(response, "正确冠军")
         self.assertContains(response, "93.52")
+        # The editorial body must not compete with the formal result on the public page.
+        self.assertNotContains(response, "冠军：错误的人")
+        body = response.content.decode()
+        self.assertLess(body.index("冠军"), body.index("亚军"))
+        self.assertLess(body.index("亚军"), body.index("季军"))
         self.assertEqual(response.context["active_release"].pk, release.pk)
+
+        self.client.force_login(self.operator)
+        preview = self.client.get(reverse("staff:post_preview", args=[self.post.pk]))
+        self.assertContains(preview, "正式赛果")
+        self.assertNotContains(preview, "冠军：错误的人")
 
         unlock_stage_result(self.stage_result, operator=self.operator, note="纠正结果")
         gone = self.client.get(reverse("public_portal:post_detail", args=[self.post.pk]))

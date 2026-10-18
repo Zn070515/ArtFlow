@@ -24,7 +24,7 @@ from tests.migration_helpers import MigrationTransactionTestCase
 from public_portal.models import PublicPost
 
 BEFORE = ("public_portal", "0005_media_path_indexes")
-AFTER = ("public_portal", "0007_backfill_resultrelease_candidate_snapshot")
+AFTER = ("public_portal", "0008_enrich_active_release_snapshots")
 
 
 class ResultReleaseSnapshotBackfillTests(MigrationTransactionTestCase):
@@ -141,6 +141,9 @@ class ResultReleaseSnapshotBackfillTests(MigrationTransactionTestCase):
             self.assertEqual(snapshot["stage_key"], "final_podium")
             self.assertEqual(snapshot["decisions"][0]["contestant"], str(singer.pk))
             self.assertEqual(snapshot["decisions"][0]["score"], "98.300000")
+            self.assertEqual(snapshot["decisions"][0]["contestant_name"], "Migration singer")
+            self.assertEqual(snapshot["decisions"][0]["outcome_label"], "最终晋级")
+            self.assertEqual(snapshot["decisions"][0]["song_label"], "Song")
             self.assertEqual(snapshot["awards"], [])
 
             self._restore_latest()
