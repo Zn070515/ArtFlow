@@ -9878,6 +9878,47 @@ class JudgeControlHTTPTests(TestCase):
         )
         self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
 
+    def test_proxy_score_reports_a_score_that_already_exists(self):
+        """A grid entry is the same fact the proxy form would create.
+
+        One score per (round, singer, judge) is the invariant. The operator who already
+        typed the grid cell must not be sent hunting for a bug when the proxy submit
+        refuses a second fact for the same pair.
+        """
+        self._prepare_panel()
+        from singer_contest.models import JudgeSeat
+
+        seat = JudgeSeat.objects.get()
+        self.client.post(
+            reverse("staff:judge_performance_advance", args=[self.contest_round.pk]),
+            {"performance_id": self.performance.pk, "reason": "开始现场表演"},
+        )
+        ScoreRecord.objects.create(
+            round=self.contest_round,
+            singer=self.performance.singer,
+            judge=seat.panel_member.judge,
+            score=56,
+            source=ScoreSource.STAFF_RAPID,
+        )
+
+        response = self.client.post(
+            reverse("staff:judge_score_proxy", args=[self.contest_round.pk]),
+            {
+                "performance_id": self.performance.pk,
+                "seat_id": seat.pk,
+                "context_version": 1,
+                "score": "91.50",
+                "notes": "",
+                "source_reference": "故障单 JC-002",
+                "reason": "评委终端故障",
+                "command_id": "proxy-score-duplicate",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "已经有一条分数")
+        self.assertEqual(ScoreRecord.objects.filter(round=self.contest_round).count(), 1)
+
     def test_rubric_proxy_score_uses_server_bound_criterion_fields(self):
         from singer_contest.models import CriterionScore, JudgeSeat, RubricCriterion, ScoringRubric
 
