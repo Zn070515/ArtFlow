@@ -279,6 +279,7 @@
         <form method="post" class="mt-3">
             {% csrf_token %}
             <input type="hidden" name="action" value="create_group_stage">
+            <input type="hidden" name="base_group_stage_binding_revision" value="{{ group_stage_binding_revision }}">
             <button class="touch-target bg-brand text-white rounded text-sm">{% if resumable_group_stage %}继续调整第一轮分组{% elif bound_group_stage %}为这一版重新调整第一轮分组{% else %}创建第一轮分组{% endif %}</button>
         </form>
         <p class="mt-2 text-xs text-gray-500">{% if resumable_group_stage %}已经有一份还没完成的分组，继续它即可，不会重复创建。{% else %}创建后请在新分组页录入名单、确认并冻结；冻结后会自动成为本版赛制的第一轮分组。{% endif %}</p>

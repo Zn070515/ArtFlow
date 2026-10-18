@@ -821,12 +821,21 @@ def save_live_2026_preparation(
 
 
 @transaction.atomic
-def create_live_2026_group_stage(version: RulesetVersion, *, operator):
+def create_live_2026_group_stage(
+    version: RulesetVersion,
+    *,
+    operator,
+    base_group_stage_binding_revision: int | None = None,
+):
     """Create (or resume) the workbench-owned first-round group stage.
 
     Key allocation, the resume check and the INSERT all happen under the Activity lock.
     Two staff clicking at the same time therefore share the unfinished stage or get
     distinct keys — never a duplicate-key ``IntegrityError``.
+
+    ``base_group_stage_binding_revision`` is the grouping intent the *page* showed. The
+    preview's replacement target must not be collected from a newer server state the
+    operator never saw, so the check runs before both resume and create.
     """
 
     from singer_contest.group_chorus import create_group_stage
@@ -844,6 +853,15 @@ def create_live_2026_group_stage(version: RulesetVersion, *, operator):
         raise ValidationError("只有最新草稿可以创建第一轮分组。")
     if not _is_live_2026_binding(_snapshot_binding(locked_ruleset)):
         raise ValidationError("当前赛制不是 2026 现场踢馆赛制。")
+    if (
+        base_group_stage_binding_revision is not None
+        and base_group_stage_binding_revision
+        != locked_ruleset.group_stage_binding_revision
+    ):
+        # The page still believes an older stage is bound (or that nothing changed since
+        # its preview). Deriving the replacement target from the newer row would record
+        # an intent the operator never saw, so refuse before resuming or creating.
+        raise ValidationError("第一轮分组已被其他工作人员修改，请刷新后重试。")
 
     resumable = (
         GroupStage.objects.select_for_update()
